@@ -612,6 +612,101 @@ function initSupportFunnelEvents() {
     });
 }
 
+function initPaymentCountdowns() {
+  const countdowns = document.querySelectorAll("[data-payment-countdown]");
+
+  if (!countdowns.length) {
+    return;
+  }
+
+  countdowns.forEach((countdown) => {
+    const value = countdown.querySelector("[data-payment-countdown-value]");
+    const state = countdown.querySelector("[data-payment-countdown-state]");
+    const announcement = countdown.querySelector(
+      "[data-payment-countdown-announcement]"
+    );
+    const deadline = Date.parse(
+      countdown.getAttribute("data-payment-deadline") || ""
+    );
+    let interval = null;
+    let announcedExpired = false;
+
+    if (!value || !Number.isFinite(deadline)) {
+      return;
+    }
+
+    const render = () => {
+      const remainingSeconds = Math.max(
+        0,
+        Math.floor((deadline - Date.now()) / 1000)
+      );
+
+      if (remainingSeconds <= 0) {
+        value.textContent = "00:00:00";
+        countdown.setAttribute("data-countdown-expired", "true");
+        if (state) {
+          state.textContent =
+            countdown.getAttribute("data-countdown-expired-title") || "";
+          state.classList.remove("hidden");
+        }
+        if (announcement && !announcedExpired) {
+          announcement.textContent =
+            `${countdown.getAttribute("data-countdown-expired-title") || ""}. ` +
+            `${countdown.getAttribute("data-countdown-expired-message") || ""}`;
+          announcedExpired = true;
+        }
+        return false;
+      }
+
+      const hours = Math.floor(remainingSeconds / 3600);
+      const minutes = Math.floor((remainingSeconds % 3600) / 60);
+      const seconds = remainingSeconds % 60;
+      value.textContent = [hours, minutes, seconds]
+        .map((part) => String(part).padStart(2, "0"))
+        .join(":");
+      countdown.removeAttribute("data-countdown-expired");
+      if (state) {
+        state.textContent = "";
+        state.classList.add("hidden");
+      }
+
+      return true;
+    };
+
+    const stop = () => {
+      if (interval !== null) {
+        window.clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const start = () => {
+      stop();
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      if (!render()) {
+        return;
+      }
+      interval = window.setInterval(() => {
+        if (!render()) {
+          stop();
+        }
+      }, 1000);
+    };
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        stop();
+        return;
+      }
+      start();
+    });
+
+    start();
+  });
+}
+
 function initShopPaymentStatus() {
   const containers = document.querySelectorAll("[data-shop-payment-status]");
 
@@ -623,25 +718,42 @@ function initShopPaymentStatus() {
     document
       .querySelector('meta[name="csrf-token"]')
       ?.getAttribute("content") || "";
-  const terminalStatuses = new Set(["expired", "cancelled", "failed"]);
-  const secondsLabel = (seconds) =>
-    `${Math.max(1, Number.parseInt(seconds, 10) || 60)} detik`;
-  const isTerminalStatus = (data) => {
-    const paymentStatus = String(data?.payment_status || "").toLowerCase();
-    const orderStatus = String(data?.order_status || "").toLowerCase();
+  const terminalStatuses = new Set([
+    "expired",
+    "cancelled",
+    "failed",
+    "refunded",
+    "completed",
+  ]);
+  const terminalBscStatuses = new Set([
+    "expired",
+    "mismatch",
+    "manual_review",
+    "transaction_already_used",
+  ]);
+  const parseRetryAfter = (value, fallback = 60) => {
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return seconds;
+    }
 
-    return (
-      data?.is_terminal === true ||
-      terminalStatuses.has(paymentStatus) ||
-      terminalStatuses.has(orderStatus)
-    );
+    const retryAt = Date.parse(String(value || ""));
+    if (Number.isFinite(retryAt)) {
+      return Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+    }
+
+    return fallback;
+  };
+  const parsePositiveInt = (value, fallback) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   };
 
   containers.forEach((container) => {
     const statusUrl = container.getAttribute("data-status-url");
     const redirectUrl = container.getAttribute("data-redirect-url");
-    const isBinance = container.getAttribute("data-payment-kind") === "binance";
-    const isBsc = container.getAttribute("data-payment-kind") === "bsc";
+    const paymentKind = container.getAttribute("data-payment-kind") || "qris";
+    const isBinance = paymentKind === "binance";
     const title = container.querySelector("[data-payment-status-title]");
     const message = container.querySelector("[data-payment-status-message]");
     const announcement = container.querySelector(
@@ -649,8 +761,94 @@ function initShopPaymentStatus() {
     );
     const followup = container.querySelector("[data-payment-status-followup]");
     const button = container.querySelector("[data-payment-status-check]");
+    let parsedCopy = {};
+    try {
+      parsedCopy = JSON.parse(
+        container.getAttribute("data-status-copy") || "{}"
+      );
+    } catch {
+      parsedCopy = {};
+    }
+    const copy = {
+      loading_title: parsedCopy.loading_title || "Mengecek pembayaran",
+      loading_message:
+        parsedCopy.loading_message ||
+        "Tunggu sebentar, status pembayaran sedang dicek.",
+      network_title: parsedCopy.network_title || "Koneksi gagal",
+      network_message:
+        parsedCopy.network_message ||
+        "Periksa koneksi internet lalu coba lagi.",
+      pending_title: parsedCopy.pending_title || "Pembayaran belum masuk",
+      pending_message:
+        parsedCopy.pending_message ||
+        "Jika sudah membayar, kami akan mengecek lagi secara otomatis.",
+      paid_title: parsedCopy.paid_title || "Pembayaran terverifikasi",
+      paid_message:
+        parsedCopy.paid_message ||
+        "Invoice akan dibuka ulang untuk menampilkan data akun.",
+      qris_ready_title: parsedCopy.qris_ready_title || "QRIS siap dibayar",
+      qris_ready_message:
+        parsedCopy.qris_ready_message ||
+        "Invoice akan dimuat ulang untuk menampilkan QRIS dan total final.",
+      terminal_title: parsedCopy.terminal_title || "Status pembayaran final",
+      terminal_message:
+        parsedCopy.terminal_message || "Invoice ini tidak dapat diproses lagi.",
+      retryable_title: parsedCopy.retryable_title || "Status belum bisa dicek",
+
+      retryable_message:
+        parsedCopy.retryable_message ||
+        "Status pembayaran belum bisa dicek sekarang. Coba lagi beberapa saat lagi.",
+      rate_limited_title:
+        parsedCopy.rate_limited_title || "Terlalu sering cek status",
+      retry_after: parsedCopy.retry_after || "Coba lagi dalam :seconds detik.",
+      rate_limited_message:
+        parsedCopy.rate_limited_message ||
+        "Terlalu sering cek status. Coba lagi dalam :seconds detik.",
+      unsupported_title:
+        parsedCopy.unsupported_title || "Status pembayaran tidak tersedia",
+      unsupported_message:
+        parsedCopy.unsupported_message ||
+        "Status pembayaran untuk invoice ini tidak dapat dicek.",
+      manual_review_title:
+        parsedCopy.manual_review_title || "Perlu peninjauan manual",
+      manual_review_message:
+        parsedCopy.manual_review_message ||
+        "Pembayaran perlu ditinjau manual. Jangan kirim transfer lain.",
+      in_progress_title: parsedCopy.in_progress_title || "Status sedang dicek",
+      in_progress_message:
+        parsedCopy.in_progress_message ||
+        "Status pembayaran sedang dicek. Coba lagi beberapa detik lagi.",
+      bsc_confirming_title:
+        parsedCopy.bsc_confirming_title || "Menunggu konfirmasi BSC",
+      bsc_confirming_message:
+        parsedCopy.bsc_confirming_message ||
+        "Transfer BSC ditemukan dan sedang menunggu konfirmasi tambahan.",
+    };
+    const pollMs = Math.max(
+      20_000,
+      parsePositiveInt(container.getAttribute("data-poll-ms"), 20_000)
+    );
+    const maxAttempts = parsePositiveInt(
+      container.getAttribute("data-poll-max-attempts"),
+      9
+    );
+    const maxDurationMs = Math.max(
+      pollMs,
+      parsePositiveInt(
+        container.getAttribute("data-poll-max-duration-ms"),
+        180_000
+      )
+    );
     let lastAnnouncement = "";
-    let waiting = false;
+    let inFlight = false;
+    let cooldownUntil = 0;
+    let cooldownTimer = null;
+    let pollTimer = null;
+    let nextPollAt = null;
+    let pollAttempts = 0;
+    let transientFailures = 0;
+    let autoPollingStopped = false;
+    const autoStartedAt = Date.now();
 
     if (
       !statusUrl ||
@@ -659,6 +857,12 @@ function initShopPaymentStatus() {
     ) {
       return;
     }
+
+    const isTerminal = () => container.getAttribute("data-terminal") === "true";
+    const isHidden = () => document.visibilityState === "hidden";
+    const isCoolingDown = () => cooldownUntil > Date.now();
+    const hasAutoBudget = () =>
+      pollAttempts < maxAttempts && Date.now() - autoStartedAt < maxDurationMs;
 
     const setStatus = (titleText, messageText) => {
       if (title) {
@@ -676,43 +880,118 @@ function initShopPaymentStatus() {
       }
     };
 
-    const cooldown = (seconds) => {
-      waiting = true;
-      button.disabled = true;
-      window.setTimeout(
-        () => {
-          waiting = false;
-          if (container.getAttribute("data-terminal") !== "true") {
-            button.disabled = false;
-          }
-        },
-        Math.max(1, Number.parseInt(seconds, 10) || 60) * 1000
-      );
+    const setBusy = (busy) => {
+      button.disabled = busy || isCoolingDown() || isTerminal();
+      button.setAttribute("aria-busy", busy ? "true" : "false");
     };
 
-    button.addEventListener("click", async () => {
-      if (waiting) {
+    setStatus(
+      title?.textContent?.trim() || copy.pending_title,
+      message?.textContent?.trim() || copy.pending_message
+    );
+    setBusy(false);
+
+    const stopAutoPolling = () => {
+      autoPollingStopped = true;
+      if (pollTimer !== null) {
+        window.clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const markTerminal = () => {
+      container.setAttribute("data-terminal", "true");
+      stopAutoPolling();
+    };
+
+    const retryAfterMessage = (seconds) =>
+      (copy.retry_after || "Coba lagi dalam :seconds detik.").replace(
+        ":seconds",
+        String(seconds)
+      );
+
+    const clearCooldown = () => {
+      if (cooldownTimer !== null) {
+        window.clearTimeout(cooldownTimer);
+        cooldownTimer = null;
+      }
+    };
+
+    const cooldown = (seconds) => {
+      const delayMs = parseRetryAfter(seconds) * 1000;
+      cooldownUntil = Math.max(cooldownUntil, Date.now() + delayMs);
+      clearCooldown();
+      cooldownTimer = window.setTimeout(
+        () => {
+          cooldownUntil = 0;
+          cooldownTimer = null;
+          if (!isTerminal()) {
+            setBusy(false);
+          }
+        },
+        Math.max(1, cooldownUntil - Date.now())
+      );
+      setBusy(false);
+    };
+
+    const scheduleAutoPoll = (delayMs = pollMs) => {
+      if (
+        autoPollingStopped ||
+        isTerminal() ||
+        isHidden() ||
+        !hasAutoBudget()
+      ) {
         return;
       }
 
-      button.disabled = true;
-      setStatus(
-        isBsc
-          ? "Checking BSC payment"
-          : isBinance
-            ? "Checking Binance Pay"
-            : "Mengecek pembayaran",
-        isBsc
-          ? "We are checking the approved BSC transfer securely."
-          : isBinance
-            ? "We are checking your submitted Order ID securely."
-            : "Tunggu sebentar, status QRIS sedang dicek."
-      );
+      const parsedDelay = Number(delayMs);
+      const delay = Number.isFinite(parsedDelay)
+        ? Math.max(0, parsedDelay)
+        : pollMs;
+      if (pollTimer !== null) {
+        window.clearTimeout(pollTimer);
+      }
+      pollTimer = window.setTimeout(() => {
+        pollTimer = null;
+        if (!isHidden()) {
+          void refresh(true);
+        }
+      }, delay);
+    };
+
+    const nextTransientDelay = () => {
+      transientFailures = Math.min(transientFailures + 1, 3);
+      return Math.min(60_000, pollMs * 2 ** Math.max(0, transientFailures - 1));
+    };
+
+    async function refresh(automatic = false) {
+      if (
+        inFlight ||
+        isTerminal() ||
+        (automatic && (isHidden() || !hasAutoBudget()))
+      ) {
+        return;
+      }
+
+      if (automatic) {
+        pollAttempts += 1;
+      }
+
+      inFlight = true;
+      setBusy(true);
+      if (!automatic) {
+        setStatus(copy.loading_title, copy.loading_message);
+      }
+
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
 
       try {
         const response = await window.fetch(statusUrl, {
           method: "POST",
           credentials: "same-origin",
+          referrerPolicy: "no-referrer",
+          signal: controller.signal,
           headers: {
             Accept: "application/json",
             "X-Requested-With": "XMLHttpRequest",
@@ -720,34 +999,45 @@ function initShopPaymentStatus() {
           },
         });
         const data = await response.json().catch(() => null);
+        transientFailures = 0;
 
         if (response.status === 429) {
-          const retryAfter =
-            data?.retry_after || response.headers.get("Retry-After") || 60;
+          const retryAfter = parseRetryAfter(
+            data?.retry_after || response.headers.get("Retry-After"),
+            60
+          );
           setStatus(
-            "Terlalu sering cek status",
-            data?.message || `Coba lagi dalam ${secondsLabel(retryAfter)}.`
+            copy.rate_limited_title,
+            data?.message ||
+              (
+                copy.rate_limited_message || retryAfterMessage(retryAfter)
+              ).replace(":seconds", String(retryAfter))
           );
           cooldown(retryAfter);
+          scheduleAutoPoll(Math.max(retryAfter * 1000, pollMs));
           return;
         }
 
         if (!data || typeof data !== "object") {
+          setStatus(copy.retryable_title, copy.retryable_message);
+          setBusy(false);
+          scheduleAutoPoll(nextTransientDelay());
+          return;
+        }
+
+        if (!response.ok) {
           setStatus(
-            "Status belum bisa dibaca",
-            "Coba cek lagi beberapa saat lagi."
+            data.title || copy.retryable_title,
+            data.message || copy.retryable_message
           );
-          button.disabled = false;
+          setBusy(false);
+          scheduleAutoPoll(nextTransientDelay());
           return;
         }
 
         if (data.is_paid === true) {
-          setStatus(
-            "Pembayaran terverifikasi",
-            data.message ||
-              "Invoice akan dibuka ulang untuk menampilkan data akun."
-          );
-          container.setAttribute("data-terminal", "true");
+          setStatus(copy.paid_title, data.message || copy.paid_message);
+          markTerminal();
           window.location.href =
             data.redirect_url || redirectUrl || window.location.href;
           return;
@@ -755,56 +1045,68 @@ function initShopPaymentStatus() {
 
         if (data.should_reload === true) {
           setStatus(
-            "QRIS siap dibayar",
-            data.message ||
-              "Invoice akan dimuat ulang untuk menampilkan QRIS dan total final."
+            copy.qris_ready_title,
+            data.message || copy.qris_ready_message
           );
+          markTerminal();
           window.location.href =
             data.redirect_url || redirectUrl || window.location.href;
           return;
         }
 
         if (data.status === "in_progress") {
-          const retryAfter = data.retry_after || 3;
+          const retryAfter = parseRetryAfter(data.retry_after, 3);
           setStatus(
-            data.title || "Status sedang dicek",
-            data.message || `Coba lagi dalam ${secondsLabel(retryAfter)}.`
+            data.title || copy.in_progress_title,
+            data.message || copy.in_progress_message
           );
           cooldown(retryAfter);
+          scheduleAutoPoll(Math.max(retryAfter * 1000, pollMs));
           return;
         }
 
-        if (isBsc && data.bsc_status) {
+        if (paymentKind === "bsc" && data.bsc_status) {
+          const bscStatus = String(data.bsc_status).toLowerCase();
           const confirmations =
             Number.parseInt(data.bsc_confirmations, 10) || 0;
           const required =
             Number.parseInt(data.bsc_required_confirmations, 10) || 3;
+          const isConfirming = bscStatus === "confirming";
+          const isManualReview = terminalBscStatuses.has(bscStatus);
           setStatus(
-            data.bsc_status === "confirming"
-              ? `Confirming BSC transfer (${confirmations}/${required})`
-              : "BSC payment status",
+            data.title ||
+              (isConfirming
+                ? copy.bsc_confirming_title
+                : isManualReview
+                  ? copy.manual_review_title
+                  : copy.pending_title),
             data.message ||
-              `The BSC transfer currently has ${confirmations}/${required} confirmations.`
+              (isConfirming
+                ? `${copy.bsc_confirming_message} (${confirmations}/${required})`
+                : isManualReview
+                  ? copy.manual_review_message
+                  : copy.pending_message)
           );
-          if (data.is_paid === true || data.is_terminal === true) {
-            container.setAttribute("data-terminal", "true");
-            if (data.is_paid === true) {
-              window.location.href =
-                data.redirect_url || redirectUrl || window.location.href;
-            }
+          if (data.is_terminal === true || isManualReview) {
+            markTerminal();
+            button.hidden = true;
+            followup?.classList.remove("hidden");
           } else {
-            button.disabled = false;
+            setBusy(false);
+            scheduleAutoPoll(pollMs);
           }
           return;
         }
 
-        if (isTerminalStatus(data)) {
-          setStatus(
-            "Status pembayaran final",
-            data.message ||
-              "QRIS ini tidak bisa dibayar lagi. Buat order baru dari katalog."
-          );
-          container.setAttribute("data-terminal", "true");
+        if (
+          data.is_terminal === true ||
+          terminalStatuses.has(
+            String(data.payment_status || "").toLowerCase()
+          ) ||
+          terminalStatuses.has(String(data.order_status || "").toLowerCase())
+        ) {
+          setStatus(copy.terminal_title, data.message || copy.terminal_message);
+          markTerminal();
           button.hidden = true;
           followup?.classList.remove("hidden");
           if (isBinance && data.is_terminal === true) {
@@ -815,28 +1117,77 @@ function initShopPaymentStatus() {
         }
 
         if (data.ok === false) {
+          if (data.status === "unsupported_payment") {
+            setStatus(
+              data.title || copy.unsupported_title,
+              data.message || copy.unsupported_message
+            );
+            markTerminal();
+            button.hidden = true;
+            followup?.classList.remove("hidden");
+            return;
+          }
+
+          const retryAfter = data.retry_after
+            ? parseRetryAfter(data.retry_after)
+            : null;
           setStatus(
-            data.title || "Status belum bisa dicek",
-            data.message || "Coba lagi beberapa saat lagi."
+            data.title || copy.retryable_title,
+            data.message || copy.retryable_message
           );
-          if (data.retry_after) {
-            cooldown(data.retry_after);
+          if (retryAfter !== null) {
+            cooldown(retryAfter);
+            scheduleAutoPoll(Math.max(retryAfter * 1000, pollMs));
           } else {
-            button.disabled = false;
+            setBusy(false);
+            scheduleAutoPoll(nextTransientDelay());
           }
           return;
         }
 
         setStatus(
-          "Pembayaran belum masuk",
-          data.message || "Jika sudah bayar, coba cek lagi beberapa saat lagi."
+          data.title || copy.pending_title,
+          data.message || copy.pending_message
         );
-        button.disabled = false;
-      } catch {
-        setStatus("Koneksi gagal", "Cek internet lalu coba lagi.");
-        button.disabled = false;
+        setBusy(false);
+        scheduleAutoPoll(pollMs);
+      } catch (error) {
+        setStatus(copy.network_title, copy.network_message);
+        setBusy(false);
+        scheduleAutoPoll(nextTransientDelay());
+      } finally {
+        window.clearTimeout(timeoutId);
+        inFlight = false;
+        if (!isTerminal() && !isCoolingDown()) {
+          setBusy(false);
+        }
+      }
+    }
+
+    button.addEventListener("click", () => {
+      if (inFlight || isCoolingDown()) {
+        return;
+      }
+      void refresh(false);
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (isHidden()) {
+        if (pollTimer !== null) {
+          window.clearTimeout(pollTimer);
+          pollTimer = null;
+        }
+        return;
+      }
+
+      if (!autoPollingStopped && !inFlight) {
+        const delay =
+          nextPollAt === null ? pollMs : Math.max(0, nextPollAt - Date.now());
+        scheduleAutoPoll(delay);
       }
     });
+
+    scheduleAutoPoll(pollMs);
   });
 }
 
@@ -1213,6 +1564,7 @@ export default function initStorefront() {
     initFaqAccordion();
     initPaymentActions();
     initSupportFunnelEvents();
+    initPaymentCountdowns();
     initShopPaymentStatus();
     initNativeQrisImageFallback();
   };

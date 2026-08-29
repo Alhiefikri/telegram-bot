@@ -2,6 +2,7 @@
 
 namespace App\Services\Checkout\PaymentPlan;
 
+use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Services\Bsc\BscPaymentReceiverSnapshot;
@@ -32,6 +33,9 @@ final readonly class BscCheckoutPaymentSnapshot extends AbstractCheckoutPaymentS
         public int $payableAmountMicro,
         public string $expectedTokenUnits,
         public string $verificationStatus,
+        public int $requiredConfirmations = ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
+        public bool $requiresFinalizedBlock = false,
+        public int $confirmationGraceMinutes = ManualPaymentSetting::DEFAULT_BSC_CONFIRMATION_GRACE_MINUTES,
     ) {
         parent::__construct($provider, $method, $paymentCurrency, $amount, $expiresAt);
 
@@ -71,6 +75,15 @@ final readonly class BscCheckoutPaymentSnapshot extends AbstractCheckoutPaymentS
             throw new InvalidArgumentException('BSC expected token units do not match the payable amount.');
         }
 
+        if ($this->requiredConfirmations < ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS
+            || $this->requiredConfirmations > 100) {
+            throw new InvalidArgumentException('BSC required confirmations are outside the supported range.');
+        }
+
+        if ($this->confirmationGraceMinutes < 0 || $this->confirmationGraceMinutes > 60) {
+            throw new InvalidArgumentException('BSC confirmation grace is outside the supported range.');
+        }
+
         if (trim($this->verificationStatus) === '') {
             throw new InvalidArgumentException('BSC verification status is required.');
         }
@@ -85,6 +98,9 @@ final readonly class BscCheckoutPaymentSnapshot extends AbstractCheckoutPaymentS
             'chain_id' => $this->chainId,
             'token_contract' => $this->tokenContract,
             'token_decimals' => $this->tokenDecimals,
+            'required_confirmations' => $this->requiredConfirmations,
+            'requires_finalized_block' => $this->requiresFinalizedBlock,
+            'confirmation_grace_minutes' => $this->confirmationGraceMinutes,
             'base_amount_micro' => $this->baseAmountMicro,
             'payable_amount_micro' => $this->payableAmountMicro,
             'expected_token_units' => $this->expectedTokenUnits,

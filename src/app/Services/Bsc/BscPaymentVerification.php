@@ -53,6 +53,7 @@ final class BscPaymentVerification
             confirmations: $detail?->current_confirmations,
             attempts: (int) ($detail?->tx_attempts ?? 0),
             version: (int) ($detail?->tx_submission_version ?? 0),
+            requiredConfirmations: $this->minimumConfirmations($detail),
         );
     }
 
@@ -1026,10 +1027,9 @@ final class BscPaymentVerification
                 ],
             );
         }
-
         $graceUntil = $detail->verification_grace_until;
         if ($graceUntil === null && $blockTimestamp->timestamp <= $deadline->timestamp) {
-            $graceUntil = $deadline->copy()->addMinutes($this->confirmationGraceMinutes());
+            $graceUntil = $deadline->copy()->addMinutes($this->confirmationGraceMinutes($detail));
             $updated = PaymentBscDetail::query()
                 ->whereKey($detail->payment_id)
                 ->where('tx_submission_version', $submissionVersion)
@@ -1045,7 +1045,7 @@ final class BscPaymentVerification
             }
         }
 
-        if ($graceUntil !== null && $graceUntil->isPast() && $evidence->confirmations < $this->minimumConfirmations()) {
+        if ($graceUntil !== null && $graceUntil->isPast() && $evidence->confirmations < $this->minimumConfirmations($detail)) {
             return $this->flagForManualReview(
                 payment: $payment,
                 detail: $detail,
@@ -1061,22 +1061,22 @@ final class BscPaymentVerification
 
         $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion);
 
-        if (($evidence->confirmations ?? 0) < $this->minimumConfirmations()) {
+        if (($evidence->confirmations ?? 0) < $this->minimumConfirmations($detail)) {
             $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion, $evidence->txHash, [
                 'reason' => 'confirmation_threshold_not_reached',
-                'required_confirmations' => $this->minimumConfirmations(),
+                'required_confirmations' => $this->minimumConfirmations($detail),
             ], $evidence);
 
             return BscVerificationResult::of(BscVerificationOutcome::Confirming, $evidence, retryable: true);
         }
 
-        if ($this->requiresFinalizedBlock()) {
+        if ($this->requiresFinalizedBlock($detail)) {
             $finalized = $this->rpc->blockByNumber('finalized');
             $finalizedNumber = $this->blockNumber($finalized['number'] ?? null);
             if ($finalized === null || $finalizedNumber === null || $finalizedNumber < $blockNumber) {
                 $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion, $evidence->txHash, [
                     'reason' => 'finalized_block_not_reached',
-                    'required_confirmations' => $this->minimumConfirmations(),
+                    'required_confirmations' => $this->minimumConfirmations($detail),
                 ], $evidence);
 
                 return BscVerificationResult::of(BscVerificationOutcome::Confirming, $evidence, retryable: true);
@@ -1638,21 +1638,31 @@ final class BscPaymentVerification
         return $deadline->isPast();
     }
 
-    private function minimumConfirmations(): int
+    private function minimumConfirmations(?PaymentBscDetail $detail = null): int
     {
-        return ManualPaymentSetting::current()?->bscMinConfirmations()
-            ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS;
+        return max(
+            ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
+            min(
+                100,
+                (int) ($detail?->required_confirmations ?: ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS),
+            ),
+        );
     }
 
-    private function confirmationGraceMinutes(): int
+    private function confirmationGraceMinutes(?PaymentBscDetail $detail = null): int
     {
-        return ManualPaymentSetting::current()?->bscConfirmationGraceMinutes()
-            ?? ManualPaymentSetting::DEFAULT_BSC_CONFIRMATION_GRACE_MINUTES;
+        return max(
+            0,
+            min(
+                60,
+                (int) ($detail?->confirmation_grace_minutes ?? ManualPaymentSetting::DEFAULT_BSC_CONFIRMATION_GRACE_MINUTES),
+            ),
+        );
     }
 
-    private function requiresFinalizedBlock(): bool
+    private function requiresFinalizedBlock(?PaymentBscDetail $detail = null): bool
     {
-        return (bool) (ManualPaymentSetting::current()?->bsc_require_finalized_block ?? false);
+        return (bool) ($detail?->requires_finalized_block ?? false);
     }
 
     private function blockNumber(mixed $value): ?int

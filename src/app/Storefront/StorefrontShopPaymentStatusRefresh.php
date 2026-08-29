@@ -2,7 +2,6 @@
 
 namespace App\Storefront;
 
-use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Binance\BinancePaymentVerification;
@@ -91,12 +90,13 @@ class StorefrontShopPaymentStatusRefresh
                     $status = $status->outcome === BscVerificationOutcome::ProviderError
                         ? $status
                         : new BscVerificationStatus(
-                            BscVerificationOutcome::ProviderError,
-                            'provider_error',
-                            $status->transactionHash,
-                            $status->confirmations,
-                            $status->attempts,
-                            $status->version,
+                            outcome: BscVerificationOutcome::ProviderError,
+                            status: 'provider_error',
+                            transactionHash: $status->transactionHash,
+                            confirmations: $status->confirmations,
+                            attempts: $status->attempts,
+                            version: $status->version,
+                            requiredConfirmations: $status->requiredConfirmations,
                         );
                 }
 
@@ -111,8 +111,7 @@ class StorefrontShopPaymentStatusRefresh
                 }
             }
             $projection = $this->orders->project($order, $payment);
-            $required = ManualPaymentSetting::current()?->bscMinConfirmations()
-                ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS;
+            $required = $status->requiredConfirmations;
 
             return StorefrontShopSignedStatusRefreshResult::refreshed(
                 paymentStatus: $payment->status,
@@ -122,7 +121,7 @@ class StorefrontShopPaymentStatusRefresh
                 qrisReady: false,
                 shouldReload: $projection->isPaid,
                 redirectUrl: $this->invoiceUrls->show($order),
-                message: $this->bscStatusMessage($status->outcome, $status->confirmations, $required),
+                message: $this->terminalCopy->bscRefreshStatusMessage($status->outcome, $status->confirmations, $required),
                 paymentRail: 'usdt_bep20',
                 bscStatus: $status->status,
                 bscConfirmations: $status->confirmations,
@@ -269,7 +268,9 @@ class StorefrontShopPaymentStatusRefresh
             qrisReady: $qrisReady,
             shouldReload: $shouldReload,
             redirectUrl: $this->invoiceUrls->show($order),
-            message: $shouldReload ? 'QRIS dan total bayar final sudah siap. Invoice akan dimuat ulang.' : $this->statusMessage($order, $payment),
+            message: $shouldReload
+                ? $this->terminalCopy->translate('storefront.invoice.status_ui.common.qris_ready_message')
+                : $this->statusMessage($order, $payment),
         );
     }
 
@@ -326,20 +327,6 @@ class StorefrontShopPaymentStatusRefresh
     {
         return strtolower((string) $payment?->provider) === PaymentProvider::MANUAL
             && strtoupper((string) $payment?->method) === 'USDT_BEP20';
-    }
-
-    private function bscStatusMessage(BscVerificationOutcome $outcome, ?int $confirmations, int $required): string
-    {
-        return match ($outcome) {
-            BscVerificationOutcome::Confirmed,
-            BscVerificationOutcome::AlreadyPaid => 'BSC payment verified. Your invoice will refresh with delivery details.',
-            BscVerificationOutcome::Confirming => 'The exact BSC transfer was found, but it has '.($confirmations ?? 0).'/'.$required.' confirmations. We will check again automatically.',
-            BscVerificationOutcome::ProviderError => 'The BSC authority is temporarily unavailable. Your payment remains pending and will be checked again.',
-            BscVerificationOutcome::ManualReview,
-            BscVerificationOutcome::Mismatch,
-            BscVerificationOutcome::TransactionAlreadyUsed => 'This BSC payment needs manual review. Do not submit another transfer.',
-            default => 'No valid BSC transfer has been confirmed yet. You can submit a transaction hash or check again shortly.',
-        };
     }
 
     private function shouldVerifyBinance(OrderLifecycleProjection $projection, BinanceVerificationStatus $verificationStatus): bool
@@ -431,29 +418,54 @@ class StorefrontShopPaymentStatusRefresh
     private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment, ?KlikQrisNativeQrisOutcome $outcome = null): array
     {
         if (! $projection->isPendingPayment) {
-            return ['state' => 'terminal', 'title' => 'QRIS tidak aktif', 'message' => 'Invoice ini tidak sedang menunggu pembayaran QRIS.'];
+            $copy = $this->terminalCopy->qrisReadiness('terminal');
+
+            return [
+                'state' => $copy['state'],
+                'title' => $copy['title'],
+                'message' => $copy['message'],
+            ];
         }
 
         if ($outcome !== null) {
-            return match ($outcome) {
-                KlikQrisNativeQrisOutcome::Payable => ['state' => 'payable', 'title' => 'QRIS siap dibayar', 'message' => 'QRIS dan total bayar final sudah siap.'],
-                KlikQrisNativeQrisOutcome::Creating => ['state' => 'creating', 'title' => 'Sedang membuat QRIS', 'message' => 'Provider sedang menyiapkan QRIS dan nominal final. Jangan bayar sebelum QRIS tampil.'],
-                KlikQrisNativeQrisOutcome::RecoveryPending => ['state' => 'recovery_pending', 'title' => 'Sedang membuat QRIS', 'message' => 'QRIS sedang dipulihkan. Buka kembali invoice ini sebentar lagi.'],
-                KlikQrisNativeQrisOutcome::ProviderTotalPending => ['state' => 'provider_total_pending', 'title' => 'Provider belum memberi nominal', 'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.'],
-                KlikQrisNativeQrisOutcome::InvalidProviderResult => ['state' => 'failed', 'title' => 'Gagal membuat QRIS', 'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.'],
-                KlikQrisNativeQrisOutcome::Expired => ['state' => 'expired', 'title' => 'QRIS kedaluwarsa', 'message' => 'Batas bayar QRIS sudah lewat. Jangan bayar QRIS ini; buat order baru dari katalog.'],
+            $state = match ($outcome) {
+                KlikQrisNativeQrisOutcome::Payable => 'ready',
+                KlikQrisNativeQrisOutcome::Creating => 'creating',
+                KlikQrisNativeQrisOutcome::RecoveryPending => 'recovery_pending',
+                KlikQrisNativeQrisOutcome::ProviderTotalPending => 'provider_total_pending',
+                KlikQrisNativeQrisOutcome::InvalidProviderResult => 'failed',
+                KlikQrisNativeQrisOutcome::Expired => 'expired',
             };
-        }
+            $copy = $this->terminalCopy->qrisReadiness($state);
 
-        if (filled($payment?->provider_payment_number) && $payment?->provider_total_payment === null) {
-            return ['state' => 'provider_total_pending', 'title' => 'Provider belum memberi nominal', 'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.'];
+            return [
+                'state' => $copy['state'],
+                'title' => $copy['title'],
+                'message' => $copy['message'],
+            ];
         }
 
         if ($this->isPakasirPayment($payment)
             && in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
-            return ['state' => 'failed', 'title' => 'Gagal membuat QRIS', 'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.'];
+            $copy = $this->terminalCopy->qrisReadiness('failed');
+
+            return [
+                'state' => $copy['state'],
+                'title' => $copy['title'],
+                'message' => $copy['message'],
+            ];
         }
 
-        return ['state' => 'creating', 'title' => 'Sedang membuat QRIS', 'message' => 'Provider sedang menyiapkan QRIS dan nominal final. Jangan bayar sebelum QRIS tampil.'];
+        $copy = $this->terminalCopy->qrisReadiness(
+            filled($payment?->provider_payment_number) && $payment?->provider_total_payment === null
+                ? 'provider_total_pending'
+                : 'creating',
+        );
+
+        return [
+            'state' => $copy['state'],
+            'title' => $copy['title'],
+            'message' => $copy['message'],
+        ];
     }
 }

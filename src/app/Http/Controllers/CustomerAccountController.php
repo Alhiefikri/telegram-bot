@@ -120,7 +120,10 @@ class CustomerAccountController extends Controller
             $payload['redirect_url'] = route('customer.orders.show', $ownedOrder);
         }
 
-        return response()->json($payload, $result->statusCode());
+        return response()
+            ->json($payload, $result->statusCode())
+            ->header('Cache-Control', 'no-store, private')
+            ->header('Referrer-Policy', 'no-referrer');
     }
 
     public function claimForm(Request $request, StorefrontPresenter $storefront): Response

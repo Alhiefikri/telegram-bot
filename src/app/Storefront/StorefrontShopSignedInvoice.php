@@ -10,7 +10,6 @@ use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\Bsc\BscExplorerUrl;
 use App\Services\Bsc\BscPaymentVerification;
-use App\Services\Bsc\BscVerificationOutcome;
 use App\Services\Bsc\BscVerificationStatus;
 use App\Services\Credentials\CredentialDelivery;
 use App\Services\Credentials\CredentialDeliveryPresentation;
@@ -204,14 +203,14 @@ class StorefrontShopSignedInvoice
 
         if ($projection->isTerminal) {
             if ($bscVerificationStatus !== null) {
-                return $this->bscStatusMessage($bscVerificationStatus);
+                return $this->terminalCopy->bscInvoiceStatusMessage($bscVerificationStatus);
             }
 
             return $this->terminalCopy->message($projection, $payment);
         }
 
         if ($bscVerificationStatus !== null) {
-            return $this->bscStatusMessage($bscVerificationStatus);
+            return $this->terminalCopy->bscInvoiceStatusMessage($bscVerificationStatus);
         }
 
         $verificationStatus ??= $this->binanceVerificationStatus($payment);
@@ -222,140 +221,48 @@ class StorefrontShopSignedInvoice
         return $this->terminalCopy->binanceStatusMessage($projection, $payment, $verificationStatus);
     }
 
-    private function bscStatusMessage(BscVerificationStatus $status): string
-    {
-        return match ($status->outcome) {
-            BscVerificationOutcome::Confirmed,
-            BscVerificationOutcome::AlreadyPaid => 'BSC payment verified. Your product will be delivered automatically.',
-            BscVerificationOutcome::Confirming => 'The exact BSC transfer was found, but it is still waiting for enough confirmations.',
-            BscVerificationOutcome::ManualReview,
-            BscVerificationOutcome::Mismatch,
-            BscVerificationOutcome::TransactionAlreadyUsed => 'This BSC payment needs manual review. Do not send another transfer.',
-            BscVerificationOutcome::ProviderError => 'The BSC authority is temporarily unavailable. Your payment remains pending.',
-            default => 'No valid BSC transfer has been confirmed yet.',
-        };
-    }
-
     /**
      * @return array{is_payable: bool, state: string, title: string, message: string, retry_label: string}
      */
     private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment, ?KlikQrisNativeQrisLifecycleResult $klikQrisResult = null): array
     {
         if (! $projection->isPendingPayment) {
-            return [
-                'is_payable' => false,
-                'state' => 'terminal',
-                'title' => 'QRIS tidak aktif',
-                'message' => 'Invoice ini tidak sedang menunggu pembayaran QRIS.',
-                'retry_label' => 'Cek status pembayaran',
-            ];
+            return ['is_payable' => false] + $this->terminalCopy->qrisReadiness('terminal');
         }
 
         if ($payment?->provider === 'manual' && $payment->method === 'QR_MANUAL') {
-            return [
-                'is_payable' => false,
-                'state' => 'manual',
-                'title' => 'Pembayaran manual',
-                'message' => 'Scan QR manual dan bayar tepat sesuai total produk. Setelah membayar, hubungi admin dengan nomor invoice ini.',
-                'retry_label' => 'Cek status pembayaran',
-            ];
+            return ['is_payable' => false] + $this->terminalCopy->qrisReadiness('manual');
         }
 
         if ($payment?->provider === 'pakasir' && $payment->method === 'hosted') {
-            return [
-                'is_payable' => false,
-                'state' => 'hosted',
-                'title' => 'Bayar via Pakasir',
-                'message' => 'Buka halaman pembayaran Pakasir dan selesaikan pembayaran sebelum batas waktu invoice.',
-                'retry_label' => 'Cek status pembayaran',
-            ];
+            return ['is_payable' => false] + $this->terminalCopy->qrisReadiness('hosted');
         }
 
         if ($klikQrisResult !== null) {
             return match ($klikQrisResult->outcome()) {
-                KlikQrisNativeQrisOutcome::Payable => [
-                    'is_payable' => true,
-                    'state' => 'ready',
-                    'title' => 'QRIS siap dibayar',
-                    'message' => 'Bayar hanya memakai QRIS dan total bayar final di invoice ini.',
-                    'retry_label' => 'Cek status pembayaran',
-                ],
-                KlikQrisNativeQrisOutcome::Creating => [
-                    'is_payable' => false,
-                    'state' => 'creating',
-                    'title' => 'Sedang membuat QRIS',
-                    'message' => 'Provider sedang menyiapkan QRIS dan nominal final. Jangan bayar sebelum QRIS tampil.',
-                    'retry_label' => 'Coba cek QRIS',
-                ],
-                KlikQrisNativeQrisOutcome::RecoveryPending => [
-                    'is_payable' => false,
-                    'state' => 'recovery_pending',
-                    'title' => 'Sedang membuat QRIS',
-                    'message' => 'QRIS sedang dipulihkan pada invoice yang sama. Buka kembali invoice ini sebentar lagi.',
-                    'retry_label' => 'Coba cek QRIS',
-                ],
-                KlikQrisNativeQrisOutcome::ProviderTotalPending => [
-                    'is_payable' => false,
-                    'state' => 'provider_total_pending',
-                    'title' => 'Provider belum memberi nominal',
-                    'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.',
-                    'retry_label' => 'Coba ambil total QRIS',
-                ],
-                KlikQrisNativeQrisOutcome::InvalidProviderResult => [
-                    'is_payable' => false,
-                    'state' => 'failed',
-                    'title' => 'Gagal membuat QRIS',
-                    'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.',
-                    'retry_label' => 'Coba buat QRIS lagi',
-                ],
-                KlikQrisNativeQrisOutcome::Expired => [
-                    'is_payable' => false,
-                    'state' => 'expired',
-                    'title' => 'QRIS kedaluwarsa',
-                    'message' => 'Batas bayar QRIS sudah lewat. Jangan bayar QRIS ini; buat order baru dari katalog.',
-                    'retry_label' => 'Cek status pembayaran',
-                ],
+                KlikQrisNativeQrisOutcome::Payable => ['is_payable' => true] + $this->terminalCopy->qrisReadiness('ready'),
+                KlikQrisNativeQrisOutcome::Creating => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('creating'),
+                KlikQrisNativeQrisOutcome::RecoveryPending => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('recovery_pending'),
+                KlikQrisNativeQrisOutcome::ProviderTotalPending => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('provider_total_pending'),
+                KlikQrisNativeQrisOutcome::InvalidProviderResult => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('failed'),
+                KlikQrisNativeQrisOutcome::Expired => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('expired'),
             };
         }
 
         if ($this->hasPayableNativePakasirQris($payment)) {
-            return [
-                'is_payable' => true,
-                'state' => 'ready',
-                'title' => 'QRIS siap dibayar',
-                'message' => 'Bayar hanya memakai QRIS dan total bayar final di invoice ini.',
-                'retry_label' => 'Cek status pembayaran',
-            ];
+            return ['is_payable' => true] + $this->terminalCopy->qrisReadiness('ready');
         }
 
         if (filled($payment?->provider_payment_number) && $payment?->provider_total_payment === null) {
-            return [
-                'is_payable' => false,
-                'state' => 'provider_total_pending',
-                'title' => 'Provider belum memberi nominal',
-                'message' => 'QRIS sudah dibuat, tetapi total bayar final dari provider belum tersedia. Jangan bayar total produk.',
-                'retry_label' => 'Coba ambil total QRIS',
-            ];
+            return ['is_payable' => false] + $this->terminalCopy->qrisReadiness('provider_total_pending');
         }
 
         if ($this->isPakasirPayment($payment)
             && in_array($payment?->provider_create_state, ['outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'], true)) {
-            return [
-                'is_payable' => false,
-                'state' => 'failed',
-                'title' => 'Gagal membuat QRIS',
-                'message' => 'QRIS belum siap dipakai. Coba buat ulang dari invoice ini atau hubungi bantuan jika tetap gagal.',
-                'retry_label' => 'Coba buat QRIS lagi',
-            ];
+            return ['is_payable' => false] + $this->terminalCopy->qrisReadiness('failed');
         }
 
-        return [
-            'is_payable' => false,
-            'state' => 'creating',
-            'title' => 'Sedang membuat QRIS',
-            'message' => 'Provider sedang menyiapkan QRIS dan nominal final. Jangan bayar sebelum QRIS tampil.',
-            'retry_label' => 'Coba cek QRIS',
-        ];
+        return ['is_payable' => false] + $this->terminalCopy->qrisReadiness('creating');
     }
 
     private function hasPayableNativePakasirQris(?Payment $payment): bool

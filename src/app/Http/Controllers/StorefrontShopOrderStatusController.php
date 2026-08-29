@@ -12,6 +12,9 @@ class StorefrontShopOrderStatusController extends Controller
     {
         $result = $refresh->execute($order);
 
-        return response()->json($result->payload(), $result->statusCode());
+        return response()
+            ->json($result->payload(), $result->statusCode())
+            ->header('Cache-Control', 'no-store, private')
+            ->header('Referrer-Policy', 'no-referrer');
     }
 }

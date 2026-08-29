@@ -82,13 +82,36 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Batas bayar')
             ->assertSee('Cek status pembayaran')
             ->assertSee('Setelah membayar, tekan tombol ini untuk mengecek status QRIS.')
-            ->assertDontSee('data-poll-ms', false)
-            ->assertSee('Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.')
+            ->assertSee('data-poll-ms="20000"', false)
+            ->assertSee('data-payment-countdown', false)
+            ->assertSee('data-payment-deadline=', false)
+            ->assertSee('Sisa waktu pembayaran')
             ->assertDontSee('/qr-lhie.jpg', false)
             ->assertDontSee($secret, false);
 
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+    }
+
+    public function test_invoice_payment_copy_follows_the_configured_storefront_locale(): void
+    {
+        config()->set('storefront.locale', 'en');
+        $this->pakasirConfigIsReady();
+        $this->qrisRendererReturnsDeterministicPng();
+        [$order] = $this->pendingNativeQrisOrder(
+            totalAmount: 66000,
+            providerFee: 500,
+            providerTotalPayment: 66500,
+            paymentNumber: '00020101021226610016ID.CO.QRIS.LOCALEEN99',
+        );
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
+            ->assertOk()
+            ->assertSee('<html lang="en"', false)
+            ->assertSee('QRIS invoice')
+            ->assertSee('Payment time remaining')
+            ->assertSee('Check payment status')
+            ->assertDontSee('Cek status pembayaran');
     }
 
     public function test_pending_invoice_with_missing_provider_total_blocks_qris_and_warns_not_to_pay(): void
@@ -136,7 +159,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $response
             ->assertOk()
             ->assertSeeInOrder([
-                'QRIS invoice',
+                'Invoice QRIS',
                 'Total bayar QRIS',
                 'Cek status pembayaran',
                 'Simpan Recovery Key pesanan website ini.',
@@ -341,11 +364,12 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             paymentNumber: '00020101021226610016ID.CO.QRIS.ISSUE121PAID99',
         );
         $this->providerTransactionDetailCompletesPayment($payment);
-
         $redirectUrl = app(StorefrontInvoiceUrl::class)->show($order);
 
         $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
             ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Referrer-Policy', 'no-referrer')
             ->assertJsonPath('ok', true)
             ->assertJsonPath('payment_status', PaymentStatus::Paid->value)
             ->assertJsonPath('order_status', OrderStatus::Completed->value)

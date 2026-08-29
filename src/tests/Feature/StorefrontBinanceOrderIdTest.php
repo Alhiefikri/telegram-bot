@@ -205,7 +205,7 @@ class StorefrontBinanceOrderIdTest extends TestCase
 
         $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
             ->assertOk()
-            ->assertSee('cancelled')
+            ->assertSee('Dibatalkan')
             ->assertSee('Jangan kirim USDT')
             ->assertDontSee('Jangan bayar QRIS');
 

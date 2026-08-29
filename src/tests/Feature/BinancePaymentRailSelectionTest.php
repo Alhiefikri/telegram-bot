@@ -195,11 +195,47 @@ class BinancePaymentRailSelectionTest extends TestCase
             ->assertSee($receiver->address_normalized)
             ->assertSee('2.5 USDT')
             ->assertDontSee('2.5 USDT USDT')
-            ->assertSee('BNB Smart Chain (BEP20) ONLY')
+            ->assertSee('BNB Smart Chain (BEP20)')
             ->assertSee('ERC20, TRC20, opBNB')
-            ->assertSee('Payment deadline:')
-            ->assertSee('Submit BSC TX Hash')
-            ->assertSee('Check Payment');
+            ->assertSee('Batas pembayaran:')
+            ->assertSee('Kirim Hash TX BSC')
+            ->assertSee('Cek pembayaran')
+            ->assertSee('Sisa waktu pembayaran');
+    }
+
+    public function test_bsc_invoice_uses_the_immutable_confirmation_policy_snapshot(): void
+    {
+        Queue::fake();
+        ManualPaymentSetting::current()->update([
+            'bsc_min_confirmations' => 7,
+            'bsc_confirmation_grace_minutes' => 5,
+        ]);
+        $receiver = $this->activeReceiver('0xabababababababababababababababababababab');
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+
+        $response = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'buyer_name' => 'bsc_policy_snapshot',
+            'terms_accepted' => '1',
+            'payment_method' => 'usdt_bep20',
+        ]);
+        $order = Order::with('payments.bscDetail')->sole();
+        $payment = $order->payments->sole();
+        ManualPaymentSetting::current()->update(['bsc_min_confirmations' => 12]);
+
+        $this->assertSame(7, $payment->bscDetail->required_confirmations);
+        $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->assertSee('setelah 7 konfirmasi')
+            ->assertDontSee('setelah 12 konfirmasi');
+        $this->postJson(app(StorefrontInvoiceUrl::class)->status($order))
+            ->assertOk()
+            ->assertJsonPath('bsc_required_confirmations', 7);
     }
 
     public function test_bsc_invoice_keeps_payment_snapshot_after_receiver_rotation_and_only_links_validated_evidence(): void
@@ -228,13 +264,13 @@ class BinancePaymentRailSelectionTest extends TestCase
             'address' => '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
             'address_normalized' => '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
         ])->save();
-
         $this->get($response->headers->get('Location'))
             ->assertOk()
             ->assertSee($snapshotAddress)
             ->assertDontSee('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-            ->assertSee('Payment deadline: '.$deadline, false)
-            ->assertDontSee('View validated transaction');
+            ->assertSee('Batas pembayaran: '.$deadline, false)
+            ->assertSee('data-payment-deadline=', false)
+            ->assertDontSee('Lihat transaksi tervalidasi');
 
         $hash = '0x'.str_repeat('d', 64);
         BscPaymentTransferEvidence::create([
@@ -258,13 +294,13 @@ class BinancePaymentRailSelectionTest extends TestCase
         $this->get($response->headers->get('Location'))
             ->assertOk()
             ->assertSee('https://bscscan.com/tx/'.$hash, false)
-            ->assertSee('View validated transaction');
+            ->assertSee('Lihat transaksi tervalidasi');
 
         config()->set('services.bsc.explorer_base_url', 'https://evil.example');
         $this->get($response->headers->get('Location'))
             ->assertOk()
             ->assertDontSee('https://evil.example/tx/'.$hash, false)
-            ->assertDontSee('View validated transaction');
+            ->assertDontSee('Lihat transaksi tervalidasi');
     }
 
     public function test_bsc_invoice_keeps_verification_states_distinct_and_safe(): void
@@ -288,12 +324,12 @@ class BinancePaymentRailSelectionTest extends TestCase
         $detail = $order->payments->sole()->bscDetail;
 
         foreach ([
-            PaymentBscDetail::STATUS_NOT_FOUND => 'Not found',
-            PaymentBscDetail::STATUS_CONFIRMING => 'Confirming',
-            PaymentBscDetail::STATUS_PROVIDER_ERROR => 'Provider error',
-            PaymentBscDetail::STATUS_MISMATCH => 'Mismatch',
-            PaymentBscDetail::STATUS_MANUAL_REVIEW => 'Manual review',
-            PaymentBscDetail::STATUS_CONFIRMED => 'Confirmed',
+            PaymentBscDetail::STATUS_NOT_FOUND => 'Belum ditemukan',
+            PaymentBscDetail::STATUS_CONFIRMING => 'Menunggu konfirmasi',
+            PaymentBscDetail::STATUS_PROVIDER_ERROR => 'Provider bermasalah',
+            PaymentBscDetail::STATUS_MISMATCH => 'Data tidak cocok',
+            PaymentBscDetail::STATUS_MANUAL_REVIEW => 'Perlu peninjauan manual',
+            PaymentBscDetail::STATUS_CONFIRMED => 'Terkonfirmasi',
         ] as $status => $label) {
             $detail->forceFill(['verification_status' => $status])->save();
 
@@ -323,8 +359,9 @@ class BinancePaymentRailSelectionTest extends TestCase
         $payment = $order->payments->sole();
         $url = app(StorefrontInvoiceUrl::class)->bscTxHash($order);
 
-        $this->post($url, ['bsc_tx_hash' => 'not-a-hash'])->assertRedirect();
-        $this->assertSame(0, (int) $payment->bscDetail->fresh()->tx_attempts);
+        $this->post($url, ['bsc_tx_hash' => 'not-a-hash'])
+            ->assertRedirect()
+            ->assertSessionHasErrors(['bsc_tx_hash' => 'Masukkan hash transaksi BSC yang diawali 0x dan berisi 64 karakter heksadesimal.']);
 
         $hash = '0x'.str_repeat('a', 64);
         $this->post($url, ['bsc_tx_hash' => $hash])->assertRedirect();

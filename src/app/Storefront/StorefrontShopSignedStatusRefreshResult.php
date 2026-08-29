@@ -7,11 +7,11 @@ use App\Enums\PaymentStatus;
 
 class StorefrontShopSignedStatusRefreshResult
 {
-    private const PAKASIR_NOT_FOUND = 'Pembayaran QRIS tidak ditemukan.';
+    private const UNSUPPORTED_PAYMENT_KEY = 'storefront.invoice.status_ui.common.unsupported_message';
 
-    private const RETRYABLE_PROVIDER_FAILURE = 'Status pembayaran belum bisa dicek sekarang. Coba lagi beberapa saat lagi.';
+    private const RETRYABLE_PROVIDER_FAILURE_KEY = 'storefront.invoice.status_ui.common.retryable_message';
 
-    private const IN_PROGRESS = 'Status QRIS sedang dicek. Coba lagi beberapa detik lagi.';
+    private const IN_PROGRESS_KEY = 'storefront.invoice.status_ui.common.in_progress_message';
 
     private function __construct(
         public readonly bool $ok,
@@ -39,7 +39,7 @@ class StorefrontShopSignedStatusRefreshResult
             ok: false,
             statusCode: 422,
             status: 'unsupported_payment',
-            message: self::PAKASIR_NOT_FOUND,
+            message: self::translate(self::UNSUPPORTED_PAYMENT_KEY),
         );
     }
 
@@ -49,8 +49,8 @@ class StorefrontShopSignedStatusRefreshResult
             ok: false,
             statusCode: 200,
             status: 'provider_failure',
-            title: 'Status belum bisa dicek',
-            message: self::RETRYABLE_PROVIDER_FAILURE,
+            title: self::translate('storefront.invoice.status_ui.common.retryable_title'),
+            message: self::translate(self::RETRYABLE_PROVIDER_FAILURE_KEY),
             retryAfter: $retryAfter,
         );
     }
@@ -61,8 +61,8 @@ class StorefrontShopSignedStatusRefreshResult
             ok: false,
             statusCode: 202,
             status: 'in_progress',
-            title: 'Status sedang dicek',
-            message: self::IN_PROGRESS,
+            title: self::translate('storefront.invoice.status_ui.common.in_progress_title'),
+            message: self::translate(self::IN_PROGRESS_KEY),
             retryAfter: $retryAfter,
         );
     }
@@ -158,5 +158,16 @@ class StorefrontShopSignedStatusRefreshResult
         }
 
         return $payload;
+    }
+
+    private static function translate(string $key): string
+    {
+        $locale = strtolower(str_replace('_', '-', trim((string) config('storefront.locale', 'id'))));
+        $locale = explode('-', $locale, 2)[0];
+        if (! in_array($locale, ['id', 'en', 'ms'], true)) {
+            $locale = 'id';
+        }
+
+        return (string) __($key, [], $locale);
     }
 }

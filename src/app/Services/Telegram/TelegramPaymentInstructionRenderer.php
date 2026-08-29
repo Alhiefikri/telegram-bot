@@ -103,12 +103,14 @@ class TelegramPaymentInstructionRenderer
             throw new \RuntimeException('BSC Payment detail snapshot is missing.');
         }
 
-        $setting = ManualPaymentSetting::current();
         $confirmations = max(
             $detail->verification_status === PaymentBscDetail::STATUS_AWAITING_TRANSFER ? 0 : (int) ($detail->current_confirmations ?? 0),
             0,
         );
-        $minimumConfirmations = $setting?->bscMinConfirmations() ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS;
+        $minimumConfirmations = max(
+            ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
+            min(100, (int) ($detail->required_confirmations ?: ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS)),
+        );
         $deadline = $payment->expired_at ?? $order->expires_at;
         $amount = $this->formatUsdt((int) $detail->payable_amount_micro);
         $baseAmount = $this->formatUsdt((int) $detail->base_amount_micro);

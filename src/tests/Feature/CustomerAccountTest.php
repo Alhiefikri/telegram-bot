@@ -300,6 +300,8 @@ class CustomerAccountTest extends TestCase
 
         $this->actingAs($customer, 'customer')->post(route('customer.orders.status', $order))
             ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Referrer-Policy', 'no-referrer')
             ->assertJsonPath('is_paid', true)
             ->assertJsonPath('redirect_url', route('customer.orders.show', $order));
     }

@@ -196,6 +196,11 @@ return [
         'checkout_rate_limit_per_minute' => (int) env('STOREFRONT_CHECKOUT_RATE_LIMIT_PER_MINUTE', 5),
         'binance_order_id_rate_limit_per_minute' => (int) env('STOREFRONT_BINANCE_ORDER_ID_RATE_LIMIT_PER_MINUTE', 5),
         'bsc_tx_hash_rate_limit_per_minute' => (int) env('STOREFRONT_BSC_TX_HASH_RATE_LIMIT_PER_MINUTE', 5),
+        // The status endpoint allows three requests per minute by default.
+        // Keep automatic polling at or above 20 seconds to stay within it.
+        'payment_status_poll_interval_seconds' => (int) env('STOREFRONT_PAYMENT_STATUS_POLL_INTERVAL_SECONDS', 20),
+        'payment_status_poll_max_attempts' => (int) env('STOREFRONT_PAYMENT_STATUS_POLL_MAX_ATTEMPTS', 9),
+        'payment_status_poll_max_duration_seconds' => (int) env('STOREFRONT_PAYMENT_STATUS_POLL_MAX_DURATION_SECONDS', 180),
         'telegram_reservation_floor' => (int) env('STOREFRONT_TELEGRAM_RESERVATION_FLOOR', 1),
         'invoice_url_ttl_days' => (int) env('STOREFRONT_INVOICE_URL_TTL_DAYS', 7),
         'credential_access_rate_limit_per_minute' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_RATE_LIMIT_PER_MINUTE', 5),

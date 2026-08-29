@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'locale' => env('STOREFRONT_LOCALE', 'id'),
+
     'meta' => [
         'title' => ':brand | Akun Premium & Produk Digital',
         'description' => 'Lhie Store menyediakan produk digital dan akun premium dengan stok transparan, harga jelas, checkout QRIS, serta akses pesanan mandiri.',

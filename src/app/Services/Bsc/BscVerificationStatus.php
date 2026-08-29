@@ -11,5 +11,6 @@ final readonly class BscVerificationStatus
         public ?int $confirmations = null,
         public int $attempts = 0,
         public int $version = 0,
+        public int $requiredConfirmations = 3,
     ) {}
 }

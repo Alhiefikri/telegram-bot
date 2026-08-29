@@ -227,6 +227,20 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame(1, PaymentEvent::query()->where('provider', 'bsc')->count());
     }
 
+    public function test_confirmation_threshold_uses_the_payment_snapshot_after_setting_changes(): void
+    {
+        $payment = $this->payment();
+        ManualPaymentSetting::current()->update(['bsc_min_confirmations' => 5]);
+        $hash = '0x'.str_repeat('9', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+
+        $result = app(BscPaymentVerification::class)->verify($payment, $hash);
+
+        $this->assertSame(BscVerificationOutcome::Confirmed, $result->outcome);
+        $this->assertSame(3, $payment->fresh()->bscDetail->required_confirmations);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+    }
+
     public function test_transfer_included_after_the_deadline_becomes_late_payment_before_order_expiry_races(): void
     {
         $payment = $this->payment();
@@ -252,12 +266,12 @@ class BscPaymentVerificationTest extends TestCase
         );
 
         $invoice = app(StorefrontShopSignedInvoice::class)->read($payment->fresh()->order);
-        $this->assertStringContainsString('manual review', strtolower($invoice->statusMessage));
+        $this->assertStringContainsString('ditinjau manual', strtolower($invoice->statusMessage));
 
         $refresh = app(StorefrontShopPaymentStatusRefresh::class)->execute($payment->fresh()->order);
         $this->assertSame('terminal', $refresh->payload()['status']);
         $this->assertFalse($refresh->payload()['is_paid']);
-        $this->assertStringContainsString('manual review', strtolower($refresh->payload()['message']));
+        $this->assertStringContainsString('ditinjau manual', strtolower($refresh->payload()['message']));
     }
 
     public function test_wrong_amount_is_mismatch_and_never_claims(): void
@@ -662,6 +676,9 @@ class BscPaymentVerificationTest extends TestCase
             'chain_id' => 56,
             'token_contract' => self::CONTRACT,
             'token_decimals' => 18,
+            'required_confirmations' => 3,
+            'requires_finalized_block' => false,
+            'confirmation_grace_minutes' => 3,
             'base_amount_micro' => 1_000_000,
             'payable_amount_micro' => 1_000_000,
             'expected_token_units' => '1000000000000000000',

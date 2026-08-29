@@ -72,6 +72,11 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
                 $receiver->tokenDecimals,
             ),
             verificationStatus: PaymentBscDetail::STATUS_AWAITING_TRANSFER,
+            requiredConfirmations: $context->lockedSetting?->bscMinConfirmations()
+                ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
+            requiresFinalizedBlock: (bool) ($context->lockedSetting?->bsc_require_finalized_block ?? false),
+            confirmationGraceMinutes: $context->lockedSetting?->bscConfirmationGraceMinutes()
+                ?? ManualPaymentSetting::DEFAULT_BSC_CONFIRMATION_GRACE_MINUTES,
         );
 
         return new CheckoutPaymentPlan(

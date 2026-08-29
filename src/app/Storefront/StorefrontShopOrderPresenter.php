@@ -28,12 +28,33 @@ class StorefrontShopOrderPresenter
     {
         $invoice = $this->signedInvoices->read($order);
         $brand = $this->storefront->brand();
+        $paymentDeadline = $invoice->qrisEffectiveExpiresAt
+            ?? $this->localPaymentDeadline($invoice);
+        $bscStatus = $this->bscStatus($invoice->bscVerificationStatus);
+        $paymentKind = match (strtoupper((string) $invoice->payment?->method)) {
+            'BINANCE_PAY_ID' => 'binance',
+            'USDT_BEP20' => 'bsc',
+            default => 'qris',
+        };
+        $pollIntervalMs = max(
+            20_000,
+            (int) config('services.storefront.payment_status_poll_interval_seconds', 20) * 1_000,
+        );
+        $pollMaxAttempts = max(1, (int) config('services.storefront.payment_status_poll_max_attempts', 9));
+        $pollMaxDurationMs = max(
+            $pollIntervalMs,
+            (int) config('services.storefront.payment_status_poll_max_duration_seconds', 180) * 1_000,
+        );
 
         return [
             'order' => $invoice->order,
             'payment' => $invoice->payment,
             'storefront' => $this->storefront,
             'brand' => $brand,
+            'storefrontLocale' => $this->terminalCopy->locale(),
+            'paymentStatusCopy' => [
+                $paymentKind => $this->terminalCopy->statusUiCopy($paymentKind),
+            ],
             'copy' => config('storefront'),
             'homeUrl' => $this->urls->catalogUrl(),
             'pageTitle' => 'Order '.$invoice->order->invoice_number.' | '.$brand,
@@ -56,7 +77,11 @@ class StorefrontShopOrderPresenter
             'isPaid' => $invoice->isPaid(),
             'isPendingPayment' => $invoice->isPendingPayment(),
             'isTerminal' => $invoice->isTerminal(),
+            'orderStatusLabel' => $this->terminalCopy->orderStatusLabel($invoice->order->order_status),
             'effectivePaymentStatus' => $this->terminalCopy->effectivePaymentStatus($invoice->order, $invoice->payment),
+            'paymentStatusPollIntervalMs' => $pollIntervalMs,
+            'paymentStatusPollMaxAttempts' => $pollMaxAttempts,
+            'paymentStatusPollMaxDurationMs' => $pollMaxDurationMs,
             'statusMessage' => $invoice->statusMessage,
             'payableAmount' => $invoice->payableAmount,
             'payableAmountFromProvider' => $invoice->payableAmountFromProvider,
@@ -68,8 +93,8 @@ class StorefrontShopOrderPresenter
             'qrisImageDataUri' => $invoice->qrisImageDataUri,
             'qrisImageSource' => $invoice->qrisImageSource,
             'payableAmountDisplay' => $invoice->payableAmountDisplay,
-            'paymentDeadline' => $invoice->qrisEffectiveExpiresAt
-                ?? $this->localPaymentDeadline($invoice),
+            'paymentDeadline' => $paymentDeadline,
+            'paymentDeadlineTimestamp' => $paymentDeadline?->toIso8601String(),
             'isBinancePay' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'BINANCE_PAY_ID',
             'isBscPayment' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'USDT_BEP20',
             'isManualQris' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'QR_MANUAL',
@@ -79,21 +104,28 @@ class StorefrontShopOrderPresenter
             'binanceVerificationAutomatic' => ($invoice->binanceVerificationStatus?->automatic ?? false)
                 && $invoice->binanceVerificationStatus?->outcome !== BinanceVerificationOutcome::NotConfigured,
             'binanceVerificationClosed' => $invoice->binanceVerificationStatus?->closed() ?? false,
-            'binanceReceiverLabel' => $invoice->payment?->binance_receiver_type === 'uid'
-                ? 'Binance UID'
-                : ($invoice->payment?->binance_receiver_type === 'pay_id' ? 'Binance Pay ID' : (filled(config('services.binance.pay_id')) ? 'Binance Pay ID' : 'Binance UID')),
+            'binanceReceiverLabel' => $this->terminalCopy->binanceReceiverLabel(
+                $invoice->payment?->binance_receiver_type,
+                filled(config('services.binance.pay_id')),
+            ),
             'binancePayId' => (string) ($invoice->payment?->binance_receiver_value ?: (config('services.binance.pay_id') ?: config('services.binance.pay_uid'))),
             'bscReceiverAddress' => (string) ($invoice->payment?->bscDetail?->receiver_address ?? ''),
             'bscPayableAmount' => $invoice->payment?->bscDetail?->payable_amount_micro,
             'bscBaseAmount' => $invoice->payment?->bscDetail?->base_amount_micro,
-            'bscNetworkLabel' => 'BNB Smart Chain (BEP20)',
-            'bscVerificationStatus' => $this->bscStatus($invoice->bscVerificationStatus),
+            'bscNetworkLabel' => $this->terminalCopy->translate('storefront.invoice.bsc.network'),
+            'bscVerificationStatus' => $bscStatus,
+            'bscStatusLabel' => $this->terminalCopy->bscStatusLabel($bscStatus),
             'bscVerificationOutcome' => $invoice->bscVerificationStatus?->outcome->value,
             'bscConfirmations' => $invoice->bscVerificationStatus?->confirmations ?? 0,
-            'bscRequiredConfirmations' => ManualPaymentSetting::current()?->bscMinConfirmations() ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
+            'bscRequiredConfirmations' => $invoice->bscVerificationStatus?->requiredConfirmations
+                ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
             'bscExplorerUrl' => $invoice->bscExplorerUrl,
-            'bscVerificationClosed' => $invoice->bscVerificationStatus?->outcome === BscVerificationOutcome::Expired
-                || $invoice->isTerminal(),
+            'bscVerificationClosed' => in_array($invoice->bscVerificationStatus?->outcome, [
+                BscVerificationOutcome::Expired,
+                BscVerificationOutcome::Mismatch,
+                BscVerificationOutcome::ManualReview,
+                BscVerificationOutcome::TransactionAlreadyUsed,
+            ], true) || $invoice->isTerminal(),
             'hostedPaymentUrl' => $invoice->hostedPaymentUrl,
             'accountGroups' => $invoice->accountGroups,
             'usageGuides' => $invoice->usageGuides,
@@ -140,15 +172,15 @@ class StorefrontShopOrderPresenter
     }
 
     /**
-     * Deadline shown for non-KlikQRIS rails (manual QR, Pakasir). KlikQRIS
-     * deadlines always come from the lifecycle Payable outcome, so a
-     * non-payable KlikQRIS Payment never exposes a provider deadline.
+     * Deadline shown for non-KlikQRIS provider outcomes and as the local
+     * checkout fallback when a KlikQRIS payable snapshot is not available.
+     * A non-payable KlikQRIS Payment never exposes its provider deadline.
      */
     private function localPaymentDeadline(StorefrontShopSignedInvoiceReadResult $invoice): ?Carbon
     {
         $payment = $invoice->payment;
         if ($payment !== null && strtolower((string) $payment->provider) === 'klikqris') {
-            return null;
+            return $payment->expired_at ?? $invoice->order->expires_at;
         }
 
         return $payment?->provider_expires_at

@@ -514,9 +514,9 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertOk()
             ->assertSee('Binance Pay (USDT)')
             ->assertSee('6 USDT')
-            ->assertSee('⚠️ IMPORTANT')
-            ->assertSee('Send exactly 6 USDT, including every decimal digit.')
-            ->assertSee('Do not round or change the amount.')
+            ->assertSee('PENTING')
+            ->assertSee('Kirim tepat 6 USDT, termasuk semua angka desimal.')
+            ->assertSee('Jangan membulatkan atau mengubah nominal.')
             ->assertSee('987654321')
             ->assertSee('/payment '.$order->invoice_number)
             ->assertSee('data-copy-text="6 USDT"', false)
@@ -559,11 +559,11 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $this->get($response->headers->get('Location'))
             ->assertOk()
-            ->assertSee('⚠️ IMPORTANT')
-            ->assertSee('Send exactly 3 USDT, including every decimal digit.')
-            ->assertSee('Do not round or change the amount.')
-            ->assertSee('After paying, submit your Binance Pay Order ID.', false)
-            ->assertSee('Open the completed payment in Binance Pay, view Order Details, and copy the Order ID exactly.', false)
+            ->assertSee('PENTING')
+            ->assertSee('Kirim tepat 3 USDT, termasuk semua angka desimal.')
+            ->assertSee('Jangan membulatkan atau mengubah nominal.')
+            ->assertSee('Setelah membayar, kirim Binance Pay Order ID.', false)
+            ->assertSee('Buka pembayaran selesai di Binance Pay, lihat Order Details, lalu salin Order ID persis.', false)
             ->assertDontSee('/payment '.$order->invoice_number);
     }
 
@@ -599,9 +599,9 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $this->get($response->headers->get('Location'))
             ->assertOk()
-            ->assertSee('Checking your payment automatically')
-            ->assertSee('We will check Binance history for the exact amount and receiver.')
-            ->assertDontSee('After paying, submit your Binance Pay Order ID.')
+            ->assertSee('Mengecek pembayaran otomatis')
+            ->assertSee('Kami akan mengecek riwayat Binance untuk nominal dan penerima yang tepat.')
+            ->assertDontSee('Setelah membayar, kirim Binance Pay Order ID.')
             ->assertDontSee('/payment '.$order->invoice_number);
     }
 

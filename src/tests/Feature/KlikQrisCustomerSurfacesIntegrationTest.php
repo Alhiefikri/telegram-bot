@@ -65,7 +65,7 @@ class KlikQrisCustomerSurfacesIntegrationTest extends TelegramBotTestSupport
 
         $viewData = app(StorefrontShopOrderPresenter::class)->viewData($order);
         $this->assertSame($orderDeadline->timestamp, $viewData['paymentDeadline']->timestamp);
-
+        $this->assertSame($orderDeadline->toIso8601String(), $viewData['paymentDeadlineTimestamp']);
         $this->fakeTelegramHttp([
             'https://klikqris.com/storage/sandbox/qris_surface.png' => Http::response(self::PNG_BYTES, 200, ['Content-Type' => 'image/png']),
         ]);

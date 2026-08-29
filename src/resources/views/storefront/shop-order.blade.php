@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="scroll-smooth bg-[var(--sf-paper)]">
+<html lang="{{ str_replace('_', '-', $storefrontLocale ?? app()->getLocale()) }}" class="scroll-smooth bg-[var(--sf-paper)]">
 <head>
     @include('storefront.partials.head')
 </head>
@@ -80,7 +80,7 @@
                     @endif
                     @include('storefront.partials.shop.order-summary')
                 @else
-                    <x-storefront.panel as="section" class="mt-6" aria-label="Status akhir invoice">
+                    <x-storefront.panel as="section" class="mt-6" aria-label="Status akhir invoice" role="status" aria-live="polite">
                         <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Status akhir</p>
                         <h2 class="mt-2 font-display text-2xl font-black text-[var(--sf-ink)]">Invoice ini tidak bisa dibayar lagi</h2>
                         <p class="mt-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">{{ $statusMessage }}</p>

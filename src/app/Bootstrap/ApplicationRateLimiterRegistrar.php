@@ -73,7 +73,11 @@ class ApplicationRateLimiterRegistrar
                 return response()->json([
                     'ok' => false,
                     'retry_after' => $retryAfter,
-                    'message' => 'Terlalu sering cek status. Coba lagi dalam '.$retryAfter.' detik.',
+                    'message' => (string) __(
+                        'storefront.invoice.status_ui.common.rate_limited_message',
+                        ['seconds' => $retryAfter],
+                        config('storefront.locale', 'id'),
+                    ),
                 ], 429, $headers);
             };
 

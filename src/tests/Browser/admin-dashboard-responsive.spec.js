@@ -445,6 +445,11 @@ test("announces terminal QRIS status and exposes buyer next steps", async ({
   await expect(
     statusCard.getByText("Sedang membuat QRIS", { exact: true }).first()
   ).toBeVisible();
+  await expect(
+    statusCard.locator("[data-payment-status-announcement]")
+  ).toHaveText(
+    "Sedang membuat QRIS. Provider sedang menyiapkan QRIS dan nominal final. Jangan bayar sebelum QRIS tampil."
+  );
 
   runArtisan([
     "tinker",
@@ -563,6 +568,135 @@ test("reloads invoice when QRIS retry obtains final provider total", async ({
   await expect(page).toHaveURL(`${baseUrl}/shop/orders/reloaded-qris`);
 });
 
+test("polls active invoices within the budget and stops on hidden or terminal state", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.clock.install({ time: new Date() });
+
+  let calls = 0;
+  let releaseSecondRequest;
+  const secondRequestReleased = new Promise((resolve) => {
+    releaseSecondRequest = resolve;
+  });
+
+  await page.route(
+    `**${invoiceFixtures.pendingWithNativeQris.statusPath}**`,
+    async (route) => {
+      calls += 1;
+      if (calls === 1) {
+        await route.fulfill({
+          status: 429,
+          headers: { "Retry-After": "30" },
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: false,
+            retry_after: 30,
+            message: "Terlalu sering cek status. Coba lagi dalam 30 detik.",
+          }),
+        });
+        return;
+      }
+      if (calls === 2) {
+        await secondRequestReleased;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            status: "refreshed",
+            payment_status: "pending",
+            order_status: "pending_payment",
+            is_paid: false,
+            is_terminal: false,
+            qris_ready: true,
+            should_reload: false,
+            message: "Pembayaran belum masuk.",
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          status: "terminal",
+          payment_status: "failed",
+          order_status: "cancelled",
+          is_paid: false,
+          is_terminal: true,
+          qris_ready: false,
+          should_reload: false,
+          message:
+            "Order dibatalkan. Jangan bayar QRIS ini; buat order baru jika masih ingin membeli.",
+        }),
+      });
+    }
+  );
+
+  await page.goto(
+    `${baseUrl}${invoiceFixtures.pendingWithNativeQris.showUrl}`,
+    { waitUntil: "domcontentloaded" }
+  );
+  const statusCard = page.locator("[data-shop-payment-status]");
+  const countdown = page.locator("[data-payment-countdown]");
+  await expect(countdown).toHaveAttribute("data-payment-deadline", /\d/);
+  await expect(countdown.locator("[data-payment-countdown-value]")).toHaveText(
+    /^\d{2}:\d{2}:\d{2}$/
+  );
+
+  await page.clock.runFor(18_000);
+  expect(calls).toBe(0);
+  await page.clock.runFor(3_000);
+  await expect.poll(() => calls).toBe(1);
+  await expect(statusCard.locator("[data-payment-status-title]")).toHaveText(
+    "Terlalu sering cek status"
+  );
+
+  await page.clock.runFor(20_000);
+  expect(calls).toBe(1);
+  await page.clock.runFor(10_000);
+  await expect.poll(() => calls).toBe(2);
+
+  await statusCard.evaluate((element) => {
+    element
+      .querySelector("[data-payment-status-check]")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  expect(calls).toBe(2);
+  releaseSecondRequest();
+  await expect(statusCard.locator("[data-payment-status-message]")).toHaveText(
+    "Pembayaran belum masuk."
+  );
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(20_000);
+  expect(calls).toBe(2);
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(20_000);
+  await expect.poll(() => calls).toBe(3);
+  await expect(statusCard.locator("[data-payment-status-title]")).toHaveText(
+    "Status pembayaran final"
+  );
+  await expect(
+    statusCard.getByRole("button", { name: "Cek status pembayaran" })
+  ).toBeHidden();
+});
+
 test("prioritizes invoice content by state without mobile overflow", async ({
   page,
 }) => {
@@ -574,16 +708,17 @@ test("prioritizes invoice content by state without mobile overflow", async ({
       { waitUntil: "domcontentloaded" }
     );
     await expect(
-      page.getByRole("heading", { name: "QRIS invoice" })
+      page.getByRole("heading", { name: "Invoice QRIS" })
     ).toBeVisible();
     await expect(page.getByText("Total bayar QRIS")).toBeVisible();
     await expect(page.getByText("Batas bayar")).toBeVisible();
+    await expect(page.getByText("Sisa waktu pembayaran")).toBeVisible();
     await expect(page.getByAltText(/QRIS invoice/)).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Cek status pembayaran" })
     ).toBeVisible();
     await expectBefore(
-      page.getByRole("heading", { name: "QRIS invoice" }),
+      page.getByRole("heading", { name: "Invoice QRIS" }),
       page.locator('section[aria-label="Ringkasan invoice"]')
     );
     await expectNoDocumentOverflow(page);
@@ -601,8 +736,8 @@ test("prioritizes invoice content by state without mobile overflow", async ({
     await expect(
       page
         .locator("[data-shop-payment-status]")
-        .getByText("Jangan bayar total produk")
-    ).toBeVisible();
+        .locator("[data-payment-status-message]")
+    ).toContainText("Jangan bayar total produk");
     await expect(page.getByAltText(/QRIS invoice/)).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "Coba ambil total QRIS" })
@@ -625,7 +760,7 @@ test("prioritizes invoice content by state without mobile overflow", async ({
       page.getByText("BrowserPaidSecret", { exact: true })
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "QRIS invoice" })
+      page.getByRole("heading", { name: "Invoice QRIS" })
     ).toHaveCount(0);
     await expectBefore(
       page.getByRole("heading", { name: "Data akun" }),
@@ -643,7 +778,7 @@ test("prioritizes invoice content by state without mobile overflow", async ({
       page.getByRole("link", { name: "Buat order baru" })
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "QRIS invoice" })
+      page.getByRole("heading", { name: "Invoice QRIS" })
     ).toHaveCount(0);
     await expectBefore(
       page.getByRole("heading", {
@@ -668,7 +803,7 @@ test("prioritizes invoice content by state without mobile overflow", async ({
       page.getByRole("button", { name: "Cek status pembayaran" })
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "QRIS invoice" })
+      page.getByRole("heading", { name: "Invoice QRIS" })
     ).toHaveCount(0);
     await expectNoDocumentOverflow(page);
   }
@@ -2602,6 +2737,7 @@ echo json_encode([
     'pendingWithNativeQris' => [
         'orderId' => $qrisOrder->id,
         'showUrl' => URL::signedRoute('storefront.shop.orders.show', ['order' => $qrisOrder, 'key' => 'browser-recovery-key'], null, false),
+        'statusPath' => parse_url(URL::signedRoute('storefront.shop.orders.status', $qrisOrder, null, false), PHP_URL_PATH),
     ],
     'pendingStatusRefresh' => [
         'orderId' => $statusPendingOrder->id,
