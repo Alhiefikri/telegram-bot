@@ -20,14 +20,15 @@ class StorefrontShopCheckoutRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'product_id' => ['required', 'integer'],
-            'quantity' => ['required', 'integer', 'min:1', 'max:20'],
+            'product_id' => ['nullable', 'integer', 'min:1'],
+            'quantity' => ['nullable', 'integer', 'min:1', 'max:20', 'required_with:product_id'],
             'buyer_name' => ['required', 'string', 'min:2', 'max:40', 'regex:/^[A-Za-z0-9_ .-]+$/'],
             'terms_accepted' => ['required', 'accepted'],
             'email' => ['nullable', 'string', 'email:rfc', 'max:254'],
             'support_contact_channel' => ['nullable', 'string', 'required_with:support_contact_value', Rule::in(['telegram', 'whatsapp'])],
             'support_contact_value' => ['nullable', 'string', 'max:120', 'required_with:support_contact_channel'],
             'payment_method' => ['nullable', Rule::in(CheckoutPaymentIntents::acceptedPaymentRails())],
+            'cart_snapshot' => ['nullable', 'string', 'max:64'],
         ];
     }
 
@@ -74,6 +75,10 @@ class StorefrontShopCheckoutRequest extends FormRequest
 
     public function checkoutRecoveryUrl(): string
     {
+        if (! $this->filled('product_id')) {
+            return route('storefront.shop.checkout.start');
+        }
+
         return app(StorefrontUrl::class)->checkoutRecoveryUrl($this->input('product_id'));
     }
 }

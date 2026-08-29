@@ -180,14 +180,27 @@ mengisi `orders.telegram_receipt_sent_at` dan mengantrekan
 Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):
 
 - public catalog: `/`, `/produk/{product}`, `/shop`;
-- guest checkout: `POST /shop/checkout`;
+- guest cart: `GET /shop/cart`, `POST /shop/cart/items`, `PATCH /shop/cart/items/{product}`, and `DELETE /shop/cart/items/{product}`;
+- guest checkout review and submit: `GET /shop/checkout` and `POST /shop/checkout`;
 - signed invoice/order: `/shop/orders/{order}`;
 - signed status refresh/cancel dan Binance Order ID submission;
 - Recovery Key order access: `/akses-pesanan`;
 - customer account/login link: `/akun/*`;
 - admin: `/admin/*` di balik `admin.access`.
 
-`StorefrontShopCheckout` membuat customer web, cart, Order, Payment, reservation, dan Recovery Key melalui service yang sama dengan domain checkout. Checkout key berbasis session/product/quantity/name/payment method memberi idempotency untuk submit ganda. Native QRIS dibuat pada Payment yang sudah ada; kegagalan pembuatan tidak membuat order atau payment kedua.
+`StorefrontGuestCart` binds the active guest Cart to the server-side
+storefront session key and creates a fresh web Customer when the previous Cart
+is checked out or expired. Cart mutations remain owned by `CartService`; the
+cart and checkout review presenters show current product values without
+accepting browser prices or names as order data.
+
+`StorefrontShopCheckout` composes direct-buy and cart review submissions through
+the same Cart and `OrderCheckoutService` transaction. Cart checkout keys include
+the complete ordered item snapshot and selected payment rail. The signed review
+snapshot detects product, price, visibility, stock, or cart-quantity changes;
+authoritative product locks still revalidate all items before Order creation.
+
+`StorefrontShopCheckout` membuat customer web, cart, Order, Payment, reservation, dan Recovery Key melalui service yang sama dengan domain checkout. Checkout key berbasis session, snapshot cart lengkap, buyer name, dan payment rail memberi idempotency untuk submit ganda. Native QRIS dibuat pada Payment yang sudah ada; kegagalan pembuatan tidak membuat order atau payment kedua.
 Checkout Web Storefront mewajibkan persetujuan eksplisit atas kebijakan syarat/refund yang dikonfigurasi sebelum membuat Customer, Cart, Order, Payment, reservation, atau side effect provider. Versi `storefront.policies.terms.version` dan timestamp persetujuan disnapshot pada Order; modal hanya memaparkan base amount USDT yang aman terpisah dari subtotal IDR.
 
 Invoice web memakai signed URL dan status refresh. `StorefrontShopPaymentStatusRefresh` dapat menjalankan recovery native QRIS, provider status lookup, atau Binance verification, tetapi paid transition tetap melalui `OrderLifecycle`. `StorefrontOrderAccess` hanya mengeluarkan plaintext Recovery Key saat issue awal; database menyimpan hash dan session grant bersifat terbatas waktu.
@@ -213,7 +226,7 @@ Untuk stok, `AdminProductAccountStockController` menerima JSON Account Input (1â
 
 Adapter presentation tidak memiliki aturan cutoff sendiri. `StorefrontShopCheckout` hanya melakukan preflight non-authoritative sebelum membuat Customer/cart; guard service tetap wajib. `StorefrontResponseCache` memasukkan maintenance `version` ke cache identity sehingga request pertama setelah perubahan nyata tidak memakai HTML lama, sedangkan no-op mempertahankan identity. `StorefrontCatalogPageBuilder`/presenter dan view partial menampilkan notice serta mengganti CTA; `TelegramMenuIntents`, `TelegramCatalogIntents`, `TelegramCartIntents`, dan callback handlers mempertahankan browsing/stock/cart, sementara `TelegramCheckoutMaintenanceCallbackHandler` menyediakan Cek Status. Status callback terdaftar sekali setelah privacy/community gate dan tidak mengirim broadcast.
 
-Entry point test terfokus adalah `tests/Feature/CheckoutMaintenanceTest.php` (mutation, zero-side-effect rejection, existing native QRIS/status refresh, lifecycle continuation), `tests/Feature/PakasirWebhookTest.php` (authoritative callback, reconciliation, receipt/Sales Proof Post), `tests/Feature/Telegram/CheckoutMaintenanceTest.php`, dan `tests/Feature/CheckoutMaintenancePostgresConcurrencyTest.php`. Lane PostgreSQL dijalankan oleh `composer test:concurrency-gate`; race test mencakup kedua commit-order outcome, duplicate version/audit prevention, and lock-order completion.
+Entry point test terfokus adalah `tests/Feature/StorefrontShopCartTest.php` (guest cart session isolation, expiry, stale snapshot, multi-item checkout, duplicate submit, maintenance rejection, and mixed fulfillment), `tests/Feature/StorefrontShopCheckoutTest.php` (direct checkout and payment rails), `tests/Feature/CheckoutMaintenanceTest.php` (mutation, zero-side-effect rejection, existing native QRIS/status refresh, lifecycle continuation), `tests/Feature/PakasirWebhookTest.php` (authoritative callback, reconciliation, receipt/Sales Proof Post), `tests/Feature/Telegram/CheckoutMaintenanceTest.php`, dan `tests/Feature/CheckoutMaintenancePostgresConcurrencyTest.php`. Lane PostgreSQL dijalankan oleh `composer test:concurrency-gate`; race test mencakup kedua commit-order outcome, duplicate version/audit prevention, and lock-order completion.
 
 ### 4.4 Buyer history dan KlikQRIS reporting
 

@@ -8,6 +8,7 @@ use App\Exceptions\CheckoutMaintenanceActive;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
+use App\Models\Cart;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -26,6 +27,7 @@ use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Contracts\Session\Session;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -34,6 +36,7 @@ class StorefrontShopCheckout
 {
     public function __construct(
         private readonly CartService $carts,
+        private readonly StorefrontGuestCart $guestCarts,
         private readonly OrderCheckoutService $orders,
         private readonly KlikQrisNativeQrisService $klikQrisNativeQris,
         private readonly PaymentProviderResolver $providerResolver,
@@ -46,67 +49,54 @@ class StorefrontShopCheckout
         private readonly TelegramOutboundEffectDispatcher $dispatcher,
     ) {}
 
-    public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null): StorefrontShopCheckoutResult
+    public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null, ?Session $session = null): StorefrontShopCheckoutResult
     {
         $this->assertTermsAccepted($input);
         $termsVersion = $this->currentTermsVersion();
         $paymentRail = $this->paymentRail($input->paymentMethod);
-        $checkoutKey = $this->checkoutKey($input, $sessionId, $paymentRail);
-        if ($checkoutKey === null) {
-            return $this->startOnce($input, null, $termsVersion);
+        if ($sessionId === null || trim($sessionId) === '') {
+            return $this->startOnce($input, null, $termsVersion, null, $paymentRail);
         }
 
+        $session ??= app('session.store');
+        $session->put(StorefrontGuestCart::CLIENT_KEY, trim($sessionId));
+        $sessionId = $this->guestCarts->clientKey($session);
+
         try {
-            return Cache::lock('storefront:checkout:'.$checkoutKey, 45)
-                ->block(5, fn (): StorefrontShopCheckoutResult => $this->startOnce($input, $checkoutKey, $termsVersion));
+            return Cache::lock('storefront:checkout:'.hash('sha256', $sessionId), 45)
+                ->block(5, fn (): StorefrontShopCheckoutResult => $this->startOnce($input, $sessionId, $termsVersion, $session, $paymentRail));
         } catch (LockTimeoutException $exception) {
             throw new InvalidCheckout('Checkout sedang diproses. Tunggu sebentar lalu buka kembali invoice Anda.', previous: $exception);
         }
     }
 
-    private function startOnce(StorefrontShopCheckoutInput $input, ?string $checkoutKey, string $termsVersion): StorefrontShopCheckoutResult
-    {
-        if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
-            $this->guestOrderNotifications->capture($existing, $input->email);
-            $this->storeSupportContact($existing, $input);
-            $recoveryKey = $this->issueRecoveryKeyIfMissing($existing);
-
-            if ($existing->order_status === OrderStatus::PendingPayment
-                && $existing->payment_status === PaymentStatus::Pending) {
-                $payment = $existing->payments()->latest('created_at')->first();
-                if ($this->usesNativeQris($payment)) {
-                    try {
-                        $wasQrisReady = $this->hasPayableNativeQris($payment);
-                        $this->ensureNativeQrisCreated($payment);
-                        $payment->refresh();
-                        if ($this->hasPayableNativeQris($payment)) {
-                            $this->events->qrisCreated($existing, $payment, [
-                                'source' => 'checkout_reuse',
-                                'idempotent_reuse' => $wasQrisReady,
-                            ]);
-                        }
-                    } catch (Throwable $exception) {
-                        report($exception);
-                    }
-                }
-            }
-
-            return new StorefrontShopCheckoutResult(redirectUrl: $this->invoiceUrls->show($existing), orderId: $existing->getKey(), recoveryKey: $recoveryKey);
+    private function startOnce(
+        StorefrontShopCheckoutInput $input,
+        ?string $sessionId,
+        string $termsVersion,
+        ?Session $session,
+        string $paymentRail,
+    ): StorefrontShopCheckoutResult {
+        if ($session !== null) {
+            return $this->startSessionCheckout($input, $sessionId, $session, $termsVersion, $paymentRail);
         }
+
         $maintenanceState = $this->maintenance->current();
         if ($maintenanceState->active) {
             throw new CheckoutMaintenanceActive($maintenanceState);
         }
 
+        if ($input->productId === null) {
+            throw new InvalidCheckout('Keranjang kosong.');
+        }
         $product = $this->product($input->productId);
-
-        $paymentIntent = $this->paymentIntent($this->paymentRail($input->paymentMethod), $product);
+        $paymentIntent = $this->paymentIntent($paymentRail, $product);
 
         if (! $product->isPublicVisible() || $product->availableStock() < $input->quantity) {
             throw new InsufficientStock('Stok produk tidak cukup atau tidak tersedia.');
         }
 
-        $order = DB::transaction(function () use ($input, $product, $paymentIntent, $checkoutKey, $termsVersion): Order {
+        $order = DB::transaction(function () use ($input, $product, $paymentIntent, $termsVersion): Order {
             $customer = Customer::create([
                 'telegram_id' => null,
                 'first_name' => $this->buyerName($input->buyerName),
@@ -119,11 +109,130 @@ class StorefrontShopCheckout
             return $this->orders->checkout(
                 $cart,
                 $paymentIntent,
+                checkoutKey: null,
+                termsVersion: $termsVersion,
+                termsAcceptedAt: now(),
+            );
+        });
+
+        return $this->finishNewCheckout($order, $input);
+    }
+
+    private function startSessionCheckout(
+        StorefrontShopCheckoutInput $input,
+        string $sessionId,
+        Session $session,
+        string $termsVersion,
+        string $paymentRail,
+    ): StorefrontShopCheckoutResult {
+        $candidate = $this->guestCarts->checkoutCandidate($session);
+        $candidateKey = $candidate === null
+            ? null
+            : $this->checkoutKey($input, $sessionId, $paymentRail, $candidate);
+
+        if ($candidateKey !== null
+            && ($existing = Order::query()->where('checkout_key', $candidateKey)->first()) !== null
+            && (string) $existing->cart_id === (string) $candidate?->getKey()) {
+            return $this->reuseExistingCheckout($existing, $input);
+        }
+
+        $maintenanceState = $this->maintenance->current();
+        if ($maintenanceState->active) {
+            throw new CheckoutMaintenanceActive($maintenanceState);
+        }
+
+        if ($input->productId !== null) {
+            $product = $this->product($input->productId);
+            $paymentIntent = $this->paymentIntent($paymentRail, $product);
+
+            if (! $product->isPublicVisible() || $product->availableStock() < $input->quantity) {
+                throw new InsufficientStock('Stok produk tidak cukup atau tidak tersedia.');
+            }
+
+            $cart = DB::transaction(function () use ($session, $product, $input): Cart {
+                $cart = $this->guestCarts->active($session);
+                $this->carts->setItemQuantity($cart, $product, $input->quantity);
+
+                return $cart;
+            });
+        } else {
+            $cart = $this->guestCarts->current($session);
+            if ($cart === null || $cart->cartItems->isEmpty()) {
+                throw new InvalidCheckout('Keranjang kosong.');
+            }
+
+            if ($input->cartSnapshot !== null && ! $this->guestCarts->matchesSnapshot($cart, $input->cartSnapshot)) {
+                throw new InvalidCheckout('Keranjang berubah. Periksa kembali item dan jumlah sebelum checkout.');
+            }
+
+            $paymentIntent = $this->paymentIntentForCart($paymentRail, $cart);
+        }
+
+        $cart = $this->guestCarts->load($cart);
+        if ($input->productId !== null && CheckoutPaymentIntents::isBinancePaymentRail($paymentRail)) {
+            $paymentIntent = $this->paymentIntentForCart($paymentRail, $cart);
+        }
+
+        $checkoutKey = $this->checkoutKey($input, $sessionId, $paymentRail, $cart);
+        $existing = Order::query()->where('checkout_key', $checkoutKey)->first();
+        if ($existing !== null && (string) $existing->cart_id === (string) $cart->getKey()) {
+            return $this->reuseExistingCheckout($existing, $input);
+        }
+        if ($existing !== null) {
+            $checkoutKey = $this->checkoutKey($input, $sessionId, $paymentRail, $cart, forceCartSnapshot: true);
+        }
+
+        $order = DB::transaction(function () use ($input, $cart, $paymentIntent, $checkoutKey, $termsVersion): Order {
+            $customer = Customer::query()->whereKey($cart->customer_id)->lockForUpdate()->firstOrFail();
+            $customer->forceFill(['first_name' => $this->buyerName($input->buyerName)])->save();
+
+            return $this->orders->checkout(
+                $cart,
+                $paymentIntent,
                 checkoutKey: $checkoutKey,
                 termsVersion: $termsVersion,
                 termsAcceptedAt: now(),
             );
         });
+
+        return $this->finishNewCheckout($order, $input);
+    }
+
+    private function reuseExistingCheckout(Order $existing, StorefrontShopCheckoutInput $input): StorefrontShopCheckoutResult
+    {
+        $this->guestOrderNotifications->capture($existing, $input->email);
+        $this->storeSupportContact($existing, $input);
+        $recoveryKey = $this->issueRecoveryKeyIfMissing($existing);
+
+        if ($existing->order_status === OrderStatus::PendingPayment
+            && $existing->payment_status === PaymentStatus::Pending) {
+            $payment = $existing->payments()->latest('created_at')->first();
+            if ($this->usesNativeQris($payment)) {
+                try {
+                    $wasQrisReady = $this->hasPayableNativeQris($payment);
+                    $this->ensureNativeQrisCreated($payment);
+                    $payment->refresh();
+                    if ($this->hasPayableNativeQris($payment)) {
+                        $this->events->qrisCreated($existing, $payment, [
+                            'source' => 'checkout_reuse',
+                            'idempotent_reuse' => $wasQrisReady,
+                        ]);
+                    }
+                } catch (Throwable $exception) {
+                    report($exception);
+                }
+            }
+        }
+
+        return new StorefrontShopCheckoutResult(
+            redirectUrl: $this->invoiceUrls->show($existing),
+            orderId: $existing->getKey(),
+            recoveryKey: $recoveryKey,
+        );
+    }
+
+    private function finishNewCheckout(Order $order, StorefrontShopCheckoutInput $input): StorefrontShopCheckoutResult
+    {
         $this->guestOrderNotifications->capture($order, $input->email);
         $this->storeSupportContact($order, $input);
         $payment = $order->payments()->latest('created_at')->firstOrFail();
@@ -238,6 +347,59 @@ class StorefrontShopCheckout
         return $selection->paymentIntent;
     }
 
+    private function paymentIntentForCart(string $paymentRail, Cart $cart): CheckoutPaymentIntent
+    {
+        $items = $cart->cartItems;
+        if ($items->isEmpty()) {
+            throw new InvalidCheckout('Keranjang kosong.');
+        }
+
+        $products = $items->map(fn ($item) => $item->product)->values();
+        if ($products->contains(fn ($product): bool => $product === null)) {
+            throw new InvalidCheckout('Keranjang berisi produk yang tidak tersedia.');
+        }
+
+        if (CheckoutPaymentIntents::isBinancePaymentRail($paymentRail)
+            && $products->contains(fn (Product $product): bool => $product->usdt_price_amount === null)) {
+            throw new InvalidCheckout('Semua produk di keranjang harus memiliki harga USDT untuk pembayaran Binance.');
+        }
+
+        /** @var Product $product */
+        $product = $products->first();
+
+        return $this->paymentIntent($paymentRail, $product);
+    }
+
+    private function checkoutKey(
+        StorefrontShopCheckoutInput $input,
+        ?string $sessionId,
+        ?string $paymentRail = null,
+        ?Cart $cart = null,
+        bool $forceCartSnapshot = false,
+    ): ?string {
+        if ($sessionId === null || $sessionId === '') {
+            return null;
+        }
+
+        $isLegacySingleProduct = ! $forceCartSnapshot
+            && ($cart === null
+                || ($input->productId !== null
+                    && $cart->cartItems->count() === 1
+                    && (int) $cart->cartItems->first()->product_id === $input->productId
+                    && (int) $cart->cartItems->first()->quantity === $input->quantity));
+        $cartFingerprint = $isLegacySingleProduct
+            ? (string) $input->productId.'|'.$input->quantity
+            : $this->guestCarts->fingerprint($cart);
+        $payload = implode('|', [
+            $sessionId,
+            $cartFingerprint,
+            mb_strtolower(trim($input->buyerName)),
+            $paymentRail ?? $this->paymentRail($input->paymentMethod),
+        ]);
+
+        return hash_hmac('sha256', $payload, (string) config('app.key'));
+    }
+
     private function ensureNativeQrisCreated(Payment $payment): void
     {
         if ($payment->provider === PaymentProvider::KLIKQRIS) {
@@ -274,23 +436,6 @@ class StorefrontShopCheckout
         }
 
         return trim($version);
-    }
-
-    private function checkoutKey(StorefrontShopCheckoutInput $input, ?string $sessionId, ?string $paymentRail = null): ?string
-    {
-        if ($sessionId === null || $sessionId === '') {
-            return null;
-        }
-
-        $payload = implode('|', [
-            $sessionId,
-            $input->productId,
-            $input->quantity,
-            mb_strtolower(trim($input->buyerName)),
-            $paymentRail ?? $this->paymentRail($input->paymentMethod),
-        ]);
-
-        return hash_hmac('sha256', $payload, (string) config('app.key'));
     }
 
     private function paymentRail(string $paymentMethod): string

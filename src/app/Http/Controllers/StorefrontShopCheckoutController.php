@@ -11,32 +11,34 @@ use App\Models\Order;
 use App\Models\Product;
 use App\Storefront\StorefrontCheckoutMaintenanceCopy;
 use App\Storefront\StorefrontFunnelEvents;
+use App\Storefront\StorefrontGuestCart;
 use App\Storefront\StorefrontOrderAccess;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Str;
 
 class StorefrontShopCheckoutController extends Controller
 {
-    public function __invoke(StorefrontShopCheckoutRequest $request, StorefrontShopCheckout $checkout, StorefrontOrderAccess $orderAccess, StorefrontFunnelEvents $events): RedirectResponse
-    {
+    public function __invoke(
+        StorefrontShopCheckoutRequest $request,
+        StorefrontShopCheckout $checkout,
+        StorefrontOrderAccess $orderAccess,
+        StorefrontFunnelEvents $events,
+        StorefrontGuestCart $guestCart,
+    ): RedirectResponse {
         $product = Product::query()->find((int) $request->input('product_id'));
         if ($product !== null) {
             $events->checkoutOpened($product, ['source' => 'checkout_submit']);
         }
+        $errorKey = $request->filled('product_id') ? 'product_id' : 'cart';
 
         try {
             $session = $request->session();
-            $checkoutClientKey = $session->get('storefront.checkout_client_key');
-            if (! is_string($checkoutClientKey) || $checkoutClientKey === '') {
-                $checkoutClientKey = Str::random(40);
-                $session->put('storefront.checkout_client_key', $checkoutClientKey);
-            }
-
+            $checkoutClientKey = $guestCart->clientKey($session);
             $result = $checkout->start(
                 StorefrontShopCheckoutInput::fromValidated($request->validated()),
                 $checkoutClientKey,
+                $session,
             );
         } catch (CheckoutMaintenanceActive $exception) {
             $message = StorefrontCheckoutMaintenanceCopy::notice($exception->state);
@@ -49,18 +51,21 @@ class StorefrontShopCheckoutController extends Controller
                 ->to($request->checkoutRecoveryUrl())
                 ->withInput()
                 ->with('storefront_checkout_error', $message)
-                ->withErrors(['product_id' => $message]);
+                ->withErrors([$errorKey => $message]);
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock $exception) {
             $events->checkoutSubmitted($product, null, [
                 'status_endpoint_result' => 'rejected',
                 'failure_kind' => $exception::class,
             ]);
+            $recoveryUrl = $request->filled('product_id')
+                ? $request->checkoutRecoveryUrl()
+                : route('storefront.shop.cart');
 
             return redirect()
-                ->to($request->checkoutRecoveryUrl())
+                ->to($recoveryUrl)
                 ->withInput()
                 ->with('storefront_checkout_error', $exception->getMessage())
-                ->withErrors(['product_id' => $exception->getMessage()]);
+                ->withErrors([$errorKey => $exception->getMessage()]);
         }
 
         if ($result->orderId !== null && $result->recoveryKey !== null) {

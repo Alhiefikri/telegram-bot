@@ -41,6 +41,8 @@ use App\Http\Controllers\StorefrontShopBinanceOrderIdController;
 use App\Http\Controllers\StorefrontShopBscTxHashController;
 use App\Http\Controllers\StorefrontShopCheckoutController;
 use App\Http\Controllers\StorefrontShopOrderCancelController;
+use App\Http\Controllers\StorefrontShopCartController;
+use App\Http\Controllers\StorefrontShopCheckoutReviewController;
 use App\Http\Controllers\StorefrontShopOrderController;
 use App\Http\Controllers\StorefrontShopOrderQrisController;
 use App\Http\Controllers\StorefrontShopOrderStatusController;
@@ -73,7 +75,11 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
 
         return redirect()->to($urls->catalogUrl(search: $search !== '' ? $search : null));
     })->name('index');
-    Route::get('checkout', fn () => redirect()->route('storefront.shop.index'))->name('checkout.start');
+    Route::get('cart', [StorefrontShopCartController::class, 'index'])->name('cart');
+    Route::post('cart/items', [StorefrontShopCartController::class, 'store'])->name('cart.items.store');
+    Route::patch('cart/items/{product}', [StorefrontShopCartController::class, 'update'])->name('cart.items.update');
+    Route::delete('cart/items/{product}', [StorefrontShopCartController::class, 'destroy'])->name('cart.items.destroy');
+    Route::get('checkout', StorefrontShopCheckoutReviewController::class)->name('checkout.start');
     Route::post('checkout', StorefrontShopCheckoutController::class)->middleware('throttle:storefront-checkout')->name('checkout');
     Route::get('orders/{order}', StorefrontShopOrderController::class)->middleware('storefront.signed')->name('orders.show');
     Route::get('orders/{order}/qris', StorefrontShopOrderQrisController::class)->middleware('storefront.signed')->name('orders.qris');

@@ -200,7 +200,17 @@
 
                             @if ($presentation->isBuyable)
                                 <noscript>
+                                    <form method="POST" action="{{ route('storefront.shop.cart.items.store') }}" class="mb-3 grid gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4">
+                                        @csrf
+                                        <input type="hidden" name="product_id" value="{{ $product->id }}">
+                                        <label class="grid gap-2 text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">
+                                            Jumlah untuk keranjang
+                                            <input name="quantity" type="number" min="1" max="{{ min($stock, 20) }}" value="{{ old('quantity', 1) }}" class="neo-input h-12 bg-white px-3 text-base font-bold">
+                                        </label>
+                                        <button type="submit" class="neo-button inline-flex h-12 items-center justify-center bg-white px-5 text-sm font-black text-[var(--sf-ink)]">Tambah ke keranjang</button>
+                                    </form>
                                     <form method="POST" action="{{ route('storefront.shop.checkout') }}" class="mt-6 grid gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4">
+
                                         @csrf
                                         <input type="hidden" name="product_id" value="{{ $product->id }}">
                                         <input type="hidden" name="payment_method" value="qris">

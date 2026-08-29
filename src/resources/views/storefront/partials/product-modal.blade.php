@@ -146,6 +146,14 @@
                                 </div>
 
                             <div class="grid gap-4 pt-2">
+                                <form method="POST" action="{{ route('storefront.shop.cart.items.store') }}" class="grid gap-2 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3">
+                                    @csrf
+                                    <input type="hidden" name="product_id" x-bind:value="selectedProduct?.id || ''">
+                                    <input type="hidden" name="quantity" x-bind:value="quantity">
+                                    <button type="submit" class="neo-button inline-flex min-h-11 w-full items-center justify-center bg-white px-4 text-sm font-black text-[var(--sf-ink)]">Tambah ke keranjang</button>
+                                    <a href="{{ route('storefront.shop.cart') }}" class="text-center text-xs font-black text-[var(--sf-ink)] underline">Lihat keranjang</a>
+                                </form>
+
                                 @if (! $checkoutMaintenanceActive && $modalCheckoutAvailable)
                                 <form method="POST"
                                       action="{{ route('storefront.shop.checkout') }}"

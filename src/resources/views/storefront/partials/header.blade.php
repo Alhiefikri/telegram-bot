@@ -1,6 +1,7 @@
 @php
     $homeUrl = $homeUrl ?? route('storefront.home');
     $shopUrl = $shopUrl ?? $storefront->catalogUrl();
+    $cartUrl = $cartUrl ?? route('storefront.shop.cart');
     $supportDestination = $supportDestination ?? $storefront->supportDestination();
 @endphp
 
@@ -14,6 +15,12 @@
             <a href="{{ $shopUrl }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Produk</a>
             <a href="{{ $homeUrl }}#cara-beli" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Cara Beli</a>
             <a href="{{ route('storefront.order-access.create') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akses Pesanan</a>
+            <a href="{{ $cartUrl }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">
+                Keranjang
+                @if (isset($cartItemCount))
+                    <span>({{ $cartItemCount }})</span>
+                @endif
+            </a>
             <a href="{{ route('customer.account') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akun</a>
             <a href="{{ route('storefront.guides.index') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan</a>
             <a href="{{ $homeUrl }}#faq" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">FAQ</a>
@@ -65,6 +72,17 @@
                         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /></svg>
                     </span>
                     <span>Katalog Web</span>
+                </a>
+                <a href="{{ $cartUrl }}" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-yellow)]">
+                    <span class="grid h-8 w-8 place-items-center rounded-md border-2 border-[var(--sf-border)] bg-white text-[var(--sf-ink)]">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 7h12l-1 13H7L6 7Zm3 0a3 3 0 0 1 6 0" /></svg>
+                    </span>
+                    <span>
+                        Keranjang
+                        @if (isset($cartItemCount))
+                            ({{ $cartItemCount }})
+                        @endif
+                    </span>
                 </a>
 
                 <a href="{{ $homeUrl }}#cara-beli" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-yellow)]">
