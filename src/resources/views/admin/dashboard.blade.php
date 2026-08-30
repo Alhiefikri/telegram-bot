@@ -24,6 +24,10 @@
             $canManageProducts = $productsTab['canManage'];
             $productPlaceholder = $productsTab['placeholder'] ?? [];
             $products = $productsTab['products'];
+            $productGroups = $productsTab['productGroups'] ?? [];
+            $standaloneProducts = $productsTab['standaloneProducts'] ?? $products;
+            $familyOptions = $productsTab['familyOptions'] ?? [];
+            $familyManagement = $productsTab['familyManagement'] ?? ['createUrl' => '', 'families' => []];
             $productsPagination = $productsTab['pagination'];
             $categoryOptions = $productsTab['categoryOptions'];
             $categoryManagement = $productsTab['categoryManagement'];
@@ -58,6 +62,7 @@
             @elseif ($navigation['activeTab'] === 'produk')
                 @include('admin.dashboard.products-tab')
                 @include('admin.dashboard.product-modal')
+                @include('admin.dashboard.product-family-modal')
                 @include('admin.dashboard.category-management-modal')
             @elseif ($navigation['activeTab'] === 'penjualan')
                 @include('admin.dashboard.sales-tab')

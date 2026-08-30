@@ -11,6 +11,8 @@ final class ProductImageOptimizer
 {
     private const DIRECTORY = 'products';
 
+    private const FAMILY_DIRECTORY = 'product-families';
+
     private const PLACEHOLDER_DIRECTORY = 'storefront/placeholders';
 
     private const MAX_DIMENSION = 1600;
@@ -20,6 +22,11 @@ final class ProductImageOptimizer
     public function store(UploadedFile $image): string
     {
         return $this->storeInDirectory($image, self::DIRECTORY);
+    }
+
+    public function storeFamily(UploadedFile $image): string
+    {
+        return $this->storeInDirectory($image, self::FAMILY_DIRECTORY);
     }
 
     public function storePlaceholder(UploadedFile $image): string
@@ -63,6 +70,14 @@ final class ProductImageOptimizer
     public function replace(?string $oldPath, UploadedFile $image): string
     {
         $newPath = $this->store($image);
+        $this->deleteManagedImage($oldPath);
+
+        return $newPath;
+    }
+
+    public function replaceFamily(?string $oldPath, UploadedFile $image): string
+    {
+        $newPath = $this->storeFamily($image);
         $this->deleteManagedImage($oldPath);
 
         return $newPath;
@@ -128,6 +143,7 @@ final class ProductImageOptimizer
     {
         if (! $path
             || (! str_starts_with($path, self::DIRECTORY.'/')
+                && ! str_starts_with($path, self::FAMILY_DIRECTORY.'/')
                 && ! str_starts_with($path, self::PLACEHOLDER_DIRECTORY.'/'))) {
             return;
         }

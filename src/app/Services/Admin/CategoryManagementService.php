@@ -15,7 +15,10 @@ final class CategoryManagementService
     /** @var list<string> */
     private const AUDITED_FIELDS = ['name', 'description', 'sort_order', 'is_active'];
 
-    public function __construct(private readonly AuditLogger $auditLogger) {}
+    public function __construct(
+        private readonly AuditLogger $auditLogger,
+        private readonly ProductFamilyCategoryCoherence $coherence,
+    ) {}
 
     public function create(string $name, ?string $description, User $user, ?string $ip = null): Category
     {
@@ -100,6 +103,7 @@ final class CategoryManagementService
     public function delete(Category $category, User $user, ?string $ip = null): array
     {
         return DB::transaction(function () use ($category, $user, $ip): array {
+            $this->coherence->lockForCategoryDeletion((int) $category->getKey());
             $locked = Category::query()->whereKey($category->getKey())->lockForUpdate()->firstOrFail();
             $productCount = Product::withTrashed()
                 ->where('category_id', $locked->getKey())

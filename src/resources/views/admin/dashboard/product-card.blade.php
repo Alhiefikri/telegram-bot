@@ -63,6 +63,40 @@
                                 {{ $product['visibility_label'] }}
                             </p>
 
+
+                            <section class="mt-3 rounded-lg border-2 border-neo-ink/30 bg-white/70 p-2.5" aria-label="Grouping Product">
+                                <div class="flex items-center justify-between gap-2">
+                                    <p class="text-[10px] font-black uppercase tracking-wide text-neo-ink/60">Grouping katalog</p>
+                                    @if ($product['family_name'])
+                                        <span class="truncate text-[10px] font-black text-neo-purple">{{ $product['family_name'] }}</span>
+                                    @endif
+                                </div>
+                                @if ($canManageProducts)
+                                    <form method="POST" action="{{ $product['family_membership']['update_url'] }}" class="mt-2 space-y-2">
+                                        @csrf
+                                        @method('PATCH')
+                                        <label class="sr-only" for="product-family-select-{{ $product['id'] }}">Product Family</label>
+                                        <select id="product-family-select-{{ $product['id'] }}" name="product_family_id" class="block min-h-10 w-full rounded-lg border-2 border-neo-ink bg-white px-2 py-1.5 text-xs font-bold text-neo-ink">
+                                            <option value="">Standalone</option>
+                                            @foreach ($familyOptions as $familyOption)
+                                                <option value="{{ $familyOption['id'] }}" @selected((int) ($product['family_id'] ?? 0) === (int) $familyOption['id'])>{{ $familyOption['name'] }}</option>
+                                            @endforeach
+                                        </select>
+                                        <div class="grid grid-cols-2 gap-2">
+                                            <label class="sr-only" for="product-family-order-{{ $product['id'] }}">Urutan option</label>
+                                            <input id="product-family-order-{{ $product['id'] }}" type="number" name="family_sort_order" min="0" max="999999" step="1" value="{{ $product['family_sort_order'] }}" placeholder="Urutan" class="min-h-10 w-full rounded-lg border-2 border-neo-ink bg-white px-2 py-1.5 text-xs font-bold text-neo-ink">
+                                            <label class="sr-only" for="product-family-label-{{ $product['id'] }}">Label option</label>
+                                            <input id="product-family-label-{{ $product['id'] }}" type="text" name="family_option_label" maxlength="160" value="{{ $product['family_option_label'] }}" placeholder="Label option (opsional)" class="min-h-10 w-full rounded-lg border-2 border-neo-ink bg-white px-2 py-1.5 text-xs font-bold text-neo-ink">
+                                        </div>
+                                        <x-admin-dashboard.button type="submit" variant="secondary" size="sm" class="w-full text-[10px]">Simpan grouping</x-admin-dashboard.button>
+                                    </form>
+                                    @if (($dashboardState['familyMembershipProductId'] ?? null) == $product['id'] && ! empty($dashboardState['familyMembershipErrors']))
+                                        <x-admin-dashboard.field-error class="mt-2">{{ collect($dashboardState['familyMembershipErrors'])->flatten()->first() }}</x-admin-dashboard.field-error>
+                                    @endif
+                                @else
+                                    <p class="mt-1 text-[10px] font-bold text-neo-ink/60">{{ $product['family_name'] ?: 'Belum memiliki Product Family.' }}</p>
+                                @endif
+                            </section>
                             @if ($canManageProducts)
                             {{-- Action buttons: in-page only --}}
                             <div class="mt-4 space-y-2" data-product-actions>

@@ -53,6 +53,17 @@ const emptyCategoryForm = () => ({
   categorySortOrder: 0,
 });
 
+const emptyProductFamilyForm = () => ({
+  familyFormMode: "create",
+  familyFormMethod: "",
+  familyId: null,
+  familyName: "",
+  familyDescription: "",
+  familySortOrder: 0,
+  familyImageUrl: "",
+  familyImageFileName: EMPTY_IMAGE_FILE_NAME,
+});
+
 const STOCK_GROUPS = [
   {
     key: "ready",
@@ -196,6 +207,12 @@ export default function adminDashboard(initialState = {}) {
       initialState.productForm?.productDeliveryNoteOpen
     ),
     categoryModalOpener: null,
+    familyModalOpen: Boolean(initialState.familyModalOpen),
+    familyFormSubmitting: false,
+    familyFormAction: initialState.familyCreateUrl ?? "",
+    familyCreateUrl: initialState.familyCreateUrl ?? "",
+    ...emptyProductFamilyForm(),
+    ...(initialState.familyForm ?? {}),
     stockModalOpen: Boolean(initialState.stockModalOpen),
     stockFormAction: initialState.stockForm?.stockFormAction ?? "",
     stockAccountsFormAction:
@@ -206,6 +223,7 @@ export default function adminDashboard(initialState = {}) {
     stockProductId: initialState.stockForm?.stockProductId ?? null,
     stockProductName: initialState.stockForm?.stockProductName ?? "",
     stockProductStock: initialState.stockForm?.stockProductStock ?? 0,
+    familyModalOpener: null,
     stockProductDeliveryNote:
       initialState.stockForm?.stockProductDeliveryNote ?? "",
     stockItems: initialState.stockForm?.stockItems ?? "",
@@ -277,6 +295,11 @@ export default function adminDashboard(initialState = {}) {
 
         if (this.categoryModalOpen) {
           this.$refs.categoryName?.focus();
+          return;
+        }
+
+        if (this.familyModalOpen) {
+          this.$refs.familyName?.focus();
           return;
         }
 
@@ -1066,6 +1089,63 @@ export default function adminDashboard(initialState = {}) {
       this.categoryModalOpen = false;
     },
 
+    openProductFamilyForm() {
+      this.familyModalOpener = document.activeElement;
+      Object.assign(this, {
+        activeTab: "produk",
+        familyModalOpen: true,
+        familyFormSubmitting: false,
+        familyFormAction: this.familyCreateUrl,
+        ...emptyProductFamilyForm(),
+      });
+      this.$nextTick(() => this.$refs.familyName?.focus());
+    },
+
+    openProductFamilyEditModal(family) {
+      this.familyModalOpener = document.activeElement;
+      Object.assign(this, {
+        activeTab: "produk",
+        familyModalOpen: true,
+        familyFormSubmitting: false,
+        familyFormMode: "edit",
+        familyFormAction: family.updateUrl,
+        familyFormMethod: "PATCH",
+        familyId: family.id,
+        familyName: family.name,
+        familyDescription: family.description ?? "",
+        familySortOrder: family.sortOrder ?? 0,
+        familyImageUrl: family.imageUrl ?? "",
+        familyImageFileName: EMPTY_IMAGE_FILE_NAME,
+      });
+      this.$nextTick(() => this.$refs.familyName?.focus());
+    },
+
+    resetProductFamilyForm() {
+      Object.assign(this, {
+        familyFormSubmitting: false,
+        familyFormAction: this.familyCreateUrl,
+        ...emptyProductFamilyForm(),
+      });
+      this.$nextTick(() => this.$refs.familyName?.focus());
+    },
+
+    closeProductFamilyModal() {
+      const opener = this.familyModalOpener;
+      this.familyFormSubmitting = false;
+      this.familyModalOpen = false;
+      this.familyModalOpener = null;
+      this.restoreModalFocus(opener);
+    },
+
+    submitProductFamilyForm(event) {
+      if (!event.target.checkValidity()) {
+        return;
+      }
+
+      this.familyFormSubmitting = true;
+      this.familyModalOpen = false;
+    },
+
     openProductEditModal(product) {
       this.productModalOpener = document.activeElement;
       Object.assign(this, {
@@ -1266,6 +1346,10 @@ export default function adminDashboard(initialState = {}) {
 
       if (event.detail?.modal === "admin-category-management") {
         this.closeCategoryManagement();
+      }
+
+      if (event.detail?.modal === "admin-product-family-management") {
+        this.closeProductFamilyModal();
       }
 
       if (event.detail?.modal === "manage-stock-modal") {

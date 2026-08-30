@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank'])]
+#[Fillable(['category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'family_id', 'family_order', 'option_label', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank'])]
 class Product extends Model
 {
     /** @use HasFactory<ProductFactory> */
@@ -17,7 +17,7 @@ class Product extends Model
 
     protected function casts(): array
     {
-        return ['category_id' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'is_active' => 'boolean', 'featured_rank' => 'integer'];
+        return ['category_id' => 'integer', 'product_family_id' => 'integer', 'family_sort_order' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'is_active' => 'boolean', 'featured_rank' => 'integer'];
     }
 
     /**
@@ -150,6 +150,46 @@ class Product extends Model
     public function category()
     {
         return $this->belongsTo(Category::class);
+    }
+
+    public function family()
+    {
+        return $this->belongsTo(ProductFamily::class, 'product_family_id');
+    }
+
+    public function productFamily()
+    {
+        return $this->family();
+    }
+
+    public function getFamilyIdAttribute(): ?int
+    {
+        return $this->product_family_id;
+    }
+
+    public function setFamilyIdAttribute(mixed $value): void
+    {
+        $this->attributes['product_family_id'] = $value;
+    }
+
+    public function getFamilyOrderAttribute(): int
+    {
+        return (int) $this->family_sort_order;
+    }
+
+    public function setFamilyOrderAttribute(mixed $value): void
+    {
+        $this->attributes['family_sort_order'] = $value;
+    }
+
+    public function getOptionLabelAttribute(): ?string
+    {
+        return $this->family_option_label;
+    }
+
+    public function setOptionLabelAttribute(mixed $value): void
+    {
+        $this->attributes['family_option_label'] = $value;
     }
 
     public function orderItems()

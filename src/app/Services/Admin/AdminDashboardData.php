@@ -108,8 +108,12 @@ final class AdminDashboardData
                 'productStoreUrl' => route('admin.products.store'),
                 'placeholder' => [],
                 'products' => [],
+                'productGroups' => [],
+                'standaloneProducts' => [],
                 'pagination' => [],
                 'categoryOptions' => [],
+                'familyOptions' => [],
+                'familyManagement' => ['createUrl' => route('admin.product-families.store'), 'families' => []],
                 'categoryManagement' => ['createUrl' => route('admin.categories.store'), 'categories' => []],
             ],
             'salesTab' => [

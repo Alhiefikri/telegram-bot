@@ -19,6 +19,10 @@ use App\Http\Controllers\Admin\AdminPaymentModeController;
 use App\Http\Controllers\Admin\AdminProductAccountStockController;
 use App\Http\Controllers\Admin\AdminProductCreateController;
 use App\Http\Controllers\Admin\AdminProductDeleteController;
+use App\Http\Controllers\Admin\AdminProductFamilyCreateController;
+use App\Http\Controllers\Admin\AdminProductFamilyDeleteController;
+use App\Http\Controllers\Admin\AdminProductFamilyMembershipController;
+use App\Http\Controllers\Admin\AdminProductFamilyUpdateController;
 use App\Http\Controllers\Admin\AdminProductStockController;
 use App\Http\Controllers\Admin\AdminProductStockItemDeleteController;
 use App\Http\Controllers\Admin\AdminProductStockItemUpdateController;
@@ -143,6 +147,12 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::patch('categories/{category}', AdminCategoryUpdateController::class)->name('categories.update');
             Route::delete('categories/{category}', AdminCategoryDeleteController::class)->name('categories.destroy');
 
+            Route::prefix('product-families')->name('product-families.')->group(function (): void {
+                Route::post('/', AdminProductFamilyCreateController::class)->name('store');
+                Route::patch('{productFamily}', AdminProductFamilyUpdateController::class)->name('update');
+                Route::delete('{productFamily}', AdminProductFamilyDeleteController::class)->name('destroy');
+            });
+
             Route::prefix('store-channel')->name('store-channel.')->group(function (): void {
                 Route::post('/', AdminStoreChannelController::class)->name('update');
                 Route::post('test', AdminStoreChannelTestController::class)->name('test');
@@ -171,6 +181,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
             });
 
             Route::prefix('products')->name('products.')->group(function (): void {
+                Route::patch('{product}/family', AdminProductFamilyMembershipController::class)->name('family.update');
                 Route::post('/', AdminProductCreateController::class)->name('store');
                 Route::patch('{product}', AdminProductUpdateController::class)->name('update');
                 Route::delete('{product}', AdminProductDeleteController::class)->name('destroy');

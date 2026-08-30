@@ -2,12 +2,13 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Exceptions\ProductFamilyCategoryMismatch;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateProductRequest;
 use App\Jobs\SendProductPriceChangeNotifications;
-use App\Models\Category;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
+use App\Services\Admin\ProductFamilyCategoryCoherence;
 use App\Services\Admin\ProductImageOptimizer;
 use App\Services\AuditLogger;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
@@ -17,7 +18,7 @@ use Throwable;
 
 class AdminProductUpdateController extends Controller
 {
-    public function __invoke(UpdateProductRequest $request, Product $product, AuditLogger $auditLogger, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms, ProductPriceChangeNotificationService $priceNotifications): RedirectResponse
+    public function __invoke(UpdateProductRequest $request, Product $product, AuditLogger $auditLogger, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms, ProductPriceChangeNotificationService $priceNotifications, ProductFamilyCategoryCoherence $coherence): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
 
@@ -26,15 +27,11 @@ class AdminProductUpdateController extends Controller
         $oldImagePath = null;
 
         try {
-            $event = DB::transaction(function () use ($product, $validated, $request, $auditLogger, $user, $priceNotifications, $newImagePath, &$oldImagePath) {
+            $event = DB::transaction(function () use ($product, $validated, $request, $auditLogger, $user, $priceNotifications, $newImagePath, &$oldImagePath, $coherence) {
                 $categoryId = $validated['category_id'] ?? null;
 
-                if ($categoryId !== null) {
-                    Category::query()->whereKey($categoryId)->lockForUpdate()->firstOrFail();
-                }
-
-                $locked = Product::query()->whereKey($product->getKey())->lockForUpdate()->firstOrFail();
-                $oldValues = $locked->only(['category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $locked = $coherence->lockForCategoryChange($product, $categoryId);
+                $oldValues = $locked->only(['category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
                 $oldImagePath = $oldValues['image_path'] ?? null;
 
                 $locked->fill([
@@ -69,6 +66,12 @@ class AdminProductUpdateController extends Controller
 
                 return $priceNotifications->createEventForCommittedUpdate($locked, $oldValues, $newValues);
             }, 5);
+        } catch (ProductFamilyCategoryMismatch $exception) {
+            if ($newImagePath !== null) {
+                $images->deleteManagedImage($newImagePath);
+            }
+
+            return $forms->productUpdateBusinessValidationError($request, $product, 'category_id', $exception->getMessage());
         } catch (Throwable $exception) {
             if ($newImagePath !== null) {
                 $images->deleteManagedImage($newImagePath);

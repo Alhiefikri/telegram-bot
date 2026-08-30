@@ -2,15 +2,21 @@
 
 namespace App\Services\Admin;
 
+use App\Catalog\CatalogBrowseEntry;
+use App\Catalog\CatalogBrowseQuery;
+use App\Catalog\CatalogFamilyReadModel;
+use App\Catalog\CatalogProductReadModel;
 use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Services\Catalog\CatalogBrowse;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Storefront\StorefrontProductPlaceholder;
 use App\Support\Money;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Throwable;
 
@@ -19,6 +25,7 @@ final class AdminDashboardProductsData
     public function __construct(
         private readonly ProductImageOptimizer $images,
         private readonly StorefrontProductPlaceholder $placeholder,
+        private readonly CatalogBrowse $catalog,
     ) {}
 
     /**
@@ -27,11 +34,14 @@ final class AdminDashboardProductsData
     public function forProducts(bool $canManageProducts, int $productsPage = 1): array
     {
         $productPage = $this->latestProducts($canManageProducts, $productsPage);
+        $familyOptions = $this->familyOptions();
 
         return [
             'canManage' => $canManageProducts,
             'productStoreUrl' => route('admin.products.store'),
             'products' => $productPage['products'],
+            'productGroups' => $productPage['productGroups'],
+            'standaloneProducts' => $productPage['standaloneProducts'],
             'pagination' => $productPage['pagination'],
             'placeholder' => [
                 'image_url' => $this->placeholder->imageUrl(),
@@ -39,6 +49,8 @@ final class AdminDashboardProductsData
                 'update_url' => route('admin.storefront-placeholder.update'),
             ],
             'categoryOptions' => $this->categoryOptions(),
+            'familyOptions' => $familyOptions,
+            'familyManagement' => $this->familyManagement($familyOptions),
             'categoryManagement' => [
                 'createUrl' => route('admin.categories.store'),
                 'categories' => $canManageProducts ? $this->categoryManagementCategories() : [],
@@ -48,39 +60,60 @@ final class AdminDashboardProductsData
 
     private function latestProducts(bool $includeManageableStockItems, int $productsPage): array
     {
-        $paginator = Product::query()
-            ->with('category:id,name')
-            ->select(['id', 'category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'featured_rank', 'created_at'])
+        $catalog = $this->catalog->browseAdmin(new CatalogBrowseQuery(page: max(1, $productsPage), perPage: 20));
+        $productIds = collect($catalog->entries)
+            ->flatMap(function (CatalogBrowseEntry $entry): array {
+                if ($entry->isFamily()) {
+                    return collect($entry->family?->members ?? [])
+                        ->map(fn (CatalogProductReadModel $product): int => $product->id)
+                        ->all();
+                }
+
+                return $entry->product?->id === null ? [] : [$entry->product->id];
+            })
+            ->map(fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values();
+        $catalogProducts = collect($catalog->entries)
+            ->flatMap(fn (CatalogBrowseEntry $entry): array => $entry->isFamily()
+                ? ($entry->family?->members ?? [])
+                : ($entry->product === null ? [] : [$entry->product]))
+            ->keyBy('id');
+        $products = Product::query()
+            ->with(['category:id,name', 'family:id,name'])
+            ->select(['id', 'category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'featured_rank', 'created_at'])
             ->withExists('stockItems')
             ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')->whereNull('retired_at')])
-            ->latest()
-            ->paginate(perPage: 20, pageName: 'products_page', page: max(1, $productsPage))
-            ->withQueryString();
-        $products = $paginator->getCollection();
+            ->whereIn('id', $productIds->all())
+            ->get()
+            ->keyBy('id');
+        $orderedProducts = new EloquentCollection($productIds
+            ->map(fn (int $id): ?Product => $products->get($id))
+            ->filter()
+            ->values()
+            ->all());
 
-        $productIds = $products->pluck('id')->all();
-        $stockItemsTable = (new ProductStockItem)->getTable();
         $stockItemSummaries = $includeManageableStockItems
             ? ProductStockItem::query()
-                ->whereIn("{$stockItemsTable}.product_id", $productIds)
-                ->leftJoin('order_items', "{$stockItemsTable}.order_item_id", '=', 'order_items.id')
+                ->whereIn('product_stock_items.product_id', $productIds->all())
+                ->leftJoin('order_items', 'product_stock_items.order_item_id', '=', 'order_items.id')
                 ->leftJoin('orders', 'order_items.order_id', '=', 'orders.id')
-                ->select("{$stockItemsTable}.product_id")
+                ->select('product_stock_items.product_id')
                 ->selectRaw('count(*) as total')
-                ->selectRaw("sum(case when {$stockItemsTable}.order_item_id is null and {$stockItemsTable}.retired_at is null then 1 else 0 end) as available")
+                ->selectRaw('sum(case when product_stock_items.order_item_id is null and product_stock_items.retired_at is null then 1 else 0 end) as available')
                 ->selectRaw('sum(case when orders.order_status = ? and orders.payment_status <> ? and not exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as reserved', [OrderStatus::PendingPayment->value, PaymentStatus::Paid->value, PaymentStatus::Paid->value])
                 ->selectRaw('sum(case when orders.payment_status = ? or exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as paid', [PaymentStatus::Paid->value, PaymentStatus::Paid->value])
-                ->groupBy("{$stockItemsTable}.product_id")
+                ->groupBy('product_stock_items.product_id')
                 ->get()
                 ->keyBy('product_id')
             : collect();
         if ($includeManageableStockItems) {
-            $this->loadOrderedStockItems($products);
+            $this->loadOrderedStockItems($orderedProducts);
         }
 
         $placeholderUrl = $this->placeholder->imageUrl();
-        $productPayloads = $products
-            ->map(function (Product $product) use ($stockItemSummaries, $includeManageableStockItems, $placeholderUrl): array {
+        $productPayloadsById = $orderedProducts
+            ->mapWithKeys(function (Product $product) use ($stockItemSummaries, $includeManageableStockItems, $placeholderUrl, $catalogProducts): array {
                 $availableStockItemCount = $product->availableStockItemCount();
                 $availableStock = $product->availableStock();
                 $stockItems = $includeManageableStockItems
@@ -98,8 +131,9 @@ final class AdminDashboardProductsData
                 $stockReturnUrl = route('admin.dashboard', ['tab' => 'produk']).'#product-'.$product->id;
                 $updateUrl = route('admin.products.update', ['product' => $product]);
                 $imageUrl = $this->images->publicUrl($product->image_path) ?? $placeholderUrl;
+                $catalogProduct = $catalogProducts->get((int) $product->id);
 
-                return [
+                return [(int) $product->id => [
                     'id' => $product->id,
                     'category_id' => $product->category_id,
                     'name' => $product->name,
@@ -125,6 +159,11 @@ final class AdminDashboardProductsData
                     'reserved_stock' => $product->reserved_stock,
                     'available_stock' => $availableStock,
                     'available_stock_item_count' => $availableStockItemCount,
+                    'sold_quantity' => $catalogProduct?->soldQuantity ?? 0,
+                    'family_id' => $product->product_family_id,
+                    'family_name' => $product->family?->name,
+                    'family_sort_order' => (int) $product->family_sort_order,
+                    'family_option_label' => $product->family_option_label,
                     'stock_items_truncated' => (int) ($summary?->total ?? 0) > count($stockItems),
                     'stock_items' => $stockItems,
                     'is_active' => $product->is_active,
@@ -145,6 +184,12 @@ final class AdminDashboardProductsData
                     'visibility_url' => route('admin.products.visibility.update', ['product' => $product]),
                     'share_url' => route('storefront.home').'#product-'.$product->id,
                     'created_at' => $product->created_at?->toDateTimeString(),
+                    'family_membership' => [
+                        'update_url' => route('admin.products.family.update', ['product' => $product]),
+                        'family_id' => $product->product_family_id,
+                        'sort_order' => (int) $product->family_sort_order,
+                        'option_label' => $product->family_option_label,
+                    ],
                     'stock_payload' => [
                         'id' => $product->id,
                         'name' => $product->name,
@@ -189,26 +234,173 @@ final class AdminDashboardProductsData
                         'stockItemsTruncated' => (int) ($summary?->total ?? 0) > count($stockItems),
                         'stockItems' => $stockItems,
                     ],
-                ];
+                ]];
+            });
+
+        $productPayload = fn (?CatalogProductReadModel $product): ?array => $product === null
+            ? null
+            : $productPayloadsById->get($product->id);
+        $flatPayloads = collect($catalog->entries)
+            ->flatMap(function (CatalogBrowseEntry $entry) use ($productPayload): array {
+                if ($entry->isFamily()) {
+                    return collect($entry->family?->members ?? [])
+                        ->map(fn (CatalogProductReadModel $product): ?array => $productPayload($product))
+                        ->filter()
+                        ->all();
+                }
+
+                $payload = $productPayload($entry->product);
+
+                return $payload === null ? [] : [$payload];
             })
+            ->values()
             ->all();
+        $familyGroups = collect($catalog->entries)
+            ->filter(fn (CatalogBrowseEntry $entry): bool => $entry->isFamily() && $entry->family instanceof CatalogFamilyReadModel)
+            ->map(function (CatalogBrowseEntry $entry) use ($productPayload): array {
+                $family = $entry->family;
+                $members = collect($family->members)
+                    ->map(fn (CatalogProductReadModel $product): ?array => $productPayload($product))
+                    ->filter()
+                    ->values()
+                    ->all();
+
+                return $this->familyGroupPayload($family, $members);
+            })
+            ->values()
+            ->all();
+        $standalonePayloads = collect($catalog->entries)
+            ->filter(fn (CatalogBrowseEntry $entry): bool => ! $entry->isFamily())
+            ->map(fn (CatalogBrowseEntry $entry): ?array => $productPayload($entry->product))
+            ->filter()
+            ->values()
+            ->all();
+        $pagination = $catalog->pagination;
+        $query = collect(request()->query())->except(['tab', 'products_page'])->all();
+        $pageUrl = fn (int $page): string => route('admin.dashboard', ['tab' => 'produk', 'products_page' => $page] + $query);
 
         return [
-            'products' => $productPayloads,
+            'products' => $flatPayloads,
+            'productGroups' => $familyGroups,
+            'standaloneProducts' => $standalonePayloads,
+            'families' => $catalog->families,
             'pagination' => [
-                'currentPage' => $paginator->currentPage(),
-                'lastPage' => $paginator->lastPage(),
-                'previousUrl' => $paginator->previousPageUrl(),
-                'nextUrl' => $paginator->nextPageUrl(),
-                'pages' => collect(range(1, $paginator->lastPage()))
+                'currentPage' => $pagination->currentPage,
+                'lastPage' => $pagination->lastPage,
+                'previousUrl' => $pagination->currentPage > 1 ? $pageUrl($pagination->currentPage - 1) : null,
+                'nextUrl' => $pagination->currentPage < $pagination->lastPage ? $pageUrl($pagination->currentPage + 1) : null,
+                'pages' => collect(range(1, $pagination->lastPage))
                     ->map(fn (int $page): array => [
                         'number' => $page,
-                        'url' => $paginator->url($page),
-                        'current' => $page === $paginator->currentPage(),
+                        'url' => $pageUrl($page),
+                        'current' => $page === $pagination->currentPage,
                     ])
                     ->all(),
             ],
         ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $members
+     * @return array<string, mixed>
+     */
+    private function familyGroupPayload(CatalogFamilyReadModel $family, array $members): array
+    {
+        $updateUrl = route('admin.product-families.update', ['productFamily' => $family->id]);
+
+        return [
+            'id' => $family->id,
+            'name' => $family->name,
+            'slug' => $family->slug,
+            'description' => $family->description,
+            'image_path' => $family->imagePath,
+            'image_url' => $family->imageUrl,
+            'sort_order' => $family->sortOrder,
+            'category' => $family->categoryName ?? 'Tanpa kategori',
+            'member_count' => $family->optionCount,
+            'available_member_count' => $family->availableOptionCount,
+            'sold_out_member_count' => $family->soldOutOptionCount,
+            'minimum_price_amount' => $family->minimumPriceAmount,
+            'minimum_price' => $family->minimumPriceAmount === null ? null : Money::idr($family->minimumPriceAmount),
+            'minimum_usdt_price_amount' => $family->minimumUsdtPriceAmount,
+            'minimum_usdt_price' => $this->formatUsdtPrice($family->minimumUsdtPriceAmount),
+            'is_available' => $family->isAvailable,
+            'members' => $members,
+            'update_url' => $updateUrl,
+            'delete_url' => route('admin.product-families.destroy', ['productFamily' => $family->id]),
+            'delete_confirmation' => $this->familyDeleteConfirmation($family),
+            'edit_payload' => [
+                'id' => $family->id,
+                'name' => $family->name,
+                'description' => $family->description,
+                'sortOrder' => $family->sortOrder,
+                'imageUrl' => $family->imageUrl,
+                'updateUrl' => $updateUrl,
+            ],
+        ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function familyOptions(): array
+    {
+        return collect($this->catalog->allAdminFamilies())
+            ->map(fn (CatalogFamilyReadModel $family): array => [
+                'id' => $family->id,
+                'name' => $family->name,
+                'slug' => $family->slug,
+                'description' => $family->description,
+                'image_url' => $family->imageUrl,
+                'sort_order' => $family->sortOrder,
+                'category' => $family->categoryName ?? 'Tanpa kategori',
+                'member_count' => $family->optionCount,
+                'available_member_count' => $family->availableOptionCount,
+                'sold_out_member_count' => $family->soldOutOptionCount,
+                'minimum_price_amount' => $family->minimumPriceAmount,
+                'minimum_price' => $family->minimumPriceAmount === null ? null : Money::idr($family->minimumPriceAmount),
+                'minimum_usdt_price_amount' => $family->minimumUsdtPriceAmount,
+                'minimum_usdt_price' => $this->formatUsdtPrice($family->minimumUsdtPriceAmount),
+                'is_available' => $family->isAvailable,
+                'edit_payload' => [
+                    'id' => $family->id,
+                    'name' => $family->name,
+                    'description' => $family->description,
+                    'sortOrder' => $family->sortOrder,
+                    'imageUrl' => $family->imageUrl,
+                    'updateUrl' => route('admin.product-families.update', ['productFamily' => $family->id]),
+                ],
+            ])
+            ->all();
+    }
+
+    /** @param list<array<string, mixed>> $families */
+    private function familyManagement(array $families): array
+    {
+        return [
+            'createUrl' => route('admin.product-families.store'),
+            'families' => array_map(function (array $family): array {
+                return $family + [
+                    'update_url' => route('admin.product-families.update', ['productFamily' => $family['id']]),
+                    'delete_url' => route('admin.product-families.destroy', ['productFamily' => $family['id']]),
+                    'delete_confirmation' => $this->familyDeleteConfirmationFromPayload($family),
+                ];
+            }, $families),
+        ];
+    }
+
+    private function familyDeleteConfirmation(CatalogFamilyReadModel $family): string
+    {
+        return $this->familyDeleteConfirmationFromPayload([
+            'name' => $family->name,
+            'member_count' => $family->optionCount,
+        ]);
+    }
+
+    /** @param array<string, mixed> $family */
+    private function familyDeleteConfirmationFromPayload(array $family): string
+    {
+        return 'Hapus Product Family '.(string) ($family['name'] ?? '').'? '
+            .(int) ($family['member_count'] ?? 0)
+            .' Product akan menjadi standalone. Visibility, stok, credentials, waitlist, notifikasi, dan history tetap dipertahankan.';
     }
 
     /** @param Collection<int, Product> $products */

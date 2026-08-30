@@ -892,6 +892,49 @@ test("shows the catalog placeholder controls in the admin product tab", async ({
   await expectNoDocumentOverflow(page);
 });
 
+test("keeps grouped Product Family controls usable at mobile width", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  const group = page
+    .locator('[id^="admin-product-family-group-"]')
+    .filter({ hasText: "Browser QA Product Family" })
+    .first();
+  await expect(group).toBeVisible();
+  await expect(group.getByText("Browser QA Produk A")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Product standalone" })
+  ).toBeVisible();
+  await expect(
+    group.getByRole("button", { name: "Tutup pilihan" })
+  ).toBeVisible();
+
+  await group.getByRole("button", { name: "Tutup pilihan" }).click();
+  await expect(group.getByText("Browser QA Produk A")).toBeHidden();
+  await group.getByRole("button", { name: "Buka pilihan" }).click();
+  await expect(group.getByText("Browser QA Produk A")).toBeVisible();
+
+  const editButton = group.getByRole("button", { name: /Edit family/i });
+  await editButton.click();
+  const modal = page.locator("#admin-product-family-management");
+  await expect(modal).toBeVisible();
+  await expect(
+    modal.getByRole("heading", { name: "Edit Product Family" })
+  ).toBeVisible();
+  await expect(modal.locator("#product-family-name")).toBeFocused();
+  await expectElementWithinViewport(page, modal);
+  await expectNoDocumentOverflow(page);
+
+  await modal.getByRole("button", { name: "Tutup modal" }).click();
+  await expect(modal).toBeHidden();
+  await expect(editButton).toBeFocused();
+});
+
 test("keeps the mobile navigation focus contained and restores its trigger", async ({
   page,
 }) => {
@@ -2486,6 +2529,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
@@ -2512,6 +2556,15 @@ $category = Category::query()->firstOrCreate(
     ],
 );
 
+$family = ProductFamily::query()->firstOrCreate(
+    ['slug' => 'browser-responsive-family'],
+    [
+        'name' => 'Browser QA Product Family',
+        'description' => 'Grouped family for admin browser coverage.',
+        'sort_order' => 98,
+    ],
+);
+
 $otherCategory = Category::query()->firstOrCreate(
     ['slug' => 'browser-responsive-other'],
     [
@@ -2523,6 +2576,10 @@ $otherCategory = Category::query()->firstOrCreate(
 );
 
 $productA = Product::factory()->create([
+    'is_active' => true,
+    'product_family_id' => $family->id,
+    'family_sort_order' => 1,
+    'family_option_label' => 'QA option',
     'category_id' => $category->id,
     'name' => 'Browser QA Produk A',
     'price_amount' => 45000,

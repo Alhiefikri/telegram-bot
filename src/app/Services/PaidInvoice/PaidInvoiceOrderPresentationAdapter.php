@@ -118,7 +118,7 @@ final class PaidInvoiceOrderPresentationAdapter
 
     private function totalPaid(Payment $payment, Order $order, string $currency): int
     {
-        if ($currency === 'USDT') {
+        if ($currency === 'USDT' && in_array(strtoupper((string) $payment->method), ['BINANCE_PAY_ID', 'USDT_BEP20'], true)) {
             return max(0, (int) $payment->amount);
         }
 

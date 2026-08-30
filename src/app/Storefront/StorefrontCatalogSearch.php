@@ -2,7 +2,7 @@
 
 namespace App\Storefront;
 
-use App\Models\Product;
+use App\Catalog\CatalogBrowseQuery;
 use Illuminate\Database\Eloquent\Builder;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -31,22 +31,7 @@ final class StorefrontCatalogSearch
 
     public static function normalize(?string $value): string
     {
-        $search = trim((string) $value);
-
-        if ($search === '') {
-            return '';
-        }
-
-        $collapsed = preg_replace('/\s+/u', ' ', $search);
-        if (is_string($collapsed)) {
-            $search = $collapsed;
-        }
-
-        if (function_exists('mb_strtolower')) {
-            return mb_strtolower($search, 'UTF-8');
-        }
-
-        return strtolower($search);
+        return CatalogBrowseQuery::normalizeSearch($value);
     }
 
     public static function exceedsMaximum(string $search): bool

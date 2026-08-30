@@ -25,21 +25,32 @@ class AdminProductDashboardState
 
     private const CATEGORY_DELETE_BAG = 'categoryDelete';
 
+    private const PRODUCT_FAMILY_CREATE_BAG = 'productFamilyCreate';
+
+    private const PRODUCT_FAMILY_UPDATE_BAG = 'productFamilyUpdate';
+
+    private const PRODUCT_FAMILY_DELETE_BAG = 'productFamilyDelete';
+
+    private const PRODUCT_FAMILY_MEMBERSHIP_BAG = 'productFamilyMembership';
+
     /**
      * @param  array<string, mixed>  $productsTab
      * @param  array<string, mixed>  $statsTab
      * @param  array<string, mixed>  $navigation
      * @return array<string, mixed>
      */
-    public function build(array $productsTab, array $statsTab, array $navigation, ViewErrorBag $errors, ?string $categoryFormMode = null, ?int $categoryId = null): array
+    public function build(array $productsTab, array $statsTab, array $navigation, ViewErrorBag $errors, ?string $categoryFormMode = null, ?int $categoryId = null, ?string $familyFormMode = null, ?int $familyId = null): array
     {
         $products = collect($productsTab['products']);
         $categoryManagement = $productsTab['categoryManagement'] ?? ['createUrl' => '', 'categories' => []];
+        $familyManagement = $productsTab['familyManagement'] ?? ['createUrl' => '', 'families' => []];
         $categories = collect($categoryManagement['categories']);
+        $families = collect($familyManagement['families']);
         $stockModalProduct = $products->firstWhere('id', (int) old('stock_product_id'));
         $stockItemUpdateProduct = $products->firstWhere('id', (int) old('stock_item_product_id'));
         $editingProduct = $products->firstWhere('id', (int) old('product_id'));
         $editingCategory = $categories->firstWhere('id', $categoryId ?? (int) old('category_id'));
+        $editingFamily = $families->firstWhere('id', $familyId ?? (int) old('family_id'));
         $productStoreUrl = $productsTab['productStoreUrl'];
 
         $productCreateErrors = $errors->getBag(self::PRODUCT_CREATE_BAG);
@@ -49,18 +60,27 @@ class AdminProductDashboardState
         $categoryUpdateErrors = $errors->getBag(self::CATEGORY_UPDATE_BAG);
         $categoryDeleteErrors = $errors->getBag(self::CATEGORY_DELETE_BAG);
         $stockItemUpdateErrors = $errors->getBag(self::STOCK_ITEM_UPDATE_BAG);
+        $familyCreateErrors = $errors->getBag(self::PRODUCT_FAMILY_CREATE_BAG);
+        $familyUpdateErrors = $errors->getBag(self::PRODUCT_FAMILY_UPDATE_BAG);
+        $familyDeleteErrors = $errors->getBag(self::PRODUCT_FAMILY_DELETE_BAG);
+        $familyMembershipErrors = $errors->getBag(self::PRODUCT_FAMILY_MEMBERSHIP_BAG);
 
         $hasProductErrors = $productCreateErrors->count() > 0 || $productUpdateErrors->count() > 0;
         $hasProductUpdateErrors = $productUpdateErrors->count() > 0;
         $hasCategoryUpdateErrors = $categoryUpdateErrors->count() > 0;
+        $hasFamilyErrors = $familyCreateErrors->count() > 0 || $familyUpdateErrors->count() > 0 || $familyDeleteErrors->count() > 0;
         $isCategoryEdit = $categoryFormMode === 'edit' || $hasCategoryUpdateErrors;
+        $isFamilyEdit = $familyFormMode === 'edit' || $familyUpdateErrors->count() > 0;
         $hasCategoryFormState = $categoryFormMode !== null;
+        $hasFamilyFormState = $familyFormMode !== null;
         $hasProductTabErrors = $hasProductErrors
             || $stockAdjustmentErrors->count() > 0
             || $categoryCreateErrors->count() > 0
             || $categoryUpdateErrors->count() > 0
             || $categoryDeleteErrors->count() > 0
-            || $stockItemUpdateErrors->count() > 0;
+            || $stockItemUpdateErrors->count() > 0
+            || $hasFamilyErrors
+            || $familyMembershipErrors->count() > 0;
 
         return [
             'activeTab' => $hasProductTabErrors ? self::PRODUCT_TAB : $navigation['activeTab'],
@@ -79,6 +99,20 @@ class AdminProductDashboardState
                 'categoryIsActive' => $this->booleanInput(old('is_active', $editingCategory['is_active'] ?? true)),
                 'categorySortOrder' => old('sort_order', $editingCategory['sort_order'] ?? 0),
             ],
+            'familyCreateUrl' => $familyManagement['createUrl'],
+            'familyModalOpen' => $hasFamilyFormState || $hasFamilyErrors,
+            'familyForm' => [
+                'familyFormMode' => $isFamilyEdit ? 'edit' : 'create',
+                'familyFormAction' => $isFamilyEdit ? ($editingFamily['update_url'] ?? $familyManagement['createUrl']) : $familyManagement['createUrl'],
+                'familyFormMethod' => $isFamilyEdit ? 'PATCH' : '',
+                'familyId' => old('family_id', $editingFamily['id'] ?? null),
+                'familyName' => old('name', $editingFamily['name'] ?? ''),
+                'familyDescription' => old('description', $editingFamily['description'] ?? ''),
+                'familySortOrder' => old('sort_order', $editingFamily['sort_order'] ?? 0),
+                'familyImageUrl' => $editingFamily['image_url'] ?? '',
+            ],
+            'familyMembershipProductId' => old('family_product_id'),
+            'familyMembershipErrors' => $familyMembershipErrors->toArray(),
             'productForm' => [
                 'productModalMode' => $hasProductUpdateErrors ? 'edit' : 'create',
                 'productFormAction' => $hasProductUpdateErrors ? ($editingProduct['update_url'] ?? $productStoreUrl) : $productStoreUrl,

@@ -51,6 +51,8 @@ class AdminDashboardController extends Controller
             $dashboardErrors,
             $request->query('category_form') !== null ? (string) $request->query('category_form') : null,
             $request->query('category_id') !== null ? (int) $request->query('category_id') : null,
+            $request->query('family_form') !== null ? (string) $request->query('family_form') : null,
+            $request->query('family_id') !== null ? (int) $request->query('family_id') : null,
         );
 
         $stockAdded = filter_var($request->query('stock_added'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);

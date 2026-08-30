@@ -8,6 +8,7 @@ use App\Models\BscPaymentReceiver;
 use App\Models\Category;
 use App\Models\ManualPaymentSetting;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\StorefrontSetting;
 use App\Observers\ProductAuditObserver;
 use App\Observers\StorefrontCacheInvalidationObserver;
@@ -122,6 +123,7 @@ class AppServiceProvider extends ServiceProvider
 
         Product::observe(ProductAuditObserver::class);
         Product::observe(StorefrontCacheInvalidationObserver::class);
+        ProductFamily::observe(StorefrontCacheInvalidationObserver::class);
         Category::observe(StorefrontCacheInvalidationObserver::class);
         ManualPaymentSetting::observe(StorefrontCacheInvalidationObserver::class);
         BscPaymentReceiver::observe(StorefrontCacheInvalidationObserver::class);

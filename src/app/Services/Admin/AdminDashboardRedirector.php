@@ -66,6 +66,18 @@ class AdminDashboardRedirector
         );
     }
 
+    public function productFamilyManagement(?string $form = null, ?int $familyId = null): RedirectResponse
+    {
+        return $this->dashboard(
+            self::TAB_PRODUCTS,
+            'admin-product-family-management',
+            [
+                'family_form' => $form,
+                'family_id' => $familyId,
+            ],
+        );
+    }
+
     public function paymentSettings(): RedirectResponse
     {
         return $this->dashboard(self::TAB_STATS, 'admin-payment-settings');
