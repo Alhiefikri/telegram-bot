@@ -88,6 +88,10 @@ whose `orders.telegram_receipt_sent_at` marker is still null. That repair uses
 the same completion rule as normal delivery and conditionally writes the
 marker. The command's existing cleanup scan then applies normal eligibility
 and queues the unique cleanup job; it never dispatches the receipt again.
+It also asks `ManualPaymentProofDeliveryPipeline` to reconcile sent
+manual payment-proof effects whose `payments.payment_proof_forwarded_at`
+marker is still null. This projection repair is conditional and does not
+claim or dispatch the sent proof effect.
 After projection repair, recovery selects only due `pending` and
 policy-retryable `failed` ledger rows and dispatches them through
 `TelegramOutboundEffectDispatcher`. It also discovers committed source rows

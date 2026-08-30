@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\Order;
 use App\Models\Payment;
@@ -74,14 +75,7 @@ final class ManualPaymentProofDeliveryPipeline
             );
 
             if ($finalized !== null) {
-                Payment::query()
-                    ->whereKey($finalized->source_id)
-                    ->whereNull('payment_proof_forwarded_at')
-                    ->update([
-                        'payment_proof_admin_chat_id' => $finalized->telegram_chat_id,
-                        'payment_proof_forwarded_at' => $finalized->sent_at ?? now(),
-                        'updated_at' => now(),
-                    ]);
+                $this->synchronizeSentProjection($finalized);
             }
         } catch (Throwable $exception) {
             if ($this->ledger->isAmbiguous($exception)) {
@@ -102,6 +96,45 @@ final class ManualPaymentProofDeliveryPipeline
 
             throw $exception;
         }
+    }
+
+    /**
+     * Repair Payment projections for sent manual payment-proof effects.
+     *
+     * Recovery only scans effects already finalized as sent. It never claims
+     * or dispatches an effect, and the conditional Payment update makes
+     * concurrent recovery runs idempotent.
+     */
+    public function reconcileSentProjections(int $chunk = 100): int
+    {
+        $repaired = 0;
+
+        TelegramOutboundEffect::query()
+            ->where('source_type', Payment::class)
+            ->where('effect_type', TelegramOutboundEffectType::ManualPaymentProof->value)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->orderBy('id')
+            ->chunkById(max(1, $chunk), function ($effects) use (&$repaired): void {
+                foreach ($effects as $effect) {
+                    if ($this->synchronizeSentProjection($effect)) {
+                        $repaired++;
+                    }
+                }
+            });
+
+        return $repaired;
+    }
+
+    private function synchronizeSentProjection(TelegramOutboundEffect $effect): bool
+    {
+        return Payment::query()
+            ->whereKey($effect->source_id)
+            ->whereNull('payment_proof_forwarded_at')
+            ->update([
+                'payment_proof_admin_chat_id' => $effect->telegram_chat_id,
+                'payment_proof_forwarded_at' => $effect->sent_at ?? now(),
+                'updated_at' => now(),
+            ]) === 1;
     }
 
     private function eligible(Order $order, Payment $payment): bool

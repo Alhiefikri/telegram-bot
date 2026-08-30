@@ -179,6 +179,13 @@ proves that a later unit remains pending after credential ambiguity.
 that recovery repairs a lost completion projection without redispatching the
 receipt.
 
+Manual payment-proof recovery evidence is kept at
+`src/tests/Feature/Telegram/TelegramLifecycleOutboundEffectTest.php`:
+`test_recovery_repairs_a_sent_manual_payment_proof_projection_without_resending_it`
+proves the sent effect is repaired without queue redispatch, while
+`test_recovery_repairs_a_late_manual_payment_proof_without_changing_payment_evidence`
+proves late-payment state and effect evidence remain unchanged.
+
 ## Operational recovery
 
 The scheduler runs `telegram:recover-outbound --queue=notifications` every
@@ -193,15 +200,18 @@ delivery recovery in this order:
    conditionally writes the marker; the command's existing cleanup
    reconciliation scan then queues the idempotent cleanup handoff. It never
    dispatches a receipt effect.
-3. The command selects due pending and retryable failed ledger rows through
+3. ManualPaymentProofDeliveryPipeline scans sent manual payment-proof effects
+   whose Payment forwarding marker is still null and conditionally restores
+   the projection. It never claims or dispatches the already-sent effect.
+4. The command selects due pending and retryable failed ledger rows through
    readyToDispatchQuery() and dispatches them through
    TelegramOutboundEffectDispatcher.
-4. It materializes missing checkout, receipt, admin notification, Sales Proof
+5. It materializes missing checkout, receipt, admin notification, Sales Proof
    Post, stock, and price effects from committed source state when the
    deterministic effect key proves that the effect is absent.
-5. It redispatches recoverable Admin Broadcast handoffs through the same locked
+6. It redispatches recoverable Admin Broadcast handoffs through the same locked
    broadcast queue boundary.
-6. Non-ledger cleanup work, such as deleting old customer-facing checkout
+7. Non-ledger cleanup work, such as deleting old customer-facing checkout
    messages, remains a separate cleanup job and is not treated as delivery
    claim authority.
 

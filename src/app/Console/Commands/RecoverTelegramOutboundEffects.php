@@ -36,6 +36,7 @@ class RecoverTelegramOutboundEffects extends Command
         $recovery = app(TelegramOutboundEffectRecovery::class);
         $staleLeases = $recovery->recoverExpiredLeases(now());
         $recovery->reconcileCompletedReceiptProjections((int) $this->option('chunk'));
+        $recovery->reconcileSentManualPaymentProofProjections((int) $this->option('chunk'));
 
         $ledger->readyToDispatchQuery(now())
             ->whereIn('effect_type', [

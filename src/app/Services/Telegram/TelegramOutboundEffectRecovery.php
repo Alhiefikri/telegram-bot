@@ -11,7 +11,7 @@ use Carbon\CarbonInterface;
 /**
  * Coordinates lease recovery with family read-projection repair. The ledger
  * protocol performs the only state transition; family adapters only refresh
- * projections for recovered unknown outcomes or completed receipt delivery.
+ * projections for recovered unknown outcomes or completed delivery handoffs.
  */
 final class TelegramOutboundEffectRecovery
 {
@@ -19,6 +19,7 @@ final class TelegramOutboundEffectRecovery
         private readonly TelegramOutboundEffectLedgerProtocol $ledger,
         private readonly AdminBroadcastDeliveryPipeline $broadcasts,
         private readonly SalesProofDeliveryPipeline $salesProof,
+        private readonly ManualPaymentProofDeliveryPipeline $manualPaymentProof,
         private readonly ReceiptDeliveryPipeline $receipts,
     ) {}
 
@@ -33,6 +34,14 @@ final class TelegramOutboundEffectRecovery
     public function reconcileCompletedReceiptProjections(int $chunk = 100): array
     {
         return $this->receipts->reconcileCompletedProjections($chunk, dispatchCleanup: false);
+    }
+
+    /**
+     * Repair sent manual payment-proof projections without dispatching effects.
+     */
+    public function reconcileSentManualPaymentProofProjections(int $chunk = 100): int
+    {
+        return $this->manualPaymentProof->reconcileSentProjections($chunk);
     }
 
     public function recoverExpiredLeases(?CarbonInterface $before = null): int

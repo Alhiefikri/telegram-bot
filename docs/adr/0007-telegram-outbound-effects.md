@@ -67,6 +67,11 @@ whose children are already `sent` while the Order marker is still null. The
 conditional marker update is idempotent; the command's existing cleanup scan
 then applies normal cleanup eligibility and queues the unique handoff.
 Recovery never dispatches a receipt effect for this case.
+Scheduled recovery also scans sent manual payment-proof effects whose Payment
+forwarding marker is still null and conditionally restores that projection.
+This repair never claims or dispatches the already-sent effect, so a worker
+crash between ledger finalization and projection update cannot cause a
+duplicate proof delivery.
 
 The focused contract is covered by
 `TelegramReceiptOutboundEffectTest::test_invoice_failure_dispatches_product_detail_and_completion_ignores_photo_failure`,
@@ -76,6 +81,11 @@ and
 
 `TelegramReceiptOutboundEffectTest::test_recovery_repairs_a_complete_sent_receipt_without_resending_it`
 also covers recovery after the ledger projection window.
+
+The manual payment-proof recovery contract is covered by
+`TelegramLifecycleOutboundEffectTest::test_recovery_repairs_a_sent_manual_payment_proof_projection_without_resending_it`
+and
+`TelegramLifecycleOutboundEffectTest::test_recovery_repairs_a_late_manual_payment_proof_without_changing_payment_evidence`.
 
 
 ### Deferred Admin Broadcast materialization

@@ -27,6 +27,7 @@ use App\Services\OrderStateMachine;
 use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
 use App\Services\Telegram\ManualPaymentProofDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
@@ -340,6 +341,77 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $adminPhotos = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && (string) ($request['chat_id'] ?? '') === '999');
         $this->assertCount(1, $adminPhotos);
+    }
+
+    public function test_recovery_repairs_a_sent_manual_payment_proof_projection_without_resending_it(): void
+    {
+        $this->configureAdminTarget();
+        Queue::fake();
+        [$order, $payment] = $this->manualProof();
+        $outboundEffects = app(TelegramOutboundEffectService::class);
+        $effect = $outboundEffects->recordManualPaymentProof($order, $payment);
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $claimed = $ledger->claim((string) $effect->getKey());
+        $this->assertNotNull($claimed);
+        $finalized = $ledger->finalizeSent(
+            (string) $effect->getKey(),
+            (string) $claimed->claim_token,
+            '901',
+        );
+        $this->assertNotNull($finalized);
+        $this->assertNull($payment->fresh()->payment_proof_forwarded_at);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $repairedPayment = $payment->fresh();
+        $this->assertNotNull($repairedPayment->payment_proof_forwarded_at);
+        $this->assertSame('999', $repairedPayment->payment_proof_admin_chat_id);
+        Queue::assertNotPushed(ForwardManualPaymentProof::class);
+
+        $forwardedAt = $repairedPayment->payment_proof_forwarded_at;
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $this->assertTrue($forwardedAt->equalTo($repairedPayment->fresh()->payment_proof_forwarded_at));
+        Queue::assertNotPushed(ForwardManualPaymentProof::class);
+    }
+
+    public function test_recovery_repairs_a_late_manual_payment_proof_without_changing_payment_evidence(): void
+    {
+        $this->configureAdminTarget();
+        Queue::fake();
+        [$order, $payment] = $this->manualProof();
+        $order->forceFill([
+            'order_status' => OrderStatus::Expired,
+            'payment_status' => PaymentStatus::Expired,
+        ])->save();
+        $payment->forceFill([
+            'method' => 'BINANCE_PAY_ID',
+            'status' => PaymentStatus::Expired,
+        ])->save();
+
+        $outboundEffects = app(TelegramOutboundEffectService::class);
+        $effect = $outboundEffects->recordManualPaymentProof($order->fresh(), $payment->fresh());
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $claimed = $ledger->claim((string) $effect->getKey());
+        $this->assertNotNull($claimed);
+        $finalized = $ledger->finalizeSent(
+            (string) $effect->getKey(),
+            (string) $claimed->claim_token,
+            '902',
+        );
+        $this->assertNotNull($finalized);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $repairedPayment = $payment->fresh();
+        $this->assertSame(PaymentStatus::Expired, $repairedPayment->status);
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertTrue($effect->fresh()->outcome_metadata['late_evidence']);
+        $this->assertNotNull($repairedPayment->payment_proof_forwarded_at);
+        Queue::assertNotPushed(ForwardManualPaymentProof::class);
     }
 
     public function test_manual_payment_proof_ambiguous_delivery_becomes_unknown_without_a_duplicate_forward(): void
