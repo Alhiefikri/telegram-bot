@@ -99,6 +99,14 @@ _Avoid_: Hidden product, deleted product
 An admin-managed catalog grouping used to organize products for customer browsing. Its name, description, customer visibility, and display order can be changed. It can be soft-deleted without deleting its products; its slug is system-managed.
 _Avoid_: Product type, product collection
 
+**Product Family**:
+A stable customer-facing discovery grouping for compatible Products. It owns identity, ordering, description, and presentation only; price, stock, credentials, checkout, and fulfillment remain on each Product.
+_Avoid_: sellable Variant, shared inventory
+
+**Product option**:
+An existing sellable Product/SKU shown as a member of a Product Family. Its Product ID remains the identity submitted to cart, checkout, order, inventory, waitlist, and delivery flows.
+_Avoid_: family-level stock, new Variant entity
+
 **Uncategorized Product**:
 An active product that is not assigned to a Product Category. Deleting a Product Category moves its products into this state without changing their active status or sale availability.
 _Avoid_: Deleted product, inactive product

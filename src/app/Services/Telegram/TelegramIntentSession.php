@@ -20,7 +20,20 @@ class TelegramIntentSession
         return 'telegram:product-selection-lock:'.$customer->telegram_id;
     }
 
-    /** @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing'|'awaiting_custom_quantity', previousQuantity?: int}|null */
+    /**
+     * @return array{
+     *     productId: int,
+     *     quantity: int,
+     *     interactionToken: string,
+     *     locale: string,
+     *     mode: 'browsing'|'awaiting_custom_quantity',
+     *     previousQuantity?: int,
+     *     familyId?: int,
+     *     familyPage?: int,
+     *     familyListPage?: int,
+     *     familyOriginToken?: string
+     * }|null
+     */
     public function get(Customer $customer): ?array
     {
         $state = Cache::get($this->key($customer));
@@ -40,6 +53,16 @@ class TelegramIntentSession
                     || ! is_int($state['previousQuantity'])
                     || $state['previousQuantity'] < 1
                     || $state['previousQuantity'] !== $state['quantity']))
+            || (isset($state['familyId']) && (! is_int($state['familyId']) || $state['familyId'] < 1))
+            || (isset($state['familyPage']) && (! is_int($state['familyPage']) || $state['familyPage'] < 1))
+            || (isset($state['familyListPage']) && (! is_int($state['familyListPage']) || $state['familyListPage'] < 1))
+            || (isset($state['familyOriginToken']) && (
+                ! is_string($state['familyOriginToken'])
+                || preg_match('/\A[a-f0-9]{16}\z/D', $state['familyOriginToken']) !== 1
+                || ! isset($state['familyId'])
+            ))
+            || (isset($state['familyListPage']) && ! isset($state['familyId']))
+            || (isset($state['familyId']) !== isset($state['familyPage']))
         ) {
             if ($state !== null) {
                 $this->forget($customer);
@@ -55,8 +78,11 @@ class TelegramIntentSession
         return $state;
     }
 
-    /** @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing'} */
-    public function start(Customer $customer, int $productId, int $quantity, string $locale): array
+    /**
+     * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}  $context
+     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing', familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}
+     */
+    public function start(Customer $customer, int $productId, int $quantity, string $locale, array $context = []): array
     {
         if ($productId < 1) {
             throw new RuntimeException('Telegram product selection product must be positive.');
@@ -74,13 +100,16 @@ class TelegramIntentSession
                 ? $locale
                 : TelegramLocale::DEFAULT_LOCALE,
             'mode' => 'browsing',
+            ...$this->navigationContext($context),
         ];
         $this->put($customer, $state);
 
         return $state;
     }
 
-    /** @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'awaiting_custom_quantity', previousQuantity: int} */
+    /**
+     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'awaiting_custom_quantity', previousQuantity: int, familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}
+     */
     public function awaitCustomQuantity(Customer $customer, array $state, string $locale): array
     {
         $awaiting = [
@@ -90,16 +119,19 @@ class TelegramIntentSession
             'locale' => $locale,
             'mode' => 'awaiting_custom_quantity',
             'previousQuantity' => (int) $state['quantity'],
+            ...$this->navigationContext($state),
         ];
         $this->put($customer, $awaiting);
 
         return $awaiting;
     }
 
-    /** @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing'} */
+    /**
+     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing', familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}
+     */
     public function browsing(Customer $customer, array $state, int $quantity, string $locale): array
     {
-        return $this->start($customer, (int) $state['productId'], $quantity, $locale);
+        return $this->start($customer, (int) $state['productId'], $quantity, $locale, $this->navigationContext($state));
     }
 
     public function put(Customer $customer, array $state): void
@@ -122,6 +154,30 @@ class TelegramIntentSession
         Cache::forget($this->key($customer));
         // Remove scalar state written before the tokenized flow cutover.
         Cache::forget('telegram:selected-product:'.$customer->telegram_id);
+    }
+
+    /** @return array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string} */
+    private function navigationContext(array $context): array
+    {
+        $familyId = $context['familyId'] ?? null;
+        $familyPage = $context['familyPage'] ?? null;
+        $familyListPage = $context['familyListPage'] ?? 1;
+        if (! is_int($familyId) || $familyId < 1 || ! is_int($familyPage) || $familyPage < 1
+            || ! is_int($familyListPage) || $familyListPage < 1) {
+            return [];
+        }
+
+        $navigation = [
+            'familyId' => $familyId,
+            'familyPage' => $familyPage,
+            'familyListPage' => $familyListPage,
+        ];
+        if (is_string($context['familyOriginToken'] ?? null)
+            && preg_match('/\A[a-f0-9]{16}\z/D', $context['familyOriginToken']) === 1) {
+            $navigation['familyOriginToken'] = $context['familyOriginToken'];
+        }
+
+        return $navigation;
     }
 
     private function newInteractionToken(): string

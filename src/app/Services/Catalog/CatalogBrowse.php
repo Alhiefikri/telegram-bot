@@ -336,8 +336,10 @@ final class CatalogBrowse
             $product->name,
             $product->description,
             $product->optionLabel,
+            $product->categoryName,
+            $product->categorySlug,
             ...array_values($product->merchandising),
-        ])->contains(fn (?string $value): bool => $this->contains($value, $search));
+        ])->contains(fn (mixed $value): bool => $this->contains($value === null ? null : (string) $value, $search));
     }
 
     private function contains(?string $value, string $search): bool

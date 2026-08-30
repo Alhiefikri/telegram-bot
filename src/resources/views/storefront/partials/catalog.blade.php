@@ -4,7 +4,7 @@
         <div class="mx-auto mb-12 max-w-2xl text-center">
             <div class="mx-auto mb-5 inline-flex items-center gap-2 rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
                 <span class="neo-spin-slow inline-block" aria-hidden="true">✦</span>
-                <span>Katalog aktif · {{ $catalogPage->productCount() }} produk publik</span>
+                <span>Katalog aktif · {{ $catalogPage->productCount() }} item katalog</span>
             </div>
             <h2 class="font-display text-4xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $copy['catalog']['title'] }}</h2>
             <div class="headline-underline mx-auto mt-4 w-28" aria-hidden="true"></div>
@@ -42,11 +42,13 @@
             @endforeach
         </nav>
     @else
-        <x-storefront.empty-state
-            :title="$catalogPage->emptyCategoryTitle"
-            :body="$catalogPage->emptyCategoryBody"
-            class="mb-10 p-6"
-        />
+        @if ($catalogPage->entries()->isEmpty())
+            <x-storefront.empty-state
+                :title="$catalogPage->emptyCategoryTitle"
+                :body="$catalogPage->emptyCategoryBody"
+                class="mb-10 p-6"
+            />
+        @endif
     @endif
 
     @if ($catalogPage->popularProducts->isEmpty() && $catalogPage->popularEmptyMessage)
@@ -59,10 +61,14 @@
         'storefront-popular-card storefront-product-grid',
         'storefront-product-grid--single mx-auto max-w-xs' => $catalogPage->productCount() === 1,
     ])>
-        @forelse ($catalogPage->products as $catalogProduct)
-            @include('storefront.components.product-card', [
-                'catalogProduct' => $catalogProduct,
-            ])
+        @forelse ($catalogPage->entries() as $entry)
+            @if ($entry->isFamily())
+                @include('storefront.components.family-card', ['entry' => $entry])
+            @else
+                @include('storefront.components.product-card', [
+                    'catalogProduct' => $entry->product,
+                ])
+            @endif
         @empty
             <x-storefront.empty-state
                 :title="$catalogPage->emptyProductsTitle"

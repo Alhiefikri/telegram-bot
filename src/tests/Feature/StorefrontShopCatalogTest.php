@@ -61,7 +61,7 @@ class StorefrontShopCatalogTest extends TestCase
 
         $this->get(route('storefront.shop.index'))
             ->assertOk()
-            ->assertSee('Katalog aktif · 25 produk publik')
+            ->assertSee('Katalog aktif · 25 item katalog')
             ->assertSee('Paginated Product 01')
             ->assertSee('Paginated Product 24')
             ->assertDontSee('Paginated Product 25')
@@ -562,7 +562,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('Lhie Store | Akun Premium &amp; Produk Digital', false)
             ->assertSee('Pilih produk digital sesuai kebutuhan.')
             ->assertSee('action="'.url('/#products').'"', false)
-            ->assertSee('Katalog aktif · 3 produk publik')
+            ->assertSee('Katalog aktif · 3 item katalog')
             ->assertSee('class="category-btn', false)
             ->assertSee('data-filter="'.$category->id.'"', false)
             ->assertSee('aria-controls="storefront-product-grid"', false)
@@ -675,7 +675,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertOk()
             ->assertSee('Katalog publik sedang disiapkan.')
             ->assertSee('Produk aktif akan tampil otomatis di sini setelah dipublikasikan dari admin.')
-            ->assertSee('Katalog aktif · 0 produk publik');
+            ->assertSee('Katalog aktif · 0 item katalog');
     }
 
     public function test_landing_catalog_behavior_remains_unchanged(): void

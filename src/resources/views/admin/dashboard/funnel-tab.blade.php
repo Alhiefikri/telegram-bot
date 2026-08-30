@@ -38,6 +38,17 @@
                     </select>
                 </label>
                 <label class="block">
+                    <span class="mb-1 block text-[10px] font-black uppercase tracking-wide text-brand-muted">Product Family</span>
+                    <select name="family_id" class="admin-dashboard-input w-full">
+                        <option value="">Semua family</option>
+                        @foreach ($funnelTab['filter_options']['families'] as $familyOption)
+                            <option value="{{ $familyOption['id'] }}" @selected((string) $funnelTab['filters']['family_id'] === (string) $familyOption['id'])>
+                                {{ $familyOption['name'] }} ({{ $familyOption['status_label'] }})
+                            </option>
+                        @endforeach
+                    </select>
+                </label>
+                <label class="block">
                     <span class="mb-1 block text-[10px] font-black uppercase tracking-wide text-brand-muted">Kategori</span>
                     <select name="category_id" class="admin-dashboard-input w-full">
                         <option value="">Semua kategori</option>
@@ -188,6 +199,51 @@
                                 </tr>
                             @empty
                                 <tr><td colspan="7" class="px-4 py-8 text-center font-bold text-brand-muted">Belum ada aktivitas produk pada periode ini.</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section aria-labelledby="funnel-families-title" class="space-y-3">
+                <div>
+                    <h3 id="funnel-families-title" class="font-display text-sm font-black uppercase tracking-[0.16em] text-neo-ink">Konversi per Product Family</h3>
+                    <p class="mt-1 text-xs font-semibold text-brand-muted">Hanya event baru dengan family snapshot yang masuk ke proyeksi ini. History tanpa snapshot tetap unknown-family.</p>
+                </div>
+                <div class="space-y-3 md:hidden">
+                    @forelse ($funnelTab['families'] as $familyRow)
+                        <x-admin-dashboard.card as="article" padding="compact" shadow="sm" class="rounded-[1.125rem]">
+                            <p class="font-display text-base font-bold text-neo-ink">{{ $familyRow['family_name'] }}</p>
+                            <p class="mt-1 text-[10px] font-bold uppercase tracking-wide text-brand-muted">Family #{{ $familyRow['family_id'] }} · snapshot</p>
+                            <dl class="mt-3 grid grid-cols-2 gap-3 border-t-2 border-brand-border pt-3 text-sm">
+                                <div><dt class="text-[9px] font-bold uppercase text-brand-muted">Views</dt><dd class="mt-0.5 font-bold text-neo-ink">{{ $familyRow['views'] }}</dd></div>
+                                <div><dt class="text-[9px] font-bold uppercase text-brand-muted">Checkout</dt><dd class="mt-0.5 font-bold text-neo-ink">{{ $familyRow['checkout_opens'] }} / {{ $familyRow['checkout_submits'] }}</dd></div>
+                                <div><dt class="text-[9px] font-bold uppercase text-brand-muted">Accepted</dt><dd class="mt-0.5 font-bold text-neo-ink">{{ $familyRow['accepted_checkouts'] }}</dd></div>
+                                <div><dt class="text-[9px] font-bold uppercase text-brand-muted">Paid</dt><dd class="mt-0.5 font-bold text-neo-ink">{{ $familyRow['paid_orders'] }}</dd></div>
+                            </dl>
+                        </x-admin-dashboard.card>
+                    @empty
+                        <x-admin-dashboard.empty-state title="Belum ada family snapshot pada periode ini." />
+                    @endforelse
+                </div>
+                <div class="hidden overflow-x-auto rounded-[1.125rem] border-[3px] border-neo-ink bg-white shadow-neo-md md:block">
+                    <table class="min-w-full text-left text-sm">
+                        <caption class="sr-only">Konversi funnel per Product Family</caption>
+                        <thead class="border-b-[3px] border-neo-ink bg-[#f1f5f9] text-[10px] font-black uppercase tracking-wide text-brand-muted">
+                            <tr><th scope="col" class="px-4 py-3">Product Family</th><th scope="col" class="px-4 py-3">Views</th><th scope="col" class="px-4 py-3">Checkout</th><th scope="col" class="px-4 py-3">Accepted</th><th scope="col" class="px-4 py-3">Paid</th><th scope="col" class="px-4 py-3">Conversion</th></tr>
+                        </thead>
+                        <tbody class="divide-y-2 divide-brand-border">
+                            @forelse ($funnelTab['families'] as $familyRow)
+                                <tr>
+                                    <td class="px-4 py-3"><div class="font-black text-neo-ink">{{ $familyRow['family_name'] }}</div><div class="text-xs font-semibold text-brand-muted">#{{ $familyRow['family_id'] }} · snapshot</div></td>
+                                    <td class="px-4 py-3 font-semibold text-neo-ink">{{ $familyRow['views'] }}</td>
+                                    <td class="px-4 py-3 font-semibold text-neo-ink">{{ $familyRow['checkout_opens'] }} / {{ $familyRow['checkout_submits'] }}</td>
+                                    <td class="px-4 py-3 font-semibold text-neo-ink">{{ $familyRow['accepted_checkouts'] }}</td>
+                                    <td class="px-4 py-3 font-black text-neo-ink">{{ $familyRow['paid_orders'] }}</td>
+                                    <td class="px-4 py-3 font-black text-neo-ink">{{ $familyRow['payment_conversion_rate_label'] }}</td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="6" class="px-4 py-8 text-center font-bold text-brand-muted">Belum ada family snapshot pada periode ini.</td></tr>
                             @endforelse
                         </tbody>
                     </table>

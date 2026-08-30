@@ -12,8 +12,10 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\User;
 use App\Services\Admin\StorefrontFunnelReport;
+use App\Storefront\StorefrontFunnelEvents;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -323,6 +325,134 @@ final class StorefrontFunnelReportTest extends TestCase
         ]);
         $this->assertContains($response->getStatusCode(), [302, 422]);
         $this->assertSame(1, AuditLog::query()->where('action', 'storefront.checkout_opened')->count());
+    }
+
+    public function test_family_reporting_uses_snapshotted_identity_after_membership_moves(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $original = ProductFamily::factory()->create(['name' => 'Original Family', 'slug' => 'original-family']);
+        $moved = ProductFamily::factory()->create(['name' => 'Moved Family', 'slug' => 'moved-family']);
+        $product = Product::factory()->create([
+            'product_family_id' => $original->id,
+            'name' => 'Family SKU',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 40000,
+            'created_at' => Carbon::parse('2026-08-30 10:00:00'),
+        ]);
+        OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'quantity' => 1,
+            'subtotal' => 40000,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'QR_MANUAL',
+            'status' => PaymentStatus::Paid,
+            'amount' => 40000,
+            'currency' => 'IDR',
+            'paid_at' => Carbon::parse('2026-08-30 10:01:00'),
+            'created_at' => Carbon::parse('2026-08-30 10:00:30'),
+        ]);
+        $this->event('storefront.checkout_submitted', Order::class, (string) $order->id, [
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'family_id' => $original->id,
+            'family_name' => $original->name,
+            'status_endpoint_result' => 'accepted',
+            'payment_method' => 'qris',
+        ], '2026-08-30 10:01:30');
+
+        $product->forceFill(['product_family_id' => $moved->id])->save();
+
+        $report = app(StorefrontFunnelReport::class)->forAdmin($owner, [
+            'start_date' => '2026-08-30',
+            'end_date' => '2026-08-30',
+            'family_id' => (string) $original->id,
+        ]);
+        $this->assertSame(1, $report['summary']['paid_orders']);
+        $this->assertSame($original->id, $report['families'][0]['family_id']);
+        $this->assertSame('Original Family', $report['families'][0]['family_name']);
+        $this->assertSame(1, $report['families'][0]['paid_orders']);
+
+        $movedReport = app(StorefrontFunnelReport::class)->forAdmin($owner, [
+            'start_date' => '2026-08-30',
+            'end_date' => '2026-08-30',
+            'family_id' => (string) $moved->id,
+        ]);
+        $this->assertSame(0, $movedReport['summary']['paid_orders']);
+        $this->assertSame([], $movedReport['families']);
+    }
+
+    public function test_order_item_family_snapshot_survives_membership_move_for_new_funnel_events(): void
+    {
+        Carbon::setTestNow('2026-08-30 10:00:00');
+        try {
+            $owner = User::factory()->create(['role' => UserRole::Owner]);
+            $family = ProductFamily::factory()->create(['name' => 'Snapshotted Family', 'slug' => 'snapshotted-family']);
+            $destination = ProductFamily::factory()->create(['name' => 'New Family', 'slug' => 'new-family']);
+            $product = Product::factory()->create([
+                'product_family_id' => $family->id,
+                'name' => 'Snapshotted SKU',
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+            $order = Order::factory()->create([
+                'order_status' => OrderStatus::Processing,
+                'payment_status' => PaymentStatus::Paid,
+                'total_amount' => 30000,
+                'currency' => 'IDR',
+            ]);
+            OrderItem::factory()->create([
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'product_name' => $product->name,
+                'family_id' => $family->id,
+                'family_name' => $family->name,
+                'quantity' => 1,
+                'unit_price' => 30000,
+                'subtotal' => 30000,
+            ]);
+            Payment::factory()->create([
+                'order_id' => $order->id,
+                'provider' => 'manual',
+                'method' => 'QR_MANUAL',
+                'status' => PaymentStatus::Paid,
+                'amount' => 30000,
+                'currency' => 'IDR',
+                'paid_at' => now(),
+            ]);
+
+            app(StorefrontFunnelEvents::class)->checkoutSubmitted(null, $order, [
+                'status_endpoint_result' => 'accepted',
+            ]);
+            $product->forceFill(['product_family_id' => $destination->id])->save();
+
+            $report = app(StorefrontFunnelReport::class)->forAdmin($owner, [
+                'start_date' => '2026-08-30',
+                'end_date' => '2026-08-30',
+                'family_id' => (string) $family->id,
+            ]);
+            $this->assertSame(1, $report['summary']['checkout_submits']);
+            $this->assertSame(1, $report['families'][0]['family_id']);
+            $this->assertSame('Snapshotted Family', $report['families'][0]['family_name']);
+
+            $destinationReport = app(StorefrontFunnelReport::class)->forAdmin($owner, [
+                'start_date' => '2026-08-30',
+                'end_date' => '2026-08-30',
+                'family_id' => (string) $destination->id,
+            ]);
+            $this->assertSame(0, $destinationReport['summary']['checkout_submits']);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     private function event(string $action, string $subjectType, string $subjectId, array $values, ?string $createdAt = null): void

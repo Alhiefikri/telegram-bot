@@ -3,6 +3,7 @@
 namespace App\Storefront;
 
 use App\Models\Product;
+use App\Models\ProductFamily;
 
 final class StorefrontSitemap
 {
@@ -29,12 +30,21 @@ final class StorefrontSitemap
                 'storefront.policies.recovery',
             ],
         );
-        $productLimit = max(0, $this->maxUrls(count($entries)) - count($entries));
-
-        if ($productLimit === 0) {
-            return $entries;
+        $familyLimit = max(0, $this->maxUrls(count($entries)) - count($entries));
+        foreach (ProductFamily::query()
+            ->publicVisible()
+            ->select(['id', 'slug', 'updated_at'])
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->limit($familyLimit)
+            ->get() as $family) {
+            $entries[] = [
+                'loc' => route('storefront.product-families.show', ['productFamily' => $family->slug]),
+                'lastmod' => $family->updated_at?->toAtomString(),
+            ];
         }
 
+        $productLimit = max(0, $this->maxUrls(count($entries)) - count($entries));
         foreach (Product::query()
             ->publicVisible()
             ->select(['id', 'updated_at'])

@@ -24,7 +24,7 @@
             <img src="{{ Vite::asset('resources/images/lhie-store-logo.webp') }}" alt="Logo Lhie Store" width="900" height="810" fetchpriority="high" class="hero-logo-image">
         </div>
 
-        <p class="mx-auto mt-4 inline-flex items-center gap-2 rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-surface)] px-4 py-1.5 text-sm font-black text-[var(--sf-accent)] shadow-[3px_3px_0_var(--sf-shadow)]">{{ $catalogPage->productCount() }} produk aktif siap dipilih</p>
+        <p class="mx-auto mt-4 inline-flex items-center gap-2 rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-surface)] px-4 py-1.5 text-sm font-black text-[var(--sf-accent)] shadow-[3px_3px_0_var(--sf-shadow)]">{{ $catalogPage->productCount() }} item katalog aktif siap dipilih</p>
 
         <h1 class="mx-auto mt-4 max-w-3xl font-display text-4xl font-black leading-[0.94] tracking-tight text-[var(--sf-ink)] text-balance sm:text-5xl lg:text-[4.15rem]">
             {{ $copy['hero']['headline'] }}

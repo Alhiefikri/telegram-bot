@@ -44,6 +44,26 @@ class StorefrontUrl
         return route('storefront.products.show', $parameters);
     }
 
+    public function familyUrl(string $slug, ?string $returnUrl = null): string
+    {
+        $url = route('storefront.product-families.show', ['productFamily' => $slug]);
+
+        return $returnUrl === null || $returnUrl === ''
+            ? $url
+            : $url.'?from='.rawurlencode($returnUrl);
+    }
+
+    public function familyReturnUrl(Request $request, string $slug): string
+    {
+        $from = $request->query('from');
+
+        if (is_string($from) && $this->isLocalUrl($from)) {
+            return $from;
+        }
+
+        return $this->familyUrl($slug);
+    }
+
     public function checkoutRecoveryUrl(mixed $productId): string
     {
         if (is_scalar($productId)) {

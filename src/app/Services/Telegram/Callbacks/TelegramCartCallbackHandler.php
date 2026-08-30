@@ -227,8 +227,29 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                 return;
             }
 
+            $familyId = $selection['familyId'] ?? null;
+            $familyPage = $selection['familyPage'] ?? null;
+            $familyListPage = $selection['familyListPage'] ?? 1;
             $product = Product::whereKey($productId)->first();
             $this->session->forget($context->customer);
+            if (is_int($familyId) && $familyId > 0 && is_int($familyPage) && $familyPage > 0
+                && is_int($familyListPage) && $familyListPage > 0) {
+                $opened = $this->catalog->openFamilyOptions(
+                    $context->customer,
+                    $context->chatId,
+                    $familyId,
+                    $familyPage,
+                    returnPage: $familyListPage,
+                    expectedProductId: $productId,
+                    originToken: is_string($selection['familyOriginToken'] ?? null) ? $selection['familyOriginToken'] : null,
+                );
+                $this->bot->answerCallbackQuery(
+                    $context->callbackQueryId,
+                    $opened ? null : $this->locale->translate($context->customer, 'catalog.selection.stale'),
+                );
+
+                return;
+            }
             if (! $product) {
                 $this->sendUnavailable($context);
 

@@ -37,6 +37,7 @@ final readonly class StorefrontProductPresentation
         public bool $canJoinWaitlist = false,
         public string $waitlistUrl = '',
         public string $waitlistCtaLabel = 'Beri tahu saya saat tersedia',
+        public ?string $familyOptionLabel = null,
     ) {}
 
     public function checkoutChoice(string $key): ?StorefrontProductCheckoutChoice

@@ -136,7 +136,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(113, 'cb-english-product', 'product:'.$product->id))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) $request['text'], 'Product List')
+            && str_contains((string) $request['text'], 'Browse Products')
             && ! str_contains((string) $request['text'], 'Daftar Produk'));
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'Netflix Premium')
@@ -172,13 +172,14 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(12, '/produk'))->assertOk();
 
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Lihat Produk')
-            && str_contains(json_encode($r->data()), 'category:'.$category->id)
-            && str_contains(json_encode($r->data()), 'category:'.$unavailableCategory->id)
-            && str_contains(json_encode($r->data()), 'category:uncategorized')
-            && ! str_contains(json_encode($r->data()), 'Kategori Mati')
-            && ! str_contains(json_encode($r->data()), 'Mati'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request['text'], 'Lihat Produk')
+            && str_contains($request['text'], 'Aktif')
+            && str_contains($request['text'], 'Kosong Aktif')
+            && str_contains($request['text'], 'Tanpa Kategori')
+            && ! str_contains($request['text'], 'Kategori Mati')
+            && ! str_contains($request['text'], 'Produk Kategori Mati')
+            && ! str_contains($request['text'], 'Mati'));
 
         $this->fakeTelegramHttp();
         Product::query()->delete();
@@ -186,10 +187,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(120, '/katalog'))->assertOk();
 
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Produk masih kosong')
-            && str_contains($r['text'], 'Belum ada produk yang bisa ditampilkan sekarang')
-            && ! str_contains($r['text'], 'admin'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request['text'], 'Produk masih kosong')
+            && str_contains($request['text'], 'Belum ada produk yang bisa ditampilkan sekarang')
+            && ! str_contains($request['text'], 'admin'));
     }
 
     public function test_menu_command_routes_through_webhook_and_sends_main_menu_keyboard(): void
@@ -219,7 +220,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Lihat Produk')
-            && str_contains(json_encode($r->data()), 'category:'.$category->id));
+            && str_contains($r['text'], 'Gemini Pro')
+            && str_contains($r['text'], 'Netflix'));
     }
 
     public function test_katalog_with_single_category_skips_category_selection(): void
@@ -230,14 +232,11 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $product = Product::factory()->create(['name' => 'Gemini Pro', 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->messageUpdate(135, '/produk'))->assertOk();
-
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Daftar Produk')
-            && str_contains($r['text'], 'Kategori: AI Tools')
+            && str_contains($r['text'], 'Lihat Produk')
+            && str_contains($r['text'], 'Gemini Pro')
             && str_contains(json_encode($r->data()), 'product:'.$product->id)
-            && ! str_contains(json_encode($r->data()), 'back:categories'));
-        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Pilih kategori yang kamu mau'));
+            && ! str_contains($r['text'], 'Pilih kategori yang kamu mau'));
     }
 
     public function test_katalog_with_only_uncategorized_products_skips_category_selection(): void
@@ -249,10 +248,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(136, '/produk'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Daftar Produk')
-            && str_contains($r['text'], 'Kategori: 📂 Lainnya')
+            && str_contains($r['text'], 'Lihat Produk')
+            && str_contains($r['text'], 'Tanpa Kategori')
             && str_contains(json_encode($r->data()), 'product:'.$product->id)
-            && ! str_contains(json_encode($r->data()), 'back:categories'));
+            && ! str_contains($r['text'], 'Pilih kategori yang kamu mau'));
     }
 
     public function test_category_callback_lists_products_and_uncategorized_virtual_category(): void
@@ -270,104 +269,60 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Product::factory()->create(['name' => 'Tanpa Kategori', 'category_id' => null, 'stock' => 2, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->callbackUpdate(121, 'cat1', 'category:'.$category->id))->assertOk();
+        $categoryMessage = Http::recorded()
+            ->map(fn (array $record) => $record[0])
+            ->first(fn ($request) => str_ends_with($request->url(), '/sendMessage') && str_contains((string) $request['text'], 'Games'));
+        $this->assertNotNull($categoryMessage);
+        $categoryData = $categoryMessage->data();
+        $this->assertStringContainsString('Diamond', (string) $categoryData['text']);
+        $this->assertStringContainsString('Diamond Habis', (string) $categoryData['text']);
+        $this->assertStringContainsString('Rp15.000', (string) $categoryData['text']);
+        $this->assertSame('product:'.$product->id, $categoryData['reply_markup']['inline_keyboard'][0][0]['callback_data']);
+        $this->assertSame('product:'.$emptyProduct->id, $categoryData['reply_markup']['inline_keyboard'][1][0]['callback_data']);
+        $this->assertSame('catalog:categories', $categoryData['reply_markup']['inline_keyboard'][2][0]['callback_data']);
+
         $this->postTelegramWebhook($this->callbackUpdate(122, 'back-categories', 'back:categories'))->assertOk();
-
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Games')
-            && str_contains($r['text'], 'Daftar Produk')
-            && ! str_contains($r['text'], 'Rp15.000')
-            && ! str_contains($r['text'], '✅')
-            && ! str_contains($r['text'], '❌')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === 'Diamond — (🟢 Tersedia: 3)'
-            && ($r['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === 'Diamond Habis — (🔴 Stok Habis: 0)'
-            && ($r['reply_markup']['inline_keyboard'][0][0]['style'] ?? null) === 'success'
-            && ($r['reply_markup']['inline_keyboard'][1][0]['style'] ?? null) === 'danger'
-            && count($r['reply_markup']['inline_keyboard'][0] ?? []) === 1
-            && count($r['reply_markup']['inline_keyboard'][1] ?? []) === 1
-            && count($r['reply_markup']['inline_keyboard'][2] ?? []) === 1
-            && ($r['reply_markup']['inline_keyboard'][2][0]['callback_data'] ?? null) === 'back:categories'
-            && str_contains(json_encode($r->data()), 'product:'.$product->id)
-            && str_contains(json_encode($r->data()), 'product:'.$emptyProduct->id)
-            && str_contains(json_encode($r->data()), 'back:categories')
-            && ! str_contains($r['text'], 'Stok 0')
-            && ! str_contains($r['text'], 'Voucher MLBB instant.')
-            && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
-            && ! str_contains($r['text'], '[BANNER:')
-            && ! str_contains($r['text'], 'akun-diamond@example.test'));
-
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Lihat Produk')
-            && str_contains(json_encode($r->data()), 'category:'.$category->id)
-            && str_contains(json_encode($r->data()), 'category:uncategorized'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'Filter kategori opsional')
+            && str_contains(json_encode($request->data()), 'category:'.$category->id)
+            && str_contains(json_encode($request->data()), 'category:uncategorized'));
     }
 
     public function test_category_product_buttons_are_compact_and_isolate_navigation_for_supported_catalog_sizes(): void
     {
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
-        $navigationCategory = Category::factory()->create(['name' => 'Navigation Anchor']);
-        Product::factory()->create([
-            'name' => 'Navigation Product',
-            'category_id' => $navigationCategory->id,
-            'stock' => 1,
-            'reserved_stock' => 0,
-        ]);
 
         foreach ([1, 2, 3, 4, 6, 12] as $count) {
             $category = Category::factory()->create(['name' => 'Geometry '.$count]);
-            $products = collect();
             foreach (range(1, $count) as $number) {
-                $products->push(Product::factory()->create([
+                Product::factory()->create([
                     'name' => sprintf('Geometry %02d %02d', $count, $number),
                     'category_id' => $category->id,
                     'stock' => $number === $count && $count > 1 ? 1 : 2,
                     'reserved_stock' => $number === $count && $count > 1 ? 1 : 0,
-                ]));
+                ]);
             }
 
             $this->postTelegramWebhook($this->callbackUpdate(2000 + $count, 'geometry-'.$count, 'category:'.$category->id))->assertOk();
-
             $request = Http::recorded()
                 ->map(fn (array $record) => $record[0])
                 ->first(fn ($request) => str_ends_with($request->url(), '/sendMessage')
                     && str_contains((string) $request['text'], 'Kategori: Geometry '.$count));
-
             $this->assertNotNull($request);
             $keyboard = $request['reply_markup']['inline_keyboard'] ?? [];
-            $this->assertCount($count + 1, $keyboard);
-
-            $productRows = array_slice($keyboard, 0, -1);
-            foreach ($productRows as $row) {
-                $this->assertCount(1, $row);
+            $entryCount = min(4, $count);
+            $this->assertCount($entryCount + ($count > 4 ? 1 : 0) + 1, $keyboard);
+            $entryButtons = array_merge(...array_slice($keyboard, 0, $entryCount));
+            $this->assertCount($entryCount, $entryButtons);
+            foreach ($entryButtons as $button) {
+                $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', (string) ($button['callback_data'] ?? ''));
+                $this->assertContains($button['style'] ?? null, ['success', 'danger']);
             }
-
-            $productButtons = array_merge(...$productRows);
-            $this->assertSame(
-                $products->sortBy('name')->values()->map(fn (Product $product): string => $this->catalogProductButtonText($product->name, 'id', max(0, $product->availableStock())))->all(),
-                array_column($productButtons, 'text'),
-            );
-
-            $orderedProducts = Product::query()
-                ->where('category_id', $category->id)
-                ->storefrontOrder()
-                ->get();
-            $this->assertSame(
-                $orderedProducts->map(fn (Product $product): string => 'product:'.$product->id)->all(),
-                array_column($productButtons, 'callback_data'),
-            );
-
-            foreach ($productButtons as $button) {
-                $productId = (int) str_replace('product:', '', (string) $button['callback_data']);
-                $product = $orderedProducts->first(fn (Product $candidate): bool => $candidate->id === $productId);
-
-                $this->assertNotNull($product);
-                $this->assertSame($product->isAvailable() ? 'success' : 'danger', $button['style'] ?? null);
-                $this->assertArrayNotHasKey('icon_custom_emoji_id', $button);
+            if ($count > 4) {
+                $this->assertSame(sprintf('category:%d:page:2', $category->id), $keyboard[4][0]['callback_data']);
             }
-
-            $navigationRow = $keyboard[array_key_last($keyboard)] ?? [];
-            $this->assertCount(1, $navigationRow);
-            $this->assertSame('back:categories', $navigationRow[0]['callback_data'] ?? null);
+            $this->assertSame('catalog:categories', $keyboard[array_key_last($keyboard)][0]['callback_data']);
         }
     }
 
@@ -376,7 +331,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
         $category = Category::factory()->create(['name' => 'Paged Catalog']);
-        foreach (range(1, 13) as $number) {
+        foreach (range(1, 5) as $number) {
             Product::factory()->create([
                 'name' => sprintf('Paged Product %02d', $number),
                 'category_id' => $category->id,
@@ -386,7 +341,6 @@ class CatalogSearchTest extends TelegramBotTestSupport
         }
 
         $this->postTelegramWebhook($this->callbackUpdate(137, 'paged-first', 'category:'.$category->id))->assertOk();
-
         $firstPage = Http::recorded()
             ->map(fn (array $record) => $record[0])
             ->first(fn ($request) => str_ends_with($request->url(), '/sendMessage')
@@ -394,21 +348,15 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && str_contains((string) $request['text'], 'Page 1 of 2'));
         $this->assertNotNull($firstPage);
         $firstKeyboard = $firstPage['reply_markup']['inline_keyboard'] ?? [];
-        $firstProductRows = array_slice($firstKeyboard, 0, 12);
-        $this->assertSame(
-            array_map(static fn (int $number): string => sprintf('Paged Product %02d — (🟢 In Stock: 2)', $number), range(1, 12)),
-            array_column(array_merge(...$firstProductRows), 'text'),
-        );
-        foreach ($firstProductRows as $row) {
-            $this->assertCount(1, $row);
-        }
-        $this->assertCount(13, $firstKeyboard);
-        $this->assertCount(1, $firstKeyboard[12]);
-        $this->assertSame('Next ➡️', $firstKeyboard[12][0]['text']);
-        $this->assertSame(sprintf('category:%d:page:2', $category->id), $firstKeyboard[12][0]['callback_data']);
+        $this->assertCount(6, $firstKeyboard);
+        $this->assertCount(4, array_slice($firstKeyboard, 0, 4));
+        $this->assertSame(sprintf('category:%d:page:2', $category->id), $firstKeyboard[4][0]['callback_data']);
+        $this->assertSame('catalog:categories', $firstKeyboard[5][0]['callback_data']);
+        $this->assertStringContainsString('1. ', (string) $firstPage['text']);
+        $this->assertStringContainsString('Paged Product 04', (string) $firstPage['text']);
+        $this->assertStringNotContainsString('Paged Product 05', (string) $firstPage['text']);
 
         $this->postTelegramWebhook($this->callbackUpdate(138, 'paged-second', sprintf('category:%d:page:2', $category->id)))->assertOk();
-
         $secondPage = Http::recorded()
             ->map(fn (array $record) => $record[0])
             ->first(fn ($request) => str_ends_with($request->url(), '/sendMessage')
@@ -416,10 +364,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && str_contains((string) $request['text'], 'Page 2 of 2'));
         $this->assertNotNull($secondPage);
         $secondKeyboard = $secondPage['reply_markup']['inline_keyboard'] ?? [];
-        $this->assertSame(['Paged Product 13 — (🟢 In Stock: 2)'], array_column($secondKeyboard[0], 'text'));
-        $this->assertCount(1, $secondKeyboard[1]);
-        $this->assertSame('⬅️ Previous', $secondKeyboard[1][0]['text']);
+        $this->assertSame('1. Select', $secondKeyboard[0][0]['text'] ?? null);
         $this->assertSame(sprintf('category:%d:page:1', $category->id), $secondKeyboard[1][0]['callback_data']);
+        $this->assertSame('catalog:categories', $secondKeyboard[2][0]['callback_data']);
     }
 
     public function test_unavailable_and_empty_category_messages_follow_customer_error_voice(): void
@@ -463,10 +410,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && str_contains((string) $request['text'], 'Hasil pencarian: premium'));
         $buttonText = $request['reply_markup']['inline_keyboard'][0][0]['text'] ?? '';
 
-        $buttonName = preg_replace('/\s+/', ' ', trim($product->name)) ?? '';
-        $this->assertSame($buttonName.' — (🟢 Tersedia: 1)', $buttonText);
+        $this->assertSame('1. Pilih', $buttonText);
         $this->assertSame('success', $request['reply_markup']['inline_keyboard'][0][0]['style'] ?? null);
-        $this->assertStringNotContainsString('Rp35.000', (string) $request['text']);
+        $this->assertStringContainsString('Rp35.000', (string) $request['text']);
         $this->assertStringNotContainsString('1.5 USDT', (string) $request['text']);
         $this->assertSame('product:'.$product->id, $request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null);
         $this->assertCount(1, $request['reply_markup']['inline_keyboard'][1] ?? []);
@@ -489,34 +435,25 @@ class CatalogSearchTest extends TelegramBotTestSupport
         }
 
         $this->postTelegramWebhook($this->messageUpdate(135, '/cari compact'))->assertOk();
-
         $request = Http::recorded()
             ->map(fn (array $record) => $record[0])
             ->first(fn ($request) => str_ends_with($request->url(), '/sendMessage')
                 && str_contains((string) $request['text'], 'Hasil pencarian: compact'));
-
         $this->assertNotNull($request);
         $keyboard = $request['reply_markup']['inline_keyboard'] ?? [];
         $this->assertCount(6, $keyboard);
-        $productRows = array_slice($keyboard, 0, -1);
-        foreach ($productRows as $row) {
-            $this->assertCount(1, $row);
-        }
-        $this->assertSame(
-            $products->sortBy('name')->values()->map(fn (Product $product): string => $this->catalogProductButtonText($product->name, 'id', max(0, $product->availableStock())))->all(),
-            array_column(array_merge(...$productRows), 'text'),
-        );
-        $this->assertSame('katalog', $keyboard[5][0]['callback_data'] ?? null);
-        $this->assertCount(1, $keyboard[5]);
+        $productRows = array_slice($keyboard, 0, 4);
+        $this->assertSame(['1. Pilih', '2. Pilih', '3. Pilih', '4. Pilih'], array_column(array_merge(...$productRows), 'text'));
+        $this->assertStringStartsWith('family:search:', $keyboard[4][0]['callback_data']);
+        $this->assertSame('katalog', $keyboard[5][0]['callback_data']);
 
         $buttons = array_merge(...$productRows);
         $this->assertSame(
-            $products->sortBy('name')->map(fn (Product $product): string => 'product:'.$product->id)->values()->all(),
+            $products->sortBy('name')->take(4)->map(fn (Product $product): string => 'product:'.$product->id)->values()->all(),
             array_column($buttons, 'callback_data'),
         );
         foreach ($buttons as $button) {
             $this->assertSame('success', $button['style'] ?? null);
-            $this->assertArrayNotHasKey('icon_custom_emoji_id', $button);
         }
     }
 
@@ -562,28 +499,21 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(124, '/cari netflix'))->assertOk();
 
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Hasil pencarian: netflix')
-            && ! str_contains($r['text'], 'Rp25.000')
-            && ! str_contains($r['text'], '✅')
-            && ! str_contains($r['text'], '❌')
-            && ! str_contains($r['text'], 'Akun streaming')
-            && ! str_contains($r['text'], 'Netflix Inactive')
-            && ! str_contains($r['text'], 'Spotify Premium')
-            && ! str_contains($r['text'], 'BANNER PLACEHOLDER')
-            && ! str_contains($r['text'], '[BANNER:')
-            && ! str_contains($r['text'], 'netflix@example.test')
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === 'Netflix Habis — (🔴 Stok Habis: 0)'
-            && ($r['reply_markup']['inline_keyboard'][0][0]['style'] ?? null) === 'danger'
-            && ($r['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === 'Netflix Premium — (🟢 Tersedia: 1)'
-            && ($r['reply_markup']['inline_keyboard'][1][0]['style'] ?? null) === 'success'
-            && count($r['reply_markup']['inline_keyboard'][0] ?? []) === 1
-            && count($r['reply_markup']['inline_keyboard'][1] ?? []) === 1
-            && ($r['reply_markup']['inline_keyboard'][2][0]['callback_data'] ?? null) === 'katalog'
-            && str_contains(json_encode($r->data()), 'product:'.$matching->id)
-            && str_contains(json_encode($r->data()), 'product:'.$empty->id)
-            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Habis — (🔴 Stok Habis: 0)')
-            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium — (🟢 Tersedia: 1)'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request['text'], 'Hasil pencarian: netflix')
+            && str_contains($request['text'], 'Netflix Premium')
+            && str_contains($request['text'], 'Netflix Habis')
+            && str_contains($request['text'], 'Rp25.000')
+            && ! str_contains($request['text'], 'Netflix Inactive')
+            && ! str_contains($request['text'], 'Spotify Premium')
+            && ! str_contains($request['text'], 'netflix@example.test')
+            && ($request['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '1. Pilih'
+            && ($request['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '2. Pilih'
+            && ($request['reply_markup']['inline_keyboard'][0][0]['style'] ?? null) === 'success'
+            && ($request['reply_markup']['inline_keyboard'][1][0]['style'] ?? null) === 'danger'
+            && ($request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'product:'.$matching->id
+            && ($request['reply_markup']['inline_keyboard'][1][0]['callback_data'] ?? null) === 'product:'.$empty->id
+            && ($request['reply_markup']['inline_keyboard'][2][0]['callback_data'] ?? null) === 'katalog');
     }
 
     public function test_cari_result_can_be_selected_and_continues_existing_product_flow(): void
@@ -658,7 +588,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(129, '/cari NETFLIX'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium — (🟢 In Stock: 5)')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Available stock: 5')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
@@ -682,9 +612,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $product = Product::factory()->create(['name' => 'Netflix Premium', 'is_active' => true, 'stock' => 5, 'reserved_stock' => 5]);
 
         $this->postTelegramWebhook($this->messageUpdate(131, '/cari netflix'))->assertOk();
-
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium — (🔴 Out of Stock: 0)')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Available stock: 0')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
@@ -886,7 +816,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(132, '/cari streaming'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium — (🟢 In Stock: 5)')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Available stock: 5')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
@@ -934,22 +865,20 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && (string) ($request['chat_id'] ?? '') === (string) $locale['chat_id'])
                 ->map(fn (array $record): array => $record[0]->data());
             $copy = $payloads->map(fn (array $payload): string => (string) ($payload['text'] ?? '')."\n".json_encode($payload['reply_markup'] ?? []))->implode("\n");
-            $productButtonText = $this->catalogProductButtonText($product->name, $index, 3);
             $selectorButtons = [];
             foreach ($payloads as $payload) {
                 foreach (($payload['reply_markup']['inline_keyboard'] ?? []) as $row) {
                     foreach ($row as $button) {
-                        if (($button['callback_data'] ?? null) === 'product:'.$product->id
-                            && ($button['text'] ?? null) === $productButtonText) {
+                        if (($button['callback_data'] ?? null) === 'product:'.$product->id) {
                             $selectorButtons[] = $button;
                         }
                     }
                 }
             }
 
-            $this->assertCount(2, $selectorButtons);
+            $this->assertCount(3, $selectorButtons);
             foreach ($selectorButtons as $selectorButton) {
-                $this->assertSame($productButtonText, $selectorButton['text'] ?? null);
+                $this->assertMatchesRegularExpression('/^[1-2]\. /', $selectorButton['text'] ?? '');
                 $this->assertSame('product:'.$product->id, $selectorButton['callback_data'] ?? null);
                 $this->assertSame('success', $selectorButton['style'] ?? null);
                 $this->assertArrayNotHasKey('icon_custom_emoji_id', $selectorButton);
@@ -991,7 +920,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 319000 + $count, 'locale' => 'en']);
         $category = Category::factory()->create(['name' => 'Grid Category '.$count, 'is_active' => true]);
-        $otherCategory = Category::factory()->create(['name' => 'Other Category '.$count, 'is_active' => true]);
+        Category::factory()->create(['name' => 'Other Category '.$count, 'is_active' => true]);
 
         for ($index = 1; $index <= $count; $index++) {
             Product::factory()->create([
@@ -1003,15 +932,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 'is_active' => true,
             ]);
         }
-        Product::factory()->create([
-            'name' => 'Other Product '.$count,
-            'category_id' => $otherCategory->id,
-            'stock' => 2,
-            'reserved_stock' => 0,
-            'is_active' => true,
-        ]);
 
-        $this->postTelegramWebhook($this->messageUpdate(319100 + $count, '/products', [], $customer->telegram_id))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(
             319200 + $count,
             'grid-category-'.$count,
@@ -1025,25 +946,20 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $message = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'Grid Category '.$count))->last();
         $this->assertNotNull($message);
-        $keyboard = $message[0]->data()['reply_markup']['inline_keyboard'] ?? [];
-        $orderedProducts = Product::query()
-            ->where('category_id', $category->id)
-            ->storefrontOrder()
-            ->withAvailability()
-            ->get();
-        $productRows = array_slice($keyboard, 0, $count);
-        $this->assertCount($count + 1, $keyboard);
-        $this->assertSame(
-            $orderedProducts->map(fn (Product $product): string => $this->catalogProductButtonText($product->name, 'en', max(0, $product->availableStock())))->all(),
-            array_column(array_merge(...$productRows), 'text'),
-        );
+        $payload = $message[0]->data();
+        $keyboard = $payload['reply_markup']['inline_keyboard'] ?? [];
+        $entryCount = min(4, $count);
+        $this->assertCount($entryCount + ($count > 4 ? 1 : 0) + 1, $keyboard);
+        $productRows = array_slice($keyboard, 0, $entryCount);
         foreach ($productRows as $row) {
             $this->assertCount(1, $row);
+            $this->assertSame('success', $row[0]['style'] ?? null);
             $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', $row[0]['callback_data']);
-            $this->assertArrayNotHasKey('icon_custom_emoji_id', $row[0]);
         }
-        $this->assertCount(1, $keyboard[$count]);
-        $this->assertSame('back:categories', $keyboard[$count][0]['callback_data']);
+        if ($count > 4) {
+            $this->assertSame(sprintf('category:%d:page:2', $category->id), $keyboard[4][0]['callback_data']);
+        }
+        $this->assertSame('catalog:categories', $keyboard[array_key_last($keyboard)][0]['callback_data']);
     }
 
     public static function productGridCounts(): iterable

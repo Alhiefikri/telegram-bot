@@ -2,6 +2,8 @@
 
 namespace App\Storefront;
 
+use App\Catalog\CatalogFamilyReadModel;
+use App\Catalog\CatalogProductReadModel;
 use App\Models\Product;
 use Illuminate\Support\Facades\Vite;
 
@@ -39,6 +41,50 @@ final class StorefrontSeo
             canonicalUrl: $canonicalUrl,
             robots: $query->search !== '' ? self::NOINDEX_FOLLOW : self::INDEX_FOLLOW,
             jsonLd: [$this->breadcrumbJsonLd($breadcrumbs)],
+            breadcrumbs: $breadcrumbs,
+        );
+    }
+
+    public function family(CatalogFamilyReadModel $family, string $canonicalUrl): StorefrontPageMetadata
+    {
+        $brand = $this->brand();
+        $description = trim((string) $family->description);
+        if ($description === '') {
+            $description = $family->name.' menawarkan '.$family->optionCount.' pilihan produk di '.$brand.'.';
+        }
+        $breadcrumbs = $this->familyBreadcrumbs($family->name, $canonicalUrl);
+        $items = [];
+        foreach ($family->members as $index => $member) {
+            if (! $member instanceof CatalogProductReadModel) {
+                continue;
+            }
+            $items[] = [
+                '@type' => 'ListItem',
+                'position' => $index + 1,
+                'name' => $member->label,
+                'url' => route('storefront.products.show', ['product' => $member->id]),
+            ];
+        }
+        $jsonLd = [
+            '@context' => 'https://schema.org',
+            '@type' => 'CollectionPage',
+            'name' => $family->name.' — Pilihan Produk',
+            'description' => $description,
+            'url' => $canonicalUrl,
+            'mainEntity' => [
+                '@type' => 'ItemList',
+                'numberOfItems' => count($items),
+                'itemListElement' => $items,
+            ],
+        ];
+
+        return $this->publicPage(
+            title: $family->name.' — Pilihan Produk | '.$brand,
+            description: $description,
+            canonicalUrl: $canonicalUrl,
+            imageUrl: $family->imageUrl,
+            imageAlt: $family->name.' | '.$brand,
+            jsonLd: [$jsonLd, $this->breadcrumbJsonLd($breadcrumbs)],
             breadcrumbs: $breadcrumbs,
         );
     }
@@ -209,6 +255,17 @@ final class StorefrontSeo
         return [
             ['name' => 'Beranda', 'url' => route('storefront.home')],
             ['name' => 'Katalog', 'url' => route('storefront.shop.index')],
+        ];
+    }
+
+    /**
+     * @return list<array{name:string,url:string}>
+     */
+    private function familyBreadcrumbs(string $name, string $canonicalUrl): array
+    {
+        return [
+            ...$this->catalogBreadcrumbs(),
+            ['name' => $name, 'url' => $canonicalUrl],
         ];
     }
 

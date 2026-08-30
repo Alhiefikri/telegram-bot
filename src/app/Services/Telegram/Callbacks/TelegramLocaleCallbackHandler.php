@@ -6,11 +6,13 @@ use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
+use App\Services\Telegram\TelegramCatalogIntents;
 use App\Services\Telegram\TelegramChatPrivacyGuard;
 use App\Services\Telegram\TelegramCommunityGate;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMenuIntents;
+use App\Services\Telegram\TelegramStartIntentSession;
 
 class TelegramLocaleCallbackHandler implements TelegramCallbackHandler
 {
@@ -18,8 +20,10 @@ class TelegramLocaleCallbackHandler implements TelegramCallbackHandler
         private TelegramBotClient $bot,
         private TelegramCommunityGate $communityGate,
         private TelegramChatPrivacyGuard $chatPrivacy,
+        private TelegramCatalogIntents $catalog,
         private TelegramMenuIntents $menu,
         private TelegramIntentSession $session,
+        private TelegramStartIntentSession $startIntents,
         private TelegramLocale $locale,
     ) {}
 
@@ -51,6 +55,11 @@ class TelegramLocaleCallbackHandler implements TelegramCallbackHandler
         $context->customer->refresh();
         $this->bot->answerCallbackQuery($context->callbackQueryId);
         if (! $this->communityGate->ensureAllowedOrPrompt($context->customer, $context->chatId)) {
+            return true;
+        }
+
+        $pendingIntent = $this->startIntents->pull($context->customer);
+        if ($pendingIntent !== null && $this->catalog->openStartIntent($context->customer, $context->chatId, $pendingIntent)) {
             return true;
         }
 

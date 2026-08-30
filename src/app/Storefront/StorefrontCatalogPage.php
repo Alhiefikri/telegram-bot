@@ -18,6 +18,7 @@ final readonly class StorefrontCatalogPage
      * @param  Collection<int, StorefrontCatalogCategoryFilter>  $categoryFilters
      * @param  Collection<int, StorefrontCatalogProduct>  $products
      * @param  Collection<int, StorefrontCatalogProduct>  $popularProducts
+     * @param  Collection<int, StorefrontCatalogEntry>|null  $entries
      */
     public function __construct(
         public string $context,
@@ -55,6 +56,8 @@ final readonly class StorefrontCatalogPage
         public string $allCategoryUrl = '',
         public string $catalogReturnUrl = '',
         public array $pagination = [],
+        /** @var Collection<int, StorefrontCatalogEntry>|null */
+        public ?Collection $entries = null,
     ) {}
 
     public function isHome(): bool
@@ -67,16 +70,24 @@ final readonly class StorefrontCatalogPage
         return $this->context === self::CONTEXT_SHOP;
     }
 
+    /** @return Collection<int, StorefrontCatalogEntry> */
+    public function entries(): Collection
+    {
+        return $this->entries ?? $this->products
+            ->map(static fn (StorefrontCatalogProduct $product): StorefrontCatalogEntry => StorefrontCatalogEntry::product($product))
+            ->values();
+    }
+
     public function productCount(): int
     {
-        return $this->products->count();
+        return $this->entries()->count();
     }
 
     public function totalProductCount(): int
     {
-        return $this->totalProducts > 0 || $this->products->isEmpty()
+        return $this->totalProducts > 0 || $this->entries()->isEmpty()
             ? $this->totalProducts
-            : $this->products->count();
+            : $this->entries()->count();
     }
 
     public function hasPagination(): bool

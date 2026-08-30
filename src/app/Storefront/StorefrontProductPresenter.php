@@ -93,6 +93,7 @@ class StorefrontProductPresenter
             canJoinWaitlist: ! $isAvailable,
             waitlistUrl: route('storefront.waitlist.store', ['product' => $product->getKey()]),
             waitlistCtaLabel: (string) config('storefront.waitlist.cta', 'Beri tahu saya saat tersedia'),
+            familyOptionLabel: $product->family_option_label,
         );
     }
 

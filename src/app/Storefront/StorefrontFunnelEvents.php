@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Services\AuditLogger;
 use Illuminate\Database\Eloquent\Model;
 
@@ -16,6 +17,7 @@ class StorefrontFunnelEvents
      * @var list<string>
      */
     public const ACTIONS = [
+        'storefront.family_opened',
         'storefront.product_opened',
         'storefront.checkout_opened',
         'storefront.checkout_submitted',
@@ -27,6 +29,14 @@ class StorefrontFunnelEvents
 
     public function __construct(private readonly AuditLogger $audit) {}
 
+    public function familyOpened(ProductFamily $family, array $metadata = []): void
+    {
+        $this->log('storefront.family_opened', $family, [
+            'family_id' => $family->getKey(),
+            'family_name' => (string) $family->name,
+        ] + $metadata);
+    }
+
     /**
      * @param  array<string, mixed>  $metadata
      */
@@ -35,6 +45,7 @@ class StorefrontFunnelEvents
         $this->log('storefront.product_opened', $product, [
             'product_id' => $product->getKey(),
             'product_public' => $product->isPublicVisible(),
+            ...$this->familySnapshot($product),
         ] + $metadata);
     }
 
@@ -46,6 +57,7 @@ class StorefrontFunnelEvents
         $this->log('storefront.checkout_opened', $product, [
             'product_id' => $product->getKey(),
             'source' => $metadata['source'] ?? 'product_page',
+            ...$this->familySnapshot($product),
         ] + $metadata);
     }
 
@@ -61,7 +73,7 @@ class StorefrontFunnelEvents
             'invoice_number' => $order?->invoice_number,
             'order_status' => $order?->order_status?->value,
             'payment_status' => $order?->payment_status?->value,
-        ], fn ($value): bool => $value !== null);
+        ], fn ($value): bool => $value !== null) + ($order instanceof Order ? $this->familySnapshotForOrder($order) : $this->familySnapshot($product));
 
         $this->log('storefront.checkout_submitted', $subject, $base + $metadata);
     }
@@ -71,7 +83,7 @@ class StorefrontFunnelEvents
      */
     public function qrisCreated(Order $order, Payment $payment, array $metadata = []): void
     {
-        $this->log('storefront.qris_created', $payment, $this->orderPaymentMetadata($order, $payment) + [
+        $this->log('storefront.qris_created', $payment, $this->orderPaymentMetadata($order, $payment) + $this->familySnapshotForOrder($order) + [
             'provider_create_state' => $payment->provider_create_state,
             'provider_fee' => $payment->provider_fee,
             'provider_total_payment' => $payment->provider_total_payment,
@@ -84,7 +96,7 @@ class StorefrontFunnelEvents
      */
     public function paymentVerified(Order $order, Payment $payment, array $metadata = []): void
     {
-        $this->log('storefront.payment_verified', $payment, $this->orderPaymentMetadata($order, $payment) + $metadata);
+        $this->log('storefront.payment_verified', $payment, $this->orderPaymentMetadata($order, $payment) + $this->familySnapshotForOrder($order) + $metadata);
     }
 
     /**
@@ -92,7 +104,7 @@ class StorefrontFunnelEvents
      */
     public function credentialsOpened(Order $order, ?Payment $payment, array $metadata = []): void
     {
-        $this->log('storefront.credentials_opened', $order, array_filter($this->orderPaymentMetadata($order, $payment) + $metadata, fn ($value): bool => $value !== null));
+        $this->log('storefront.credentials_opened', $order, array_filter($this->orderPaymentMetadata($order, $payment) + $this->familySnapshotForOrder($order) + $metadata, fn ($value): bool => $value !== null));
     }
 
     /**
@@ -108,7 +120,7 @@ class StorefrontFunnelEvents
             'order_status' => $order?->order_status?->value,
             'payment_status' => $order?->payment_status?->value,
             'product_id' => $product?->getKey(),
-        ], fn ($value): bool => $value !== null) + $metadata);
+        ], fn ($value): bool => $value !== null) + ($order instanceof Order ? $this->familySnapshotForOrder($order) : $this->familySnapshot($product)) + $metadata);
     }
 
     /**
@@ -125,6 +137,59 @@ class StorefrontFunnelEvents
             'storefront.checkout_opened' => $product ? $this->checkoutOpened($product, $metadata) : null,
             default => null,
         };
+    }
+
+    /** @return array{family_id?: int, family_name?: ?string} */
+    private function familySnapshot(?Product $product): array
+    {
+        if (! $product) {
+            return [];
+        }
+
+        $family = $product->relationLoaded('family')
+            ? $product->family
+            : $product->family()->select(['id', 'name'])->first();
+        if (! $family) {
+            return [];
+        }
+
+        return [
+            'family_id' => (int) $family->getKey(),
+            'family_name' => trim((string) $family->name),
+        ];
+    }
+
+    /** @return array{family_id?: int, family_name?: ?string} */
+    private function familySnapshotForOrder(?Order $order): array
+    {
+        if (! $order) {
+            return [];
+        }
+        $order->loadMissing('orderItems');
+
+        $snapshots = $order->orderItems
+            ->map(function ($item): ?array {
+                $id = $item->family_id === null ? null : (int) $item->family_id;
+                $name = trim((string) $item->family_name);
+                if ($id === null || $id < 1) {
+                    return null;
+                }
+
+                return ['id' => $id, 'name' => $name === '' ? null : $name];
+            })
+            ->filter()
+            ->unique(fn (array $snapshot): int => $snapshot['id'])
+            ->values();
+        if ($snapshots->count() !== 1) {
+            return [];
+        }
+
+        $snapshot = $snapshots->first();
+
+        return [
+            'family_id' => $snapshot['id'],
+            'family_name' => $snapshot['name'],
+        ];
     }
 
     /**
@@ -161,6 +226,8 @@ class StorefrontFunnelEvents
             'product_id',
             'product_public',
             'source',
+            'family_id',
+            'family_name',
             'path',
             'utm_source',
             'utm_medium',
@@ -195,6 +262,9 @@ class StorefrontFunnelEvents
                     return null;
                 }
                 if ($value === null) {
+                    return null;
+                }
+                if ($key === 'family_id' && (! is_int($value) || $value < 1)) {
                     return null;
                 }
 
@@ -263,6 +333,7 @@ class StorefrontFunnelEvents
     {
         return match ($key) {
             'path' => 200,
+            'family_name' => 160,
             'failure_kind' => 120,
             'invoice_number', 'provider_expires_at' => 120,
             default => 80,

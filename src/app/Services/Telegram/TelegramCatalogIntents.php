@@ -2,15 +2,21 @@
 
 namespace App\Services\Telegram;
 
+use App\Catalog\CatalogBrowseEntry;
+use App\Catalog\CatalogBrowseQuery;
+use App\Catalog\CatalogBrowseResult;
+use App\Catalog\CatalogProductReadModel;
 use App\Models\Category;
 use App\Models\Customer;
 use App\Models\Product;
+use App\Services\Catalog\CatalogBrowse;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class TelegramCatalogIntents
 {
-    private const PRODUCTS_PER_PAGE = 12;
+    private const PRODUCTS_PER_PAGE = 4;
 
     public function __construct(
         private TelegramBotClient $bot,
@@ -18,44 +24,296 @@ class TelegramCatalogIntents
         private TelegramCheckoutIntents $checkout,
         private TelegramIntentSession $session,
         private CheckoutMaintenance $maintenance,
+        private CatalogBrowse $browse,
+        private ProductBrandIconResolver $icons,
+        private TelegramCatalogQuerySession $catalogQueries,
+        private TelegramFamilyCallbackToken $familyTokens,
     ) {}
 
     public function sendCategoryCatalog(Customer $customer, string $chatId): void
     {
-        $categories = Category::query()
-            ->where('is_active', true)
-            ->whereHas('products', fn ($q) => $q->where('is_active', true))
-            ->orderBy('sort_order')->orderBy('name')->get();
-        $hasUncategorized = Product::whereNull('category_id')->where('is_active', true)->exists();
+        $this->sendCatalogPage($customer, $chatId);
+    }
 
-        if ($categories->count() + ($hasUncategorized ? 1 : 0) === 1) {
-            $this->sendCategoryProducts($customer, $chatId, $hasUncategorized ? 'uncategorized' : (string) $categories->first()->id);
+    public function sendCatalogPage(Customer $customer, string $chatId, int $page = 1, ?string $search = null, ?string $category = null): void
+    {
+        $requestedPage = max(1, $page);
+        $result = $this->browse->browsePublic(CatalogBrowseQuery::fromValues(
+            search: $search,
+            category: $category,
+            page: $requestedPage,
+            perPage: self::PRODUCTS_PER_PAGE,
+        ));
+
+        if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
+            $this->sendStaleCatalog($customer, $chatId);
 
             return;
         }
 
-        $keyboard = $categories->map(fn ($category) => [['text' => '📂 '.$category->name, 'callback_data' => 'category:'.$category->id]])->values()->all();
+        $originToken = $this->catalogQueries->putCatalog($customer, $result->pagination->currentPage);
+        $this->sendBrowseResult($customer, $chatId, $result, 'catalog.header', 'catalog', null, $search, null, null, $originToken);
+    }
+
+    public function sendCategoryPicker(Customer $customer, string $chatId): void
+    {
+        $categories = Category::query()
+            ->where('is_active', true)
+            ->whereHas('products', fn ($query) => $query->publicVisible())
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get();
+        $hasUncategorized = Product::query()->publicVisible()->whereNull('category_id')->exists();
+        $keyboard = $categories
+            ->map(fn (Category $category): array => [[
+                'text' => '📂 '.$category->name,
+                'callback_data' => 'category:'.$category->id,
+            ]])
+            ->values()
+            ->all();
         if ($hasUncategorized) {
-            $keyboard[] = [['text' => $this->locale->translate($customer, 'catalog.uncategorized'), 'callback_data' => 'category:uncategorized']];
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'catalog.uncategorized'),
+                'callback_data' => 'category:uncategorized',
+            ]];
         }
+        $keyboard[] = [[
+            'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
+            'callback_data' => 'family:back:menu',
+        ]];
 
-        $message = $keyboard === []
+        $message = $categories->isEmpty() && ! $hasUncategorized
             ? $this->locale->translate($customer, 'catalog.empty')
-            : $this->locale->translate($customer, 'catalog.header');
-        $maintenance = $this->maintenance->current();
-        if ($maintenance->active) {
-            $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
-        }
-
+            : $this->locale->translate($customer, 'catalog.category_filter');
         $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => $keyboard]);
     }
 
-    public function sendProductDetail(Customer $customer, string $chatId, Product $product): void
+    public function sendFamilyOptions(Customer $customer, string $chatId, int $familyId, int $page = 1, int $returnPage = 1, ?string $originToken = null): void
+    {
+        try {
+            $family = $this->browse->showPublicFamily($familyId);
+        } catch (ModelNotFoundException) {
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.family.unavailable'), [
+                'inline_keyboard' => [[[
+                    'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
+                    'callback_data' => 'family:back:menu',
+                ]]],
+            ]);
+
+            return;
+        }
+
+        $members = collect($family->members);
+        $lastPage = max(1, (int) ceil($members->count() / self::PRODUCTS_PER_PAGE));
+        $page = min(max(1, $page), $lastPage);
+        $returnPage = max(1, $returnPage);
+        $pageMembers = $members->forPage($page, self::PRODUCTS_PER_PAGE)->values();
+        $lines = [
+            $this->locale->translate($customer, 'catalog.family.options_title', ['name' => $family->name]),
+            '━━━━━━━━━━━━━━',
+        ];
+        if ($lastPage > 1) {
+            $lines[] = $this->locale->translate($customer, 'catalog.family.page', [
+                'page' => $page,
+                'pages' => $lastPage,
+            ]);
+        }
+        $lines[] = '';
+        foreach ($pageMembers as $index => $member) {
+            $number = $index + 1;
+            $lines[] = $this->familyOptionBlock($customer, $member, $number);
+            if ($index < $pageMembers->count() - 1) {
+                $lines[] = '';
+            }
+        }
+        $maintenance = $this->maintenance->current();
+        if ($maintenance->active) {
+            $lines[] = '';
+            $lines[] = $this->maintenanceNotice($customer, $maintenance);
+        }
+        $keyboard = $pageMembers
+            ->map(fn (CatalogProductReadModel $member, int $index): array => [[
+                'text' => $this->locale->translate($customer, 'catalog.family.option_button', [
+                    'number' => $index + 1,
+                    'label' => $member->label,
+                ]),
+                'callback_data' => $this->familySelectCallback($family->id, $member->id, $page, $returnPage),
+            ]])
+            ->all();
+        $pageButtons = [];
+        if ($page > 1) {
+            $pageButtons[] = [
+                'text' => $this->locale->translate($customer, 'catalog.family.previous_page'),
+                'callback_data' => $this->familyOptionsCallbackData($family->id, $page - 1, $returnPage, $originToken),
+            ];
+        }
+        if ($page < $lastPage) {
+            $pageButtons[] = [
+                'text' => $this->locale->translate($customer, 'catalog.family.next_page'),
+                'callback_data' => $this->familyOptionsCallbackData($family->id, $page + 1, $returnPage, $originToken),
+            ];
+        }
+        if ($pageButtons !== []) {
+            $keyboard[] = $pageButtons;
+        }
+        $keyboard[] = [[
+            'text' => $this->locale->translate($customer, 'catalog.family.back_list'),
+            'callback_data' => $originToken === null
+                ? 'family:list:'.$returnPage
+                : 'family:list:'.$returnPage.':o'.$originToken,
+        ]];
+
+        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+    }
+
+    public function openFamilyOptions(Customer $customer, string $chatId, int $familyId, int $page, int $returnPage = 1, ?int $expectedProductId = null, ?string $originToken = null, ?callable $beforeSend = null): bool
+    {
+        try {
+            $family = $this->browse->showPublicFamily($familyId);
+        } catch (ModelNotFoundException) {
+            return false;
+        }
+        $members = collect($family->members);
+        $lastPage = max(1, (int) ceil($members->count() / self::PRODUCTS_PER_PAGE));
+        if ($page < 1 || $page > $lastPage || $returnPage < 1) {
+            return false;
+        }
+        if ($expectedProductId !== null && ! $members->forPage($page, self::PRODUCTS_PER_PAGE)->contains(
+            fn (CatalogProductReadModel $member): bool => $member->id === $expectedProductId,
+        )) {
+            return false;
+        }
+
+        $origin = $originToken === null
+            ? null
+            : ($this->catalogQueries->stateForToken($customer, $originToken)
+                ?? $this->catalogQueries->originForToken($customer, $originToken));
+        if ($originToken !== null && $origin === null) {
+            return false;
+        }
+
+        $this->catalogQueries->putFamily($customer, $familyId, $page, $returnPage, $originToken, $origin);
+        if ($beforeSend !== null) {
+            $beforeSend();
+        }
+        $this->sendFamilyOptions($customer, $chatId, $familyId, $page, $returnPage, $originToken);
+
+        return true;
+    }
+
+    public function openFamilyProduct(Customer $customer, string $chatId, int $familyId, int $productId, int $page, int $returnPage = 1): bool
+    {
+        $familyState = $this->catalogQueries->familyState($customer);
+        if ($familyState === null
+            || $familyState['familyId'] !== $familyId
+            || $familyState['page'] !== $page
+            || $familyState['returnPage'] !== $returnPage) {
+            return false;
+        }
+        $originToken = is_array($familyState['origin'] ?? null)
+            ? ($familyState['origin']['token'] ?? null)
+            : null;
+
+        try {
+            $family = $this->browse->showPublicFamily($familyId);
+        } catch (ModelNotFoundException) {
+            return false;
+        }
+        $members = collect($family->members);
+        $lastPage = max(1, (int) ceil($members->count() / self::PRODUCTS_PER_PAGE));
+        if ($page < 1 || $page > $lastPage || $returnPage < 1) {
+            return false;
+        }
+        $selectedMember = $members
+            ->forPage($page, self::PRODUCTS_PER_PAGE)
+            ->first(fn (CatalogProductReadModel $member): bool => $member->id === $productId);
+        if (! $selectedMember instanceof CatalogProductReadModel) {
+            return false;
+        }
+
+        $product = Product::publicVisible()->whereKey($productId)->first();
+        if (! $product || (int) $product->product_family_id !== $familyId) {
+            return false;
+        }
+
+        if ($selectedMember->isAvailable) {
+            $selection = $this->session->get($customer);
+            if ($selection !== null
+                && $selection['mode'] === 'browsing'
+                && $selection['productId'] === $productId
+                && ($selection['familyId'] ?? null) === $familyId
+                && ($selection['familyPage'] ?? null) === $page
+                && ($selection['familyListPage'] ?? 1) === $returnPage
+                && ($selection['familyOriginToken'] ?? null) === $originToken) {
+                return true;
+            }
+        }
+        $this->sendProductDetail($customer, $chatId, $product, [
+            'familyId' => $familyId,
+            'familyPage' => $page,
+            'familyListPage' => $returnPage,
+            'familyOriginToken' => is_string($originToken) ? $originToken : null,
+        ]);
+
+        return true;
+    }
+
+    public function openCatalogOrigin(Customer $customer, string $chatId, string $originToken): bool
+    {
+        $origin = $this->catalogQueries->originForToken($customer, $originToken);
+        if ($origin === null) {
+            return false;
+        }
+        $this->session->forgetWithLock($customer);
+
+        if (($origin['type'] ?? null) === 'search' && is_string($origin['search'] ?? null)) {
+            $this->sendSearchResults($customer, $chatId, $origin['search'], (int) ($origin['page'] ?? 1));
+
+            return true;
+        }
+        if (($origin['type'] ?? null) === 'category' && is_string($origin['category'] ?? null)) {
+            $this->sendCategoryProducts($customer, $chatId, $origin['category'], (int) ($origin['page'] ?? 1));
+
+            return true;
+        }
+
+        if (($origin['type'] ?? null) === 'catalog') {
+            $this->sendCatalogPage($customer, $chatId, (int) ($origin['page'] ?? 1));
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array{type: 'product'|'family', id: int}  $intent
+     */
+    public function openStartIntent(Customer $customer, string $chatId, array $intent): bool
+    {
+        if ($intent['type'] === 'family') {
+            return $this->openFamilyOptions($customer, $chatId, $intent['id'], 1);
+        }
+
+        $product = Product::publicVisible()->whereKey($intent['id'])->first();
+        if (! $product) {
+            return false;
+        }
+
+        $this->sendProductDetail($customer, $chatId, $product);
+
+        return true;
+    }
+
+    /**
+     * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}|null  $navigation
+     */
+    public function sendProductDetail(Customer $customer, string $chatId, Product $product, ?array $navigation = null): void
     {
         $availableStock = max(0, $product->availableStock());
         if ($availableStock < 1) {
             $this->session->forget($customer);
-            $this->renderProductDetail($customer, $chatId, $product, null, $availableStock);
+            $this->renderProductDetail($customer, $chatId, $product, null, $availableStock, null, $navigation);
 
             return;
         }
@@ -65,16 +323,19 @@ class TelegramCatalogIntents
             (int) $product->getKey(),
             1,
             $this->locale->code($customer),
+            $navigation ?? [],
         );
-        $this->renderProductDetail($customer, $chatId, $product, $selection, $availableStock);
+        $this->renderProductDetail($customer, $chatId, $product, $selection, $availableStock, null, $navigation);
     }
 
     /**
-     * @param  array{productId: int, quantity: int, interactionToken: string, locale: string, mode: string}  $selection
+     * @param  array{productId: int, quantity: int, interactionToken: string, locale: string, mode: string, familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}|null  $selection
+     * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}|null  $navigation
      */
-    public function renderProductDetail(Customer $customer, string $chatId, Product $product, ?array $selection, ?int $availableStock = null, ?int $messageId = null): void
+    public function renderProductDetail(Customer $customer, string $chatId, Product $product, ?array $selection, ?int $availableStock = null, ?int $messageId = null, ?array $navigation = null): void
     {
         $availableStock ??= max(0, $product->availableStock());
+        $navigation ??= $this->navigationFromSelection($selection);
         $quantity = $selection['quantity'] ?? null;
         if ($selection !== null && $selection['mode'] === 'browsing') {
             if ($availableStock < 1 || ! is_int($quantity) || $quantity < 1) {
@@ -156,9 +417,13 @@ class TelegramCatalogIntents
                     'callback_data' => 'checkout-maintenance:status',
                 ]];
             }
+            $familyBackCallback = $this->familyOptionsCallback($navigation);
             $keyboard[] = [[
-                'text' => $this->locale->translate($customer, 'catalog.back_categories'),
-                'callback_data' => $product->category_id ? 'category:'.$product->category_id : 'category:uncategorized',
+                'text' => $familyBackCallback !== null
+                    ? $this->locale->translate($customer, 'catalog.family.back_options')
+                    : $this->locale->translate($customer, 'catalog.back_categories'),
+                'callback_data' => $familyBackCallback
+                    ?? ($product->category_id ? 'category:'.$product->category_id : 'category:uncategorized'),
             ]];
         }
 
@@ -328,127 +593,380 @@ class TelegramCatalogIntents
 
     public function sendCategoryProducts(Customer $customer, string $chatId, string $categoryId, int $page = 1): void
     {
-        $page = max(1, $page);
-        $query = Product::publicVisible()->storefrontOrder();
         $category = null;
-        if ($categoryId === 'uncategorized') {
-            $query->whereNull('category_id');
-            $title = $this->locale->translate($customer, 'catalog.uncategorized');
-        } else {
-            $category = Category::whereKey((int) $categoryId)->where('is_active', true)->first();
+        if ($categoryId !== 'uncategorized') {
+            $category = Category::query()
+                ->whereKey((int) $categoryId)
+                ->where('is_active', true)
+                ->first();
             if (! $category) {
-                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.category.unavailable'), ['inline_keyboard' => [[['text' => $this->locale->translate($customer, 'catalog.back_categories'), 'callback_data' => 'back:categories']]]]);
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.category.unavailable'), [
+                    'inline_keyboard' => [[[
+                        'text' => $this->locale->translate($customer, 'catalog.back_categories'),
+                        'callback_data' => 'catalog:categories',
+                    ]]],
+                ]);
 
                 return;
             }
-            $query->where('category_id', $category->id);
-            $title = $category->name;
         }
 
-        $totalProducts = (clone $query)->count();
-        $lastPage = max(1, (int) ceil($totalProducts / self::PRODUCTS_PER_PAGE));
-        $page = min($page, $lastPage);
-        $products = $query
-            ->withAvailability()
-            ->forPage($page, self::PRODUCTS_PER_PAGE)
-            ->get();
+        $requestedPage = max(1, $page);
+        $result = $this->browse->browsePublic(CatalogBrowseQuery::fromValues(
+            category: $categoryId,
+            page: $requestedPage,
+            perPage: self::PRODUCTS_PER_PAGE,
+        ));
+        if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
+            $this->sendStaleCatalog($customer, $chatId);
+
+            return;
+        }
+
+        $title = $category?->name ?? $this->locale->translate($customer, 'catalog.uncategorized');
+        $originToken = $this->catalogQueries->putCategory($customer, $categoryId, $result->pagination->currentPage);
+        $this->sendBrowseResult(
+            $customer,
+            $chatId,
+            $result,
+            'catalog.category.title',
+            'category',
+            $categoryId,
+            null,
+            $title,
+            $category?->description,
+            $originToken,
+        );
+    }
+
+    public function sendSearchResults(Customer $customer, string $chatId, string $keyword, int $page = 1): void
+    {
+        $search = CatalogBrowseQuery::normalizeSearch($keyword);
+        if ($search === '') {
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'search.prompt'));
+
+            return;
+        }
+
+        $requestedPage = max(1, $page);
+        $result = $this->browse->browsePublic(CatalogBrowseQuery::fromValues(
+            search: $search,
+            page: $requestedPage,
+            perPage: self::PRODUCTS_PER_PAGE,
+        ));
+        if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
+            $this->sendStaleCatalog($customer, $chatId);
+
+            return;
+        }
+        $searchToken = $this->catalogQueries->putSearch($customer, $search, $result->pagination->currentPage);
+
+        $this->sendBrowseResult($customer, $chatId, $result, 'search.title', 'search', null, $search, null, null, $searchToken);
+    }
+
+    private function sendBrowseResult(
+        Customer $customer,
+        string $chatId,
+        CatalogBrowseResult $result,
+        string $titleKey,
+        string $mode,
+        ?string $categoryId = null,
+        ?string $search = null,
+        ?string $categoryTitle = null,
+        ?string $categoryDescription = null,
+        ?string $originToken = null,
+    ): void {
         $maintenance = $this->maintenance->current();
-        $lines = [$this->locale->translate($customer, 'catalog.category.title'), '━━━━━━━━━━━━━━', $this->locale->translate($customer, 'catalog.category.label').$title];
-        if ($lastPage > 1) {
-            $lines[] = $this->locale->translate($customer, 'catalog.category.page', [
-                'page' => $page,
-                'pages' => $lastPage,
+        $title = $this->locale->translate(
+            $customer,
+            $titleKey,
+            $search === null ? [] : ['keyword' => $search],
+        );
+        if ($search !== null && ! str_contains($title, $search)) {
+            $title .= $search;
+        }
+        $pagination = $result->pagination;
+        $lines = [$title];
+        if ($categoryTitle !== null) {
+            $lines[] = $this->locale->translate($customer, 'catalog.category.label').$categoryTitle;
+        }
+        if ($pagination->hasPages()) {
+            $lines[] = $this->locale->translate($customer, 'catalog.family.page', [
+                'page' => $pagination->currentPage,
+                'pages' => $pagination->lastPage,
             ]);
         }
-        if ($category?->description) {
+        if ($categoryDescription !== null && trim($categoryDescription) !== '') {
             $lines[] = '';
-            $lines[] = $category->description;
+            $lines[] = $categoryDescription;
         }
-        if ($maintenance->active) {
+        if ($maintenance->active && $result->entries !== []) {
             $lines[] = '';
             $lines[] = $this->maintenanceNotice($customer, $maintenance);
         }
-        $lines[] = '';
-        $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
 
-        $keyboard = $this->productKeyboard($customer, $products);
-        if ($lastPage > 1) {
+        if ($result->entries === []) {
+            $message = match ($mode) {
+                'search' => $this->locale->translate($customer, 'search.no_results', ['keyword' => $search ?? '']),
+                'category' => $this->locale->translate($customer, 'catalog.category.empty'),
+                default => $this->locale->translate($customer, 'catalog.empty'),
+            };
+            if ($maintenance->active) {
+                $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
+            }
+            $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => $this->browseNavigationKeyboard($customer, $mode)]);
+
+            return;
+        }
+
+        $lines[] = '';
+        $lines[] = $this->locale->translate($customer, $mode === 'catalog'
+            ? 'catalog.family.choose_entry'
+            : 'catalog.category.choose_product');
+        foreach ($result->entries as $index => $entry) {
+            $number = $index + 1;
+            $lines[] = '';
+            $lines[] = $this->entryBlock($customer, $entry, $number);
+        }
+
+        if ($mode === 'search' && $pagination->hasPages()) {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'search.more');
+        }
+
+        $keyboard = $this->entryKeyboard($customer, $result->entries, $pagination->currentPage, $originToken);
+        if ($pagination->hasPages()) {
             $pageButtons = [];
-            if ($page > 1) {
+            if ($pagination->currentPage > 1) {
                 $pageButtons[] = [
-                    'text' => $this->locale->translate($customer, 'catalog.category.previous_page'),
-                    'callback_data' => 'category:'.$categoryId.':page:'.($page - 1),
+                    'text' => $this->locale->translate($customer, 'catalog.family.previous_page'),
+                    'callback_data' => $this->browsePageCallback($mode, $categoryId, $pagination->currentPage - 1, $originToken),
                 ];
             }
-            if ($page < $lastPage) {
+            if ($pagination->currentPage < $pagination->lastPage) {
                 $pageButtons[] = [
-                    'text' => $this->locale->translate($customer, 'catalog.category.next_page'),
-                    'callback_data' => 'category:'.$categoryId.':page:'.($page + 1),
+                    'text' => $this->locale->translate($customer, 'catalog.family.next_page'),
+                    'callback_data' => $this->browsePageCallback($mode, $categoryId, $pagination->currentPage + 1, $originToken),
                 ];
             }
             if ($pageButtons !== []) {
                 $keyboard[] = $pageButtons;
             }
         }
-        if ($this->hasMultipleCategoryOptions()) {
-            $keyboard[] = [['text' => $this->locale->translate($customer, 'catalog.category.back'), 'callback_data' => 'back:categories']];
-        }
-
-        $message = $products->isEmpty()
-            ? $this->locale->translate($customer, 'catalog.category.empty')
-            : implode("\n", $lines);
-        if ($maintenance->active && $products->isEmpty()) {
-            $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
-        }
-
-        $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => $keyboard]);
-    }
-
-    public function sendSearchResults(Customer $customer, string $chatId, string $keyword): void
-    {
-        $limit = 5;
-        $like = '%'.addcslashes(strtolower($keyword), '%_\\').'%';
-        $products = Product::query()
-            ->publicVisible()
-            ->where(function ($query) use ($like) {
-                $query->whereRaw('LOWER(name) LIKE ?', [$like])
-                    ->orWhereRaw('LOWER(description) LIKE ?', [$like])
-                    ->orWhereHas('category', fn ($category) => $category->where('is_active', true)->whereRaw('LOWER(name) LIKE ?', [$like]));
-            })
-            ->orderBy('name')
-            ->limit($limit + 1)
-            ->withAvailability()
-            ->get();
-
-        $maintenance = $this->maintenance->current();
-        if ($products->isEmpty()) {
-            $message = $this->locale->translate($customer, 'search.no_results', ['keyword' => $keyword]);
-            if ($maintenance->active) {
-                $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
-            }
-            $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => [[['text' => $this->locale->translate($customer, 'search.browse'), 'callback_data' => 'katalog']]]]);
-
-            return;
-        }
-
-        $hasMore = $products->count() > $limit;
-        $products = $products->take($limit)->values();
-        $lines = [$this->locale->translate($customer, 'search.title').$keyword, '━━━━━━━━━━━━━━', ''];
-        if ($maintenance->active) {
-            $lines[] = $this->maintenanceNotice($customer, $maintenance);
-            $lines[] = '';
-        }
-        if ($hasMore) {
-            $lines[] = '';
-            $lines[] = $this->locale->translate($customer, 'search.more');
-        }
-        $lines[] = '';
-        $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
-
-        $keyboard = $this->productKeyboard($customer, $products);
-        $keyboard[] = [['text' => $this->locale->translate($customer, 'search.browse'), 'callback_data' => 'katalog']];
+        $keyboard = [...$keyboard, ...$this->browseNavigationKeyboard($customer, $mode, includeEmptyFallback: false)];
 
         $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+    }
+
+    /**
+     * @param  list<CatalogBrowseEntry>  $entries
+     * @return list<list<array<string, mixed>>>
+     */
+    private function entryKeyboard(Customer $customer, array $entries, int $listPage = 1, ?string $originToken = null): array
+    {
+        $keyboard = [];
+        foreach ($entries as $index => $entry) {
+            $number = $index + 1;
+            $family = $entry->family;
+            $product = $entry->product;
+            if ($family !== null) {
+                $callback = 'family:options:'.$this->familyTokens->options($family->id, 1, $listPage);
+                if ($originToken !== null) {
+                    $callback .= ':o'.$originToken;
+                }
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
+                    'callback_data' => $callback,
+                    'style' => $family->isAvailable ? 'success' : 'danger',
+                ]];
+            } elseif ($product !== null) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
+                    'callback_data' => 'product:'.$product->id,
+                    'style' => $product->isAvailable ? 'success' : 'danger',
+                ]];
+            }
+        }
+
+        return $keyboard;
+    }
+
+    private function entryBlock(Customer $customer, CatalogBrowseEntry $entry, int $number): string
+    {
+        if ($entry->family !== null) {
+            $family = $entry->family;
+            $icon = $this->icons->resolve($family->name)['fallback'];
+            $block = $number.'. '.$icon.' '.$family->name."\n"
+                .$this->locale->translate($customer, 'catalog.family.summary', [
+                    'options' => $family->optionCount,
+                    'available' => $family->availableOptionCount,
+                    'price' => $family->minimumPriceAmount === null
+                        ? '-'
+                        : number_format($family->minimumPriceAmount, 0, ',', '.'),
+                ]);
+            if ($family->minimumUsdtPriceAmount !== null) {
+                $block .= "\n".$this->locale->translate($customer, 'catalog.family.usdt_price', [
+                    'amount' => $this->checkout->formatUsdt($family->minimumUsdtPriceAmount),
+                ]);
+            }
+
+            return $block;
+        }
+
+        $product = $entry->product;
+        if ($product === null) {
+            return $number.'.';
+        }
+        $icon = $this->icons->resolve($product->name)['fallback'];
+
+        return $number.'. '.$icon.' '.$product->name."\n"
+            .$this->locale->translate($customer, 'catalog.family.standalone_summary', [
+                'price' => number_format($product->priceAmount, 0, ',', '.'),
+                'stock' => $product->availableStock,
+            ]);
+    }
+
+    private function familyOptionBlock(Customer $customer, CatalogProductReadModel $member, int $number): string
+    {
+        $lines = [
+            '['.$number.'] '.$member->label,
+            $this->locale->translate($customer, 'catalog.family.option_price', [
+                'amount' => number_format($member->priceAmount, 0, ',', '.'),
+            ]),
+        ];
+        if ($member->usdtPriceAmount !== null) {
+            $lines[] = $this->locale->translate($customer, 'catalog.family.option_usdt_price', [
+                'amount' => $this->checkout->formatUsdt($member->usdtPriceAmount),
+            ]);
+        }
+        $lines[] = $this->locale->translate($customer, $member->isAvailable
+            ? 'catalog.family.option_stock'
+            : 'catalog.family.option_sold_out', [
+                'stock' => $member->availableStock,
+            ]);
+        $lines[] = $this->locale->translate($customer, 'catalog.family.option_sold', [
+            'sold' => $member->soldQuantity,
+        ]);
+
+        return implode("\n", $lines);
+    }
+
+    private function familyOptionsCallbackData(int $familyId, int $page, int $returnPage, ?string $originToken = null): string
+    {
+        $callback = 'family:options:'.$this->familyTokens->options($familyId, $page, $returnPage);
+        if (is_string($originToken) && preg_match('/\A[a-f0-9]{16}\z/D', $originToken) === 1) {
+            $callback .= ':o'.$originToken;
+        }
+
+        return $callback;
+    }
+
+    private function familySelectCallback(int $familyId, int $productId, int $page, int $returnPage): string
+    {
+        return 'family:select:'.$this->familyTokens->select($familyId, $productId, $page, $returnPage);
+    }
+
+    /**
+     * @return list<list<array<string, string>>>
+     */
+    private function browseNavigationKeyboard(Customer $customer, string $mode, bool $includeEmptyFallback = true): array
+    {
+        if ($mode === 'catalog') {
+            return [
+                [[
+                    'text' => $this->locale->translate($customer, 'catalog.family.filter_category'),
+                    'callback_data' => 'catalog:categories',
+                ]],
+                [[
+                    'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
+                    'callback_data' => 'family:back:menu',
+                ]],
+            ];
+        }
+        if ($mode === 'category') {
+            return [[[
+                'text' => $this->locale->translate($customer, 'catalog.category.back'),
+                'callback_data' => 'catalog:categories',
+            ]]];
+        }
+        if ($mode === 'search') {
+            return [[[
+                'text' => $this->locale->translate($customer, 'search.browse'),
+                'callback_data' => 'katalog',
+            ]]];
+        }
+
+        return $includeEmptyFallback ? [[[
+            'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
+            'callback_data' => 'family:back:menu',
+        ]]] : [];
+    }
+
+    private function browsePageCallback(string $mode, ?string $categoryId, int $page, ?string $searchToken = null): string
+    {
+        return match ($mode) {
+            'category' => 'category:'.$categoryId.':page:'.$page,
+            'search' => $searchToken !== null ? 'family:search:'.$searchToken.':'.$page : 'family:list:1',
+            default => 'family:list:'.$page,
+        };
+    }
+
+    private function sendStaleCatalog(Customer $customer, string $chatId): void
+    {
+        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.family.stale'), [
+            'inline_keyboard' => [[[
+                'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
+                'callback_data' => 'family:back:menu',
+            ]]],
+        ]);
+    }
+
+    /** @param  array<string, mixed>|null  $navigation */
+    private function familyOptionsCallback(?array $navigation): ?string
+    {
+        if (! is_array($navigation)
+            || ! is_int($navigation['familyId'] ?? null)
+            || $navigation['familyId'] < 1
+            || ! is_int($navigation['familyPage'] ?? null)
+            || $navigation['familyPage'] < 1) {
+            return null;
+        }
+        $familyListPage = $navigation['familyListPage'] ?? 1;
+        if (! is_int($familyListPage) || $familyListPage < 1) {
+            return null;
+        }
+
+        return $this->familyOptionsCallbackData(
+            $navigation['familyId'],
+            $navigation['familyPage'],
+            $familyListPage,
+            is_string($navigation['familyOriginToken'] ?? null) ? $navigation['familyOriginToken'] : null,
+        );
+    }
+
+    /** @param  array<string, mixed>|null  $selection */
+    /** @return array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string} */
+    private function navigationFromSelection(?array $selection): array
+    {
+        if (! is_array($selection)
+            || ! is_int($selection['familyId'] ?? null)
+            || ! is_int($selection['familyPage'] ?? null)) {
+            return [];
+        }
+
+        $navigation = [
+            'familyId' => $selection['familyId'],
+            'familyPage' => $selection['familyPage'],
+            'familyListPage' => is_int($selection['familyListPage'] ?? null) && $selection['familyListPage'] > 0
+                ? $selection['familyListPage']
+                : 1,
+        ];
+        if (is_string($selection['familyOriginToken'] ?? null)
+            && preg_match('/\A[a-f0-9]{16}\z/D', $selection['familyOriginToken']) === 1) {
+            $navigation['familyOriginToken'] = $selection['familyOriginToken'];
+        }
+
+        return $navigation;
     }
 
     private function maintenanceNotice(Customer $customer, CheckoutMaintenanceState $state): string
@@ -456,65 +974,10 @@ class TelegramCatalogIntents
         return $this->locale->translate($customer, 'checkout.maintenance').$this->locale->checkoutMaintenanceNote($customer, $state->publicNote);
     }
 
-    private function hasMultipleCategoryOptions(): bool
-    {
-        $categoryCount = Category::query()
-            ->where('is_active', true)
-            ->whereHas('products', fn ($q) => $q->where('is_active', true))
-            ->count();
-        $hasUncategorized = Product::whereNull('category_id')->where('is_active', true)->exists();
-
-        return $categoryCount + ($hasUncategorized ? 1 : 0) > 1;
-    }
-
     private function descriptionText(Customer $customer, Product $product): string
     {
         $description = trim((string) $product->description);
 
         return $description !== '' ? $description : $this->locale->translate($customer, 'catalog.description_missing');
-    }
-
-    /**
-     * @param  iterable<int, Product>  $products
-     * @return list<list<array{text: string, callback_data: string, style: string}>>
-     */
-    private function productKeyboard(Customer $customer, iterable $products): array
-    {
-        $keyboard = [];
-        foreach ($products as $product) {
-            $keyboard[] = [$this->productButton($customer, $product)];
-        }
-
-        return $keyboard;
-    }
-
-    /**
-     * @return array{text: string, callback_data: string, style: string}
-     */
-    private function productButton(Customer $customer, Product $product): array
-    {
-        $availableStock = max(0, $product->availableStock());
-
-        return [
-            'text' => $this->locale->translate($customer, 'catalog.product_button', [
-                'name' => $this->buttonProductName($product),
-                'status' => $this->locale->translate(
-                    $customer,
-                    $availableStock > 0
-                        ? 'catalog.product_button.in_stock'
-                        : 'catalog.product_button.out_of_stock',
-                ),
-                'stock' => $availableStock,
-            ]),
-            'callback_data' => 'product:'.$product->id,
-            'style' => $availableStock > 0 ? 'success' : 'danger',
-        ];
-    }
-
-    private function buttonProductName(Product $product): string
-    {
-        $name = preg_replace('/\s+/', ' ', trim((string) $product->name)) ?? '';
-
-        return $name !== '' ? $name : '-';
     }
 }

@@ -4,7 +4,6 @@ namespace App\Services\Telegram;
 
 use App\Enums\CartStatus;
 use App\Models\Customer;
-use App\Models\Product;
 use Illuminate\Support\Arr;
 
 class TelegramMessageRouter
@@ -20,6 +19,8 @@ class TelegramMessageRouter
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramIntentSession $session,
+        private TelegramStartIntentSession $startIntents,
+        private TelegramCatalogQuerySession $catalogQueries,
         private TelegramMenuIntents $menu,
         private TelegramCatalogIntents $catalog,
         private TelegramOrderIntents $orders,
@@ -44,9 +45,14 @@ class TelegramMessageRouter
 
             return;
         }
-
         if ($text === '/start' || str_starts_with($text, '/start ')) {
             $this->session->forgetWithLock($customer);
+            $this->catalogQueries->forget($customer);
+            $this->startIntents->forget($customer);
+            $startIntent = $this->startIntent($text);
+            if ($startIntent !== null) {
+                $this->startIntents->put($customer, $startIntent);
+            }
             if ($customer->locale === null) {
                 $this->menu->sendLanguagePicker($chatId, $customer);
 
@@ -55,13 +61,9 @@ class TelegramMessageRouter
             if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
                 return;
             }
-            if (($productId = $this->startProductId($text)) !== null) {
-                $product = Product::publicVisible()->whereKey($productId)->first();
-                if ($product) {
-                    $this->catalog->sendProductDetail($customer, $chatId, $product);
-
-                    return;
-                }
+            $pendingIntent = $this->startIntents->pull($customer);
+            if ($pendingIntent !== null && $this->catalog->openStartIntent($customer, $chatId, $pendingIntent)) {
+                return;
             }
             $this->menu->sendWelcome($customer, $chatId, $isPrivateChat);
 
@@ -69,6 +71,7 @@ class TelegramMessageRouter
         }
 
         if (in_array($text, ['/language', '/bahasa', '🌐 Language', '🌐 Bahasa'], true)) {
+            $this->catalogQueries->forget($customer);
             $this->menu->sendLanguagePicker($chatId, $customer);
 
             return;
@@ -118,15 +121,15 @@ class TelegramMessageRouter
 
             return;
         }
-
         if (in_array($text, ['/produk', '/products', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Browse Products'], true)) {
+            $this->catalogQueries->forget($customer);
             $this->session->forgetWithLock($customer);
             $this->catalog->sendCategoryCatalog($customer, $chatId);
 
             return;
         }
-
         if (in_array($text, ['/menu', '☰ Menu'], true)) {
+            $this->catalogQueries->forget($customer);
             $this->session->forgetWithLock($customer);
             $this->menu->sendMainMenu($customer, $chatId, $isPrivateChat);
 
@@ -290,13 +293,17 @@ class TelegramMessageRouter
             || $this->isBroadcastCommand($text);
     }
 
-    private function startProductId(string $text): ?int
+    /** @return array{type: 'product'|'family', id: int}|null */
+    private function startIntent(string $text): ?array
     {
-        if (preg_match('/^\/start\s+product_([1-9][0-9]*)$/', $text, $matches) !== 1) {
+        if (preg_match('/^\/start\s+(product|family)_([1-9][0-9]*)$/', $text, $matches) !== 1) {
             return null;
         }
 
-        return (int) $matches[1];
+        return [
+            'type' => $matches[1],
+            'id' => (int) $matches[2],
+        ];
     }
 
     private function isBroadcastCommand(string $text): bool

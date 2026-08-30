@@ -44,8 +44,10 @@ class EloquentInventoryLedger implements InventoryLedger
     public function lockedCheckoutProducts(Collection $items): Collection
     {
         $products = Product::withTrashed()
-            ->with(['category' => fn ($query) => $query->where('is_active', true)])
-            ->withAvailability()
+            ->with([
+                'category' => fn ($query) => $query->where('is_active', true),
+                'family:id,name',
+            ])
             ->whereIn('id', $items->pluck('product_id'))
             ->orderBy('id')
             ->lockForUpdate()

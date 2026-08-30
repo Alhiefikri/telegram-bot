@@ -5,7 +5,7 @@
         <div class="mb-8 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,25rem)] lg:items-end">
             <div>
                 <div class="mb-4 inline-flex items-center gap-2 rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
-                    <span>Katalog aktif · {{ $catalogPage->totalProductCount() }} produk publik</span>
+                    <span>Katalog aktif · {{ $catalogPage->totalProductCount() }} item katalog</span>
                 </div>
                 <h2 class="text-balance font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">
                     Pilih akun, cek stok, lanjut checkout.
@@ -52,11 +52,13 @@
                     @endforeach
                 </nav>
             @else
-                <x-storefront.empty-state
-                    :title="$catalogPage->emptyCategoryTitle"
-                    :body="$catalogPage->emptyCategoryBody"
-                    class="p-6"
-                />
+                @if ($catalogPage->entries()->isEmpty())
+                    <x-storefront.empty-state
+                        :title="$catalogPage->emptyCategoryTitle"
+                        :body="$catalogPage->emptyCategoryBody"
+                        class="p-6"
+                    />
+                @endif
             @endif
 
             <form action="{{ $catalogPage->searchAction }}" method="GET" class="flex shrink-0 items-center gap-2">
@@ -81,10 +83,14 @@
             'storefront-popular-card storefront-product-grid p-0 sm:p-1',
             'storefront-product-grid--single mx-auto max-w-xs' => $catalogPage->productCount() === 1,
         ])>
-            @forelse ($catalogPage->products as $catalogProduct)
-                @include('storefront.components.product-card', [
-                    'catalogProduct' => $catalogProduct,
-                ])
+            @forelse ($catalogPage->entries() as $entry)
+                @if ($entry->isFamily())
+                    @include('storefront.components.family-card', ['entry' => $entry])
+                @else
+                    @include('storefront.components.product-card', [
+                        'catalogProduct' => $entry->product,
+                    ])
+                @endif
             @empty
                 <x-storefront.empty-state
                     title="{{ $catalogPage->emptyProductsTitle }}"

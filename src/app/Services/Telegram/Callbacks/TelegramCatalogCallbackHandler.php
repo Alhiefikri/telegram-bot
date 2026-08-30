@@ -2,22 +2,29 @@
 
 namespace App\Services\Telegram\Callbacks;
 
+use App\Models\Customer;
 use App\Models\Product;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramCatalogIntents;
+use App\Services\Telegram\TelegramCatalogQuerySession;
+use App\Services\Telegram\TelegramFamilyCallbackToken;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramMenuIntents;
 
 class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
 {
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramCatalogIntents $catalog,
+        private TelegramCatalogQuerySession $catalogQueries,
+        private TelegramFamilyCallbackToken $familyTokens,
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
+        private TelegramMenuIntents $menu,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -32,17 +39,136 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
 
     public function supports(TelegramCallbackContext $context): bool
     {
-        return in_array($context->data, ['katalog', 'back:categories', 'balance'], true)
+        return in_array($context->data, ['katalog', 'back:categories', 'catalog:categories', 'family:back:menu', 'balance'], true)
             || preg_match('/^category:([1-9][0-9]*|uncategorized)(?::page:[1-9][0-9]*)?$/', $context->data) === 1
+            || preg_match('/^family:list:[1-9][0-9]{0,18}(?::o[a-f0-9]{16})?$/', $context->data) === 1
+            || preg_match('/^family:search:[a-f0-9]{16}:[1-9][0-9]{0,18}$/', $context->data) === 1
+            || preg_match('/^family:options:v[A-Za-z0-9_-]{1,48}(?::o[a-f0-9]{16})?$/', $context->data) === 1
+            || preg_match('/^family:select:v[A-Za-z0-9_-]{1,48}$/', $context->data) === 1
             || preg_match('/^product:([1-9][0-9]*)$/', $context->data) === 1;
     }
 
     public function handle(TelegramCallbackContext $context): bool
     {
-        if ($context->data === 'katalog' || $context->data === 'back:categories') {
+        if ($context->data === 'family:back:menu') {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
             $this->session->forgetWithLock($context->customer);
+            $this->catalogQueries->forget($context->customer);
+            $this->menu->sendMainMenu($context->customer, $context->chatId, $context->chatType === 'private');
+
+            return true;
+        }
+
+        if ($context->data === 'catalog:categories') {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->session->forgetWithLock($context->customer);
+            $this->catalogQueries->forget($context->customer);
+            $this->catalog->sendCategoryPicker($context->customer, $context->chatId);
+
+            return true;
+        }
+
+        if ($context->data === 'back:categories') {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->session->forgetWithLock($context->customer);
+            $this->catalogQueries->forget($context->customer);
+            $this->catalog->sendCategoryPicker($context->customer, $context->chatId);
+
+            return true;
+        }
+
+        if ($context->data === 'katalog') {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->session->forgetWithLock($context->customer);
+            $this->catalogQueries->forget($context->customer);
             $this->catalog->sendCategoryCatalog($context->customer, $context->chatId);
+
+            return true;
+        }
+
+        if (preg_match('/^family:list:([1-9][0-9]{0,18}):o([a-f0-9]{16})$/', $context->data, $matches)) {
+            $opened = $this->catalog->openCatalogOrigin($context->customer, $context->chatId, $matches[2]);
+            if ($opened) {
+                $this->session->forgetWithLock($context->customer);
+            }
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $opened ? null : $this->locale->translate($context->customer, 'catalog.selection.stale'),
+            );
+
+            return true;
+        }
+
+        if (preg_match('/^family:list:([1-9][0-9]{0,18})$/', $context->data, $matches)) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->session->forgetWithLock($context->customer);
+            $this->catalogQueries->forget($context->customer);
+            $this->catalog->sendCatalogPage($context->customer, $context->chatId, (int) $matches[1]);
+
+            return true;
+        }
+
+        if (preg_match('/^family:search:([a-f0-9]{16}):([1-9][0-9]{0,18})$/', $context->data, $matches)) {
+            $search = $this->catalogQueries->searchForToken($context->customer, $matches[1]);
+            if ($search === null) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.selection.stale'));
+
+                return true;
+            }
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->session->forgetWithLock($context->customer);
+            $this->catalog->sendSearchResults($context->customer, $context->chatId, $search, (int) $matches[2]);
+
+            return true;
+        }
+
+        if (str_starts_with($context->data, 'family:options:')) {
+            $payload = $this->decodeOptionsCallback($context->data);
+            if ($payload === null || (
+                ! isset($payload['originToken'])
+                && ! $this->acceptsUnscopedFamilyOptions($context->customer, $payload)
+            )) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.selection.stale'));
+
+                return true;
+            }
+            $opened = $this->catalog->openFamilyOptions(
+                $context->customer,
+                $context->chatId,
+                $payload['familyId'],
+                $payload['page'],
+                $payload['returnPage'],
+                originToken: $payload['originToken'] ?? null,
+                beforeSend: function () use ($context): void {
+                    $this->session->forgetWithLock($context->customer);
+                },
+            );
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $opened ? null : $this->locale->translate($context->customer, 'catalog.selection.stale'),
+            );
+
+            return true;
+        }
+        if (str_starts_with($context->data, 'family:select:')) {
+            $payload = $this->decodeSelectCallback($context->data);
+            if ($payload === null) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.selection.stale'));
+
+                return true;
+            }
+            $opened = $this->session->withLock($context->customer, fn (): bool => $this->catalog->openFamilyProduct(
+                $context->customer,
+                $context->chatId,
+                $payload['familyId'],
+                $payload['productId'],
+                $payload['page'],
+                $payload['returnPage'],
+            ));
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $opened ? null : $this->locale->translate($context->customer, 'catalog.selection.stale'),
+            );
 
             return true;
         }
@@ -50,6 +176,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
         if (preg_match('/^category:([1-9][0-9]*|uncategorized)(?::page:([1-9][0-9]*))?$/', $context->data, $matches)) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
             $this->session->forgetWithLock($context->customer);
+            $this->catalogQueries->forget($context->customer);
             $this->catalog->sendCategoryProducts(
                 $context->customer,
                 $context->chatId,
@@ -74,8 +201,8 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
 
                 return true;
             }
-
             $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->catalogQueries->forget($context->customer);
             $this->session->forgetWithLock($context->customer);
             $this->catalog->sendProductDetail($context->customer, $context->chatId, $product);
 
@@ -83,5 +210,47 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
         }
 
         return false;
+    }
+
+    /** @param array{familyId:int,page:int,returnPage:int,originToken?:string} $payload */
+    private function acceptsUnscopedFamilyOptions(Customer $customer, array $payload): bool
+    {
+        $state = $this->catalogQueries->state($customer);
+        if ($state === null) {
+            return true;
+        }
+
+        return ($state['type'] ?? null) === 'family'
+            && ($state['familyId'] ?? null) === $payload['familyId']
+            && ($state['returnPage'] ?? null) === $payload['returnPage']
+            && ! is_array($state['origin'] ?? null);
+    }
+
+    /** @return array{familyId:int,page:int,returnPage:int,originToken?:string}|null */
+    private function decodeOptionsCallback(string $data): ?array
+    {
+        if (preg_match('/^family:options:v([A-Za-z0-9_-]{1,48})(?::o([a-f0-9]{16}))?$/', $data, $matches) === 1) {
+            $payload = $this->familyTokens->decodeOptions($matches[1]);
+            if ($payload === null) {
+                return null;
+            }
+            if (isset($matches[2]) && $matches[2] !== '') {
+                $payload['originToken'] = $matches[2];
+            }
+
+            return $payload;
+        }
+
+        return null;
+    }
+
+    /** @return array{familyId:int,productId:int,page:int,returnPage:int}|null */
+    private function decodeSelectCallback(string $data): ?array
+    {
+        if (preg_match('/^family:select:v([A-Za-z0-9_-]{1,48})$/', $data, $matches) === 1) {
+            return $this->familyTokens->decodeSelect($matches[1]);
+        }
+
+        return null;
     }
 }

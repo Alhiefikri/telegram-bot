@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\User;
 use App\Storefront\StorefrontFunnelEvents;
 use App\Support\Money;
@@ -98,6 +99,7 @@ final class StorefrontFunnelReport
             'filter_options' => $this->emptyFilterOptions(),
             'summary' => $this->emptySummary(),
             'products' => [],
+            'families' => [],
             'rails' => [],
             'sources' => [],
             'failure_categories' => [],
@@ -175,6 +177,7 @@ final class StorefrontFunnelReport
         }
 
         $productId = $this->optionalInteger($filters['product_id'] ?? null, $invalid);
+        $familyId = $this->optionalInteger($filters['family_id'] ?? null, $invalid);
         $categoryId = $this->optionalCategory($filters['category_id'] ?? null, $invalid);
         $provider = $this->optionalText($filters['provider'] ?? null, $invalid);
         $rail = $this->optionalText($filters['rail'] ?? null, $invalid);
@@ -201,6 +204,7 @@ final class StorefrontFunnelReport
                 'start_date' => $start?->toDateString() ?? $defaultStart->toDateString(),
                 'end_date' => $end?->toDateString() ?? $defaultEnd->toDateString(),
                 'product_id' => $productId,
+                'family_id' => $familyId,
                 'category_id' => $categoryId,
                 'provider' => $provider,
                 'rail' => $rail,
@@ -321,6 +325,7 @@ final class StorefrontFunnelReport
             'start_date' => $today->subDays(self::DEFAULT_WINDOW_DAYS - 1)->toDateString(),
             'end_date' => $today->toDateString(),
             'product_id' => null,
+            'family_id' => null,
             'category_id' => null,
             'provider' => null,
             'rail' => null,
@@ -336,6 +341,7 @@ final class StorefrontFunnelReport
     {
         return [
             'products' => [],
+            'families' => [],
             'categories' => [],
             'providers' => $this->providerOptions(),
             'rails' => $this->railOptions(),
@@ -357,6 +363,7 @@ final class StorefrontFunnelReport
     {
         return [
             'views' => 0,
+            'family_views' => 0,
             'checkout_opens' => 0,
             'checkout_submits' => 0,
             'accepted_checkouts' => 0,
@@ -396,6 +403,10 @@ final class StorefrontFunnelReport
                     if ($productId === null && $this->isSubjectType($subjectType, Product::class)) {
                         $productId = $this->positiveId($subjectId);
                     }
+                    $familyId = $this->positiveId($values['family_id'] ?? null);
+                    $familyName = $familyId === null
+                        ? null
+                        : $this->safeEventText($values['family_name'] ?? null, 160);
 
                     $orderId = $this->safeEventText($values['order_id'] ?? null, 80);
                     if ($orderId === null && $this->isSubjectType($subjectType, Order::class)) {
@@ -404,10 +415,11 @@ final class StorefrontFunnelReport
                     if ($orderId !== null) {
                         $orderIds['o'.$orderId] = $orderId;
                     }
-
                     $event = [
                         'action' => (string) $log->action,
                         'product_id' => $productId,
+                        'family_id' => $familyId,
+                        'family_name' => $familyName,
                         'order_id' => $orderId,
                         'provider' => $this->safeEventText($values['provider'] ?? null, 40),
                         'payment_method' => $this->safeEventText($values['payment_method'] ?? null, 40),
@@ -492,6 +504,12 @@ final class StorefrontFunnelReport
                 ->orderBy('id')
                 ->limit(self::OPTION_LIMIT)
                 ->get(),
+            'catalog_families' => ProductFamily::withTrashed()
+                ->select(['id', 'name', 'slug', 'deleted_at'])
+                ->orderBy('name')
+                ->orderBy('id')
+                ->limit(self::OPTION_LIMIT)
+                ->get(),
             'catalog_categories' => Category::withTrashed()
                 ->select(['id', 'name', 'is_active', 'deleted_at'])
                 ->orderBy('name')
@@ -552,7 +570,7 @@ final class StorefrontFunnelReport
             $orders = $orders->merge(
                 Order::query()
                     ->select(['id', 'customer_id', 'total_amount', 'currency', 'payment_status', 'order_status', 'created_at'])
-                    ->with(['orderItems' => fn ($query) => $query->select(['id', 'order_id', 'product_id', 'product_name', 'subtotal'])])
+                    ->with(['orderItems' => fn ($query) => $query->select(['id', 'order_id', 'product_id', 'product_name', 'family_id', 'family_name', 'subtotal'])])
                     ->whereIn('id', $orderIdChunk)
                     ->get(),
             );
@@ -632,6 +650,7 @@ final class StorefrontFunnelReport
     {
         $overall = $this->newBucket();
         $productBuckets = [];
+        $familyBuckets = [];
         $railBuckets = [];
         $sourceBuckets = [];
         $failureCounts = [];
@@ -654,6 +673,16 @@ final class StorefrontFunnelReport
                     $productBuckets[$bucketKey] = $this->newProductBucket($productId, $context);
                 }
                 $this->recordEvent($productBuckets[$bucketKey], $event, collect: false);
+            }
+            if (($event['family_id'] ?? null) !== null) {
+                $familyKey = $this->familyBucketKey((int) $event['family_id'], $event['family_name'] ?? null);
+                if (! isset($familyBuckets[$familyKey])) {
+                    $familyBuckets[$familyKey] = $this->newFamilyBucket(
+                        (int) $event['family_id'],
+                        $event['family_name'] ?? null,
+                    );
+                }
+                $this->recordEvent($familyBuckets[$familyKey], $event, collect: false);
             }
 
             $provider = $this->eventProvider($event, $payment);
@@ -732,6 +761,21 @@ final class StorefrontFunnelReport
                 }
                 $this->recordPaid($productBuckets[$bucketKey], $order);
             }
+            $familySnapshots = [
+                ...$this->familySnapshots($matchedEventsByOrder[$orderId] ?? [], $filters['family_id'] ?? null),
+                ...$this->familySnapshotsForOrder($order, $filters['family_id'] ?? null),
+            ];
+            $uniqueFamilySnapshots = [];
+            foreach ($familySnapshots as $snapshot) {
+                $uniqueFamilySnapshots[$snapshot['id'].'|'.($snapshot['name'] ?? '')] = $snapshot;
+            }
+            foreach ($uniqueFamilySnapshots as $snapshot) {
+                $familyKey = $this->familyBucketKey($snapshot['id'], $snapshot['name']);
+                if (! isset($familyBuckets[$familyKey])) {
+                    $familyBuckets[$familyKey] = $this->newFamilyBucket($snapshot['id'], $snapshot['name']);
+                }
+                $this->recordPaid($familyBuckets[$familyKey], $order);
+            }
 
             if ($provider !== null && $rail !== null) {
                 $railKey = $provider.'|'.$rail;
@@ -756,6 +800,7 @@ final class StorefrontFunnelReport
         return [
             'summary' => $this->bucketMetrics($overall),
             'products' => $this->finalizeProductBuckets($productBuckets),
+            'families' => $this->finalizeFamilyBuckets($familyBuckets),
             'rails' => $this->finalizeRailBuckets($railBuckets),
             'sources' => $this->finalizeSourceBuckets($sourceBuckets),
             'failure_categories' => $this->finalizeCountBuckets($failureCounts, self::FAILURE_LABELS),
@@ -771,6 +816,9 @@ final class StorefrontFunnelReport
     private function matchesEvent(array $event, array $productIds, ?Payment $payment, ?Order $order, array $products, array $filters, array &$matchedEventsByOrder): bool
     {
         if (! $this->matchesProductFilter($productIds, $filters['product_id'] ?? null)) {
+            return false;
+        }
+        if (! $this->matchesFamilyFilter($event['family_id'] ?? null, $filters['family_id'] ?? null)) {
             return false;
         }
         if (! $this->matchesCategoryFilter($productIds, $filters['category_id'] ?? null, $products)) {
@@ -803,10 +851,14 @@ final class StorefrontFunnelReport
         if (! $order instanceof Order) {
             return false;
         }
-
         $productIds = $this->orderProductIds($order);
+        $familyFilter = $filters['family_id'] ?? null;
+        $familyMatches = $familyFilter === null
+            || $this->familySnapshots($matchedEventsByOrder[(string) $order->getKey()] ?? [], $familyFilter) !== []
+            || $this->familySnapshotsForOrder($order, $familyFilter) !== [];
         if (! $this->matchesProductFilter($productIds, $filters['product_id'] ?? null)
-            || ! $this->matchesCategoryFilter($productIds, $filters['category_id'] ?? null, $products)) {
+            || ! $this->matchesCategoryFilter($productIds, $filters['category_id'] ?? null, $products)
+            || ! $familyMatches) {
             return false;
         }
 
@@ -822,6 +874,11 @@ final class StorefrontFunnelReport
         }
 
         return true;
+    }
+
+    private function matchesFamilyFilter(mixed $eventFamilyId, int|string|null $filter): bool
+    {
+        return $filter === null || ($eventFamilyId !== null && (int) $eventFamilyId === (int) $filter);
     }
 
     /** @param list<int> $productIds */
@@ -869,7 +926,12 @@ final class StorefrontFunnelReport
     private function recordEvent(array &$bucket, array $event, bool $collect = false, ?array &$failureCounts = null, ?array &$supportCounts = null): void
     {
         $action = $event['action'];
-        if ($action === 'storefront.product_opened') {
+        if ($action === 'storefront.family_opened') {
+            $bucket['family_views']++;
+            if ($event['session_hash'] !== null) {
+                $bucket['_session_hashes']['s'.$event['session_hash']] = true;
+            }
+        } elseif ($action === 'storefront.product_opened') {
             $bucket['views']++;
             if ($event['session_hash'] !== null) {
                 $bucket['_session_hashes']['s'.$event['session_hash']] = true;
@@ -946,6 +1008,47 @@ final class StorefrontFunnelReport
             ->unique()
             ->values()
             ->all();
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $events
+     * @return list<array{id:int,name:?string}>
+     */
+    private function familySnapshots(array $events, int|string|null $filter = null): array
+    {
+        $snapshots = [];
+        foreach ($events as $event) {
+            $id = $this->positiveId($event['family_id'] ?? null);
+            if ($id === null || ! $this->matchesFamilyFilter($id, $filter)) {
+                continue;
+            }
+            $name = $this->safeEventText($event['family_name'] ?? null, 160);
+            $key = $id.'|'.($name ?? '');
+            $snapshots[$key] = ['id' => $id, 'name' => $name];
+        }
+
+        return array_values($snapshots);
+    }
+
+    /** @return list<array{id:int,name:?string}> */
+    private function familySnapshotsForOrder(Order $order, int|string|null $filter = null): array
+    {
+        $snapshots = [];
+        foreach ($order->orderItems as $item) {
+            $id = $this->positiveId($item->family_id ?? null);
+            if ($id === null || ! $this->matchesFamilyFilter($id, $filter)) {
+                continue;
+            }
+            $name = $this->safeEventText($item->family_name ?? null, 160);
+            $snapshots[$id.'|'.($name ?? '')] = ['id' => $id, 'name' => $name];
+        }
+
+        return array_values($snapshots);
+    }
+
+    private function familyBucketKey(int $familyId, ?string $familyName): string
+    {
+        return 'f'.$familyId.'|'.sha1((string) $familyName);
     }
 
     /** @param array<string, mixed> $event */
@@ -1088,6 +1191,15 @@ final class StorefrontFunnelReport
     }
 
     /** @return array<string, mixed> */
+    private function newFamilyBucket(int $familyId, ?string $familyName): array
+    {
+        return $this->newBucket() + [
+            'family_id' => $familyId,
+            'family_name' => $familyName ?: 'Product Family #'.$familyId,
+        ];
+    }
+
+    /** @return array<string, mixed> */
     private function newRailBucket(string $provider, string $rail): array
     {
         return $this->newBucket() + [
@@ -1125,6 +1237,7 @@ final class StorefrontFunnelReport
         return [
             'views' => (int) $bucket['views'],
             'product_views' => (int) $bucket['views'],
+            'family_views' => (int) $bucket['family_views'],
             'unique_sessions' => count($bucket['_session_hashes']),
             'checkout_opens' => (int) $bucket['checkout_opens'],
             'checkout_opened' => (int) $bucket['checkout_opens'],
@@ -1175,6 +1288,24 @@ final class StorefrontFunnelReport
         }
 
         usort($rows, fn (array $left, array $right): int => $this->compareRows($left, $right, 'product_name'));
+
+        return $rows;
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function finalizeFamilyBuckets(array $buckets): array
+    {
+        $rows = [];
+        foreach ($buckets as $bucket) {
+            $metrics = $this->bucketMetrics($bucket);
+            $metrics['views'] = (int) $metrics['views'] + (int) $metrics['family_views'];
+            $rows[] = [
+                'family_id' => $bucket['family_id'],
+                'family_name' => $bucket['family_name'],
+            ] + $metrics;
+        }
+
+        usort($rows, fn (array $left, array $right): int => $this->compareRows($left, $right, 'family_name'));
 
         return $rows;
     }
@@ -1291,6 +1422,40 @@ final class StorefrontFunnelReport
             'name' => $category->name ?: 'Kategori #'.$category->getKey(),
             'status_label' => $category->trashed() ? 'Deleted' : ($category->is_active ? 'Aktif' : 'Tidak aktif'),
         ])->values()->all();
+        $familiesById = [];
+        foreach ($context['catalog_families'] as $family) {
+            $familiesById[(int) $family->getKey()] = [
+                'id' => (int) $family->getKey(),
+                'name' => $family->name ?: 'Product Family #'.$family->getKey(),
+                'status_label' => $family->trashed() ? 'Deleted' : 'Aktif',
+            ];
+        }
+        foreach ($context['events'] as $event) {
+            $familyId = $this->positiveId($event['family_id'] ?? null);
+            if ($familyId === null || isset($familiesById[$familyId])) {
+                continue;
+            }
+            $familiesById[$familyId] = [
+                'id' => $familyId,
+                'name' => $event['family_name'] ?: 'Product Family #'.$familyId,
+                'status_label' => 'Snapshot',
+            ];
+        }
+        foreach ($context['orders'] as $order) {
+            foreach ($order->orderItems as $item) {
+                $familyId = $this->positiveId($item->family_id ?? null);
+                if ($familyId === null || isset($familiesById[$familyId])) {
+                    continue;
+                }
+                $familiesById[$familyId] = [
+                    'id' => $familyId,
+                    'name' => $this->safeEventText($item->family_name ?? null, 160) ?: 'Product Family #'.$familyId,
+                    'status_label' => 'Snapshot',
+                ];
+            }
+        }
+        $families = array_values($familiesById);
+        usort($families, static fn (array $left, array $right): int => strcmp($left['name'], $right['name']) ?: ($left['id'] <=> $right['id']));
 
         $values = fn (string $field): array => collect($context['events'])
             ->map(fn (array $event): ?string => $event[$field] === null ? null : (string) $event[$field])
@@ -1303,6 +1468,7 @@ final class StorefrontFunnelReport
 
         return [
             'products' => $products,
+            'families' => $families,
             'categories' => $categories,
             'providers' => $this->providerOptions(),
             'rails' => $this->railOptions(),

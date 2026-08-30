@@ -154,6 +154,13 @@ POST /api/webhook/telegram
 
 Handler callback didaftarkan terpusat di [`AppServiceProvider`](../../src/app/Providers/AppServiceProvider.php). Tambah handler baru ke pipeline dan tentukan stage-nya; jangan membuat router kedua.
 
+`TelegramCatalogIntents` consumes `CatalogBrowse::browsePublic()` for the
+family/standalone discovery list, optional category filter, search collapse,
+and bounded four-entry pages. Family option callbacks use the signed compact
+`TelegramFamilyCallbackToken` and resolve the existing Product ID only after
+the current public family projection and page are revalidated. Product Detail,
+quantity, payment, Cart, Order, and outbound-effect ownership remains unchanged.
+
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
 
 Untuk delivery durable, [`TelegramOutboundEffectLedgerProtocol`](../../src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php) adalah satu-satunya seam state: claim/lease, token-checked finalization, ambiguity, retry scheduling, terminal failure, dan receipt ordering. [`TelegramOutboundEffectPolicy`](../../src/app/Services/Telegram/TelegramOutboundEffectPolicy.php) memasok limit dan policy family tanpa memindahkan state machine ke adapter. `TelegramOutboundEffectService` hanya mematerialisasi effect, melakukan lookup, dan menyimpan resend history; queue mapping berada di `TelegramOutboundEffectDispatcher`. Delivery/projection adapter per family adalah `CheckoutInstructionDeliveryPipeline`, `ReceiptDeliveryPipeline`, `AdminOrderNotificationDeliveryPipeline`, `ManualPaymentProofDeliveryPipeline`, `SalesProofDeliveryPipeline`, `AdminBroadcastDeliveryPipeline`, `StockNotificationDeliveryPipeline`, dan `ProductPriceChangeNotificationService`. Jangan menambahkan claim/finalization pass-through baru ke service materializer atau job. Boundary lengkap, scope #286, recovery, dan Manual Delivery Review ada di [`telegram-outbound-effect-architecture.md`](../../docs/telegram-outbound-effect-architecture.md); migration/incident runbook ada di [`runbook-telegram-outbound-effect-contract.md`](../../docs/runbook-telegram-outbound-effect-contract.md).
@@ -179,7 +186,8 @@ mengisi `orders.telegram_receipt_sent_at` dan mengantrekan
 
 Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):
 
-- public catalog: `/`, `/produk/{product}`, `/shop`;
+- public catalog: `/`, `/shop`, `/produk-keluarga/{productFamily:slug}`, and `/produk/{product}`;
+- family discovery is built by `StorefrontFamilyPageBuilder` from the shared credential-free `CatalogBrowse` projection. `/produk-keluarga/{slug}` is canonical/indexable discovery; `/produk/{product}` remains the SKU-specific detail and waitlist contract.
 - guest cart: `GET /shop/cart`, `POST /shop/cart/items`, `PATCH /shop/cart/items/{product}`, and `DELETE /shop/cart/items/{product}`;
 - guest checkout review and submit: `GET /shop/checkout` and `POST /shop/checkout`;
 - signed invoice/order: `/shop/orders/{order}`;
@@ -189,8 +197,10 @@ Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):
 - admin: `/admin/*` di balik `admin.access`.
 `GET /shop` renders the canonical full catalog. Its bounded query state is
 `q`, `category` (public slug or id), `sort` (`recommended`, `newest`,
-`price_asc`, or `price_desc`), and `page`; pagination and category links carry
-only normalized state. The homepage remains the curated, cached entry point.
+`price_asc`, or `price_desc`), and `page`; the shared `CatalogBrowse` projection
+collapses Product Family members into one card while retaining standalone
+Products. Pagination and category links carry only normalized state. The
+homepage remains the curated, cached entry point.
 
 `StorefrontGuestCart` binds the active guest Cart to the server-side
 storefront session key and creates a fresh web Customer when the previous Cart
