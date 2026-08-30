@@ -65,11 +65,14 @@
                         <span class="rounded-full border-2 border-[var(--sf-border)] bg-[#c94856] px-2 py-1 text-[9px] font-black text-white">
                             {{ $presentation->soldLabel }}
                         </span>
+                        <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-2 py-1 text-[9px] font-black text-[var(--sf-ink)]">
+                            {{ $presentation->stockLabel }}
+                        </span>
                     </div>
 
-                    <span class="inline-flex h-11 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-2 text-xs font-black text-[var(--sf-ink)] sm:px-3 sm:text-sm">
-                        {{ $presentation->cardActionLabel }}
-                    </span>
+                    <a href="{{ $productUrl }}#waitlist" class="inline-flex h-11 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-2 text-xs font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] sm:px-3 sm:text-sm">
+                        {{ $presentation->waitlistCtaLabel }}
+                    </a>
                 </div>
             </div>
         </div>

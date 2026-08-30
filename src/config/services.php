@@ -205,6 +205,13 @@ return [
         'invoice_url_ttl_days' => (int) env('STOREFRONT_INVOICE_URL_TTL_DAYS', 7),
         'credential_access_rate_limit_per_minute' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_RATE_LIMIT_PER_MINUTE', 5),
         'credential_access_session_minutes' => (int) env('STOREFRONT_CREDENTIAL_ACCESS_SESSION_MINUTES', 30),
+        'waitlist_hash_key' => env('STOREFRONT_WAITLIST_HASH_KEY'),
+        'waitlist_confirmation_ttl_minutes' => (int) env('STOREFRONT_WAITLIST_CONFIRMATION_TTL_MINUTES', 60),
+        'waitlist_unsubscribe_ttl_days' => (int) env('STOREFRONT_WAITLIST_UNSUBSCRIBE_TTL_DAYS', 30),
+        'waitlist_max_recipients_per_event' => (int) env('STOREFRONT_WAITLIST_MAX_RECIPIENTS_PER_EVENT', 500),
+        'waitlist_ip_rate_limit_per_hour' => (int) env('STOREFRONT_WAITLIST_IP_RATE_LIMIT_PER_HOUR', 30),
+        'waitlist_email_rate_limit_per_hour' => (int) env('STOREFRONT_WAITLIST_EMAIL_RATE_LIMIT_PER_HOUR', 5),
+        'waitlist_product_rate_limit_per_hour' => (int) env('STOREFRONT_WAITLIST_PRODUCT_RATE_LIMIT_PER_HOUR', 100),
     ],
 
     'support' => [

@@ -34,6 +34,9 @@ final readonly class StorefrontProductPresentation
         public bool $checkoutMaintenanceActive = false,
         public ?string $checkoutMaintenanceNotice = null,
         public ?int $usdtPriceAmount = null,
+        public bool $canJoinWaitlist = false,
+        public string $waitlistUrl = '',
+        public string $waitlistCtaLabel = 'Beri tahu saya saat tersedia',
     ) {}
 
     public function checkoutChoice(string $key): ?StorefrontProductCheckoutChoice

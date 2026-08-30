@@ -33,6 +33,7 @@ final class ProductStockIntake
     public function __construct(
         private readonly AuditLogger $auditLogger,
         private readonly StockNotificationDeliveryPipeline $stockNotifications,
+        private readonly ProductWaitlistNotificationService $waitlistNotifications,
         private readonly CredentialDeliveryFormatter $credentialFormatter,
         private readonly CredentialIdentityFingerprint $fingerprints,
         private readonly CredentialIdentityBackfillReadinessService $identityBackfillReadiness,
@@ -158,6 +159,7 @@ final class ProductStockIntake
 
                 if ($itemCount > 0) {
                     $this->stockNotifications->materialize($movement->id);
+                    $this->waitlistNotifications->scheduleForMovement($movement->id);
                     if ($dispatchNotifications) {
                         DB::afterCommit(fn (): mixed => SendProductStockNotifications::dispatch($movement->id)
                             ->onQueue(StockNotificationDeliveryPipeline::QUEUE));

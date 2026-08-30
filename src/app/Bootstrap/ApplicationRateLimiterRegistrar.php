@@ -165,6 +165,30 @@ class ApplicationRateLimiterRegistrar
 
         $this->rateLimiter->for('customer-login-consume', fn (Request $request) => Limit::perMinutes(15, 10)->by('customer:login:consume:'.($request->ip() ?: 'unknown')));
         $this->rateLimiter->for('customer-order-claim', fn (Request $request) => Limit::perMinutes(15, 5)->by('customer:claim:'.($request->user('customer')?->getAuthIdentifier() ?? 'unknown').':'.($request->ip() ?: 'unknown')));
+        $this->rateLimiter->for('storefront-waitlist', function (Request $request) {
+            $product = $request->route('product');
+            $productId = is_object($product) && method_exists($product, 'getKey')
+                ? (string) $product->getKey()
+                : trim((string) $product);
+            $productId = $productId !== '' ? $productId : 'unknown';
+            $ip = $request->ip() ?: 'unknown';
+            $email = $request->input('email');
+            $email = is_string($email) ? mb_strtolower(trim($email)) : '';
+            $hashKey = trim((string) $this->config->get('services.storefront.waitlist_hash_key', ''));
+            if ($hashKey === '') {
+                $hashKey = (string) $this->config->get('app.key', '');
+            }
+            $emailKey = $email === '' ? 'unknown' : hash_hmac('sha256', $email, $hashKey);
+            $ipLimit = max(1, (int) $this->config->get('services.storefront.waitlist_ip_rate_limit_per_hour', 30));
+            $emailLimit = max(1, (int) $this->config->get('services.storefront.waitlist_email_rate_limit_per_hour', 5));
+            $productLimit = max(1, (int) $this->config->get('services.storefront.waitlist_product_rate_limit_per_hour', 100));
+
+            return [
+                Limit::perHour($ipLimit)->by('storefront:waitlist:ip:'.$ip.':product:'.$productId),
+                Limit::perHour($emailLimit)->by('storefront:waitlist:email:'.$emailKey.':product:'.$productId),
+                Limit::perHour($productLimit)->by('storefront:waitlist:product:'.$productId),
+            ];
+        });
     }
 
     private function hasTrustedTelegramWebhookSecret(Request $request): bool

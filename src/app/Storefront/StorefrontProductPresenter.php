@@ -90,6 +90,9 @@ class StorefrontProductPresenter
             checkoutMaintenanceActive: $maintenanceState->active,
             checkoutMaintenanceNotice: StorefrontCheckoutMaintenanceCopy::notice($maintenanceState),
             usdtPriceAmount: $product->usdt_price_amount !== null ? (int) $product->usdt_price_amount : null,
+            canJoinWaitlist: ! $isAvailable,
+            waitlistUrl: route('storefront.waitlist.store', ['product' => $product->getKey()]),
+            waitlistCtaLabel: (string) config('storefront.waitlist.cta', 'Beri tahu saya saat tersedia'),
         );
     }
 

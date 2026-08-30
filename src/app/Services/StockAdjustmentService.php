@@ -17,6 +17,7 @@ class StockAdjustmentService
         private readonly AuditLogger $auditLogger,
         private readonly StockNotificationDeliveryPipeline $stockNotifications,
         private readonly ProductStockIntake $stockIntake,
+        private readonly ProductWaitlistNotificationService $waitlistNotifications,
     ) {}
 
     /**
@@ -98,6 +99,7 @@ class StockAdjustmentService
 
             if ($delta > 0) {
                 $this->stockNotifications->materialize($movement->id);
+                $this->waitlistNotifications->scheduleForMovement($movement->id);
             }
 
             $this->auditLogger->log('product.stock_adjusted', $locked, $old, ['stock' => $newStock, 'reserved_stock' => $locked->reserved_stock, 'delta' => $delta, 'notes' => $notes], $user, $ip);

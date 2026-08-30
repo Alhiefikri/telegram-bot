@@ -21,6 +21,7 @@ Schedule::command('telegram:forward-payment-proofs --chunk=100')->everyMinute()-
 // full day (Laravel's default withoutOverlapping expiry is 24 hours).
 Schedule::command('telegram:recover-outbound --queue=notifications')->everyMinute()->withoutOverlapping(10);
 Schedule::command('telegram:reconcile-stock-notifications --chunk=100')->everyMinute()->withoutOverlapping();
+Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
 Schedule::command('ops:payment-lifecycle-rollout-report')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping();
 Schedule::command('customers:cleanup-login-links --chunk=500')->hourly()->withoutOverlapping();

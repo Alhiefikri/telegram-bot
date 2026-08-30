@@ -50,6 +50,7 @@ use App\Http\Controllers\StorefrontShopOrderQrisController;
 use App\Http\Controllers\StorefrontShopOrderStatusController;
 use App\Http\Controllers\StorefrontSitemapController;
 use App\Http\Controllers\StorefrontVerifiedPurchaseActivityController;
+use App\Http\Controllers\StorefrontWaitlistController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/robots.txt', StorefrontRobotsController::class)->name('storefront.robots');
@@ -63,6 +64,13 @@ Route::get('/syarat-ketentuan', [StorefrontPolicyController::class, 'terms'])->n
 Route::get('/refund', [StorefrontPolicyController::class, 'refund'])->name('storefront.policies.refund');
 Route::get('/pemulihan-pesanan', [StorefrontPolicyController::class, 'recovery'])->name('storefront.policies.recovery');
 Route::get('/produk/{product}', StorefrontProductController::class)->name('storefront.products.show');
+Route::post('/produk/{product}/waitlist', [StorefrontWaitlistController::class, 'store'])
+    ->middleware('throttle:storefront-waitlist')
+    ->name('storefront.waitlist.store');
+Route::get('/waitlist/confirm/{subscription}', [StorefrontWaitlistController::class, 'confirm'])
+    ->name('storefront.waitlist.confirm');
+Route::get('/waitlist/unsubscribe/{subscription}', [StorefrontWaitlistController::class, 'unsubscribe'])
+    ->name('storefront.waitlist.unsubscribe');
 Route::get('/aktivitas-pembelian-terverifikasi', StorefrontVerifiedPurchaseActivityController::class)
     ->middleware('throttle:storefront-verified-purchase-activity')
     ->name('storefront.verified-purchase-activity');

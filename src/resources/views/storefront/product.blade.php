@@ -38,6 +38,11 @@
                         {{ session('storefront_notice') }}
                     </x-storefront.notice>
                 @endif
+                @if (session('storefront_waitlist_notice'))
+                    <x-storefront.notice class="mt-6" tone="success">
+                        {{ session('storefront_waitlist_notice') }}
+                    </x-storefront.notice>
+                @endif
 
                 <div class="mt-6 grid gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-start">
                     <div class="neo-panel overflow-hidden bg-[var(--sf-surface)]">
@@ -172,13 +177,13 @@
                                     >
                                         {{ $presentation->primaryCheckoutChoice()?->label ?? $copy['shop']['checkout_cta'] }}
                                     </x-storefront.button>
+                                @elseif (! $isAvailable)
+                                    <x-storefront.button href="#waitlist" variant="danger" class="flex-1" id="product-waitlist-cta">
+                                        {{ $presentation->waitlistCtaLabel }}
+                                    </x-storefront.button>
                                 @elseif ($checkoutMaintenanceActive)
                                     <x-storefront.button variant="warning" class="flex-1 cursor-not-allowed opacity-80" disabled>
                                         Checkout sedang maintenance
-                                    </x-storefront.button>
-                                @elseif (! $isAvailable)
-                                    <x-storefront.button variant="danger" class="flex-1 cursor-not-allowed opacity-80" disabled>
-                                        Habis
                                     </x-storefront.button>
                                 @else
                                     <x-storefront.button variant="warning" class="flex-1 cursor-not-allowed opacity-80" disabled>
@@ -198,6 +203,22 @@
                                 'supportId' => 'product-support',
                                 'supportClass' => 'mt-6',
                             ])
+
+                            @if ($presentation->canJoinWaitlist)
+                                <section id="waitlist" class="mt-6 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4" aria-labelledby="waitlist-title">
+                                    <h2 id="waitlist-title" class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $copy['waitlist']['title'] }}</h2>
+                                    <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $copy['waitlist']['body'] }}</p>
+                                    <form method="POST" action="{{ $presentation->waitlistUrl }}" class="mt-4 grid gap-3">
+                                        @csrf
+                                        <label for="waitlist-email" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['waitlist']['email_label'] }}</label>
+                                        <input id="waitlist-email" name="email" type="email" required maxlength="254" autocomplete="email" value="{{ old('email') }}" placeholder="{{ $copy['waitlist']['email_placeholder'] }}" class="neo-input h-12 bg-white px-3 text-base font-bold">
+                                        @error('email')
+                                            <p role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
+                                        @enderror
+                                        <button type="submit" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">{{ $copy['waitlist']['submit'] }}</button>
+                                    </form>
+                                </section>
+                            @endif
 
                             @if ($presentation->isBuyable)
                                 <noscript>

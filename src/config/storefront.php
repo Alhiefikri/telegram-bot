@@ -90,6 +90,28 @@ return [
         'checkout_cta' => 'Bayar QRIS di Website',
     ],
 
+    'waitlist' => [
+        'cta' => 'Beri tahu saya saat tersedia',
+        'title' => 'Dapatkan kabar saat stok tersedia',
+        'body' => 'Masukkan email Anda. Kami akan mengirim tautan konfirmasi, lalu satu notifikasi saat produk ini tersedia kembali.',
+        'email_label' => 'Alamat email',
+        'email_placeholder' => 'nama@contoh.com',
+        'submit' => 'Kirim permintaan',
+        'notices' => [
+            'pending_confirmation' => 'Jika alamat email valid, tautan konfirmasi akan dikirim. Periksa inbox dan folder spam Anda.',
+            'success' => 'Permintaan notifikasi sudah dikonfirmasi.',
+            'already_requested' => 'Permintaan notifikasi ini sudah dikonfirmasi sebelumnya.',
+            'unsubscribed' => 'Anda tidak akan menerima notifikasi lagi untuk produk ini.',
+            'expired_link' => 'Tautan ini tidak valid, sudah digunakan, atau sudah kedaluwarsa.',
+        ],
+        'result_titles' => [
+            'success' => 'Permintaan dikonfirmasi',
+            'already_requested' => 'Permintaan sudah tercatat',
+            'unsubscribed' => 'Notifikasi dihentikan',
+            'expired_link' => 'Tautan tidak tersedia',
+        ],
+    ],
+
     'featured' => [
         'eyebrow' => 'Pilihan utama dari admin',
         'empty_title' => 'Belum ada pilihan utama.',
@@ -224,7 +246,7 @@ return [
                 [
                     'title' => 'Data yang kami pakai',
                     'items' => [
-                        'Nama pembeli, email pelanggan bila Anda membuat akun, nomor invoice, item pesanan, status pembayaran, dan catatan operasional yang dibutuhkan untuk memenuhi pesanan.',
+                        'Nama pembeli, email pelanggan bila Anda membuat akun, dan email waitlist bila Anda meminta notifikasi stok; email waitlist disimpan terenkripsi dan hanya dipakai untuk konfirmasi serta satu notifikasi ketersediaan produk.',
                         'Data pembayaran yang diterima dari penyedia QRIS atau pembayaran lain, seperti status transaksi, nominal, referensi pembayaran, dan waktu konfirmasi.',
                         'Pesan support yang Anda kirim melalui WhatsApp atau Telegram admin untuk membantu verifikasi masalah pesanan.',
                     ],
