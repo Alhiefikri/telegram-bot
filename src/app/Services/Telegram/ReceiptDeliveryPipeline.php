@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Jobs\DeleteBuyerCheckoutMessages;
@@ -133,6 +134,68 @@ final class ReceiptDeliveryPipeline
         }
     }
 
+    /**
+     * Repair Order projections for receipt groups that already finished.
+     *
+     * Recovery only examines sent ledger rows; it never dispatches a receipt
+     * effect. The conditional projection update fences concurrent recovery
+     * scans and keeps cleanup dispatch idempotent. Recovery passes
+     * `dispatchCleanup: false` so the command's existing cleanup scan retains
+     * its eligibility and stale-claim behavior.
+     */
+    public function reconcileCompletedProjections(int $chunk = 100, bool $dispatchCleanup = true): array
+    {
+        $repairedOrderIds = [];
+        Order::query()
+            ->whereNull('telegram_receipt_sent_at')
+            ->whereHas('telegramOutboundEffects', function ($effects): void {
+                $effects
+                    ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
+                    ->where('state', TelegramOutboundEffectState::Sent->value)
+                    ->whereNotNull('effect_group_key');
+            })
+            ->select('id')
+            ->orderBy('id')
+            ->chunkById(max(1, $chunk), function ($orders) use (&$repairedOrderIds, $dispatchCleanup): void {
+                $orderIds = $orders->modelKeys();
+                if ($orderIds === []) {
+                    return;
+                }
+
+                $sentEffects = TelegramOutboundEffect::query()
+                    ->where('source_type', Order::class)
+                    ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
+                    ->where('state', TelegramOutboundEffectState::Sent->value)
+                    ->whereNotNull('effect_group_key')
+                    ->whereIn('source_id', array_map(
+                        static fn ($id): string => (string) $id,
+                        $orderIds,
+                    ))
+                    ->orderBy('source_id')
+                    ->orderBy('effect_group_key')
+                    ->orderBy('sequence')
+                    ->get()
+                    ->groupBy(fn (TelegramOutboundEffect $effect): string => (string) $effect->source_id);
+
+                foreach ($orders as $order) {
+                    $effectsForOrder = $sentEffects->get((string) $order->getKey());
+                    if ($effectsForOrder === null) {
+                        continue;
+                    }
+
+                    foreach ($effectsForOrder->groupBy('effect_group_key') as $group) {
+                        $last = $group->last();
+                        if ($last !== null && $this->synchronizeSentProjection($last, $order->getKey(), dispatchCleanup: $dispatchCleanup)) {
+                            $repairedOrderIds[] = (string) $order->getKey();
+                            break;
+                        }
+                    }
+                }
+            });
+
+        return $repairedOrderIds;
+    }
+
     private function receiptIsEligible(Order $order): bool
     {
         return $order->payment_status === PaymentStatus::Paid
@@ -186,14 +249,17 @@ final class ReceiptDeliveryPipeline
                 && $effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE);
     }
 
-    private function synchronizeSentProjection(TelegramOutboundEffect $effect, int|string $orderId): void
-    {
+    private function synchronizeSentProjection(
+        TelegramOutboundEffect $effect,
+        int|string $orderId,
+        bool $dispatchCleanup = true,
+    ): bool {
         if (! in_array($effect->effect_group_key, [
             TelegramOutboundEffectService::receiptEffectGroupKey((string) $orderId),
             TelegramOutboundEffectService::receiptTextFallbackEffectGroupKey((string) $orderId),
             TelegramOutboundEffectService::legacyReceiptEffectGroupKey((string) $orderId),
         ], true)) {
-            return;
+            return false;
         }
 
         $hasUnsentTextUnit = TelegramOutboundEffect::query()
@@ -202,7 +268,7 @@ final class ReceiptDeliveryPipeline
             ->get()
             ->contains(fn (TelegramOutboundEffect $candidate): bool => ! $this->isInvoiceEffect($candidate));
         if ($hasUnsentTextUnit) {
-            return;
+            return false;
         }
 
         $updated = Order::query()
@@ -213,9 +279,15 @@ final class ReceiptDeliveryPipeline
                 'updated_at' => now(),
             ]);
 
-        if ($updated === 1) {
+        if ($updated !== 1) {
+            return false;
+        }
+
+        if ($dispatchCleanup) {
             $this->dispatchReceiptCleanup($orderId);
         }
+
+        return true;
     }
 
     private function isExplicitReceiptEffect(TelegramOutboundEffect $effect): bool

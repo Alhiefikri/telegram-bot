@@ -33,7 +33,9 @@ class RecoverTelegramOutboundEffects extends Command
         $outboundEffects = app(TelegramOutboundEffectService::class);
         $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
         $dispatcher = app(TelegramOutboundEffectDispatcher::class);
-        $staleLeases = app(TelegramOutboundEffectRecovery::class)->recoverExpiredLeases(now());
+        $recovery = app(TelegramOutboundEffectRecovery::class);
+        $staleLeases = $recovery->recoverExpiredLeases(now());
+        $recovery->reconcileCompletedReceiptProjections((int) $this->option('chunk'));
 
         $ledger->readyToDispatchQuery(now())
             ->whereIn('effect_type', [
@@ -196,7 +198,8 @@ class RecoverTelegramOutboundEffects extends Command
                                 ->where('unfinished_receipt_effects.effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
                                 ->where('unfinished_receipt_effects.state', '<>', 'sent')
                                 ->whereRaw('unfinished_receipt_effects.source_id = CAST(orders.id AS TEXT)');
-                        });
+                        })
+                        ->orWhereNotNull('telegram_receipt_sent_at');
                 })
                     ->orWhere('order_status', 'cancelled')
                     ->orWhereHas('payments', fn ($payments) => $payments->where('provider', PaymentProvider::MANUAL)->where('method', 'BINANCE_PAY_ID'));

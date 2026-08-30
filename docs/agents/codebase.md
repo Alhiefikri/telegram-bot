@@ -182,6 +182,11 @@ child `sent`; group legacy tetap memakai aturan non-invoice lama. Pipeline lalu
 mengisi `orders.telegram_receipt_sent_at` dan mengantrekan
 `DeleteBuyerCheckoutMessages`.
 
+Scheduled recovery rechecks deterministic receipt groups whose children are
+already `sent` when the Order marker is null. It repairs the marker; the
+command's cleanup scan then applies normal eligibility and queues the cleanup
+without redispatching the receipt.
+
 ### 4.2 Web Storefront
 
 Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):

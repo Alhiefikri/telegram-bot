@@ -62,11 +62,20 @@ completion rule holds, then dispatches the best-effort
 `DeleteBuyerCheckoutMessages` cleanup. Cleanup does not alter the invoice
 ledger outcome, delete review history, or trigger an automatic resend.
 
+Scheduled recovery repeats this projection step for deterministic receipt groups
+whose children are already `sent` while the Order marker is still null. The
+conditional marker update is idempotent; the command's existing cleanup scan
+then applies normal cleanup eligibility and queues the unique handoff.
+Recovery never dispatches a receipt effect for this case.
+
 The focused contract is covered by
 `TelegramReceiptOutboundEffectTest::test_invoice_failure_dispatches_product_detail_and_completion_ignores_photo_failure`,
 `TelegramReceiptOutboundEffectTest::test_ambiguous_invoice_is_unknown_but_product_detail_still_delivers`,
 and
 `TelegramReceiptOutboundEffectTest::test_ordered_receipt_stops_after_an_ambiguous_credential_unit_without_resending_previous_units`.
+
+`TelegramReceiptOutboundEffectTest::test_recovery_repairs_a_complete_sent_receipt_without_resending_it`
+also covers recovery after the ledger projection window.
 
 
 ### Deferred Admin Broadcast materialization

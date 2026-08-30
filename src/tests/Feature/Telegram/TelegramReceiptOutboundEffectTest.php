@@ -8,6 +8,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Exceptions\TelegramOutboundPreSendException;
+use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
 use App\Models\Order;
@@ -516,6 +517,86 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             fn (SendTelegramReceipt $job): bool => $job->orderId === (string) $order->id
                 && $job->effectId !== null,
         );
+    }
+
+    public function test_recovery_repairs_a_complete_sent_receipt_without_resending_it(): void
+    {
+        Queue::fake();
+        $order = $this->multiChunkPaidOrder();
+        $first = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $this->assertNotNull($first);
+
+        $sentAt = now()->subMinute();
+        TelegramOutboundEffect::query()
+            ->where('effect_group_key', $first->effect_group_key)
+            ->get()
+            ->each(function (TelegramOutboundEffect $effect) use ($sentAt): void {
+                $effect->forceFill([
+                    'state' => TelegramOutboundEffectState::Sent,
+                    'telegram_message_id' => (string) (880000 + (int) $effect->sequence),
+                    'sent_at' => $sentAt,
+                ])->save();
+            });
+        $order->forceFill([
+            'buyer_order_detail_message_chat_id' => (string) $order->customer->telegram_id,
+            'buyer_order_detail_message_id' => 880099,
+        ])->save();
+
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        Queue::assertPushedOn(
+            'notifications',
+            DeleteBuyerCheckoutMessages::class,
+            fn (DeleteBuyerCheckoutMessages $job): bool => $job->orderId === (string) $order->id,
+        );
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        Queue::assertPushedTimes(DeleteBuyerCheckoutMessages::class, 1);
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+    }
+
+    public function test_recovery_repairs_a_complete_legacy_receipt_with_unresolved_invoice(): void
+    {
+        Queue::fake();
+        $order = $this->paidOrderWithoutCredentials();
+        $first = $this->recordLegacyReceiptGroup($order);
+
+        $sentAt = now()->subMinute();
+        TelegramOutboundEffect::query()
+            ->where('effect_group_key', $first->effect_group_key)
+            ->update([
+                'state' => TelegramOutboundEffectState::Sent->value,
+                'telegram_message_id' => '881000',
+                'sent_at' => $sentAt,
+            ]);
+        DB::table('telegram_outbound_effects')->where('id', $first->id)->update([
+            'state' => TelegramOutboundEffectState::Unknown->value,
+            'telegram_message_id' => null,
+            'sent_at' => null,
+            'unknown_at' => $sentAt,
+        ]);
+        DB::table('orders')->where('id', $order->id)->update([
+            'buyer_order_detail_message_chat_id' => (string) $order->customer->telegram_id,
+            'buyer_order_detail_message_id' => 881099,
+        ]);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        Queue::assertPushedOn(
+            'notifications',
+            DeleteBuyerCheckoutMessages::class,
+            fn (DeleteBuyerCheckoutMessages $job): bool => $job->orderId === (string) $order->id,
+        );
+        Queue::assertNotPushed(SendTelegramReceipt::class);
     }
 
     public function test_ordered_receipt_stops_after_an_ambiguous_credential_unit_without_resending_previous_units(): void

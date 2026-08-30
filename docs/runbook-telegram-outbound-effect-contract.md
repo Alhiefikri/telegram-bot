@@ -82,7 +82,13 @@ php artisan telegram:recover-outbound --chunk=100 --queue=notifications
 ```
 
 The command first asks `TelegramOutboundEffectRecovery` to fence expired
-`sending` leases as `unknown`. It then selects only due `pending` and
+`sending` leases as `unknown`. It then asks `ReceiptDeliveryPipeline` to
+reconcile deterministic receipt groups whose children are already `sent` but
+whose `orders.telegram_receipt_sent_at` marker is still null. That repair uses
+the same completion rule as normal delivery and conditionally writes the
+marker. The command's existing cleanup scan then applies normal eligibility
+and queues the unique cleanup job; it never dispatches the receipt again.
+After projection repair, recovery selects only due `pending` and
 policy-retryable `failed` ledger rows and dispatches them through
 `TelegramOutboundEffectDispatcher`. It also discovers committed source rows
 whose deterministic effect is missing and redispatches recoverable Admin

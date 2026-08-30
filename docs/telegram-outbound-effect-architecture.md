@@ -175,6 +175,10 @@ cover the invoice exception, while
 `test_ordered_receipt_stops_after_an_ambiguous_credential_unit_without_resending_previous_units`
 proves that a later unit remains pending after credential ambiguity.
 
+`test_recovery_repairs_a_complete_sent_receipt_without_resending_it` proves
+that recovery repairs a lost completion projection without redispatching the
+receipt.
+
 ## Operational recovery
 
 The scheduler runs `telegram:recover-outbound --queue=notifications` every
@@ -184,15 +188,20 @@ delivery recovery in this order:
 
 1. TelegramOutboundEffectRecovery asks the ledger protocol to turn expired
    sending leases into unknown, fencing the old claim token.
-2. The command selects due pending and retryable failed ledger rows through
+2. ReceiptDeliveryPipeline scans sent receipt rows whose Order marker is still
+   null and applies the same group-completion rule as normal delivery. It
+   conditionally writes the marker; the command's existing cleanup
+   reconciliation scan then queues the idempotent cleanup handoff. It never
+   dispatches a receipt effect.
+3. The command selects due pending and retryable failed ledger rows through
    readyToDispatchQuery() and dispatches them through
    TelegramOutboundEffectDispatcher.
-3. It materializes missing checkout, receipt, admin notification, Sales Proof
+4. It materializes missing checkout, receipt, admin notification, Sales Proof
    Post, stock, and price effects from committed source state when the
    deterministic effect key proves that the effect is absent.
-4. It redispatches recoverable Admin Broadcast handoffs through the same locked
+5. It redispatches recoverable Admin Broadcast handoffs through the same locked
    broadcast queue boundary.
-5. Non-ledger cleanup work, such as deleting old customer-facing checkout
+6. Non-ledger cleanup work, such as deleting old customer-facing checkout
    messages, remains a separate cleanup job and is not treated as delivery
    claim authority.
 

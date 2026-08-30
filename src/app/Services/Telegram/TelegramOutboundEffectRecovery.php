@@ -11,7 +11,7 @@ use Carbon\CarbonInterface;
 /**
  * Coordinates lease recovery with family read-projection repair. The ledger
  * protocol performs the only state transition; family adapters only refresh
- * projections that describe the newly recovered unknown outcome.
+ * projections for recovered unknown outcomes or completed receipt delivery.
  */
 final class TelegramOutboundEffectRecovery
 {
@@ -19,7 +19,21 @@ final class TelegramOutboundEffectRecovery
         private readonly TelegramOutboundEffectLedgerProtocol $ledger,
         private readonly AdminBroadcastDeliveryPipeline $broadcasts,
         private readonly SalesProofDeliveryPipeline $salesProof,
+        private readonly ReceiptDeliveryPipeline $receipts,
     ) {}
+
+    /**
+     * Repair completed buyer receipt projections without dispatching receipts.
+     *
+     * The command's cleanup reconciliation scan owns the follow-up cleanup
+     * handoff so existing cleanup eligibility and claim recovery stay intact.
+     *
+     * @return list<string> Order IDs whose receipt marker was repaired.
+     */
+    public function reconcileCompletedReceiptProjections(int $chunk = 100): array
+    {
+        return $this->receipts->reconcileCompletedProjections($chunk, dispatchCleanup: false);
+    }
 
     public function recoverExpiredLeases(?CarbonInterface $before = null): int
     {
