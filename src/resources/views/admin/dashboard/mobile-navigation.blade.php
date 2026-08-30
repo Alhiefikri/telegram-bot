@@ -49,7 +49,7 @@
                         type="button"
                         x-on:click="openMoreMenu()"
                         class="flex min-w-0 w-full flex-col items-center gap-1 rounded-2xl px-1.5 py-2 text-white/80 transition-all duration-200"
-                        :class="moreMenuOpen || ['broadcast', 'telegram-channel', 'riwayat', 'withdraw'].includes(activeTab) ? 'bottom-nav-active' : ''"
+                        :class="moreMenuOpen || ['broadcast', 'telegram-channel', 'riwayat', 'withdraw', 'funnel'].includes(activeTab) ? 'bottom-nav-active' : ''"
                         x-bind:aria-expanded="moreMenuOpen"
                         aria-haspopup="dialog"
                         aria-controls="admin-more-menu"
@@ -117,6 +117,15 @@
                         >
                             Riwayat KlikQRIS
                         </button>
+                        @if ($canViewFunnel)
+                            <button
+                                type="button"
+                                class="admin-dashboard-action min-h-11 rounded-neo-2xl border-[3px] border-neo-ink bg-white px-3 py-2 text-left text-xs font-black uppercase tracking-wide shadow-neo-sm"
+                                x-on:click="goToTabFromMore('funnel')"
+                            >
+                                Funnel storefront
+                            </button>
+                        @endif
                         @if ($canViewWithdraw)
                             <button
                                 type="button"

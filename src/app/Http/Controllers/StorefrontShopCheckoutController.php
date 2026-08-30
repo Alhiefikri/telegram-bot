@@ -28,7 +28,10 @@ class StorefrontShopCheckoutController extends Controller
     ): RedirectResponse {
         $product = Product::query()->find((int) $request->input('product_id'));
         if ($product !== null) {
-            $events->checkoutOpened($product, ['source' => 'checkout_submit']);
+            $events->checkoutOpened($product, [
+                'source' => 'checkout_submit',
+                'payment_method' => $request->validated()['payment_method'] ?? null,
+            ]);
         }
         $errorKey = $request->filled('product_id') ? 'product_id' : 'cart';
 
@@ -45,6 +48,7 @@ class StorefrontShopCheckoutController extends Controller
             $events->checkoutSubmitted($product, null, [
                 'status_endpoint_result' => 'rejected',
                 'failure_kind' => $exception::class,
+                'payment_method' => $request->validated()['payment_method'] ?? null,
             ]);
 
             return redirect()
@@ -56,6 +60,7 @@ class StorefrontShopCheckoutController extends Controller
             $events->checkoutSubmitted($product, null, [
                 'status_endpoint_result' => 'rejected',
                 'failure_kind' => $exception::class,
+                'payment_method' => $request->validated()['payment_method'] ?? null,
             ]);
             $recoveryUrl = $request->filled('product_id')
                 ? $request->checkoutRecoveryUrl()
@@ -77,6 +82,7 @@ class StorefrontShopCheckoutController extends Controller
 
         $events->checkoutSubmitted($product, $result->orderId === null ? null : Order::find($result->orderId), [
             'status_endpoint_result' => 'accepted',
+            'payment_method' => $request->validated()['payment_method'] ?? null,
         ]);
 
         return redirect()->to($result->redirectUrl);

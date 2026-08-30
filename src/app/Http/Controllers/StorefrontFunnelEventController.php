@@ -21,7 +21,11 @@ class StorefrontFunnelEventController extends Controller
             'product_id' => ['nullable', 'integer', 'exists:products,id'],
             'support_channel' => ['nullable', 'string', Rule::in(['whatsapp', 'telegram_admin'])],
             'support_category' => ['nullable', 'string', 'max:80'],
-            'source' => ['nullable', 'string', 'max:80'],
+            'source' => ['nullable', 'string', 'max:80', 'regex:/^[A-Za-z0-9._~%+\/:\-]{1,80}$/D'],
+            'utm_source' => ['nullable', 'string', 'max:80', 'regex:/^[A-Za-z0-9._~%+\/:\-]{1,80}$/D'],
+            'utm_medium' => ['nullable', 'string', 'max:80', 'regex:/^[A-Za-z0-9._~%+\/:\-]{1,80}$/D'],
+            'utm_campaign' => ['nullable', 'string', 'max:80', 'regex:/^[A-Za-z0-9._~%+\/:\-]{1,80}$/D'],
+            'path' => ['nullable', 'string', 'max:200', 'regex:/^\/[A-Za-z0-9._~%\/-]{0,199}$/D'],
             'signed_url' => ['nullable', 'string', 'max:2048'],
         ]);
 
@@ -35,6 +39,10 @@ class StorefrontFunnelEventController extends Controller
             'support_channel' => $validated['support_channel'] ?? null,
             'support_category' => $validated['support_category'] ?? null,
             'source' => $validated['source'] ?? 'browser_beacon',
+            'utm_source' => $validated['utm_source'] ?? null,
+            'utm_medium' => $validated['utm_medium'] ?? null,
+            'utm_campaign' => $validated['utm_campaign'] ?? null,
+            'path' => $validated['path'] ?? null,
         ]);
 
         return response()->json(['ok' => true]);

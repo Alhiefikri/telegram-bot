@@ -29,6 +29,11 @@ enum UserRole: string
         return in_array($this, [self::Owner, self::Admin, self::Finance], true);
     }
 
+    public function canViewStorefrontAnalytics(): bool
+    {
+        return $this->canReconcilePayments();
+    }
+
     public function canManagePaymentSettings(): bool
     {
         return in_array($this, [self::Owner, self::Admin], true);

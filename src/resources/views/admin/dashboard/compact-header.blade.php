@@ -6,6 +6,7 @@
         'telegram-channel' => 'Store Channel',
         'riwayat' => 'Riwayat KlikQRIS',
         'withdraw' => 'Withdraw Order Status',
+        'funnel' => 'Funnel Storefront',
     ];
     $internalTabLabel = $internalTabLabels[$navigation['activeTab']] ?? 'Dashboard';
 @endphp

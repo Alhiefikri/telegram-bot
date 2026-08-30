@@ -21,11 +21,10 @@ final class AdminDashboardData
         private readonly FakeSalesProofPostPublisher $fakeSalesProof,
         private readonly PaymentReceiptReport $receiptReport,
         private readonly AdminDashboardReportingData $reportingData,
+        private readonly StorefrontFunnelReport $funnelReport,
     ) {}
 
     /**
-     * Compatibility façade for controllers/tests that consume the full dashboard payload.
-     *
      * @return array{
      *     admin: array{name: string, role: string},
      *     metrics: array<string, int>,
@@ -34,7 +33,8 @@ final class AdminDashboardData
      *     productsTab: array<string, mixed>,
      *     salesTab: array<string, mixed>,
      *     historyTab: array<string, mixed>,
-     *     withdrawTab: array<string, mixed>
+     *     withdrawTab: array<string, mixed>,
+     *     funnelTab: array<string, mixed>
      * }
      */
     public function forAdmin(
@@ -49,8 +49,13 @@ final class AdminDashboardData
         $storeLink = $this->storeLink();
         $navigation = $this->navigation($requestedTab);
         $canManageProducts = (bool) $user->role?->canMutateProducts();
+        $funnelTab = $this->funnelReport->empty($user);
         $historyTab = $this->reportingData->emptyHistory();
         $withdrawTab = $this->reportingData->emptyWithdraw($user);
+
+        if ($navigation['activeTab'] === StorefrontFunnelReport::TAB) {
+            $funnelTab = $this->funnelReport->forAdmin($user, $reportingFilters);
+        }
 
         if ($navigation['activeTab'] === 'riwayat') {
             $historyTab = $this->reportingData->forHistory($reportingFilters['page'] ?? 1);
@@ -71,6 +76,7 @@ final class AdminDashboardData
             'storeChannelTab' => $this->storeChannelTab($user),
             'historyTab' => $historyTab,
             'withdrawTab' => $withdrawTab,
+            'funnelTab' => $funnelTab,
         ];
     }
 
@@ -117,6 +123,7 @@ final class AdminDashboardData
             'storeChannelTab' => [],
             'historyTab' => $this->reportingData->emptyHistory(),
             'withdrawTab' => $this->reportingData->emptyWithdraw($user),
+            'funnelTab' => $this->funnelReport->empty($user),
         ];
 
         match ($navigation['activeTab']) {
@@ -127,6 +134,7 @@ final class AdminDashboardData
             'telegram-channel' => $data['storeChannelTab'] = $this->storeChannelTab($user),
             'riwayat' => $data['historyTab'] = $this->reportingData->forHistory($reportingFilters['page'] ?? 1),
             'withdraw' => $data['withdrawTab'] = $this->reportingData->forWithdraw($user, $reportingFilters),
+            StorefrontFunnelReport::TAB => $data['funnelTab'] = $this->funnelReport->forAdmin($user, $reportingFilters),
             default => null,
         };
 
@@ -174,6 +182,7 @@ final class AdminDashboardData
             ['id' => 'telegram-channel', 'label' => 'Telegram Channel'],
             ['id' => 'withdraw', 'label' => 'Withdraw'],
             ['id' => 'riwayat', 'label' => 'Riwayat'],
+            ['id' => StorefrontFunnelReport::TAB, 'label' => 'Funnel'],
         ];
         $tabIds = array_column($tabs, 'id');
         $requestedTab = (string) ($requestedTab ?: 'stats');

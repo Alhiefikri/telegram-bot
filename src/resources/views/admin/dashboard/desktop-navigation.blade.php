@@ -44,6 +44,23 @@
                     <span class="text-[11px] font-black uppercase tracking-wide">Pesanan</span>
                 </x-admin-dashboard.button>
 
+                @if ($canViewFunnel)
+                <x-admin-dashboard.button
+                    type="button"
+                    variant="neutral"
+                    size="sm"
+                    x-on:click="goToTab('funnel')"
+                    class="py-3"
+                    x-bind:class="activeTab === 'funnel' ? 'bottom-nav-active' : ''"
+                    x-bind:aria-current="activeTab === 'funnel' ? 'page' : null"
+                >
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 19V5m0 14h16M8 16v-4m4 4V8m4 8V6" />
+                    </svg>
+                    <span class="text-[11px] font-black uppercase tracking-wide">Funnel</span>
+                </x-admin-dashboard.button>
+                @endif
+
                 <x-admin-dashboard.button
                     type="button"
                     variant="neutral"

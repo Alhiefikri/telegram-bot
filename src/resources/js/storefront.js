@@ -8,9 +8,18 @@ function trackStorefrontEvent(action, payload = {}) {
       .querySelector('meta[name="csrf-token"]')
       ?.getAttribute("content") || "";
   const data = new FormData();
+  const eventPayload = { ...payload };
+  const currentUrl = new URL(window.location.href);
+
+  eventPayload.path ||= currentUrl.pathname;
+  ["utm_source", "utm_medium", "utm_campaign"].forEach((key) => {
+    if (!eventPayload[key]) {
+      eventPayload[key] = currentUrl.searchParams.get(key) || "";
+    }
+  });
 
   data.append("action", action);
-  Object.entries(payload).forEach(([key, value]) => {
+  Object.entries(eventPayload).forEach(([key, value]) => {
     if (value !== null && value !== undefined && value !== "") {
       data.append(key, value);
     }

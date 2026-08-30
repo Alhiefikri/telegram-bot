@@ -45,7 +45,7 @@ class StorefrontFunnelEvents
     {
         $this->log('storefront.checkout_opened', $product, [
             'product_id' => $product->getKey(),
-            'source' => 'product_page',
+            'source' => $metadata['source'] ?? 'product_page',
         ] + $metadata);
     }
 
@@ -55,14 +55,15 @@ class StorefrontFunnelEvents
     public function checkoutSubmitted(?Product $product = null, ?Order $order = null, array $metadata = []): void
     {
         $subject = $order ?? $product;
-
-        $this->log('storefront.checkout_submitted', $subject, array_filter([
+        $base = array_filter([
             'product_id' => $product?->getKey(),
             'order_id' => $order?->getKey(),
             'invoice_number' => $order?->invoice_number,
             'order_status' => $order?->order_status?->value,
             'payment_status' => $order?->payment_status?->value,
-        ], fn ($value): bool => $value !== null) + $metadata);
+        ], fn ($value): bool => $value !== null);
+
+        $this->log('storefront.checkout_submitted', $subject, $base + $metadata);
     }
 
     /**
@@ -131,7 +132,7 @@ class StorefrontFunnelEvents
      */
     private function log(string $action, ?Model $subject, array $metadata): void
     {
-        $this->audit->log($action, $subject, new: $this->sanitize($metadata));
+        $this->audit->log($action, $subject, new: $this->sanitize($this->withRequestContext($metadata)));
     }
 
     /**
@@ -160,6 +161,11 @@ class StorefrontFunnelEvents
             'product_id',
             'product_public',
             'source',
+            'path',
+            'utm_source',
+            'utm_medium',
+            'utm_campaign',
+            'session_hash',
             'order_id',
             'invoice_number',
             'order_status',
@@ -184,8 +190,88 @@ class StorefrontFunnelEvents
 
         return collect($metadata)
             ->only($allowed)
-            ->map(fn ($value) => is_scalar($value) || $value === null ? $value : (string) $value)
+            ->map(function ($value, string $key): mixed {
+                if (! is_scalar($value) && $value !== null) {
+                    return null;
+                }
+                if ($value === null) {
+                    return null;
+                }
+
+                if (is_string($value)) {
+                    $value = trim($value);
+                }
+                if (is_string($value) && ($value === '' || mb_strlen($value) > $this->maxLength($key) || preg_match('/[\\x00-\\x1F\\x7F]/', $value) === 1)) {
+                    return null;
+                }
+                if (in_array($key, ['source', 'utm_source', 'utm_medium', 'utm_campaign'], true)
+                    && (! is_string($value) || ! $this->isSafeAttribution($value))) {
+                    return null;
+                }
+                if ($key === 'session_hash' && (! is_string($value) || preg_match('/^[a-f0-9]{64}$/iD', $value) !== 1)) {
+                    return null;
+                }
+                if ($key === 'path' && (! is_string($value) || preg_match('/^\\/[A-Za-z0-9._~%\\/-]{0,199}$/D', $value) !== 1)) {
+                    return null;
+                }
+
+                return $value;
+            })
             ->filter(fn ($value): bool => $value !== null && $value !== '')
             ->all();
+    }
+
+    private function withRequestContext(array $metadata): array
+    {
+        $context = [
+            'source' => 'direct',
+            'path' => null,
+            'utm_source' => null,
+            'utm_medium' => null,
+            'utm_campaign' => null,
+            'session_hash' => $this->anonymousSessionHash(),
+        ];
+
+        if (app()->bound('request')) {
+            $request = request();
+            $context['path'] = '/'.ltrim($request->path(), '/');
+            foreach (['utm_source', 'utm_medium', 'utm_campaign'] as $field) {
+                $context[$field] = $request->query($field);
+            }
+        }
+
+        return array_replace($context, $metadata);
+    }
+
+    private function anonymousSessionHash(): ?string
+    {
+        if (! app()->bound('request')) {
+            return null;
+        }
+
+        $request = request();
+        if (! $request->hasSession()) {
+            return null;
+        }
+
+        $sessionId = (string) $request->session()->getId();
+
+        return $sessionId === '' ? null : hash_hmac('sha256', $sessionId, (string) config('app.key'));
+    }
+
+    private function maxLength(string $key): int
+    {
+        return match ($key) {
+            'path' => 200,
+            'failure_kind' => 120,
+            'invoice_number', 'provider_expires_at' => 120,
+            default => 80,
+        };
+    }
+
+    private function isSafeAttribution(string $value): bool
+    {
+        return preg_match('/^[A-Za-z0-9._~%+\\/:\\-]{1,80}$/D', $value) === 1
+            && preg_match('/^\\+?\\d[\\d-]{6,}$/D', $value) !== 1;
     }
 }

@@ -1053,6 +1053,7 @@ test("uses a compact sticky shell header on internal admin tabs", async ({
     ["penjualan", "Pesanan"],
     ["broadcast", "Siaran"],
     ["telegram-channel", "Store Channel"],
+    ["funnel", "Funnel Storefront"],
   ]) {
     await page.goto(`${baseUrl}/admin?tab=${tab}`);
 
@@ -1142,6 +1143,9 @@ test("keeps responsive navigation and utility actions usable", async ({
     moreSheet.getByRole("button", { name: "Store Channel", exact: true })
   ).toBeVisible();
   await expect(
+    moreSheet.getByRole("button", { name: "Funnel storefront", exact: true })
+  ).toBeVisible();
+  await expect(
     moreSheet.getByRole("button", { name: "Tambah Produk", exact: true })
   ).toBeVisible();
   await expect(
@@ -1203,7 +1207,7 @@ test("keeps responsive navigation and utility actions usable", async ({
     })
   );
 
-  await expect(desktopButtons).toHaveCount(8);
+  await expect(desktopButtons).toHaveCount(9);
   expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
   expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
   await expect(
@@ -1252,7 +1256,7 @@ for (const width of [768, 1024, 1280, 1440, 1920]) {
       })
     );
 
-    await expect(desktopButtons).toHaveCount(8);
+    await expect(desktopButtons).toHaveCount(9);
     if (width >= 1024) {
       expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
       expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
@@ -1320,6 +1324,27 @@ for (const width of [320, 390, 768, 1280, 1440, 1920]) {
       await expect(withdraw.locator("table")).toBeVisible();
     }
     await expectNoDocumentOverflow(page);
+  });
+}
+
+for (const width of [320, 390, 768, 1280, 1440, 1920]) {
+  test(`renders storefront funnel analytics without overflow at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=funnel`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const funnel = page.locator("#admin-section-funnel");
+    await expect(
+      funnel.getByRole("heading", { name: "Storefront Funnel" })
+    ).toBeVisible();
+    await expect(funnel.getByLabel("Produk")).toBeVisible();
+    await expect(funnel.getByLabel("Payment rail")).toBeVisible();
+    await expect(funnel.getByText("QR/provider outcomes")).toBeVisible();
+    await expect(funnel.getByText("Maksimal 31 hari")).toBeVisible();
   });
 }
 

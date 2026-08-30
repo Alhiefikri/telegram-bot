@@ -33,7 +33,9 @@
             $storeChannel = $storeChannelTab;
             $historyTab = $historyTab ?? [];
             $withdrawTab = $withdrawTab ?? [];
+            $funnelTab = $funnelTab ?? [];
             $canViewWithdraw = (bool) ($withdrawTab['can_view'] ?? false);
+            $canViewFunnel = (bool) ($funnelTab['can_view'] ?? false);
             $structuredStockInputEnabled = (bool) ($dashboardState['structuredStockInputEnabled'] ?? false);
         @endphp
 
@@ -67,6 +69,8 @@
                 @include('admin.dashboard.history-tab')
             @elseif ($navigation['activeTab'] === 'withdraw')
                 @include('admin.dashboard.withdraw-tab')
+            @elseif ($navigation['activeTab'] === 'funnel')
+                @include('admin.dashboard.funnel-tab')
             @endif
             @include('admin.dashboard.mobile-navigation')
         </main>
