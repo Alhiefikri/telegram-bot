@@ -94,6 +94,15 @@ refreshes the Inventory Movement aggregate transactionally. An unresolved
 unknown recipient keeps `stock_notification_sent_at` null, and the repair
 never claims or redispatches the effect. Repeated recovery is idempotent.
 
+Scheduled recovery also asks `ProductPriceChangeNotificationService` to repair
+customer recipient and Store Channel projections for price-notification effects
+whose expired leases were fenced to `unknown`. It copies the ledger attempt
+count and safe error text, clears stale failure fields, never claims or
+redispatches the effect, and remains idempotent across repeated recovery.
+
+The Price Notification lease-recovery contract is covered by
+`ProductPriceChangeNotificationTest::test_recovery_synchronizes_expired_price_notification_leases_without_redispatching`.
+
 The Stock Notification lease-recovery contract is covered by
 `ProductInventoryRaceTest::test_lease_recovery_synchronizes_stock_recipient_and_movement_projection_without_redispatching`.
 

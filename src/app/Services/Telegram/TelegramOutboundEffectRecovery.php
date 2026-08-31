@@ -22,6 +22,7 @@ final class TelegramOutboundEffectRecovery
         private readonly ManualPaymentProofDeliveryPipeline $manualPaymentProof,
         private readonly ReceiptDeliveryPipeline $receipts,
         private readonly StockNotificationDeliveryPipeline $stockNotifications,
+        private readonly ProductPriceChangeNotificationService $priceNotifications,
     ) {}
 
     /**
@@ -77,9 +78,20 @@ final class TelegramOutboundEffectRecovery
                 TelegramOutboundEffectType::AdminBroadcastRecipient->value,
                 TelegramOutboundEffectType::SalesProofPost->value,
                 TelegramOutboundEffectType::StockNotificationRecipient->value,
+                TelegramOutboundEffectType::PriceChangeNotificationRecipient->value,
+                TelegramOutboundEffectType::PriceChangeStoreChannel->value,
             ])
             ->get()
             ->each(function (TelegramOutboundEffect $effect): void {
+                if (in_array($effect->effect_type, [
+                    TelegramOutboundEffectType::PriceChangeNotificationRecipient->value,
+                    TelegramOutboundEffectType::PriceChangeStoreChannel->value,
+                ], true)) {
+                    $this->priceNotifications->synchronizeRecoveredUnknown($effect);
+
+                    return;
+                }
+
                 if ($effect->effect_type === TelegramOutboundEffectType::AdminBroadcastRecipient->value) {
                     $broadcastId = TelegramBroadcastRecipient::query()
                         ->whereKey($effect->source_id)

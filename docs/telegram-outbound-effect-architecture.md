@@ -234,15 +234,19 @@ delivery recovery in this order:
    count and safe error text, then refreshes the Inventory Movement aggregate
    in the same transaction. An unresolved unknown recipient never completes
    the movement, and recovery never redispatches it.
-7. The command selects due pending and retryable failed ledger rows through
+7. `ProductPriceChangeNotificationService` synchronizes each customer
+   recipient and Store Channel projection whose price-notification lease was
+   fenced to `unknown`, copying the ledger attempt count and safe error text,
+   clearing stale failure fields, and never redispatching the effect.
+8. The command selects due pending and retryable failed ledger rows through
    readyToDispatchQuery() and dispatches them through
    TelegramOutboundEffectDispatcher.
-8. It materializes missing checkout, receipt, admin notification, Sales Proof
+9. It materializes missing checkout, receipt, admin notification, Sales Proof
    Post, stock, and price effects from committed source state when the
    deterministic effect key proves that the effect is absent.
-9. It redispatches recoverable Admin Broadcast handoffs through the same locked
+10. It redispatches recoverable Admin Broadcast handoffs through the same locked
    broadcast queue boundary.
-10. Non-ledger cleanup work, such as deleting old customer-facing checkout
+11. Non-ledger cleanup work, such as deleting old customer-facing checkout
    messages, remains a separate cleanup job and is not treated as delivery
    claim authority.
 

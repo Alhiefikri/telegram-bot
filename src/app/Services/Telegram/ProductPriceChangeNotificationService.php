@@ -401,6 +401,25 @@ class ProductPriceChangeNotificationService
         return $this->ledger ??= app(TelegramOutboundEffectLedgerProtocol::class);
     }
 
+    /**
+     * Synchronize a lease-recovered unknown effect without redispatching it.
+     */
+    public function synchronizeRecoveredUnknown(TelegramOutboundEffect $effect): void
+    {
+        $isRecipient = $effect->source_type === ProductPriceChangeNotificationRecipient::class
+            && $effect->effect_type === TelegramOutboundEffectType::PriceChangeNotificationRecipient->value;
+        $isStoreChannel = $effect->source_type === ProductPriceChangeEvent::class
+            && $effect->effect_type === TelegramOutboundEffectType::PriceChangeStoreChannel->value;
+
+        if (! $isRecipient && ! $isStoreChannel) {
+            return;
+        }
+
+        DB::transaction(function () use ($effect): void {
+            $this->synchronizeUnknownProjection($effect);
+        }, 5);
+    }
+
     private function synchronizeSentProjection(TelegramOutboundEffect $effect, string $messageId): void
     {
         if ($effect->effect_type === TelegramOutboundEffectType::PriceChangeNotificationRecipient->value) {
@@ -470,8 +489,10 @@ class ProductPriceChangeNotificationService
                 ->whereKey($effect->source_id)
                 ->whereNull('sent_at')
                 ->update([
+                    'failed_at' => null,
                     'attempts' => (int) $effect->attempts,
-                    'updated_at' => now(),
+                    'last_error' => $this->unknownProjectionError($effect),
+                    'updated_at' => $effect->unknown_at ?? now(),
                 ]);
 
             return;
@@ -482,10 +503,21 @@ class ProductPriceChangeNotificationService
                 ->whereKey($effect->source_id)
                 ->whereNull('store_channel_sent_at')
                 ->update([
+                    'store_channel_failed_at' => null,
                     'store_channel_attempts' => (int) $effect->attempts,
-                    'updated_at' => now(),
+                    'store_channel_last_error' => $this->unknownProjectionError($effect),
+                    'updated_at' => $effect->unknown_at ?? now(),
                 ]);
         }
+    }
+
+    private function unknownProjectionError(TelegramOutboundEffect $effect): string
+    {
+        return mb_substr(
+            $effect->last_error ?: 'Price change notification delivery outcome is unknown and requires review.',
+            0,
+            2000,
+        );
     }
 
     private function projectionError(Throwable $exception): string

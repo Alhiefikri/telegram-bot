@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Storefront\StorefrontUrl;
 use Exception;
@@ -261,6 +262,75 @@ class ProductPriceChangeNotificationTest extends TestCase
 
         Queue::assertPushedOn('telegram-broadcast', SendProductPriceChangeNotifications::class);
         Queue::assertPushed(SendProductPriceChangeNotifications::class, fn (SendProductPriceChangeNotifications $job): bool => $job->eventId === $event->id);
+    }
+
+    public function test_recovery_synchronizes_expired_price_notification_leases_without_redispatching(): void
+    {
+        Queue::fake();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 9030]);
+        $product = Product::factory()->create();
+        $event = ProductPriceChangeEvent::create([
+            'event_key' => (string) str()->uuid(),
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'old_price_amount' => 30000,
+            'new_price_amount' => 25000,
+            'old_usdt_price_amount' => null,
+            'new_usdt_price_amount' => null,
+            'recipients_materialized_at' => now(),
+        ]);
+        $recipient = ProductPriceChangeNotificationRecipient::create([
+            'event_id' => $event->id,
+            'customer_id' => $customer->id,
+            'telegram_id' => (string) $customer->telegram_id,
+            'locale' => 'id',
+        ]);
+        $effects = app(TelegramOutboundEffectService::class);
+        $recipientEffect = $effects->recordPriceChangeNotificationRecipient($recipient, $event->id);
+        $storeChannelEffect = $effects->recordPriceChangeStoreChannel($event, '-100123');
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+
+        $this->assertNotNull($ledger->claim((string) $recipientEffect->getKey()));
+        $this->assertNotNull($ledger->claim((string) $storeChannelEffect->getKey()));
+        $recipientEffect->fresh()->forceFill(['lease_until' => now()->subSecond()])->save();
+        $storeChannelEffect->fresh()->forceFill(['lease_until' => now()->subSecond()])->save();
+
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=0')
+            ->expectsOutput('telegram:recover-outbound stale_unknown=2')
+            ->assertSuccessful();
+
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=0')
+            ->assertSuccessful();
+
+        $recoveredRecipientEffect = $recipientEffect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $recoveredRecipientEffect->state);
+        $this->assertSame(1, $recoveredRecipientEffect->attempts);
+        $this->assertSame('lease_expired', $recoveredRecipientEffect->last_error_code);
+        $this->assertSame(1, $recipient->fresh()->attempts);
+        $this->assertNull($recipient->fresh()->failed_at);
+        $this->assertSame(
+            'Worker lease expired before Telegram delivery was finalized.',
+            $recipient->fresh()->last_error,
+        );
+
+        $recoveredStoreChannelEffect = $storeChannelEffect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $recoveredStoreChannelEffect->state);
+        $this->assertSame(1, $recoveredStoreChannelEffect->attempts);
+        $this->assertSame('lease_expired', $recoveredStoreChannelEffect->last_error_code);
+        $recoveredEvent = $event->fresh();
+        $this->assertSame(1, $recoveredEvent->store_channel_attempts);
+        $this->assertNull($recoveredEvent->store_channel_failed_at);
+        $this->assertSame(
+            'Worker lease expired before Telegram delivery was finalized.',
+            $recoveredEvent->store_channel_last_error,
+        );
+        Queue::assertNotPushed(SendProductPriceChangeNotifications::class);
     }
 
     public function test_backlog_finalization_migration_prevents_historical_price_notifications_from_recovery(): void
