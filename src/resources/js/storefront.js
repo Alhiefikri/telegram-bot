@@ -1557,6 +1557,24 @@ export function storefrontModal() {
   };
 }
 
+function initCatalogFilterFocus() {
+  if (window.location.hash !== "#products") {
+    return;
+  }
+
+  const activeFilter = document.querySelector(
+    'nav[aria-label="Filter kategori produk"] a[aria-current="page"]'
+  );
+
+  if (!activeFilter) {
+    return;
+  }
+
+  window.requestAnimationFrame(() =>
+    activeFilter.focus({ preventScroll: true })
+  );
+}
+
 export function registerStorefrontAlpine(Alpine) {
   Alpine.data("storefrontModal", storefrontModal);
 }
@@ -1566,6 +1584,7 @@ export default function initStorefront() {
     document.body.classList.add("js-enabled");
 
     initMobileMenu();
+    initCatalogFilterFocus();
     initCounters();
     initScrollProgress();
     initVerifiedPurchaseActivity();

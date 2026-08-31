@@ -93,7 +93,7 @@
                                         id="stock-items"
                                         name="stock_items"
                                         rows="6"
-                                        x-bind:placeholder="stockInputFormat === 'email_password_mfa_secret' ? 'email@example.com|password|MFA-SECRET&#10;akun2@example.com|password2|MFA-SECRET-2' : (stockInputFormat === 'email_password_access_token' ? 'email@example.com|password|ACCESS-TOKEN|CLIENT-ID|recovery@example.com&#10;akun2@example.com|password2|ACCESS-TOKEN-2' : 'email@example.com|password&#10;KEY-XXXX-1234')"
+                                        x-bind:placeholder="stockInputFormat === 'email_password_mfa_secret' ? 'email@example.com|password|MFA-SECRET' + String.fromCharCode(10) + 'akun2@example.com|password2|MFA-SECRET-2' : (stockInputFormat === 'email_password_access_token' ? 'email@example.com|password|ACCESS-TOKEN|CLIENT-ID|recovery@example.com' + String.fromCharCode(10) + 'akun2@example.com|password2|ACCESS-TOKEN-2' : 'email@example.com|password' + String.fromCharCode(10) + 'KEY-XXXX-1234')"
                                         x-model="stockItems"
                                         x-ref="stockItems"
                                         required

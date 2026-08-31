@@ -108,7 +108,7 @@ class KlikQrisNativeQrisTest extends TestCase
         $this->assertSame('opaque-test-signature', $fresh->klikqris_transaction_signature);
         $this->assertNotSame(
             'opaque-test-signature',
-            DB::table('payments')->whereKey($payment->id)->value('klikqris_transaction_signature'),
+            DB::table('payments')->where('id', $payment->id)->value('klikqris_transaction_signature'),
         );
         $this->assertArrayNotHasKey('klikqris_transaction_signature', $fresh->toArray());
         $this->assertStringNotContainsString(

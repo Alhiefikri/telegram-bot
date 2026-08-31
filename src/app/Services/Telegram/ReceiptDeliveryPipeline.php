@@ -158,14 +158,25 @@ final class ReceiptDeliveryPipeline
     public function reconcileCompletedProjections(int $chunk = 100, bool $dispatchCleanup = true): array
     {
         $repairedOrderIds = [];
+        // Polymorphic source_id is text while Order IDs are UUIDs on PostgreSQL;
+        // collect matching source IDs before querying the typed Order key.
+        $receiptOrderIds = TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->whereNotNull('effect_group_key')
+            ->distinct()
+            ->pluck('source_id')
+            ->map(static fn (mixed $id): string => (string) $id)
+            ->all();
+
+        if ($receiptOrderIds === []) {
+            return $repairedOrderIds;
+        }
+
         Order::query()
             ->whereNull('telegram_receipt_sent_at')
-            ->whereHas('telegramOutboundEffects', function ($effects): void {
-                $effects
-                    ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
-                    ->where('state', TelegramOutboundEffectState::Sent->value)
-                    ->whereNotNull('effect_group_key');
-            })
+            ->whereIn('id', $receiptOrderIds)
             ->select('id')
             ->orderBy('id')
             ->chunkById(max(1, $chunk), function ($orders) use (&$repairedOrderIds, $dispatchCleanup): void {

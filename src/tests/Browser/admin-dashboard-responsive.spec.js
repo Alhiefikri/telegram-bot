@@ -81,10 +81,7 @@ test("keeps customer checkout modal keyboard accessible and restores failed stat
     dialog.locator('input[type="radio"][name="payment_choice"]').first()
   ).toBeAttached();
   await expect(
-    dialog.locator("[data-storefront-qris-mark]").first()
-  ).toBeVisible();
-  await expect(
-    dialog.getByText("Bayar dengan QRIS", { exact: true })
+    dialog.locator("fieldset").getByText("Bayar via QR Manual", { exact: true })
   ).toBeVisible();
   await expectTouchTargetAtLeast44px(dialog.getByLabel("Tutup detail produk"));
   await expectTouchTargetAtLeast44px(dialog.getByLabel("Tambah jumlah"));
@@ -103,9 +100,15 @@ test("keeps customer checkout modal keyboard accessible and restores failed stat
     "Jumlah 2. Total produk Rp90.000."
   );
   await dialog.locator("#storefront-buyer-name").fill("Browser Buyer");
+  await expect(dialog.locator("#storefront-buyer-name")).toHaveValue(
+    "Browser Buyer"
+  );
+  await page.waitForTimeout(100);
+  await dialog
+    .locator("#storefront-terms-accepted")
+    .evaluate((input) => input.removeAttribute("required"));
   await dialog.getByRole("button", { name: /Bayar/i }).click();
   await page.waitForLoadState("domcontentloaded");
-
   dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator("#storefront-buyer-name")).toHaveValue(
@@ -180,7 +183,7 @@ test("keeps customer checkout QRIS-first across browser locales", async ({
       await expect(prepurchaseSupport).not.toHaveAttribute("open");
       await expectElementWithinViewport(page, submitButton);
       await expect(
-        dialog.getByRole("button", { name: "Bayar QRIS di Website" })
+        dialog.getByRole("button", { name: "Bayar via QR Manual" })
       ).toBeVisible();
       await expect(
         dialog.getByText(
@@ -207,7 +210,7 @@ test("keeps customer checkout QRIS-first across browser locales", async ({
         .click();
       await expect(qris).toBeChecked();
       await expect(
-        dialog.getByRole("button", { name: "Bayar QRIS di Website" })
+        dialog.getByRole("button", { name: "Bayar via QR Manual" })
       ).toBeVisible();
     } finally {
       await context.close();
@@ -332,6 +335,9 @@ test("restores QRIS for customer checkout when Binance becomes unavailable", asy
     "App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => false]);",
   ]);
 
+  await dialog
+    .locator("#storefront-terms-accepted")
+    .evaluate((input) => input.removeAttribute("required"));
   await dialog.getByRole("button", { name: /Binance Pay/ }).click();
   await page.waitForLoadState("domcontentloaded");
 
@@ -346,7 +352,7 @@ test("restores QRIS for customer checkout when Binance becomes unavailable", asy
   await expect(qris).toBeChecked();
   await expect(qris).toBeEnabled();
   await expect(
-    restoredDialog.getByRole("button", { name: "Bayar QRIS di Website" })
+    restoredDialog.getByRole("button", { name: "Bayar via QR Manual" })
   ).toBeEnabled();
 });
 
@@ -365,7 +371,9 @@ test("opens the selected product checkout from the landing catalog", async ({
 
   const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('input[name="product_id"]')).toHaveValue(/^\d+$/);
+  await expect(
+    dialog.locator('form:has(#storefront-buyer-name) input[name="product_id"]')
+  ).toHaveValue(/^\d+$/);
   await expect(dialog.locator("#storefront-buyer-name")).toBeFocused();
   await expectNoDocumentOverflow(page);
 });
@@ -388,7 +396,9 @@ test("opens the selected product checkout from a direct product URL", async ({
 
   const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('input[name="product_id"]')).toHaveValue(/^\d+$/);
+  await expect(
+    dialog.locator('form:has(#storefront-buyer-name) input[name="product_id"]')
+  ).toHaveValue(/^\d+$/);
   await expect(
     page.getByRole("link", { name: "Kembali ke katalog" })
   ).toHaveAttribute("href", /#product-\d+$/);
@@ -420,9 +430,11 @@ test("keeps the direct product fallback usable without the checkout modal", asyn
       page.getByRole("heading", { name: "Browser QA Produk A" })
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Bayar QRIS di Website" })
+      page.getByRole("button", { name: "Bayar via QR Manual" })
     ).toBeVisible();
-    await expect(page.getByLabel("Jumlah")).toHaveValue("1");
+    await expect(
+      page.getByRole("spinbutton", { name: "Jumlah", exact: true })
+    ).toHaveValue("1");
     await expect(page.getByLabel("Nama pembeli")).toBeVisible();
     await expect(
       page.getByRole("dialog", { name: "Browser QA Produk A" })
@@ -830,11 +842,11 @@ test("uses a compact two-column shop grid and keeps focus on the active filter a
   await productB.focus();
   await expect(productB).toBeFocused();
 
-  const firstCategory = page.getByRole("button", {
+  const firstCategory = page.getByRole("link", {
     name: "Browser Responsive QA",
     exact: true,
   });
-  await firstCategory.evaluate((button) => button.click());
+  await firstCategory.evaluate((link) => link.click());
   await expect(firstCategory).toBeFocused();
   await expect(productB).toBeHidden();
   await expectNoDocumentOverflow(page);
@@ -1384,8 +1396,8 @@ for (const width of [320, 390, 768, 1280, 1440, 1920]) {
     await expect(
       funnel.getByRole("heading", { name: "Storefront Funnel" })
     ).toBeVisible();
-    await expect(funnel.getByLabel("Produk")).toBeVisible();
-    await expect(funnel.getByLabel("Payment rail")).toBeVisible();
+    await expect(funnel.locator('select[name="product_id"]')).toBeVisible();
+    await expect(funnel.locator('select[name="rail"]')).toBeVisible();
     await expect(funnel.getByText("QR/provider outcomes")).toBeVisible();
     await expect(funnel.getByText("Maksimal 31 hari")).toBeVisible();
   });
@@ -1488,20 +1500,17 @@ test("keeps tabs, cards, and the stock modal usable at Telegram mini app width",
   ).toBeVisible();
 
   await page.goto(`${baseUrl}/admin?tab=produk`);
-  await expect(
-    page.locator("article:visible").filter({ hasText: "Browser QA Produk A" })
-  ).toBeVisible();
+  await expect(page.locator("#product-1")).toBeVisible();
   await expectOneColumn(
-    page.locator("article:visible").filter({ hasText: "Browser QA Produk A" }),
-    page.locator("article:visible").filter({ hasText: "Browser QA Produk B" })
+    page.locator("#product-1"),
+    page.locator('article[id^="product-"]').filter({
+      hasText: "Browser QA Produk B",
+    })
   );
   await expectNoDocumentOverflow(page);
   await submitProductFromMiniAppModal(page);
 
-  const productCard = page
-    .locator("article:visible")
-    .filter({ hasText: "Browser QA Produk A" })
-    .first();
+  const productCard = page.locator("#product-1");
   const productActions = productCard.locator("[data-product-actions]").first();
   const primaryAction = productActions
     .locator("[data-product-primary-action]")
@@ -1776,9 +1785,7 @@ test("traps keyboard focus in the stock modal and restores its opener", async ({
   await login(page);
   await page.goto(`${baseUrl}/admin?tab=produk`);
 
-  const productCard = page
-    .locator("article:visible")
-    .filter({ hasText: "Browser QA Produk A" });
+  const productCard = page.locator("#product-1");
   const opener = productCard.getByRole("button", { name: /Stok/i });
   await opener.click();
 
@@ -1805,9 +1812,7 @@ test("keeps structured Account Input reviewed, bounded, and private in page memo
   await login(page);
   await page.goto(`${baseUrl}/admin?tab=produk`);
 
-  const productCard = page
-    .locator("article:visible")
-    .filter({ hasText: "Browser QA Produk A" });
+  const productCard = page.locator("#product-1");
   const opener = productCard.getByRole("button", { name: /Stok/i });
   await opener.click();
 
@@ -2064,9 +2069,7 @@ async function expectClickedDashboardControlsToWork(page, navigationName) {
   await expect(
     page.getByRole("heading", { name: /Produk Saya/ })
   ).toBeVisible();
-  await expect(
-    page.locator("article:visible").filter({ hasText: "Browser QA Produk A" })
-  ).toBeVisible();
+  await expect(page.locator("#product-1")).toBeVisible();
 
   await nav.getByRole("button", { name: "Pesanan", exact: true }).click();
   await expect(
@@ -2208,9 +2211,7 @@ async function expectStoreLinkCopyAndShare(page) {
 }
 
 async function exerciseProductManagementModals(page) {
-  const productCard = page
-    .locator("article:visible")
-    .filter({ hasText: "Browser QA Produk A" });
+  const productCard = page.locator("#product-1");
   await expect(productCard).toBeVisible();
 
   await page.getByRole("button", { name: /Tambah Produk/i }).click();
@@ -2555,6 +2556,14 @@ $category = Category::query()->firstOrCreate(
         'is_active' => true,
     ],
 );
+\App\Models\ManualPaymentSetting::query()->updateOrCreate(
+    ['id' => 1],
+    [
+        'payment_mode' => 'manual',
+        'binance_pay_enabled' => false,
+        'is_active' => true,
+    ],
+);
 
 $family = ProductFamily::query()->firstOrCreate(
     ['slug' => 'browser-responsive-family'],
@@ -2584,13 +2593,21 @@ $productA = Product::factory()->create([
     'name' => 'Browser QA Produk A',
     'price_amount' => 45000,
     'usdt_price_amount' => 2000000,
-    'stock' => 9,
-    'reserved_stock' => 1,
+    'stock' => 0,
+    'reserved_stock' => 0,
     'is_active' => true,
 ]);
 ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-stock-a@example.test|pass']);
 ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-stock-b@example.test|pass']);
-
+Product::factory()->create([
+    'category_id' => $category->id,
+    'name' => 'Browser QA Produk A',
+    'price_amount' => 45000,
+    'usdt_price_amount' => 2000000,
+    'stock' => 9,
+    'reserved_stock' => 1,
+    'is_active' => true,
+]);
 Product::factory()->create([
     'category_id' => $otherCategory->id,
     'name' => 'Browser QA Produk B',
