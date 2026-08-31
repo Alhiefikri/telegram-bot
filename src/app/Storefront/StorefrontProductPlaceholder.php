@@ -21,11 +21,7 @@ final class StorefrontProductPlaceholder
                 : '/storage/'.ltrim($this->customPath, '/');
         }
 
-        $configured = trim((string) config('storefront.product_placeholder', '/assets/product-placeholder.svg'));
-
-        return str_starts_with($configured, '/') || preg_match('/^https?:\/\//i', $configured)
-            ? $configured
-            : '/'.ltrim($configured, '/');
+        return StorefrontProductPresentationNormalizer::configuredProductImageUrl();
     }
 
     public function imagePath(): ?string

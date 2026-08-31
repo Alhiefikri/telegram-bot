@@ -44,6 +44,31 @@ class StorefrontUrl
         return route('storefront.products.show', $parameters);
     }
 
+    public function productUrlForId(int $productId, ?string $returnUrl = null, bool $checkout = false): string
+    {
+        $parameters = ['product' => $productId];
+
+        if ($checkout) {
+            $parameters['checkout'] = 1;
+        }
+
+        if ($returnUrl !== null && $returnUrl !== '') {
+            $parameters['from'] = $returnUrl;
+        }
+
+        return route('storefront.products.show', $parameters);
+    }
+
+    public function productModalUrlForId(int $productId): string
+    {
+        return route('storefront.products.modal', ['product' => $productId]);
+    }
+
+    public function waitlistUrlForId(int $productId): string
+    {
+        return route('storefront.waitlist.store', ['product' => $productId]);
+    }
+
     public function familyUrl(string $slug, ?string $returnUrl = null): string
     {
         $url = route('storefront.product-families.show', ['productFamily' => $slug]);
