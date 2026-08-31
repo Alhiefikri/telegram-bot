@@ -1204,6 +1204,11 @@ export function storefrontModal() {
   return {
     productModalOpen: false,
     selectedProduct: null,
+    modalLoading: false,
+    modalRequestController: null,
+    modalRequestToken: 0,
+    modalCloseTimer: null,
+    modalCloseToken: 0,
     quantity: 1,
     notes: "",
     buyerName: "",
@@ -1250,6 +1255,10 @@ export function storefrontModal() {
         return;
       }
 
+      this.abortModalRequest();
+      this.clearModalCloseTimer();
+      this.modalCloseToken += 1;
+      this.modalLoading = false;
       this.modalOpener = options.opener || document.activeElement;
       this.selectedProduct = product;
       this.quantity = Number.parseInt(options.quantity, 10) || 1;
@@ -1275,12 +1284,150 @@ export function storefrontModal() {
       document.body.style.overflow = "hidden";
       this.$nextTick(() => this.focusModal(options.focusInvalid));
     },
+    openProductModalFromUrl(url, options = {}) {
+      const fallbackUrl = options.fallbackUrl;
+      const opener = options.opener || document.activeElement;
+
+      this.abortModalRequest();
+      this.clearModalCloseTimer();
+      this.modalCloseToken += 1;
+      this.modalOpener = opener;
+      this.selectedProduct = null;
+      this.modalLoading = true;
+      this.productModalOpen = true;
+      this.quantityAnnouncement = "";
+      document.body.style.overflow = "hidden";
+      this.$nextTick(() => {
+        if (this.modalLoading && this.productModalOpen) {
+          this.focusModal();
+        }
+      });
+
+      let requestUrl;
+      try {
+        requestUrl = new URL(url, window.location.href);
+      } catch {
+        this.navigateModalFallback(fallbackUrl);
+        return Promise.resolve(false);
+      }
+
+      if (requestUrl.origin !== window.location.origin) {
+        this.navigateModalFallback(fallbackUrl);
+        return Promise.resolve(false);
+      }
+
+      const requestToken = this.modalRequestToken;
+      const controller =
+        typeof AbortController === "function" ? new AbortController() : null;
+      this.modalRequestController = controller;
+
+      return window
+        .fetch(requestUrl.href, {
+          credentials: "same-origin",
+          referrerPolicy: "no-referrer",
+          headers: {
+            Accept: "application/json",
+          },
+          ...(controller ? { signal: controller.signal } : {}),
+        })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error("storefront_product_modal_request_failed");
+          }
+
+          return response.json();
+        })
+        .then((payload) => {
+          if (!this.isCurrentModalRequest(requestToken)) {
+            return false;
+          }
+
+          if (
+            payload?.status !== "ready" ||
+            !payload?.product?.availability?.canOpenModal
+          ) {
+            this.navigateModalFallback(fallbackUrl);
+            return false;
+          }
+
+          this.modalRequestController = null;
+          this.modalLoading = false;
+          this.openProductModal(payload.product, {
+            ...options,
+            opener,
+          });
+
+          return true;
+        })
+        .catch((error) => {
+          if (!this.isCurrentModalRequest(requestToken)) {
+            return false;
+          }
+
+          if (error?.name === "AbortError") {
+            return false;
+          }
+
+          this.navigateModalFallback(fallbackUrl);
+          return false;
+        })
+        .finally(() => {
+          if (!this.isCurrentModalRequest(requestToken)) {
+            return;
+          }
+
+          this.modalRequestController = null;
+          this.modalLoading = false;
+        });
+    },
+    abortModalRequest() {
+      const controller = this.modalRequestController;
+
+      this.modalRequestToken += 1;
+      this.modalRequestController = null;
+      controller?.abort();
+    },
+    clearModalCloseTimer() {
+      if (this.modalCloseTimer === null) {
+        return;
+      }
+
+      window.clearTimeout(this.modalCloseTimer);
+      this.modalCloseTimer = null;
+    },
+    isCurrentModalRequest(requestToken) {
+      return this.modalRequestToken === requestToken;
+    },
+    navigateModalFallback(fallbackUrl) {
+      this.abortModalRequest();
+      this.clearModalCloseTimer();
+      this.modalCloseToken += 1;
+      this.productModalOpen = false;
+      this.modalLoading = false;
+      this.selectedProduct = null;
+      this.modalOpener = null;
+      document.body.style.overflow = "";
+
+      if (fallbackUrl) {
+        window.location.assign(fallbackUrl);
+      }
+    },
     closeProductModal() {
       const opener = this.modalOpener;
 
+      this.abortModalRequest();
+      this.clearModalCloseTimer();
+      const closeToken = ++this.modalCloseToken;
       this.productModalOpen = false;
-      window.setTimeout(() => {
+      this.modalLoading = false;
+      this.modalCloseTimer = window.setTimeout(() => {
+        if (this.modalCloseToken !== closeToken || this.productModalOpen) {
+          return;
+        }
+
         this.selectedProduct = null;
+        this.modalOpener = null;
+        this.modalCloseTimer = null;
         if (opener && typeof opener.focus === "function") {
           opener.focus();
         }

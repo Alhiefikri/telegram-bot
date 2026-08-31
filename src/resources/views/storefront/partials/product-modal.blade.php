@@ -55,6 +55,33 @@
                  @keydown="handleModalKeydown($event)"
                  class="neo-panel relative flex max-h-[calc(100dvh-1rem)] w-full transform flex-col overflow-hidden bg-[var(--sf-surface)] text-left shadow-[8px_8px_0_var(--sf-shadow)] transition-all focus:outline-none sm:my-8 sm:max-h-[calc(100dvh-4rem)] sm:max-w-lg">
 
+                <template x-if="modalLoading">
+                    <div class="flex min-h-0 flex-1 flex-col">
+                        <div class="flex items-center justify-between border-b-[3px] border-[var(--sf-border)] p-4">
+                            <h3 id="modal-title" class="font-display text-lg font-black text-[var(--sf-ink)]">Memuat detail produk</h3>
+                            <button type="button" @click="closeProductModal()" class="grid h-12 w-12 place-items-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform hover-rubber-band hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[3px] active:translate-y-[3px] active:shadow-none focus:outline-none" aria-label="Tutup detail produk">
+                                <span class="text-xl leading-none" aria-hidden="true">×</span>
+                            </button>
+                        </div>
+                        <div class="flex flex-1 items-center justify-center p-6" role="status" aria-live="polite">
+                            <p class="text-center text-sm font-bold text-[var(--sf-muted)]">Memuat detail produk...</p>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="!modalLoading && !selectedProduct">
+                    <div class="flex min-h-0 flex-1 flex-col">
+                        <div class="flex items-center justify-between border-b-[3px] border-[var(--sf-border)] p-4">
+                            <h3 id="modal-title" class="font-display text-lg font-black text-[var(--sf-ink)]">Detail produk belum tersedia</h3>
+                            <button type="button" @click="closeProductModal()" class="grid h-12 w-12 place-items-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition-transform hover-rubber-band hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[3px] active:translate-y-[3px] active:shadow-none focus:outline-none" aria-label="Tutup detail produk">
+                                <span class="text-xl leading-none" aria-hidden="true">×</span>
+                            </button>
+                        </div>
+                        <div class="flex flex-1 items-center justify-center p-6" role="status">
+                            <p class="text-center text-sm font-bold text-[var(--sf-muted)]">Detail produk tidak dapat ditampilkan. Silakan buka halaman produk.</p>
+                        </div>
+                    </div>
+                </template>
                 <template x-if="selectedProduct">
                     <div class="flex min-h-0 flex-1 flex-col">
                         <div class="flex items-center justify-between border-b-[3px] border-[var(--sf-border)] p-4">

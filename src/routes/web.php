@@ -42,6 +42,7 @@ use App\Http\Controllers\StorefrontOrderAccessController;
 use App\Http\Controllers\StorefrontPolicyController;
 use App\Http\Controllers\StorefrontProductController;
 use App\Http\Controllers\StorefrontProductFamilyController;
+use App\Http\Controllers\StorefrontProductModalController;
 use App\Http\Controllers\StorefrontRobotsController;
 use App\Http\Controllers\StorefrontShopBinanceOrderIdController;
 use App\Http\Controllers\StorefrontShopBscTxHashController;
@@ -69,6 +70,7 @@ Route::get('/syarat-ketentuan', [StorefrontPolicyController::class, 'terms'])->n
 Route::get('/refund', [StorefrontPolicyController::class, 'refund'])->name('storefront.policies.refund');
 Route::get('/produk-keluarga/{productFamily:slug}', StorefrontProductFamilyController::class)->name('storefront.product-families.show');
 Route::get('/pemulihan-pesanan', [StorefrontPolicyController::class, 'recovery'])->name('storefront.policies.recovery');
+Route::get('/produk/{product}/modal', StorefrontProductModalController::class)->name('storefront.products.modal');
 Route::get('/produk/{product}', StorefrontProductController::class)->name('storefront.products.show');
 Route::post('/produk/{product}/waitlist', [StorefrontWaitlistController::class, 'store'])
     ->middleware('throttle:storefront-waitlist')

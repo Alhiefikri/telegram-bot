@@ -122,6 +122,208 @@ test("keeps customer checkout modal keyboard accessible and restores failed stat
   await expectNoDocumentOverflow(page);
 });
 
+test("keeps customer checkout lazy modal loading cancellable and accessible", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+
+  const productCard = page
+    .locator("a[data-product]")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first();
+  const productId = Number(
+    (await productCard.getAttribute("id")).replace("product-", "")
+  );
+  const productUrl = await productCard.getAttribute("href");
+  const modalUrlPattern = `**/produk/${productId}/modal`;
+  let releaseRequest;
+  let holdNextRequest = true;
+  const requestHeld = new Promise((resolve) => {
+    releaseRequest = resolve;
+  });
+
+  await page.route(modalUrlPattern, async (route) => {
+    if (holdNextRequest) {
+      holdNextRequest = false;
+      await requestHeld;
+    }
+
+    try {
+      await route.continue();
+    } catch {
+      // The browser may abort the held request when the modal closes.
+    }
+  });
+
+  try {
+    await page.evaluate(
+      ({ productId, productUrl }) => {
+        const root = document.querySelector('[x-data="storefrontModal()"]');
+        const modal = root?._x_dataStack?.[0];
+        const opener = document.getElementById(`product-${productId}`);
+
+        if (!modal || !opener) {
+          throw new Error("Storefront modal component is unavailable");
+        }
+
+        window.__lazyModalPromise = modal.openProductModalFromUrl(
+          `/produk/${productId}/modal`,
+          {
+            opener,
+            fallbackUrl: productUrl,
+            quantity: 2,
+            buyerName: "Lazy Buyer",
+            termsAccepted: true,
+            email: "lazy@example.test",
+          }
+        );
+      },
+      { productId, productUrl }
+    );
+
+    const loadingDialog = page.getByRole("dialog", {
+      name: "Memuat detail produk",
+    });
+    await expect(loadingDialog).toBeVisible();
+    await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+
+    await loadingDialog.getByLabel("Tutup detail produk").click();
+    await expect(loadingDialog).toBeHidden();
+    await expect(productCard).toBeFocused();
+
+    releaseRequest();
+    await page.evaluate(() => window.__lazyModalPromise);
+    await expect(
+      page.getByRole("dialog", { name: "Browser QA Produk A" })
+    ).toHaveCount(0);
+
+    await page.evaluate(
+      ({ productId, productUrl }) => {
+        const root = document.querySelector('[x-data="storefrontModal()"]');
+        const modal = root?._x_dataStack?.[0];
+        const opener = document.getElementById(`product-${productId}`);
+
+        window.__lazyModalPromise = modal.openProductModalFromUrl(
+          `/produk/${productId}/modal`,
+          {
+            opener,
+            fallbackUrl: productUrl,
+            quantity: 2,
+            buyerName: "Lazy Buyer",
+            termsAccepted: true,
+            email: "lazy@example.test",
+          }
+        );
+      },
+      { productId, productUrl }
+    );
+
+    const dialog = page.getByRole("dialog", {
+      name: "Browser QA Produk A",
+    });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator("#storefront-buyer-name")).toHaveValue(
+      "Lazy Buyer"
+    );
+    await expect(dialog.locator("#storefront-email")).toHaveValue(
+      "lazy@example.test"
+    );
+    await expect(dialog.locator("#storefront-terms-accepted")).toBeChecked();
+    await expect(dialog.locator("span.min-w-8")).toHaveText("2");
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(productCard).toBeFocused();
+  } finally {
+    releaseRequest();
+    await page.unroute(modalUrlPattern);
+  }
+});
+
+test("keeps customer checkout lazy modal failures on the product page", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+
+  const productCard = page
+    .locator("a[data-product]")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first();
+  const productId = Number(
+    (await productCard.getAttribute("id")).replace("product-", "")
+  );
+  const productUrl = await productCard.getAttribute("href");
+  const modalUrlPattern = `**/produk/${productId}/modal`;
+  const productPage = page.waitForURL(
+    (url) => url.pathname === `/produk/${productId}`
+  );
+
+  await page.route(modalUrlPattern, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "fallback",
+        product: null,
+        reason: "checkout_unavailable",
+        fallback_url: productUrl,
+      }),
+    })
+  );
+
+  try {
+    await page.evaluate(
+      ({ productId, productUrl }) => {
+        const root = document.querySelector('[x-data="storefrontModal()"]');
+        const modal = root?._x_dataStack?.[0];
+        const opener = document.getElementById(`product-${productId}`);
+
+        window.__lazyModalPromise = modal.openProductModalFromUrl(
+          `/produk/${productId}/modal`,
+          { opener, fallbackUrl: productUrl }
+        );
+      },
+      { productId, productUrl }
+    );
+    await productPage;
+    await expect(
+      page.getByRole("heading", { name: "Browser QA Produk A" })
+    ).toBeVisible();
+  } finally {
+    await page.unroute(modalUrlPattern);
+  }
+
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  const networkFailureNavigation = page.waitForURL(
+    (url) => url.pathname === `/produk/${productId}`
+  );
+  await page.route(modalUrlPattern, (route) => route.abort());
+
+  try {
+    await page.evaluate(
+      ({ productId, productUrl }) => {
+        const root = document.querySelector('[x-data="storefrontModal()"]');
+        const modal = root?._x_dataStack?.[0];
+        const opener = document.getElementById(`product-${productId}`);
+
+        window.__lazyModalPromise = modal.openProductModalFromUrl(
+          `/produk/${productId}/modal`,
+          { opener, fallbackUrl: productUrl }
+        );
+      },
+      { productId, productUrl }
+    );
+    await networkFailureNavigation;
+    await expect(
+      page.getByRole("heading", { name: "Browser QA Produk A" })
+    ).toBeVisible();
+  } finally {
+    await page.unroute(modalUrlPattern);
+  }
+});
+
 test("keeps customer checkout QRIS-first across browser locales", async ({
   browser,
 }) => {
