@@ -5,11 +5,14 @@ namespace App\Services\Catalog;
 use App\Catalog\CatalogBrowseEntry;
 use App\Catalog\CatalogBrowseQuery;
 use App\Catalog\CatalogBrowseResult;
+use App\Catalog\CatalogCategoryOptions;
+use App\Catalog\CatalogCategoryReadModel;
 use App\Catalog\CatalogFamilyReadModel;
 use App\Catalog\CatalogPagination;
 use App\Catalog\CatalogProductReadModel;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use Illuminate\Database\Eloquent\Builder;
@@ -19,6 +22,9 @@ use Illuminate\Support\Collection;
 final class CatalogBrowse
 {
     private const ADMIN_PER_PAGE = 20;
+
+    /** @var list<string> */
+    private const CATEGORY_COLUMNS = ['id', 'name', 'slug', 'description', 'sort_order'];
 
     /** @var list<string> */
     private const PRODUCT_COLUMNS = [
@@ -46,6 +52,7 @@ final class CatalogBrowse
         'reserved_stock',
         'image_path',
         'is_active',
+        'featured_rank',
         'created_at',
     ];
 
@@ -65,6 +72,47 @@ final class CatalogBrowse
         }
 
         return $this->browse($query, public: false);
+    }
+
+    public function publicCategoryOptions(bool $withProductsOnly = false): CatalogCategoryOptions
+    {
+        $categories = $this->publicCategoryQuery($withProductsOnly)
+            ->storefrontOrder()
+            ->get()
+            ->map(fn (Category $category): CatalogCategoryReadModel => $this->categoryReadModel($category))
+            ->values()
+            ->all();
+        $hasUncategorized = Product::query()
+            ->publicVisible()
+            ->whereNull('category_id')
+            ->exists();
+
+        return new CatalogCategoryOptions($categories, $hasUncategorized);
+    }
+
+    public function findPublicCategory(int|string $identity): ?CatalogCategoryReadModel
+    {
+        $identityString = trim((string) $identity);
+        $category = ctype_digit($identityString)
+            ? $this->publicCategoryQuery()->whereKey((int) $identityString)->first()
+            : ($identityString === ''
+                ? null
+                : $this->publicCategoryQuery()->where('slug', strtolower($identityString))->first());
+
+        return $category instanceof Category ? $this->categoryReadModel($category) : null;
+    }
+
+    public function featuredPublic(): ?CatalogProductReadModel
+    {
+        $product = $this->productQuery(public: true)
+            ->availableForPurchase()
+            ->whereNotNull('featured_rank')
+            ->orderBy('featured_rank')
+            ->orderBy('name')
+            ->orderBy('id')
+            ->first();
+
+        return $product instanceof Product ? $this->productReadModel($product) : null;
     }
 
     public function showPublicFamily(ProductFamily|int|string $identity): CatalogFamilyReadModel
@@ -197,6 +245,34 @@ final class CatalogBrowse
             standaloneProducts: $pageStandalone,
             search: $query->search,
             category: $query->category,
+        );
+    }
+
+    /**
+     * @return Builder<Category>
+     */
+    private function publicCategoryQuery(bool $withProductsOnly = false): Builder
+    {
+        return Category::query()
+            ->select(self::CATEGORY_COLUMNS)
+            ->publicVisible()
+            ->when(
+                $withProductsOnly,
+                fn (Builder $query): Builder => $query->whereHas(
+                    'products',
+                    fn (Builder $productQuery): Builder => $productQuery->publicVisible(),
+                ),
+            );
+    }
+
+    private function categoryReadModel(Category $category): CatalogCategoryReadModel
+    {
+        return new CatalogCategoryReadModel(
+            id: (int) $category->getKey(),
+            name: (string) $category->name,
+            slug: (string) $category->slug,
+            sortOrder: (int) $category->sort_order,
+            description: $category->description,
         );
     }
 

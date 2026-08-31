@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Catalog\CatalogBrowseQuery;
+use App\Catalog\CatalogCategoryOptions;
+use App\Catalog\CatalogCategoryReadModel;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
@@ -201,6 +203,204 @@ class ProductFamilyCatalogTest extends TestCase
         $this->assertCount(1, $filtered->entries);
         $this->assertSame($family->id, $filtered->entries[0]->family?->id);
         $this->assertSame('design', $filtered->entries[0]->family?->categorySlug);
+    }
+
+    public function test_public_category_options_preserve_storefront_and_product_backed_sets(): void
+    {
+        $empty = Category::factory()->create([
+            'name' => 'Empty Category',
+            'slug' => 'empty-category',
+            'sort_order' => 1,
+        ]);
+        $used = Category::factory()->create([
+            'name' => 'Used Category',
+            'slug' => 'used-category',
+            'sort_order' => 2,
+        ]);
+        $inactive = Category::factory()->create([
+            'name' => 'Inactive Category',
+            'slug' => 'inactive-category',
+            'sort_order' => 3,
+            'is_active' => false,
+        ]);
+        $usedProduct = Product::factory()->create([
+            'category_id' => $used->id,
+            'name' => 'Visible Used Product',
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'category_id' => $inactive->id,
+            'name' => 'Hidden Inactive Category Product',
+            'is_active' => true,
+        ]);
+
+        $catalog = app(CatalogBrowse::class);
+        $all = $catalog->publicCategoryOptions();
+        $withProductsOnly = $catalog->publicCategoryOptions(withProductsOnly: true);
+
+        $this->assertInstanceOf(CatalogCategoryOptions::class, $all);
+        $this->assertSame([$empty->id, $used->id], array_map(
+            static fn (CatalogCategoryReadModel $category): int => $category->id,
+            $all->categories,
+        ));
+        $this->assertSame([$used->id], array_map(
+            static fn (CatalogCategoryReadModel $category): int => $category->id,
+            $withProductsOnly->categories,
+        ));
+        $this->assertFalse($all->hasUncategorized);
+        $this->assertSame([
+            'id' => $empty->id,
+            'name' => $empty->name,
+            'slug' => $empty->slug,
+            'sort_order' => $empty->sort_order,
+            'description' => $empty->description,
+        ], $all->categories[0]->toArray());
+        $this->assertSame($usedProduct->category_id, $withProductsOnly->categories[0]->id);
+    }
+
+    public function test_public_category_options_report_only_public_uncategorized_products(): void
+    {
+        $inactive = Product::factory()->create([
+            'category_id' => null,
+            'is_active' => false,
+        ]);
+        $this->assertFalse($inactive->is_active);
+
+        $catalog = app(CatalogBrowse::class);
+        $this->assertFalse($catalog->publicCategoryOptions()->hasUncategorized);
+
+        $visible = Product::factory()->create([
+            'category_id' => null,
+            'is_active' => true,
+        ]);
+        $options = $catalog->publicCategoryOptions();
+
+        $this->assertTrue($options->hasUncategorized);
+        $this->assertNull($visible->category_id);
+    }
+
+    public function test_find_public_category_accepts_numeric_and_slug_identity_and_rejects_invalid_categories(): void
+    {
+        $category = Category::factory()->create([
+            'name' => 'Streaming',
+            'slug' => 'streaming',
+            'sort_order' => 4,
+        ]);
+        $inactive = Category::factory()->create([
+            'name' => 'Inactive',
+            'slug' => 'inactive',
+            'is_active' => false,
+        ]);
+        $catalog = app(CatalogBrowse::class);
+
+        $byId = $catalog->findPublicCategory($category->id);
+        $byNumericString = $catalog->findPublicCategory((string) $category->id);
+        $bySlug = $catalog->findPublicCategory(' STREAMING ');
+
+        $this->assertInstanceOf(CatalogCategoryReadModel::class, $byId);
+        $this->assertSame($category->id, $byId?->id);
+        $this->assertSame($category->id, $byNumericString?->id);
+        $this->assertSame($category->slug, $bySlug?->slug);
+        $this->assertSame($category->description, $bySlug?->description);
+        $this->assertNull($catalog->findPublicCategory($inactive->slug));
+        $this->assertNull($catalog->findPublicCategory('missing'));
+        $this->assertNull($catalog->findPublicCategory('   '));
+    }
+
+    public function test_featured_public_preserves_rank_name_and_id_precedence(): void
+    {
+        $higherRank = Product::factory()->create([
+            'name' => 'Higher Rank',
+            'featured_rank' => 2,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        $inactiveCategory = Category::factory()->create(['is_active' => false]);
+        Product::factory()->create([
+            'name' => 'Hidden Product',
+            'featured_rank' => 0,
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => false,
+        ]);
+        Product::factory()->create([
+            'name' => 'Inactive Category Product',
+            'featured_rank' => 0,
+            'category_id' => $inactiveCategory->id,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'Unavailable Product',
+            'featured_rank' => 0,
+            'stock' => 0,
+            'reserved_stock' => 0,
+        ]);
+        $sameRankFirstId = Product::factory()->create([
+            'name' => 'Alpha',
+            'featured_rank' => 1,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        $sameRankSecondId = Product::factory()->create([
+            'name' => 'Alpha',
+            'featured_rank' => 1,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        $sameRankLaterName = Product::factory()->create([
+            'name' => 'Bravo',
+            'featured_rank' => 1,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'Unranked Ready',
+            'featured_rank' => null,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+
+        $featured = app(CatalogBrowse::class)->featuredPublic();
+
+        $this->assertNotNull($featured);
+        $this->assertSame($sameRankFirstId->id, $featured->id);
+        $this->assertLessThan($sameRankSecondId->id, $featured->id);
+        $this->assertNotSame($sameRankLaterName->id, $featured->id);
+        $this->assertSame('Alpha', $featured->name);
+    }
+
+    public function test_featured_public_reuses_credential_managed_availability(): void
+    {
+        $claimed = Product::factory()->create([
+            'name' => 'Claimed Credential',
+            'featured_rank' => 1,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $claimed->id,
+            'order_item_id' => OrderItem::factory()->create(['product_id' => $claimed->id])->id,
+            'secret' => 'claimed@example.test|pass',
+        ]);
+        $available = Product::factory()->create([
+            'name' => 'Available Credential',
+            'featured_rank' => 2,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $available->id,
+            'secret' => 'available@example.test|pass',
+        ]);
+
+        $featured = app(CatalogBrowse::class)->featuredPublic();
+
+        $this->assertNotNull($featured);
+        $this->assertSame($available->id, $featured->id);
+        $this->assertTrue($featured->isAvailable);
+        $this->assertSame(1, $featured->availableStock);
+        $this->assertArrayNotHasKey('secret', $featured->toArray());
     }
 
     public function test_owner_can_manage_family_membership_and_delete_family_without_mutating_product_state(): void
