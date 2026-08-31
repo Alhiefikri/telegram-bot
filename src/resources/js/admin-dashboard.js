@@ -1033,6 +1033,28 @@ export default function adminDashboard(initialState = {}) {
       });
       this.$nextTick(() => this.$refs.productName?.focus());
     },
+    focusProductFamilyAssignment(familyId) {
+      const section = document.getElementById("admin-standalone-products");
+      if (!section) {
+        return;
+      }
+
+      section.scrollIntoView({ block: "start" });
+      const familyValue = String(familyId);
+      const select = Array.from(
+        section.querySelectorAll("[data-family-assignment-select]")
+      ).find((candidate) =>
+        Array.from(candidate.options).some(
+          (option) => option.value === familyValue
+        )
+      );
+      if (!select) {
+        return;
+      }
+
+      select.value = familyValue;
+      select.focus({ preventScroll: true });
+    },
 
     openCategoryManagement() {
       this.categoryModalOpener = document.activeElement;

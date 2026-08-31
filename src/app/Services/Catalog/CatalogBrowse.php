@@ -242,11 +242,14 @@ final class CatalogBrowse
     {
         $category = $product->category;
         $family = $product->family;
+        $optionLabel = trim((string) $product->family_option_label);
+        $optionLabel = $optionLabel === '' ? null : $optionLabel;
+        $label = $optionLabel ?? trim((string) $product->name);
 
         return new CatalogProductReadModel(
             id: (int) $product->getKey(),
             name: (string) $product->name,
-            label: trim((string) ($product->family_option_label ?: $product->name)),
+            label: $label,
             description: (string) $product->description,
             merchandising: [
                 'product_type' => $product->product_type,
@@ -276,7 +279,7 @@ final class CatalogBrowse
             familyId: $family?->getKey() === null ? null : (int) $family->getKey(),
             familyName: $family?->name,
             familySortOrder: (int) ($product->family_sort_order ?? 0),
-            optionLabel: $product->family_option_label,
+            optionLabel: $optionLabel,
             imagePath: $product->image_path,
             imageUrl: $this->publicImageUrl($product->image_path),
             createdAt: $product->created_at?->toISOString(),

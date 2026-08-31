@@ -55,7 +55,10 @@
                     @foreach ($members as $member)
                         @php
                             $presentation = $member->presentation;
-                            $optionLabel = trim((string) ($presentation->familyOptionLabel ?: $presentation->name));
+                            $optionLabel = trim((string) $presentation->familyOptionLabel);
+                            if ($optionLabel === '') {
+                                $optionLabel = trim((string) $presentation->name);
+                            }
                             $productUrl = $presentation->productUrl.(str_contains($presentation->productUrl, '?') ? '&' : '?').'from='.urlencode($familyUrl);
                             $checkoutUrl = $presentation->productUrl.(str_contains($presentation->productUrl, '?') ? '&' : '?').'checkout=1&from='.urlencode($familyUrl);
                         @endphp

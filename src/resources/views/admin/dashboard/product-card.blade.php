@@ -76,7 +76,7 @@
                                         @csrf
                                         @method('PATCH')
                                         <label class="sr-only" for="product-family-select-{{ $product['id'] }}">Product Family</label>
-                                        <select id="product-family-select-{{ $product['id'] }}" name="product_family_id" class="block min-h-10 w-full rounded-lg border-2 border-neo-ink bg-white px-2 py-1.5 text-xs font-bold text-neo-ink">
+                                        <select id="product-family-select-{{ $product['id'] }}" data-family-assignment-select name="product_family_id" class="block min-h-10 w-full rounded-lg border-2 border-neo-ink bg-white px-2 py-1.5 text-xs font-bold text-neo-ink">
                                             <option value="">Standalone</option>
                                             @foreach ($familyOptions as $familyOption)
                                                 <option value="{{ $familyOption['id'] }}" @selected((int) ($product['family_id'] ?? 0) === (int) $familyOption['id'])>{{ $familyOption['name'] }}</option>

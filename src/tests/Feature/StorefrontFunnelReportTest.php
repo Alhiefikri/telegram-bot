@@ -455,6 +455,77 @@ final class StorefrontFunnelReportTest extends TestCase
         }
     }
 
+    public function test_multi_family_order_events_retain_every_bounded_family_snapshot(): void
+    {
+        Carbon::setTestNow('2026-08-30 10:00:00');
+        try {
+            $owner = User::factory()->create(['role' => UserRole::Owner]);
+            $familyA = ProductFamily::factory()->create(['name' => 'Family A', 'slug' => 'family-a']);
+            $familyB = ProductFamily::factory()->create(['name' => 'Family B', 'slug' => 'family-b']);
+            $productA = Product::factory()->create(['product_family_id' => $familyA->id, 'name' => 'Product A']);
+            $productB = Product::factory()->create(['product_family_id' => $familyB->id, 'name' => 'Product B']);
+            $order = Order::factory()->create([
+                'order_status' => OrderStatus::Processing,
+                'payment_status' => PaymentStatus::Paid,
+                'total_amount' => 30000,
+                'currency' => 'IDR',
+            ]);
+            OrderItem::factory()->create([
+                'order_id' => $order->id,
+                'product_id' => $productA->id,
+                'product_name' => $productA->name,
+                'family_id' => $familyA->id,
+                'family_name' => $familyA->name,
+                'quantity' => 1,
+                'unit_price' => 10000,
+                'subtotal' => 10000,
+            ]);
+            OrderItem::factory()->create([
+                'order_id' => $order->id,
+                'product_id' => $productB->id,
+                'product_name' => $productB->name,
+                'family_id' => $familyB->id,
+                'family_name' => $familyB->name,
+                'quantity' => 1,
+                'unit_price' => 20000,
+                'subtotal' => 20000,
+            ]);
+            Payment::factory()->create([
+                'order_id' => $order->id,
+                'provider' => 'manual',
+                'method' => 'QR_MANUAL',
+                'status' => PaymentStatus::Paid,
+                'amount' => 30000,
+                'currency' => 'IDR',
+                'paid_at' => now(),
+            ]);
+
+            app(StorefrontFunnelEvents::class)->checkoutSubmitted(null, $order, [
+                'status_endpoint_result' => 'accepted',
+            ]);
+
+            $event = AuditLog::query()->where('action', 'storefront.checkout_submitted')->latest('id')->firstOrFail();
+            $this->assertSame([
+                ['id' => $familyA->id, 'name' => 'Family A'],
+                ['id' => $familyB->id, 'name' => 'Family B'],
+            ], $event->new_values['family_snapshots']);
+            $this->assertArrayNotHasKey('family_id', $event->new_values);
+            $this->assertArrayNotHasKey('family_name', $event->new_values);
+            $report = app(StorefrontFunnelReport::class)->forAdmin($owner, [
+                'start_date' => '2026-08-30',
+                'end_date' => '2026-08-30',
+            ]);
+            $families = collect($report['families'])->keyBy('family_id');
+            $this->assertSame(1, $families[$familyA->id]['checkout_submits']);
+            $this->assertSame(1, $families[$familyB->id]['checkout_submits']);
+            $this->assertSame(1, $families[$familyA->id]['paid_orders']);
+            $this->assertSame(1, $families[$familyB->id]['paid_orders']);
+
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     private function event(string $action, string $subjectType, string $subjectId, array $values, ?string $createdAt = null): void
     {
         AuditLog::factory()->create([

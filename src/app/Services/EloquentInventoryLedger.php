@@ -48,6 +48,7 @@ class EloquentInventoryLedger implements InventoryLedger
                 'category' => fn ($query) => $query->where('is_active', true),
                 'family:id,name',
             ])
+            ->withAvailability()
             ->whereIn('id', $items->pluck('product_id'))
             ->orderBy('id')
             ->lockForUpdate()

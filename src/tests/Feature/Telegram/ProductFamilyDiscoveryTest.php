@@ -86,6 +86,121 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('Netflix Individual', (string) $catalogAfterBack['text']);
     }
 
+    public function test_signed_family_option_callback_is_rejected_without_current_catalog_state(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41012, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Replay Family', 'slug' => 'replay-family']);
+        Product::factory()->create([
+            'name' => 'Replay Option',
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Replay Package',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            41016,
+            'replayed-family-callback',
+            $this->optionsCallback($family->id),
+            [],
+            41012,
+        ))->assertOk();
+
+        $this->assertSame(0, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Replay Package'))->count());
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'replayed-family-callback'
+            && str_contains((string) ($request['text'] ?? ''), 'sudah tidak berlaku'));
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+    }
+
+    public function test_family_option_callbacks_reject_invalid_contexts_without_commerce_effects(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41017, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Invalid Family', 'slug' => 'invalid-family']);
+        $firstProduct = Product::factory()->create([
+            'name' => 'Invalid Option 1',
+            'product_family_id' => $family->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        foreach (range(2, 5) as $number) {
+            Product::factory()->create([
+                'name' => 'Invalid Option '.$number,
+                'product_family_id' => $family->id,
+                'family_sort_order' => $number,
+                'stock' => 1,
+                'reserved_stock' => 0,
+            ]);
+        }
+        $otherFamily = ProductFamily::factory()->create(['name' => 'Other Invalid Family', 'slug' => 'other-invalid-family']);
+        Product::factory()->create([
+            'name' => 'Other Invalid Option',
+            'product_family_id' => $otherFamily->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->openFamilyFromDeepLink($customer, 41017, $family);
+        $before = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->count();
+        $validOptionsCallback = $this->optionsCallback($family->id);
+        $lastCharacter = substr($validOptionsCallback, -1);
+        $tamperedOptionsCallback = substr($validOptionsCallback, 0, -1).($lastCharacter === 'a' ? 'b' : 'a');
+        $cases = [
+            ['out-of-range', $this->optionsCallback($family->id, 99)],
+            ['cross-family', $this->optionsCallback($otherFamily->id)],
+            ['malformed', 'family:options:vnot-a-real-token'],
+            ['tampered', $tamperedOptionsCallback],
+        ];
+
+        foreach ($cases as [$callbackId, $data]) {
+            $invalidCallbackIds[] = $callbackId;
+            $this->postTelegramWebhook($this->callbackUpdate(
+                41018 + count($invalidCallbackIds),
+                $callbackId,
+                $data,
+                [],
+                41017,
+            ))->assertOk();
+        }
+
+        Product::query()->where('product_family_id', $family->id)->update(['is_active' => false]);
+        $invalidCallbackIds[] = 'inactive-family';
+        $this->postTelegramWebhook($this->callbackUpdate(
+            41023,
+            'inactive-family',
+            $this->optionsCallback($family->id),
+            [],
+            41017,
+        ))->assertOk();
+
+        $this->openFamilyFromDeepLink($customer, 41024, $otherFamily);
+        $otherFamily->delete();
+        $invalidCallbackIds[] = 'deleted-family';
+        $this->postTelegramWebhook($this->callbackUpdate(
+            41025,
+            'deleted-family',
+            $this->optionsCallback($otherFamily->id),
+            [],
+            41017,
+        ))->assertOk();
+
+        $after = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->count();
+        $this->assertSame($before + 1, $after);
+        foreach ($invalidCallbackIds as $callbackId) {
+            Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+                && ($request['callback_query_id'] ?? null) === $callbackId
+                && str_contains((string) ($request['text'] ?? ''), 'sudah tidak berlaku'));
+        }
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+    }
+
     public function test_family_option_callback_is_rejected_after_catalog_context_changes(): void
     {
         $this->fakeTelegramHttp();
@@ -130,7 +245,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'reserved_stock' => 0,
         ]);
 
-        $this->postTelegramWebhook($this->callbackUpdate(41010, 'open-family', $this->optionsCallback($family->id), [], 41002))->assertOk();
+        $this->openFamilyFromDeepLink($customer, 41008, $family);
         $this->postTelegramWebhook($this->callbackUpdate(41011, 'select-family-option', $this->selectCallback($family->id, $product->id), [], 41002))->assertOk();
 
         $detail = $this->lastMessageContaining('CapCut Team 30 Days');
@@ -152,7 +267,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
     public function test_sold_out_family_option_is_readable_and_side_effect_free(): void
     {
         $this->fakeTelegramHttp();
-        Customer::factory()->create(['telegram_id' => 41003, 'locale' => 'id']);
+        $customer = Customer::factory()->create(['telegram_id' => 41003, 'locale' => 'id']);
         $family = ProductFamily::factory()->create(['name' => 'Sold Out Family', 'slug' => 'sold-out-family']);
         $product = Product::factory()->create([
             'name' => 'Sold Out Option',
@@ -163,7 +278,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'is_active' => true,
         ]);
 
-        $this->postTelegramWebhook($this->callbackUpdate(41020, 'open-sold-family', $this->optionsCallback($family->id), [], 41003))->assertOk();
+        $this->openFamilyFromDeepLink($customer, 41018, $family);
         $this->postTelegramWebhook($this->callbackUpdate(41021, 'select-sold-option', $this->selectCallback($family->id, $product->id), [], 41003))->assertOk();
 
         $detail = $this->lastMessageContaining('Sold Out Option');
@@ -245,7 +360,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
     public function test_family_options_use_four_per_page_and_bounded_navigation(): void
     {
         $this->fakeTelegramHttp();
-        Customer::factory()->create(['telegram_id' => 41005, 'locale' => 'en']);
+        $customer = Customer::factory()->create(['telegram_id' => 41005, 'locale' => 'en']);
         $family = ProductFamily::factory()->create(['name' => 'Paged Family', 'slug' => 'paged-family']);
         foreach (range(1, 5) as $number) {
             Product::factory()->create([
@@ -258,7 +373,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             ]);
         }
 
-        $this->postTelegramWebhook($this->callbackUpdate(41040, 'options-page-one', $this->optionsCallback($family->id), [], 41005))->assertOk();
+        $this->openFamilyFromDeepLink($customer, 41038, $family);
         $first = $this->lastMessageContaining('Choose an option for Paged Family');
         $firstKeyboard = $first['reply_markup']['inline_keyboard'];
         $this->assertCount(6, $firstKeyboard);
@@ -269,7 +384,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('[4] Package 4', (string) $first['text']);
         $this->assertStringNotContainsString('[5] Package 5', (string) $first['text']);
 
-        $this->postTelegramWebhook($this->callbackUpdate(41041, 'options-page-two', $this->optionsCallback($family->id, 2), [], 41005))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41041, 'options-page-two', $firstKeyboard[4][0]['callback_data'], [], 41005))->assertOk();
         $second = $this->lastMessageContaining('Package 5');
         $secondKeyboard = $second['reply_markup']['inline_keyboard'];
         $this->assertCount(3, $secondKeyboard);
@@ -394,7 +509,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'reserved_stock' => 0,
         ]);
 
-        $this->postTelegramWebhook($this->callbackUpdate(41080, 'move-open', $this->optionsCallback($original->id), [], 41007))->assertOk();
+        $this->openFamilyFromDeepLink($customer, 41078, $original);
         $this->postTelegramWebhook($this->callbackUpdate(41081, 'move-select', $this->selectCallback($original->id, $product->id), [], 41007))->assertOk();
         $state = app(TelegramIntentSession::class)->get($customer);
         $messagesBeforeBack = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage') && str_contains((string) ($request['text'] ?? ''), 'Original Family'))->count();
@@ -440,7 +555,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'is_active' => true,
         ]);
 
-        $this->postTelegramWebhook($this->callbackUpdate(41090, 'checkout-family-open', $this->optionsCallback($family->id), [], 41009))->assertOk();
+        $this->openFamilyFromDeepLink($customer, 41088, $family);
         $this->postTelegramWebhook($this->callbackUpdate(41091, 'checkout-family-select', $this->selectCallback($family->id, $selected->id), [], 41009))->assertOk();
         $state = app(TelegramIntentSession::class)->get($customer);
         $this->postTelegramWebhook($this->callbackUpdate(41092, 'checkout-family-pay', 'detail:pay:qris:'.$selected->id.':'.$state['interactionToken'], [], 41009, 'private', 99009))->assertOk();
@@ -468,6 +583,18 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 
         $this->assertSame(PHP_INT_MAX, $tokens->decodeOptions(substr($optionToken, 1))['familyId']);
         $this->assertSame(PHP_INT_MAX, $tokens->decodeSelect(substr($selectToken, 1))['productId']);
+    }
+
+    private function openFamilyFromDeepLink(Customer $customer, int $updateId, ProductFamily $family): void
+    {
+        $chatId = (int) $customer->telegram_id;
+        $this->postTelegramWebhook($this->messageUpdate(
+            $updateId,
+            '/start family_'.$family->id,
+            [],
+            $chatId,
+        ))->assertOk();
+        $this->lastMessageContaining($family->name);
     }
 
     private function optionsCallback(int $familyId, int $page = 1, int $returnPage = 1): string

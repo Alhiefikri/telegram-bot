@@ -403,10 +403,13 @@ final class StorefrontFunnelReport
                     if ($productId === null && $this->isSubjectType($subjectType, Product::class)) {
                         $productId = $this->positiveId($subjectId);
                     }
-                    $familyId = $this->positiveId($values['family_id'] ?? null);
-                    $familyName = $familyId === null
-                        ? null
-                        : $this->safeEventText($values['family_name'] ?? null, 160);
+                    $familySnapshots = $this->eventFamilySnapshots([
+                        'family_snapshots' => $values['family_snapshots'] ?? null,
+                        'family_id' => $values['family_id'] ?? null,
+                        'family_name' => $values['family_name'] ?? null,
+                    ]);
+                    $familyId = count($familySnapshots) === 1 ? $familySnapshots[0]['id'] : null;
+                    $familyName = count($familySnapshots) === 1 ? $familySnapshots[0]['name'] : null;
 
                     $orderId = $this->safeEventText($values['order_id'] ?? null, 80);
                     if ($orderId === null && $this->isSubjectType($subjectType, Order::class)) {
@@ -419,6 +422,8 @@ final class StorefrontFunnelReport
                         'action' => (string) $log->action,
                         'product_id' => $productId,
                         'family_id' => $familyId,
+                        'family_snapshots' => $familySnapshots,
+
                         'family_name' => $familyName,
                         'order_id' => $orderId,
                         'provider' => $this->safeEventText($values['provider'] ?? null, 40),
@@ -674,12 +679,12 @@ final class StorefrontFunnelReport
                 }
                 $this->recordEvent($productBuckets[$bucketKey], $event, collect: false);
             }
-            if (($event['family_id'] ?? null) !== null) {
-                $familyKey = $this->familyBucketKey((int) $event['family_id'], $event['family_name'] ?? null);
+            foreach ($this->eventFamilySnapshots($event) as $snapshot) {
+                $familyKey = $this->familyBucketKey($snapshot['id'], $snapshot['name']);
                 if (! isset($familyBuckets[$familyKey])) {
                     $familyBuckets[$familyKey] = $this->newFamilyBucket(
-                        (int) $event['family_id'],
-                        $event['family_name'] ?? null,
+                        $snapshot['id'],
+                        $snapshot['name'],
                     );
                 }
                 $this->recordEvent($familyBuckets[$familyKey], $event, collect: false);
@@ -818,9 +823,11 @@ final class StorefrontFunnelReport
         if (! $this->matchesProductFilter($productIds, $filters['product_id'] ?? null)) {
             return false;
         }
-        if (! $this->matchesFamilyFilter($event['family_id'] ?? null, $filters['family_id'] ?? null)) {
+        if (($filters['family_id'] ?? null) !== null
+            && $this->familySnapshots([$event], $filters['family_id']) === []) {
             return false;
         }
+
         if (! $this->matchesCategoryFilter($productIds, $filters['category_id'] ?? null, $products)) {
             return false;
         }
@@ -1011,6 +1018,44 @@ final class StorefrontFunnelReport
     }
 
     /**
+     * @param  array<string, mixed>  $event
+     * @return list<array{id:int,name:?string}>
+     */
+    private function eventFamilySnapshots(array $event): array
+    {
+        $snapshots = [];
+        $rawSnapshots = $event['family_snapshots'] ?? null;
+        if (is_array($rawSnapshots)) {
+            foreach ($rawSnapshots as $rawSnapshot) {
+                if (! is_array($rawSnapshot)) {
+                    continue;
+                }
+                $id = $this->positiveId($rawSnapshot['id'] ?? $rawSnapshot['family_id'] ?? null);
+                if ($id === null || isset($snapshots[$id])) {
+                    continue;
+                }
+
+                $snapshots[$id] = [
+                    'id' => $id,
+                    'name' => $this->safeEventText($rawSnapshot['name'] ?? $rawSnapshot['family_name'] ?? null, 160),
+                ];
+            }
+        }
+
+        if ($snapshots === []) {
+            $id = $this->positiveId($event['family_id'] ?? null);
+            if ($id !== null) {
+                $snapshots[$id] = [
+                    'id' => $id,
+                    'name' => $this->safeEventText($event['family_name'] ?? null, 160),
+                ];
+            }
+        }
+
+        return array_values($snapshots);
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $events
      * @return list<array{id:int,name:?string}>
      */
@@ -1018,13 +1063,13 @@ final class StorefrontFunnelReport
     {
         $snapshots = [];
         foreach ($events as $event) {
-            $id = $this->positiveId($event['family_id'] ?? null);
-            if ($id === null || ! $this->matchesFamilyFilter($id, $filter)) {
-                continue;
+            foreach ($this->eventFamilySnapshots($event) as $snapshot) {
+                if (! $this->matchesFamilyFilter($snapshot['id'], $filter)) {
+                    continue;
+                }
+                $key = $snapshot['id'].'|'.($snapshot['name'] ?? '');
+                $snapshots[$key] = $snapshot;
             }
-            $name = $this->safeEventText($event['family_name'] ?? null, 160);
-            $key = $id.'|'.($name ?? '');
-            $snapshots[$key] = ['id' => $id, 'name' => $name];
         }
 
         return array_values($snapshots);
@@ -1431,15 +1476,17 @@ final class StorefrontFunnelReport
             ];
         }
         foreach ($context['events'] as $event) {
-            $familyId = $this->positiveId($event['family_id'] ?? null);
-            if ($familyId === null || isset($familiesById[$familyId])) {
-                continue;
+            foreach ($this->eventFamilySnapshots($event) as $snapshot) {
+                $familyId = $snapshot['id'];
+                if (isset($familiesById[$familyId])) {
+                    continue;
+                }
+                $familiesById[$familyId] = [
+                    'id' => $familyId,
+                    'name' => $snapshot['name'] ?: 'Product Family #'.$familyId,
+                    'status_label' => 'Snapshot',
+                ];
             }
-            $familiesById[$familyId] = [
-                'id' => $familyId,
-                'name' => $event['family_name'] ?: 'Product Family #'.$familyId,
-                'status_label' => 'Snapshot',
-            ];
         }
         foreach ($context['orders'] as $order) {
             foreach ($order->orderItems as $item) {

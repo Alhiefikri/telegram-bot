@@ -43,6 +43,9 @@ class StorefrontProductPresenter
                 ? (int) $attributes['sold_quantity']
                 : $this->soldQuantity($product);
         }
+        $familyOptionLabel = trim((string) $product->family_option_label);
+        $familyOptionLabel = $familyOptionLabel === '' ? null : $familyOptionLabel;
+
         $isAvailable = $stockAvailable > 0;
         $paymentSetting = $this->paymentSetting();
         $checkoutReadiness = $this->readinessFor($paymentSetting);
@@ -93,7 +96,7 @@ class StorefrontProductPresenter
             canJoinWaitlist: ! $isAvailable,
             waitlistUrl: route('storefront.waitlist.store', ['product' => $product->getKey()]),
             waitlistCtaLabel: (string) config('storefront.waitlist.cta', 'Beri tahu saya saat tersedia'),
-            familyOptionLabel: $product->family_option_label,
+            familyOptionLabel: $familyOptionLabel,
         );
     }
 

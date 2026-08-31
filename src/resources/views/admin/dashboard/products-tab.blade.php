@@ -112,7 +112,7 @@
                                             <span x-text="familyExpanded ? 'Tutup pilihan' : 'Buka pilihan'">Tutup pilihan</span>
                                         </button>
                                         @if ($canManageProducts)
-                                            <button type="button" class="min-h-11 rounded-lg border-2 border-neo-ink bg-neo-yellow px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]" x-on:click="document.getElementById('admin-standalone-products')?.scrollIntoView({ block: 'start' })">+ Tambah Product</button>
+                                            <button type="button" class="min-h-11 rounded-lg border-2 border-neo-ink bg-neo-yellow px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]" x-on:click="focusProductFamilyAssignment({{ $group['id'] }})">+ Tambah Product</button>
                                         @endif
                                         @if ($canManageProducts)
                                             <button type="button" class="min-h-11 rounded-lg border-2 border-neo-ink bg-white px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]" x-on:click="openProductFamilyEditModal(familyEditPayload)">✏️ Edit family</button>

@@ -217,7 +217,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
     {
         $state = $this->catalogQueries->state($customer);
         if ($state === null) {
-            return true;
+            return false;
         }
 
         return ($state['type'] ?? null) === 'family'

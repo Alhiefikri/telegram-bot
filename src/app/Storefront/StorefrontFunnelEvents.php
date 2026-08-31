@@ -13,6 +13,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class StorefrontFunnelEvents
 {
+    private const MAX_FAMILY_SNAPSHOTS = 20;
+
     /**
      * @var list<string>
      */
@@ -139,7 +141,7 @@ class StorefrontFunnelEvents
         };
     }
 
-    /** @return array{family_id?: int, family_name?: ?string} */
+    /** @return array<string, mixed> */
     private function familySnapshot(?Product $product): array
     {
         if (! $product) {
@@ -159,7 +161,7 @@ class StorefrontFunnelEvents
         ];
     }
 
-    /** @return array{family_id?: int, family_name?: ?string} */
+    /** @return array<string, mixed> */
     private function familySnapshotForOrder(?Order $order): array
     {
         if (! $order) {
@@ -170,26 +172,30 @@ class StorefrontFunnelEvents
         $snapshots = $order->orderItems
             ->map(function ($item): ?array {
                 $id = $item->family_id === null ? null : (int) $item->family_id;
-                $name = trim((string) $item->family_name);
                 if ($id === null || $id < 1) {
                     return null;
                 }
 
-                return ['id' => $id, 'name' => $name === '' ? null : $name];
+                return ['id' => $id, 'name' => $this->safeFamilyName($item->family_name)];
             })
             ->filter()
             ->unique(fn (array $snapshot): int => $snapshot['id'])
+            ->take(self::MAX_FAMILY_SNAPSHOTS)
             ->values();
-        if ($snapshots->count() !== 1) {
+        if ($snapshots->isEmpty()) {
             return [];
         }
 
-        $snapshot = $snapshots->first();
+        $metadata = ['family_snapshots' => $snapshots->all()];
+        if ($snapshots->count() === 1) {
+            $snapshot = $snapshots->first();
+            $metadata += [
+                'family_id' => $snapshot['id'],
+                'family_name' => $snapshot['name'],
+            ];
+        }
 
-        return [
-            'family_id' => $snapshot['id'],
-            'family_name' => $snapshot['name'],
-        ];
+        return $metadata;
     }
 
     /**
@@ -226,6 +232,8 @@ class StorefrontFunnelEvents
             'product_id',
             'product_public',
             'source',
+            'family_snapshots',
+
             'family_id',
             'family_name',
             'path',
@@ -258,6 +266,10 @@ class StorefrontFunnelEvents
         return collect($metadata)
             ->only($allowed)
             ->map(function ($value, string $key): mixed {
+                if ($key === 'family_snapshots') {
+                    return $this->sanitizeFamilySnapshots($value);
+                }
+
                 if (! is_scalar($value) && $value !== null) {
                     return null;
                 }
@@ -289,6 +301,64 @@ class StorefrontFunnelEvents
             })
             ->filter(fn ($value): bool => $value !== null && $value !== '')
             ->all();
+    }
+
+    /**
+     * @return list<array{id:int,name:?string}>|null
+     */
+    private function sanitizeFamilySnapshots(mixed $value): ?array
+    {
+        if (! is_array($value)) {
+            return null;
+        }
+
+        $snapshots = [];
+        foreach (array_slice($value, 0, self::MAX_FAMILY_SNAPSHOTS) as $snapshot) {
+            if (! is_array($snapshot)) {
+                continue;
+            }
+            $id = $this->positiveId($snapshot['id'] ?? $snapshot['family_id'] ?? null);
+            if ($id === null || isset($snapshots[$id])) {
+                continue;
+            }
+
+            $snapshots[$id] = [
+                'id' => $id,
+                'name' => $this->safeFamilyName($snapshot['name'] ?? $snapshot['family_name'] ?? null),
+            ];
+        }
+
+        return $snapshots === [] ? null : array_values($snapshots);
+    }
+
+    private function positiveId(mixed $value): ?int
+    {
+        if (is_int($value) && $value > 0) {
+            return $value;
+        }
+        if (is_string($value) && preg_match('/^\d+$/D', $value) === 1) {
+            $parsed = filter_var($value, FILTER_VALIDATE_INT);
+            if ($parsed !== false && $parsed > 0) {
+                return (int) $parsed;
+            }
+        }
+
+        return null;
+    }
+
+    private function safeFamilyName(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        return $value === ''
+            || mb_strlen($value) > 160
+            || preg_match('/[\x00-\x1F\x7F]/', $value) === 1
+            ? null
+            : $value;
     }
 
     private function withRequestContext(array $metadata): array

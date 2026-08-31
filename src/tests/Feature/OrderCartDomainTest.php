@@ -34,6 +34,7 @@ use App\Support\PaymentProvider;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\PakasirNativeQrisScenarios;
@@ -43,6 +44,29 @@ class OrderCartDomainTest extends TestCase
 {
     use PakasirNativeQrisScenarios;
     use RefreshDatabase;
+
+    public function test_locked_checkout_uses_the_availability_projection_for_credential_products(): void
+    {
+        $product = Product::factory()->create(['stock' => 3, 'reserved_stock' => 0]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'projection-a']);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'projection-b']);
+        $cart = $this->cartWithProduct($product, quantity: 1);
+        $item = $cart->cartItems()->sole();
+        $queries = [];
+
+        DB::listen(function ($query) use (&$queries): void {
+            $queries[] = strtolower($query->sql);
+        });
+
+        app(InventoryLedger::class)->lockedCheckoutProducts(collect([$item]));
+
+        $standaloneAvailabilityQueries = collect($queries)
+            ->filter(fn (string $sql): bool => preg_match('/\Aselect\s+(exists|count)\b/', $sql) === 1
+                && str_contains($sql, 'product_stock_items'))
+            ->values();
+
+        $this->assertCount(0, $standaloneAvailabilityQueries);
+    }
 
     public function test_duplicate_checkout_returns_existing_order(): void
     {

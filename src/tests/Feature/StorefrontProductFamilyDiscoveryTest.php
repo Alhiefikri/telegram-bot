@@ -2,11 +2,18 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\SendProductWaitlistConfirmation;
 use App\Models\AuditLog;
+use App\Models\Cart;
 use App\Models\Category;
+use App\Models\InventoryMovement;
+use App\Models\ManualPaymentSetting;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\ProductWaitlistSubscription;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class StorefrontProductFamilyDiscoveryTest extends TestCase
@@ -18,6 +25,8 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         parent::setUp();
 
         $this->withoutVite();
+        config()->set('services.storefront.telegram_reservation_floor', 0);
+
     }
 
     public function test_home_and_shop_render_one_family_card_with_standalone_entries(): void
@@ -113,6 +122,213 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertIsInt($firstPosition);
         $this->assertIsInt($laterPosition);
         $this->assertLessThan($laterPosition, $firstPosition);
+    }
+
+    public function test_family_page_falls_back_to_product_name_for_whitespace_only_option_label(): void
+    {
+        $family = ProductFamily::factory()->create(['slug' => 'whitespace-family', 'name' => 'Whitespace Family']);
+        $product = Product::factory()->create([
+            'name' => 'Canonical Family Product',
+            'product_family_id' => $family->id,
+            'family_option_label' => " \t\n ",
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.product-families.show', ['productFamily' => $family->slug]))
+            ->assertOk()
+            ->assertSee('<h3 class="mt-2 font-display text-2xl font-black leading-tight">Canonical Family Product</h3>', false)
+            ->assertSee('name="product_id" value="'.$product->id.'"', false);
+    }
+
+    public function test_family_option_direct_checkout_preserves_product_identity_amount_and_return_path(): void
+    {
+        Queue::fake();
+        $this->manualPaymentModeIsActive();
+        $family = ProductFamily::factory()->create(['slug' => 'direct-family', 'name' => 'Direct Family']);
+        $product = Product::factory()->create([
+            'name' => 'Direct Family SKU',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'family_option_label' => 'Direct Package',
+            'price_amount' => 32000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $familyUrl = route('storefront.product-families.show', ['productFamily' => $family->slug]);
+
+        $this->get($familyUrl)
+            ->assertOk()
+            ->assertSee('name="product_id" value="'.$product->id.'"', false);
+        $this->get(route('storefront.products.show', [
+            'product' => $product,
+            'checkout' => 1,
+            'from' => $familyUrl,
+        ]))
+            ->assertOk()
+            ->assertSee('data-checkout-product=', false)
+            ->assertSee('href="'.$familyUrl.'"', false);
+
+        $checkoutResponse = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 2,
+            'buyer_name' => 'Family Direct Buyer',
+            'payment_method' => 'qris',
+            'terms_accepted' => '1',
+        ]);
+        $checkoutResponse->assertRedirect();
+
+        $order = Order::query()->with('orderItems')->sole();
+        $item = $order->orderItems->sole();
+        $payment = $order->payments()->sole();
+        $this->assertSame($product->id, $item->product_id);
+        $this->assertSame($family->id, $item->family_id);
+        $this->assertSame(32000, $item->unit_price);
+        $this->assertSame(64000, $item->subtotal);
+        $this->assertSame(64000, $payment->amount);
+        $this->assertSame(2, $product->fresh()->reserved_stock);
+    }
+
+    public function test_family_members_can_fill_a_multi_item_cart_and_checkout_with_product_ids(): void
+    {
+        Queue::fake();
+        $this->manualPaymentModeIsActive();
+        $family = ProductFamily::factory()->create(['slug' => 'cart-family', 'name' => 'Cart Family']);
+        $first = Product::factory()->create([
+            'name' => 'Cart Family First',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'price_amount' => 10000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+        ]);
+        $second = Product::factory()->create([
+            'name' => 'Cart Family Second',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'price_amount' => 15000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+        ]);
+        $this->get(route('storefront.product-families.show', ['productFamily' => $family->slug]))
+            ->assertOk()
+            ->assertSee('name="product_id" value="'.$first->id.'"', false)
+            ->assertSee('name="product_id" value="'.$second->id.'"', false);
+        $sessionKey = 'family-cart-session';
+
+        $this->addToCart($first, sessionKey: $sessionKey);
+        $this->addToCart($second, sessionKey: $sessionKey);
+        $review = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->get(route('storefront.shop.checkout.start'))
+            ->assertOk();
+        preg_match('/name="cart_snapshot" value="([a-f0-9]+)"/', $review->getContent(), $matches);
+        $this->assertNotEmpty($matches[1] ?? null);
+
+        $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->post(route('storefront.shop.checkout'), [
+                'cart_snapshot' => $matches[1],
+                'buyer_name' => 'Family Cart Buyer',
+                'payment_method' => 'qris',
+                'terms_accepted' => '1',
+            ])
+            ->assertRedirect();
+
+        $order = Order::query()->with('orderItems')->sole();
+        $this->assertSame([$first->id, $second->id], $order->orderItems->pluck('product_id')->sort()->values()->all());
+        $this->assertSame(25000, $order->payments()->sole()->amount);
+        $this->assertSame(1, $first->fresh()->reserved_stock);
+        $this->assertSame(1, $second->fresh()->reserved_stock);
+    }
+
+    public function test_family_cart_stale_signed_snapshot_is_rejected_before_order_creation(): void
+    {
+        Queue::fake();
+        $this->manualPaymentModeIsActive();
+        $family = ProductFamily::factory()->create(['slug' => 'stale-family', 'name' => 'Stale Family']);
+        $product = Product::factory()->create([
+            'name' => 'Stale Family SKU',
+            'product_family_id' => $family->id,
+            'price_amount' => 12000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $this->get(route('storefront.product-families.show', ['productFamily' => $family->slug]))
+            ->assertOk()
+            ->assertSee('Stale Family SKU');
+        $sessionKey = 'stale-family-cart-session';
+        $this->addToCart($product, sessionKey: $sessionKey);
+        $review = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->get(route('storefront.shop.checkout.start'))
+            ->assertOk();
+        preg_match('/name="cart_snapshot" value="([a-f0-9]+)"/', $review->getContent(), $matches);
+        $this->assertNotEmpty($matches[1] ?? null);
+
+        $product->update(['price_amount' => 13000]);
+
+        $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->post(route('storefront.shop.checkout'), [
+                'cart_snapshot' => $matches[1],
+                'buyer_name' => 'Stale Family Buyer',
+                'payment_method' => 'qris',
+                'terms_accepted' => '1',
+            ])
+            ->assertRedirect(route('storefront.shop.cart'));
+
+        $this->assertSame(0, Order::query()->count());
+        $this->assertSame(0, InventoryMovement::query()->count());
+    }
+
+    public function test_sold_out_family_member_keeps_waitlist_path_product_identity_and_no_commerce_effects(): void
+    {
+        Queue::fake();
+        $family = ProductFamily::factory()->create(['slug' => 'waitlist-family', 'name' => 'Waitlist Family']);
+        $product = Product::factory()->create([
+            'name' => 'Waitlist Family SKU',
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Sold Out Package',
+            'stock' => 0,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->get(route('storefront.product-families.show', ['productFamily' => $family->slug]))
+            ->assertOk()
+            ->assertSee('Sold Out Package')
+            ->assertSee(route('storefront.products.show', ['product' => $product]), false);
+        $this->get(route('storefront.products.show', ['product' => $product]))
+            ->assertOk()
+            ->assertDontSee('id="product-checkout-cta"', false)
+            ->assertSee('id="waitlist"', false)
+            ->assertSee('action="'.route('storefront.waitlist.store', ['product' => $product]).'"', false);
+
+        $this->post(route('storefront.waitlist.store', ['product' => $product]), [
+            'email' => 'family-waitlist@example.test',
+        ])->assertRedirect(route('storefront.products.show', ['product' => $product]).'#waitlist');
+
+        $subscription = ProductWaitlistSubscription::query()->sole();
+        $this->assertSame($product->id, $subscription->product_id);
+        $this->assertSame(ProductWaitlistSubscription::STATUS_PENDING_CONFIRMATION, $subscription->status);
+        $this->assertSame(0, Cart::query()->count());
+        $this->assertSame(0, Order::query()->count());
+        Queue::assertPushed(SendProductWaitlistConfirmation::class);
+    }
+
+    private function manualPaymentModeIsActive(): void
+    {
+        ManualPaymentSetting::query()->create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+    }
+
+    private function addToCart(Product $product, int $quantity = 1, string $sessionKey = 'family-cart-session'): void
+    {
+        $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->post(route('storefront.shop.cart.items.store'), [
+                'product_id' => $product->id,
+                'quantity' => $quantity,
+            ])
+            ->assertRedirect(route('storefront.shop.cart'));
     }
 
     public function test_sitemap_contains_public_family_pages_and_sku_urls(): void

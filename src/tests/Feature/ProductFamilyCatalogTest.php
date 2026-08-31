@@ -148,6 +148,22 @@ class ProductFamilyCatalogTest extends TestCase
         $this->assertSame(2, $soldOutFamily->soldOutOptionCount);
     }
 
+    public function test_whitespace_only_option_label_falls_back_to_product_name_in_shared_read_models(): void
+    {
+        $family = ProductFamily::factory()->create(['name' => 'Whitespace Family']);
+        $product = Product::factory()->create([
+            'name' => 'Canonical Product Name',
+            'product_family_id' => $family->id,
+            'family_option_label' => " \t\n ",
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $member = app(CatalogBrowse::class)->showPublicFamily($family->id)->members[0];
+
+        $this->assertSame($product->name, $member->label);
+    }
+
     public function test_search_collapses_member_matches_category_filters_and_reports_paid_sold_quantity(): void
     {
         $category = Category::factory()->create(['name' => 'Design', 'slug' => 'design']);
@@ -330,6 +346,7 @@ class ProductFamilyCatalogTest extends TestCase
 
     public function test_category_delete_keeps_family_members_coherent_and_only_clears_category_membership(): void
     {
+
         $admin = User::factory()->create(['role' => UserRole::Admin]);
         $category = Category::factory()->create(['name' => 'Streaming']);
         $family = ProductFamily::factory()->create(['name' => 'Netflix']);
@@ -343,6 +360,19 @@ class ProductFamilyCatalogTest extends TestCase
         $this->assertDatabaseHas('products', ['id' => $first->id, 'category_id' => null, 'product_family_id' => $family->id, 'stock' => 8, 'reserved_stock' => 2]);
         $this->assertDatabaseHas('products', ['id' => $second->id, 'category_id' => null, 'product_family_id' => $family->id, 'stock' => 3, 'reserved_stock' => 1]);
         $this->assertSame($family->id, app(CatalogBrowse::class)->showPublicFamily($family->id)->id);
+    }
+
+    public function test_family_row_add_action_carries_the_selected_family_assignment_context(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $family = ProductFamily::factory()->create(['name' => 'Target Family']);
+        Product::factory()->create(['product_family_id' => $family->id, 'stock' => 1]);
+        Product::factory()->create(['name' => 'Standalone Candidate', 'stock' => 1]);
+
+        $this->actingAs($admin)
+            ->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('focusProductFamilyAssignment('.$family->id.')', false);
     }
 
     public function test_read_only_roles_cannot_mutate_families_or_memberships(): void
