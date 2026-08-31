@@ -21,6 +21,7 @@ final class TelegramOutboundEffectRecovery
         private readonly SalesProofDeliveryPipeline $salesProof,
         private readonly ManualPaymentProofDeliveryPipeline $manualPaymentProof,
         private readonly ReceiptDeliveryPipeline $receipts,
+        private readonly StockNotificationDeliveryPipeline $stockNotifications,
     ) {}
 
     /**
@@ -75,6 +76,7 @@ final class TelegramOutboundEffectRecovery
             ->whereIn('effect_type', [
                 TelegramOutboundEffectType::AdminBroadcastRecipient->value,
                 TelegramOutboundEffectType::SalesProofPost->value,
+                TelegramOutboundEffectType::StockNotificationRecipient->value,
             ])
             ->get()
             ->each(function (TelegramOutboundEffect $effect): void {
@@ -89,7 +91,13 @@ final class TelegramOutboundEffectRecovery
                     return;
                 }
 
-                $this->salesProof->synchronizeRecoveredUnknown($effect);
+                if ($effect->effect_type === TelegramOutboundEffectType::SalesProofPost->value) {
+                    $this->salesProof->synchronizeRecoveredUnknown($effect);
+
+                    return;
+                }
+
+                $this->stockNotifications->synchronizeRecoveredUnknown($effect);
             });
 
         return $count;

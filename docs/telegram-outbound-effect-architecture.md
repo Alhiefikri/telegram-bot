@@ -229,15 +229,20 @@ delivery recovery in this order:
    effects and conditionally restores stale recipient projections, then
    recomputes each affected broadcast's aggregate counts and status. It never
    claims or dispatches an already-sent effect.
-6. The command selects due pending and retryable failed ledger rows through
+6. `StockNotificationDeliveryPipeline` synchronizes each stock recipient
+   projection whose lease was fenced to `unknown`, copying the ledger attempt
+   count and safe error text, then refreshes the Inventory Movement aggregate
+   in the same transaction. An unresolved unknown recipient never completes
+   the movement, and recovery never redispatches it.
+7. The command selects due pending and retryable failed ledger rows through
    readyToDispatchQuery() and dispatches them through
    TelegramOutboundEffectDispatcher.
-7. It materializes missing checkout, receipt, admin notification, Sales Proof
+8. It materializes missing checkout, receipt, admin notification, Sales Proof
    Post, stock, and price effects from committed source state when the
    deterministic effect key proves that the effect is absent.
-8. It redispatches recoverable Admin Broadcast handoffs through the same locked
+9. It redispatches recoverable Admin Broadcast handoffs through the same locked
    broadcast queue boundary.
-9. Non-ledger cleanup work, such as deleting old customer-facing checkout
+10. Non-ledger cleanup work, such as deleting old customer-facing checkout
    messages, remains a separate cleanup job and is not treated as delivery
    claim authority.
 

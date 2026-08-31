@@ -28,6 +28,7 @@ use App\Services\ProductStockItemManager;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramIntentSession;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -327,6 +328,66 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Stok tersedia semula', (string) $recipient->text);
         $this->assertFalse($second['has_more']);
         $this->assertCount(1, Http::recorded());
+    }
+
+    public function test_lease_recovery_synchronizes_stock_recipient_and_movement_projection_without_redispatching(): void
+    {
+        Queue::fake();
+        Http::preventStrayRequests();
+        Customer::factory()->create(['telegram_id' => 991006, 'locale' => 'ms']);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product,
+            1,
+            'lease projection recovery',
+            $admin,
+            '127.0.0.1',
+            ['lease-projection-secret'],
+        )['movement_id'];
+
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+        $pipeline->materialize($movementId);
+        $recipient = StockNotificationRecipient::query()->sole();
+        $recipient->forceFill([
+            'failed_at' => now()->subMinute(),
+            'last_error' => 'stale delivery failure',
+        ])->save();
+
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
+            ->where('source_id', (string) $recipient->id)
+            ->sole();
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $claimed = $ledger->claim((string) $effect->getKey());
+        $this->assertNotNull($claimed);
+        $claimed->forceFill(['lease_until' => now()->subSecond()])->save();
+
+        $this->assertSame(0, $recipient->fresh()->attempts);
+        $this->assertNull(InventoryMovement::findOrFail($movementId)->stock_notification_sent_at);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->expectsOutputToContain('telegram:recover-outbound completed cleanly: dispatched=0')
+            ->assertSuccessful();
+
+        $recoveredEffect = $effect->fresh();
+        $recoveredRecipient = $recipient->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $recoveredEffect->state);
+        $this->assertSame(1, $recoveredRecipient->attempts);
+        $this->assertSame($recoveredEffect->last_error, $recoveredRecipient->last_error);
+        $this->assertNull($recoveredRecipient->sent_at);
+        $this->assertNull($recoveredRecipient->failed_at);
+        $this->assertNull($recoveredRecipient->terminal_failed_at);
+        $this->assertNull(InventoryMovement::findOrFail($movementId)->stock_notification_sent_at);
+        Queue::assertNotPushed(SendProductStockNotifications::class);
+        Http::assertNothingSent();
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->expectsOutputToContain('telegram:recover-outbound completed cleanly: dispatched=0')
+            ->assertSuccessful();
+        $this->assertSame(1, $recipient->fresh()->attempts);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+        Queue::assertNotPushed(SendProductStockNotifications::class);
     }
 
     public function test_legacy_stock_notification_recipients_are_finalized_before_delivery(): void

@@ -87,6 +87,16 @@ broadcast aggregate counts and status. It never claims or redispatches the
 already-sent effect; independent `unknown` or `failed` recipients retain their
 own outcomes.
 
+Scheduled recovery also asks `StockNotificationDeliveryPipeline` to repair
+stock recipient projections for effects whose expired leases were fenced to
+`unknown`. It copies the ledger attempt count and safe error text, then
+refreshes the Inventory Movement aggregate transactionally. An unresolved
+unknown recipient keeps `stock_notification_sent_at` null, and the repair
+never claims or redispatches the effect. Repeated recovery is idempotent.
+
+The Stock Notification lease-recovery contract is covered by
+`ProductInventoryRaceTest::test_lease_recovery_synchronizes_stock_recipient_and_movement_projection_without_redispatching`.
+
 The Admin Broadcast recovery contract is covered by
 `AdminTelegramBroadcastOutboundEffectTest::test_recovery_repairs_sent_recipient_and_broadcast_projection_without_redispatching`.
 

@@ -160,6 +160,28 @@ class StockNotificationDeliveryPipeline
         $this->syncStockNotificationProjection($movementId);
     }
 
+    /**
+     * Synchronize a lease-recovered unknown effect without redispatching it.
+     */
+    public function synchronizeRecoveredUnknown(TelegramOutboundEffect $effect): void
+    {
+        if ($effect->source_type !== StockNotificationRecipient::class
+            || $effect->effect_type !== TelegramOutboundEffectType::StockNotificationRecipient->value) {
+            return;
+        }
+
+        DB::transaction(function () use ($effect): void {
+            $this->synchronizeUnknownProjection($effect);
+            $movementId = StockNotificationRecipient::query()
+                ->whereKey($effect->source_id)
+                ->join('stock_notification_events', 'stock_notification_events.id', '=', 'stock_notification_recipients.stock_notification_event_id')
+                ->value('stock_notification_events.inventory_movement_id');
+            if ($movementId !== null) {
+                $this->syncStockNotificationProjection((int) $movementId);
+            }
+        }, 5);
+    }
+
     private function snapshotEvent(int $movementId): ?StockNotificationEvent
     {
         return DB::transaction(function () use ($movementId): ?StockNotificationEvent {
@@ -390,8 +412,11 @@ class StockNotificationDeliveryPipeline
             ->whereKey($effect->source_id)
             ->whereNull('sent_at')
             ->update([
+                'failed_at' => null,
+                'terminal_failed_at' => null,
                 'attempts' => (int) $effect->attempts,
-                'updated_at' => now(),
+                'last_error' => mb_substr($effect->last_error ?: 'Stock notification delivery outcome is unknown and requires review.', 0, 2000),
+                'updated_at' => $effect->unknown_at ?? now(),
             ]);
     }
 
