@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Models\Order;
 use App\Models\Payment;
@@ -153,6 +154,38 @@ final class CheckoutInstructionDeliveryPipeline
         }
     }
 
+    /**
+     * Repair Order projections for checkout effects already finalized as sent.
+     *
+     * Recovery only examines sent ledger rows; it never claims or dispatches an
+     * effect. The conditional projection update fences concurrent recovery
+     * scans and keeps repeated recovery idempotent.
+     */
+    public function reconcileSentProjections(int $chunk = 100): int
+    {
+        $repaired = 0;
+
+        TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->whereIn('effect_type', self::EFFECT_TYPES)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->whereNotNull('telegram_message_id')
+            ->orderBy('id')
+            ->chunkById(max(1, $chunk), function ($effects) use (&$repaired): void {
+                foreach ($effects as $effect) {
+                    if ($this->synchronizeSentProjection(
+                        $effect,
+                        (string) $effect->telegram_message_id,
+                        $effect->sent_at ?? now(),
+                    )) {
+                        $repaired++;
+                    }
+                }
+            });
+
+        return $repaired;
+    }
+
     private function paymentForEffect(Order $order, TelegramOutboundEffect $effect): ?Payment
     {
         return match ($effect->effect_type) {
@@ -255,21 +288,22 @@ final class CheckoutInstructionDeliveryPipeline
         TelegramOutboundEffect $effect,
         string $messageId,
         CarbonInterface $at,
-    ): void {
-        if (! in_array($effect->effect_type, self::EFFECT_TYPES, true)) {
-            return;
+    ): bool {
+        if (! $this->responseValidator->isValidMessageId($messageId)) {
+            return false;
         }
 
-        Order::query()
+        return Order::query()
             ->whereKey($effect->source_id)
+            ->whereNull('manual_checkout_customer_notified_at')
             ->update([
                 'manual_checkout_customer_notified_at' => $at,
                 'manual_checkout_customer_notification_chat_id' => $effect->telegram_chat_id,
-                'manual_checkout_customer_notification_message_id' => $this->responseValidator->isValidMessageId($messageId) ? (int) $messageId : null,
+                'manual_checkout_customer_notification_message_id' => (int) $messageId,
                 'manual_checkout_customer_notification_deleted_at' => null,
                 'manual_checkout_customer_notification_deletion_started_at' => null,
                 'manual_checkout_customer_notification_deletion_token' => null,
                 'updated_at' => now(),
-            ]);
+            ]) === 1;
     }
 }

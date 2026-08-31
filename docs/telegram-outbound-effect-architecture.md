@@ -226,6 +226,13 @@ delivery recovery in this order:
    conditionally writes the marker; the command's existing cleanup
    reconciliation scan then queues the idempotent cleanup handoff. It never
    dispatches a receipt effect.
+
+Before the cleanup reconciliation scan, `CheckoutInstructionDeliveryPipeline`
+scans sent checkout-instruction effects whose Order notification marker is
+still null. It conditionally restores the ledger message identifier, chat, and
+timestamp without claiming or redispatching the sent effect, so Binance/BSC
+cleanup can use the recovered message metadata.
+
 3. ManualPaymentProofDeliveryPipeline scans sent manual payment-proof effects
    whose Payment forwarding marker is still null and conditionally restores
    the projection. It never claims or dispatches the already-sent effect.

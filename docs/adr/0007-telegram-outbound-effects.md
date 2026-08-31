@@ -72,6 +72,14 @@ whose children are already `sent` while the Order marker is still null. The
 conditional marker update is idempotent; the command's existing cleanup scan
 then applies normal cleanup eligibility and queues the unique handoff.
 Recovery never dispatches a receipt effect for this case.
+
+Scheduled recovery also scans sent checkout-instruction effects whose Order
+notification marker is still null and conditionally restores the ledger
+message identifier, chat, and sent timestamp. It never claims or dispatches
+the already-sent effect; the repair runs before cleanup reconciliation so
+cancelled Binance and BSC checkout instructions remain deletable after a
+worker crash.
+
 Scheduled recovery also scans sent manual payment-proof effects whose Payment
 forwarding marker is still null and conditionally restores that projection.
 This repair never claims or dispatches the already-sent effect, so a worker

@@ -89,6 +89,12 @@ the same completion rule as normal delivery and conditionally writes the
 marker. The command's existing cleanup scan then applies normal eligibility
 and queues the unique cleanup job; it never dispatches the receipt again.
 
+It also asks `CheckoutInstructionDeliveryPipeline` to reconcile sent
+checkout-instruction effects whose Order notification marker is still null.
+The conditional repair copies the ledger chat, message identifier, and sent
+timestamp before the cleanup scan; it never claims or redispatches the sent
+effect. `unknown` and `manual_review` effects remain review-only.
+
 It also asks `ManualPaymentProofDeliveryPipeline` to reconcile sent
 manual payment-proof effects whose `payments.payment_proof_forwarded_at`
 marker is still null. This projection repair is conditional and does not

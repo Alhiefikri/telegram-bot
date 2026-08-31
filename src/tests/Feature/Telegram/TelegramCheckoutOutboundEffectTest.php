@@ -2,15 +2,20 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
+use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendBinanceCheckoutInstructions;
+use App\Jobs\SendBscCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUpdate;
@@ -128,6 +133,108 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
             fn (SendBinanceCheckoutInstructions $job): bool => $job->orderId === $order->id
                 && $job->effectId === $effect->id,
         );
+    }
+
+    public function test_recovery_repairs_sent_binance_and_bsc_checkout_projections_without_redispatching(): void
+    {
+        Queue::fake();
+        $sentAt = now()->subMinute()->startOfSecond();
+        $cases = [
+            [
+                'method' => 'BINANCE_PAY_ID',
+                'effect_type' => TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
+                'message_id' => 81001,
+                'chat_id' => '8101',
+            ],
+            [
+                'method' => 'USDT_BEP20',
+                'effect_type' => TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
+                'message_id' => 81002,
+                'chat_id' => '8102',
+            ],
+        ];
+        $orders = [];
+
+        foreach ($cases as $case) {
+            $customer = Customer::factory()->create(['telegram_id' => $case['chat_id']]);
+            $order = Order::factory()->create([
+                'customer_id' => $customer->id,
+                'order_status' => OrderStatus::Cancelled,
+                'payment_status' => PaymentStatus::Failed,
+                'manual_checkout_customer_notification_deleted_at' => now(),
+                'manual_checkout_customer_notification_deletion_started_at' => now(),
+                'manual_checkout_customer_notification_deletion_token' => '6f32f78e-e3bd-4dff-a534-f07cc08922dd',
+            ]);
+            Payment::factory()->for($order)->create([
+                'provider' => 'manual',
+                'method' => $case['method'],
+                'status' => PaymentStatus::Failed,
+            ]);
+            $effect = TelegramOutboundEffect::factory()->create([
+                'effect_key' => 'checkout-recovery:'.$order->id,
+                'effect_group_key' => 'checkout-recovery:'.$order->id,
+                'effect_type' => $case['effect_type'],
+                'source_id' => $order->id,
+                'telegram_chat_id' => $case['chat_id'],
+                'template_version' => $case['effect_type'] === TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT
+                    ? TelegramOutboundEffectService::TEMPLATE_BINANCE_CHECKOUT
+                    : TelegramOutboundEffectService::TEMPLATE_BSC_CHECKOUT,
+                'telegram_method' => $case['effect_type'] === TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT
+                    ? 'sendPhoto'
+                    : 'sendMessage',
+                'state' => TelegramOutboundEffectState::Sent,
+                'attempts' => 1,
+                'next_attempt_at' => null,
+                'telegram_message_id' => $case['message_id'],
+                'sent_at' => $sentAt,
+            ]);
+            $orders[] = [$order, $effect, $case];
+        }
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        foreach ($orders as [$order, $effect, $case]) {
+            $repaired = $order->fresh();
+            $this->assertNotNull($repaired->manual_checkout_customer_notified_at);
+            $this->assertTrue($sentAt->equalTo($repaired->manual_checkout_customer_notified_at));
+            $this->assertSame($case['chat_id'], $repaired->manual_checkout_customer_notification_chat_id);
+            $this->assertSame($case['message_id'], $repaired->manual_checkout_customer_notification_message_id);
+            $this->assertNull($repaired->manual_checkout_customer_notification_deleted_at);
+            $this->assertNull($repaired->manual_checkout_customer_notification_deletion_started_at);
+            $this->assertNull($repaired->manual_checkout_customer_notification_deletion_token);
+            $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+        }
+
+        Queue::assertPushed(DeleteBuyerBinanceCheckoutInstruction::class, 2);
+        Queue::assertNotPushed(SendBinanceCheckoutInstructions::class);
+        Queue::assertNotPushed(SendBscCheckoutInstructions::class);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        Queue::assertPushed(DeleteBuyerBinanceCheckoutInstruction::class, 2);
+    }
+
+    public function test_recovery_leaves_an_unknown_checkout_effect_for_manual_review(): void
+    {
+        Queue::fake();
+        $order = $this->checkout(CheckoutPaymentIntents::manualQris());
+        $effect = TelegramOutboundEffect::query()->sole();
+        $effect->forceFill([
+            'state' => TelegramOutboundEffectState::Unknown,
+            'unknown_at' => now(),
+            'next_attempt_at' => null,
+            'last_error_code' => 'telegram_transport_ambiguous',
+            'last_error' => 'Telegram delivery outcome is unknown and requires review.',
+        ])->save();
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+        $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
+        Queue::assertNotPushed(SendManualCheckoutNotifications::class);
     }
 
     public function test_binance_effect_uses_the_payment_snapshot_and_does_not_retry_ambiguous_telegram_delivery(): void

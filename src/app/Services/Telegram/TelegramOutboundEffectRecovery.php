@@ -21,6 +21,7 @@ final class TelegramOutboundEffectRecovery
         private readonly SalesProofDeliveryPipeline $salesProof,
         private readonly ManualPaymentProofDeliveryPipeline $manualPaymentProof,
         private readonly ReceiptDeliveryPipeline $receipts,
+        private readonly CheckoutInstructionDeliveryPipeline $checkoutInstructions,
         private readonly StockNotificationDeliveryPipeline $stockNotifications,
         private readonly ProductPriceChangeNotificationService $priceNotifications,
     ) {}
@@ -61,6 +62,14 @@ final class TelegramOutboundEffectRecovery
     public function reconcileSentAdminBroadcastProjections(int $chunk = 100): int
     {
         return $this->broadcasts->reconcileSentProjections($chunk);
+    }
+
+    /**
+     * Repair Order projections for checkout effects already finalized as sent.
+     */
+    public function reconcileSentCheckoutInstructionProjections(int $chunk = 100): int
+    {
+        return $this->checkoutInstructions->reconcileSentProjections($chunk);
     }
 
     public function recoverExpiredLeases(?CarbonInterface $before = null): int

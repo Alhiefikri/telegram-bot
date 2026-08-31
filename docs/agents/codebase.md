@@ -408,6 +408,11 @@ Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php)
 - `binance:reconcile --chunk=100` tiap menit;
 - `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;
 - recovery Telegram updates/outbound and payment proofs tiap menit; `telegram:recover-outbound` mengubah lease kadaluarsa menjadi `unknown`, memperbaiki projection sent manual payment-proof/receipt/Sales Proof yang marker atau read projection-nya hilang, menyinkronkan projection recipient Stock Notification dan aggregate Inventory Movement untuk lease yang dipagari menjadi `unknown`, lalu hanya mengirim effect `pending`/`failed` yang dispatchable; recipient `unknown` tetap tidak dikirim ulang dan tidak menyelesaikan movement.
+
+- `telegram:recover-outbound` also repairs sent checkout-instruction effects
+  whose Order notification marker is null before the cleanup scan, copying
+  ledger metadata and never redispatching the already-sent effect. Unknown and
+  manual-review effects remain outside this repair.
 - cleanup login links tiap jam dan retained data tiap hari;
 - daily admin stats job di queue `notifications`.
 

@@ -390,6 +390,7 @@ Manual checkout notification retry behavior:
 
 - the job is unique per order while queued/running, so duplicate checkout callbacks cannot enqueue concurrent sends for the same order;
 - successful customer QR/photo delivery sets `orders.manual_checkout_customer_notified_at`;
+- recovery repairs a sent checkout effect's Order projection from ledger metadata before cleanup and never resends that effect;
 - successful admin notification delivery, or a configured no-op because no admin chat exists, sets `orders.manual_checkout_admin_notified_at`;
 - if the customer send succeeds and the admin send fails, retry sends only the admin notification;
 - if the customer send fails before the timestamp is written, retry sends the customer instructions again because Telegram delivery was not confirmed durably.
