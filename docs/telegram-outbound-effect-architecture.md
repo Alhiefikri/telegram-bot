@@ -214,6 +214,13 @@ aggregate projection is temporarily terminal.
 
 ## Operational recovery
 
+Admin Order-notification recovery evidence is covered by
+`TelegramLifecycleOutboundEffectTest::test_recovery_repairs_sent_admin_order_projections_without_redispatching_them`.
+It repairs pending, paid, and expired Order notification projections from
+sent ledger effects without queue redispatch; the companion cleanup test keeps
+an already-recorded pending deletion marker intact, and the version test keeps
+older sent resends from overwriting the latest projection.
+
 The scheduler runs `telegram:recover-outbound --queue=notifications` every
 minute with a bounded 10-minute `withoutOverlapping` mutex. Production cutover
 also clears stale scheduler mutexes. The command performs source discovery and
@@ -232,6 +239,12 @@ scans sent checkout-instruction effects whose Order notification marker is
 still null. It conditionally restores the ledger message identifier, chat, and
 timestamp without claiming or redispatching the sent effect, so Binance/BSC
 cleanup can use the recovered message metadata.
+
+Before the cleanup reconciliation scan, `AdminOrderNotificationDeliveryPipeline`
+scans sent pending, paid, and expired Order-notification effects and
+conditionally restores their Order projection. Pending effects also restore
+the ledger chat and message metadata without clearing a recorded cleanup
+marker. It never claims or redispatches the already-sent effect.
 
 3. ManualPaymentProofDeliveryPipeline scans sent manual payment-proof effects
    whose Payment forwarding marker is still null and conditionally restores

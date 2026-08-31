@@ -413,6 +413,11 @@ Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php)
   whose Order notification marker is null before the cleanup scan, copying
   ledger metadata and never redispatching the already-sent effect. Unknown and
   manual-review effects remain outside this repair.
+
+- `telegram:recover-outbound` also repairs sent Admin Order-notification
+  effects whose Order projection is stale, restoring safe pending metadata and
+  pending/paid/expired timestamps. Only the latest sent version repairs a
+  source/type projection; sent effects are never redispatched.
 - cleanup login links tiap jam dan retained data tiap hari;
 - daily admin stats job di queue `notifications`.
 

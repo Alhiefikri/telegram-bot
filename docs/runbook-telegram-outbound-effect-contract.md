@@ -95,6 +95,13 @@ The conditional repair copies the ledger chat, message identifier, and sent
 timestamp before the cleanup scan; it never claims or redispatches the sent
 effect. `unknown` and `manual_review` effects remain review-only.
 
+It also asks `AdminOrderNotificationDeliveryPipeline` to reconcile sent
+pending, paid, and expired Order-notification effects whose Order projection is
+stale. The conditional repair restores the ledger timestamp and, for pending
+notifications, the safe chat/message metadata without clearing an existing
+cleanup marker. If explicit versions coexist, only the latest sent version
+repairs the projection. It never claims or redispatches the already-sent effect.
+
 It also asks `ManualPaymentProofDeliveryPipeline` to reconcile sent
 manual payment-proof effects whose `payments.payment_proof_forwarded_at`
 marker is still null. This projection repair is conditional and does not

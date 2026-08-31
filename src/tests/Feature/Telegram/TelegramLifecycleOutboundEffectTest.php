@@ -428,6 +428,144 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         Queue::assertPushed(PublishSalesProofPost::class, 1);
     }
 
+    public function test_recovery_repairs_sent_admin_order_projections_without_redispatching_them(): void
+    {
+        $this->configureAdminTarget();
+        Queue::fake();
+
+        $pendingOrder = $this->checkoutOrder();
+        $pendingEffect = app(TelegramOutboundEffectService::class)
+            ->forOrder($pendingOrder->id, TelegramOutboundEffectService::TYPE_ADMIN_PENDING);
+        $this->assertNotNull($pendingEffect);
+        $pendingFinalized = $this->finalizeSentEffect($pendingEffect, '901');
+
+        $paidOrder = $this->checkoutOrder(telegramId: 12346);
+        app(OrderStateMachine::class)->applyPaymentPaid($paidOrder->payments()->sole());
+        $paidEffect = app(TelegramOutboundEffectService::class)
+            ->forOrder($paidOrder->id, TelegramOutboundEffectService::TYPE_ADMIN_PAID);
+        $this->assertNotNull($paidEffect);
+        $paidFinalized = $this->finalizeSentEffect($paidEffect, '902');
+
+        $expiredOrder = $this->checkoutOrder(telegramId: 12347);
+        $expiredOrder->forceFill(['expires_at' => now()->subMinute()])->save();
+        $expiredOrder->payments()->sole()->update(['expired_at' => now()->subMinute()]);
+        app(OrderStateMachine::class)->applyPendingExpiry($expiredOrder);
+        $expiredEffect = app(TelegramOutboundEffectService::class)
+            ->forOrder($expiredOrder->id, TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED);
+        $this->assertNotNull($expiredEffect);
+        $expiredFinalized = $this->finalizeSentEffect($expiredEffect, '903');
+
+        $this->assertNull($pendingOrder->fresh()->admin_pending_order_notified_at);
+        $this->assertNull($paidOrder->fresh()->admin_paid_order_notified_at);
+        $this->assertNull($expiredOrder->fresh()->admin_expired_order_notified_at);
+
+        Queue::fake();
+        Http::preventStrayRequests();
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $repairedPending = $pendingOrder->fresh();
+        $this->assertNotNull($repairedPending->admin_pending_order_notified_at);
+        $this->assertTrue($pendingFinalized->sent_at->equalTo($repairedPending->admin_pending_order_notified_at));
+        $this->assertSame('999', $repairedPending->admin_pending_order_notification_chat_id);
+        $this->assertSame(901, $repairedPending->admin_pending_order_notification_message_id);
+        $this->assertNull($repairedPending->admin_pending_order_notification_deleted_at);
+        $this->assertNotNull($paidOrder->fresh()->admin_paid_order_notified_at);
+        $this->assertTrue($paidFinalized->sent_at->equalTo($paidOrder->fresh()->admin_paid_order_notified_at));
+        $this->assertNotNull($expiredOrder->fresh()->admin_expired_order_notified_at);
+        $this->assertTrue($expiredFinalized->sent_at->equalTo($expiredOrder->fresh()->admin_expired_order_notified_at));
+
+        Queue::assertNotPushed(
+            SendAdminOrderPendingNotification::class,
+            fn (SendAdminOrderPendingNotification $job): bool => $job->effectId === $pendingEffect->id,
+        );
+        Queue::assertNotPushed(SendAdminOrderPaidNotification::class);
+        Queue::assertNotPushed(SendAdminOrderExpiredNotification::class);
+
+        $pendingNotifiedAt = $repairedPending->admin_pending_order_notified_at;
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+        $this->assertTrue($pendingNotifiedAt->equalTo($pendingOrder->fresh()->admin_pending_order_notified_at));
+        Queue::assertNotPushed(
+            SendAdminOrderPendingNotification::class,
+            fn (SendAdminOrderPendingNotification $job): bool => $job->effectId === $pendingEffect->id,
+        );
+    }
+
+    public function test_recovery_preserves_recorded_admin_pending_cleanup_projection(): void
+    {
+        $this->configureAdminTarget();
+        Queue::fake();
+
+        $order = $this->checkoutOrder();
+        $effect = app(TelegramOutboundEffectService::class)
+            ->forOrder($order->id, TelegramOutboundEffectService::TYPE_ADMIN_PENDING);
+        $this->assertNotNull($effect);
+        $this->finalizeSentEffect($effect, '904');
+
+        $deletedAt = now()->subMinute()->startOfSecond();
+        $order->forceFill(['admin_pending_order_notification_deleted_at' => $deletedAt])->save();
+        Queue::fake();
+        Http::preventStrayRequests();
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $repaired = $order->fresh();
+        $this->assertNotNull($repaired->admin_pending_order_notified_at);
+        $this->assertSame('999', $repaired->admin_pending_order_notification_chat_id);
+        $this->assertSame(904, $repaired->admin_pending_order_notification_message_id);
+        $this->assertTrue($deletedAt->equalTo($repaired->admin_pending_order_notification_deleted_at));
+        Queue::assertNotPushed(SendAdminOrderPendingNotification::class);
+    }
+
+    public function test_recovery_repairs_only_the_latest_sent_admin_order_effect_version(): void
+    {
+        $this->configureAdminTarget();
+        Queue::fake();
+
+        $order = $this->checkoutOrder();
+        $outboundEffects = app(TelegramOutboundEffectService::class);
+        $firstEffect = $outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_ADMIN_PENDING);
+        $this->assertNotNull($firstEffect);
+        $this->finalizeSentEffect($firstEffect, '905');
+
+        $secondEffect = TelegramOutboundEffect::factory()->create([
+            'effect_key' => $firstEffect->effect_key.':resend:v2',
+            'effect_group_key' => $firstEffect->effect_group_key,
+            'supersedes_effect_id' => $firstEffect->id,
+            'sequence' => 2,
+            'effect_type' => TelegramOutboundEffectService::TYPE_ADMIN_PENDING,
+            'source_type' => Order::class,
+            'source_id' => $order->id,
+            'target_type' => 'admin',
+            'telegram_chat_id' => '999',
+            'queue' => 'notifications',
+            'telegram_method' => 'sendMessage',
+            'template_version' => TelegramOutboundEffectService::TEMPLATE_ADMIN_ORDER_PENDING,
+            'state' => TelegramOutboundEffectState::Pending,
+            'attempts' => 0,
+            'next_attempt_at' => now(),
+            'outcome_metadata' => [
+                'delivery_context' => 'explicit_resend',
+                'duplicate_risk_acknowledged' => true,
+            ],
+        ]);
+        $secondFinalized = $this->finalizeSentEffect($secondEffect, '906');
+
+        Queue::fake();
+        Http::preventStrayRequests();
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $repaired = $order->fresh();
+        $this->assertSame(906, $repaired->admin_pending_order_notification_message_id);
+        $this->assertTrue($secondFinalized->sent_at->equalTo($repaired->admin_pending_order_notified_at));
+        Queue::assertNotPushed(SendAdminOrderPendingNotification::class);
+    }
+
     public function test_recovery_leaves_unknown_and_manual_review_sales_proof_effects_untouched(): void
     {
         Queue::fake();
@@ -575,9 +713,29 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         ]);
     }
 
-    private function checkoutOrder($paymentIntent = null): Order
+    private function finalizeSentEffect(TelegramOutboundEffect $effect, string $messageId): TelegramOutboundEffect
     {
-        $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer']);
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $claimed = $ledger->claim((string) $effect->getKey());
+        if ($claimed === null) {
+            $this->fail('The outbound effect could not be claimed for the regression setup.');
+        }
+
+        $finalized = $ledger->finalizeSent(
+            (string) $effect->getKey(),
+            (string) $claimed->claim_token,
+            $messageId,
+        );
+        if ($finalized === null) {
+            $this->fail('The outbound effect could not be finalized for the regression setup.');
+        }
+
+        return $finalized;
+    }
+
+    private function checkoutOrder($paymentIntent = null, int $telegramId = 12345): Order
+    {
+        $customer = Customer::factory()->create(['telegram_id' => $telegramId, 'username' => 'buyer'.$telegramId]);
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);

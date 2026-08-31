@@ -80,6 +80,15 @@ the already-sent effect; the repair runs before cleanup reconciliation so
 cancelled Binance and BSC checkout instructions remain deletable after a
 worker crash.
 
+Scheduled recovery also scans sent Admin Order-notification effects whose
+matching Order projection is stale after ledger finalization. It conditionally
+restores the pending, paid, or expired notification timestamp; pending effects
+also restore the safe admin chat/message snapshot without clearing an
+already-recorded pending cleanup marker. When explicit versions coexist, only
+the latest sent version for a source and effect type can repair the projection.
+It never claims or redispatches the already-sent effect, and repeated recovery
+is idempotent.
+
 Scheduled recovery also scans sent manual payment-proof effects whose Payment
 forwarding marker is still null and conditionally restores that projection.
 This repair never claims or dispatches the already-sent effect, so a worker
@@ -121,6 +130,11 @@ The Stock Notification lease-recovery contract is covered by
 
 The Admin Broadcast recovery contract is covered by
 `AdminTelegramBroadcastOutboundEffectTest::test_recovery_repairs_sent_recipient_and_broadcast_projection_without_redispatching`.
+
+The Admin Order-notification recovery contract is covered by
+`TelegramLifecycleOutboundEffectTest::test_recovery_repairs_sent_admin_order_projections_without_redispatching_them`
+and
+`TelegramLifecycleOutboundEffectTest::test_recovery_preserves_recorded_admin_pending_cleanup_projection`.
 
 The focused contract is covered by
 `TelegramReceiptOutboundEffectTest::test_invoice_failure_dispatches_product_detail_and_completion_ignores_photo_failure`,

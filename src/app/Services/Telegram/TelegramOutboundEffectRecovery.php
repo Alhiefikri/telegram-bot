@@ -17,6 +17,7 @@ final class TelegramOutboundEffectRecovery
 {
     public function __construct(
         private readonly TelegramOutboundEffectLedgerProtocol $ledger,
+        private readonly AdminOrderNotificationDeliveryPipeline $adminOrderNotifications,
         private readonly AdminBroadcastDeliveryPipeline $broadcasts,
         private readonly SalesProofDeliveryPipeline $salesProof,
         private readonly ManualPaymentProofDeliveryPipeline $manualPaymentProof,
@@ -37,6 +38,14 @@ final class TelegramOutboundEffectRecovery
     public function reconcileCompletedReceiptProjections(int $chunk = 100): array
     {
         return $this->receipts->reconcileCompletedProjections($chunk, dispatchCleanup: false);
+    }
+
+    /**
+     * Repair sent admin Order-notification projections without redispatching.
+     */
+    public function reconcileSentAdminOrderProjections(int $chunk = 100): int
+    {
+        return $this->adminOrderNotifications->reconcileSentProjections($chunk);
     }
 
     /**

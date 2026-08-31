@@ -40,6 +40,7 @@ class RecoverTelegramOutboundEffects extends Command
         $recovery->reconcileSentSalesProofProjections((int) $this->option('chunk'));
         $recovery->reconcileSentAdminBroadcastProjections((int) $this->option('chunk'));
         $recovery->reconcileSentCheckoutInstructionProjections((int) $this->option('chunk'));
+        $recovery->reconcileSentAdminOrderProjections((int) $this->option('chunk'));
 
         $ledger->readyToDispatchQuery(now())
             ->whereIn('effect_type', [

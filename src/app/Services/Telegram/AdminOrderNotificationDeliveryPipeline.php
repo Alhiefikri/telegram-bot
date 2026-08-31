@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
@@ -115,6 +116,46 @@ final class AdminOrderNotificationDeliveryPipeline
         }
     }
 
+    /**
+     * Repair Order projections for admin Order-notification effects already
+     * finalized as sent.
+     *
+     * Recovery only scans sent ledger rows; it never claims or dispatches an
+     * effect. Pending cleanup metadata remains authoritative when it was
+     * already recorded.
+     */
+    public function reconcileSentProjections(int $chunk = 100): int
+    {
+        $repaired = 0;
+
+        TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->whereIn('effect_type', self::EFFECT_TYPES)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->whereNotNull('telegram_message_id')
+            // An explicit resend is the only sent version allowed to repair.
+            ->whereNotExists(function ($newer): void {
+                $newer
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects as newer_admin_effects')
+                    ->whereColumn('newer_admin_effects.source_type', 'telegram_outbound_effects.source_type')
+                    ->whereColumn('newer_admin_effects.source_id', 'telegram_outbound_effects.source_id')
+                    ->whereColumn('newer_admin_effects.effect_type', 'telegram_outbound_effects.effect_type')
+                    ->where('newer_admin_effects.state', TelegramOutboundEffectState::Sent->value)
+                    ->whereColumn('newer_admin_effects.sequence', '>', 'telegram_outbound_effects.sequence');
+            })
+            ->orderBy('id')
+            ->chunkById(max(1, $chunk), function ($effects) use (&$repaired): void {
+                foreach ($effects as $effect) {
+                    if ($this->synchronizeSentProjection($effect, preservePendingCleanup: true)) {
+                        $repaired++;
+                    }
+                }
+            });
+
+        return $repaired;
+    }
+
     private function eligible(Order $order, string $effectType): bool
     {
         return match ($effectType) {
@@ -128,29 +169,71 @@ final class AdminOrderNotificationDeliveryPipeline
         };
     }
 
-    private function synchronizeSentProjection(TelegramOutboundEffect $effect): void
-    {
+    private function synchronizeSentProjection(
+        TelegramOutboundEffect $effect,
+        bool $preservePendingCleanup = false,
+    ): bool {
+        $messageId = (string) $effect->telegram_message_id;
+        if (! $this->responseValidator->isValidMessageId($messageId)) {
+            return false;
+        }
+
+        $sentAt = $effect->sent_at ?? now();
         $values = match ($effect->effect_type) {
             TelegramOutboundEffectType::AdminOrderPendingNotification->value => [
-                'admin_pending_order_notified_at' => $effect->sent_at ?? now(),
+                'admin_pending_order_notified_at' => $sentAt,
                 'admin_pending_order_notification_chat_id' => $effect->telegram_chat_id,
-                'admin_pending_order_notification_message_id' => $this->responseValidator->isValidMessageId((string) $effect->telegram_message_id)
-                    ? (int) $effect->telegram_message_id
-                    : null,
-                'admin_pending_order_notification_deleted_at' => null,
+                'admin_pending_order_notification_message_id' => (int) $messageId,
             ],
             TelegramOutboundEffectType::AdminOrderPaidNotification->value => [
-                'admin_paid_order_notified_at' => $effect->sent_at ?? now(),
+                'admin_paid_order_notified_at' => $sentAt,
             ],
             TelegramOutboundEffectType::AdminOrderExpiredNotification->value => [
-                'admin_expired_order_notified_at' => $effect->sent_at ?? now(),
+                'admin_expired_order_notified_at' => $sentAt,
             ],
             default => [],
         };
 
-        if ($values !== []) {
-            Order::query()->whereKey($effect->source_id)->update($values + ['updated_at' => now()]);
+        if ($values === []) {
+            return false;
         }
+
+        if ($effect->effect_type === TelegramOutboundEffectType::AdminOrderPendingNotification->value) {
+            if (! $preservePendingCleanup) {
+                $values['admin_pending_order_notification_deleted_at'] = null;
+            }
+
+            return Order::query()
+                ->whereKey($effect->source_id)
+                ->where(function ($order) use ($effect, $messageId, $sentAt, $preservePendingCleanup): void {
+                    $order
+                        ->whereNull('admin_pending_order_notified_at')
+                        ->orWhere('admin_pending_order_notified_at', '<>', $sentAt)
+                        ->orWhereNull('admin_pending_order_notification_chat_id')
+                        ->orWhere('admin_pending_order_notification_chat_id', '<>', $effect->telegram_chat_id)
+                        ->orWhereNull('admin_pending_order_notification_message_id')
+                        ->orWhere('admin_pending_order_notification_message_id', '<>', (int) $messageId);
+
+                    if (! $preservePendingCleanup) {
+                        $order->orWhereNotNull('admin_pending_order_notification_deleted_at');
+                    }
+                })
+                ->update($values + ['updated_at' => now()]) === 1;
+        }
+
+        $notifiedColumn = match ($effect->effect_type) {
+            TelegramOutboundEffectType::AdminOrderPaidNotification->value => 'admin_paid_order_notified_at',
+            TelegramOutboundEffectType::AdminOrderExpiredNotification->value => 'admin_expired_order_notified_at',
+            default => null,
+        };
+        if ($notifiedColumn === null) {
+            return false;
+        }
+
+        return Order::query()
+            ->whereKey($effect->source_id)
+            ->whereNull($notifiedColumn)
+            ->update($values + ['updated_at' => now()]) === 1;
     }
 
     private function finalizeNotDeliverable(TelegramOutboundEffect $effect, string $reason, string $message): void
