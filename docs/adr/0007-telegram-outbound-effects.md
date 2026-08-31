@@ -79,6 +79,17 @@ status, message identifier, attempts, and timestamp. It never claims or
 dispatches the already-sent effect; `unknown` and `manual_review` effects
 remain untouched.
 
+Scheduled recovery also scans sent Admin Broadcast recipient effects whose
+recipient projection may still be stale after a worker stops between ledger
+finalization and projection synchronization. It conditionally restores the
+recipient `sent_at`, clears stale failure fields, and recomputes the affected
+broadcast aggregate counts and status. It never claims or redispatches the
+already-sent effect; independent `unknown` or `failed` recipients retain their
+own outcomes.
+
+The Admin Broadcast recovery contract is covered by
+`AdminTelegramBroadcastOutboundEffectTest::test_recovery_repairs_sent_recipient_and_broadcast_projection_without_redispatching`.
+
 The focused contract is covered by
 `TelegramReceiptOutboundEffectTest::test_invoice_failure_dispatches_product_detail_and_completion_ignores_photo_failure`,
 `TelegramReceiptOutboundEffectTest::test_ambiguous_invoice_is_unknown_but_product_detail_still_delivers`,
@@ -112,10 +123,12 @@ materializes recipients and effects in idempotent chunks and sets
 `recipients_materialized_at` only after that work is complete. A process death
 before queue dispatch, before worker pickup, or during chunked materialization
 therefore leaves a committed source row that recovery can find. The
-`telegram:recover-outbound` command selects every non-terminal broadcast whose
-handoff is still unmaterialized, and redispatches it through the same locked
-queue boundary as the original request. `queue_dispatched_at` records a
-dispatch attempt but never hides an unmaterialized handoff from recovery.
+`telegram:recover-outbound` selects every broadcast whose handoff is still
+unmaterialized, regardless of aggregate status, and redispatches it through
+the same locked queue boundary as the original request. For already
+materialized broadcasts it selects only non-terminal rows with due work;
+`queue_dispatched_at` records a dispatch attempt but never hides an
+unmaterialized handoff from recovery.
 
 This exception preserves asynchronous recipient fan-out, recipient
 independence, locale snapshots, batching, rate limiting, and ambiguous-delivery

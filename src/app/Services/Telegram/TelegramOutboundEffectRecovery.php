@@ -52,6 +52,15 @@ final class TelegramOutboundEffectRecovery
         return $this->salesProof->reconcileSentProjections($chunk);
     }
 
+    /**
+     * Repair sent Admin Broadcast recipient and aggregate projections without
+     * redispatching the already-sent effects.
+     */
+    public function reconcileSentAdminBroadcastProjections(int $chunk = 100): int
+    {
+        return $this->broadcasts->reconcileSentProjections($chunk);
+    }
+
     public function recoverExpiredLeases(?CarbonInterface $before = null): int
     {
         $at = $before ?? now();

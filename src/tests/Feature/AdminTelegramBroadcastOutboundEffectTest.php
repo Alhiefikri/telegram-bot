@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\TelegramOutboundEffectState;
+use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\Customer;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
@@ -18,6 +19,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
@@ -235,6 +237,86 @@ class AdminTelegramBroadcastOutboundEffectTest extends TestCase
         $this->assertSame(TelegramOutboundEffectState::Sent, $resend->fresh()->state);
         $this->assertSame($original->id, $resend->supersedes_effect_id);
         $this->assertNotNull(TelegramBroadcastRecipient::query()->sole()->sent_at);
+    }
+
+    public function test_recovery_repairs_sent_recipient_and_broadcast_projection_without_redispatching(): void
+    {
+        Queue::fake();
+        Http::preventStrayRequests();
+        $firstCustomer = Customer::factory()->create(['telegram_id' => 677777771]);
+        $secondCustomer = Customer::factory()->create(['telegram_id' => 677777772]);
+        $broadcast = $this->broadcast('Repair sent recipient', TelegramBroadcast::STATUS_IN_PROGRESS);
+        $broadcast->forceFill([
+            'recipients_materialized_at' => now(),
+            'recipient_count' => 2,
+            'sent_count' => 0,
+            'failed_count' => 0,
+            'pending_count' => 2,
+        ])->save();
+
+        $sentRecipient = TelegramBroadcastRecipient::create([
+            'broadcast_id' => $broadcast->id,
+            'customer_id' => $firstCustomer->id,
+            'telegram_id' => (string) $firstCustomer->telegram_id,
+            'locale' => 'id',
+        ]);
+        $unknownRecipient = TelegramBroadcastRecipient::create([
+            'broadcast_id' => $broadcast->id,
+            'customer_id' => $secondCustomer->id,
+            'telegram_id' => (string) $secondCustomer->telegram_id,
+            'locale' => 'id',
+            'attempts' => 1,
+            'last_error' => 'requires review',
+        ]);
+
+        $outboundEffects = app(TelegramOutboundEffectService::class);
+        $sentEffect = $outboundEffects->recordAdminBroadcastRecipient($broadcast, $sentRecipient);
+        $unknownEffect = $outboundEffects->recordAdminBroadcastRecipient(
+            $broadcast,
+            $unknownRecipient,
+            state: TelegramOutboundEffectState::Unknown,
+            unknownAt: now(),
+            lastErrorCode: 'telegram_transport_ambiguous',
+            lastError: 'requires review',
+        );
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $claimed = $ledger->claim((string) $sentEffect->getKey());
+        $this->assertNotNull($claimed);
+        $finalized = $ledger->finalizeSent(
+            (string) $sentEffect->getKey(),
+            (string) $claimed->claim_token,
+            '907',
+        );
+        $this->assertNotNull($finalized);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $sentEffect->fresh()->state);
+        $this->assertNull($sentRecipient->fresh()->sent_at);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $unknownEffect->fresh()->state);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $repairedRecipient = $sentRecipient->fresh();
+        $repairedBroadcast = $broadcast->fresh();
+        $this->assertNotNull($repairedRecipient->sent_at);
+        $this->assertSame(1, $repairedRecipient->attempts);
+        $this->assertNull($repairedRecipient->failed_at);
+        $this->assertNull($unknownRecipient->fresh()->sent_at);
+        $this->assertSame(1, $unknownRecipient->fresh()->attempts);
+        $this->assertSame(2, $repairedBroadcast->recipient_count);
+        $this->assertSame(1, $repairedBroadcast->sent_count);
+        $this->assertSame(0, $repairedBroadcast->failed_count);
+        $this->assertSame(1, $repairedBroadcast->pending_count);
+        $this->assertSame(TelegramBroadcast::STATUS_IN_PROGRESS, $repairedBroadcast->status);
+        $this->assertNull($repairedBroadcast->completed_at);
+        Queue::assertNotPushed(SendTelegramBroadcastBatch::class);
+        Http::assertNothingSent();
+        $sentAt = $repairedRecipient->sent_at;
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+        $this->assertTrue($sentAt->equalTo($sentRecipient->fresh()->sent_at));
+        $this->assertSame(TelegramOutboundEffectState::Sent, $sentEffect->fresh()->state);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $unknownEffect->fresh()->state);
+        Queue::assertNotPushed(SendTelegramBroadcastBatch::class);
     }
 
     private function broadcast(string $message, string $status = TelegramBroadcast::STATUS_QUEUED): TelegramBroadcast

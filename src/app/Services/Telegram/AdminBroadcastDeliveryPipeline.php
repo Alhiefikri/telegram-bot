@@ -154,17 +154,23 @@ final class AdminBroadcastDeliveryPipeline
             ->select('broadcast_id');
 
         return TelegramBroadcast::query()
-            ->whereNotIn('status', [
-                TelegramBroadcast::STATUS_COMPLETED,
-                TelegramBroadcast::STATUS_PARTIALLY_FAILED,
-                TelegramBroadcast::STATUS_FAILED,
-                TelegramBroadcast::STATUS_SKIPPED,
-            ])
             ->where(function (Builder $query) use ($readyBroadcastIds, $legacyBroadcastIds): void {
                 $query
                     ->whereNull('recipients_materialized_at')
-                    ->orWhereIn('id', $readyBroadcastIds)
-                    ->orWhereIn('id', $legacyBroadcastIds);
+                    ->orWhere(function (Builder $active) use ($readyBroadcastIds, $legacyBroadcastIds): void {
+                        $active
+                            ->whereNotIn('status', [
+                                TelegramBroadcast::STATUS_COMPLETED,
+                                TelegramBroadcast::STATUS_PARTIALLY_FAILED,
+                                TelegramBroadcast::STATUS_FAILED,
+                                TelegramBroadcast::STATUS_SKIPPED,
+                            ])
+                            ->where(function (Builder $work) use ($readyBroadcastIds, $legacyBroadcastIds): void {
+                                $work
+                                    ->whereIn('id', $readyBroadcastIds)
+                                    ->orWhereIn('id', $legacyBroadcastIds);
+                            });
+                    });
             });
     }
 
@@ -180,6 +186,49 @@ final class AdminBroadcastDeliveryPipeline
         if ($broadcastId !== null) {
             $this->syncAdminBroadcastProjection((int) $broadcastId);
         }
+    }
+
+    /**
+     * Repair recipient and aggregate projections for effects already finalized
+     * as sent. Recovery never claims or dispatches these effects.
+     *
+     * @return int Number of recipient projections repaired.
+     */
+    public function reconcileSentProjections(int $chunk = 100): int
+    {
+        $repaired = 0;
+
+        TelegramOutboundEffect::query()
+            ->where('source_type', TelegramBroadcastRecipient::class)
+            ->where('effect_type', TelegramOutboundEffectType::AdminBroadcastRecipient->value)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->orderBy('id')
+            ->chunkById(max(1, $chunk), function ($effects) use (&$repaired): void {
+                $broadcastIds = [];
+
+                foreach ($effects as $effect) {
+                    $recipient = TelegramBroadcastRecipient::query()
+                        ->whereKey($effect->source_id)
+                        ->first(['id', 'broadcast_id']);
+                    if ($recipient === null) {
+                        continue;
+                    }
+
+                    if ($this->synchronizeSentProjection($effect)) {
+                        $repaired++;
+                    }
+                    $broadcastIds[(int) $recipient->broadcast_id] = true;
+                }
+
+                foreach (array_keys($broadcastIds) as $broadcastId) {
+                    DB::transaction(
+                        fn (): bool => $this->syncAdminBroadcastProjection((int) $broadcastId),
+                        5,
+                    );
+                }
+            });
+
+        return $repaired;
     }
 
     private function readyAdminBroadcastEffectsQuery(?CarbonInterface $at = null): Builder
@@ -424,9 +473,13 @@ final class AdminBroadcastDeliveryPipeline
         ]);
     }
 
-    private function synchronizeSentProjection(TelegramOutboundEffect $effect): void
+    private function synchronizeSentProjection(TelegramOutboundEffect $effect): bool
     {
-        TelegramBroadcastRecipient::query()
+        if (! $this->responseValidator->isValidMessageId($effect->telegram_message_id)) {
+            return false;
+        }
+
+        return TelegramBroadcastRecipient::query()
             ->whereKey($effect->source_id)
             ->whereNull('sent_at')
             ->update([
@@ -437,7 +490,7 @@ final class AdminBroadcastDeliveryPipeline
                 'last_error' => null,
                 'attempts' => (int) $effect->attempts,
                 'updated_at' => now(),
-            ]);
+            ]) === 1;
     }
 
     private function synchronizeUnknownProjection(TelegramOutboundEffect $effect): void
@@ -573,7 +626,9 @@ final class AdminBroadcastDeliveryPipeline
             'failed_count' => $terminalFailedCount,
             'terminal_failed_count' => $terminalFailedCount,
             'pending_count' => $pendingCount,
-            'completed_at' => $complete || $recipientCount === 0 ? now() : null,
+            'completed_at' => $complete || $recipientCount === 0
+                ? ($broadcast->completed_at ?? now())
+                : null,
             'updated_at' => now(),
         ];
         if ($materialized) {

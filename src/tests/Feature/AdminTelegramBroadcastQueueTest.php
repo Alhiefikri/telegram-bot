@@ -12,6 +12,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Telegram\TelegramBroadcastRateLimiter;
 use App\Services\Telegram\TelegramBroadcastService;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Contracts\Bus\Dispatcher as DispatcherContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -664,6 +665,49 @@ class AdminTelegramBroadcastQueueTest extends TestCase
         Queue::assertPushedOn('telegram-broadcast', SendTelegramBroadcastBatch::class);
         Queue::assertPushed(SendTelegramBroadcastBatch::class, fn (SendTelegramBroadcastBatch $job): bool => $job->broadcastId === $unmaterialized->id);
         Queue::assertPushed(SendTelegramBroadcastBatch::class, fn (SendTelegramBroadcastBatch $job): bool => $job->broadcastId === $expiredClaim->id);
+    }
+
+    public function test_recovery_redispatches_unmaterialized_handoff_after_sent_projection_repair(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Queue::fake();
+        Http::preventStrayRequests();
+        $customer = Customer::factory()->create(['telegram_id' => 333333334]);
+        $broadcast = TelegramBroadcast::create([
+            'broadcast_key' => (string) Str::uuid(),
+            'source' => 'admin',
+            'message' => 'Repair before materialization',
+            'status' => TelegramBroadcast::STATUS_IN_PROGRESS,
+        ]);
+        $recipient = TelegramBroadcastRecipient::create([
+            'broadcast_id' => $broadcast->id,
+            'customer_id' => $customer->id,
+            'telegram_id' => (string) $customer->telegram_id,
+            'locale' => 'id',
+        ]);
+        $effect = app(TelegramOutboundEffectService::class)
+            ->recordAdminBroadcastRecipient($broadcast, $recipient);
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $claimed = $ledger->claim((string) $effect->getKey());
+        $this->assertNotNull($claimed);
+        $finalized = $ledger->finalizeSent(
+            (string) $effect->getKey(),
+            (string) $claimed->claim_token,
+            '908',
+        );
+        $this->assertNotNull($finalized);
+        $this->assertNull($recipient->fresh()->sent_at);
+
+        $this->artisan('telegram:recover-outbound')
+            ->expectsOutput('telegram:recover-outbound completed cleanly: dispatched=1')
+            ->assertSuccessful();
+
+        $repairedBroadcast = $broadcast->fresh();
+        $this->assertNotNull($recipient->fresh()->sent_at);
+        $this->assertSame(TelegramBroadcast::STATUS_COMPLETED, $repairedBroadcast->status);
+        $this->assertNull($repairedBroadcast->recipients_materialized_at);
+        Queue::assertPushedOn('telegram-broadcast', SendTelegramBroadcastBatch::class);
+        Http::assertNothingSent();
     }
 
     public function test_recover_outbound_leaves_a_broadcast_with_an_active_claim_to_its_worker(): void

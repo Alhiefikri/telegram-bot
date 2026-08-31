@@ -100,6 +100,12 @@ copies the ledger's message identifier, attempts, and sent timestamp without
 claiming or dispatching the already-sent effect. `unknown` and `manual_review`
 effects are not selected for this repair.
 
+It also asks `AdminBroadcastDeliveryPipeline` to reconcile sent Admin
+Broadcast recipient effects whose recipient snapshot or broadcast aggregate is
+stale. The conditional repair restores `sent_at` and recalculates counts and
+status without claiming or redispatching the sent effect; `unknown` and other
+recipient outcomes remain independent.
+
 After projection repair, recovery selects only due `pending` and
 policy-retryable `failed` ledger rows and dispatches them through
 `TelegramOutboundEffectDispatcher`. It also discovers committed source rows

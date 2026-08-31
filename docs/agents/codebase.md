@@ -187,6 +187,12 @@ already `sent` when the Order marker is null. It repairs the marker; the
 command's cleanup scan then applies normal eligibility and queues the cleanup
 without redispatching the receipt.
 
+Scheduled recovery also scans sent Admin Broadcast recipient effects after
+ledger finalization. It conditionally repairs the recipient `sent_at` and
+clears stale failure fields, then recomputes the affected broadcast aggregate
+projection without redispatching the sent effect; other recipient outcomes
+remain independent.
+
 ### 4.2 Web Storefront
 
 Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):

@@ -193,6 +193,17 @@ SalesProofPost projection without queue redispatch. The companion
 `test_recovery_leaves_unknown_and_manual_review_sales_proof_effects_untouched`
 keeps review outcomes out of the automatic repair path.
 
+Admin Broadcast recovery evidence is covered by
+`src/tests/Feature/AdminTelegramBroadcastOutboundEffectTest.php`:
+`test_recovery_repairs_sent_recipient_and_broadcast_projection_without_redispatching`
+proves that a sent recipient repairs both its recipient snapshot and the
+aggregate projection without sending again, while an independent ambiguous
+recipient remains unresolved.
+
+`AdminTelegramBroadcastQueueTest::test_recovery_redispatches_unmaterialized_handoff_after_sent_projection_repair`
+proves that an unmaterialized handoff remains recoverable even when the
+aggregate projection is temporarily terminal.
+
 ## Operational recovery
 
 The scheduler runs `telegram:recover-outbound --queue=notifications` every
@@ -214,15 +225,19 @@ delivery recovery in this order:
    restores the matching SalesProofPost status, message identifier, attempts,
    and timestamp. It never claims or dispatches the already-sent effect;
    unknown and manual-review effects remain outside this scan.
-5. The command selects due pending and retryable failed ledger rows through
+5. AdminBroadcastDeliveryPipeline scans sent Admin Broadcast recipient
+   effects and conditionally restores stale recipient projections, then
+   recomputes each affected broadcast's aggregate counts and status. It never
+   claims or dispatches an already-sent effect.
+6. The command selects due pending and retryable failed ledger rows through
    readyToDispatchQuery() and dispatches them through
    TelegramOutboundEffectDispatcher.
-6. It materializes missing checkout, receipt, admin notification, Sales Proof
+7. It materializes missing checkout, receipt, admin notification, Sales Proof
    Post, stock, and price effects from committed source state when the
    deterministic effect key proves that the effect is absent.
-7. It redispatches recoverable Admin Broadcast handoffs through the same locked
+8. It redispatches recoverable Admin Broadcast handoffs through the same locked
    broadcast queue boundary.
-8. Non-ledger cleanup work, such as deleting old customer-facing checkout
+9. Non-ledger cleanup work, such as deleting old customer-facing checkout
    messages, remains a separate cleanup job and is not treated as delivery
    claim authority.
 
@@ -244,9 +259,10 @@ recipients and locales in idempotent chunks, materializes recipient effects,
 and sets recipients_materialized_at only after the materialization pass has
 completed.
 
-recoverableBroadcastsQuery() selects every non-terminal broadcast whose
-handoff is still unmaterialized, or whose materialized recipient effects are
-due. Recovery force-dispatches the same queue boundary, so process death after
+recoverableBroadcastsQuery() selects every broadcast whose handoff is still
+unmaterialized, regardless of its aggregate status, or selects due work for a
+non-terminal broadcast whose recipients are already materialized. Recovery
+force-dispatches the same queue boundary, so process death after
 commit and before worker pickup cannot lose the Admin Broadcast delivery
 intent. Recipient independence, batching, locale snapshots, rate limiting,
 and ambiguous recipient outcomes remain family-local behavior.
