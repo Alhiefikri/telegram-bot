@@ -44,6 +44,14 @@ final class TelegramOutboundEffectRecovery
         return $this->manualPaymentProof->reconcileSentProjections($chunk);
     }
 
+    /**
+     * Repair sent Sales Proof projections without dispatching their effects.
+     */
+    public function reconcileSentSalesProofProjections(int $chunk = 100): int
+    {
+        return $this->salesProof->reconcileSentProjections($chunk);
+    }
+
     public function recoverExpiredLeases(?CarbonInterface $before = null): int
     {
         $at = $before ?? now();

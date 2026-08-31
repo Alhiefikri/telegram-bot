@@ -377,6 +377,107 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         Queue::assertNotPushed(ForwardManualPaymentProof::class);
     }
 
+    public function test_recovery_repairs_a_sent_sales_proof_projection_without_resending_it(): void
+    {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        Queue::fake();
+        Http::preventStrayRequests();
+
+        $order = $this->checkoutOrder();
+        app(OrderStateMachine::class)->applyPaymentPaid($order->payments()->sole());
+
+        $post = $order->fresh()->salesProofPost()->firstOrFail();
+        $effect = app(TelegramOutboundEffectService::class)
+            ->forOrder($order->id, TelegramOutboundEffectService::TYPE_SALES_PROOF);
+        $this->assertNotNull($effect);
+
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $claimed = $ledger->claim((string) $effect->getKey());
+        $this->assertNotNull($claimed);
+        $finalized = $ledger->finalizeSent(
+            (string) $effect->getKey(),
+            (string) $claimed->claim_token,
+            '901',
+        );
+        $this->assertNotNull($finalized);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+        $this->assertSame(SalesProofPost::STATUS_PENDING, $post->fresh()->status);
+        $this->assertNull($post->fresh()->telegram_message_id);
+        Queue::assertPushed(PublishSalesProofPost::class, 1);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $repairedPost = $post->fresh();
+        $this->assertSame(SalesProofPost::STATUS_SENT, $repairedPost->status);
+        $this->assertSame('901', $repairedPost->telegram_message_id);
+        $this->assertSame((int) $finalized->attempts, (int) $repairedPost->attempts);
+        $this->assertNotNull($repairedPost->sent_at);
+        $this->assertTrue($finalized->sent_at->equalTo($repairedPost->sent_at));
+        Queue::assertPushed(PublishSalesProofPost::class, 1);
+
+        $sentAt = $repairedPost->sent_at;
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $this->assertTrue($sentAt->equalTo($post->fresh()->sent_at));
+        Queue::assertPushed(PublishSalesProofPost::class, 1);
+    }
+
+    public function test_recovery_leaves_unknown_and_manual_review_sales_proof_effects_untouched(): void
+    {
+        Queue::fake();
+        $rows = [];
+
+        foreach ([
+            'unknown' => [
+                'post_status' => SalesProofPost::STATUS_UNKNOWN,
+                'effect_state' => TelegramOutboundEffectState::Unknown,
+            ],
+            'manual_review' => [
+                'post_status' => SalesProofPost::STATUS_MANUAL_REVIEW,
+                'effect_state' => TelegramOutboundEffectState::ManualReview,
+            ],
+        ] as $case) {
+            $order = Order::factory()->create();
+            $post = SalesProofPost::create([
+                'order_id' => $order->id,
+                'status' => $case['post_status'],
+                'attempts' => 2,
+                'last_error' => 'requires operator review',
+            ]);
+            $effect = TelegramOutboundEffect::factory()->create([
+                'effect_key' => 'sales-proof-recovery:'.$order->id,
+                'effect_group_key' => 'sales-proof-recovery:'.$order->id,
+                'effect_type' => TelegramOutboundEffectService::TYPE_SALES_PROOF,
+                'source_type' => Order::class,
+                'source_id' => (string) $order->id,
+                'target_type' => 'store_channel',
+                'telegram_chat_id' => '-100123',
+                'queue' => 'notifications',
+                'telegram_method' => 'sendPhoto',
+                'template_version' => TelegramOutboundEffectService::TEMPLATE_SALES_PROOF,
+                'state' => $case['effect_state'],
+                'attempts' => 2,
+                'last_error' => 'requires operator review',
+            ]);
+            $rows[] = [$post, $effect, $case];
+        }
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        foreach ($rows as [$post, $effect, $case]) {
+            $this->assertSame($case['post_status'], $post->fresh()->status);
+            $this->assertSame($case['effect_state'], $effect->fresh()->state);
+        }
+        Queue::assertNotPushed(PublishSalesProofPost::class);
+    }
+
     public function test_recovery_repairs_a_late_manual_payment_proof_without_changing_payment_evidence(): void
     {
         $this->configureAdminTarget();

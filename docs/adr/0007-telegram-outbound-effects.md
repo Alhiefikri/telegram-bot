@@ -73,6 +73,12 @@ This repair never claims or dispatches the already-sent effect, so a worker
 crash between ledger finalization and projection update cannot cause a
 duplicate proof delivery.
 
+Scheduled recovery also scans sent Sales Proof effects whose matching
+`SalesProofPost` read projection is stale and conditionally restores its sent
+status, message identifier, attempts, and timestamp. It never claims or
+dispatches the already-sent effect; `unknown` and `manual_review` effects
+remain untouched.
+
 The focused contract is covered by
 `TelegramReceiptOutboundEffectTest::test_invoice_failure_dispatches_product_detail_and_completion_ignores_photo_failure`,
 `TelegramReceiptOutboundEffectTest::test_ambiguous_invoice_is_unknown_but_product_detail_still_delivers`,
@@ -87,6 +93,10 @@ The manual payment-proof recovery contract is covered by
 and
 `TelegramLifecycleOutboundEffectTest::test_recovery_repairs_a_late_manual_payment_proof_without_changing_payment_evidence`.
 
+The Sales Proof recovery contract is covered by
+`TelegramLifecycleOutboundEffectTest::test_recovery_repairs_a_sent_sales_proof_projection_without_resending_it`
+and
+`TelegramLifecycleOutboundEffectTest::test_recovery_leaves_unknown_and_manual_review_sales_proof_effects_untouched`.
 
 ### Deferred Admin Broadcast materialization
 

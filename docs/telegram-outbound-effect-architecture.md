@@ -186,6 +186,13 @@ proves the sent effect is repaired without queue redispatch, while
 `test_recovery_repairs_a_late_manual_payment_proof_without_changing_payment_evidence`
 proves late-payment state and effect evidence remain unchanged.
 
+Sales Proof recovery evidence is covered by
+`test_recovery_repairs_a_sent_sales_proof_projection_without_resending_it`,
+which proves the ledger's sent message identifier and timestamp repair the
+SalesProofPost projection without queue redispatch. The companion
+`test_recovery_leaves_unknown_and_manual_review_sales_proof_effects_untouched`
+keeps review outcomes out of the automatic repair path.
+
 ## Operational recovery
 
 The scheduler runs `telegram:recover-outbound --queue=notifications` every
@@ -203,15 +210,19 @@ delivery recovery in this order:
 3. ManualPaymentProofDeliveryPipeline scans sent manual payment-proof effects
    whose Payment forwarding marker is still null and conditionally restores
    the projection. It never claims or dispatches the already-sent effect.
-4. The command selects due pending and retryable failed ledger rows through
+4. SalesProofDeliveryPipeline scans sent Sales Proof effects and conditionally
+   restores the matching SalesProofPost status, message identifier, attempts,
+   and timestamp. It never claims or dispatches the already-sent effect;
+   unknown and manual-review effects remain outside this scan.
+5. The command selects due pending and retryable failed ledger rows through
    readyToDispatchQuery() and dispatches them through
    TelegramOutboundEffectDispatcher.
-5. It materializes missing checkout, receipt, admin notification, Sales Proof
+6. It materializes missing checkout, receipt, admin notification, Sales Proof
    Post, stock, and price effects from committed source state when the
    deterministic effect key proves that the effect is absent.
-6. It redispatches recoverable Admin Broadcast handoffs through the same locked
+7. It redispatches recoverable Admin Broadcast handoffs through the same locked
    broadcast queue boundary.
-7. Non-ledger cleanup work, such as deleting old customer-facing checkout
+8. Non-ledger cleanup work, such as deleting old customer-facing checkout
    messages, remains a separate cleanup job and is not treated as delivery
    claim authority.
 

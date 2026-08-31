@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\Order;
 use App\Models\SalesProofPost;
@@ -160,6 +161,32 @@ final class SalesProofDeliveryPipeline
         }
     }
 
+    /**
+     * Repair Sales Proof Post projections for effects already finalized as sent.
+     *
+     * Recovery only examines sent ledger rows; it never claims or dispatches an
+     * effect. Conditional projection updates make repeated recovery idempotent.
+     */
+    public function reconcileSentProjections(int $chunk = 100): int
+    {
+        $repaired = 0;
+
+        TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->where('effect_type', TelegramOutboundEffectType::SalesProofPost->value)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->orderBy('id')
+            ->chunkById(max(1, $chunk), function ($effects) use (&$repaired): void {
+                foreach ($effects as $effect) {
+                    if ($this->synchronizeSentProjection($effect)) {
+                        $repaired++;
+                    }
+                }
+            });
+
+        return $repaired;
+    }
+
     private function paidOrderProofInvariantFailure(Order $order): ?string
     {
         $isPaid = $order->payment_status === PaymentStatus::Paid
@@ -189,18 +216,36 @@ final class SalesProofDeliveryPipeline
             && $effect->template_version === TelegramOutboundEffectService::TEMPLATE_SALES_PROOF;
     }
 
-    private function synchronizeSentProjection(TelegramOutboundEffect $effect): void
+    private function synchronizeSentProjection(TelegramOutboundEffect $effect): bool
     {
-        SalesProofPost::query()
+        $messageId = (string) $effect->telegram_message_id;
+        if (! $this->responseValidator->isValidMessageId($messageId)) {
+            return false;
+        }
+
+        $sentAt = $effect->sent_at ?? now();
+        $attempts = (int) $effect->attempts;
+
+        return SalesProofPost::query()
             ->where('order_id', $effect->source_id)
+            ->where(function ($post) use ($messageId, $sentAt, $attempts): void {
+                $post
+                    ->where('status', '<>', SalesProofPost::STATUS_SENT)
+                    ->orWhere('attempts', '<>', $attempts)
+                    ->orWhereNull('telegram_message_id')
+                    ->orWhere('telegram_message_id', '<>', $messageId)
+                    ->orWhereNull('sent_at')
+                    ->orWhere('sent_at', '<>', $sentAt)
+                    ->orWhereNotNull('last_error');
+            })
             ->update([
                 'status' => SalesProofPost::STATUS_SENT,
-                'attempts' => (int) $effect->attempts,
-                'telegram_message_id' => $effect->telegram_message_id,
-                'sent_at' => $effect->sent_at ?? now(),
+                'attempts' => $attempts,
+                'telegram_message_id' => $messageId,
+                'sent_at' => $sentAt,
                 'last_error' => null,
                 'updated_at' => now(),
-            ]);
+            ]) === 1;
     }
 
     private function synchronizeUnknownProjection(TelegramOutboundEffect $effect): void
