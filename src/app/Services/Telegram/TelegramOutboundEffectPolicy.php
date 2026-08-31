@@ -164,6 +164,22 @@ final class TelegramOutboundEffectPolicy
             && $this->orderedPredecessorIsResolved($effect);
     }
 
+    public function canSelectReceiptSuccessor(
+        TelegramOutboundEffect $effect,
+        CarbonInterface $at,
+    ): bool {
+        if ($effect->effect_type !== TelegramOutboundEffectType::ReceiptCredentials->value
+            || ! in_array($this->stateValue($effect), [
+                TelegramOutboundEffectState::Pending->value,
+                TelegramOutboundEffectState::Failed->value,
+            ], true)
+            || $this->isLegacyInvoiceOrderingException($effect)) {
+            return false;
+        }
+
+        return $this->canClaim($effect, $at);
+    }
+
     /** @return array<string, mixed> */
     public function claimMetadata(TelegramOutboundEffect $effect): array
     {
@@ -281,6 +297,16 @@ final class TelegramOutboundEffectPolicy
                     });
             })
             ->exists();
+    }
+
+    private function isLegacyInvoiceOrderingException(TelegramOutboundEffect $effect): bool
+    {
+        return in_array($this->stateValue($effect), [
+            TelegramOutboundEffectState::Failed->value,
+            TelegramOutboundEffectState::Unknown->value,
+        ], true)
+            && $effect->telegram_method === 'sendPhoto'
+            && $effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE;
     }
 
     private function stateValue(TelegramOutboundEffect $effect): string

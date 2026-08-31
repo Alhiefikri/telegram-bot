@@ -19,6 +19,11 @@ rules, receipt ordering, and operator-confirmed finalization. The family policy
 supplies attempt limits and ordering constraints without becoming a second
 state machine.
 
+Receipt adapters use the protocol's `nextReceiptEffect()` successor seam for
+both initial group materialization (sequence `0`) and continuation selection;
+version-specific predecessor exceptions therefore have one query/readiness
+owner.
+
 Effect-family adapters own only eligibility, source loading, rendering,
 Telegram transport, and their read projection. The dispatcher maps effect
 types to queue jobs. Materialization and safe review summaries remain in the

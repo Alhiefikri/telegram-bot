@@ -138,6 +138,27 @@ class AdminTelegramOutboundEffectReviewTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_owner_marks_a_bsc_checkout_effect_sent_and_synchronizes_order_projection(): void
+    {
+        $effect = $this->unknownEffect([
+            'effect_type' => TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
+            'telegram_method' => 'sendMessage',
+            'template_version' => TelegramOutboundEffectService::TEMPLATE_BSC_CHECKOUT,
+        ]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($owner)
+            ->post(route('admin.telegram-outbound-effects.mark-sent', $effect), [
+                'telegram_message_id' => '123456',
+            ])
+            ->assertRedirect(route('admin.telegram-outbound-effects.show', $effect));
+
+        $order = $effect->source;
+        $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
+        $this->assertSame('987654321', $order->fresh()->manual_checkout_customer_notification_chat_id);
+        $this->assertSame(123456, $order->fresh()->manual_checkout_customer_notification_message_id);
+    }
+
     #[DataProvider('invalidOperatorMessageIds')]
     public function test_operator_cannot_mark_an_effect_sent_with_an_invalid_message_id(string $messageId): void
     {

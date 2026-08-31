@@ -275,6 +275,70 @@ class TelegramOutboundEffectLedgerProtocolTest extends TestCase
         $this->assertSame($second->id, $protocol->claim($second->id)?->id);
     }
 
+    public function test_receipt_successor_seam_preserves_legacy_exception_and_strict_versions(): void
+    {
+        $protocol = app(TelegramOutboundEffectLedgerProtocol::class);
+        $legacyGroup = 'order:receipt-successor-legacy:receipt.credentials:v1';
+        $legacyInvoice = TelegramOutboundEffect::factory()->create([
+            'effect_key' => $legacyGroup.':unit:1',
+            'effect_group_key' => $legacyGroup,
+            'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            'telegram_method' => 'sendPhoto',
+            'template_version' => TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE,
+            'state' => TelegramOutboundEffectState::Failed,
+            'last_error_code' => 'telegram_http_500',
+            'next_attempt_at' => now()->addMinute(),
+        ]);
+        $legacyDetail = TelegramOutboundEffect::factory()->create([
+            'effect_key' => $legacyGroup.':unit:2',
+            'effect_group_key' => $legacyGroup,
+            'sequence' => 2,
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+        ]);
+
+        $this->assertSame(
+            $legacyDetail->id,
+            $protocol->nextReceiptEffect($legacyGroup)?->id,
+        );
+        $this->assertSame(
+            $legacyDetail->id,
+            $protocol->nextReceiptEffect($legacyGroup, (int) $legacyInvoice->sequence)?->id,
+        );
+
+        $strictGroup = 'order:receipt-successor-strict:receipt.credentials:v2';
+        $strictPhoto = TelegramOutboundEffect::factory()->create([
+            'effect_key' => $strictGroup.':unit:1',
+            'effect_group_key' => $strictGroup,
+            'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            'telegram_method' => 'sendPhoto',
+            'template_version' => TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION,
+            'state' => TelegramOutboundEffectState::Unknown,
+            'unknown_at' => now()->subMinute(),
+            'next_attempt_at' => null,
+        ]);
+        $strictContinuation = TelegramOutboundEffect::factory()->create([
+            'effect_key' => $strictGroup.':unit:2',
+            'effect_group_key' => $strictGroup,
+            'sequence' => 2,
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+        ]);
+
+        $this->assertNull($protocol->nextReceiptEffect($strictGroup));
+
+        $strictPhoto->forceFill([
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_message_id' => '393001',
+            'sent_at' => now(),
+        ])->save();
+
+        $this->assertSame(
+            $strictContinuation->id,
+            $protocol->nextReceiptEffect($strictGroup)?->id,
+        );
+    }
+
     /** @return iterable<string, array{mixed}> */
     public static function invalidMessageIds(): iterable
     {

@@ -67,7 +67,10 @@ final class TelegramOutboundEffectReviewService
             );
 
             if ($resolved->effect_type === TelegramOutboundEffectType::ReceiptCredentials->value) {
-                $next = $this->nextReceiptEffect($resolved);
+                $next = $this->ledger->nextReceiptEffect(
+                    $resolved->effect_group_key,
+                    (int) $resolved->sequence,
+                );
                 if ($next !== null) {
                     $this->dispatcher->dispatch($next);
                 } elseif ($this->isExplicitReceiptEffect($resolved) && $this->receiptGroupComplete($resolved)) {
@@ -87,25 +90,6 @@ final class TelegramOutboundEffectReviewService
             TelegramOutboundEffectState::Unknown->value,
             TelegramOutboundEffectState::ManualReview->value,
         ], true);
-    }
-
-    private function nextReceiptEffect(TelegramOutboundEffect $effect): ?TelegramOutboundEffect
-    {
-        if ($effect->effect_type !== TelegramOutboundEffectType::ReceiptCredentials->value
-            || $effect->effect_group_key === null) {
-            return null;
-        }
-
-        return TelegramOutboundEffect::query()
-            ->where('effect_group_key', $effect->effect_group_key)
-            ->where('sequence', '>', $effect->sequence)
-            ->whereIn('state', [
-                TelegramOutboundEffectState::Pending->value,
-                TelegramOutboundEffectState::Failed->value,
-            ])
-            ->orderBy('sequence')
-            ->get()
-            ->first(fn (TelegramOutboundEffect $candidate): bool => $this->ledger->isDispatchable($candidate));
     }
 
     private function isExplicitReceiptEffect(TelegramOutboundEffect $effect): bool

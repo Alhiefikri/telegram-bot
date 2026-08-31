@@ -121,6 +121,31 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             && str_contains((string) json_encode($request->data()), 'Submit TX Hash'));
     }
 
+    public function test_recovery_redispatches_a_pending_bsc_checkout_effect_by_effect_id(): void
+    {
+        Queue::fake();
+        $customer = Customer::factory()->create(['telegram_id' => 44504, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::usdtBep20());
+        $effect = TelegramOutboundEffect::query()->sole();
+
+        $this->artisan('telegram:recover-outbound')
+            ->assertSuccessful();
+
+        Queue::assertPushed(
+            SendBscCheckoutInstructions::class,
+            fn (SendBscCheckoutInstructions $job): bool => $job->orderId === $order->id
+                && $job->effectId === $effect->id,
+        );
+    }
+
     public function test_detail_selector_cancel_keeps_product_choices_and_creates_no_checkout_rows(): void
     {
         $this->fakeTelegramHttp();

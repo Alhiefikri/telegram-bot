@@ -31,6 +31,7 @@ use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCredentialDeliveryRenderer;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMessageChunker;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectReviewService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptNotifier;
@@ -709,6 +710,32 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame(TelegramOutboundEffectState::Sent, $current->fresh()->state);
     }
 
+    #[DataProvider('unresolvedFirstPhotoStates')]
+    public function test_new_photo_caption_receipt_blocks_continuations_after_unresolved_first_unit(
+        TelegramOutboundEffectState $state,
+    ): void {
+        $order = $this->multiChunkPaidOrder();
+        $first = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $this->assertNotNull($first);
+        $second = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $first->effect_group_key)
+            ->where('sequence', 2)
+            ->firstOrFail();
+
+        $first->forceFill([
+            'state' => $state,
+            'failed_at' => $state === TelegramOutboundEffectState::Failed ? now() : null,
+            'unknown_at' => $state === TelegramOutboundEffectState::Unknown ? now() : null,
+            'manual_review_at' => $state === TelegramOutboundEffectState::ManualReview ? now() : null,
+            'next_attempt_at' => null,
+        ])->save();
+
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+
+        $this->assertFalse($ledger->isDispatchable($second->fresh()));
+        $this->assertFalse($ledger->readyToDispatchQuery()->whereKey($second->getKey())->exists());
+    }
+
     #[DataProvider('invalidTelegramResponses')]
     public function test_invalid_telegram_responses_never_mark_a_receipt_chunk_sent(array $response): void
     {
@@ -996,6 +1023,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             app(TelegramSupportContact::class),
             app(PaidInvoiceRenderer::class),
             app(PaidInvoiceOrderPresentationAdapter::class),
+            app(TelegramOutboundEffectLedgerProtocol::class),
         ])->makePartial();
         $notifier->shouldReceive('renderInvoiceUnit')
             ->andThrow(new TelegramOutboundPreSendException('deterministic invoice image failure'));
@@ -1044,6 +1072,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             app(TelegramSupportContact::class),
             app(PaidInvoiceRenderer::class),
             app(PaidInvoiceOrderPresentationAdapter::class),
+            app(TelegramOutboundEffectLedgerProtocol::class),
         ])->makePartial();
         $notifier->shouldReceive('renderInvoiceUnit')
             ->andThrow(new TelegramOutboundPreSendException('Telegram paid invoice rendering failed before send.'));
@@ -1442,6 +1471,14 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             $tutorial,
             $recoveryKey,
         ]];
+    }
+
+    /** @return iterable<string, array{TelegramOutboundEffectState}> */
+    public static function unresolvedFirstPhotoStates(): iterable
+    {
+        yield 'failed' => [TelegramOutboundEffectState::Failed];
+        yield 'unknown' => [TelegramOutboundEffectState::Unknown];
+        yield 'manual review' => [TelegramOutboundEffectState::ManualReview];
     }
 
     /** @return iterable<string, array{array<string, mixed>}> */

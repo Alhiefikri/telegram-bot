@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Enums\TelegramOutboundEffectState;
+use App\Enums\TelegramOutboundEffectType;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Exceptions\TelegramTransportException;
 use App\Models\TelegramOutboundEffect;
@@ -349,6 +350,36 @@ class TelegramOutboundEffectLedgerProtocol
     public function isDispatchable(TelegramOutboundEffect $effect): bool
     {
         return $this->policy->isDispatchable($effect, now());
+    }
+
+    /**
+     * Return the first dispatchable receipt unit after the given sequence.
+     *
+     * Sequence zero starts at the beginning of a group. Receipt ordering and
+     * the legacy invoice-photo exception are evaluated by the family policy;
+     * callers do not select or filter receipt states themselves.
+     */
+    public function nextReceiptEffect(?string $effectGroupKey, int $afterSequence = 0): ?TelegramOutboundEffect
+    {
+        if ($effectGroupKey === null || $effectGroupKey === '') {
+            return null;
+        }
+
+        $at = now();
+        $effects = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
+            ->where('effect_group_key', $effectGroupKey)
+            ->where('sequence', '>', max(0, $afterSequence))
+            ->orderBy('sequence')
+            ->get();
+
+        foreach ($effects as $candidate) {
+            if ($this->policy->canSelectReceiptSuccessor($candidate, $at)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     private function claimMatches(?TelegramOutboundEffect $effect, string $claimToken): bool

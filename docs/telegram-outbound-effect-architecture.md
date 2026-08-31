@@ -68,6 +68,14 @@ is the only owner of durable delivery mechanics. It owns:
 - operator-confirmed finalization after a delivery is verified outside the
   Telegram API.
 
+Receipt successor selection uses the protocol's `nextReceiptEffect()` seam.
+Passing sequence `0` selects the first dispatchable unit for materialization;
+passing a completed unit's sequence selects its next dispatchable successor.
+The seam applies the legacy invoice-photo exception and strict
+`receipt-photo-caption-v1`/text-fallback predecessor rules, so materialization,
+worker delivery, recovery, and Manual Delivery Review do not query receipt
+sequence or state locally.
+
 [TelegramOutboundEffectPolicy](../src/app/Services/Telegram/TelegramOutboundEffectPolicy.php)
 supplies family-specific attempt limits, terminal error codes, retry timing,
 and receipt ordering constraints. It does not become a second state machine.

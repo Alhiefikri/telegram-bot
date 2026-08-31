@@ -765,7 +765,7 @@ class TelegramOutboundEffectService
                     continue;
                 }
 
-                $ready = $this->firstReadyReceiptEffect($groupKey);
+                $ready = $this->ledger->nextReceiptEffect($groupKey);
                 if ($ready !== null) {
                     return $ready;
                 }
@@ -806,7 +806,7 @@ class TelegramOutboundEffectService
 
             $groupKey = self::receiptTextFallbackEffectGroupKey((string) $order->getKey());
             if (TelegramOutboundEffect::query()->where('effect_group_key', $groupKey)->exists()) {
-                return $this->firstReadyReceiptEffect($groupKey);
+                return $this->ledger->nextReceiptEffect($groupKey);
             }
 
             try {
@@ -1469,49 +1469,6 @@ class TelegramOutboundEffectService
                 'last_error' => mb_substr((string) ($effect->last_error ?: 'Sales Proof delivery failed before completion.'), 0, 1000),
                 'updated_at' => now(),
             ]);
-    }
-
-    private function firstReadyReceiptEffect(string $groupKey): ?TelegramOutboundEffect
-    {
-        $effects = TelegramOutboundEffect::query()
-            ->where('effect_group_key', $groupKey)
-            ->orderBy('sequence')
-            ->get();
-
-        foreach ($effects as $candidate) {
-            if ($candidate->state === TelegramOutboundEffectState::Sent) {
-                continue;
-            }
-
-            if ($this->isInvoiceEffect($candidate)
-                && in_array($candidate->state, [
-                    TelegramOutboundEffectState::Failed,
-                    TelegramOutboundEffectState::Unknown,
-                ], true)) {
-                continue;
-            }
-
-            if (! in_array($candidate->state, [
-                TelegramOutboundEffectState::Pending,
-                TelegramOutboundEffectState::Failed,
-            ], true)) {
-                return null;
-            }
-
-            if ($this->ledger->isDispatchable($candidate)) {
-                return $candidate;
-            }
-
-            return null;
-        }
-
-        return null;
-    }
-
-    private function isInvoiceEffect(TelegramOutboundEffect $effect): bool
-    {
-        return $effect->telegram_method === 'sendPhoto'
-            && $effect->template_version === self::TEMPLATE_RECEIPT_INVOICE;
     }
 
     private function latestReceiptEffect(Order $order): ?TelegramOutboundEffect

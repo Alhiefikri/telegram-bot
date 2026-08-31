@@ -70,6 +70,22 @@ final class TelegramOutboundEffectContractReport
         'product_price_change_events_store_channel_send_started_at_index' => 'product_price_change_events',
     ];
 
+    /** @var list<string> */
+    public const RECEIPT_SUCCESSOR_ADAPTERS = [
+        'Services/Telegram/ReceiptDeliveryPipeline.php',
+        'Services/Telegram/TelegramOutboundEffectReviewService.php',
+        'Services/Telegram/TelegramReceiptNotifier.php',
+        'Services/Telegram/TelegramOutboundEffectService.php',
+    ];
+
+    /** @var list<string> */
+    public const RECEIPT_SUCCESSOR_FORBIDDEN_MARKERS = [
+        'private function nextReceiptEffect',
+        'private function firstReadyReceiptEffect',
+        "->where('sequence', '>',",
+        "->whereIn('state', [",
+    ];
+
     /** @return array<string, mixed> */
     public function report(): array
     {
@@ -229,11 +245,13 @@ final class TelegramOutboundEffectContractReport
                     TelegramOutboundEffectType::KlikQrisCheckoutInstructions->value,
                     TelegramOutboundEffectType::PakasirCheckoutInstructions->value,
                     TelegramOutboundEffectType::BinanceCheckoutInstructions->value,
+                    TelegramOutboundEffectType::BscCheckoutInstructions->value,
                     TelegramOutboundEffectType::ReceiptCredentials->value,
                     TelegramOutboundEffectType::AdminOrderPendingNotification->value,
                     TelegramOutboundEffectType::AdminOrderPaidNotification->value,
                     TelegramOutboundEffectType::AdminOrderExpiredNotification->value,
                 ],
+
             ),
             'manual_payment_proofs' => $this->missingDirectEffects(
                 'payments',
@@ -294,6 +312,7 @@ final class TelegramOutboundEffectContractReport
                     TelegramOutboundEffectType::KlikQrisCheckoutInstructions->value,
                     TelegramOutboundEffectType::PakasirCheckoutInstructions->value,
                     TelegramOutboundEffectType::BinanceCheckoutInstructions->value,
+                    TelegramOutboundEffectType::BscCheckoutInstructions->value,
                     TelegramOutboundEffectType::ReceiptCredentials->value,
                     TelegramOutboundEffectType::AdminOrderPendingNotification->value,
                     TelegramOutboundEffectType::AdminOrderPaidNotification->value,
@@ -500,6 +519,17 @@ final class TelegramOutboundEffectContractReport
             }
 
             $contents = $filesystem->get($file->getPathname());
+            $relativePath = $file->getRelativePathname();
+            if (in_array($relativePath, self::RECEIPT_SUCCESSOR_ADAPTERS, true)) {
+                foreach (self::RECEIPT_SUCCESSOR_FORBIDDEN_MARKERS as $marker) {
+                    if (str_contains($contents, $marker)) {
+                        $references[] = [
+                            'file' => $relativePath,
+                            'column' => 'receipt_successor_selector:'.$marker,
+                        ];
+                    }
+                }
+            }
             foreach (self::LEGACY_CLAIM_COLUMNS as $columns) {
                 foreach ($columns as $column) {
                     // `claim_token` remains a field on the authoritative

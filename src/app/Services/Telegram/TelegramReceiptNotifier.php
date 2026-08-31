@@ -29,6 +29,7 @@ class TelegramReceiptNotifier
         private TelegramSupportContact $supportContact,
         private PaidInvoiceRenderer $invoiceRenderer,
         private PaidInvoiceOrderPresentationAdapter $invoicePresentation,
+        private TelegramOutboundEffectLedgerProtocol $ledger,
     ) {}
 
     /**
@@ -61,13 +62,10 @@ class TelegramReceiptNotifier
                 $ambiguousInvoiceException ??= $exception;
             }
 
-            $effect = TelegramOutboundEffect::query()
-                ->where('effect_group_key', $effect->effect_group_key)
-                ->where('sequence', '>', $effect->sequence)
-                ->whereIn('state', ['pending', 'failed'])
-                ->orderBy('sequence')
-                ->get()
-                ->first(fn (TelegramOutboundEffect $candidate): bool => app(TelegramOutboundEffectLedgerProtocol::class)->isDispatchable($candidate));
+            $effect = $this->ledger->nextReceiptEffect(
+                $effect->effect_group_key,
+                (int) $effect->sequence,
+            );
         }
 
         if ($ambiguousInvoiceException !== null) {

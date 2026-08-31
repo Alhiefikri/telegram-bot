@@ -78,7 +78,10 @@ final class ReceiptDeliveryPipeline
                 $this->synchronizeSentProjection($finalized, $order->id);
 
                 if ($dispatchNext) {
-                    $next = $this->nextReceiptEffect($finalized);
+                    $next = $this->ledger->nextReceiptEffect(
+                        $finalized->effect_group_key,
+                        (int) $finalized->sequence,
+                    );
                     if ($next !== null) {
                         $this->dispatcher->dispatch($next);
                     }
@@ -119,8 +122,17 @@ final class ReceiptDeliveryPipeline
                     } else {
                         $current = $fallback;
                         do {
-                            $this->deliver($current, $notifier, dispatchNext: false, throwOnAmbiguous: $throwOnAmbiguous);
-                            $current = $this->nextReceiptEffect($current->fresh());
+                            $this->deliver(
+                                $current,
+                                $notifier,
+                                dispatchNext: false,
+                                throwOnAmbiguous: $throwOnAmbiguous,
+                            );
+                            $current = $current->fresh();
+                            $current = $this->ledger->nextReceiptEffect(
+                                $current->effect_group_key,
+                                (int) $current->sequence,
+                            );
                         } while ($current !== null);
                     }
                 }
@@ -203,28 +215,12 @@ final class ReceiptDeliveryPipeline
             && $order->customer?->telegram_id !== null;
     }
 
-    private function nextReceiptEffect(TelegramOutboundEffect $effect): ?TelegramOutboundEffect
-    {
-        if ($effect->effect_type !== TelegramOutboundEffectType::ReceiptCredentials->value
-            || $effect->effect_group_key === null) {
-            return null;
-        }
-
-        return TelegramOutboundEffect::query()
-            ->where('effect_group_key', $effect->effect_group_key)
-            ->where('sequence', '>', $effect->sequence)
-            ->whereIn('state', [
-                'pending',
-                'failed',
-            ])
-            ->orderBy('sequence')
-            ->get()
-            ->first(fn (TelegramOutboundEffect $candidate): bool => $this->ledger->isDispatchable($candidate));
-    }
-
     private function dispatchNextReceiptEffect(TelegramOutboundEffect $effect): void
     {
-        $next = $this->nextReceiptEffect($effect);
+        $next = $this->ledger->nextReceiptEffect(
+            $effect->effect_group_key,
+            (int) $effect->sequence,
+        );
         if ($next !== null) {
             $this->dispatcher->dispatch($next);
         }

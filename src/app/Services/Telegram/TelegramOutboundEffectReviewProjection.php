@@ -42,7 +42,8 @@ final class TelegramOutboundEffectReviewProjection
             TelegramOutboundEffectType::ManualCheckoutInstructions->value,
             TelegramOutboundEffectType::KlikQrisCheckoutInstructions->value,
             TelegramOutboundEffectType::PakasirCheckoutInstructions->value,
-            TelegramOutboundEffectType::BinanceCheckoutInstructions->value => $this->checkout($effect, $messageId, $at),
+            TelegramOutboundEffectType::BinanceCheckoutInstructions->value,
+            TelegramOutboundEffectType::BscCheckoutInstructions->value => $this->checkout($effect, $messageId, $at),
             default => null,
         };
     }
