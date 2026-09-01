@@ -460,7 +460,7 @@
                             </div>
                             <div class="grid gap-3 sm:grid-cols-2">
                                 <x-admin-dashboard.input name="label" placeholder="Wallet utama" value="{{ old('label') }}" required />
-                                <x-admin-dashboard.input name="address" placeholder="0x..." value="{{ old('address') }}" required />
+                                <x-admin-dashboard.input name="address" placeholder="0x..." maxlength="42" inputmode="text" autocapitalize="off" autocomplete="off" spellcheck="false" pattern="0x[0-9A-Fa-f]{40}" value="{{ old('address') }}" required />
                             </div>
                             <x-admin-dashboard.button type="submit" variant="neutral" size="sm" class="w-full text-[11px]">Simpan address</x-admin-dashboard.button>
                         </form>

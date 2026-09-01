@@ -117,6 +117,27 @@ class BscReceiverConfigurationTest extends TestCase
         Queue::assertPushed(SendBscReceiverMutationNotification::class, 1);
     }
 
+    public function test_owner_can_add_receiver_with_unicode_boundary_whitespace(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $address = "\u{00A0}0xF43F918727E621BA6ABC31C2BCA292DC46D8E038\u{00A0}";
+
+        $this->actingAs($owner)
+            ->withSession(['auth.password_confirmed_at' => now()->timestamp])
+            ->post(route('admin.bsc.receivers.store'), [
+                'label' => 'Wallet copy paste',
+                'address' => $address,
+            ])
+            ->assertRedirect('/admin?tab=stats#admin-bsc-settings')
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('bsc_payment_receivers', [
+            'label' => 'Wallet copy paste',
+            'address_normalized' => '0xf43f918727e621ba6abc31c2bca292dc46d8e038',
+        ]);
+    }
+
     public function test_owner_can_save_multiple_bsc_receivers_without_an_ownership_challenge(): void
     {
         Queue::fake();

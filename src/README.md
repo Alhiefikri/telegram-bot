@@ -30,8 +30,8 @@ Alur customer berjalan dari Telegram:
 1. Customer mengirim `/start`.
 2. Bot membuat atau menggunakan ulang data customer Telegram, lalu mengirim satu banner dengan metrik toko terlokalisasi dan persistent main menu. Tautan `/start product_ID` langsung membuka detail produk.
 3. Customer juga bisa membuka katalog dengan `/katalog`, atau mencari produk langsung dengan `/cari keyword`.
-4. `/produk`, `/product`, dan tombol Lihat Produk menampilkan entri Product Family dan Product mandiri; setiap baris hanya memuat nomor, icon, nama, dan total stok, maksimal 4 entri per halaman. Tombol family memakai icon Product dan maksimal dua per baris.
-5. Customer menekan satu family untuk melihat quote setiap Product/SKU di pesan katalog yang sama. Tombol opsi memakai ikon yang sama dan disusun maksimal dua per baris; setiap quote dirender sebagai blok kutipan Telegram.
+4. `/produk`, `/product`, dan tombol Lihat Produk menampilkan entri Product Family dan Product mandiri; setiap baris hanya memuat nomor, icon, nama, dan total stok, maksimal 10 entri per halaman. Tombol family memakai icon Product dan maksimal dua per baris.
+5. Customer menekan satu family untuk melihat quote setiap Product/SKU di pesan katalog yang sama. Tombol opsi memakai ikon yang sama dan maksimal dua per baris; setiap quote dirender sebagai blok kutipan Telegram.
 6. Customer memilih satu Product option. Callback mengedit pesan yang sama menjadi Product Detail ketika callback membawa `message_id`; Product ID asli tetap diteruskan ke quantity, Cart, checkout, Order, inventory, waitlist, dan delivery tanpa membuat entitas variant baru.
 7. Product Detail memisahkan informasi produk, harga/stok/deskripsi, quantity/subtotal, kontrol quantity, payment rail, dan navigasi kembali.
 8. Quantity dimulai dari `1`, dapat dinaikkan/diturunkan dengan `−`/`+`, atau diisi sekali melalui `Enter custom quantity`. Input custom yang tidak valid tetap di mode input; Cancel kembali ke quantity sebelumnya yang masih valid terhadap live stock.
@@ -45,7 +45,7 @@ Diagram sederhana:
 ```text
 /start, /katalog, /produk, atau tombol Lihat Produk
         ↓
-Daftar Product Family dan Product mandiri (maksimal 4 entri per halaman)
+Daftar Product Family dan Product mandiri (maksimal 10 entri per halaman)
         ↓
 Pilih family untuk melihat opsi Product/SKU
         ↓

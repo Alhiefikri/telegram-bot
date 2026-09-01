@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
+use App\Models\BscPaymentReceiver;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\RedirectResponse;
@@ -22,7 +23,7 @@ class BscReceiverStoreRequest extends FormRequest
     {
         return [
             'label' => ['required', 'string', 'max:120'],
-            'address' => ['required', 'string', 'regex:/^0x[a-fA-F0-9]{40}$/'],
+            'address' => ['required', 'string', 'regex:/\A0x[a-f0-9]{40}\z/D'],
         ];
     }
 
@@ -40,7 +41,9 @@ class BscReceiverStoreRequest extends FormRequest
     {
         $this->merge([
             'label' => is_string($this->input('label')) ? trim($this->input('label')) : $this->input('label'),
-            'address' => is_string($this->input('address')) ? trim($this->input('address')) : $this->input('address'),
+            'address' => is_string($this->input('address'))
+                ? BscPaymentReceiver::normalizeAddressInput($this->input('address'))
+                : $this->input('address'),
         ]);
     }
 

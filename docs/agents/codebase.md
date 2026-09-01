@@ -161,11 +161,16 @@ Handler callback didaftarkan terpusat di [`AppServiceProvider`](../../src/app/Pr
 `TelegramCatalogIntents` consumes `CatalogBrowse::browsePublic()` for the
 Product Family and standalone Product discovery list, while optional category
 filtering and search retain their existing Product projection. The list shows
-up to four entries per page; family option callbacks use the signed compact
+up to ten entries per page; family option callbacks use the signed compact
 `TelegramFamilyCallbackToken` and resolve the existing Product ID only after
 the current public family projection and page are revalidated. Product Detail,
 quantity, payment, Cart, Order, and outbound-effect ownership remains unchanged.
-For inline family navigation, the callback `message_id` is threaded through the catalog presenter so `editMessageText` replaces the original catalog message. Product quote cards use Telegram HTML `<blockquote>` formatting; command/deep-link entry points without an originating message use the send path, while deterministic edit rejection may use a safe new-message fallback and transport ambiguity never triggers one.
+For inline family navigation, the callback `message_id` is threaded through the
+catalog presenter so `editMessageText` replaces the original catalog message.
+Product quote cards use Telegram HTML `<blockquote>` formatting; command/deep-link
+entry points without an originating message use the send path, while
+deterministic edit rejection may use a safe new-message fallback and transport
+ambiguity never triggers one.
 
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
 

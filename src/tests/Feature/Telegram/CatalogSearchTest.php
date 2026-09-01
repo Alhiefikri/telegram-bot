@@ -365,7 +365,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
 
-        foreach ([1, 2, 3, 4, 6, 12] as $count) {
+        foreach ([1, 2, 3, 10, 11, 12] as $count) {
             $category = Category::factory()->create(['name' => 'Geometry '.$count]);
             foreach (range(1, $count) as $number) {
                 Product::factory()->create([
@@ -383,27 +383,27 @@ class CatalogSearchTest extends TelegramBotTestSupport
                     && str_contains((string) $request['text'], 'Kategori: Geometry '.$count));
             $this->assertNotNull($request);
             $keyboard = $request['reply_markup']['inline_keyboard'] ?? [];
-            $entryCount = min(4, $count);
-            $this->assertCount($entryCount + ($count > 4 ? 1 : 0) + 1, $keyboard);
+            $entryCount = min(10, $count);
+            $this->assertCount($entryCount + ($count > 10 ? 1 : 0) + 1, $keyboard);
             $entryButtons = array_merge(...array_slice($keyboard, 0, $entryCount));
             $this->assertCount($entryCount, $entryButtons);
             foreach ($entryButtons as $button) {
                 $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', (string) ($button['callback_data'] ?? ''));
                 $this->assertContains($button['style'] ?? null, ['success', 'danger']);
             }
-            if ($count > 4) {
-                $this->assertSame(sprintf('category:%d:page:2', $category->id), $keyboard[4][0]['callback_data']);
+            if ($count > 10) {
+                $this->assertSame(sprintf('category:%d:page:2', $category->id), $keyboard[$entryCount][0]['callback_data']);
             }
             $this->assertSame('catalog:categories', $keyboard[array_key_last($keyboard)][0]['callback_data']);
         }
     }
 
-    public function test_category_product_list_exposes_explicit_pagination_after_twelve_products(): void
+    public function test_category_product_list_exposes_explicit_pagination_after_eleven_products(): void
     {
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
         $category = Category::factory()->create(['name' => 'Paged Catalog']);
-        foreach (range(1, 5) as $number) {
+        foreach (range(1, 11) as $number) {
             Product::factory()->create([
                 'name' => sprintf('Paged Product %02d', $number),
                 'category_id' => $category->id,
@@ -420,13 +420,13 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && str_contains((string) $request['text'], 'Page 1 of 2'));
         $this->assertNotNull($firstPage);
         $firstKeyboard = $firstPage['reply_markup']['inline_keyboard'] ?? [];
-        $this->assertCount(6, $firstKeyboard);
-        $this->assertCount(4, array_slice($firstKeyboard, 0, 4));
-        $this->assertSame(sprintf('category:%d:page:2', $category->id), $firstKeyboard[4][0]['callback_data']);
-        $this->assertSame('catalog:categories', $firstKeyboard[5][0]['callback_data']);
+        $this->assertCount(12, $firstKeyboard);
+        $this->assertCount(10, array_slice($firstKeyboard, 0, 10));
+        $this->assertSame(sprintf('category:%d:page:2', $category->id), $firstKeyboard[10][0]['callback_data']);
+        $this->assertSame('catalog:categories', $firstKeyboard[11][0]['callback_data']);
         $this->assertStringContainsString('1. ', (string) $firstPage['text']);
-        $this->assertStringContainsString('Paged Product 04', (string) $firstPage['text']);
-        $this->assertStringNotContainsString('Paged Product 05', (string) $firstPage['text']);
+        $this->assertStringContainsString('Paged Product 10', (string) $firstPage['text']);
+        $this->assertStringNotContainsString('Paged Product 11', (string) $firstPage['text']);
 
         $this->postTelegramWebhook($this->callbackUpdate(138, 'paged-second', sprintf('category:%d:page:2', $category->id)))->assertOk();
         $secondPage = Http::recorded()
@@ -497,7 +497,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $products = collect();
-        foreach (range(1, 5) as $number) {
+        foreach (range(1, 11) as $number) {
             $products->push(Product::factory()->create([
                 'name' => 'Search Compact '.$number,
                 'description' => 'Compact search result.',
@@ -513,15 +513,18 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 && str_contains((string) $request['text'], 'Hasil pencarian: compact'));
         $this->assertNotNull($request);
         $keyboard = $request['reply_markup']['inline_keyboard'] ?? [];
-        $this->assertCount(6, $keyboard);
-        $productRows = array_slice($keyboard, 0, 4);
-        $this->assertSame(['1. Pilih', '2. Pilih', '3. Pilih', '4. Pilih'], array_column(array_merge(...$productRows), 'text'));
-        $this->assertStringStartsWith('family:search:', $keyboard[4][0]['callback_data']);
-        $this->assertSame('katalog', $keyboard[5][0]['callback_data']);
+        $this->assertCount(12, $keyboard);
+        $productRows = array_slice($keyboard, 0, 10);
+        $this->assertSame(
+            ['1. Pilih', '2. Pilih', '3. Pilih', '4. Pilih', '5. Pilih', '6. Pilih', '7. Pilih', '8. Pilih', '9. Pilih', '10. Pilih'],
+            array_column(array_merge(...$productRows), 'text'),
+        );
+        $this->assertStringStartsWith('family:search:', $keyboard[10][0]['callback_data']);
+        $this->assertSame('katalog', $keyboard[11][0]['callback_data']);
 
         $buttons = array_merge(...$productRows);
         $this->assertSame(
-            $products->sortBy('name')->take(4)->map(fn (Product $product): string => 'product:'.$product->id)->values()->all(),
+            $products->sortBy('name')->take(10)->map(fn (Product $product): string => 'product:'.$product->id)->values()->all(),
             array_column($buttons, 'callback_data'),
         );
         foreach ($buttons as $button) {
@@ -1022,16 +1025,16 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertNotNull($message);
         $payload = $message[0]->data();
         $keyboard = $payload['reply_markup']['inline_keyboard'] ?? [];
-        $entryCount = min(4, $count);
-        $this->assertCount($entryCount + ($count > 4 ? 1 : 0) + 1, $keyboard);
+        $entryCount = min(10, $count);
+        $this->assertCount($entryCount + ($count > 10 ? 1 : 0) + 1, $keyboard);
         $productRows = array_slice($keyboard, 0, $entryCount);
         foreach ($productRows as $row) {
             $this->assertCount(1, $row);
             $this->assertSame('success', $row[0]['style'] ?? null);
             $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', $row[0]['callback_data']);
         }
-        if ($count > 4) {
-            $this->assertSame(sprintf('category:%d:page:2', $category->id), $keyboard[4][0]['callback_data']);
+        if ($count > 10) {
+            $this->assertSame(sprintf('category:%d:page:2', $category->id), $keyboard[$entryCount][0]['callback_data']);
         }
         $this->assertSame('catalog:categories', $keyboard[array_key_last($keyboard)][0]['callback_data']);
     }
@@ -1041,7 +1044,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
         yield 'one product' => [1];
         yield 'two products' => [2];
         yield 'three products' => [3];
-        yield 'six products' => [6];
+        yield 'ten products' => [10];
+        yield 'eleven products' => [11];
         yield 'twelve products' => [12];
     }
 

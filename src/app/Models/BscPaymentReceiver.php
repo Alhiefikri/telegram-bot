@@ -103,10 +103,17 @@ class BscPaymentReceiver extends Model
         return $this->is_active && $this->isVerified();
     }
 
+    public static function normalizeAddressInput(string $address): string
+    {
+        $trimmed = preg_replace('/\A[\s\p{Z}\x{FEFF}]+|[\s\p{Z}\x{FEFF}]+\z/u', '', $address);
+
+        return strtolower($trimmed ?? trim($address));
+    }
+
     public static function normalizeAddress(string $address): string
     {
-        $normalized = strtolower(trim($address));
-        if (preg_match('/^0x[a-f0-9]{40}$/', $normalized) !== 1) {
+        $normalized = self::normalizeAddressInput($address);
+        if (preg_match('/\A0x[a-f0-9]{40}\z/D', $normalized) !== 1) {
             throw new InvalidArgumentException('BSC Receiving Address harus berupa address EVM 0x + 40 karakter hex.');
         }
 

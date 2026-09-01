@@ -17,9 +17,9 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class TelegramCatalogIntents
 {
-    private const PRODUCTS_PER_PAGE = 4;
+    private const PRODUCTS_PER_PAGE = 10;
 
-    private const FAMILY_LIST_PER_PAGE = 4;
+    private const FAMILY_LIST_PER_PAGE = 10;
 
     public function __construct(
         private TelegramBotClient $bot,
