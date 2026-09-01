@@ -6,6 +6,7 @@ use App\Enums\BscReceiverVerificationStatus;
 use App\Enums\UserRole;
 use App\Exceptions\BscReceiverChallengeException;
 use App\Exceptions\BscReceiverDeletionBlocked;
+use App\Http\Requests\Admin\BscReceiverStoreRequest;
 use App\Jobs\SendBscReceiverMutationNotification;
 use App\Models\AuditLog;
 use App\Models\BscPaymentReceiver;
@@ -27,6 +28,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Validator;
 use Tests\TestCase;
 
 class BscReceiverConfigurationTest extends TestCase
@@ -82,11 +84,22 @@ class BscReceiverConfigurationTest extends TestCase
         $this->assertFalse(session()->has(BscReceiverPendingMutationStore::SESSION_KEY));
     }
 
+    public function test_address_rule_accepts_the_reported_checksum_address_without_preprocessing(): void
+    {
+        $request = new BscReceiverStoreRequest;
+        $validator = Validator::make([
+            'label' => 'Wallet valid',
+            'address' => '0xaac58212Ab1E3C9c8d4dbB3FD3cdAF9d4cff9012',
+        ], $request->rules());
+
+        $this->assertFalse($validator->fails());
+    }
+
     public function test_owner_can_add_receiver_after_password_confirmation(): void
     {
         Queue::fake();
         $owner = User::factory()->create(['role' => UserRole::Owner]);
-        $address = '0xf43f918727e621ba6abc31c2bca292dc46d8e038';
+        $address = '0xaac58212Ab1E3C9c8d4dbB3FD3cdAF9d4cff9012';
 
         $this->actingAs($owner)
             ->post(route('admin.bsc.receivers.store'), [
@@ -101,7 +114,7 @@ class BscReceiverConfigurationTest extends TestCase
 
         $this->assertDatabaseHas('bsc_payment_receivers', [
             'label' => 'Wallet utama',
-            'address_normalized' => $address,
+            'address_normalized' => strtolower($address),
             'is_active' => true,
             'verification_status' => BscReceiverVerificationStatus::ManualVerified->value,
             'verification_method' => 'manual_verified',
@@ -351,13 +364,13 @@ class BscReceiverConfigurationTest extends TestCase
             ->withSession(['auth.password_confirmed_at' => now()->timestamp])
             ->post(route('admin.bsc.receivers.store'), [
                 'label' => 'Wallet utama',
-                'address' => '0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD',
+                'address' => '0xaac58212Ab1E3C9c8d4dbB3FD3cdAF9d4cff9012',
             ])
             ->assertRedirect('/admin?tab=stats#admin-bsc-settings');
 
         $receiver = BscPaymentReceiver::query()->firstOrFail();
 
-        $this->assertSame('0xabcdefabcdefabcdefabcdefabcdefabcdefabcd', $receiver->address_normalized);
+        $this->assertSame('0xaac58212ab1e3c9c8d4dbb3fd3cdaf9d4cff9012', $receiver->address_normalized);
         $this->assertSame(BscReceiverVerificationStatus::ManualVerified, $receiver->verification_status);
         $this->assertTrue($receiver->is_active);
         $this->assertSame('manual_verified', $receiver->verification_method);

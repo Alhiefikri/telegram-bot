@@ -23,7 +23,7 @@ class BscReceiverStoreRequest extends FormRequest
     {
         return [
             'label' => ['required', 'string', 'max:120'],
-            'address' => ['required', 'string', 'regex:/\A0x[a-f0-9]{40}\z/D'],
+            'address' => ['required', 'string', 'regex:/\A0x[0-9a-fA-F]{40}\z/D'],
         ];
     }
 

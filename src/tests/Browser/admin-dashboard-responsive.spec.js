@@ -2415,6 +2415,51 @@ async function clickMobileUtility(page, nav, actionName) {
   await sheet.getByRole("button", { name: actionName, exact: true }).click();
 }
 
+test("saves product name and icon edits from the admin modal", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+
+  const productCard = page
+    .locator("article[id^='product-']")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first();
+  const familyGroup = page
+    .locator('[id^="admin-product-family-group-"]')
+    .filter({ hasText: "Browser QA Product Family" })
+    .first();
+  await familyGroup.getByRole("button", { name: "Lihat product" }).click();
+  await expect(productCard).toBeVisible();
+  await productCard.getByRole("button", { name: "Ubah", exact: true }).click();
+
+  const productModal = page.getByRole("dialog", { name: "Edit produk" });
+  const form = productModal.locator("form");
+  await expect(productModal).toBeVisible();
+  await expect(form).toHaveAttribute("action", /\/admin\/products\/\d+$/);
+  await expect(form.locator('input[name="_method"]')).toHaveValue("PATCH");
+
+  await productModal
+    .locator("#product-name")
+    .fill("Browser QA Produk A Edited");
+  await productModal.locator("#product-icon").fill("🛠️");
+
+  await Promise.all([
+    page.waitForURL(`${baseUrl}/admin?tab=produk`),
+    productModal.getByRole("button", { name: /Simpan/i }).click(),
+  ]);
+
+  await expect(
+    page.getByText("Produk Browser QA Produk A Edited berhasil diperbarui.")
+  ).toBeVisible();
+  await expect(
+    page
+      .locator("article:visible")
+      .filter({ hasText: "Browser QA Produk A Edited" })
+  ).toBeVisible();
+});
+
 async function submitProductFromMiniAppModal(page) {
   const productName = `Mini App Produk ${Date.now()}`;
 
