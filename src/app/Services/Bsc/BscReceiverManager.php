@@ -42,25 +42,30 @@ final class BscReceiverManager
                     'chain_id' => $chainId,
                     'token_contract' => $tokenContract,
                     'token_decimals' => $tokenDecimals,
-                    'is_active' => false,
-                    'verification_status' => BscReceiverVerificationStatus::PendingVerification,
+                    // Receiver destinations are explicitly entered and owned by
+                    // the authenticated Owner. Do not make address entry depend
+                    // on a wallet-signature challenge; the BSC payment flow
+                    // validates the transfer on-chain instead.
+                    'is_active' => true,
+                    'verification_status' => BscReceiverVerificationStatus::ManualVerified,
+                    'verification_method' => 'manual_verified',
+                    'verified_at' => now(),
+                    'verified_by' => $actor->getKey(),
                 ]);
-                $challenge = $this->issueChallenge($receiver, $actor);
 
                 $this->auditLogger->log(
                     'bsc_receiver.added',
                     $receiver,
                     null,
                     $this->safeValues($receiver) + [
-                        'challenge_id' => (string) $challenge->getKey(),
-                        'reason' => 'receiver_added_pending_ownership_verification',
+                        'reason' => 'owner_added_receiver_for_on_chain_payment_verification',
                     ],
                     $actor,
                     $ip,
                 );
                 $this->notifyAfterCommit('added', $receiver, $actor);
 
-                return new BscReceiverRegistration($receiver, $challenge);
+                return new BscReceiverRegistration($receiver);
             }, 5);
         } catch (QueryException $exception) {
             if (! $this->isAddressUniqueViolation($exception)) {
@@ -198,7 +203,7 @@ final class BscReceiverManager
                 'verification_method' => 'manual_verified',
                 'verified_at' => now(),
                 'verified_by' => $actor->getKey(),
-                'is_active' => false,
+                'is_active' => true,
             ])->save();
 
             $this->auditLogger->log(

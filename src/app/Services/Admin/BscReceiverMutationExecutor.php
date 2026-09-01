@@ -16,7 +16,7 @@ final class BscReceiverMutationExecutor
     {
         return $this->execute(
             fn (): mixed => $this->manager->add($label, $address, $actor, $ip),
-            'BSC receiver ditambahkan sebagai pending verification. Challenge ownership tersedia di dashboard.',
+            'BSC Receiving Address berhasil disimpan dan langsung diaktifkan.',
         );
     }
 
@@ -46,7 +46,7 @@ final class BscReceiverMutationExecutor
     {
         return $this->execute(
             fn (): mixed => $this->manager->manualVerify($receiver, true, $actor, $ip),
-            'Receiver ditandai manual_verified. Jalur ini high risk; aktifkan hanya setelah review Owner.',
+            'BSC Receiving Address berhasil diaktifkan.',
         );
     }
 

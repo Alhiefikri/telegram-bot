@@ -20,17 +20,12 @@ class BscReceiverManualVerifyRequest extends FormRequest
 
     public function rules(): array
     {
-        return [
-            'high_risk_ack' => ['required', 'accepted'],
-        ];
+        return [];
     }
 
     public function messages(): array
     {
-        return [
-            'high_risk_ack.required' => 'Manual verified harus dikonfirmasi sebagai jalur high risk.',
-            'high_risk_ack.accepted' => 'Manual verified harus dikonfirmasi sebagai jalur high risk.',
-        ];
+        return [];
     }
 
     protected function validationErrorRedirect(Validator $validator): RedirectResponse

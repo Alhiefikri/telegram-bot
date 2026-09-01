@@ -85,7 +85,7 @@ These are the working decisions for this spec. They are intentionally visible so
 | Surfaces | Store Bot and Web Storefront | Both surfaces currently expose Binance checkout and should not diverge. |
 | BSC method | `USDT_BEP20` | Distinguishes the rail from existing `BINANCE_PAY_ID`. |
 | Provider column | `manual` | Matches the existing manual/customer-initiated crypto boundary; `method` remains authoritative. |
-| Address management | Owner-managed database pool with wallet-ownership verification | Address rotation and audit must not require a deploy; a typed address alone must never become active. |
+| Address management | Owner-managed database pool with direct Owner confirmation | Address rotation and audit must not require a deploy; a valid typed address is saved as an active destination after Owner re-authentication. |
 | Address assignment | Least-recently-assigned, locked in checkout transaction | Distributes traffic and is deterministic under concurrency. |
 | Unique amount increment | `0.0001` USDT (`100` micro-USDT) | Gives a useful human-readable reference space while retaining integer arithmetic. |
 | Unique scope | Global across pending BSC Payments | Avoids ambiguity even when several addresses are active. |
@@ -94,7 +94,7 @@ These are the working decisions for this spec. They are intentionally visible so
 | Hash attempts | Five valid submissions per Payment; invalid format does not consume an attempt | Limits abuse while allowing correction of a copied hash. |
 | Technical grace | Three minutes only for a transfer included before the original deadline | Confirmation latency does not become a new payment window. |
 
-These decisions are now resolved for ticketing. The implementation may improve internal names, but must not change the customer-visible rail choices, database-backed activation, address ownership gate, 30-minute deadline, or three-confirmation default without reopening this spec.
+These decisions are now resolved for ticketing. The implementation may improve internal names, but must not change the customer-visible rail choices, database-backed activation, Owner-confirmed address management, 30-minute deadline, or three-confirmation default without reopening this spec.
 
 ## Activation and operator configuration
 
@@ -267,17 +267,14 @@ There is no private key column. An address is a receiving destination only; the 
 
 Address mutation policy:
 
-- Only the Owner role can add, verify, activate, or deactivate a receiver. This is stricter than the existing general payment-settings permission because a receiver controls the destination of customer funds.
-- Adding a receiver creates `pending_verification`; a syntactically valid address is never active by itself.
-- The Owner must re-authenticate before the mutation and complete a wallet ownership challenge for the new address.
-- For an EOA, the application issues a one-time, expiring EIP-191 message containing the address, chain ID, purpose, and nonce; the server recovers the signer and requires an exact address match.
-- For a smart-contract wallet, the application supports ERC-1271 `isValidSignature` validation against the same challenge hash.
-- An address that cannot sign, such as a custodial exchange deposit address, may only be added through an explicit `manual_verified` path protected by Owner re-authentication and a high-risk warning; it is not equivalent to cryptographic ownership proof.
+- Only the Owner role can add, activate, or deactivate a receiver. This is stricter than the existing general payment-settings permission because a receiver controls the destination of customer funds.
+- Adding a receiver validates and normalizes the EVM address, then stores it as active `manual_verified` after Owner re-authentication. The add form does not require a wallet-signature challenge.
+- The Owner is responsible for checking that the address belongs to the intended receiving wallet before saving it. BSC transfer verification remains authoritative for customer Payments.
 - Owner can deactivate a receiver after re-authentication.
 - A receiver referenced by a Payment cannot be deleted.
 - Deactivation affects new checkouts only.
 - Existing Payments keep their snapshotted address and remain auditable.
-- Every add/verify/activate/deactivate action writes the existing audit log with actor, label, normalized address fingerprint, verification method, challenge ID, and reason; never log private credentials because none are required.
+- Every add/activate/deactivate action writes the existing audit log with actor, label, normalized address fingerprint, verification method, and reason; never log private credentials because none are required.
 - The application sends an owner notification after every receiver mutation. The notification includes the action, label, masked address, actor, and timestamp, but never a signature payload or secret.
 
 ### BSC Payment snapshot
@@ -523,8 +520,8 @@ The admin dashboard needs:
 
 - BSC enable/disable control;
 - BSC TTL and minimum-confirmation display;
-- add, ownership-verify, activate, and deactivate receiver actions;
-- re-authentication and signature-challenge state for receiver mutations;
+- add, activate, and deactivate receiver actions;
+- re-authentication state for receiver mutations;
 - readiness status and last RPC health result;
 - active receiver count;
 - pending BSC Payment count;
@@ -656,7 +653,7 @@ The implementation should be delivered in small, independently testable slices:
 
 - Add the `USDT_BEP20` method contract.
 - Add BSC receiver and Payment-detail migrations/models/factories.
-- Add readiness configuration, Owner-only receiver management, re-authentication, and EIP-191/ERC-1271 receiver ownership verification.
+- Add readiness configuration, Owner-only receiver management, and re-authentication.
 - Add integer amount conversion/allocator with partial unique index.
 - Add Storefront cache invalidation/versioning for committed BSC setting and receiver mutations.
 - Add schema/concurrency tests.
@@ -712,7 +709,7 @@ The implementation should be delivered in small, independently testable slices:
 
 ### Receiver and amount allocation
 
-- Inactive/invalid/duplicate receivers cannot be activated.
+- Invalid or duplicate receivers cannot be saved; valid distinct addresses can be saved directly as active receivers by the Owner.
 - Two concurrent BSC checkouts receive safe distinct amounts and valid receiver snapshots.
 - Receiver selection is distributed according to the documented cursor policy.
 - Pending BSC amount uniqueness is enforced by both allocator and database index.
@@ -750,7 +747,7 @@ The implementation should be delivered in small, independently testable slices:
 - BSC instruction effect uses the BSC template/method and survives queue recovery.
 - Admin order detail shows sanitized BSC evidence and safe explorer link.
 - Missing RPC/receiver/token readiness hides or disables BSC without breaking Binance Pay ID.
-- An address typed by an Admin/Support user cannot become active; Owner re-authentication and ownership verification are required.
+- An address typed by an Admin/Support user cannot become active; Owner re-authentication is required.
 - A valid address can be added, activated, deactivated, and rotated from the dashboard without changing ENV or restarting the application.
 - Storefront availability changes after a committed setting/receiver mutation without waiting for the catalog cache TTL.
 - Existing Binance Pay regression suite remains green.

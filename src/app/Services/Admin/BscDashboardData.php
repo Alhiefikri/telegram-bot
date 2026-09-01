@@ -52,7 +52,6 @@ final class BscDashboardData
         try {
             /** @var Collection<int, BscPaymentReceiver> $receivers */
             $receivers = BscPaymentReceiver::query()
-                ->with(['ownershipChallenges' => fn ($query) => $query->whereNull('used_at')->latest('created_at')])
                 ->latest('id')
                 ->get();
         } catch (\Throwable) {
@@ -60,8 +59,6 @@ final class BscDashboardData
         }
 
         return $receivers->map(function (BscPaymentReceiver $receiver): array {
-            $challenge = $receiver->ownershipChallenges->first();
-
             return [
                 'id' => (int) $receiver->getKey(),
                 'label' => (string) $receiver->label,
@@ -71,11 +68,6 @@ final class BscDashboardData
                 'verification_status' => $receiver->verification_status?->value ?? 'pending_verification',
                 'verification_label' => $receiver->verification_status?->label() ?? 'Menunggu verifikasi wallet',
                 'verification_method' => $receiver->verification_method,
-                'pending_challenge_id' => $challenge?->getKey(),
-                'pending_challenge_message' => $challenge?->message,
-                'pending_challenge_expires_at' => $challenge?->expires_at?->toIso8601String(),
-                'verify_url' => route('admin.bsc.receivers.verify', $receiver),
-                'challenge_url' => route('admin.bsc.receivers.challenge', $receiver),
                 'manual_verify_url' => route('admin.bsc.receivers.manual-verify', $receiver),
                 'activate_url' => route('admin.bsc.receivers.activate', $receiver),
                 'deactivate_url' => route('admin.bsc.receivers.deactivate', $receiver),

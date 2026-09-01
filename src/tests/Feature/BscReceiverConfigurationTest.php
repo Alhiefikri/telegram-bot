@@ -18,7 +18,6 @@ use App\Services\Admin\BscReceiverPendingMutationStore;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Bsc\BscReceiverManager;
 use App\Services\Bsc\BscRpcClientInterface;
-use App\Services\Bsc\BscWalletOwnershipVerifierInterface;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -103,8 +102,12 @@ class BscReceiverConfigurationTest extends TestCase
         $this->assertDatabaseHas('bsc_payment_receivers', [
             'label' => 'Wallet utama',
             'address_normalized' => $address,
+            'is_active' => true,
+            'verification_status' => BscReceiverVerificationStatus::ManualVerified->value,
+            'verification_method' => 'manual_verified',
+            'verified_by' => $owner->id,
         ]);
-        $this->assertDatabaseCount('bsc_receiver_ownership_challenges', 1);
+        $this->assertDatabaseCount('bsc_receiver_ownership_challenges', 0);
         $this->assertFalse(session()->has(BscReceiverPendingMutationStore::SESSION_KEY));
         Queue::assertPushed(SendBscReceiverMutationNotification::class);
         $this->post(route('admin.password.confirm.store'), [
@@ -112,6 +115,51 @@ class BscReceiverConfigurationTest extends TestCase
         ])->assertRedirect(route('admin.dashboard'));
         $this->assertDatabaseCount('bsc_payment_receivers', 1);
         Queue::assertPushed(SendBscReceiverMutationNotification::class, 1);
+    }
+
+    public function test_owner_can_save_multiple_bsc_receivers_without_an_ownership_challenge(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $addresses = [
+            '0xf43f918727e621ba6abc31c2bca292dc46d8e038',
+            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        ];
+
+        foreach ($addresses as $index => $address) {
+            $this->actingAs($owner)
+                ->withSession(['auth.password_confirmed_at' => now()->timestamp])
+                ->post(route('admin.bsc.receivers.store'), [
+                    'label' => 'Wallet '.($index + 1),
+                    'address' => $address,
+                ])
+                ->assertRedirect('/admin?tab=stats#admin-bsc-settings')
+                ->assertSessionHasNoErrors();
+        }
+
+        $this->assertDatabaseCount('bsc_payment_receivers', 2);
+        $this->assertDatabaseCount('bsc_receiver_ownership_challenges', 0);
+        $this->assertDatabaseCount('audit_logs', 2);
+        foreach ($addresses as $address) {
+            $this->assertDatabaseHas('bsc_payment_receivers', [
+                'address_normalized' => $address,
+                'is_active' => true,
+                'verification_status' => BscReceiverVerificationStatus::ManualVerified->value,
+                'verification_method' => 'manual_verified',
+                'verified_by' => $owner->id,
+            ]);
+        }
+
+        $this->actingAs($owner)
+            ->get(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertOk()
+            ->assertSee('Wallet 1')
+            ->assertSee('Wallet 2')
+            ->assertSee('Simpan address')
+            ->assertDontSee('ownership challenge')
+            ->assertDontSee('Buat challenge baru')
+            ->assertDontSee('Verifikasi ownership signature')
+            ->assertDontSee('Manual verified high risk');
     }
 
     public function test_wrong_password_keeps_pending_receiver_mutation_for_retry(): void
@@ -209,77 +257,19 @@ class BscReceiverConfigurationTest extends TestCase
         $this->assertFalse(session()->has(BscReceiverPendingMutationStore::SESSION_KEY));
     }
 
-    public function test_owner_can_renew_challenge_after_password_confirmation(): void
+    public function test_owner_can_activate_a_legacy_pending_receiver_after_password_confirmation(): void
     {
         Queue::fake();
         $owner = User::factory()->create(['role' => UserRole::Owner]);
-        $registration = app(BscReceiverManager::class)->add(
-            'Wallet challenge',
-            '0x3333333333333333333333333333333333333333',
-            $owner,
-        );
+        $receiver = BscPaymentReceiver::factory()->create([
+            'label' => 'Legacy pending wallet',
+            'address' => '0x5555555555555555555555555555555555555555',
+            'is_active' => false,
+            'verification_status' => BscReceiverVerificationStatus::PendingVerification,
+        ]);
 
         $this->actingAs($owner)
-            ->post(route('admin.bsc.receivers.challenge', $registration->receiver))
-            ->assertRedirect(route('password.confirm'));
-
-        $this->post(route('admin.password.confirm.store'), [
-            'password' => 'password',
-        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
-
-        $renewed = BscReceiverOwnershipChallenge::query()
-            ->where('receiver_id', $registration->receiver->getKey())
-            ->latest('created_at')
-            ->firstOrFail();
-
-        $this->assertNotSame((string) $registration->challenge->getKey(), (string) $renewed->getKey());
-        $this->assertNotNull($registration->challenge->fresh()->used_at);
-    }
-
-    public function test_owner_can_verify_receiver_after_password_confirmation(): void
-    {
-        Queue::fake();
-        $owner = User::factory()->create(['role' => UserRole::Owner]);
-        $this->useOwnershipVerifier(true);
-        $registration = app(BscReceiverManager::class)->add(
-            'Wallet verify',
-            '0x4444444444444444444444444444444444444444',
-            $owner,
-        );
-
-        $this->actingAs($owner)
-            ->post(route('admin.bsc.receivers.verify', $registration->receiver), [
-                'challenge_id' => (string) $registration->challenge->getKey(),
-                'wallet_type' => 'eoa',
-                'signature' => '0x'.str_repeat('1', 130),
-            ])
-            ->assertRedirect(route('password.confirm'));
-
-        $this->post(route('admin.password.confirm.store'), [
-            'password' => 'password',
-        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
-
-        $this->assertSame(
-            BscReceiverVerificationStatus::Verified,
-            $registration->receiver->fresh()->verification_status,
-        );
-        $this->assertNotNull($registration->challenge->fresh()->used_at);
-    }
-
-    public function test_owner_can_manually_verify_receiver_after_password_confirmation(): void
-    {
-        Queue::fake();
-        $owner = User::factory()->create(['role' => UserRole::Owner]);
-        $registration = app(BscReceiverManager::class)->add(
-            'Custodial wallet',
-            '0x5555555555555555555555555555555555555555',
-            $owner,
-        );
-
-        $this->actingAs($owner)
-            ->post(route('admin.bsc.receivers.manual-verify', $registration->receiver), [
-                'high_risk_ack' => '1',
-            ])
+            ->post(route('admin.bsc.receivers.manual-verify', $receiver))
             ->assertRedirect(route('password.confirm'));
 
         $this->post(route('admin.password.confirm.store'), [
@@ -288,8 +278,9 @@ class BscReceiverConfigurationTest extends TestCase
 
         $this->assertSame(
             BscReceiverVerificationStatus::ManualVerified,
-            $registration->receiver->fresh()->verification_status,
+            $receiver->fresh()->verification_status,
         );
+        $this->assertTrue($receiver->fresh()->is_active);
     }
 
     public function test_owner_can_activate_receiver_after_password_confirmation(): void
@@ -330,7 +321,7 @@ class BscReceiverConfigurationTest extends TestCase
         $this->assertFalse($receiver->fresh()->is_active);
     }
 
-    public function test_owner_add_creates_pending_receiver_and_one_time_challenge(): void
+    public function test_owner_add_creates_an_active_manual_receiver_without_a_challenge(): void
     {
         Queue::fake();
         $owner = User::factory()->create(['role' => UserRole::Owner]);
@@ -344,16 +335,13 @@ class BscReceiverConfigurationTest extends TestCase
             ->assertRedirect('/admin?tab=stats#admin-bsc-settings');
 
         $receiver = BscPaymentReceiver::query()->firstOrFail();
-        $challenge = BscReceiverOwnershipChallenge::query()->firstOrFail();
 
         $this->assertSame('0xabcdefabcdefabcdefabcdefabcdefabcdefabcd', $receiver->address_normalized);
-        $this->assertSame(BscReceiverVerificationStatus::PendingVerification, $receiver->verification_status);
-        $this->assertFalse($receiver->is_active);
-        $this->assertSame($owner->id, $challenge->user_id);
-        $this->assertSame($receiver->address_normalized, $challenge->wallet_address);
-        $this->assertStringContainsString('Challenge ID: '.$challenge->id, $challenge->message);
-        $this->assertStringContainsString('Purpose: add_bsc_receiving_address', $challenge->message);
-        $this->assertNotSame($challenge->message, $challenge->message_hash);
+        $this->assertSame(BscReceiverVerificationStatus::ManualVerified, $receiver->verification_status);
+        $this->assertTrue($receiver->is_active);
+        $this->assertSame('manual_verified', $receiver->verification_method);
+        $this->assertSame($owner->id, $receiver->verified_by);
+        $this->assertDatabaseCount('bsc_receiver_ownership_challenges', 0);
         Queue::assertPushed(SendBscReceiverMutationNotification::class);
         $this->assertDatabaseHas('audit_logs', ['action' => 'bsc_receiver.added', 'subject_id' => (string) $receiver->id]);
     }
@@ -375,7 +363,7 @@ class BscReceiverConfigurationTest extends TestCase
         ]);
     }
 
-    public function test_duplicate_receiver_addition_returns_a_conflict_without_second_challenge(): void
+    public function test_duplicate_receiver_addition_returns_a_conflict_without_a_second_receiver(): void
     {
         Queue::fake();
         $owner = User::factory()->create(['role' => UserRole::Owner]);
@@ -391,7 +379,7 @@ class BscReceiverConfigurationTest extends TestCase
         }
 
         $this->assertSame(1, BscPaymentReceiver::query()->count());
-        $this->assertSame(1, BscReceiverOwnershipChallenge::query()->count());
+        $this->assertSame(0, BscReceiverOwnershipChallenge::query()->count());
         $this->assertSame(1, AuditLog::query()->where('action', 'bsc_receiver.added')->count());
         Queue::assertPushed(SendBscReceiverMutationNotification::class, 1);
     }
@@ -481,69 +469,6 @@ class BscReceiverConfigurationTest extends TestCase
         $this->assertTrue($setting->bsc_require_finalized_block);
         $this->assertSame('manual', $setting->payment_mode);
         $this->assertDatabaseHas('audit_logs', ['action' => 'bsc_settings.updated']);
-    }
-
-    public function test_bad_expired_wrong_chain_and_replayed_challenges_are_rejected(): void
-    {
-        $owner = User::factory()->create(['role' => UserRole::Owner]);
-        $this->useOwnershipVerifier(true);
-        $manager = app(BscReceiverManager::class);
-        $registration = $manager->add('Wallet utama', '0x3333333333333333333333333333333333333333', $owner);
-
-        $challenge = $registration->challenge;
-        $challenge->forceFill(['chain_id' => 55])->save();
-        $this->expectException(BscReceiverChallengeException::class);
-        $manager->verify($registration->receiver, (string) $challenge->id, 'eoa', '0x'.str_repeat('1', 130), $owner);
-    }
-
-    public function test_owner_can_reissue_an_expired_or_lost_challenge_without_duplicating_the_receiver(): void
-    {
-        $owner = User::factory()->create(['role' => UserRole::Owner]);
-        $manager = app(BscReceiverManager::class);
-        $registration = $manager->add('Wallet utama', '0x7777777777777777777777777777777777777777', $owner);
-
-        $renewed = $manager->renewChallenge($registration->receiver, $owner);
-
-        $this->assertNotSame((string) $registration->challenge->id, (string) $renewed->id);
-        $this->assertNotNull($registration->challenge->fresh()->used_at);
-        $this->assertSame(1, BscPaymentReceiver::query()->count());
-    }
-
-    public function test_successful_signature_verification_keeps_receiver_inactive_until_explicit_activation(): void
-    {
-        Queue::fake();
-        $owner = User::factory()->create(['role' => UserRole::Owner]);
-        $this->useOwnershipVerifier(true);
-        $manager = app(BscReceiverManager::class);
-        $registration = $manager->add('Wallet utama', '0x4444444444444444444444444444444444444444', $owner);
-
-        $verified = $manager->verify(
-            $registration->receiver,
-            (string) $registration->challenge->id,
-            'eoa',
-            '0x'.str_repeat('2', 130),
-            $owner,
-        );
-        $this->assertSame(BscReceiverVerificationStatus::Verified, $verified->verification_status);
-        $this->assertFalse($verified->is_active);
-
-        $active = $manager->activate($verified, $owner);
-        $this->assertTrue($active->is_active);
-        $inactive = $manager->deactivate($active, $owner);
-        $this->assertFalse($inactive->is_active);
-        $this->assertSame(1, $this->assertAuditCount('bsc_receiver.verified'));
-        $this->assertSame(1, $this->assertAuditCount('bsc_receiver.activated'));
-        $this->assertSame(1, $this->assertAuditCount('bsc_receiver.deactivated'));
-    }
-
-    public function test_manual_verified_requires_an_explicit_high_risk_acknowledgement(): void
-    {
-        $owner = User::factory()->create(['role' => UserRole::Owner]);
-        $manager = app(BscReceiverManager::class);
-        $registration = $manager->add('Custodial wallet', '0x5555555555555555555555555555555555555555', $owner);
-
-        $this->expectException(BscReceiverChallengeException::class);
-        $manager->manualVerify($registration->receiver, false, $owner);
     }
 
     public function test_readiness_requires_enabled_setting_rpc_identity_and_active_verified_receiver(): void
@@ -641,23 +566,6 @@ class BscReceiverConfigurationTest extends TestCase
 
         $this->expectException(BscReceiverDeletionBlocked::class);
         $receiver->delete();
-    }
-
-    private function useOwnershipVerifier(bool $accepted): void
-    {
-        app()->instance(BscWalletOwnershipVerifierInterface::class, new class($accepted) implements BscWalletOwnershipVerifierInterface
-        {
-            public function __construct(private readonly bool $accepted) {}
-
-            public function verify(
-                BscPaymentReceiver $receiver,
-                BscReceiverOwnershipChallenge $challenge,
-                string $walletType,
-                string $signature,
-            ): bool {
-                return $this->accepted;
-            }
-        });
     }
 
     private function assertAuditCount(string $action): int

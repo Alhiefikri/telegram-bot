@@ -456,13 +456,13 @@
                             @csrf
                             <div>
                                 <p class="text-[11px] font-black uppercase tracking-wider text-brand-muted">Tambah receiver</p>
-                                <p class="mt-1 text-[11px] font-semibold text-brand-muted">Address baru selalu pending verification dan tidak langsung menerima checkout.</p>
+                                <p class="mt-1 text-[11px] font-semibold text-brand-muted">Simpan address BEP20 yang benar. Address baru langsung aktif untuk pembayaran BSC.</p>
                             </div>
                             <div class="grid gap-3 sm:grid-cols-2">
                                 <x-admin-dashboard.input name="label" placeholder="Wallet utama" value="{{ old('label') }}" required />
                                 <x-admin-dashboard.input name="address" placeholder="0x..." value="{{ old('address') }}" required />
                             </div>
-                            <x-admin-dashboard.button type="submit" variant="neutral" size="sm" class="w-full text-[11px]">Tambah & buat ownership challenge</x-admin-dashboard.button>
+                            <x-admin-dashboard.button type="submit" variant="neutral" size="sm" class="w-full text-[11px]">Simpan address</x-admin-dashboard.button>
                         </form>
 
                         <div class="mt-4 space-y-3 border-t-2 border-neo-ink/15 pt-4">
@@ -478,33 +478,7 @@
                                         </x-admin-dashboard.badge>
                                     </div>
 
-                                    @if ($receiver['pending_challenge_message'])
-                                        <textarea readonly rows="7" class="neo-input mt-3 w-full bg-white px-3 py-2 text-[10px] font-mono leading-4">{{ $receiver['pending_challenge_message'] }}</textarea>
-                                        <form method="POST" action="{{ $receiver['verify_url'] }}" class="mt-2 space-y-2">
-                                            @csrf
-                                            <input type="hidden" name="challenge_id" value="{{ $receiver['pending_challenge_id'] }}">
-                                            <div class="grid gap-2 sm:grid-cols-2">
-                                                <select name="wallet_type" class="neo-input w-full bg-white px-3 py-2 text-xs font-bold" required>
-                                                    <option value="eoa">EOA · EIP-191</option>
-                                                    <option value="erc1271">Smart wallet · ERC-1271</option>
-                                                </select>
-                                                <x-admin-dashboard.input name="signature" placeholder="0x + signature hex" required />
-                                            </div>
-                                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">Verifikasi ownership signature</x-admin-dashboard.button>
-                                        </form>
-                                        <form method="POST" action="{{ $receiver['challenge_url'] }}" class="mt-2">
-                                            @csrf
-                                            <x-admin-dashboard.button type="submit" variant="neutral" size="sm" class="w-full text-[11px]">Buat challenge baru</x-admin-dashboard.button>
-                                        </form>
-                                        <form method="POST" action="{{ $receiver['manual_verify_url'] }}" class="mt-2">
-                                            @csrf
-                                            <label class="flex items-start gap-2 text-[10px] font-semibold leading-4 text-amber-900">
-                                                <input type="checkbox" name="high_risk_ack" value="1" required class="mt-0.5 h-4 w-4 rounded border-2 border-amber-900">
-                                                Manual verified high risk: custodial address tidak membuktikan kontrol cryptographic.
-                                            </label>
-                                            <x-admin-dashboard.button type="submit" variant="warning" size="sm" class="mt-2 w-full text-[11px]">Tandai manual_verified</x-admin-dashboard.button>
-                                        </form>
-                                    @elseif ($receiver['is_active'])
+                                    @if ($receiver['is_active'])
                                         <form method="POST" action="{{ $receiver['deactivate_url'] }}" class="mt-3">
                                             @csrf
                                             <x-admin-dashboard.button type="submit" variant="warning" size="sm" class="w-full text-[11px]">Nonaktifkan receiver</x-admin-dashboard.button>
@@ -514,6 +488,13 @@
                                             @csrf
                                             <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">Aktifkan receiver</x-admin-dashboard.button>
                                         </form>
+                                    @elseif ($receiver['verification_status'] === 'pending_verification')
+                                        <form method="POST" action="{{ $receiver['manual_verify_url'] }}" class="mt-3">
+                                            @csrf
+                                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">Aktifkan address</x-admin-dashboard.button>
+                                        </form>
+                                    @else
+                                        <p class="mt-3 text-[11px] font-semibold text-brand-muted">Address belum bisa dipakai. Tambahkan address baru.</p>
                                     @endif
                                 </div>
                             @empty
@@ -521,7 +502,7 @@
                             @endforelse
                         </div>
                     @else
-                        <x-admin-dashboard.notice tone="neutral" class="mt-4 text-xs">Hanya Owner yang dapat menambah, memverifikasi, mengaktifkan, atau menonaktifkan destination address BSC.</x-admin-dashboard.notice>
+                        <x-admin-dashboard.notice tone="neutral" class="mt-4 text-xs">Hanya Owner yang dapat menambah, mengaktifkan, atau menonaktifkan destination address BSC.</x-admin-dashboard.notice>
                     @endif
                 </x-admin-dashboard.card>
 

@@ -41,8 +41,8 @@ The application uses the existing `BINANCE_VERIFICATION_QUEUE` / `binance-verifi
    php artisan ops:health --db --queue-schema --queue-depth --bsc
    ```
 
-4. In Admin → Mode pembayaran, leave `bsc_payment_enabled` off while adding the receiver. Add the public address, re-authenticate as Owner, and complete its EIP-191 EOA or ERC-1271 smart-wallet challenge. The custodial/manual path is an explicit high-risk exception and is not cryptographic ownership proof.
-5. Activate only a receiver whose chain, approved contract, and decimals match readiness. Owner receiver mutations write audit records, send an owner notification, and invalidate the Storefront response-cache version after commit.
+4. In Admin → Mode pembayaran, leave `bsc_payment_enabled` off while adding receivers. Enter each public BEP20 address, re-authenticate as Owner, and save it. The address is normalized and becomes an active receiver immediately; the Owner is responsible for checking the destination before saving it.
+5. Confirm each receiver has the expected chain, approved contract, and decimals. Owner receiver mutations write audit records, send an owner notification, and invalidate the Storefront response-cache version after commit.
 6. Re-run `bsc:check-readiness --json`, then enable the BSC setting in the database-backed dashboard. This affects new checkout selection only; existing Payments retain their immutable snapshots.
 
 ## Verification and review

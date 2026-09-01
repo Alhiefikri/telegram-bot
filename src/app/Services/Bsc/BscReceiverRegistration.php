@@ -9,6 +9,8 @@ final readonly class BscReceiverRegistration
 {
     public function __construct(
         public BscPaymentReceiver $receiver,
-        public BscReceiverOwnershipChallenge $challenge,
+        // New registrations are directly active; this remains nullable for
+        // callers that still consume the legacy registration shape.
+        public ?BscReceiverOwnershipChallenge $challenge = null,
     ) {}
 }

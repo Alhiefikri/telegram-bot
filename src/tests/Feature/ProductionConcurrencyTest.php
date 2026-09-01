@@ -541,7 +541,7 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertCount(2, PaymentBscDetail::query()->whereIn('payment_id', $payments->pluck('id'))->get());
     }
 
-    public function test_concurrent_bsc_receiver_registration_creates_one_receiver_and_one_challenge(): void
+    public function test_concurrent_bsc_receiver_registration_creates_one_active_receiver_without_challenge(): void
     {
         $this->requireConcurrencyLane();
         config()->set('services.bsc', array_merge(config('services.bsc'), [
@@ -572,7 +572,8 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(1, $this->successfulResultCount($results));
         $this->assertSame([BscReceiverChallengeException::class], $this->failedResultClasses($results));
         $this->assertSame(1, BscPaymentReceiver::query()->count());
-        $this->assertSame(1, BscReceiverOwnershipChallenge::query()->count());
+        $this->assertSame(1, BscPaymentReceiver::query()->activeVerified()->count());
+        $this->assertSame(0, BscReceiverOwnershipChallenge::query()->count());
         $this->assertSame(1, AuditLog::query()->where('action', 'bsc_receiver.added')->count());
     }
 
