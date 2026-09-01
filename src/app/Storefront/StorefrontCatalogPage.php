@@ -22,7 +22,7 @@ final readonly class StorefrontCatalogPage
      */
     public function __construct(
         public string $context,
-        public StorefrontPresenter $storefront,
+        public StorefrontCatalogFacade $storefront,
         public string $brand,
         public array $copy,
         public string $pageTitle,

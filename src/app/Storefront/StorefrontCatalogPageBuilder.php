@@ -14,7 +14,7 @@ use Illuminate\Support\Collection;
 class StorefrontCatalogPageBuilder
 {
     public function __construct(
-        private readonly StorefrontPresenter $storefront,
+        private readonly StorefrontCatalogFacade $storefront,
         private readonly StorefrontCatalogProductPresenter $catalogPresenter,
         private readonly StorefrontUrl $urls,
         private readonly CheckoutMaintenance $maintenance,
@@ -89,7 +89,7 @@ class StorefrontCatalogPageBuilder
             shopUrl: route('storefront.shop.index'),
             supportHref: $this->storefront->supportHref(),
             supportDestination: $this->storefront->supportDestination(),
-            supportContext: $this->storefront->support()->general(),
+            supportContext: $this->storefront->generalSupportContext(),
             hasPublicCategories: $categories->isNotEmpty(),
             categoryFilters: $this->categoryFilters($categories, $query, $isShop),
             products: $catalogProducts,

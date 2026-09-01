@@ -13,7 +13,7 @@ final class StorefrontFamilyPageBuilder
 {
     public function __construct(
         private readonly CatalogBrowse $catalog,
-        private readonly StorefrontPresenter $storefront,
+        private readonly StorefrontCatalogFacade $storefront,
         private readonly StorefrontCatalogProductPresenter $catalogPresenter,
         private readonly StorefrontUrl $urls,
         private readonly CheckoutMaintenance $maintenance,
@@ -45,7 +45,7 @@ final class StorefrontFamilyPageBuilder
             'metadata' => $metadata,
             'supportHref' => $this->storefront->supportHref(),
             'supportDestination' => $this->storefront->supportDestination(),
-            'supportContext' => $this->storefront->support()->general(),
+            'supportContext' => $this->storefront->generalSupportContext(),
             'family' => $catalogFamily,
             'catalogFamily' => $catalogFamily,
             'members' => $members,
