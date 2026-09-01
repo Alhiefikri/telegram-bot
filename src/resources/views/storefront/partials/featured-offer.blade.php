@@ -1,8 +1,7 @@
-<section id="featured-offer" class="relative mx-auto max-w-6xl px-5 mt-16 pb-20 sm:px-6">
+<section id="featured-offer" class="relative mx-auto mt-16 max-w-6xl px-5 pb-20 sm:px-6">
     @if ($catalogPage->featuredProduct)
         @php
             $featuredPresentation = $catalogPage->featuredProduct->presentation;
-            $featuredPayload = $featuredPresentation->modalPayload();
             $featuredReturnUrl = $catalogPage->productReturnUrl($featuredPresentation->id);
             $featuredCheckoutUrl = $featuredPresentation->productUrl.(str_contains($featuredPresentation->productUrl, '?') ? '&' : '?').'checkout=1&from='.urlencode($featuredReturnUrl);
         @endphp
@@ -45,15 +44,13 @@
                             <div role="status" class="flex min-h-14 w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-6 py-4 text-center text-sm font-black text-[var(--sf-ink)]">
                                 Checkout sedang maintenance
                             </div>
-                        @elseif ($featuredPresentation->isBuyable)
-                            <a href="{{ $featuredCheckoutUrl }}" x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product), { opener: $el })" data-product='@json($featuredPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' class="neo-button neo-sheen flex min-h-14 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] px-6 py-4 text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)]">
+                        @else
+                            <a href="{{ $featuredCheckoutUrl }}"
+                               x-on:click.prevent="openProductModalFromUrl($el.dataset.modalUrl, { opener: $el, fallbackUrl: $el.href })"
+                               data-modal-url="{{ $featuredPresentation->modalUrl }}"
+                               class="neo-button neo-sheen flex min-h-14 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] px-6 py-4 text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)]">
                                 Pilih Checkout
                             </a>
-                        @else
-                            <div role="status" class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4 text-sm font-semibold leading-6 text-[var(--sf-ink)]">
-                                <p class="font-black">{{ $featuredPresentation->checkoutReadiness->label }}</p>
-                                <p class="mt-2">{{ $featuredPresentation->checkoutReadiness->notice }}</p>
-                            </div>
                         @endif
                     </div>
                 </div>

@@ -25,9 +25,9 @@ class StorefrontProductCheckoutTest extends TestCase
         ]);
     }
 
-    public function test_catalog_product_cards_open_modal_with_checkout_choices(): void
+    public function test_catalog_product_cards_use_lazy_modal_without_checkout_payload(): void
     {
-        Product::factory()->create([
+        $product = Product::factory()->create([
             'name' => 'CapCut Pro',
             'description' => 'Akun Private dari dashboard',
             'price_amount' => 60000,
@@ -38,16 +38,17 @@ class StorefrontProductCheckoutTest extends TestCase
 
         $this->get('/')
             ->assertOk()
-            ->assertSee('JSON.parse($el.dataset.product)', false)
+            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
+            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
+            ->assertDontSee('data-product=', false)
             ->assertSee('CapCut Pro')
             ->assertSee('Akun Private dari dashboard')
             ->assertSee('Rp60.000')
             ->assertDontSee('Rp85.000')
             ->assertDontSee('line-through', false)
             ->assertSee('Stok: 8')
-            ->assertSee('Bayar via QR Manual')
             ->assertSee('data-storefront-qris-mark', false)
-            ->assertSee('Bayar via QR Manual', false)
+            ->assertDontSee('Bayar via QR Manual')
             ->assertDontSee('Beli lewat Telegram')
             ->assertDontSee('&amp;quot;', false)
             ->assertDontSee('POPULER')
@@ -142,7 +143,7 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertDontSee('x-on:click.prevent="openProductModal', false);
     }
 
-    public function test_landing_hides_checkout_actions_without_payment_setting(): void
+    public function test_landing_defers_checkout_readiness_without_payment_setting(): void
     {
         ManualPaymentSetting::query()->delete();
         $product = Product::factory()->create([
@@ -153,9 +154,11 @@ class StorefrontProductCheckoutTest extends TestCase
 
         $this->get(route('storefront.home'))
             ->assertOk()
-            ->assertSee('Checkout belum tersedia')
+            ->assertSee('No Provider Landing Product')
+            ->assertSee('Pilih Checkout')
+            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
             ->assertDontSee('data-product=', false)
-            ->assertDontSee('action="'.route('storefront.shop.checkout').'"', false)
+            ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
             ->assertDontSee('Bayar via QR Manual')
             ->assertDontSee('Bayar via KlikQRIS');
     }

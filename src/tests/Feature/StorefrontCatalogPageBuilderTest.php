@@ -37,7 +37,10 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->assertSame(route('storefront.shop.index').'#products', $page->clearSearchUrl);
         $this->assertSame(route('storefront.shop.index', ['q' => 'chat']), $page->canonicalUrl);
         $this->assertSame(['Chat GPT Plus'], $page->products->map(fn ($entry) => $entry->presentation->name)->all());
-        $this->assertTrue($page->products->first()->presentation->canOpenModal);
+        $this->assertSame(
+            route('storefront.products.modal', ['product' => $page->products->first()->presentation->id]),
+            $page->products->first()->presentation->modalUrl,
+        );
     }
 
     public function test_home_context_exposes_landing_actions_and_empty_state_inputs(): void
@@ -271,10 +274,8 @@ class StorefrontCatalogPageBuilderTest extends TestCase
             ->assertSee('value=""', false);
     }
 
-    public function test_binance_payment_choice_is_available_without_catalog_n_plus_one_queries(): void
+    public function test_catalog_presentations_do_not_resolve_payment_choices_without_catalog_n_plus_one_queries(): void
     {
-        config()->set('services.binance.pay_id', '987654321');
-        ManualPaymentSetting::create(['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'is_active' => true]);
         $this->availableProduct(['name' => 'One USDT Product', 'usdt_price_amount' => 1_500_000]);
 
         $singleProductQueries = $this->catalogQueryCount();
@@ -287,7 +288,12 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $manyProductQueries = $this->catalogQueryCount();
 
         $this->assertSame($singleProductQueries, $manyProductQueries);
-        $this->assertNotNull($page->products->first()->presentation->checkoutChoice('website_binance_pay'));
+        $presentation = $page->products->first()->presentation;
+        $this->assertFalse(property_exists($presentation, 'checkoutChoices'));
+        $this->assertSame(
+            route('storefront.products.modal', ['product' => $presentation->id]),
+            $presentation->modalUrl,
+        );
     }
 
     private function catalogQueryCount(): int

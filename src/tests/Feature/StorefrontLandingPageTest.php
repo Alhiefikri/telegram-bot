@@ -283,7 +283,7 @@ class StorefrontLandingPageTest extends TestCase
             ->assertDontSee('Canva Pro Lama');
     }
 
-    public function test_storefront_product_cards_show_public_details_links_and_hide_stock_item_secrets(): void
+    public function test_storefront_product_cards_show_public_details_links_and_lazy_modal_urls_without_stock_item_secrets(): void
     {
         config()->set('services.telegram.admin_contact_url', 'https://t.me/lhiestore');
         $product = Product::factory()->create([
@@ -307,7 +307,9 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('Terjual: 0')
             ->assertSee('Stok: 3')
             ->assertSee(route('storefront.products.show', $product), false)
+            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
             ->assertSee('Akses Pesanan')
+            ->assertDontSee('data-product=', false)
             ->assertDontSee('Produk Nonaktif Rahasia')
             ->assertDontSee('claude-user@example.test')
             ->assertDontSee('Secret-333');
@@ -363,7 +365,7 @@ class StorefrontLandingPageTest extends TestCase
             'reserved_stock' => 0,
         ]);
         $deleted->delete();
-        Product::factory()->create([
+        $featuredProduct = Product::factory()->create([
             'category_id' => $category->id,
             'name' => 'Canva Pro Promo',
             'description' => 'Offer utama dengan stok siap kirim.',
@@ -384,6 +386,12 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertStringContainsString('Rp99.000', $featuredHtml);
         $this->assertStringContainsString('Sisa 3', $featuredHtml);
         $this->assertStringContainsString('Pilih Checkout', $featuredHtml);
+        $this->assertStringContainsString(
+            'href="'.route('storefront.products.show', ['product' => $featuredProduct]).'?checkout=1&amp;from=',
+            $featuredHtml,
+        );
+        $this->assertStringContainsString('data-modal-url="'.route('storefront.products.modal', $featuredProduct).'"', $featuredHtml);
+        $this->assertStringNotContainsString('data-product=', $featuredHtml);
         $this->assertStringNotContainsString('fomoTimer', $featuredHtml);
         $this->assertStringNotContainsString('timeDisplay', $featuredHtml);
         $this->assertStringNotContainsString('15:00', $featuredHtml);

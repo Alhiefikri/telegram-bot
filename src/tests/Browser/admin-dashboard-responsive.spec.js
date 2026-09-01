@@ -68,7 +68,7 @@ test("keeps customer checkout modal keyboard accessible and restores failed stat
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
   const productCard = page
-    .locator("a[data-product]")
+    .locator("a[data-modal-url]")
     .filter({ hasText: "Browser QA Produk A" })
     .first();
   await productCard.scrollIntoViewIfNeeded();
@@ -129,7 +129,7 @@ test("keeps customer checkout lazy modal loading cancellable and accessible", as
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
   const productCard = page
-    .locator("a[data-product]")
+    .locator("a[data-modal-url]")
     .filter({ hasText: "Browser QA Produk A" })
     .first();
   const productId = Number(
@@ -248,7 +248,7 @@ test("keeps customer checkout lazy modal failures on the product page", async ({
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
   const productCard = page
-    .locator("a[data-product]")
+    .locator("a[data-modal-url]")
     .filter({ hasText: "Browser QA Produk A" })
     .first();
   const productId = Number(
@@ -345,7 +345,7 @@ test("keeps customer checkout QRIS-first across browser locales", async ({
       await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
       const productCard = page
-        .locator("a[data-product]")
+        .locator("a[data-modal-url]")
         .filter({ hasText: "Browser QA Produk A" })
         .first();
       await productCard.click();
@@ -427,7 +427,7 @@ test("keeps the customer QRIS submit button stable while hovering", async ({
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
   await page
-    .locator("a[data-product]")
+    .locator("a[data-modal-url]")
     .filter({ hasText: "Browser QA Produk A" })
     .first()
     .click();
@@ -475,7 +475,7 @@ test("respects reduced motion in the customer checkout modal", async ({
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
   await page
-    .locator("a[data-product]")
+    .locator("a[data-modal-url]")
     .filter({ hasText: "Browser QA Produk A" })
     .first()
     .click();
@@ -516,7 +516,7 @@ test("restores QRIS for customer checkout when Binance becomes unavailable", asy
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
   const productCard = page
-    .locator("a[data-product]")
+    .locator("a[data-modal-url]")
     .filter({ hasText: "Browser QA Produk A" })
     .first();
   await productCard.click();
@@ -565,7 +565,7 @@ test("opens the selected product checkout from the landing catalog", async ({
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
   const productCard = page
-    .locator("a[data-product]")
+    .locator("a[data-modal-url]")
     .filter({ hasText: "Browser QA Produk A" })
     .first();
   await productCard.scrollIntoViewIfNeeded();
@@ -587,7 +587,7 @@ test("opens the selected product checkout from a direct product URL", async ({
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
   const productHref = await page
-    .locator("a[data-product]")
+    .locator("a[data-modal-url]")
     .filter({ hasText: "Browser QA Produk A" })
     .first()
     .getAttribute("href");
@@ -619,7 +619,7 @@ test("keeps the direct product fallback usable without the checkout modal", asyn
   try {
     await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
     const productHref = await page
-      .locator("a[data-product]")
+      .locator("a[data-modal-url]")
       .filter({ hasText: "Browser QA Produk A" })
       .first()
       .getAttribute("href");
@@ -1031,11 +1031,11 @@ test("uses a compact two-column shop grid and keeps focus on the active filter a
 
   const catalogGrid = page.locator("#storefront-product-grid");
   const productA = catalogGrid
-    .locator("a[data-product]")
+    .locator("a[data-modal-url]")
     .filter({ hasText: "Browser QA Produk A" })
     .first();
   const productB = catalogGrid
-    .locator("a[data-product]")
+    .locator("a[data-modal-url]")
     .filter({ hasText: "Browser QA Produk B" })
     .first();
   await page.waitForTimeout(700);

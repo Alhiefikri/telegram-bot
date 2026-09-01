@@ -22,9 +22,7 @@
         ?? ($checkoutMaintenanceState ? \App\Storefront\StorefrontCheckoutMaintenanceCopy::notice($checkoutMaintenanceState) : '');
     $modalCheckoutAvailable = isset($presentation)
         ? $presentation->isBuyable
-        : (isset($catalogPage) && $catalogPage->products->contains(
-            fn ($catalogProduct): bool => $catalogProduct->presentation->isBuyable,
-        ));
+        : isset($catalogPage) && ! $checkoutMaintenanceActive;
 @endphp
 
 <div class="relative z-50" x-show="productModalOpen" x-cloak @keydown.window="if (productModalOpen && $event.key === 'Escape' && !$event.defaultPrevented) { $event.preventDefault(); closeProductModal(); }">

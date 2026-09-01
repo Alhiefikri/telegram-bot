@@ -4,52 +4,18 @@ namespace App\Storefront;
 
 use App\Catalog\CatalogBrowseEntry;
 use App\Catalog\CatalogBrowseQuery;
+use App\Catalog\CatalogCategoryReadModel;
 use App\Catalog\CatalogFamilyReadModel;
 use App\Catalog\CatalogProductReadModel;
-use App\Enums\OrderStatus;
-use App\Enums\PaymentStatus;
-use App\Models\Category;
-use App\Models\Product;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
-use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 class StorefrontCatalogPageBuilder
 {
-    /** @var list<string> */
-    private const PUBLIC_PRODUCT_COLUMNS = [
-        'id',
-        'category_id',
-        'product_family_id',
-        'family_sort_order',
-        'family_option_label',
-        'name',
-        'description',
-        'product_type',
-        'access_duration',
-        'region',
-        'account_type',
-        'device_limit',
-        'included_items',
-        'limitations',
-        'fulfillment_expectation',
-        'warranty_policy',
-        'support_policy',
-        'price_amount',
-        'usdt_price_amount',
-        'currency',
-        'stock',
-        'reserved_stock',
-        'image_path',
-        'is_active',
-        'featured_rank',
-    ];
-
     public function __construct(
         private readonly StorefrontPresenter $storefront,
-        private readonly StorefrontProductPresenter $products,
+        private readonly StorefrontCatalogProductPresenter $catalogPresenter,
         private readonly StorefrontUrl $urls,
         private readonly CheckoutMaintenance $maintenance,
         private readonly StorefrontSeo $seo,
@@ -90,10 +56,10 @@ class StorefrontCatalogPageBuilder
         $category = $this->publicCategory($query->category);
         $query = $query->withCategory($query->category === 'uncategorized' ? 'uncategorized' : $category?->slug);
         $listing = $this->publicProducts($query, paginate: $isShop);
-        $catalogProducts = $this->catalogProducts($listing['products'], $maintenance, $listing['standaloneReadModels']);
+        $catalogProducts = $this->catalogProducts($listing['standaloneReadModels']);
         $catalogEntries = $this->catalogEntries($listing['entries'], $catalogProducts);
         $featuredProduct = $context === StorefrontCatalogPage::CONTEXT_HOME
-            ? $this->featuredProduct($maintenance)
+            ? $this->featuredProduct()
             : null;
         $copy = config('storefront');
         $brand = $this->storefront->brand();
@@ -155,34 +121,20 @@ class StorefrontCatalogPageBuilder
     }
 
     /**
-     * @return Collection<int, Category>
+     * @return Collection<int, CatalogCategoryReadModel>
      */
     private function publicCategories(): Collection
     {
-        return Category::query()
-            ->select(['id', 'name', 'slug', 'description', 'sort_order'])
-            ->publicVisible()
-            ->storefrontOrder()
-            ->get();
+        return collect($this->catalog->publicCategoryOptions(withProductsOnly: false)->categories);
     }
 
-    private function publicCategory(?string $category): ?Category
+    private function publicCategory(?string $category): ?CatalogCategoryReadModel
     {
-        if ($category === null) {
-            return null;
-        }
-
-        $query = Category::query()
-            ->select(['id', 'name', 'slug'])
-            ->publicVisible();
-
-        return ctype_digit($category)
-            ? $query->whereKey((int) $category)->first()
-            : $query->where('slug', $category)->first();
+        return $category === null ? null : $this->catalog->findPublicCategory($category);
     }
 
     /**
-     * @return array{products: Collection<int, Product>, standaloneReadModels: Collection<int, CatalogProductReadModel>, entries: list<CatalogBrowseEntry>, total: int, page: int, lastPage: int}
+     * @return array{standaloneReadModels: Collection<int, CatalogProductReadModel>, entries: list<CatalogBrowseEntry>, total: int, page: int, lastPage: int}
      */
     private function publicProducts(StorefrontCatalogQuery $query, bool $paginate): array
     {
@@ -194,21 +146,9 @@ class StorefrontCatalogPageBuilder
             perPage: StorefrontCatalogQuery::PRODUCTS_PER_PAGE,
         ));
         $standaloneReadModels = collect($result->standaloneProducts)->keyBy('id');
-        $productIds = $standaloneReadModels->keys()->map(fn ($id): int => (int) $id)->all();
-        $productsById = $productIds === []
-            ? collect()
-            : $this->publicProductQuery(StorefrontCatalogQuery::fromSearch(null))
-                ->whereKey($productIds)
-                ->get()
-                ->keyBy('id');
-        $products = collect($productIds)
-            ->map(fn (int $productId): ?Product => $productsById->get($productId))
-            ->filter()
-            ->values();
         $pagination = $result->pagination;
 
         return [
-            'products' => $products,
             'standaloneReadModels' => $standaloneReadModels,
             'entries' => $result->entries,
             'total' => $paginate ? $pagination->total : count($result->entries),
@@ -218,49 +158,15 @@ class StorefrontCatalogPageBuilder
     }
 
     /**
-     * @return Builder<Product>
-     */
-    private function publicProductQuery(StorefrontCatalogQuery $query): Builder
-    {
-        return Product::query()
-            ->select(self::PUBLIC_PRODUCT_COLUMNS)
-            ->with([
-                'category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible(),
-                'family' => fn ($query) => $query->select(['id', 'name', 'slug']),
-            ])
-            ->publicVisible()
-            ->when($query->category !== null, function (Builder $productQuery) use ($query): void {
-                if ($query->category === 'uncategorized') {
-                    $productQuery->whereNull('category_id');
-
-                    return;
-                }
-                $productQuery->whereHas('category', fn (Builder $categoryQuery) => $categoryQuery
-                    ->publicVisible()
-                    ->where('slug', $query->category));
-            })
-            ->tap(fn (Builder $productQuery) => StorefrontCatalogSearch::apply($productQuery, $query->search));
-    }
-
-    /**
      * @param  Collection<int, CatalogProductReadModel>  $readModels
      * @return Collection<int, StorefrontCatalogProduct>
      */
-    private function catalogProducts(Collection $products, CheckoutMaintenanceState $maintenance, Collection $readModels): Collection
+    private function catalogProducts(Collection $readModels): Collection
     {
-        $presentations = $products->mapWithKeys(
-            function (Product $product) use ($readModels, $maintenance): array {
-                $readModel = $readModels->get($product->id);
-
-                return [
-                    (int) $product->id => $this->products->present(
-                        $product,
-                        stockAvailable: $readModel instanceof CatalogProductReadModel ? $readModel->availableStock : null,
-                        soldQuantity: $readModel instanceof CatalogProductReadModel ? $readModel->soldQuantity : null,
-                        maintenanceState: $maintenance,
-                    ),
-                ];
-            },
+        $presentations = $readModels->mapWithKeys(
+            fn (CatalogProductReadModel $readModel): array => [
+                $readModel->id => $this->catalogPresenter->present($readModel),
+            ],
         );
 
         /*
@@ -268,14 +174,14 @@ class StorefrontCatalogPageBuilder
          * products with more sales rank first; name and id make ties stable.
          */
         $popularIds = $presentations
-            ->filter(fn (StorefrontProductPresentation $presentation): bool => $presentation->isAvailable && $presentation->soldQuantity > 0)
-            ->sort(fn (StorefrontProductPresentation $left, StorefrontProductPresentation $right): int => $this->comparePopular($left, $right))
+            ->filter(fn (StorefrontCatalogProductPresentation $presentation): bool => $presentation->isAvailable && $presentation->soldQuantity > 0)
+            ->sort(fn (StorefrontCatalogProductPresentation $left, StorefrontCatalogProductPresentation $right): int => $this->comparePopular($left, $right))
             ->take(3)
             ->keys()
             ->all();
 
         return $presentations
-            ->map(fn (StorefrontProductPresentation $presentation): StorefrontCatalogProduct => new StorefrontCatalogProduct(
+            ->map(fn (StorefrontCatalogProductPresentation $presentation): StorefrontCatalogProduct => new StorefrontCatalogProduct(
                 presentation: $presentation,
                 isPopular: in_array($presentation->id, $popularIds, true),
             ))
@@ -326,7 +232,7 @@ class StorefrontCatalogPageBuilder
             ->values();
     }
 
-    private function comparePopular(StorefrontProductPresentation $left, StorefrontProductPresentation $right): int
+    private function comparePopular(StorefrontCatalogProductPresentation $left, StorefrontCatalogProductPresentation $right): int
     {
         return ($right->soldQuantity <=> $left->soldQuantity)
             ?: strcmp($left->name, $right->name)
@@ -334,14 +240,14 @@ class StorefrontCatalogPageBuilder
     }
 
     /**
-     * @param  Collection<int, Category>  $categories
+     * @param  Collection<int, CatalogCategoryReadModel>  $categories
      * @return Collection<int, StorefrontCatalogCategoryFilter>
      */
     private function categoryFilters(Collection $categories, StorefrontCatalogQuery $query, bool $isShop): Collection
     {
         return $categories
-            ->map(fn (Category $category): StorefrontCatalogCategoryFilter => new StorefrontCatalogCategoryFilter(
-                id: (int) $category->id,
+            ->map(fn (CatalogCategoryReadModel $category): StorefrontCatalogCategoryFilter => new StorefrontCatalogCategoryFilter(
+                id: $category->id,
                 name: $category->name,
                 slug: $category->slug,
                 url: $isShop
@@ -411,26 +317,12 @@ class StorefrontCatalogPageBuilder
         ]));
     }
 
-    private function featuredProduct(CheckoutMaintenanceState $maintenance): ?StorefrontCatalogProduct
+    private function featuredProduct(): ?StorefrontCatalogProduct
     {
-        $product = Product::query()
-            ->select(self::PUBLIC_PRODUCT_COLUMNS)
-            ->with(['category' => fn ($query) => $query->select(['id', 'name', 'slug'])->publicVisible()])
-            ->withAvailability()
-            ->withSum(['orderItems as sold_quantity' => fn ($query) => $query
-                ->whereHas('order', fn ($order) => $order
-                    ->where('order_status', OrderStatus::Completed)
-                    ->where('payment_status', PaymentStatus::Paid))], 'quantity')
-            ->publicVisible()
-            ->availableForPurchase()
-            ->whereNotNull('featured_rank')
-            ->orderBy('featured_rank')
-            ->orderBy('name')
-            ->orderBy('id')
-            ->first();
+        $readModel = $this->catalog->featuredPublic();
 
-        return $product
-            ? new StorefrontCatalogProduct($this->products->present($product, maintenanceState: $maintenance))
+        return $readModel instanceof CatalogProductReadModel
+            ? new StorefrontCatalogProduct($this->catalogPresenter->present($readModel))
             : null;
     }
 

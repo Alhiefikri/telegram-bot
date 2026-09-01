@@ -358,7 +358,7 @@ class StorefrontShopCheckoutTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_landing_catalog_renders_ready_modal_and_empty_stock_state(): void
+    public function test_landing_catalog_renders_lazy_modal_and_empty_stock_state(): void
     {
         $this->manualPaymentModeIsActive();
         $ready = $this->availableProduct([
@@ -378,13 +378,15 @@ class StorefrontShopCheckoutTest extends TestCase
         $response
             ->assertOk()
             ->assertSee('Pilih produk digital sesuai kebutuhan.')
-            ->assertSee('openProductModal(JSON.parse($el.dataset.product))', false)
-            ->assertSee('data-product=', false)
+            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
+            ->assertSee('data-modal-url="'.route('storefront.products.modal', $ready).'"', false)
+            ->assertDontSee('data-product=', false)
+            ->assertDontSee('JSON.parse($el.dataset.product)', false)
             ->assertSee('Claude Pro Ready')
             ->assertSee('Akun private siap dari dashboard')
             ->assertSee('Rp60.000')
             ->assertSee('Stok: 1')
-            ->assertSee('Bayar via QR Manual')
+            ->assertDontSee('Bayar via QR Manual')
             ->assertDontSee('Beli lewat Telegram')
             ->assertSee('STOK HABIS')
             ->assertSee('Restock segera')
@@ -400,10 +402,10 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertStringNotContainsString('data-product=', $emptyCard);
     }
 
-    public function test_landing_modal_uses_only_the_website_qris_checkout_action(): void
+    public function test_landing_modal_keeps_only_the_website_qris_checkout_action(): void
     {
         $this->manualPaymentModeIsActive();
-        $this->availableProduct([
+        $product = $this->availableProduct([
             'name' => 'CapCut Pro Web',
             'stock' => 3,
         ]);
@@ -413,9 +415,12 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertDontSee('checkoutManual()', false)
             ->assertDontSee('@click="checkoutManual()"', false)
             ->assertDontSee('Beli lewat Telegram')
+            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
+            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
+            ->assertDontSee('data-product=', false)
             ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
             ->assertSee('method="POST"', false)
-            ->assertSee('Bayar via QR Manual');
+            ->assertDontSee('Bayar via QR Manual');
     }
 
     public function test_landing_modal_renders_accessible_native_checkout_controls(): void
@@ -428,7 +433,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'binance_order_id_compatibility_ready_at' => now(),
         ]);
         config()->set('services.binance.pay_id', '987654321');
-        $this->availableProduct([
+        $product = $this->availableProduct([
             'name' => 'Accessible Checkout Product',
             'stock' => 3,
             'usdt_price_amount' => 2_000_000,
@@ -444,8 +449,10 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('@keydown="handleModalKeydown($event)"', false)
             ->assertSee('type="radio"', false)
             ->assertSee('name="payment_choice"', false)
-            ->assertSee('Scan QR manual pada invoice, bayar tepat sesuai total produk, lalu hubungi admin dengan bukti pembayaran dan nomor invoice ini.')
-            ->assertSee('type="hidden" name="payment_method"', false);
+            ->assertSee('type="hidden" name="payment_method"', false)
+            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
+            ->assertDontSee('data-product=', false)
+            ->assertDontSee('Bayar via QR Manual');
     }
 
     public function test_failed_checkout_reopens_modal_state_and_renders_inline_buyer_error(): void
@@ -630,7 +637,11 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
         $product = $this->availableProduct(['usdt_price_amount' => 2_000_000, 'stock' => 1]);
 
-        $this->get(route('storefront.home'))->assertOk()->assertSee('Binance Pay');
+        $this->get(route('storefront.home'))
+            ->assertOk()
+            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
+            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
+            ->assertDontSee('data-product=', false);
         $settings->update(['binance_pay_enabled' => false]);
 
         $this->post(route('storefront.shop.checkout'), [

@@ -49,6 +49,30 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('Shop Search Product');
     }
 
+    public function test_shop_catalog_uses_lazy_modal_urls_without_embedded_checkout_payload(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Lazy Shop Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+
+        $html = $this->get(route('storefront.shop.index'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString(
+            'href="'.route('storefront.products.show', ['product' => $product]).'?from=',
+            $html,
+        );
+        $this->assertStringContainsString(
+            'data-modal-url="'.route('storefront.products.modal', ['product' => $product]).'"',
+            $html,
+        );
+        $this->assertStringNotContainsString('data-product=', $html);
+        $this->assertStringNotContainsString('"checkout":', $html);
+    }
+
     public function test_shop_exposes_more_than_one_page_without_hiding_public_products(): void
     {
         foreach (range(1, 25) as $number) {
@@ -582,7 +606,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertDontSee('sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
     }
 
-    public function test_available_landing_products_open_existing_modal_with_dual_checkout_contract(): void
+    public function test_available_landing_products_use_lazy_modal_and_retain_checkout_markup(): void
     {
         $product = Product::factory()->create([
             'name' => 'CapCut Pro Web',
@@ -596,9 +620,10 @@ class StorefrontShopCatalogTest extends TestCase
 
         $response
             ->assertOk()
-            ->assertSee('JSON.parse($el.dataset.product)', false)
-            ->assertSee('openProductModal(JSON.parse($el.dataset.product))', false)
-            ->assertSee('data-product=', false)
+            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
+            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
+            ->assertDontSee('data-product=', false)
+            ->assertDontSee('JSON.parse($el.dataset.product)', false)
             ->assertSee('CapCut Pro Web')
             ->assertSee('Akun Private dari dashboard')
             ->assertSee('Rp60.000')
@@ -620,8 +645,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('placeholder="Nama pembeli"', false)
             ->assertSee('Checkout tidak perlu akun. Nama ini hanya dipakai untuk menandai invoice Anda.')
             ->assertSee('type="submit"', false)
-            ->assertSee('Bayar via QR Manual')
-            ->assertDontSee('@click="checkoutManual()"', false)
+            ->assertDontSee('Bayar via QR Manual')
             ->assertDontSee('Beli lewat Telegram')
             ->assertDontSee('Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.')
             ->assertSee('Stok kosong')
@@ -652,7 +676,7 @@ class StorefrontShopCatalogTest extends TestCase
         $response
             ->assertOk()
             ->assertSee('Claude Ready Web')
-            ->assertSee('openProductModal(JSON.parse($el.dataset.product))', false)
+            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
             ->assertSee('ChatGPT Habis Web');
 
         $this->assertStringContainsString('class="product-card', $unavailableCard);
@@ -680,7 +704,7 @@ class StorefrontShopCatalogTest extends TestCase
 
     public function test_landing_catalog_behavior_remains_unchanged(): void
     {
-        Product::factory()->create(['name' => 'Landing Catalog Product', 'stock' => 2, 'reserved_stock' => 0]);
+        $product = Product::factory()->create(['name' => 'Landing Catalog Product', 'stock' => 2, 'reserved_stock' => 0]);
 
         $this->get(route('storefront.home'))
             ->assertOk()
@@ -694,7 +718,9 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('id="faq-answer-0"', false)
             ->assertSee('role="region" aria-labelledby="faq-question-0"', false)
             ->assertSee('Landing Catalog Product')
-            ->assertSee('JSON.parse($el.dataset.product)', false)
+            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
+            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
+            ->assertDontSee('data-product=', false)
             ->assertSee('Produk digital siap pakai, checkout tanpa ribet.')
             ->assertSee('Belanja produk digital dalam tiga langkah.')
             ->assertDontSee('Katalog produk digital siap pakai')
