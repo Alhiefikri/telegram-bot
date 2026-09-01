@@ -94,7 +94,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                 return;
             }
 
-            $product = Product::publicVisible()->whereKey($productId)->first();
+            $product = Product::query()->withAvailability()->publicVisible()->whereKey($productId)->first();
             $availableStock = $product ? max(0, $product->availableStock()) : 0;
             $selectedQuantity = (int) $selection['quantity'];
             if ($action === 'current') {
@@ -263,6 +263,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                 $context->chatId,
                 $product->category_id ? (string) $product->category_id : 'uncategorized',
                 1,
+                $context->messageId,
             );
         });
     }

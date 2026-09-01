@@ -29,7 +29,9 @@ class TelegramCartIntents
         $cart = null;
 
         try {
-            $product = Product::publicVisible()
+            $product = Product::query()
+                ->withAvailability()
+                ->publicVisible()
                 ->whereKey($productId)
                 ->firstOrFail();
             if ($product->availableStock() < $quantity) {

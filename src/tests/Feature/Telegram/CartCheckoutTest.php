@@ -236,6 +236,37 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertCount(0, $buyerMessages);
     }
 
+    public function test_manual_paid_button_rejects_an_expired_order_without_editing_or_sending(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12347, 'locale' => 'en']);
+        $product = Product::factory()->create(['name' => 'Expired Proof Product', 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(20, 'expired-checkout', 'checkout', [], 12347))->assertOk();
+        $order = Order::query()->sole();
+        $order->update(['expires_at' => now()->subMinute()]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            21,
+            'expired-manual-paid',
+            'manual:paid:'.$order->id,
+            [],
+            12347,
+            'private',
+            123456,
+        ))->assertOk();
+
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/editMessageCaption')));
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12347'));
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'expired-manual-paid'
+            && str_contains((string) ($request['text'] ?? ''), 'no longer awaiting payment'));
+    }
+
     #[Group('postgres-release')]
     public function test_manual_checkout_enqueues_outbound_notifications_without_inline_photo_or_admin_send(): void
     {

@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Exceptions\TelegramApiException;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
@@ -47,7 +48,13 @@ class TelegramBotClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        return $this->timed('editMessageText', fn () => $this->requests->request()->post($this->requests->url('editMessageText'), $payload)->throw()->json());
+        try {
+            $response = $this->timed('editMessageText', fn () => $this->requests->request()->post($this->requests->url('editMessageText'), $payload)->throw()->json());
+        } catch (RequestException $exception) {
+            throw TelegramApiException::fromRequest('editMessageText', $exception);
+        }
+
+        return $this->successfulResponse('editMessageText', $response);
     }
 
     public function editMessageCaption(int|string $chatId, int $messageId, string $caption, array $replyMarkup = [], array $options = []): array
@@ -64,7 +71,67 @@ class TelegramBotClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        return $this->timed('editMessageCaption', fn () => $this->requests->request()->post($this->requests->url('editMessageCaption'), $payload)->throw()->json());
+        try {
+            $response = $this->timed('editMessageCaption', fn () => $this->requests->request()->post($this->requests->url('editMessageCaption'), $payload)->throw()->json());
+        } catch (RequestException $exception) {
+            throw TelegramApiException::fromRequest('editMessageCaption', $exception);
+        }
+
+        return $this->successfulResponse('editMessageCaption', $response);
+    }
+
+    public function editMessageTextOrSend(
+        int|string $chatId,
+        string $text,
+        array $replyMarkup = [],
+        ?int $messageId = null,
+        array $options = [],
+    ): void {
+        if ($messageId === null || $messageId < 1) {
+            $this->sendMessage($chatId, $text, $replyMarkup, $options);
+
+            return;
+        }
+
+        try {
+            $this->editMessageText($chatId, $messageId, $text, $replyMarkup, $options);
+        } catch (TelegramApiException $exception) {
+            if ($exception->isMessageNotModified()) {
+                return;
+            }
+            if (! $exception->isDefiniteEditFailure()) {
+                throw $exception;
+            }
+
+            $this->sendMessage($chatId, $text, $replyMarkup, $options);
+        }
+    }
+
+    public function editMessageCaptionOrSend(
+        int|string $chatId,
+        string $caption,
+        array $replyMarkup = [],
+        ?int $messageId = null,
+        array $options = [],
+    ): void {
+        if ($messageId === null || $messageId < 1) {
+            $this->sendMessage($chatId, $caption, $replyMarkup, $options);
+
+            return;
+        }
+
+        try {
+            $this->editMessageCaption($chatId, $messageId, $caption, $replyMarkup, $options);
+        } catch (TelegramApiException $exception) {
+            if ($exception->isMessageNotModified()) {
+                return;
+            }
+            if (! $exception->isDefiniteEditFailure()) {
+                throw $exception;
+            }
+
+            $this->sendMessage($chatId, $caption, $replyMarkup, $options);
+        }
     }
 
     public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): array
@@ -137,6 +204,18 @@ class TelegramBotClient
     public function deleteMessage(int|string $chatId, int|string $messageId): void
     {
         $this->timed('deleteMessage', fn () => $this->requests->request()->post($this->requests->url('deleteMessage'), ['chat_id' => $chatId, 'message_id' => $messageId])->throw());
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function successfulResponse(string $operation, mixed $response): array
+    {
+        if (! is_array($response) || ($response['ok'] ?? false) !== true) {
+            throw TelegramApiException::fromResponse($operation, $response);
+        }
+
+        return $response;
     }
 
     private function timed(string $operation, callable $callback): mixed

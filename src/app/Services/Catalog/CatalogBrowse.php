@@ -172,7 +172,11 @@ final class CatalogBrowse
             page: $query->page,
             perPage: $query->perPage,
         );
-        $products = $this->productQuery($public, $query->category)->get();
+        $productQuery = $this->productQuery($public, $query->category);
+        if ($familiesOnly) {
+            $productQuery->whereNotNull('product_family_id');
+        }
+        $products = $productQuery->get();
         $families = ProductFamily::query()
             ->select(self::FAMILY_COLUMNS)
             ->catalogOrder()
@@ -181,11 +185,12 @@ final class CatalogBrowse
         $productModels = $products
             ->map(fn (Product $product): CatalogProductReadModel => $this->productReadModel($product))
             ->values();
+        $productsByFamily = $productModels
+            ->filter(fn (CatalogProductReadModel $product): bool => $product->familyId !== null)
+            ->groupBy(fn (CatalogProductReadModel $product): int => $product->familyId);
         $familyModels = $families
-            ->map(function (ProductFamily $family) use ($productModels, $query, $public): ?CatalogFamilyReadModel {
-                $members = $productModels
-                    ->filter(fn (CatalogProductReadModel $product): bool => $product->familyId === (int) $family->getKey())
-                    ->values();
+            ->map(function (ProductFamily $family) use ($productsByFamily, $query, $public): ?CatalogFamilyReadModel {
+                $members = ($productsByFamily->get((int) $family->getKey()) ?? collect())->values();
 
                 if ($members->isEmpty()) {
                     if ($public || ($query->search !== '' && ! $this->matchesFamily($family, $query->search))) {

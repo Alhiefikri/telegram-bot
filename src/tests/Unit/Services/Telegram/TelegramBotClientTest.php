@@ -2,6 +2,8 @@
 
 namespace Tests\Unit\Services\Telegram;
 
+use App\Exceptions\TelegramApiException;
+use App\Exceptions\TelegramTransportException;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackAckState;
@@ -75,6 +77,76 @@ class TelegramBotClientTest extends TestCase
         $this->assertSame('Edited message', $requests['editMessageText']['text']);
         $this->assertTrue($requests['sendPhoto']->isMultipart(), 'sendPhoto should use the multipart attach request path.');
         $this->assertTrue($requests['sendPhoto']->hasFile('photo', 'binary-photo', 'receipt.png'));
+    }
+
+    public function test_not_modified_edit_is_idempotent_without_a_duplicate_send(): void
+    {
+        Http::fake([
+            'https://api.telegram.org/*/editMessageText' => Http::response([
+                'ok' => false,
+                'description' => 'Bad Request: message is not modified',
+            ], 400),
+        ]);
+
+        app(TelegramBotClient::class)->editMessageTextOrSend(
+            12345,
+            'Already rendered',
+            ['inline_keyboard' => []],
+            777,
+        );
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/editMessageText'));
+    }
+
+    public function test_definite_edit_failure_falls_back_to_one_new_message(): void
+    {
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/editMessageText')) {
+                return Http::response([
+                    'ok' => false,
+                    'description' => 'Bad Request: message to edit not found',
+                ], 400);
+            }
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 778]], 200);
+        });
+
+        app(TelegramBotClient::class)->editMessageTextOrSend(12345, 'Fallback text', [], 777);
+
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && $request['text'] === 'Fallback text');
+    }
+
+    public function test_edit_transport_ambiguity_never_falls_back_to_send(): void
+    {
+        Http::fake([
+            'https://api.telegram.org/*/editMessageText' => Http::failedConnection('timed out'),
+        ]);
+
+        try {
+            app(TelegramBotClient::class)->editMessageTextOrSend(12345, 'Ambiguous text', [], 777);
+            $this->fail('Expected the edit transport failure to remain ambiguous.');
+        } catch (TelegramTransportException $exception) {
+            $this->assertStringContainsString('editMessageText', $exception->getMessage());
+        }
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/editMessageText'));
+    }
+
+    public function test_unsuccessful_json_edit_response_is_rejected(): void
+    {
+        Http::fake([
+            'https://api.telegram.org/*/editMessageText' => Http::response([
+                'ok' => false,
+                'description' => 'Unexpected Telegram failure',
+            ]),
+        ]);
+
+        $this->expectException(TelegramApiException::class);
+        app(TelegramBotClient::class)->editMessageText(12345, 777, 'Invalid response');
     }
 
     public function test_fake_telegram_client_matches_send_photo_contract(): void

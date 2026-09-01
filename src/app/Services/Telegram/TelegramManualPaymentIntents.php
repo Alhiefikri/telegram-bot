@@ -362,6 +362,9 @@ class TelegramManualPaymentIntents
             ->whereKey($orderId)
             ->where('order_status', OrderStatus::PendingPayment)
             ->where('payment_status', PaymentStatus::Pending)
+            ->where(fn ($query) => $query
+                ->whereNull('expires_at')
+                ->orWhere('expires_at', '>', now()))
             ->whereHas('payments', fn ($query) => $query
                 ->where('provider', 'manual')
                 ->where('method', 'QR_MANUAL')

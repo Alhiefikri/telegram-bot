@@ -210,7 +210,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         $selection = $this->session->get($context->customer);
-        $product = Product::publicVisible()->whereKey($productId)->first();
+        $product = Product::query()->withAvailability()->publicVisible()->whereKey($productId)->first();
         if ($selection === null
             || $selection['mode'] !== 'browsing'
             || (int) $selection['productId'] !== $productId
@@ -311,7 +311,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         $token = (string) ($state['interactionToken'] ?? '');
         $this->session->withLock($context->customer, function () use ($context, $rail, $checkoutKey, $productId, $token): void {
             $selection = $this->session->get($context->customer);
-            $product = Product::publicVisible()->whereKey($productId)->first();
+            $product = Product::query()->withAvailability()->publicVisible()->whereKey($productId)->first();
             if ($selection === null
                 || $selection['mode'] !== 'browsing'
                 || (int) $selection['productId'] !== $productId
@@ -366,7 +366,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         $selection = $this->session->get($context->customer);
-        $product = Product::publicVisible()->whereKey((int) ($state['productId'] ?? 0))->first();
+        $product = Product::query()->withAvailability()->publicVisible()->whereKey((int) ($state['productId'] ?? 0))->first();
         if ($selection !== null && $product !== null) {
             $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $selection);
 
@@ -446,7 +446,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 return;
             }
 
-            $product = Product::publicVisible()->whereKey($productId)->first();
+            $product = Product::query()->withAvailability()->publicVisible()->whereKey($productId)->first();
             $availableStock = $product ? max(0, $product->availableStock()) : 0;
             if (! $product || $availableStock < (int) $selection['quantity']) {
                 $this->session->forget($context->customer);
@@ -669,7 +669,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
     private function showManualPaymentProofInstructions(TelegramCallbackContext $context, string $orderId): void
     {
         $order = $this->manualPayments->pendingManualQrisOrderForCustomer($context->customer, $orderId);
-        if ($order === null || ($order->expires_at !== null && ! $order->expires_at->isFuture())) {
+        if ($order === null) {
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,
                 $this->locale->translate($context->customer, 'payment.manual.proof_unavailable'),
@@ -687,13 +687,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             ]]],
         ];
 
-        if ($context->messageId !== null && $context->messageId > 0) {
-            $this->bot->editMessageCaption($context->chatId, $context->messageId, $caption, $replyMarkup);
-
-            return;
-        }
-
-        $this->bot->sendMessage($context->chatId, $caption, $replyMarkup);
+        $this->bot->editMessageCaptionOrSend($context->chatId, $caption, $replyMarkup, $context->messageId);
     }
 
     private function sendSelectionStale(TelegramCallbackContext $context): void

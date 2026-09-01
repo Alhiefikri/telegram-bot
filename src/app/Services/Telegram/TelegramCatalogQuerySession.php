@@ -14,7 +14,7 @@ final class TelegramCatalogQuerySession
         return 'telegram:catalog-query:'.$customer->telegram_id;
     }
 
-    public function putSearch(Customer $customer, string $search, int $page = 1): ?string
+    public function putSearch(Customer $customer, string $search, int $page = 1, array $familyIds = []): ?string
     {
         $search = trim($search);
         if ($search === '' || $page < 1) {
@@ -27,10 +27,10 @@ final class TelegramCatalogQuerySession
             'type' => 'search',
             'search' => $search,
             'page' => $page,
-        ]);
+        ], $familyIds);
     }
 
-    public function putCategory(Customer $customer, string $category, int $page): ?string
+    public function putCategory(Customer $customer, string $category, int $page, array $familyIds = []): ?string
     {
         if ($category === '' || $page < 1) {
             $this->forget($customer);
@@ -42,10 +42,10 @@ final class TelegramCatalogQuerySession
             'type' => 'category',
             'category' => $category,
             'page' => $page,
-        ]);
+        ], $familyIds);
     }
 
-    public function putCatalog(Customer $customer, int $page): ?string
+    public function putCatalog(Customer $customer, int $page, array $familyIds = []): ?string
     {
         if ($page < 1) {
             $this->forget($customer);
@@ -56,7 +56,7 @@ final class TelegramCatalogQuerySession
         return $this->put($customer, [
             'type' => 'catalog',
             'page' => $page,
-        ]);
+        ], $familyIds);
     }
 
     /**
@@ -82,10 +82,15 @@ final class TelegramCatalogQuerySession
     }
 
     /** @param array{type:'search'|'category'|'catalog',search?:string,category?:string,page?:int} $state */
-    private function put(Customer $customer, array $state): string
+    private function put(Customer $customer, array $state, array $familyIds = []): string
     {
         $token = bin2hex(random_bytes(8));
-        Cache::put($this->key($customer), [...$state, 'token' => $token], now()->addMinutes(self::TTL_MINUTES));
+        $payload = [...$state, 'token' => $token];
+        $familyIds = $this->sanitizeFamilyIds($familyIds);
+        if ($familyIds !== []) {
+            $payload['familyIds'] = $familyIds;
+        }
+        Cache::put($this->key($customer), $payload, now()->addMinutes(self::TTL_MINUTES));
 
         return $token;
     }
@@ -161,17 +166,23 @@ final class TelegramCatalogQuerySession
             || preg_match('/\A[a-f0-9]{16}\z/D', $state['token']) !== 1) {
             return null;
         }
+        $familyIds = array_key_exists('familyIds', $state)
+            ? $this->normalizeFamilyIds($state['familyIds'])
+            : null;
+        if (array_key_exists('familyIds', $state) && $familyIds === null) {
+            return null;
+        }
 
         if (($state['type'] ?? null) === 'search'
             && is_string($state['search'] ?? null)
             && $state['search'] !== ''
             && (! isset($state['page']) || (is_int($state['page']) && $state['page'] > 0))) {
-            return [
+            return $this->withFamilyIds([
                 'type' => 'search',
                 'search' => $state['search'],
                 'page' => is_int($state['page'] ?? null) && $state['page'] > 0 ? $state['page'] : 1,
                 'token' => $state['token'],
-            ];
+            ], $familyIds);
         }
 
         if (($state['type'] ?? null) === 'category'
@@ -179,21 +190,21 @@ final class TelegramCatalogQuerySession
             && $state['category'] !== ''
             && is_int($state['page'] ?? null)
             && $state['page'] > 0) {
-            return [
+            return $this->withFamilyIds([
                 'type' => 'category',
                 'category' => $state['category'],
                 'page' => $state['page'],
                 'token' => $state['token'],
-            ];
+            ], $familyIds);
         }
         if (($state['type'] ?? null) === 'catalog'
             && is_int($state['page'] ?? null)
             && $state['page'] > 0) {
-            return [
+            return $this->withFamilyIds([
                 'type' => 'catalog',
                 'page' => $state['page'],
                 'token' => $state['token'],
-            ];
+            ], $familyIds);
         }
 
         if (($state['type'] ?? null) === 'family'
@@ -225,42 +236,82 @@ final class TelegramCatalogQuerySession
         if ($token === null || preg_match('/\A[a-f0-9]{16}\z/D', $token) !== 1 || ! is_array($origin)) {
             return null;
         }
+        $familyIds = array_key_exists('familyIds', $origin)
+            ? $this->normalizeFamilyIds($origin['familyIds'])
+            : null;
+        if (array_key_exists('familyIds', $origin) && $familyIds === null) {
+            return null;
+        }
 
         $type = $origin['type'] ?? null;
         if ($type === 'search'
             && is_string($origin['search'] ?? null)
             && $origin['search'] !== ''
             && (! isset($origin['page']) || (is_int($origin['page']) && $origin['page'] > 0))) {
-            return [
+            return $this->withFamilyIds([
                 'type' => 'search',
                 'search' => $origin['search'],
                 'page' => is_int($origin['page'] ?? null) && $origin['page'] > 0 ? $origin['page'] : 1,
                 'token' => $token,
-            ];
+            ], $familyIds);
         }
         if ($type === 'category'
             && is_string($origin['category'] ?? null)
             && $origin['category'] !== ''
             && is_int($origin['page'] ?? null)
             && $origin['page'] > 0) {
-            return [
+            return $this->withFamilyIds([
                 'type' => 'category',
                 'category' => $origin['category'],
                 'page' => $origin['page'],
                 'token' => $token,
-            ];
+            ], $familyIds);
         }
 
         if ($type === 'catalog'
             && is_int($origin['page'] ?? null)
             && $origin['page'] > 0) {
-            return [
+            return $this->withFamilyIds([
                 'type' => 'catalog',
                 'page' => $origin['page'],
                 'token' => $token,
-            ];
+            ], $familyIds);
         }
 
         return null;
+    }
+
+    /** @param array<string, mixed> $state */
+    private function withFamilyIds(array $state, ?array $familyIds): array
+    {
+        if ($familyIds !== null) {
+            $state['familyIds'] = $familyIds;
+        }
+
+        return $state;
+    }
+
+    /** @return list<int>|null */
+    private function normalizeFamilyIds(mixed $familyIds): ?array
+    {
+        if (! is_array($familyIds)) {
+            return null;
+        }
+
+        $normalized = [];
+        foreach ($familyIds as $familyId) {
+            if (! is_int($familyId) || $familyId < 1) {
+                return null;
+            }
+            $normalized[$familyId] = $familyId;
+        }
+
+        return array_values($normalized);
+    }
+
+    /** @param list<int> $familyIds */
+    private function sanitizeFamilyIds(array $familyIds): array
+    {
+        return $this->normalizeFamilyIds($familyIds) ?? [];
     }
 }

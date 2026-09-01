@@ -30,7 +30,7 @@ Alur customer berjalan dari Telegram:
 1. Customer mengirim `/start`.
 2. Bot membuat atau menggunakan ulang data customer Telegram, lalu mengirim satu banner dengan metrik toko terlokalisasi dan persistent main menu. Tautan `/start product_ID` langsung membuka detail produk.
 3. Customer juga bisa membuka katalog dengan `/katalog`, atau mencari produk langsung dengan `/cari keyword`.
-4. `/produk`, `/product`, dan tombol Lihat Produk menampilkan hanya Product Family sebagai satu entri per brand; setiap baris hanya memuat nomor, icon, nama family, dan total stok, maksimal 10 family per halaman. Tombol family memakai icon Product dan maksimal dua per baris.
+4. `/produk`, `/product`, dan tombol Lihat Produk menampilkan entri Product Family dan Product mandiri; setiap baris hanya memuat nomor, icon, nama, dan total stok, maksimal 4 entri per halaman. Tombol family memakai icon Product dan maksimal dua per baris.
 5. Customer menekan satu family untuk melihat quote setiap Product/SKU di pesan katalog yang sama. Tombol opsi memakai ikon yang sama dan disusun maksimal dua per baris; setiap quote dirender sebagai blok kutipan Telegram.
 6. Customer memilih satu Product option. Callback mengedit pesan yang sama menjadi Product Detail ketika callback membawa `message_id`; Product ID asli tetap diteruskan ke quantity, Cart, checkout, Order, inventory, waitlist, dan delivery tanpa membuat entitas variant baru.
 7. Product Detail memisahkan informasi produk, harga/stok/deskripsi, quantity/subtotal, kontrol quantity, payment rail, dan navigasi kembali.
@@ -45,7 +45,7 @@ Diagram sederhana:
 ```text
 /start, /katalog, /produk, atau tombol Lihat Produk
         ↓
-Daftar Product Family (maksimal 10 per halaman)
+Daftar Product Family dan Product mandiri (maksimal 4 entri per halaman)
         ↓
 Pilih family untuk melihat opsi Product/SKU
         ↓
@@ -72,7 +72,7 @@ Catatan:
 - `/riwayat` menampilkan hingga 5 Order terakhir customer Telegram tersebut dengan tombol detail; `/order NOMOR_INVOICE` menampilkan detail Order milik customer yang sama.
 - Ikon katalog family/option disimpan sebagai data Product melalui field opsional `Ikon katalog` di modal Tambah/Edit produk. Kosongkan field untuk memakai icon brand default.
 - Nilai icon katalog dapat diubah langsung dari Admin Dashboard tanpa mengubah `.env`, rebuild image, atau clear config.
-- Store Bot memakai Telegram `editMessageText` dengan `callback_query.message.message_id` untuk family, quote, detail, dan navigasi balik satu pesan. `sendMessage` hanya menjadi fallback aman untuk command/deep-link yang memang tidak memiliki pesan asal.
+- Store Bot memakai `editMessageText` dengan `callback_query.message.message_id` untuk family, category, quote, detail, dan navigasi balik satu pesan. `sendMessage` hanya dipakai bila tidak ada pesan asal atau Telegram menolak edit secara definitif; timeout/connection failure tidak memicu blind resend.
 
 ## 3. Payment Flow
 
@@ -112,10 +112,11 @@ Pada jalur manual:
 
 1. Customer checkout dari Telegram.
 2. Sistem membuat order dan payment provider `manual`, status `pending`.
-3. Bot mengirim QR manual LHIE STORE beserta invoice, total, batas pembayaran, detail item, dan instruksi kirim bukti foto dengan caption `/payment`.
-4. Admin memvalidasi pembayaran di luar sistem, misalnya dari bukti transfer customer.
-5. Admin menjalankan operasi “complete manual order” dari dashboard/admin operation.
-6. Sistem menandai payment sebagai `paid`, mengurangi stok dari reservasi menjadi penjualan, mengubah order menjadi `completed`, lalu mengirim receipt lewat queue.
+3. Bot mengirim foto QR manual LHIE STORE beserta invoice, total, batas pembayaran, dan instruksi singkat, dengan tombol `Sudah Bayar` dan `Batalkan`.
+4. Setelah pembayaran dilakukan, customer menekan `Sudah Bayar`. Bot memvalidasi ulang Order milik customer dan mengedit caption QR yang sama menjadi instruksi pengiriman bukti foto melalui `/payment`.
+5. Admin memvalidasi pembayaran di luar sistem, misalnya dari bukti transfer customer.
+6. Admin menjalankan operasi “complete manual order” dari dashboard/admin operation.
+7. Sistem menandai payment sebagai `paid`, mengurangi stok dari reservasi menjadi penjualan, mengubah order menjadi `completed`, lalu mengirim receipt lewat queue.
 
 Manual payment dianggap pending sejak checkout sampai admin menyelesaikan order atau order kedaluwarsa/dibatalkan oleh proses lain.
 

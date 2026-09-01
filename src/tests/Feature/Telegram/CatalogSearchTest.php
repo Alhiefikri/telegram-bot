@@ -12,6 +12,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
+use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Support\Carbon;
@@ -296,6 +297,67 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains((string) $request['text'], 'Filter kategori opsional')
             && str_contains(json_encode($request->data()), 'category:'.$category->id)
             && str_contains(json_encode($request->data()), 'category:uncategorized'));
+    }
+
+    public function test_inline_catalog_navigation_edits_one_message_through_product_back(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12346, 'locale' => 'en']);
+        $category = Category::factory()->create(['name' => 'Inline Category']);
+        Category::factory()->create(['name' => 'Second Inline Category']);
+        $product = Product::factory()->create([
+            'name' => 'Inline Product',
+            'category_id' => $category->id,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $messageId = 88000;
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            123460,
+            'inline-categories',
+            'catalog:categories',
+            [],
+            12346,
+            'private',
+            $messageId,
+        ))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            123461,
+            'inline-category',
+            'category:'.$category->id,
+            [],
+            12346,
+            'private',
+            $messageId,
+        ))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            123462,
+            'inline-product',
+            'product:'.$product->id,
+            [],
+            12346,
+            'private',
+            $messageId,
+        ))->assertOk();
+        $selection = app(TelegramIntentSession::class)->get($customer);
+        $this->assertIsArray($selection);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            123463,
+            'inline-product-back',
+            'detail:back:'.$product->id.':'.$selection['interactionToken'],
+            [],
+            12346,
+            'private',
+            $messageId,
+        ))->assertOk();
+
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
+        $edits = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/editMessageText'));
+        $this->assertCount(4, $edits);
+        foreach ($edits as $record) {
+            $this->assertSame($messageId, (int) $record[0]['message_id']);
+        }
     }
 
     public function test_category_product_buttons_are_compact_and_isolate_navigation_for_supported_catalog_sizes(): void
@@ -954,7 +1016,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
             99000 + $count,
         ))->assertOk();
 
-        $message = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+        $message = Http::recorded(fn ($request): bool => (str_ends_with($request->url(), '/sendMessage')
+                || str_ends_with($request->url(), '/editMessageText'))
             && str_contains((string) ($request['text'] ?? ''), 'Grid Category '.$count))->last();
         $this->assertNotNull($message);
         $payload = $message[0]->data();

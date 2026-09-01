@@ -146,6 +146,7 @@ POST /api/webhook/telegram
 ```
 
 `TelegramWebhookIngress` memeriksa secret header, `update_id`, dan bentuk update yang didukung. Payload diperkecil sebelum disimpan. Duplicate update tidak membuat pekerjaan bisnis kedua; update yang belum diproses diklaim oleh processor job.
+`TelegramUpdateProcessor` serializes message and callback routing per Telegram chat with a distributed cache lock. The critical section includes selection/query-session transitions and inline message edits, so parallel workers cannot apply out-of-order UI state for one chat; transport ambiguity is never converted into a blind send fallback.
 
 `TelegramMessageRouter` menangani command/text/menu. `TelegramCallbackRouter` menjalankan urutan guard:
 
@@ -157,14 +158,14 @@ POST /api/webhook/telegram
 
 Handler callback didaftarkan terpusat di [`AppServiceProvider`](../../src/app/Providers/AppServiceProvider.php). Tambah handler baru ke pipeline dan tentukan stage-nya; jangan membuat router kedua.
 
-`TelegramCatalogIntents` consumes `CatalogBrowse::browsePublicFamilies()` for the
-Product Family discovery list, while optional category filtering and search
-retain their existing Product projection. The family list shows up to ten
-families per page; family option callbacks use the signed compact
+`TelegramCatalogIntents` consumes `CatalogBrowse::browsePublic()` for the
+Product Family and standalone Product discovery list, while optional category
+filtering and search retain their existing Product projection. The list shows
+up to four entries per page; family option callbacks use the signed compact
 `TelegramFamilyCallbackToken` and resolve the existing Product ID only after
 the current public family projection and page are revalidated. Product Detail,
 quantity, payment, Cart, Order, and outbound-effect ownership remains unchanged.
-For inline family navigation, the callback `message_id` is threaded through the catalog presenter so `editMessageText` replaces the original catalog message. Product quote cards use Telegram HTML `<blockquote>` formatting; command/deep-link entry points without an originating message retain the send fallback.
+For inline family navigation, the callback `message_id` is threaded through the catalog presenter so `editMessageText` replaces the original catalog message. Product quote cards use Telegram HTML `<blockquote>` formatting; command/deep-link entry points without an originating message use the send path, while deterministic edit rejection may use a safe new-message fallback and transport ambiguity never triggers one.
 
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
 
