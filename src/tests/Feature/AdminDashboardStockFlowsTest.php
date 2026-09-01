@@ -64,14 +64,16 @@ class AdminDashboardStockFlowsTest extends TestCase
             dispatchNotifications: false,
         );
 
-        $payload = app(AdminDashboardProductsData::class)->forProducts(true)['products'][0]['edit_payload'];
+        $productPayload = app(AdminDashboardProductsData::class)->forProducts(true)['products'][0];
+        $payload = $productPayload['edit_payload'];
+        $stockPayload = $productPayload['stock_payload'];
         $item = $payload['stockItems'][0];
 
         $this->assertSame(CredentialFormat::StructuredAccount->value, $item['credential_format']);
         $this->assertSame('structured@example.test', $item['credential_payload']['email']);
         $this->assertSame('fake-auth-token-for-admin-test', $item['credential_payload']['access_value']);
         $this->assertSame('Use the product tutorial.', $payload['deliveryNote']);
-        $this->assertSame(route('admin.products.stock.accounts.store', $product), $payload['stockAccountsUrl']);
+        $this->assertSame(route('admin.products.stock.accounts.store', $product), $stockPayload['stockAccountsUrl']);
         $this->assertTrue($item['editable']);
 
         $response = $this->actingAs($admin)->get('/admin?tab=produk');
