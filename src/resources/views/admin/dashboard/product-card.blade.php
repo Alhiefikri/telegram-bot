@@ -19,10 +19,10 @@
                                     >
                                 </div>
                             @endif
-                            {{-- Product name + status badge --}}
+                            {{-- Variant label + status badge --}}
                             <div class="flex min-w-0 items-start justify-between gap-3">
                                 <div class="min-w-0">
-                                    <p class="truncate font-display text-base font-bold text-neo-ink">{{ $product['name'] }}</p>
+                                    <p class="truncate font-display text-base font-bold text-neo-ink">{{ trim((string) ($product['family_option_label'] ?? '')) ?: $product['name'] }}</p>
                                     <x-admin-dashboard.badge
                                         :tone="$product['is_active'] ? 'emerald' : 'slate'"
                                         class="mt-1"
@@ -77,7 +77,7 @@
                                         @method('PATCH')
                                         <label class="sr-only" for="product-family-select-{{ $product['id'] }}">Product Family</label>
                                         <select id="product-family-select-{{ $product['id'] }}" data-family-assignment-select name="product_family_id" class="block min-h-10 w-full rounded-lg border-2 border-neo-ink bg-white px-2 py-1.5 text-xs font-bold text-neo-ink">
-                                            <option value="">Standalone</option>
+                                            <option value="">Tanpa family</option>
                                             @foreach ($familyOptions as $familyOption)
                                                 <option value="{{ $familyOption['id'] }}" @selected((int) ($product['family_id'] ?? 0) === (int) $familyOption['id'])>{{ $familyOption['name'] }}</option>
                                             @endforeach

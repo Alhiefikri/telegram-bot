@@ -25,44 +25,49 @@ class TelegramPaymentInstructionRenderer
      */
     public function manual(Order $order, array $paymentOption, string $supportUsername, string $locale = 'id'): TelegramPaymentInstruction
     {
-        $order->loadMissing('orderItems');
         $formattedTotal = 'Rp '.number_format($order->total_amount, 0, ',', '.');
-
         $lines = [
             $this->text($locale, 'payment.checkout_created'),
-            '━━━━━━━━━━━━━━',
             $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
             $this->text($locale, 'payment.total', ['amount' => $formattedTotal]),
             $this->text($locale, 'payment.pay_via', ['method' => $paymentOption['label']]),
             '',
-            $this->text($locale, 'payment.manual.scan_qr'),
-            '',
-            $this->text($locale, 'payment.manual.before_pay'),
-            $this->text($locale, 'payment.manual.qr_name', ['name' => $paymentOption['name']]),
-            $this->text($locale, 'payment.manual.exact_amount', ['amount' => $formattedTotal]),
+            $this->text($locale, 'payment.manual.scan_qr_short'),
         ];
-
         if ($order->expires_at) {
-            $lines[] = '';
-            $lines[] = $this->text($locale, 'payment.deadline');
-            $lines[] = $this->formatDate($order->expires_at, $locale);
-            $lines[] = $this->text($locale, 'payment.manual.deadline_guidance');
+            $lines[] = $this->text($locale, 'payment.manual.deadline_short', [
+                'date' => $this->formatDate($order->expires_at, $locale),
+            ]);
         }
-
-        $lines[] = '';
-        $lines[] = $this->text($locale, 'payment.order', ['items' => $this->orderItemsSummary($order)]);
-        $lines[] = '';
-        $lines[] = $this->text($locale, 'payment.manual.proof_prompt');
-        $lines[] = '';
-        $lines[] = '/payment';
-        $lines[] = '';
-        $lines[] = $this->text($locale, 'payment.manual.help', ['username' => $supportUsername]);
 
         return new TelegramPaymentInstruction(
             photoContents: $this->manualQrPhotoContents($order),
             filename: 'qr-lhie.jpg',
             captionLines: $lines,
+            replyMarkup: [
+                'inline_keyboard' => [
+                    [['text' => $this->text($locale, 'payment.action.paid'), 'callback_data' => 'manual:paid:'.$order->id]],
+                    [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+                ],
+            ],
         );
+    }
+
+    public function manualProof(Order $order, string $supportUsername, string $locale = 'id'): string
+    {
+        $formattedTotal = 'Rp '.number_format($order->total_amount, 0, ',', '.');
+
+        return implode("\n", [
+            $this->text($locale, 'payment.manual.proof_title'),
+            '━━━━━━━━━━━━━━',
+            $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            $this->text($locale, 'payment.total', ['amount' => $formattedTotal]),
+            '',
+            $this->text($locale, 'payment.manual.proof_prompt'),
+            '/payment',
+            '',
+            $this->text($locale, 'payment.manual.help', ['username' => $supportUsername]),
+        ]);
     }
 
     public function binancePay(Order $order, Payment $payment, string $payId, ?string $locale, bool $autoVerify = false, string $receiverLabel = 'BINANCE PAY ID'): string

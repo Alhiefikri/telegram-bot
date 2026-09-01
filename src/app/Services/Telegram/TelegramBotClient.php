@@ -50,6 +50,23 @@ class TelegramBotClient
         return $this->timed('editMessageText', fn () => $this->requests->request()->post($this->requests->url('editMessageText'), $payload)->throw()->json());
     }
 
+    public function editMessageCaption(int|string $chatId, int $messageId, string $caption, array $replyMarkup = [], array $options = []): array
+    {
+        $payload = array_merge([
+            'chat_id' => $chatId,
+            'message_id' => $messageId,
+            'caption' => $caption,
+        ], $options);
+        if (isset($payload['caption_entities']) && is_array($payload['caption_entities'])) {
+            $payload['caption_entities'] = json_encode($payload['caption_entities'], JSON_THROW_ON_ERROR);
+        }
+        if ($replyMarkup !== []) {
+            $payload['reply_markup'] = $replyMarkup;
+        }
+
+        return $this->timed('editMessageCaption', fn () => $this->requests->request()->post($this->requests->url('editMessageCaption'), $payload)->throw()->json());
+    }
+
     public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): array
     {
         $request = $this->requests->request()->attach('photo', $photoContents, $filename);

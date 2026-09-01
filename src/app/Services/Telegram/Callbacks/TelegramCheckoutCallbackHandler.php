@@ -32,6 +32,7 @@ use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramManualPaymentIntents;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
@@ -48,6 +49,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         private TelegramCartIntents $cart,
         private TelegramCatalogIntents $catalog,
         private TelegramCheckoutIntents $checkoutIntents,
+        private TelegramManualPaymentIntents $manualPayments,
         private TelegramCheckoutPaymentIntentSelector $paymentIntentSelector,
         private TelegramIntentSession $session,
         private TelegramBinanceRailSelectionSession $railSession,
@@ -74,11 +76,17 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             || $context->data === 'checkout:binance'
             || preg_match('/^checkout:binance:(?:rail:)?(binance_pay_id|usdt_bep20):[a-f0-9]{16}$/', $context->data) === 1
             || preg_match('/^checkout:binance:cancel:[a-f0-9]{16}$/', $context->data) === 1
+            || preg_match('/^manual:paid:([0-9a-fA-F-]+)$/', $context->data) === 1
             || preg_match('/^detail:pay:(qris|binance):([1-9][0-9]*):[A-Za-z0-9_-]+$/', $context->data) === 1;
     }
 
     public function handle(TelegramCallbackContext $context): bool
     {
+        if (preg_match('/^manual:paid:([0-9a-fA-F-]+)$/', $context->data, $matches) === 1) {
+            $this->showManualPaymentProofInstructions($context, $matches[1]);
+
+            return true;
+        }
         if ($context->data === 'checkout') {
             $checkoutKey = $this->checkoutIntentKey($context->customer, $context->chatId, $context->messageId, $this->checkoutIntentPayload($context->data));
             $this->withCheckoutIntentLock($context, $checkoutKey, fn () => $this->choosePaymentMethod($context, $checkoutKey));
@@ -656,6 +664,36 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             CheckoutPostCreationBehavior::ManualQrisInstructions,
             CheckoutPostCreationBehavior::KlikQrisInstructions => null,
         };
+    }
+
+    private function showManualPaymentProofInstructions(TelegramCallbackContext $context, string $orderId): void
+    {
+        $order = $this->manualPayments->pendingManualQrisOrderForCustomer($context->customer, $orderId);
+        if ($order === null || ($order->expires_at !== null && ! $order->expires_at->isFuture())) {
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $this->locale->translate($context->customer, 'payment.manual.proof_unavailable'),
+            );
+
+            return;
+        }
+
+        $this->bot->answerCallbackQuery($context->callbackQueryId);
+        $caption = $this->checkoutIntents->manualPaymentProofInstructions($order);
+        $replyMarkup = [
+            'inline_keyboard' => [[[
+                'text' => $this->locale->translate($context->customer, 'payment.action.cancel'),
+                'callback_data' => 'buyer:cancel-pending:'.$order->id,
+            ]]],
+        ];
+
+        if ($context->messageId !== null && $context->messageId > 0) {
+            $this->bot->editMessageCaption($context->chatId, $context->messageId, $caption, $replyMarkup);
+
+            return;
+        }
+
+        $this->bot->sendMessage($context->chatId, $caption, $replyMarkup);
     }
 
     private function sendSelectionStale(TelegramCallbackContext $context): void

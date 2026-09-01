@@ -242,6 +242,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                     returnPage: $familyListPage,
                     expectedProductId: $productId,
                     originToken: is_string($selection['familyOriginToken'] ?? null) ? $selection['familyOriginToken'] : null,
+                    messageId: $context->messageId,
                 );
                 $this->bot->answerCallbackQuery(
                     $context->callbackQueryId,
@@ -261,6 +262,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                 $context->customer,
                 $context->chatId,
                 $product->category_id ? (string) $product->category_id : 'uncategorized',
+                1,
             );
         });
     }

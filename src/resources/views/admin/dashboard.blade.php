@@ -25,7 +25,6 @@
             $productPlaceholder = $productsTab['placeholder'] ?? [];
             $products = $productsTab['products'];
             $productGroups = $productsTab['productGroups'] ?? [];
-            $standaloneProducts = $productsTab['standaloneProducts'] ?? $products;
             $familyOptions = $productsTab['familyOptions'] ?? [];
             $familyManagement = $productsTab['familyManagement'] ?? ['createUrl' => '', 'families' => []];
             $productsPagination = $productsTab['pagination'];

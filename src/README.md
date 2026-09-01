@@ -30,22 +30,24 @@ Alur customer berjalan dari Telegram:
 1. Customer mengirim `/start`.
 2. Bot membuat atau menggunakan ulang data customer Telegram, lalu mengirim satu banner dengan metrik toko terlokalisasi dan persistent main menu. Tautan `/start product_ID` langsung membuka detail produk.
 3. Customer juga bisa membuka katalog dengan `/katalog`, atau mencari produk langsung dengan `/cari keyword`.
-4. Customer memilih kategori dari tombol inline. Product List menampilkan ringkasan bernomor, harga, status ketersediaan, konteks halaman, dan tombol angka ringkas (maksimal tiga per baris); navigasi halaman dan kembali ke kategori memakai baris terpisah.
-5. Customer memilih produk. Product Detail memisahkan informasi produk, harga/stok/deskripsi, quantity/subtotal, kontrol quantity, payment rail, dan navigasi kembali.
-6. Quantity dimulai dari `1`, dapat dinaikkan/diturunkan dengan `−`/`+`, atau diisi sekali melalui `Enter custom quantity`. Input custom yang tidak valid tetap di mode input; Cancel kembali ke quantity sebelumnya yang masih valid terhadap live stock.
-7. Customer menekan QRIS, atau Binance bila rail tersebut aktif dan produk memiliki harga USDT. Tidak ada halaman payment-choice atau generic checkout tambahan dalam direct purchase flow.
-8. Callback payment memvalidasi ulang visibility product, live stock, harga, harga USDT, rail, dan Checkout Maintenance sebelum memakai CartService dan OrderCheckoutService. Cart dibuat sebagai detail internal checkout; bot tidak menampilkan halaman cart terpisah.
-9. Saat checkout, sistem membuat Order dan Payment dengan status awal pending, lalu mengirim instruksi payment melalui queue Telegram outbound.
-10. Customer dapat membatalkan Cart aktif dengan `/batal`, mengecek status order terakhir dengan `/status` atau `/pesanan`, melihat riwayat dengan `/riwayat`, dan membuka detail invoice dengan `/order NOMOR_INVOICE`.
+4. `/produk`, `/product`, dan tombol Lihat Produk menampilkan hanya Product Family sebagai satu entri per brand; setiap baris hanya memuat nomor, icon, nama family, dan total stok, maksimal 10 family per halaman. Tombol family memakai icon Product dan maksimal dua per baris.
+5. Customer menekan satu family untuk melihat quote setiap Product/SKU di pesan katalog yang sama. Tombol opsi memakai ikon yang sama dan disusun maksimal dua per baris; setiap quote dirender sebagai blok kutipan Telegram.
+6. Customer memilih satu Product option. Callback mengedit pesan yang sama menjadi Product Detail ketika callback membawa `message_id`; Product ID asli tetap diteruskan ke quantity, Cart, checkout, Order, inventory, waitlist, dan delivery tanpa membuat entitas variant baru.
+7. Product Detail memisahkan informasi produk, harga/stok/deskripsi, quantity/subtotal, kontrol quantity, payment rail, dan navigasi kembali.
+8. Quantity dimulai dari `1`, dapat dinaikkan/diturunkan dengan `−`/`+`, atau diisi sekali melalui `Enter custom quantity`. Input custom yang tidak valid tetap di mode input; Cancel kembali ke quantity sebelumnya yang masih valid terhadap live stock.
+9. Customer menekan QRIS, atau Binance bila rail tersebut aktif dan produk memiliki harga USDT. Tidak ada halaman payment-choice atau generic checkout tambahan dalam direct purchase flow.
+10. Saat checkout, sistem membuat Order dan Payment dengan status awal pending, lalu mengirim instruksi payment melalui queue Telegram outbound.
+11. Customer dapat membatalkan Cart aktif dengan `/batal`, mengecek status order terakhir dengan `/status` atau `/pesanan`, melihat riwayat dengan `/riwayat`, dan membuka detail invoice dengan `/order NOMOR_INVOICE`.
+12. Untuk melihat contoh family seperti Canva, ChatGPT, Gemini, Netflix, dan Surfshark di database lokal, jalankan `php artisan catalog:seed-demo`.
 
 Diagram sederhana:
 
 ```text
-/start, /katalog, atau /cari keyword
+/start, /katalog, /produk, atau tombol Lihat Produk
         ↓
-Pilih kategori / halaman Product List
+Daftar Product Family (maksimal 10 per halaman)
         ↓
-Pilih produk
+Pilih family untuk melihat opsi Product/SKU
         ↓
 Product Detail (quantity 1)
         ↓
@@ -68,6 +70,9 @@ Catatan:
 - `/cari keyword` mencari product aktif. Hasilnya memakai tombol angka yang sama untuk membuka Product Detail.
 - `/status` dan `/pesanan` menampilkan Order terakhir customer dengan kombinasi status Order dan status Payment.
 - `/riwayat` menampilkan hingga 5 Order terakhir customer Telegram tersebut dengan tombol detail; `/order NOMOR_INVOICE` menampilkan detail Order milik customer yang sama.
+- Ikon katalog family/option disimpan sebagai data Product melalui field opsional `Ikon katalog` di modal Tambah/Edit produk. Kosongkan field untuk memakai icon brand default.
+- Nilai icon katalog dapat diubah langsung dari Admin Dashboard tanpa mengubah `.env`, rebuild image, atau clear config.
+- Store Bot memakai Telegram `editMessageText` dengan `callback_query.message.message_id` untuk family, quote, detail, dan navigasi balik satu pesan. `sendMessage` hanya menjadi fallback aman untuk command/deep-link yang memang tidak memiliki pesan asal.
 
 ## 3. Payment Flow
 

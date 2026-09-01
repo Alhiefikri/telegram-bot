@@ -177,10 +177,12 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains($r->body(), '12345')
             && str_contains($r->body(), '✅ Checkout berhasil dibuat')
             && str_contains($r->body(), 'Bayar via: QR Manual')
-            && str_contains($r->body(), 'Nama QR: LHIE STORE')
-            && str_contains($r->body(), 'Nominal wajib sama persis')
-            && str_contains($r->body(), '/payment')
-            && str_contains($r->body(), 'GPT Plus')
+            && str_contains($r->body(), 'Scan QR di atas dan bayar sesuai nominal')
+            && str_contains($r->body(), 'manual:paid:'.$order->id)
+            && str_contains($r->body(), 'buyer:cancel-pending:'.$order->id)
+            && ! str_contains($r->body(), 'Nominal wajib sama persis')
+            && ! str_contains($r->body(), '/payment')
+            && ! str_contains($r->body(), 'GPT Plus')
             && ! str_contains($r->body(), 'Halo admin'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (string) $r['chat_id'] === '999'
@@ -193,6 +195,45 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
         $this->assertNull($order->fresh()->manual_checkout_admin_notified_at);
         $this->assertNotNull($order->fresh()->admin_pending_order_notified_at);
+    }
+
+    public function test_manual_paid_button_edits_qr_caption_to_proof_instructions_without_new_buyer_message(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 12346, 'username' => 'buyer', 'locale' => 'en']);
+        $product = Product::factory()->create(['name' => 'Manual Proof Product', 'stock' => 5]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(18, 'checkout-manual-proof', 'checkout', [], 12346))->assertOk();
+
+        $order = Order::query()->sole();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            19,
+            'manual-paid',
+            'manual:paid:'.$order->id,
+            [],
+            12346,
+            'private',
+            123456,
+        ))->assertOk();
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
+        $this->assertNull($order->payments()->sole()->fresh()->payment_proof_submitted_at);
+        $editMessages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/editMessageCaption')
+            && (string) ($request['chat_id'] ?? '') === '12346');
+        $this->assertCount(1, $editMessages);
+        $edited = $editMessages->last()[0]->data();
+        $this->assertSame(123456, $edited['message_id']);
+        $this->assertStringContainsString('Send payment proof', (string) $edited['caption']);
+        $this->assertStringContainsString('/payment', (string) $edited['caption']);
+        $this->assertStringNotContainsString('Scan the QR above', (string) $edited['caption']);
+        $this->assertSame('buyer:cancel-pending:'.$order->id, $edited['reply_markup']['inline_keyboard'][0][0]['callback_data']);
+        $buyerMessages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12346');
+        $this->assertCount(0, $buyerMessages);
     }
 
     #[Group('postgres-release')]
@@ -388,7 +429,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
             && str_contains($r->body(), '12345')
             && str_contains($r->body(), 'Bayar via: QR Manual')
-            && str_contains($r->body(), 'Premium Account'));
+            && str_contains($r->body(), 'Scan QR di atas dan bayar sesuai nominal'));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && (string) $r['chat_id'] === '999'
             && str_contains($r['text'], 'Checkout belum bayar'));

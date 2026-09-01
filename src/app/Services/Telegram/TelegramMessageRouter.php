@@ -121,7 +121,7 @@ class TelegramMessageRouter
 
             return;
         }
-        if (in_array($text, ['/produk', '/products', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Browse Products'], true)) {
+        if (in_array($text, ['/produk', '/product', '/products', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Browse Products'], true)) {
             $this->catalogQueries->forget($customer);
             $this->session->forgetWithLock($customer);
             $this->catalog->sendCategoryCatalog($customer, $chatId);

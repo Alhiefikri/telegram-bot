@@ -55,6 +55,17 @@ class TelegramCheckoutIntents
         ]);
     }
 
+    public function manualPaymentProofInstructions(Order $order): string
+    {
+        $order->loadMissing('customer');
+
+        return $this->paymentInstructions->manualProof(
+            $order,
+            ltrim((string) (config('services.telegram.admin_username') ?: 'Alhie02'), '@'),
+            $this->locale->code($order->customer),
+        );
+    }
+
     public function sendPakasirPaymentInstructions(string $chatId, Order $order, Payment $payment): array
     {
         $order->loadMissing('customer');

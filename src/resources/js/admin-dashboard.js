@@ -20,21 +20,11 @@ const emptyProductForm = () => ({
   productFormMethod: "",
   productId: null,
   productName: "",
+  productIcon: "",
   productPrice: "",
   productUsdtPrice: "",
   productCategoryId: "",
   productDescription: "",
-  productType: "",
-  productAccessDuration: "",
-  productRegion: "",
-  productAccountType: "",
-  productDeviceLimit: "",
-  productIncludedItems: "",
-  productLimitations: "",
-  productFulfillmentExpectation: "",
-  productWarrantyPolicy: "",
-  productSupportPolicy: "",
-  productFeaturedRank: "",
   productDeliveryNote: "",
   productUsageGuideTitle: "",
   productUsageGuideUrl: "",
@@ -1034,26 +1024,36 @@ export default function adminDashboard(initialState = {}) {
       this.$nextTick(() => this.$refs.productName?.focus());
     },
     focusProductFamilyAssignment(familyId) {
-      const section = document.getElementById("admin-standalone-products");
-      if (!section) {
-        return;
-      }
-
-      section.scrollIntoView({ block: "start" });
       const familyValue = String(familyId);
       const select = Array.from(
-        section.querySelectorAll("[data-family-assignment-select]")
-      ).find((candidate) =>
-        Array.from(candidate.options).some(
-          (option) => option.value === familyValue
-        )
+        document.querySelectorAll("[data-family-assignment-select]")
+      ).find(
+        (candidate) =>
+          candidate.value === "" &&
+          Array.from(candidate.options).some(
+            (option) => option.value === familyValue
+          )
       );
       if (!select) {
         return;
       }
 
-      select.value = familyValue;
-      select.focus({ preventScroll: true });
+      const group = select.closest('[id^="admin-product-family-group-"]');
+      const toggle = group?.querySelector(
+        'button[aria-controls^="admin-product-family-members-"]'
+      );
+      const focusSelect = () => {
+        group?.scrollIntoView({ block: "start" });
+        select.value = familyValue;
+        select.focus({ preventScroll: true });
+      };
+      if (toggle?.getAttribute("aria-expanded") !== "true") {
+        toggle?.click();
+        this.$nextTick(focusSelect);
+
+        return;
+      }
+      focusSelect();
     },
 
     openCategoryManagement() {
@@ -1178,21 +1178,11 @@ export default function adminDashboard(initialState = {}) {
         productFormMethod: "PATCH",
         productId: product.id,
         productName: product.name,
+        productIcon: product.icon ?? "",
         productPrice: product.priceAmount,
         productUsdtPrice: product.usdtPriceAmount ?? "",
         productCategoryId: product.categoryId ?? "",
         productDescription: product.description,
-        productType: product.productType ?? "",
-        productAccessDuration: product.accessDuration ?? "",
-        productRegion: product.region ?? "",
-        productAccountType: product.accountType ?? "",
-        productDeviceLimit: product.deviceLimit ?? "",
-        productIncludedItems: product.includedItems ?? "",
-        productLimitations: product.limitations ?? "",
-        productFulfillmentExpectation: product.fulfillmentExpectation ?? "",
-        productWarrantyPolicy: product.warrantyPolicy ?? "",
-        productSupportPolicy: product.supportPolicy ?? "",
-        productFeaturedRank: product.featuredRank ?? "",
         productDeliveryNote: product.deliveryNote ?? "",
         productUsageGuideTitle: product.usageGuideTitle ?? "",
         productUsageGuideUrl: product.usageGuideUrl ?? "",

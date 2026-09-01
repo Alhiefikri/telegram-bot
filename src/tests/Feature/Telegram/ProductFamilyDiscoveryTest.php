@@ -19,7 +19,7 @@ use Tests\Support\TelegramBotTestSupport;
 
 class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 {
-    public function test_product_menu_lists_family_and_standalone_entries_then_opens_ordered_options(): void
+    public function test_product_menu_lists_only_family_entries_then_opens_ordered_options(): void
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 41001, 'locale' => 'id']);
@@ -42,34 +42,35 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'stock' => 3,
             'reserved_stock' => 0,
         ]);
-        $standalone = Product::factory()->create(['name' => 'Spotify Standalone', 'stock' => 2, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Spotify Standalone', 'stock' => 2, 'reserved_stock' => 0]);
 
-        $this->postTelegramWebhook($this->messageUpdate(41001, '/produk', [], 41001))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(41001, '/product', [], 41001))->assertOk();
         $catalog = $this->lastMessageContaining('Netflix');
         $this->assertStringContainsString('Netflix', (string) $catalog['text']);
-        $this->assertStringContainsString('2 opsi', (string) $catalog['text']);
-        $this->assertStringContainsString('1 tersedia', (string) $catalog['text']);
-        $this->assertStringContainsString('Spotify Standalone', (string) $catalog['text']);
-        $this->assertStringNotContainsString('Netflix Family', (string) $catalog['text']);
+        $this->assertStringContainsString('01. ', (string) $catalog['text']);
+        $this->assertStringContainsString('Netflix (3)', (string) $catalog['text']);
+        $this->assertStringNotContainsString('Spotify Standalone', (string) $catalog['text']);
+        $this->assertStringNotContainsString('produk mandiri', strtolower((string) $catalog['text']));
         $familyCallback = $catalog['reply_markup']['inline_keyboard'][0][0]['callback_data'];
         $this->assertStringStartsWith('family:options:v', $familyCallback);
-        $this->assertSame('product:'.$standalone->id, $catalog['reply_markup']['inline_keyboard'][1][0]['callback_data']);
-        $this->assertCount(4, $catalog['reply_markup']['inline_keyboard']);
+        $this->assertCount(3, $catalog['reply_markup']['inline_keyboard']);
 
         $this->postTelegramWebhook($this->callbackUpdate(41002, 'family-open', 'family:options:'.$family->id.':1,', [], 41001))->assertOk();
         $this->assertSame(0, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage') && str_contains((string) ($request['text'] ?? ''), 'Family 5 Profile'))->count());
         $this->postTelegramWebhook($this->callbackUpdate(41003, 'family-open-valid', $familyCallback, [], 41001))->assertOk();
         $options = $this->lastMessageContaining('Family 5 Profile');
-        $this->assertStringContainsString('[1] Family 5 Profile', (string) $options['text']);
+        $this->assertStringContainsString('01. ', (string) $options['text']);
+        $this->assertStringContainsString('Family 5 Profile', (string) $options['text']);
         $this->assertStringContainsString('Harga: Rp28.000', (string) $options['text']);
         $this->assertStringContainsString('Stok: Habis', (string) $options['text']);
-        $this->assertStringContainsString('[2] Individual 1 Profile', (string) $options['text']);
+        $this->assertStringContainsString('02. ', (string) $options['text']);
+        $this->assertStringContainsString('Individual 1 Profile', (string) $options['text']);
         $this->assertStringContainsString('Stok tersedia: 3', (string) $options['text']);
         $this->assertStringContainsString('Terjual: 0', (string) $options['text']);
         $this->assertStringStartsWith('family:select:v', $options['reply_markup']['inline_keyboard'][0][0]['callback_data']);
-        $this->assertStringStartsWith('family:select:v', $options['reply_markup']['inline_keyboard'][1][0]['callback_data']);
-        $this->assertStringStartsWith('family:list:1:o', $options['reply_markup']['inline_keyboard'][2][0]['callback_data']);
-        $selectCallback = $options['reply_markup']['inline_keyboard'][1][0]['callback_data'];
+        $this->assertStringStartsWith('family:select:v', $options['reply_markup']['inline_keyboard'][0][1]['callback_data']);
+        $this->assertStringStartsWith('family:list:1:o', $options['reply_markup']['inline_keyboard'][1][0]['callback_data']);
+        $selectCallback = $options['reply_markup']['inline_keyboard'][0][1]['callback_data'];
         $this->postTelegramWebhook($this->callbackUpdate(41004, 'family-select-token', $selectCallback, [], 41001))->assertOk();
         $this->assertStringContainsString('Netflix Individual', (string) $this->lastMessageContaining('Netflix Individual')['text']);
         $selection = app(TelegramIntentSession::class)->get($customer);
@@ -84,6 +85,41 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(41006, 'family-catalog-back', $catalogBackCallback['callback_data'], [], 41001))->assertOk();
         $catalogAfterBack = $this->lastMessageContaining('Netflix');
         $this->assertStringNotContainsString('Netflix Individual', (string) $catalogAfterBack['text']);
+    }
+
+    public function test_product_menu_paginates_ten_product_families_per_page(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41007, 'locale' => 'en']);
+
+        foreach (range(1, 11) as $number) {
+            $family = ProductFamily::factory()->create([
+                'name' => 'Paged Family '.$number,
+                'slug' => 'paged-family-'.$number,
+                'sort_order' => $number,
+            ]);
+            Product::factory()->create([
+                'name' => 'Paged Product '.$number,
+                'product_family_id' => $family->id,
+                'family_sort_order' => 1,
+                'stock' => 1,
+                'reserved_stock' => 0,
+            ]);
+        }
+
+        $this->postTelegramWebhook($this->messageUpdate(41007, '/produk', [], 41007))->assertOk();
+        $firstPage = $this->lastMessageContaining('Paged Family 10');
+        $this->assertStringContainsString('Page 1 of 2', (string) $firstPage['text']);
+        $this->assertStringNotContainsString('Paged Family 11', (string) $firstPage['text']);
+        $keyboard = $firstPage['reply_markup']['inline_keyboard'];
+        $familyButtons = collect(array_slice($keyboard, 0, 5))->flatten(1);
+        $this->assertCount(10, $familyButtons);
+        $this->assertSame('family:list:2', $keyboard[5][0]['callback_data']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41008, 'paged-family-next', 'family:list:2', [], 41007))->assertOk();
+        $secondPage = $this->lastMessageContaining('Paged Family 11');
+        $this->assertStringContainsString('Page 2 of 2', (string) $secondPage['text']);
+        $this->assertStringNotContainsString('Paged Family 1 (1)', (string) $secondPage['text']);
     }
 
     public function test_signed_family_option_callback_is_rejected_without_current_catalog_state(): void
@@ -376,21 +412,23 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->openFamilyFromDeepLink($customer, 41038, $family);
         $first = $this->lastMessageContaining('Choose an option for Paged Family');
         $firstKeyboard = $first['reply_markup']['inline_keyboard'];
-        $this->assertCount(6, $firstKeyboard);
-        $this->assertCount(4, array_slice($firstKeyboard, 0, 4));
-        $this->assertStringStartsWith('family:options:v', $firstKeyboard[4][0]['callback_data']);
-        $this->assertSame('family:list:1', $firstKeyboard[5][0]['callback_data']);
-        $this->assertStringContainsString('[1] Package 1', (string) $first['text']);
-        $this->assertStringContainsString('[4] Package 4', (string) $first['text']);
-        $this->assertStringNotContainsString('[5] Package 5', (string) $first['text']);
+        $this->assertCount(4, $firstKeyboard);
+        $this->assertCount(2, $firstKeyboard[0]);
+        $this->assertCount(2, $firstKeyboard[1]);
+        $this->assertStringStartsWith('family:options:v', $firstKeyboard[2][0]['callback_data']);
+        $this->assertSame('family:list:1', $firstKeyboard[3][0]['callback_data']);
+        $this->assertStringContainsString('01. 🛍️ Package 1', (string) $first['text']);
+        $this->assertStringContainsString('04. 🛍️ Package 4', (string) $first['text']);
+        $this->assertStringNotContainsString('05. 🛍️ Package 5', (string) $first['text']);
 
-        $this->postTelegramWebhook($this->callbackUpdate(41041, 'options-page-two', $firstKeyboard[4][0]['callback_data'], [], 41005))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41041, 'options-page-two', $firstKeyboard[2][0]['callback_data'], [], 41005))->assertOk();
         $second = $this->lastMessageContaining('Package 5');
         $secondKeyboard = $second['reply_markup']['inline_keyboard'];
         $this->assertCount(3, $secondKeyboard);
+        $this->assertStringStartsWith('family:select:v', $secondKeyboard[0][0]['callback_data']);
         $this->assertStringStartsWith('family:options:v', $secondKeyboard[1][0]['callback_data']);
         $this->assertSame('family:list:1', $secondKeyboard[2][0]['callback_data']);
-        $this->assertStringContainsString('[1] Package 5', (string) $second['text']);
+        $this->assertStringContainsString('01. 🛍️ Package 5', (string) $second['text']);
     }
 
     public function test_first_time_product_and_family_start_targets_survive_language_selection(): void
@@ -569,6 +607,169 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertSame('Checkout Family', $orderItem->family_name, 'order family snapshot');
         $this->assertSame(1, Product::query()->whereKey($selected->id)->firstOrFail()->fresh()->reserved_stock, 'reserved stock');
         $this->assertSame('QR_MANUAL', Payment::query()->sole()->method, 'payment method');
+    }
+
+    public function test_catalog_uses_stored_product_icons_and_compact_family_rows(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41100, 'locale' => 'id']);
+
+        foreach ([
+            ['name' => 'Canva', 'slug' => 'canva', 'sort_order' => 1],
+            ['name' => 'CapCut', 'slug' => 'capcut', 'sort_order' => 2],
+            ['name' => 'ChatGPT', 'slug' => 'chatgpt', 'sort_order' => 3],
+            ['name' => 'Gemini AI', 'slug' => 'gemini-ai', 'sort_order' => 4],
+        ] as $familyData) {
+            $family = ProductFamily::factory()->create($familyData);
+            Product::factory()->create([
+                'name' => $familyData['name'].' 1 Bulan',
+                'icon' => $familyData['name'] === 'Canva' ? '🖌️' : null,
+                'product_family_id' => $family->id,
+                'family_sort_order' => 1,
+                'family_option_label' => '1 Bulan',
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+        }
+
+        $this->postTelegramWebhook($this->messageUpdate(41101, '/produk', [], 41100))->assertOk();
+
+        $catalog = $this->lastMessageContaining('Canva');
+        $keyboard = $catalog['reply_markup']['inline_keyboard'];
+        $this->assertStringContainsString('01. 🖌️ Canva (2)', (string) $catalog['text']);
+        $this->assertCount(2, $keyboard[0]);
+        $this->assertSame('🖌️ (1)', $keyboard[0][0]['text']);
+        $this->assertSame('🎬 (2)', $keyboard[0][1]['text']);
+        $this->assertSame('🤖 (3)', $keyboard[1][0]['text']);
+        $this->assertSame('✨ (4)', $keyboard[1][1]['text']);
+    }
+
+    public function test_family_options_show_per_product_quotes_and_two_column_icon_buttons(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41110, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Netflix', 'slug' => 'netflix']);
+        foreach ([
+            ['name' => 'Netflix Premium (No VPN)', 'label' => 'Premium (No VPN)', 'price' => 25000],
+            ['name' => 'Netflix Premium (VPN)', 'label' => 'Premium (VPN)', 'price' => 15000],
+            ['name' => 'Netflix Extra', 'label' => 'Extra', 'price' => 10000],
+        ] as $sortOrder => $productData) {
+            Product::factory()->create([
+                'name' => $productData['name'],
+                'icon' => $sortOrder === 0 ? '🟥' : null,
+                'product_family_id' => $family->id,
+                'family_sort_order' => $sortOrder + 1,
+                'family_option_label' => $productData['label'],
+                'price_amount' => $productData['price'],
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+        }
+
+        $this->openFamilyFromDeepLink($customer, 41111, $family);
+
+        $options = $this->lastMessageContaining('Pilih opsi Netflix');
+        $this->assertStringContainsString('🟥 Pilih opsi Netflix', (string) $options['text']);
+        $this->assertStringContainsString('Terjual: 0', (string) $options['text']);
+        $this->assertStringContainsString('01. 🟥 Premium (No VPN)', (string) $options['text']);
+        $this->assertStringContainsString('Harga: Rp25.000', (string) $options['text']);
+        $keyboard = $options['reply_markup']['inline_keyboard'];
+        $this->assertCount(2, $keyboard[0]);
+        $this->assertSame('🟥 1', $keyboard[0][0]['text']);
+        $this->assertSame('📺 2', $keyboard[0][1]['text']);
+        $this->assertCount(1, $keyboard[1]);
+        $this->assertSame('📺 3', $keyboard[1][0]['text']);
+        $this->assertStringStartsWith('family:list:1', $keyboard[2][0]['callback_data']);
+    }
+
+    public function test_demo_catalog_seed_is_repeatable_and_matches_the_family_examples(): void
+    {
+        $this->artisan('catalog:seed-demo')
+            ->expectsOutputToContain('Demo catalog ready: 7 families, 9 products (7 families and 9 products created).')
+            ->assertSuccessful();
+
+        $this->assertSame(7, ProductFamily::query()->count());
+        $this->assertSame(9, Product::query()->count());
+        $this->assertDatabaseHas('products', [
+            'name' => 'Netflix Premium (No VPN)',
+            'family_option_label' => 'Premium (No VPN)',
+            'price_amount' => 25000,
+            'stock' => 5,
+        ]);
+        $this->assertDatabaseHas('products', [
+            'name' => 'Netflix Premium (VPN)',
+            'family_option_label' => 'Premium (VPN)',
+            'price_amount' => 15000,
+            'stock' => 5,
+        ]);
+
+        $this->artisan('catalog:seed-demo')
+            ->expectsOutputToContain('Demo catalog ready: 7 families, 9 products (0 families and 0 products created).')
+            ->assertSuccessful();
+
+        $this->assertSame(7, ProductFamily::query()->count());
+        $this->assertSame(9, Product::query()->count());
+    }
+
+    public function test_family_navigation_edits_the_original_message_for_options_and_variant_detail(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41120, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Single Message Family', 'slug' => 'single-message-family']);
+        $product = Product::factory()->create([
+            'name' => 'Single Message Option',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'family_option_label' => 'Premium 30 Hari',
+            'price_amount' => 25000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(41121, '/produk', [], 41120))->assertOk();
+        $catalog = $this->lastMessageContaining('Single Message Family');
+        $familyCallback = $catalog['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            41122,
+            'single-family-open',
+            $familyCallback,
+            [],
+            41120,
+            'private',
+            123457,
+        ))->assertOk();
+
+        $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $editMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText'));
+        $this->assertCount(1, $sendMessages);
+        $this->assertCount(1, $editMessages);
+        $options = $editMessages->last()[0]->data();
+        $this->assertStringContainsString('Premium 30 Hari', (string) $options['text']);
+        $this->assertSame(123457, $options['message_id']);
+        $this->assertSame('HTML', $options['parse_mode']);
+        $this->assertStringContainsString('<blockquote>', (string) $options['text']);
+        $this->assertStringContainsString('</blockquote>', (string) $options['text']);
+        $selectCallback = $options['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            41123,
+            'single-variant-select',
+            $selectCallback,
+            [],
+            41120,
+            'private',
+            123457,
+        ))->assertOk();
+
+        $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $editMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText'));
+        $this->assertCount(1, $sendMessages);
+        $this->assertCount(2, $editMessages);
+        $detail = $editMessages->last()[0]->data();
+        $this->assertStringContainsString('Single Message Option', (string) $detail['text']);
+        $this->assertSame(123457, $detail['message_id']);
+        $this->assertStringContainsString('detail:pay:qris:'.$product->id.':', json_encode($detail, JSON_THROW_ON_ERROR));
     }
 
     public function test_signed_family_callbacks_round_trip_and_stay_within_telegram_limit(): void

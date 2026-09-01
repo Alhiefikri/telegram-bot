@@ -38,6 +38,7 @@ class AdminProductCreateController extends Controller
                 $product = new Product([
                     'category_id' => $categoryId,
                     'name' => $validated['name'],
+                    'icon' => $validated['icon'] ?? null,
                     'description' => $validated['description'],
                     ...$request->merchandisingAttributes(),
                     'delivery_note' => $validated['delivery_note'] ?? null,
@@ -57,7 +58,7 @@ class AdminProductCreateController extends Controller
                     'product.created',
                     $product,
                     null,
-                    $product->only(['category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']),
+                    $product->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']),
                     $user,
                     $request->ip(),
                 );

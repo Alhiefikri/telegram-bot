@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram\Callbacks;
 
+use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
@@ -9,7 +10,10 @@ use App\Services\Telegram\TelegramManualPaymentIntents;
 
 class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
 {
-    public function __construct(private TelegramManualPaymentIntents $manualPayments) {}
+    public function __construct(
+        private TelegramManualPaymentIntents $manualPayments,
+        private TelegramBotClient $bot,
+    ) {}
 
     public function stage(): TelegramCallbackStage
     {
@@ -33,7 +37,14 @@ class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
         }
 
         if ($matches[1] === 'approve-payment') {
-            $this->manualPayments->approveManualPaymentFromTelegram($context->customer, $context->chatId, $context->callbackQueryId, $matches[2]);
+            $approved = $this->manualPayments->approveManualPaymentFromTelegram($context->customer, $context->chatId, $context->callbackQueryId, $matches[2]);
+            if ($approved && $context->messageId !== null && $context->messageId > 0) {
+                try {
+                    $this->bot->deleteMessage($context->chatId, $context->messageId);
+                } catch (\Throwable $exception) {
+                    report($exception);
+                }
+            }
         } else {
             $this->manualPayments->rejectManualPaymentFromTelegram($context->customer, $context->chatId, $context->callbackQueryId, $matches[2]);
         }

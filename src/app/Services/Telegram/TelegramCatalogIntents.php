@@ -6,6 +6,7 @@ use App\Catalog\CatalogBrowseEntry;
 use App\Catalog\CatalogBrowseQuery;
 use App\Catalog\CatalogBrowseResult;
 use App\Catalog\CatalogCategoryReadModel;
+use App\Catalog\CatalogFamilyReadModel;
 use App\Catalog\CatalogProductReadModel;
 use App\Models\Customer;
 use App\Models\Product;
@@ -17,6 +18,8 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 class TelegramCatalogIntents
 {
     private const PRODUCTS_PER_PAGE = 4;
+
+    private const FAMILY_LIST_PER_PAGE = 10;
 
     public function __construct(
         private TelegramBotClient $bot,
@@ -30,29 +33,29 @@ class TelegramCatalogIntents
         private TelegramFamilyCallbackToken $familyTokens,
     ) {}
 
-    public function sendCategoryCatalog(Customer $customer, string $chatId): void
+    public function sendCategoryCatalog(Customer $customer, string $chatId, ?int $messageId = null): void
     {
-        $this->sendCatalogPage($customer, $chatId);
+        $this->sendCatalogPage($customer, $chatId, messageId: $messageId);
     }
 
-    public function sendCatalogPage(Customer $customer, string $chatId, int $page = 1, ?string $search = null, ?string $category = null): void
+    public function sendCatalogPage(Customer $customer, string $chatId, int $page = 1, ?string $search = null, ?string $category = null, ?int $messageId = null): void
     {
         $requestedPage = max(1, $page);
-        $result = $this->browse->browsePublic(CatalogBrowseQuery::fromValues(
+        $result = $this->browse->browsePublicFamilies(CatalogBrowseQuery::fromValues(
             search: $search,
             category: $category,
             page: $requestedPage,
-            perPage: self::PRODUCTS_PER_PAGE,
+            perPage: self::FAMILY_LIST_PER_PAGE,
         ));
 
         if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
-            $this->sendStaleCatalog($customer, $chatId);
+            $this->sendStaleCatalog($customer, $chatId, $messageId);
 
             return;
         }
 
         $originToken = $this->catalogQueries->putCatalog($customer, $result->pagination->currentPage);
-        $this->sendBrowseResult($customer, $chatId, $result, 'catalog.header', 'catalog', null, $search, null, null, $originToken);
+        $this->sendBrowseResult($customer, $chatId, $result, 'catalog.header', 'catalog', null, $search, null, null, $originToken, $messageId);
     }
 
     public function sendCategoryPicker(Customer $customer, string $chatId): void
@@ -82,17 +85,17 @@ class TelegramCatalogIntents
         $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => $keyboard]);
     }
 
-    public function sendFamilyOptions(Customer $customer, string $chatId, int $familyId, int $page = 1, int $returnPage = 1, ?string $originToken = null): void
+    public function sendFamilyOptions(Customer $customer, string $chatId, int $familyId, int $page = 1, int $returnPage = 1, ?string $originToken = null, ?int $messageId = null): void
     {
         try {
             $family = $this->browse->showPublicFamily($familyId);
         } catch (ModelNotFoundException) {
-            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.family.unavailable'), [
+            $this->sendCatalogMessage($chatId, $this->locale->translate($customer, 'catalog.family.unavailable'), [
                 'inline_keyboard' => [[[
                     'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
                     'callback_data' => 'family:back:menu',
                 ]]],
-            ]);
+            ], $messageId);
 
             return;
         }
@@ -102,15 +105,22 @@ class TelegramCatalogIntents
         $page = min(max(1, $page), $lastPage);
         $returnPage = max(1, $returnPage);
         $pageMembers = $members->forPage($page, self::PRODUCTS_PER_PAGE)->values();
+        $familyIcon = $this->familyIcon($family);
+        $totalSold = $members->sum(fn (CatalogProductReadModel $member): int => $member->soldQuantity);
         $lines = [
-            $this->locale->translate($customer, 'catalog.family.options_title', ['name' => $family->name]),
+            $this->escapeHtml($this->locale->translate($customer, 'catalog.family.options_title', [
+                'icon' => $familyIcon,
+                'name' => $family->name,
+            ])),
+            '━━━━━━━━━━━━━━',
+            $this->escapeHtml($this->locale->translate($customer, 'catalog.family.sold_total', ['sold' => $totalSold])),
             '━━━━━━━━━━━━━━',
         ];
         if ($lastPage > 1) {
-            $lines[] = $this->locale->translate($customer, 'catalog.family.page', [
+            $lines[] = $this->escapeHtml($this->locale->translate($customer, 'catalog.family.page', [
                 'page' => $page,
                 'pages' => $lastPage,
-            ]);
+            ]));
         }
         $lines[] = '';
         foreach ($pageMembers as $index => $member) {
@@ -123,17 +133,17 @@ class TelegramCatalogIntents
         $maintenance = $this->maintenance->current();
         if ($maintenance->active) {
             $lines[] = '';
-            $lines[] = $this->maintenanceNotice($customer, $maintenance);
+            $lines[] = $this->escapeHtml($this->maintenanceNotice($customer, $maintenance));
         }
-        $keyboard = $pageMembers
-            ->map(fn (CatalogProductReadModel $member, int $index): array => [[
-                'text' => $this->locale->translate($customer, 'catalog.family.option_button', [
-                    'number' => $index + 1,
-                    'label' => $member->label,
-                ]),
-                'callback_data' => $this->familySelectCallback($family->id, $member->id, $page, $returnPage),
-            ]])
+        $optionButtons = $pageMembers
+            ->map(function (CatalogProductReadModel $member, int $index) use ($family, $page, $returnPage): array {
+                return [
+                    ...$this->iconButton($member->name, (string) ($index + 1), $member->icon),
+                    'callback_data' => $this->familySelectCallback($family->id, $member->id, $page, $returnPage),
+                ];
+            })
             ->all();
+        $keyboard = array_chunk($optionButtons, 2);
         $pageButtons = [];
         if ($page > 1) {
             $pageButtons[] = [
@@ -157,10 +167,10 @@ class TelegramCatalogIntents
                 : 'family:list:'.$returnPage.':o'.$originToken,
         ]];
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+        $this->sendCatalogMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard], $messageId, ['parse_mode' => 'HTML']);
     }
 
-    public function openFamilyOptions(Customer $customer, string $chatId, int $familyId, int $page, int $returnPage = 1, ?int $expectedProductId = null, ?string $originToken = null, ?callable $beforeSend = null): bool
+    public function openFamilyOptions(Customer $customer, string $chatId, int $familyId, int $page, int $returnPage = 1, ?int $expectedProductId = null, ?string $originToken = null, ?callable $beforeSend = null, ?int $messageId = null): bool
     {
         try {
             $family = $this->browse->showPublicFamily($familyId);
@@ -190,12 +200,12 @@ class TelegramCatalogIntents
         if ($beforeSend !== null) {
             $beforeSend();
         }
-        $this->sendFamilyOptions($customer, $chatId, $familyId, $page, $returnPage, $originToken);
+        $this->sendFamilyOptions($customer, $chatId, $familyId, $page, $returnPage, $originToken, $messageId);
 
         return true;
     }
 
-    public function openFamilyProduct(Customer $customer, string $chatId, int $familyId, int $productId, int $page, int $returnPage = 1): bool
+    public function openFamilyProduct(Customer $customer, string $chatId, int $familyId, int $productId, int $page, int $returnPage = 1, ?int $messageId = null): bool
     {
         $familyState = $this->catalogQueries->familyState($customer);
         if ($familyState === null
@@ -247,12 +257,12 @@ class TelegramCatalogIntents
             'familyPage' => $page,
             'familyListPage' => $returnPage,
             'familyOriginToken' => is_string($originToken) ? $originToken : null,
-        ]);
+        ], $messageId);
 
         return true;
     }
 
-    public function openCatalogOrigin(Customer $customer, string $chatId, string $originToken): bool
+    public function openCatalogOrigin(Customer $customer, string $chatId, string $originToken, ?int $messageId = null): bool
     {
         $origin = $this->catalogQueries->originForToken($customer, $originToken);
         if ($origin === null) {
@@ -261,18 +271,18 @@ class TelegramCatalogIntents
         $this->session->forgetWithLock($customer);
 
         if (($origin['type'] ?? null) === 'search' && is_string($origin['search'] ?? null)) {
-            $this->sendSearchResults($customer, $chatId, $origin['search'], (int) ($origin['page'] ?? 1));
+            $this->sendSearchResults($customer, $chatId, $origin['search'], (int) ($origin['page'] ?? 1), $messageId);
 
             return true;
         }
         if (($origin['type'] ?? null) === 'category' && is_string($origin['category'] ?? null)) {
-            $this->sendCategoryProducts($customer, $chatId, $origin['category'], (int) ($origin['page'] ?? 1));
+            $this->sendCategoryProducts($customer, $chatId, $origin['category'], (int) ($origin['page'] ?? 1), $messageId);
 
             return true;
         }
 
         if (($origin['type'] ?? null) === 'catalog') {
-            $this->sendCatalogPage($customer, $chatId, (int) ($origin['page'] ?? 1));
+            $this->sendCatalogPage($customer, $chatId, (int) ($origin['page'] ?? 1), messageId: $messageId);
 
             return true;
         }
@@ -302,12 +312,12 @@ class TelegramCatalogIntents
     /**
      * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}|null  $navigation
      */
-    public function sendProductDetail(Customer $customer, string $chatId, Product $product, ?array $navigation = null): void
+    public function sendProductDetail(Customer $customer, string $chatId, Product $product, ?array $navigation = null, ?int $messageId = null): void
     {
         $availableStock = max(0, $product->availableStock());
         if ($availableStock < 1) {
             $this->session->forget($customer);
-            $this->renderProductDetail($customer, $chatId, $product, null, $availableStock, null, $navigation);
+            $this->renderProductDetail($customer, $chatId, $product, null, $availableStock, $messageId, $navigation);
 
             return;
         }
@@ -319,7 +329,7 @@ class TelegramCatalogIntents
             $this->locale->code($customer),
             $navigation ?? [],
         );
-        $this->renderProductDetail($customer, $chatId, $product, $selection, $availableStock, null, $navigation);
+        $this->renderProductDetail($customer, $chatId, $product, $selection, $availableStock, $messageId, $navigation);
     }
 
     /**
@@ -422,7 +432,7 @@ class TelegramCatalogIntents
         }
 
         $lines = [
-            '🛍️ '.$product->name,
+            $this->productIcon($product->name, $product->icon).' '.$product->name,
             '━━━━━━━━━━━━━━',
             $this->locale->translate($customer, 'catalog.price').number_format($product->price_amount, 0, ',', '.'),
         ];
@@ -585,18 +595,18 @@ class TelegramCatalogIntents
         });
     }
 
-    public function sendCategoryProducts(Customer $customer, string $chatId, string $categoryId, int $page = 1): void
+    public function sendCategoryProducts(Customer $customer, string $chatId, string $categoryId, int $page = 1, ?int $messageId = null): void
     {
         $category = $categoryId === 'uncategorized'
             ? null
             : $this->browse->findPublicCategory($categoryId);
         if ($categoryId !== 'uncategorized' && $category === null) {
-            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.category.unavailable'), [
+            $this->sendCatalogMessage($chatId, $this->locale->translate($customer, 'catalog.category.unavailable'), [
                 'inline_keyboard' => [[[
                     'text' => $this->locale->translate($customer, 'catalog.back_categories'),
                     'callback_data' => 'catalog:categories',
                 ]]],
-            ]);
+            ], $messageId);
 
             return;
         }
@@ -608,7 +618,7 @@ class TelegramCatalogIntents
             perPage: self::PRODUCTS_PER_PAGE,
         ));
         if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
-            $this->sendStaleCatalog($customer, $chatId);
+            $this->sendStaleCatalog($customer, $chatId, $messageId);
 
             return;
         }
@@ -626,14 +636,15 @@ class TelegramCatalogIntents
             $title,
             $category?->description,
             $originToken,
+            $messageId,
         );
     }
 
-    public function sendSearchResults(Customer $customer, string $chatId, string $keyword, int $page = 1): void
+    public function sendSearchResults(Customer $customer, string $chatId, string $keyword, int $page = 1, ?int $messageId = null): void
     {
         $search = CatalogBrowseQuery::normalizeSearch($keyword);
         if ($search === '') {
-            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'search.prompt'));
+            $this->sendCatalogMessage($chatId, $this->locale->translate($customer, 'search.prompt'), [], $messageId);
 
             return;
         }
@@ -645,13 +656,12 @@ class TelegramCatalogIntents
             perPage: self::PRODUCTS_PER_PAGE,
         ));
         if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
-            $this->sendStaleCatalog($customer, $chatId);
+            $this->sendStaleCatalog($customer, $chatId, $messageId);
 
             return;
         }
         $searchToken = $this->catalogQueries->putSearch($customer, $search, $result->pagination->currentPage);
-
-        $this->sendBrowseResult($customer, $chatId, $result, 'search.title', 'search', null, $search, null, null, $searchToken);
+        $this->sendBrowseResult($customer, $chatId, $result, 'search.title', 'search', null, $search, null, null, $searchToken, $messageId);
     }
 
     private function sendBrowseResult(
@@ -665,6 +675,7 @@ class TelegramCatalogIntents
         ?string $categoryTitle = null,
         ?string $categoryDescription = null,
         ?string $originToken = null,
+        ?int $messageId = null,
     ): void {
         $maintenance = $this->maintenance->current();
         $title = $this->locale->translate(
@@ -704,19 +715,22 @@ class TelegramCatalogIntents
             if ($maintenance->active) {
                 $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
             }
-            $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => $this->browseNavigationKeyboard($customer, $mode)]);
+            $this->sendCatalogMessage($chatId, $message, ['inline_keyboard' => $this->browseNavigationKeyboard($customer, $mode)], $messageId);
 
             return;
         }
 
-        $lines[] = '';
-        $lines[] = $this->locale->translate($customer, $mode === 'catalog'
-            ? 'catalog.family.choose_entry'
-            : 'catalog.category.choose_product');
+        if ($mode !== 'catalog') {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
+        }
         foreach ($result->entries as $index => $entry) {
             $number = $index + 1;
             $lines[] = '';
             $lines[] = $this->entryBlock($customer, $entry, $number);
+            if ($mode === 'catalog' && $index < count($result->entries) - 1) {
+                $lines[] = '━━━━━━━━━━━━━━';
+            }
         }
 
         if ($mode === 'search' && $pagination->hasPages()) {
@@ -724,7 +738,7 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->translate($customer, 'search.more');
         }
 
-        $keyboard = $this->entryKeyboard($customer, $result->entries, $pagination->currentPage, $originToken);
+        $keyboard = $this->entryKeyboard($customer, $result->entries, $pagination->currentPage, $originToken, $mode);
         if ($pagination->hasPages()) {
             $pageButtons = [];
             if ($pagination->currentPage > 1) {
@@ -745,16 +759,42 @@ class TelegramCatalogIntents
         }
         $keyboard = [...$keyboard, ...$this->browseNavigationKeyboard($customer, $mode, includeEmptyFallback: false)];
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+        $this->sendCatalogMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard], $messageId);
+    }
+
+    /**
+     * A callback always carries the originating bot message ID. Editing is
+     * preferred; sending is only the safe fallback for command/deep-link
+     * callers that have no message to edit.
+     */
+    private function sendCatalogMessage(
+        string $chatId,
+        string $text,
+        array $replyMarkup = [],
+        ?int $messageId = null,
+        array $options = [],
+    ): void {
+        if ($messageId !== null && $messageId > 0) {
+            $this->bot->editMessageText($chatId, $messageId, $text, $replyMarkup, $options);
+
+            return;
+        }
+
+        $this->bot->sendMessage($chatId, $text, $replyMarkup, $options);
     }
 
     /**
      * @param  list<CatalogBrowseEntry>  $entries
      * @return list<list<array<string, mixed>>>
      */
-    private function entryKeyboard(Customer $customer, array $entries, int $listPage = 1, ?string $originToken = null): array
-    {
-        $keyboard = [];
+    private function entryKeyboard(
+        Customer $customer,
+        array $entries,
+        int $listPage = 1,
+        ?string $originToken = null,
+        string $mode = 'category',
+    ): array {
+        $buttons = [];
         foreach ($entries as $index => $entry) {
             $number = $index + 1;
             $family = $entry->family;
@@ -764,50 +804,49 @@ class TelegramCatalogIntents
                 if ($originToken !== null) {
                     $callback .= ':o'.$originToken;
                 }
-                $keyboard[] = [[
-                    'text' => $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
+                $buttons[] = [
+                    'text' => $mode === 'catalog'
+                        ? $this->productIcon($family->name, $this->familyIconOverride($family)).' ('.$number.')'
+                        : $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
                     'callback_data' => $callback,
                     'style' => $family->isAvailable ? 'success' : 'danger',
-                ]];
+                ];
             } elseif ($product !== null) {
-                $keyboard[] = [[
+                $buttons[] = [
                     'text' => $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
                     'callback_data' => 'product:'.$product->id,
                     'style' => $product->isAvailable ? 'success' : 'danger',
-                ]];
+                ];
             }
         }
 
-        return $keyboard;
+        return $mode === 'catalog'
+            ? array_chunk($buttons, 2)
+            : array_map(static fn (array $button): array => [$button], $buttons);
     }
 
     private function entryBlock(Customer $customer, CatalogBrowseEntry $entry, int $number): string
     {
         if ($entry->family !== null) {
             $family = $entry->family;
-            $icon = $this->icons->resolve($family->name)['fallback'];
-            $block = $number.'. '.$icon.' '.$family->name."\n"
-                .$this->locale->translate($customer, 'catalog.family.summary', [
-                    'options' => $family->optionCount,
-                    'available' => $family->availableOptionCount,
-                    'price' => $family->minimumPriceAmount === null
-                        ? '-'
-                        : number_format($family->minimumPriceAmount, 0, ',', '.'),
-                ]);
-            if ($family->minimumUsdtPriceAmount !== null) {
-                $block .= "\n".$this->locale->translate($customer, 'catalog.family.usdt_price', [
-                    'amount' => $this->checkout->formatUsdt($family->minimumUsdtPriceAmount),
-                ]);
-            }
+            $stock = array_sum(array_map(
+                static fn (CatalogProductReadModel $member): int => max(0, $member->availableStock),
+                $family->members,
+            ));
 
-            return $block;
+            return $this->locale->translate($customer, 'catalog.family.list_item', [
+                'number' => sprintf('%02d.', $number),
+                'icon' => $this->familyIcon($family),
+                'name' => $family->name,
+                'stock' => $stock,
+            ]);
         }
 
         $product = $entry->product;
         if ($product === null) {
             return $number.'.';
         }
-        $icon = $this->icons->resolve($product->name)['fallback'];
+        $icon = $this->productIcon($product->name, $product->icon);
 
         return $number.'. '.$icon.' '.$product->name."\n"
             .$this->locale->translate($customer, 'catalog.family.standalone_summary', [
@@ -819,7 +858,7 @@ class TelegramCatalogIntents
     private function familyOptionBlock(Customer $customer, CatalogProductReadModel $member, int $number): string
     {
         $lines = [
-            '['.$number.'] '.$member->label,
+            sprintf('%02d. %s %s', $number, $this->productIcon($member->name, $member->icon), $member->label),
             $this->locale->translate($customer, 'catalog.family.option_price', [
                 'amount' => number_format($member->priceAmount, 0, ',', '.'),
             ]),
@@ -838,7 +877,45 @@ class TelegramCatalogIntents
             'sold' => $member->soldQuantity,
         ]);
 
-        return implode("\n", $lines);
+        return '<blockquote>'.$this->escapeHtml(implode("\n", $lines)).'</blockquote>';
+    }
+
+    private function escapeHtml(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    private function productIcon(string $name, ?string $configuredIcon = null): string
+    {
+        return $this->icons->resolve($name, $configuredIcon);
+    }
+
+    private function familyIcon(CatalogFamilyReadModel $family): string
+    {
+        return $this->productIcon($family->name, $this->familyIconOverride($family));
+    }
+
+    private function familyIconOverride(CatalogFamilyReadModel $family): ?string
+    {
+        foreach ($family->members as $member) {
+            if (! $member instanceof CatalogProductReadModel) {
+                continue;
+            }
+            $icon = trim((string) $member->icon);
+            if ($icon !== '') {
+                return $icon;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{text: string}
+     */
+    private function iconButton(string $name, string $label, ?string $configuredIcon = null): array
+    {
+        return ['text' => $this->productIcon($name, $configuredIcon).' '.$label];
     }
 
     private function familyOptionsCallbackData(int $familyId, int $page, int $returnPage, ?string $originToken = null): string
@@ -901,14 +978,14 @@ class TelegramCatalogIntents
         };
     }
 
-    private function sendStaleCatalog(Customer $customer, string $chatId): void
+    private function sendStaleCatalog(Customer $customer, string $chatId, ?int $messageId = null): void
     {
-        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.family.stale'), [
+        $this->sendCatalogMessage($chatId, $this->locale->translate($customer, 'catalog.family.stale'), [
             'inline_keyboard' => [[[
                 'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
                 'callback_data' => 'family:back:menu',
             ]]],
-        ]);
+        ], $messageId);
     }
 
     /** @param  array<string, mixed>|null  $navigation */

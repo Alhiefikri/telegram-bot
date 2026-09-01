@@ -109,7 +109,6 @@ final class AdminDashboardData
                 'placeholder' => [],
                 'products' => [],
                 'productGroups' => [],
-                'standaloneProducts' => [],
                 'pagination' => [],
                 'categoryOptions' => [],
                 'familyOptions' => [],

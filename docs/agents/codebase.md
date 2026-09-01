@@ -12,6 +12,9 @@ Sebelum mengubah behavior:
 4. Ubah boundary service dan test behavior-nya; jangan menyalin aturan bisnis ke controller, view, job, atau adapter channel.
 
 Dokumen ini menjelaskan _mengapa_ file-file utama saling berhubungan. Source code tetap menjadi sumber kebenaran untuk detail method dan schema.
+## Configuration boundary
+
+`ENV` hanya untuk credential/secret dan nilai deployment yang memang tidak boleh berada di database. Jangan menambah ENV untuk data katalog atau presentation customer. Icon Product wajib nullable di database dan diedit dari Admin Dashboard; perubahan tidak boleh membutuhkan rebuild image atau clear config.
 
 ## 1. Topology repository dan runtime
 
@@ -154,12 +157,14 @@ POST /api/webhook/telegram
 
 Handler callback didaftarkan terpusat di [`AppServiceProvider`](../../src/app/Providers/AppServiceProvider.php). Tambah handler baru ke pipeline dan tentukan stage-nya; jangan membuat router kedua.
 
-`TelegramCatalogIntents` consumes `CatalogBrowse::browsePublic()` for the
-family/standalone discovery list, optional category filter, search collapse,
-and bounded four-entry pages. Family option callbacks use the signed compact
+`TelegramCatalogIntents` consumes `CatalogBrowse::browsePublicFamilies()` for the
+Product Family discovery list, while optional category filtering and search
+retain their existing Product projection. The family list shows up to ten
+families per page; family option callbacks use the signed compact
 `TelegramFamilyCallbackToken` and resolve the existing Product ID only after
 the current public family projection and page are revalidated. Product Detail,
 quantity, payment, Cart, Order, and outbound-effect ownership remains unchanged.
+For inline family navigation, the callback `message_id` is threaded through the catalog presenter so `editMessageText` replaces the original catalog message. Product quote cards use Telegram HTML `<blockquote>` formatting; command/deep-link entry points without an originating message retain the send fallback.
 
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
 

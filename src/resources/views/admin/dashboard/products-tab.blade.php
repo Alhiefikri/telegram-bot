@@ -86,67 +86,47 @@
                     @endif
                 </section>
 
-                @if ($productGroups !== [])
-                    <section id="admin-product-families" class="space-y-4" aria-labelledby="admin-product-families-title">
-                        <div class="flex items-end justify-between gap-3">
-                            <div>
-                                <h3 id="admin-product-families-title" class="font-display text-base font-black uppercase text-neo-ink">Product Family</h3>
-                                <p class="mt-1 text-xs font-bold text-brand-muted">Product tetap menjadi SKU sellable; family hanya mengelompokkan pilihan katalog.</p>
-                            </div>
-                            <span class="rounded-full border-2 border-neo-ink bg-neo-purple px-2 py-1 text-[10px] font-black uppercase">{{ count($productGroups) }} family</span>
-                        </div>
-
-                        @foreach ($productGroups as $group)
-                            <article id="admin-product-family-group-{{ $group['id'] }}" x-data="{ familyExpanded: true, familyEditPayload: @js($group['edit_payload']) }" class="rounded-[1.125rem] border-[3px] border-neo-ink bg-[#efe8ff] p-3 shadow-[4px_4px_0_#111827] sm:p-4">
-                                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                    <div class="min-w-0">
-                                        <div class="flex flex-wrap items-center gap-2">
-                                            <h4 class="break-words font-display text-lg font-black text-neo-ink">{{ $group['name'] }}</h4>
-                                            <span class="rounded-full border-2 border-neo-ink bg-white px-2 py-0.5 text-[10px] font-black uppercase">{{ $group['category'] }}</span>
-                                        </div>
-                                        <p class="mt-1 text-xs font-bold text-neo-ink/65">{{ $group['member_count'] }} Product · {{ $group['available_member_count'] }} tersedia · {{ $group['sold_out_member_count'] }} habis</p>
-                                        <p class="mt-1 text-xs font-black text-neo-ink">{{ $group['minimum_price'] ?? 'Harga belum diatur' }}{{ $group['minimum_usdt_price'] !== null ? ' · USDT '.$group['minimum_usdt_price'] : '' }}</p>
-                                    </div>
-                                    <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-                                        <button type="button" class="min-h-11 rounded-lg border-2 border-neo-ink bg-white px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]" aria-controls="admin-product-family-members-{{ $group['id'] }}" x-bind:aria-expanded="familyExpanded.toString()" x-on:click="familyExpanded = ! familyExpanded">
-                                            <span x-text="familyExpanded ? 'Tutup pilihan' : 'Buka pilihan'">Tutup pilihan</span>
-                                        </button>
-                                        @if ($canManageProducts)
-                                            <button type="button" class="min-h-11 rounded-lg border-2 border-neo-ink bg-neo-yellow px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]" x-on:click="focusProductFamilyAssignment({{ $group['id'] }})">+ Tambah Product</button>
-                                        @endif
-                                        @if ($canManageProducts)
-                                            <button type="button" class="min-h-11 rounded-lg border-2 border-neo-ink bg-white px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]" x-on:click="openProductFamilyEditModal(familyEditPayload)">✏️ Edit family</button>
-                                        @endif
-                                    </div>
-                                </div>
-                                <div id="admin-product-family-members-{{ $group['id'] }}" x-show="familyExpanded" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                                    @forelse ($group['members'] as $product)
-                                        @include('admin.dashboard.product-card')
-                                    @empty
-                                        <x-admin-dashboard.notice tone="neutral" class="text-xs">Belum ada Product dalam family ini. Assign Product dari bagian standalone.</x-admin-dashboard.notice>
-                                    @endforelse
-                                </div>
-                            </article>
-                        @endforeach
-                    </section>
-                @endif
-
-                <section id="admin-standalone-products" aria-labelledby="admin-standalone-products-title">
-                    <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+                <section id="admin-product-families" class="space-y-4" aria-labelledby="admin-product-families-title">
+                    <div class="flex items-end justify-between gap-3">
                         <div>
-                            <h3 id="admin-standalone-products-title" class="font-display text-base font-black uppercase text-neo-ink">Product standalone</h3>
-                            <p class="mt-1 text-xs font-bold text-brand-muted">Product tanpa family tetap memiliki semua action stok, credentials, harga, dan visibility.</p>
+                            <h3 id="admin-product-families-title" class="font-display text-base font-black uppercase text-neo-ink">Daftar Product Family</h3>
+                            <p class="mt-1 text-xs font-bold text-brand-muted">Semua Product ditampilkan sebagai satu family agar daftar tetap ringkas. Family bisa berisi satu atau beberapa Product.</p>
                         </div>
-                        <span class="rounded-full border-2 border-neo-ink bg-white px-2 py-1 text-[10px] font-black uppercase">{{ count($standaloneProducts) }} Product</span>
+                        <span class="rounded-full border-2 border-neo-ink bg-neo-purple px-2 py-1 text-[10px] font-black uppercase">{{ count($productGroups) }} family di halaman ini</span>
                     </div>
-                    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                        @forelse ($standaloneProducts as $product)
-                            @include('admin.dashboard.product-card')
-                        @empty
-                            <x-admin-dashboard.empty-state title="Tidak ada Product standalone di halaman ini." />
-                        @endforelse
-                    </div>
-                </section>
+
+                    @forelse ($productGroups as $group)
+                        <article id="admin-product-family-group-{{ $group['id'] }}" x-data="{ familyExpanded: false, familyEditPayload: @js($group['edit_payload']) }" class="rounded-[1.125rem] border-[3px] border-neo-ink bg-[#efe8ff] p-3 shadow-[4px_4px_0_#111827] sm:p-4">
+                            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div class="min-w-0">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <h4 class="break-words font-display text-lg font-black text-neo-ink">{{ $group['name'] }}</h4>
+                                        <span class="rounded-full border-2 border-neo-ink bg-white px-2 py-0.5 text-[10px] font-black uppercase">{{ $group['category'] }}</span>
+                                    </div>
+                                    <p class="mt-1 text-xs font-bold text-neo-ink/65">{{ $group['member_count'] }} Product · {{ $group['available_member_count'] }} tersedia · {{ $group['sold_out_member_count'] }} habis</p>
+                                    <p class="mt-1 text-xs font-black text-neo-ink">{{ $group['minimum_price'] ?? 'Harga belum diatur' }}{{ $group['minimum_usdt_price'] !== null ? ' · USDT '.$group['minimum_usdt_price'] : '' }}</p>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+                                    <button type="button" class="min-h-11 rounded-lg border-2 border-neo-ink bg-white px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]" aria-controls="admin-product-family-members-{{ $group['id'] }}" x-bind:aria-expanded="familyExpanded.toString()" x-on:click="familyExpanded = ! familyExpanded">
+                                        <span x-text="familyExpanded ? 'Tutup daftar product' : 'Lihat product'">Lihat product</span>
+                                    </button>
+                                    @if ($canManageProducts && ! ($group['is_single_product_group'] ?? false))
+                                        <button type="button" class="min-h-11 rounded-lg border-2 border-neo-ink bg-neo-yellow px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]" x-on:click="focusProductFamilyAssignment({{ $group['id'] }})">+ Tambah Product</button>
+                                        <button type="button" class="min-h-11 rounded-lg border-2 border-neo-ink bg-white px-3 py-2 text-xs font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]" x-on:click="openProductFamilyEditModal(familyEditPayload)">✏️ Edit family</button>
+                                    @endif
+                                </div>
+                            </div>
+                            <div id="admin-product-family-members-{{ $group['id'] }}" x-cloak x-show="familyExpanded" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                @forelse ($group['members'] as $product)
+                                    @include('admin.dashboard.product-card')
+                                @empty
+                                    <x-admin-dashboard.notice tone="neutral" class="text-xs">Belum ada Product dalam family ini. Tambahkan Product melalui form grouping.</x-admin-dashboard.notice>
+                                @endforelse
+                            </div>
+                        </article>
+                    @empty
+                        <x-admin-dashboard.empty-state title="Belum ada Product di halaman ini." />
+                    @endforelse
 
                 @if ($productsPagination['lastPage'] > 1)
                     <nav aria-label="Halaman produk" class="flex flex-col items-center gap-2 rounded-[1rem] border-2 border-neo-ink bg-white/70 px-3 py-3 shadow-[3px_3px_0_#111827] sm:flex-row sm:justify-between">
@@ -180,6 +160,7 @@
                         </div>
                     </nav>
                 @endif
+                </section>
 
                 @include('admin.dashboard.stock-modals')
             </div>

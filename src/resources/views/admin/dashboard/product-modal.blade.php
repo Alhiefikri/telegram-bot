@@ -8,7 +8,7 @@
                     show="productModalOpen"
                     title="Tambah produk"
                     title-expression="productModalMode === 'edit' ? 'Edit produk' : 'Tambah produk'"
-                    description="Nama, harga, detail publik, dan gambar WebP otomatis."
+                    description="Nama, harga, deskripsi, dan gambar WebP otomatis."
                     class="max-h-[92vh] w-full max-w-xl overflow-y-auto"
                     x-bind:class="productModalMode === 'edit' ? '!bg-[#fee648]' : '!bg-[#7BD10A]'"
                 >
@@ -43,6 +43,25 @@
                             @enderror
                         </div>
 
+                        <div>
+                            <x-admin-dashboard.field-label for="product-icon">Ikon katalog (opsional)</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.input
+                                id="product-icon"
+                                name="icon"
+                                maxlength="32"
+                                placeholder="🎨"
+                                autocomplete="off"
+                                class="mt-1.5"
+                                x-model="productIcon"
+                            />
+                            <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Emoji/karakter ini tampil di katalog Telegram. Kosongkan untuk memakai icon default otomatis.</p>
+                            @error('icon', 'productCreate')
+                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                            @enderror
+                            @error('icon', 'productUpdate')
+                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                            @enderror
+                        </div>
                         <div class="grid gap-3 sm:grid-cols-3">
                             <div>
                                 <x-admin-dashboard.field-label for="product-price">Harga Asli (IDR)</x-admin-dashboard.field-label>
@@ -140,131 +159,6 @@
                             @error('description', 'productUpdate')
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
-                        </x-admin-dashboard.card>
-
-                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
-                            <div>
-                                <p class="font-display text-sm font-extrabold text-neo-ink">Detail yang dilihat pelanggan</p>
-                                <p class="mt-1 text-[10px] font-extrabold uppercase leading-4 text-neo-ink/60">Opsional. Isi satu per satu supaya pelanggan tahu apa yang diterima sebelum checkout. Daftar item dan batasan memakai satu baris untuk setiap poin. Jangan masukkan password, token, atau instruksi pasca pembayaran di sini.</p>
-                            </div>
-
-                            <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                                <div>
-                                    <x-admin-dashboard.field-label for="product-type">Tipe produk</x-admin-dashboard.field-label>
-                                    <x-admin-dashboard.input id="product-type" name="product_type" maxlength="100" placeholder="Akun premium / lisensi" class="mt-1.5" x-model="productType" />
-                                    @error('product_type', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    @error('product_type', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                </div>
-                                <div>
-                                    <x-admin-dashboard.field-label for="product-access-duration">Durasi akses</x-admin-dashboard.field-label>
-                                    <x-admin-dashboard.input id="product-access-duration" name="access_duration" maxlength="100" placeholder="30 hari / lifetime" class="mt-1.5" x-model="productAccessDuration" />
-                                    @error('access_duration', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    @error('access_duration', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                </div>
-                                <div>
-                                    <x-admin-dashboard.field-label for="product-region">Region / negara</x-admin-dashboard.field-label>
-                                    <x-admin-dashboard.input id="product-region" name="region" maxlength="120" placeholder="Global / Indonesia" class="mt-1.5" x-model="productRegion" />
-                                    @error('region', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    @error('region', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                </div>
-                                <div>
-                                    <x-admin-dashboard.field-label for="product-account-type">Tipe akun</x-admin-dashboard.field-label>
-                                    <x-admin-dashboard.input id="product-account-type" name="account_type" maxlength="100" placeholder="Private / shared" class="mt-1.5" x-model="productAccountType" />
-                                    @error('account_type', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    @error('account_type', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                </div>
-                                <div>
-                                    <x-admin-dashboard.field-label for="product-device-limit">Batas perangkat / seat</x-admin-dashboard.field-label>
-                                    <x-admin-dashboard.input id="product-device-limit" name="device_limit" maxlength="100" placeholder="1 perangkat / 2 seat" class="mt-1.5" x-model="productDeviceLimit" />
-                                    @error('device_limit', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    @error('device_limit', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                </div>
-                                <div>
-                                    <x-admin-dashboard.field-label for="product-featured-rank">Urutan pilihan utama</x-admin-dashboard.field-label>
-                                    <x-admin-dashboard.input type="number" id="product-featured-rank" name="featured_rank" min="1" max="999" step="1" inputmode="numeric" placeholder="Kosong = tidak dipilih" class="mt-1.5" x-model="productFeaturedRank" />
-                                    <p class="mt-1 text-[10px] font-bold leading-4 text-neo-ink/60">Angka lebih kecil tampil lebih dulu di area pilihan utama. Produk tetap harus aktif dan punya stok.</p>
-                                    @error('featured_rank', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    @error('featured_rank', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                </div>
-                            </div>
-
-                            <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                                <div>
-                                    <x-admin-dashboard.field-label for="product-included-items">Yang termasuk</x-admin-dashboard.field-label>
-                                    <x-admin-dashboard.textarea id="product-included-items" name="included_items" rows="4" maxlength="2000" placeholder="Akun siap pakai&#10;Panduan login&#10;Dukungan awal" x-model="productIncludedItems" />
-                                    <p class="mt-1 text-[10px] font-bold leading-4 text-neo-ink/60">Maksimal 20 poin, satu poin per baris.</p>
-                                    @error('included_items', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    @error('included_items', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                </div>
-                                <div>
-                                    <x-admin-dashboard.field-label for="product-limitations">Batasan penggunaan</x-admin-dashboard.field-label>
-                                    <x-admin-dashboard.textarea id="product-limitations" name="limitations" rows="4" maxlength="2000" placeholder="Tidak untuk dijual kembali&#10;Ikuti batas perangkat" x-model="productLimitations" />
-                                    <p class="mt-1 text-[10px] font-bold leading-4 text-neo-ink/60">Tulis batasan yang perlu diketahui sebelum membayar.</p>
-                                    @error('limitations', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    @error('limitations', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                </div>
-                            </div>
-
-                            <div class="mt-3 grid gap-3">
-                                <div>
-                                    <x-admin-dashboard.field-label for="product-fulfillment-expectation">Ekspektasi pemenuhan</x-admin-dashboard.field-label>
-                                    <x-admin-dashboard.textarea id="product-fulfillment-expectation" name="fulfillment_expectation" rows="2" maxlength="1000" placeholder="Data akun dikirim setelah pembayaran terverifikasi, biasanya dalam beberapa menit." x-model="productFulfillmentExpectation" />
-                                    @error('fulfillment_expectation', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    @error('fulfillment_expectation', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                </div>
-                                <div class="grid gap-3 sm:grid-cols-2">
-                                    <div>
-                                        <x-admin-dashboard.field-label for="product-warranty-policy">Kebijakan garansi</x-admin-dashboard.field-label>
-                                        <x-admin-dashboard.textarea id="product-warranty-policy" name="warranty_policy" rows="3" maxlength="1000" placeholder="Garansi login 7 hari sejak data diterima." x-model="productWarrantyPolicy" />
-                                        @error('warranty_policy', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                        @error('warranty_policy', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    </div>
-                                    <div>
-                                        <x-admin-dashboard.field-label for="product-support-policy">Dukungan pelanggan</x-admin-dashboard.field-label>
-                                        <x-admin-dashboard.textarea id="product-support-policy" name="support_policy" rows="3" maxlength="1000" placeholder="Support membantu login sesuai jam operasional." x-model="productSupportPolicy" />
-                                        @error('support_policy', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                        @error('support_policy', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="mt-3 rounded-lg border-2 border-neo-ink bg-white p-3 shadow-[3px_3px_0_0_#050505]">
-                                <p class="font-display text-sm font-extrabold text-neo-ink">Pratinjau publik</p>
-                                <p class="mt-1 whitespace-pre-line text-xs font-bold leading-5 text-neo-ink/70" x-text="productDescription || 'Deskripsi singkat akan tampil di sini.'">Deskripsi singkat akan tampil di sini.</p>
-                                <dl class="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                                    <div x-show="productType" x-cloak>
-                                        <dt class="font-black uppercase tracking-wide text-neo-ink/50">Tipe produk</dt>
-                                        <dd class="font-bold text-neo-ink" x-text="productType"></dd>
-                                    </div>
-                                    <div x-show="productAccessDuration" x-cloak>
-                                        <dt class="font-black uppercase tracking-wide text-neo-ink/50">Durasi</dt>
-                                        <dd class="font-bold text-neo-ink" x-text="productAccessDuration"></dd>
-                                    </div>
-                                    <div x-show="productRegion" x-cloak>
-                                        <dt class="font-black uppercase tracking-wide text-neo-ink/50">Region</dt>
-                                        <dd class="font-bold text-neo-ink" x-text="productRegion"></dd>
-                                    </div>
-                                    <div x-show="productAccountType" x-cloak>
-                                        <dt class="font-black uppercase tracking-wide text-neo-ink/50">Tipe akun</dt>
-                                        <dd class="font-bold text-neo-ink" x-text="productAccountType"></dd>
-                                    </div>
-                                    <div x-show="productDeviceLimit" x-cloak>
-                                        <dt class="font-black uppercase tracking-wide text-neo-ink/50">Batas perangkat / seat</dt>
-                                        <dd class="font-bold text-neo-ink" x-text="productDeviceLimit"></dd>
-                                    </div>
-                                </dl>
-                                <div x-show="productIncludedItems" x-cloak class="mt-3">
-                                    <p class="font-black uppercase tracking-wide text-neo-ink/50">Yang termasuk</p>
-                                    <p class="mt-1 whitespace-pre-line text-xs font-bold leading-5 text-neo-ink" x-text="productIncludedItems"></p>
-                                </div>
-                                <div x-show="productLimitations" x-cloak class="mt-3">
-                                    <p class="font-black uppercase tracking-wide text-neo-ink/50">Batasan</p>
-                                    <p class="mt-1 whitespace-pre-line text-xs font-bold leading-5 text-neo-ink" x-text="productLimitations"></p>
-                                </div>
-                                <p x-show="productFulfillmentExpectation" x-cloak class="mt-3 whitespace-pre-line text-xs font-bold leading-5 text-neo-ink"><span class="font-black uppercase tracking-wide text-neo-ink/50">Pemenuhan: </span><span x-text="productFulfillmentExpectation"></span></p>
-                                <p x-show="productWarrantyPolicy" x-cloak class="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-neo-ink"><span class="font-black uppercase tracking-wide text-neo-ink/50">Garansi: </span><span x-text="productWarrantyPolicy"></span></p>
-                                <p x-show="productSupportPolicy" x-cloak class="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-neo-ink"><span class="font-black uppercase tracking-wide text-neo-ink/50">Dukungan: </span><span x-text="productSupportPolicy"></span></p>
-                            </div>
                         </x-admin-dashboard.card>
 
                         <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">

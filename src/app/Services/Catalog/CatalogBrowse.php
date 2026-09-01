@@ -34,6 +34,7 @@ final class CatalogBrowse
         'family_sort_order',
         'family_option_label',
         'name',
+        'icon',
         'description',
         'product_type',
         'access_duration',
@@ -62,6 +63,11 @@ final class CatalogBrowse
     public function browsePublic(CatalogBrowseQuery|string|null $query = null): CatalogBrowseResult
     {
         return $this->browse($this->coerceQuery($query), public: true);
+    }
+
+    public function browsePublicFamilies(CatalogBrowseQuery|string|null $query = null): CatalogBrowseResult
+    {
+        return $this->browse($this->coerceQuery($query), public: true, familiesOnly: true);
     }
 
     public function browseAdmin(CatalogBrowseQuery|string|null $query = null): CatalogBrowseResult
@@ -157,7 +163,7 @@ final class CatalogBrowse
         return $result->families;
     }
 
-    private function browse(CatalogBrowseQuery $query, bool $public): CatalogBrowseResult
+    private function browse(CatalogBrowseQuery $query, bool $public, bool $familiesOnly = false): CatalogBrowseResult
     {
         $query = CatalogBrowseQuery::fromValues(
             search: $query->search,
@@ -205,12 +211,14 @@ final class CatalogBrowse
             ->filter()
             ->values();
 
-        $standalone = $productModels
-            ->filter(fn (CatalogProductReadModel $product): bool => $product->familyId === null)
-            ->filter(fn (CatalogProductReadModel $product): bool => $this->matchesProduct($product, $query->search))
-            ->map(fn (CatalogProductReadModel $product): CatalogProductReadModel => $this->withMatch($product, $query->search !== ''))
-            ->sort(fn (CatalogProductReadModel $left, CatalogProductReadModel $right): int => $this->compareProducts($left, $right, $query->sort))
-            ->values();
+        $standalone = $familiesOnly
+            ? collect()
+            : $productModels
+                ->filter(fn (CatalogProductReadModel $product): bool => $product->familyId === null)
+                ->filter(fn (CatalogProductReadModel $product): bool => $this->matchesProduct($product, $query->search))
+                ->map(fn (CatalogProductReadModel $product): CatalogProductReadModel => $this->withMatch($product, $query->search !== ''))
+                ->sort(fn (CatalogProductReadModel $left, CatalogProductReadModel $right): int => $this->compareProducts($left, $right, $query->sort))
+                ->values();
 
         $entries = $familyModels
             ->map(fn (CatalogFamilyReadModel $family): CatalogBrowseEntry => CatalogBrowseEntry::family($family))
@@ -359,6 +367,7 @@ final class CatalogBrowse
             imagePath: $product->image_path,
             imageUrl: $this->publicImageUrl($product->image_path),
             createdAt: $product->created_at?->toISOString(),
+            icon: $product->icon,
         );
     }
 
@@ -549,6 +558,7 @@ final class CatalogBrowse
             imagePath: $product->imagePath,
             imageUrl: $product->imageUrl,
             createdAt: $product->createdAt,
+            icon: $product->icon,
             matchesSearch: $matches,
         );
     }

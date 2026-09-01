@@ -33,6 +33,7 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSee('Harga')
             ->assertSee('Kategori')
             ->assertSee('Deskripsi singkat')
+            ->assertSee('Ikon katalog (opsional)')
             ->assertSee('Catatan pengiriman rahasia')
             ->assertSee('Panduan pemakaian produk')
             ->assertSee('Judul panduan')
@@ -137,6 +138,7 @@ class AdminDashboardProductFormsTest extends TestCase
             ->from('/admin?tab=produk')
             ->post(route('admin.products.store'), [
                 'name' => 'Canva Pro 1 Bulan',
+                'icon' => '🖌️',
                 'price_amount' => '75000',
                 'category_id' => (string) $category->id,
                 'description' => 'Akses Canva Pro siap pakai.',
@@ -150,6 +152,7 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertDatabaseHas('products', [
             'category_id' => $category->id,
             'name' => 'Canva Pro 1 Bulan',
+            'icon' => '🖌️',
             'price_amount' => 75000,
             'currency' => 'IDR',
             'stock' => 0,
@@ -159,6 +162,7 @@ class AdminDashboardProductFormsTest extends TestCase
 
         $product = Product::where('name', 'Canva Pro 1 Bulan')->firstOrFail();
         $this->assertSame('Akses Canva Pro siap pakai.', $product->description);
+        $this->assertSame('🖌️', $product->icon);
         $this->assertSame("Login menggunakan data akun yang dikirim.\nGanti password setelah berhasil masuk.", $product->delivery_note);
         $this->assertSame('Panduan penggunaan Canva Pro', $product->usage_guide_title);
         $this->assertSame('https://docs.example.test/canva/getting-started', $product->usage_guide_url);
@@ -178,8 +182,37 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSeeInOrder(['Stok', '0'])
             ->assertSeeInOrder(['Tersedia', '0'])
             ->assertSeeInOrder(['Dipesan', '0'])
+
             ->assertSee('Akses Canva Pro siap pakai.')
             ->assertSee('/assets/product-placeholder.svg', false);
+    }
+
+    public function test_admin_can_update_and_clear_optional_product_icon(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'Icon Product',
+            'icon' => '🧩',
+            'description' => 'Original description.',
+            'price_amount' => 25000,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'Icon Product',
+                'icon' => '',
+                'price_amount' => '25000',
+                'description' => 'Updated description.',
+                'is_active' => '1',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $this->assertNull($product->fresh()->icon);
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('Ikon katalog (opsional)')
+            ->assertSee('productIcon', false);
     }
 
     public function test_admin_can_upload_product_image_as_optimized_webp(): void
@@ -384,10 +417,52 @@ class AdminDashboardProductFormsTest extends TestCase
 
         $this->get('/admin?tab=produk')
             ->assertOk()
-            ->assertSee('Detail yang dilihat pelanggan')
-            ->assertSee('Pratinjau publik')
-            ->assertSee('Lisensi software')
+            ->assertDontSee('Detail yang dilihat pelanggan')
+            ->assertDontSee('Pratinjau publik')
+            ->assertDontSee('product-type', false)
+            ->assertDontSee('product-featured-rank', false)
+            ->assertDontSee('Lisensi software')
             ->assertSee('Pilihan utama #1');
+    }
+
+    public function test_basic_product_update_preserves_removed_customer_detail_values(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'product_type' => 'Akun premium',
+            'access_duration' => '30 hari',
+            'region' => 'Indonesia',
+            'account_type' => 'Private',
+            'device_limit' => '1 perangkat',
+            'included_items' => 'Akun siap pakai',
+            'limitations' => 'Satu perangkat',
+            'fulfillment_expectation' => 'Dikirim setelah pembayaran.',
+            'warranty_policy' => 'Garansi 7 hari.',
+            'support_policy' => 'Support via Telegram.',
+            'featured_rank' => 7,
+        ]);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), [
+                'name' => $product->name,
+                'price_amount' => (string) $product->price_amount,
+                'description' => 'Deskripsi terbaru.',
+                'is_active' => '1',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $product->refresh();
+        $this->assertSame('Akun premium', $product->product_type);
+        $this->assertSame('30 hari', $product->access_duration);
+        $this->assertSame('Indonesia', $product->region);
+        $this->assertSame('Private', $product->account_type);
+        $this->assertSame('1 perangkat', $product->device_limit);
+        $this->assertSame('Akun siap pakai', $product->included_items);
+        $this->assertSame('Satu perangkat', $product->limitations);
+        $this->assertSame('Dikirim setelah pembayaran.', $product->fulfillment_expectation);
+        $this->assertSame('Garansi 7 hari.', $product->warranty_policy);
+        $this->assertSame('Support via Telegram.', $product->support_policy);
+        $this->assertSame(7, $product->featured_rank);
     }
 
     public function test_product_merchandising_validation_rejects_invalid_lengths_and_featured_rank(): void

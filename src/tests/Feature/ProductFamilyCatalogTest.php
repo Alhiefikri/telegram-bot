@@ -41,13 +41,14 @@ class ProductFamilyCatalogTest extends TestCase
     {
         $this->assertTrue(Schema::hasTable('product_families'));
         $this->assertTrue(Schema::hasColumns('product_families', ['id', 'name', 'slug', 'description', 'image_path', 'sort_order', 'deleted_at']));
-        $this->assertTrue(Schema::hasColumns('products', ['product_family_id', 'family_sort_order', 'family_option_label']));
+        $this->assertTrue(Schema::hasColumns('products', ['product_family_id', 'family_sort_order', 'family_option_label', 'icon']));
 
         $family = ProductFamily::factory()->create();
         $product = Product::factory()->create([
             'product_family_id' => $family->id,
             'family_sort_order' => 3,
             'family_option_label' => 'Package',
+            'icon' => '🧩',
         ]);
 
         $this->assertSame($family->id, $product->family->id);
@@ -55,6 +56,7 @@ class ProductFamilyCatalogTest extends TestCase
         $this->assertSame($product->id, $family->products->sole()->id);
         $this->assertSame(3, $product->family_order);
         $this->assertSame('Package', $product->option_label);
+        $this->assertSame('🧩', $product->icon);
     }
 
     public function test_committed_family_and_membership_mutations_invalidate_storefront_cache(): void
@@ -616,25 +618,32 @@ class ProductFamilyCatalogTest extends TestCase
         $this->assertSame(3, $uncategorized->pagination->total);
     }
 
-    public function test_admin_dashboard_groups_family_products_and_retains_product_actions(): void
+    public function test_admin_dashboard_groups_every_product_as_a_collapsed_family_and_retains_product_actions(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
         $family = ProductFamily::factory()->create(['name' => 'Netflix', 'sort_order' => 1]);
-        $member = Product::factory()->create(['name' => 'Netflix Individual', 'product_family_id' => $family->id, 'family_sort_order' => 1]);
+        $member = Product::factory()->create([
+            'name' => 'Netflix Individual',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'family_option_label' => 'Individual',
+        ]);
         $standalone = Product::factory()->create(['name' => 'Standalone Product', 'product_family_id' => null]);
 
         $this->actingAs($admin)
             ->get('/admin?tab=produk')
             ->assertOk()
-            ->assertSee('Product Family')
+            ->assertSee('Daftar Product Family')
             ->assertSee('Netflix')
-            ->assertSee('Netflix Individual')
+            ->assertSee('Individual')
             ->assertSee('Standalone Product')
+            ->assertSee('admin-product-family-group-product-'.$standalone->id, false)
+            ->assertSee('familyExpanded: false', false)
+            ->assertDontSee('Product standalone')
             ->assertSee('Edit family')
             ->assertSee('Simpan grouping')
             ->assertSee(route('admin.products.update', $member), false)
             ->assertSee('Stok');
-
     }
 
     public function test_invalid_family_create_reopens_management_modal_with_dedicated_errors(): void

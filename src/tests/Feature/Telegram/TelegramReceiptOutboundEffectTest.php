@@ -138,6 +138,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         ];
         $this->assertStringContainsString($expectedTitles[$locale], $caption);
         $this->assertStringContainsString($expectedPaymentLabels[$locale], $caption);
+        $this->assertStringContainsString("\n\n".$expectedPaymentLabels[$locale], $caption);
         $this->assertStringContainsString(
             match ($locale) {
                 'id' => '🔐 Detail Produk',

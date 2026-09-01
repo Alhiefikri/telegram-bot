@@ -41,7 +41,6 @@ final class AdminDashboardProductsData
             'productStoreUrl' => route('admin.products.store'),
             'products' => $productPage['products'],
             'productGroups' => $productPage['productGroups'],
-            'standaloneProducts' => $productPage['standaloneProducts'],
             'pagination' => $productPage['pagination'],
             'placeholder' => [
                 'image_url' => $this->placeholder->imageUrl(),
@@ -81,7 +80,7 @@ final class AdminDashboardProductsData
             ->keyBy('id');
         $products = Product::query()
             ->with(['category:id,name', 'family:id,name'])
-            ->select(['id', 'category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'featured_rank', 'created_at'])
+            ->select(['id', 'category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'name', 'icon', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'featured_rank', 'created_at'])
             ->withExists('stockItems')
             ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')->whereNull('retired_at')])
             ->whereIn('id', $productIds->all())
@@ -137,17 +136,8 @@ final class AdminDashboardProductsData
                     'id' => $product->id,
                     'category_id' => $product->category_id,
                     'name' => $product->name,
+                    'icon' => $product->icon,
                     'description' => $product->description,
-                    'product_type' => $product->product_type,
-                    'access_duration' => $product->access_duration,
-                    'region' => $product->region,
-                    'account_type' => $product->account_type,
-                    'device_limit' => $product->device_limit,
-                    'included_items' => $product->included_items,
-                    'limitations' => $product->limitations,
-                    'fulfillment_expectation' => $product->fulfillment_expectation,
-                    'warranty_policy' => $product->warranty_policy,
-                    'support_policy' => $product->support_policy,
                     'delivery_note' => $product->delivery_note,
                     'usage_guide_title' => $product->usage_guide_title,
                     'usage_guide_url' => $product->usage_guide_url,
@@ -203,35 +193,15 @@ final class AdminDashboardProductsData
                     'edit_payload' => [
                         'id' => $product->id,
                         'name' => $product->name,
+                        'icon' => $product->icon,
                         'priceAmount' => $product->price_amount,
                         'usdtPriceAmount' => $this->formatUsdtPrice($product->usdt_price_amount),
                         'categoryId' => $product->category_id,
                         'description' => $product->description,
-                        'productType' => $product->product_type,
-                        'accessDuration' => $product->access_duration,
-                        'region' => $product->region,
-                        'accountType' => $product->account_type,
-                        'deviceLimit' => $product->device_limit,
-                        'includedItems' => $product->included_items,
-                        'limitations' => $product->limitations,
-                        'fulfillmentExpectation' => $product->fulfillment_expectation,
-                        'warrantyPolicy' => $product->warranty_policy,
-                        'supportPolicy' => $product->support_policy,
                         'deliveryNote' => $product->delivery_note,
-                        'usageGuideTitle' => $product->usage_guide_title,
-                        'usageGuideUrl' => $product->usage_guide_url,
-                        'featuredRank' => $product->featured_rank,
-                        'isActive' => $product->is_active,
-                        'imageUrl' => $imageUrl,
-                        'updateUrl' => $updateUrl,
-                        'stockUrl' => $stockUrl,
-                        'stockAccountsUrl' => $stockAccountsUrl,
-                        'stockAccountsReviewUrl' => $stockAccountsReviewUrl,
-                        'stockReturnUrl' => $stockReturnUrl,
                         'stock' => $product->stock,
                         'availableStockItemCount' => $availableStockItemCount,
                         'stockSummary' => $stockSummary,
-                        'stockItemsTruncated' => (int) ($summary?->total ?? 0) > count($stockItems),
                         'stockItems' => $stockItems,
                     ],
                 ]];
@@ -255,23 +225,23 @@ final class AdminDashboardProductsData
             })
             ->values()
             ->all();
-        $familyGroups = collect($catalog->entries)
-            ->filter(fn (CatalogBrowseEntry $entry): bool => $entry->isFamily() && $entry->family instanceof CatalogFamilyReadModel)
-            ->map(function (CatalogBrowseEntry $entry) use ($productPayload): array {
-                $family = $entry->family;
-                $members = collect($family->members)
-                    ->map(fn (CatalogProductReadModel $product): ?array => $productPayload($product))
-                    ->filter()
-                    ->values()
-                    ->all();
+        $productGroups = collect($catalog->entries)
+            ->map(function (CatalogBrowseEntry $entry) use ($productPayload): ?array {
+                if ($entry->isFamily() && $entry->family instanceof CatalogFamilyReadModel) {
+                    $family = $entry->family;
+                    $members = collect($family->members)
+                        ->map(fn (CatalogProductReadModel $product): ?array => $productPayload($product))
+                        ->filter()
+                        ->values()
+                        ->all();
 
-                return $this->familyGroupPayload($family, $members);
+                    return $this->familyGroupPayload($family, $members);
+                }
+
+                $payload = $productPayload($entry->product);
+
+                return $payload === null ? null : $this->singleProductGroupPayload($payload);
             })
-            ->values()
-            ->all();
-        $standalonePayloads = collect($catalog->entries)
-            ->filter(fn (CatalogBrowseEntry $entry): bool => ! $entry->isFamily())
-            ->map(fn (CatalogBrowseEntry $entry): ?array => $productPayload($entry->product))
             ->filter()
             ->values()
             ->all();
@@ -281,8 +251,7 @@ final class AdminDashboardProductsData
 
         return [
             'products' => $flatPayloads,
-            'productGroups' => $familyGroups,
-            'standaloneProducts' => $standalonePayloads,
+            'productGroups' => $productGroups,
             'families' => $catalog->families,
             'pagination' => [
                 'currentPage' => $pagination->currentPage,
@@ -326,6 +295,7 @@ final class AdminDashboardProductsData
             'minimum_usdt_price' => $this->formatUsdtPrice($family->minimumUsdtPriceAmount),
             'is_available' => $family->isAvailable,
             'members' => $members,
+            'is_single_product_group' => false,
             'update_url' => $updateUrl,
             'delete_url' => route('admin.product-families.destroy', ['productFamily' => $family->id]),
             'delete_confirmation' => $this->familyDeleteConfirmation($family),
@@ -337,6 +307,37 @@ final class AdminDashboardProductsData
                 'imageUrl' => $family->imageUrl,
                 'updateUrl' => $updateUrl,
             ],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $product
+     * @return array<string, mixed>
+     */
+    private function singleProductGroupPayload(array $product): array
+    {
+        return [
+            'id' => 'product-'.$product['id'],
+            'name' => $product['name'],
+            'slug' => null,
+            'description' => $product['description'],
+            'image_path' => $product['image_path'],
+            'image_url' => $product['image_url'],
+            'sort_order' => PHP_INT_MAX,
+            'category' => $product['category'],
+            'member_count' => 1,
+            'available_member_count' => (int) ($product['available_stock'] ?? 0) > 0 ? 1 : 0,
+            'sold_out_member_count' => (int) ($product['available_stock'] ?? 0) > 0 ? 0 : 1,
+            'minimum_price_amount' => $product['price_amount'],
+            'minimum_price' => $product['price'],
+            'minimum_usdt_price_amount' => $product['usdt_price_amount'],
+            'minimum_usdt_price' => $product['usdt_price_amount'],
+            'members' => [$product],
+            'update_url' => null,
+            'delete_url' => null,
+            'delete_confirmation' => null,
+            'edit_payload' => null,
+            'is_single_product_group' => true,
         ];
     }
 
@@ -400,7 +401,7 @@ final class AdminDashboardProductsData
     {
         return 'Hapus Product Family '.(string) ($family['name'] ?? '').'? '
             .(int) ($family['member_count'] ?? 0)
-            .' Product akan menjadi standalone. Visibility, stok, credentials, waitlist, notifikasi, dan history tetap dipertahankan.';
+            .' Product tidak lagi tergabung dalam family. Visibility, stok, credentials, waitlist, notifikasi, dan history tetap dipertahankan.';
     }
 
     /** @param Collection<int, Product> $products */

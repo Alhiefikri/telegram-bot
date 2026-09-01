@@ -31,6 +31,7 @@ final readonly class CatalogProductReadModel
         public ?string $imagePath,
         public ?string $imageUrl,
         public ?string $createdAt,
+        public ?string $icon = null,
         public bool $matchesSearch = false,
     ) {}
 
@@ -57,10 +58,10 @@ final readonly class CatalogProductReadModel
             'is_available' => $this->isAvailable,
             'family_id' => $this->familyId,
             'family_name' => $this->familyName,
-            'family_sort_order' => $this->familySortOrder,
             'option_label' => $this->optionLabel,
             'image_path' => $this->imagePath,
             'image_url' => $this->imageUrl,
+            'icon' => $this->icon,
             'created_at' => $this->createdAt,
             'matches_search' => $this->matchesSearch,
         ];

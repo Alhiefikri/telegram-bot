@@ -265,29 +265,31 @@ class TelegramManualPaymentIntents
         return [implode("\n", $caption), $replyMarkup];
     }
 
-    public function approveManualPaymentFromTelegram(Customer $admin, string $chatId, string $callbackQueryId, string $orderId): void
+    public function approveManualPaymentFromTelegram(Customer $admin, string $chatId, string $callbackQueryId, string $orderId): bool
     {
         if (! $this->isTelegramAdmin($admin, $chatId)) {
             $this->bot->answerCallbackQuery($callbackQueryId, $this->locale->translateLocale($admin->locale ?? 'id', 'router.admin_required'));
 
-            return;
+            return false;
         }
 
         $order = Str::isUuid($orderId) ? Order::find($orderId) : null;
         if (! $order) {
             $this->bot->answerCallbackQuery($callbackQueryId, 'Order tidak ditemukan.');
 
-            return;
+            return false;
         }
 
         if (! $this->adminOrders->canCompleteManualOrder($order)) {
             $this->bot->answerCallbackQuery($callbackQueryId, 'Order sudah diproses atau tidak bisa diubah.');
 
-            return;
+            return false;
         }
 
         $this->adminOrders->completeManualOrder($order);
         $this->bot->answerCallbackQuery($callbackQueryId, 'Pembayaran disetujui. Produk dikirim ke pembeli.');
+
+        return true;
     }
 
     public function rejectManualPaymentFromTelegram(Customer $admin, string $chatId, string $callbackQueryId, string $orderId): void
@@ -352,6 +354,21 @@ class TelegramManualPaymentIntents
 
         $cancelled = $this->adminOrders->cancelPendingOrder($order);
         $this->bot->sendMessage($chatId, "✅ Order dibatalkan\n━━━━━━━━━━━━━━\nInvoice {$cancelled->invoice_number} dibatalkan dan stok sudah dilepas kembali.");
+    }
+
+    public function pendingManualQrisOrderForCustomer(Customer $customer, string $orderId): ?Order
+    {
+        return $customer->orders()
+            ->whereKey($orderId)
+            ->where('order_status', OrderStatus::PendingPayment)
+            ->where('payment_status', PaymentStatus::Pending)
+            ->whereHas('payments', fn ($query) => $query
+                ->where('provider', 'manual')
+                ->where('method', 'QR_MANUAL')
+                ->where('status', PaymentStatus::Pending)
+                ->whereNull('payment_proof_submitted_at'))
+            ->latest()
+            ->first();
     }
 
     public function manualPaymentOrderForCustomer(Customer $customer, string $invoice): ?Order

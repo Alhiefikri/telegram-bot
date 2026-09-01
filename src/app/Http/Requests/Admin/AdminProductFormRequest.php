@@ -25,21 +25,22 @@ abstract class AdminProductFormRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->merge([
-            'usage_guide_title' => $this->nullableTrimmedString('usage_guide_title'),
-            'usage_guide_url' => $this->nullableTrimmedString('usage_guide_url'),
-            'product_type' => $this->nullableTrimmedString('product_type'),
-            'access_duration' => $this->nullableTrimmedString('access_duration'),
-            'region' => $this->nullableTrimmedString('region'),
-            'account_type' => $this->nullableTrimmedString('account_type'),
-            'device_limit' => $this->nullableTrimmedString('device_limit'),
-            'included_items' => $this->normalizedLineList('included_items'),
-            'limitations' => $this->normalizedLineList('limitations'),
-            'fulfillment_expectation' => $this->nullableTrimmedString('fulfillment_expectation'),
-            'warranty_policy' => $this->nullableTrimmedString('warranty_policy'),
-            'support_policy' => $this->nullableTrimmedString('support_policy'),
-            'featured_rank' => $this->nullableTrimmedString('featured_rank'),
-        ]);
+        $normalized = [];
+        foreach (['icon', 'usage_guide_title', 'usage_guide_url'] as $field) {
+            if ($this->exists($field)) {
+                $normalized[$field] = $this->nullableTrimmedString($field);
+            }
+        }
+        foreach (self::MERCHANDISING_FIELDS as $field) {
+            if (! $this->exists($field)) {
+                continue;
+            }
+
+            $normalized[$field] = in_array($field, ['included_items', 'limitations'], true)
+                ? $this->normalizedLineList($field)
+                : $this->nullableTrimmedString($field);
+        }
+        $this->merge($normalized);
 
         $value = trim((string) $this->input('usdt_price_amount', ''));
         if ($value === '') {
@@ -67,6 +68,7 @@ abstract class AdminProductFormRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:255'],
+            'icon' => ['nullable', 'string', 'max:32'],
             'price_amount' => ['required', 'integer', 'min:0'],
             'usdt_price_amount' => ['nullable', 'integer', 'min:0'],
             'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')->whereNull('deleted_at')],
@@ -122,7 +124,9 @@ abstract class AdminProductFormRequest extends FormRequest
         $attributes = [];
 
         foreach (self::MERCHANDISING_FIELDS as $field) {
-            $attributes[$field] = $validated[$field] ?? null;
+            if (array_key_exists($field, $validated)) {
+                $attributes[$field] = $validated[$field];
+            }
         }
 
         return $attributes;
@@ -139,6 +143,7 @@ abstract class AdminProductFormRequest extends FormRequest
             'price_amount.integer' => 'Harga harus berupa angka tanpa pemisah.',
             'usdt_price_amount.integer' => 'Harga USDT harus berupa angka dengan maksimal 3 desimal.',
             'description.required' => 'Deskripsi singkat wajib diisi.',
+            'icon.max' => 'Ikon katalog maksimal 32 karakter.',
             'product_type.max' => 'Tipe produk maksimal 100 karakter.',
             'access_duration.max' => 'Durasi akses maksimal 100 karakter.',
             'region.max' => 'Region atau negara maksimal 120 karakter.',

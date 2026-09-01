@@ -129,18 +129,21 @@ class TelegramReceiptNotifier
             $blocks = $this->receiptHeaderBlocks($order, $customer);
             if ($delivery->isEmpty()) {
                 $blocks[] = new TelegramMessageUnit(
-                    $this->locale->translate($customer, 'receipt.no_credentials'),
+                    "\n".$this->locale->translate($customer, 'receipt.no_credentials'),
                 );
             } else {
                 array_push($blocks, ...$this->credentialRenderer->receiptBlocks($customer, $delivery));
             }
 
+            $footerLines = [
+                $this->locale->translate($customer, 'receipt.save_details'),
+            ];
+            if (! $delivery->isEmpty()) {
+                $footerLines[] = $this->locale->translate($customer, 'receipt.copy_guidance');
+            }
+            $footerLines[] = $this->locale->translate($customer, 'receipt.thanks');
             $blocks[] = new TelegramMessageUnit(
-                implode("\n", [
-                    $this->locale->translate($customer, 'receipt.save_details'),
-                    $this->locale->translate($customer, 'receipt.copy_guidance'),
-                    $this->locale->translate($customer, 'receipt.thanks'),
-                ]),
+                "\n".implode("\n\n", $footerLines),
                 replyMarkup: $this->receiptReplyMarkup($customer, []),
             );
 
@@ -285,7 +288,6 @@ class TelegramReceiptNotifier
                 $this->locale->translate($customer, 'receipt.no_credentials'),
                 '',
                 $this->locale->translate($customer, 'receipt.save_details'),
-                $this->locale->translate($customer, 'receipt.copy_guidance'),
                 $this->locale->translate($customer, 'receipt.thanks'),
             ], $customer, $guides, withReplyMarkup: true);
 
@@ -304,7 +306,7 @@ class TelegramReceiptNotifier
             ),
         );
         $units[] = new TelegramMessageUnit(
-            implode("\n", [
+            implode("\n\n", [
                 $this->locale->translate($customer, 'receipt.save_details'),
                 $this->locale->translate($customer, 'receipt.copy_guidance'),
                 $this->locale->translate($customer, 'receipt.thanks'),
@@ -569,45 +571,54 @@ class TelegramReceiptNotifier
     /**
      * @return list<TelegramMessageUnit>
      */
-    private function receiptHeaderBlocks(Order $order, Customer $customer): array
-    {
+    private function receiptHeaderBlocks(
+        Order $order,
+        Customer $customer,
+    ): array {
         $payment = $this->canonicalPaidPayment($order);
-        $lines = [
+        $headerLines = [
             $this->locale->translate($customer, 'receipt.title'),
             '━━━━━━━━━━━━━━',
             $this->locale->translate($customer, 'receipt.order_id', [
                 'order' => $order->invoice_number ?: $order->getKey(),
             ]),
+        ];
+        $productLines = [
             $this->locale->translate($customer, 'receipt.products'),
         ];
-
         foreach ($order->orderItems->sortBy('id')->values() as $item) {
-            $lines[] = '- '.$item->product_name.' x '.$item->quantity;
+            $productLines[] = '- '.$item->product_name.' x '.$item->quantity;
         }
-
-        $lines[] = $this->locale->translate($customer, 'receipt.payment_method', [
-            'method' => $payment instanceof Payment
-                ? $this->locale->paymentMethod($customer, $payment)
-                : $this->locale->translate($customer, 'payment.method.unknown'),
-        ]);
-        $lines[] = $this->locale->translate($customer, 'receipt.paid_at', [
-            'date' => $this->locale->formatDate($customer, $payment?->paid_at ?? $order->updated_at ?? now()),
-        ]);
-        $lines[] = $this->locale->translate($customer, 'receipt.total_quantity', [
-            'quantity' => $order->orderItems->sum(fn ($item): int => max(0, (int) $item->quantity)),
-        ]);
-        $lines[] = $this->locale->translate($customer, 'receipt.amount_paid', [
-            'amount' => $this->formatPaidAmount($order, $payment),
-        ]);
-        $lines[] = $this->locale->translate($customer, 'receipt.product_detail');
-
+        $paymentLines = [
+            $this->locale->translate($customer, 'receipt.payment_method', [
+                'method' => $payment instanceof Payment
+                    ? $this->locale->paymentMethod($customer, $payment)
+                    : $this->locale->translate($customer, 'payment.method.unknown'),
+            ]),
+            '',
+            $this->locale->translate($customer, 'receipt.paid_at', [
+                'date' => $this->locale->formatDate($customer, $payment?->paid_at ?? $order->updated_at ?? now()),
+            ]),
+            '',
+            $this->locale->translate($customer, 'receipt.total_quantity', [
+                'quantity' => $order->orderItems->sum(fn ($item): int => max(0, (int) $item->quantity)),
+            ]),
+            $this->locale->translate($customer, 'receipt.amount_paid', [
+                'amount' => $this->formatPaidAmount($order, $payment),
+            ]),
+        ];
+        $sections = [
+            $headerLines,
+            $productLines,
+            $paymentLines,
+            [$this->locale->translate($customer, 'receipt.product_detail')],
+        ];
         $blocks = [];
-        foreach ($lines as $line) {
-            if ($line === '') {
-                continue;
-            }
-
-            foreach ($this->messageChunker->fromLines([$line], TelegramReceiptPlan::MESSAGE_TEXT_LIMIT) as $chunk) {
+        foreach ($sections as $sectionIndex => $lines) {
+            foreach ($this->messageChunker->fromLines($lines, TelegramReceiptPlan::MESSAGE_TEXT_LIMIT) as $chunkIndex => $chunk) {
+                if ($sectionIndex > 0 && $chunkIndex === 0) {
+                    $chunk = "\n".$chunk;
+                }
                 $blocks[] = new TelegramMessageUnit($chunk);
             }
         }

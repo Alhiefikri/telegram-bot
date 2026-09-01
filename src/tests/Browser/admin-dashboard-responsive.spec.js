@@ -1182,22 +1182,41 @@ test("keeps grouped Product Family controls usable at mobile width", async ({
 
   const group = page
     .locator('[id^="admin-product-family-group-"]')
-    .filter({ hasText: "Browser QA Product Family" })
+    .filter({
+      has: page.locator("h4").filter({ hasText: "Browser QA Product Family" }),
+    })
+    .first();
+  const memberList = group
+    .locator('[id^="admin-product-family-members-"]')
     .first();
   await expect(group).toBeVisible();
-  await expect(group.getByText("Browser QA Produk A")).toBeVisible();
+  await expect(memberList).toBeHidden();
   await expect(
     page.getByRole("heading", { name: "Product standalone" })
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
-    group.getByRole("button", { name: "Tutup pilihan" })
+    group.getByRole("button", { name: "Lihat product" })
   ).toBeVisible();
 
-  await group.getByRole("button", { name: "Tutup pilihan" }).click();
-  await expect(group.getByText("Browser QA Produk A")).toBeHidden();
-  await group.getByRole("button", { name: "Buka pilihan" }).click();
-  await expect(group.getByText("Browser QA Produk A")).toBeVisible();
+  await group.getByRole("button", { name: "Lihat product" }).click();
+  await expect(memberList).toBeVisible();
+  await expect(memberList.getByText("QA option")).toBeVisible();
+  await expect(
+    group.getByRole("button", { name: "Tutup daftar product" })
+  ).toBeVisible();
 
+  await group.getByRole("button", { name: "Tutup daftar product" }).click();
+  await expect(memberList).toBeHidden();
+  await group.getByRole("button", { name: "Lihat product" }).click();
+  await expect(memberList.getByText("QA option")).toBeVisible();
+  const familyId = (await group.getAttribute("id")).replace(
+    "admin-product-family-group-",
+    ""
+  );
+  await group.getByRole("button", { name: "+ Tambah Product" }).click();
+  await expect(
+    page.locator("[data-family-assignment-select]:focus")
+  ).toHaveValue(familyId);
   const editButton = group.getByRole("button", { name: /Edit family/i });
   await editButton.click();
   const modal = page.locator("#admin-product-family-management");
@@ -2479,11 +2498,24 @@ async function expectStoreLinkCopyAndShare(page) {
 
 async function exerciseProductManagementModals(page) {
   const productCard = page.locator("#product-1");
+  const familyGroup = page
+    .locator('[id^="admin-product-family-group-"]')
+    .filter({ has: productCard })
+    .first();
+  await familyGroup.getByRole("button", { name: "Lihat product" }).click();
   await expect(productCard).toBeVisible();
 
   await page.getByRole("button", { name: /Tambah Produk/i }).click();
   const productModal = page.getByRole("dialog", { name: /Tambah produk/i });
   await expect(productModal).toBeVisible();
+  await expect(productModal.locator("#product-description")).toBeVisible();
+  await expect(
+    productModal.getByText("Detail yang dilihat pelanggan")
+  ).toHaveCount(0);
+  await expect(productModal.locator("#product-type")).toHaveCount(0);
+  await expect(
+    productModal.getByText("Catatan pengiriman rahasia")
+  ).toBeVisible();
   await expectElementWithinViewport(page, productModal);
   await productModal.getByRole("button", { name: "Tutup modal" }).click();
   await expect(productModal).toBeHidden();

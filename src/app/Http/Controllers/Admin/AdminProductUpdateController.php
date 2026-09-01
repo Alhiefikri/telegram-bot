@@ -31,12 +31,13 @@ class AdminProductUpdateController extends Controller
                 $categoryId = $validated['category_id'] ?? null;
 
                 $locked = $coherence->lockForCategoryChange($product, $categoryId);
-                $oldValues = $locked->only(['category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $oldValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
                 $oldImagePath = $oldValues['image_path'] ?? null;
 
                 $locked->fill([
                     'category_id' => $validated['category_id'] ?? null,
                     'name' => $validated['name'],
+                    'icon' => $request->exists('icon') ? ($validated['icon'] ?? null) : $locked->icon,
                     'description' => $validated['description'],
                     ...$request->merchandisingAttributes(),
                     'delivery_note' => $validated['delivery_note'] ?? null,
@@ -53,7 +54,7 @@ class AdminProductUpdateController extends Controller
                 }
                 $locked->save();
 
-                $newValues = $locked->only(['category_id', 'name', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $newValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
 
                 $auditLogger->log(
                     'product.updated',

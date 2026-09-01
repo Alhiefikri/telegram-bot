@@ -77,9 +77,9 @@ class AdminProductDashboardFormProtocol
             ->withErrors($validator->errors()->messages(), self::PRODUCT_UPDATE_BAG)
             ->withInput([
                 'name' => $request->input('name'),
+                'icon' => $request->input('icon'),
                 'price_amount' => $request->input('price_amount'),
                 'usdt_price_amount' => $request->input('usdt_price_amount'),
-                'category_id' => $request->input('category_id'),
                 'description' => $request->input('description'),
                 'product_type' => $request->input('product_type'),
                 'access_duration' => $request->input('access_duration'),
@@ -209,7 +209,7 @@ class AdminProductDashboardFormProtocol
     public function productFamilyDeleted(string $familyName, int $productCount): RedirectResponse
     {
         return $this->productFamilyManagementRedirect('create')
-            ->with('status', "Product Family {$familyName} dihapus. {$productCount} Product menjadi standalone; state Product tetap dipertahankan.");
+            ->with('status', "Product Family {$familyName} dihapus. {$productCount} Product tidak lagi tergabung dalam family; state Product tetap dipertahankan.");
     }
 
     public function productFamilyMembershipUpdated(Product $product): RedirectResponse

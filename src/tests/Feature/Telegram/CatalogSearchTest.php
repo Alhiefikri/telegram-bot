@@ -10,6 +10,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramProductNotificationService;
@@ -122,8 +123,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
         $category = Category::factory()->create(['name' => 'Streaming']);
+        $family = ProductFamily::factory()->create(['name' => 'Netflix Premium', 'slug' => 'netflix-premium-english']);
         $product = Product::factory()->create([
             'name' => 'Netflix Premium',
+            'product_family_id' => $family->id,
             'category_id' => $category->id,
             'description' => 'Merchant-authored product copy.',
             'price_amount' => 25000,
@@ -136,7 +139,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(113, 'cb-english-product', 'product:'.$product->id))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) $request['text'], 'Browse Products')
+            && str_contains((string) $request['text'], 'DIGITAL PRODUCT LIST')
             && ! str_contains((string) $request['text'], 'Daftar Produk'));
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'Netflix Premium')
@@ -164,22 +167,26 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $category = Category::factory()->create(['name' => 'Streaming']);
         $unavailableCategory = Category::factory()->create(['name' => 'Preorder']);
         $inactiveCategory = Category::factory()->create(['name' => 'Kategori Mati', 'is_active' => false]);
-        Product::factory()->create(['name' => 'Aktif', 'category_id' => $category->id, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
-        Product::factory()->create(['name' => 'Kosong Aktif', 'category_id' => $unavailableCategory->id, 'is_active' => true, 'stock' => 1, 'reserved_stock' => 1]);
-        Product::factory()->create(['name' => 'Produk Kategori Mati', 'category_id' => $inactiveCategory->id, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
-        Product::factory()->create(['name' => 'Tanpa Kategori', 'category_id' => null, 'is_active' => true, 'stock' => 2, 'reserved_stock' => 0]);
+        $activeFamily = ProductFamily::factory()->create(['name' => 'Aktif', 'slug' => 'aktif']);
+        Product::factory()->create(['name' => 'Aktif', 'product_family_id' => $activeFamily->id, 'category_id' => $category->id, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+        $soldOutFamily = ProductFamily::factory()->create(['name' => 'Kosong Aktif', 'slug' => 'kosong-aktif']);
+        Product::factory()->create(['name' => 'Kosong Aktif', 'product_family_id' => $soldOutFamily->id, 'category_id' => $unavailableCategory->id, 'is_active' => true, 'stock' => 1, 'reserved_stock' => 1]);
+        $inactiveCategoryFamily = ProductFamily::factory()->create(['name' => 'Produk Kategori Mati', 'slug' => 'produk-kategori-mati']);
+        Product::factory()->create(['name' => 'Produk Kategori Mati', 'product_family_id' => $inactiveCategoryFamily->id, 'category_id' => $inactiveCategory->id, 'is_active' => true, 'stock' => 5, 'reserved_stock' => 0]);
+        $uncategorizedFamily = ProductFamily::factory()->create(['name' => 'Tanpa Kategori', 'slug' => 'tanpa-kategori']);
+        Product::factory()->create(['name' => 'Tanpa Kategori', 'product_family_id' => $uncategorizedFamily->id, 'category_id' => null, 'is_active' => true, 'stock' => 2, 'reserved_stock' => 0]);
         Product::factory()->create(['name' => 'Mati', 'is_active' => false]);
 
         $this->postTelegramWebhook($this->messageUpdate(12, '/produk'))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'Lihat Produk')
+            && str_contains($request['text'], 'DAFTAR PRODUK DIGITAL')
             && str_contains($request['text'], 'Aktif')
             && str_contains($request['text'], 'Kosong Aktif')
             && str_contains($request['text'], 'Tanpa Kategori')
             && ! str_contains($request['text'], 'Kategori Mati')
             && ! str_contains($request['text'], 'Produk Kategori Mati')
-            && ! str_contains($request['text'], 'Mati'));
+            && ! str_contains($request['text'], 'Mati ('));
 
         $this->fakeTelegramHttp();
         Product::query()->delete();
@@ -213,13 +220,15 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $category = Category::factory()->create(['name' => 'AI Tools']);
         $otherCategory = Category::factory()->create(['name' => 'Streaming']);
-        Product::factory()->create(['name' => 'Gemini Pro', 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
-        Product::factory()->create(['name' => 'Netflix', 'category_id' => $otherCategory->id, 'stock' => 3, 'reserved_stock' => 0]);
+        $geminiFamily = ProductFamily::factory()->create(['name' => 'Gemini Pro', 'slug' => 'gemini-pro']);
+        $netflixFamily = ProductFamily::factory()->create(['name' => 'Netflix', 'slug' => 'netflix']);
+        Product::factory()->create(['name' => 'Gemini Pro', 'product_family_id' => $geminiFamily->id, 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Netflix', 'product_family_id' => $netflixFamily->id, 'category_id' => $otherCategory->id, 'stock' => 3, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->messageUpdate(133, '/lihat produk'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Lihat Produk')
+            && str_contains($r['text'], 'DAFTAR PRODUK DIGITAL')
             && str_contains($r['text'], 'Gemini Pro')
             && str_contains($r['text'], 'Netflix'));
     }
@@ -229,13 +238,13 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $category = Category::factory()->create(['name' => 'AI Tools']);
-        $product = Product::factory()->create(['name' => 'Gemini Pro', 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
+        $family = ProductFamily::factory()->create(['name' => 'Gemini Pro', 'slug' => 'gemini-pro-single-category']);
+        $product = Product::factory()->create(['name' => 'Gemini Pro', 'product_family_id' => $family->id, 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->messageUpdate(135, '/produk'))->assertOk();
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Lihat Produk')
             && str_contains($r['text'], 'Gemini Pro')
-            && str_contains(json_encode($r->data()), 'product:'.$product->id)
+            && str_contains(json_encode($r->data()), 'family:options:v')
             && ! str_contains($r['text'], 'Pilih kategori yang kamu mau'));
     }
 
@@ -243,14 +252,15 @@ class CatalogSearchTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
-        $product = Product::factory()->create(['name' => 'Tanpa Kategori', 'category_id' => null, 'stock' => 2, 'reserved_stock' => 0]);
+        $family = ProductFamily::factory()->create(['name' => 'Tanpa Kategori', 'slug' => 'tanpa-kategori-only']);
+        $product = Product::factory()->create(['name' => 'Tanpa Kategori', 'product_family_id' => $family->id, 'category_id' => null, 'stock' => 2, 'reserved_stock' => 0]);
 
         $this->postTelegramWebhook($this->messageUpdate(136, '/produk'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Lihat Produk')
+            && str_contains($r['text'], 'DAFTAR PRODUK DIGITAL')
             && str_contains($r['text'], 'Tanpa Kategori')
-            && str_contains(json_encode($r->data()), 'product:'.$product->id)
+            && str_contains(json_encode($r->data()), 'family:options:v')
             && ! str_contains($r['text'], 'Pilih kategori yang kamu mau'));
     }
 
@@ -829,9 +839,11 @@ class CatalogSearchTest extends TelegramBotTestSupport
             'description' => 'Merchant category copy / keep exact.',
         ]);
         $otherCategory = Category::factory()->create(['name' => 'Design']);
+        $family = ProductFamily::factory()->create(['name' => 'Netflix Premium™', 'slug' => 'netflix-premium-locale']);
         $product = Product::factory()->create([
             'name' => 'Netflix Premium™',
             'description' => 'Merchant product copy / keep exact.',
+            'product_family_id' => $family->id,
             'category_id' => $category->id,
             'price_amount' => 25000,
             'stock' => 3,
@@ -847,9 +859,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
         ]);
 
         $locales = [
-            'id' => ['chat_id' => 45101, 'catalog' => 'Lihat Produk', 'list' => 'Daftar Produk', 'details' => 'Detail produk', 'quantity' => 'Jumlah: 1', 'search' => 'Hasil pencarian'],
-            'en' => ['chat_id' => 45102, 'catalog' => 'Browse Products', 'list' => 'Product List', 'details' => 'Product details', 'quantity' => 'Quantity: 1', 'search' => 'Search results'],
-            'ms' => ['chat_id' => 45103, 'catalog' => 'Lihat Produk', 'list' => 'Senarai Produk', 'details' => 'Butiran produk', 'quantity' => 'Kuantiti: 1', 'search' => 'Hasil carian'],
+            'id' => ['chat_id' => 45101, 'catalog' => 'DAFTAR PRODUK DIGITAL', 'list' => 'Daftar Produk', 'details' => 'Detail produk', 'quantity' => 'Jumlah: 1', 'search' => 'Hasil pencarian'],
+            'en' => ['chat_id' => 45102, 'catalog' => 'DIGITAL PRODUCT LIST', 'list' => 'Product List', 'details' => 'Product details', 'quantity' => 'Quantity: 1', 'search' => 'Search results'],
+            'ms' => ['chat_id' => 45103, 'catalog' => 'SENARAI PRODUK DIGITAL', 'list' => 'Senarai Produk', 'details' => 'Butiran produk', 'quantity' => 'Kuantiti: 1', 'search' => 'Hasil carian'],
         ];
 
         foreach ($locales as $index => $locale) {
@@ -869,7 +881,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             foreach ($payloads as $payload) {
                 foreach (($payload['reply_markup']['inline_keyboard'] ?? []) as $row) {
                     foreach ($row as $button) {
-                        if (($button['callback_data'] ?? null) === 'product:'.$product->id) {
+                        if (str_starts_with((string) ($button['callback_data'] ?? ''), 'family:options:v')) {
                             $selectorButtons[] = $button;
                         }
                     }
@@ -878,10 +890,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
             $this->assertCount(3, $selectorButtons);
             foreach ($selectorButtons as $selectorButton) {
-                $this->assertMatchesRegularExpression('/^[1-2]\. /', $selectorButton['text'] ?? '');
-                $this->assertSame('product:'.$product->id, $selectorButton['callback_data'] ?? null);
+                $this->assertMatchesRegularExpression('/^(?:.*\([1-2]\)$|(?:.* )?[1-2](?:\. |$))/', $selectorButton['text'] ?? '');
+                $this->assertStringStartsWith('family:options:v', $selectorButton['callback_data'] ?? '');
                 $this->assertSame('success', $selectorButton['style'] ?? null);
-                $this->assertArrayNotHasKey('icon_custom_emoji_id', $selectorButton);
             }
 
             $this->assertStringContainsString($locale['catalog'], $copy);

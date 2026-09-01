@@ -87,7 +87,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
         }
 
         if (preg_match('/^family:list:([1-9][0-9]{0,18}):o([a-f0-9]{16})$/', $context->data, $matches)) {
-            $opened = $this->catalog->openCatalogOrigin($context->customer, $context->chatId, $matches[2]);
+            $opened = $this->catalog->openCatalogOrigin($context->customer, $context->chatId, $matches[2], $context->messageId);
             if ($opened) {
                 $this->session->forgetWithLock($context->customer);
             }
@@ -103,7 +103,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
             $this->bot->answerCallbackQuery($context->callbackQueryId);
             $this->session->forgetWithLock($context->customer);
             $this->catalogQueries->forget($context->customer);
-            $this->catalog->sendCatalogPage($context->customer, $context->chatId, (int) $matches[1]);
+            $this->catalog->sendCatalogPage($context->customer, $context->chatId, (int) $matches[1], messageId: $context->messageId);
 
             return true;
         }
@@ -117,7 +117,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
             }
             $this->bot->answerCallbackQuery($context->callbackQueryId);
             $this->session->forgetWithLock($context->customer);
-            $this->catalog->sendSearchResults($context->customer, $context->chatId, $search, (int) $matches[2]);
+            $this->catalog->sendSearchResults($context->customer, $context->chatId, $search, (int) $matches[2], $context->messageId);
 
             return true;
         }
@@ -142,6 +142,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
                 beforeSend: function () use ($context): void {
                     $this->session->forgetWithLock($context->customer);
                 },
+                messageId: $context->messageId,
             );
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,
@@ -164,6 +165,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
                 $payload['productId'],
                 $payload['page'],
                 $payload['returnPage'],
+                $context->messageId,
             ));
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,

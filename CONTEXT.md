@@ -107,6 +107,9 @@ _Avoid_: sellable Variant, shared inventory
 An existing sellable Product/SKU shown as a member of a Product Family. Its Product ID remains the identity submitted to cart, checkout, order, inventory, waitlist, and delivery flows.
 _Avoid_: family-level stock, new Variant entity
 
+**Product catalog icon**:
+An optional plain Unicode presentation value stored on a Product and edited through the Admin Dashboard. It is used by the Store Bot catalog and keyboard; when empty, the bot uses a static brand fallback. It is not a secret and must not be configured through ENV.
+
 **Uncategorized Product**:
 An active product that is not assigned to a Product Category. Deleting a Product Category moves its products into this state without changing their active status or sale availability.
 _Avoid_: Deleted product, inactive product
