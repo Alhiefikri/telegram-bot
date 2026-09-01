@@ -5,8 +5,8 @@ namespace App\Services\Telegram;
 use App\Catalog\CatalogBrowseEntry;
 use App\Catalog\CatalogBrowseQuery;
 use App\Catalog\CatalogBrowseResult;
+use App\Catalog\CatalogCategoryReadModel;
 use App\Catalog\CatalogProductReadModel;
-use App\Models\Category;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Services\Catalog\CatalogBrowse;
@@ -57,21 +57,15 @@ class TelegramCatalogIntents
 
     public function sendCategoryPicker(Customer $customer, string $chatId): void
     {
-        $categories = Category::query()
-            ->where('is_active', true)
-            ->whereHas('products', fn ($query) => $query->publicVisible())
-            ->orderBy('sort_order')
-            ->orderBy('name')
-            ->get();
-        $hasUncategorized = Product::query()->publicVisible()->whereNull('category_id')->exists();
-        $keyboard = $categories
-            ->map(fn (Category $category): array => [[
+        $options = $this->browse->publicCategoryOptions(withProductsOnly: true);
+        $keyboard = collect($options->categories)
+            ->map(fn (CatalogCategoryReadModel $category): array => [[
                 'text' => '📂 '.$category->name,
                 'callback_data' => 'category:'.$category->id,
             ]])
             ->values()
             ->all();
-        if ($hasUncategorized) {
+        if ($options->hasUncategorized) {
             $keyboard[] = [[
                 'text' => $this->locale->translate($customer, 'catalog.uncategorized'),
                 'callback_data' => 'category:uncategorized',
@@ -82,7 +76,7 @@ class TelegramCatalogIntents
             'callback_data' => 'family:back:menu',
         ]];
 
-        $message = $categories->isEmpty() && ! $hasUncategorized
+        $message = $options->categories === [] && ! $options->hasUncategorized
             ? $this->locale->translate($customer, 'catalog.empty')
             : $this->locale->translate($customer, 'catalog.category_filter');
         $this->bot->sendMessage($chatId, $message, ['inline_keyboard' => $keyboard]);
@@ -593,22 +587,18 @@ class TelegramCatalogIntents
 
     public function sendCategoryProducts(Customer $customer, string $chatId, string $categoryId, int $page = 1): void
     {
-        $category = null;
-        if ($categoryId !== 'uncategorized') {
-            $category = Category::query()
-                ->whereKey((int) $categoryId)
-                ->where('is_active', true)
-                ->first();
-            if (! $category) {
-                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.category.unavailable'), [
-                    'inline_keyboard' => [[[
-                        'text' => $this->locale->translate($customer, 'catalog.back_categories'),
-                        'callback_data' => 'catalog:categories',
-                    ]]],
-                ]);
+        $category = $categoryId === 'uncategorized'
+            ? null
+            : $this->browse->findPublicCategory($categoryId);
+        if ($categoryId !== 'uncategorized' && $category === null) {
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.category.unavailable'), [
+                'inline_keyboard' => [[[
+                    'text' => $this->locale->translate($customer, 'catalog.back_categories'),
+                    'callback_data' => 'catalog:categories',
+                ]]],
+            ]);
 
-                return;
-            }
+            return;
         }
 
         $requestedPage = max(1, $page);
