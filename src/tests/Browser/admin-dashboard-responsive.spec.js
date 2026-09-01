@@ -324,6 +324,71 @@ test("keeps customer checkout lazy modal failures on the product page", async ({
   }
 });
 
+test("restores customer checkout errors on the shop catalog through lazy modal", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+
+  const productCard = page
+    .locator("a[data-modal-url]")
+    .filter({ hasText: "Browser QA Produk A" })
+    .first();
+  await expect(productCard).toBeVisible();
+
+  const productId = Number(
+    (await productCard.getAttribute("id")).replace("product-", "")
+  );
+  expect(await productCard.getAttribute("data-product")).toBeNull();
+  const modalResponse = page.waitForResponse(
+    (response) =>
+      response.url() === `${baseUrl}/produk/${productId}/modal` &&
+      response.request().method() === "GET"
+  );
+
+  await page.evaluate((productId) => {
+    const root = document.querySelector('[x-data="storefrontModal()"]');
+    const modal = root?._x_dataStack?.[0];
+
+    if (!modal) {
+      throw new Error("Storefront modal component is unavailable");
+    }
+
+    modal.restoreCheckout = {
+      productId,
+      quantity: 2,
+      buyerName: "Restored Buyer",
+      termsAccepted: true,
+      supportContactChannel: "",
+      supportContactValue: "",
+      email: "restored@example.test",
+      paymentMethod: "qris",
+    };
+    modal.reopenFailedCheckout();
+  }, productId);
+
+  await modalResponse;
+  const dialog = page.getByRole("dialog", {
+    name: "Browser QA Produk A",
+  });
+
+  await expect(dialog).toBeVisible();
+  await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+  await expect(dialog.locator("#storefront-buyer-name")).toHaveValue(
+    "Restored Buyer"
+  );
+  await expect(dialog.locator("#storefront-email")).toHaveValue(
+    "restored@example.test"
+  );
+  await expect(dialog.locator("#storefront-terms-accepted")).toBeChecked();
+  await expect(dialog.locator("span.min-w-8")).toHaveText("2");
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(productCard).toBeFocused();
+  await expectNoDocumentOverflow(page);
+});
+
 test("keeps customer checkout QRIS-first across browser locales", async ({
   browser,
 }) => {

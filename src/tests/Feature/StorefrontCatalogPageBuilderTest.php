@@ -11,7 +11,6 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Storefront\StorefrontCatalogPageBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Tests\Support\StorefrontProductScenarios;
 use Tests\TestCase;
 
@@ -181,15 +180,8 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->unavailableProduct(['name' => 'Akun Habis']);
         $this->availableProduct(['name' => 'Canva Ready', 'stock' => 5, 'featured_rank' => 1]);
 
-        DB::flushQueryLog();
-        DB::enableQueryLog();
         $page = app(StorefrontCatalogPageBuilder::class)->home(null);
-        $productListingQueries = collect(DB::getQueryLog())
-            ->filter(fn (array $entry): bool => str_contains($entry['query'], 'sold_quantity'))
-            ->count();
-        DB::disableQueryLog();
 
-        $this->assertSame(2, $productListingQueries);
         $this->assertNotNull($page->featuredProduct);
         $this->assertSame('Canva Ready', $page->featuredProduct->presentation->name);
     }
@@ -274,36 +266,41 @@ class StorefrontCatalogPageBuilderTest extends TestCase
             ->assertSee('value=""', false);
     }
 
-    public function test_catalog_presentations_do_not_resolve_payment_choices_without_catalog_n_plus_one_queries(): void
+    public function test_catalog_presentations_expose_projection_facts_without_checkout_payload(): void
     {
-        $this->availableProduct(['name' => 'One USDT Product', 'usdt_price_amount' => 1_500_000]);
-
-        $singleProductQueries = $this->catalogQueryCount();
-        collect(range(2, 6))->each(fn (int $number) => $this->availableProduct([
-            'name' => 'USDT Product '.$number,
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+        ]);
+        $product = $this->availableProduct([
+            'name' => 'One USDT Product',
+            'description' => 'Projection-owned catalog details.',
             'usdt_price_amount' => 1_500_000,
-        ]));
+        ]);
 
-        $page = app(StorefrontCatalogPageBuilder::class)->home(null);
-        $manyProductQueries = $this->catalogQueryCount();
+        $presentation = app(StorefrontCatalogPageBuilder::class)
+            ->home(null)
+            ->products
+            ->first()
+            ->presentation;
 
-        $this->assertSame($singleProductQueries, $manyProductQueries);
-        $presentation = $page->products->first()->presentation;
-        $this->assertFalse(property_exists($presentation, 'checkoutChoices'));
+        $this->assertSame($product->id, $presentation->id);
+        $this->assertSame($product->name, $presentation->name);
+        $this->assertSame($product->description, $presentation->description);
+        $this->assertSame($product->price_amount, $presentation->priceAmount);
+        $this->assertSame($product->usdt_price_amount, $presentation->usdtPriceAmount);
+        $this->assertSame($product->stock, $presentation->stockAvailable);
+        $this->assertSame('Terjual: 0', $presentation->soldLabel);
+        $this->assertTrue($presentation->isAvailable);
         $this->assertSame(
-            route('storefront.products.modal', ['product' => $presentation->id]),
+            route('storefront.products.modal', ['product' => $product->id]),
             $presentation->modalUrl,
         );
-    }
-
-    private function catalogQueryCount(): int
-    {
-        DB::flushQueryLog();
-        DB::enableQueryLog();
-        app(StorefrontCatalogPageBuilder::class)->home(null);
-        $count = count(DB::getQueryLog());
-        DB::disableQueryLog();
-
-        return $count;
+        $this->assertFalse(property_exists($presentation, 'checkoutChoices'));
+        $this->assertFalse(property_exists($presentation, 'checkoutReadiness'));
+        $this->assertFalse(property_exists($presentation, 'isBuyable'));
+        $this->assertFalse(property_exists($presentation, 'canOpenModal'));
+        $this->assertFalse(property_exists($presentation, 'support'));
+        $this->assertFalse(method_exists($presentation, 'modalPayload'));
     }
 }

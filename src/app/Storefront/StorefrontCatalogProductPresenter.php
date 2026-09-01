@@ -8,6 +8,7 @@ final class StorefrontCatalogProductPresenter
 {
     public function __construct(
         private readonly StorefrontUrl $urls,
+        private readonly StorefrontProductPlaceholder $placeholder,
     ) {}
 
     public function present(CatalogProductReadModel $product): StorefrontCatalogProductPresentation
@@ -49,6 +50,6 @@ final class StorefrontCatalogProductPresenter
     {
         return StorefrontProductPresentationNormalizer::publicStorageUrl($product->imagePath)
             ?? StorefrontProductPresentationNormalizer::publicStorageUrl($product->imageUrl)
-            ?? StorefrontProductPresentationNormalizer::configuredProductImageUrl();
+            ?? $this->placeholder->imageUrl();
     }
 }

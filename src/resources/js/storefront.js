@@ -1651,31 +1651,40 @@ export function storefrontModal() {
       const card = document.getElementById(
         `product-${this.restoreCheckout.productId}`
       );
-      const payload =
-        card?.dataset?.product ||
-        this.checkoutProductPayloadFor(this.restoreCheckout.productId);
+      const opener =
+        card ||
+        document.getElementById("product-checkout-cta") ||
+        document.activeElement;
+      const restoreOptions = {
+        opener,
+        quantity: this.restoreCheckout.quantity,
+        buyerName: this.restoreCheckout.buyerName,
+        termsAccepted: Boolean(this.restoreCheckout.termsAccepted),
+        supportContactChannel: this.restoreCheckout.supportContactChannel,
+        email: this.restoreCheckout.email,
+        supportContactValue: this.restoreCheckout.supportContactValue,
+        focusInvalid: true,
+      };
+
+      if (card?.dataset?.modalUrl) {
+        void this.openProductModalFromUrl(card.dataset.modalUrl, {
+          ...restoreOptions,
+          fallbackUrl: card.href,
+        });
+
+        return;
+      }
+
+      const payload = this.checkoutProductPayloadFor(
+        this.restoreCheckout.productId
+      );
 
       if (!payload) {
         return;
       }
 
       try {
-        this.openProductModal(
-          typeof payload === "string" ? JSON.parse(payload) : payload,
-          {
-            opener:
-              card ||
-              document.getElementById("product-checkout-cta") ||
-              document.activeElement,
-            quantity: this.restoreCheckout.quantity,
-            buyerName: this.restoreCheckout.buyerName,
-            termsAccepted: Boolean(this.restoreCheckout.termsAccepted),
-            supportContactChannel: this.restoreCheckout.supportContactChannel,
-            email: this.restoreCheckout.email,
-            supportContactValue: this.restoreCheckout.supportContactValue,
-            focusInvalid: true,
-          }
-        );
+        this.openProductModal(payload, restoreOptions);
         window.setTimeout(() => this.focusModal(true), 800);
       } catch {
         // Keep the global checkout error visible if the product payload is stale.

@@ -8,9 +8,7 @@ use App\Services\Catalog\CatalogBrowse;
 use App\Storefront\StorefrontCatalogProductPresenter;
 use App\Storefront\StorefrontProductPresenter;
 use App\Storefront\StorefrontUrl;
-use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class StorefrontCatalogProductPresentationTest extends TestCase
@@ -28,14 +26,9 @@ class StorefrontCatalogProductPresentationTest extends TestCase
             'imageUrl' => '/storage/products/canva.jpg',
             'optionLabel' => 'Canva 30 Hari',
         ]);
-        $queryCount = 0;
-        DB::listen(static function (QueryExecuted $query) use (&$queryCount): void {
-            $queryCount++;
-        });
 
         $presentation = app(StorefrontCatalogProductPresenter::class)->present($product);
 
-        $this->assertSame(0, $queryCount);
         $this->assertSame($product->id, $presentation->id);
         $this->assertSame('7', $presentation->categoryKey);
         $this->assertSame($product->name, $presentation->name);

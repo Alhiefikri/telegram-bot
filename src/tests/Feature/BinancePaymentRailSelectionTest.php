@@ -380,20 +380,19 @@ class BinancePaymentRailSelectionTest extends TestCase
     {
         config()->set('services.binance.pay_id', '987654321');
         $this->activeReceiver('0xcccccccccccccccccccccccccccccccccccccccc');
-        Product::factory()->create([
+        $product = Product::factory()->create([
             'stock' => 1,
             'reserved_stock' => 0,
             'usdt_price_amount' => 2_500_000,
         ]);
 
-        $this->get(route('storefront.home'))
+        $this->getJson(route('storefront.products.modal', $product))
             ->assertOk()
-            ->assertSee('websiteBinancePayId', false)
-            ->assertSee('websiteUsdtBep20', false)
-            ->assertSee('name="payment_choice"', false)
-            ->assertSee('name="payment_method"', false)
-            ->assertSee('cancelBinanceRailSelection', false)
-            ->assertSee('>Cancel<', false);
+            ->assertJsonPath('status', 'ready')
+            ->assertJsonPath('product.checkout.websiteBinancePayId.key', 'website_binance_pay_id')
+            ->assertJsonPath('product.checkout.websiteUsdtBep20.key', 'website_usdt_bep20')
+            ->assertJsonPath('product.checkout.websiteBinancePayId.enabled', true)
+            ->assertJsonPath('product.checkout.websiteUsdtBep20.enabled', true);
     }
 
     private function activeReceiver(string $address): BscPaymentReceiver
