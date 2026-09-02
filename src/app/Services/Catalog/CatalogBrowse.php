@@ -303,7 +303,7 @@ final class CatalogBrowse
             ->withAvailability()
             ->withSum(['orderItems as sold_quantity' => fn ($query) => $query
                 ->whereHas('order', fn ($order) => $order
-                    ->where('order_status', OrderStatus::Completed)
+                    ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
                     ->where('payment_status', PaymentStatus::Paid))], 'quantity')
             ->when($public, fn (Builder $query) => $query->publicVisible())
             ->when($category !== null, function (Builder $query) use ($category, $public): void {

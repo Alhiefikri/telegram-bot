@@ -105,7 +105,7 @@ class StorefrontProductPresenter
         return (int) OrderItem::query()
             ->where('product_id', $product->id)
             ->whereHas('order', fn ($order) => $order
-                ->where('order_status', OrderStatus::Completed)
+                ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
                 ->where('payment_status', PaymentStatus::Paid))
             ->sum('quantity');
     }

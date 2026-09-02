@@ -2,10 +2,13 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Cart;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
@@ -86,6 +89,47 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(41006, 'family-catalog-back', $catalogBackCallback['callback_data'], [], 41001))->assertOk();
         $catalogAfterBack = $this->lastMessageContaining('Netflix');
         $this->assertStringNotContainsString('Netflix Individual', (string) $catalogAfterBack['text']);
+    }
+
+    public function test_family_options_aggregate_sold_quantity_across_paid_processing_variants(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41006, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Aggregate Family', 'slug' => 'aggregate-family']);
+        $first = Product::factory()->create([
+            'name' => 'Aggregate Basic',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'family_option_label' => 'Basic',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $second = Product::factory()->create([
+            'name' => 'Aggregate Premium',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'family_option_label' => 'Premium',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $first->id, 'quantity' => 4]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $second->id, 'quantity' => 6]);
+
+        $this->openFamilyFromDeepLink($customer, 41007, $family);
+
+        $options = $this->lastMessageContaining('Pilih opsi Aggregate Family');
+        $this->assertStringContainsString('Terjual: 10', (string) $options['text']);
+        $this->assertStringContainsString('Terjual: 4', (string) $options['text']);
+        $this->assertStringContainsString('Terjual: 6', (string) $options['text']);
     }
 
     public function test_product_menu_paginates_ten_product_families_per_page(): void

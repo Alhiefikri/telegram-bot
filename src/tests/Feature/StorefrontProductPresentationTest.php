@@ -87,10 +87,14 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertNull($presentation->modalPayload());
     }
 
-    public function test_product_presentation_counts_paid_completed_sales_only(): void
+    public function test_product_presentation_counts_paid_processable_sales_only(): void
     {
         $product = $this->availableProduct(['name' => 'ChatGPT Plus Private']);
-        $paidOrder = Order::factory()->create([
+        $paidProcessingOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $paidCompletedOrder = Order::factory()->create([
             'order_status' => OrderStatus::Completed,
             'payment_status' => PaymentStatus::Paid,
         ]);
@@ -99,13 +103,14 @@ class StorefrontProductPresentationTest extends TestCase
             'payment_status' => PaymentStatus::Pending,
         ]);
 
-        OrderItem::factory()->create(['order_id' => $paidOrder->id, 'product_id' => $product->id, 'quantity' => 3]);
+        OrderItem::factory()->create(['order_id' => $paidProcessingOrder->id, 'product_id' => $product->id, 'quantity' => 3]);
+        OrderItem::factory()->create(['order_id' => $paidCompletedOrder->id, 'product_id' => $product->id, 'quantity' => 2]);
         OrderItem::factory()->create(['order_id' => $pendingOrder->id, 'product_id' => $product->id, 'quantity' => 5]);
 
         $presentation = app(StorefrontProductPresenter::class)->present($product);
 
-        $this->assertSame(3, $presentation->soldQuantity);
-        $this->assertSame('Terjual: 3', $presentation->soldLabel);
+        $this->assertSame(5, $presentation->soldQuantity);
+        $this->assertSame('Terjual: 5', $presentation->soldLabel);
     }
 
     public function test_unavailable_product_presentation_stays_visible_without_checkout_actions(): void
