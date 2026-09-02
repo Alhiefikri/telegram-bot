@@ -194,7 +194,6 @@ final class BscReadiness
         $this->rpc->{'transferLogs'}($contract, 'latest', 'latest', self::READINESS_PROBE_RECEIVER);
     }
 
-
     private function cacheSeconds(): int
     {
         return max(

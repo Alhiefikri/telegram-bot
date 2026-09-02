@@ -181,7 +181,6 @@ final class BscReadinessTest extends TestCase
         $this->assertArrayHasKey('BSC_USDT_DECIMALS', $report->invalid);
     }
 
-
     public function test_readiness_is_cached_and_invalidated_after_setting_and_receiver_mutations(): void
     {
         $readiness = app(BscReadiness::class);

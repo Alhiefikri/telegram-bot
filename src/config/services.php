@@ -1,5 +1,7 @@
 <?php
 
+use App\Services\Bsc\BscReadiness;
+
 return [
     'credentials' => [
         // Optional override. When omitted, CredentialIdentityFingerprint
@@ -14,7 +16,7 @@ return [
         // limits are pinned here.
         'rpc_url' => env('BSC_RPC_URL'),
         'chain_id' => 56,
-        'usdt_contract' => \App\Services\Bsc\BscReadiness::APPROVED_USDT_CONTRACT,
+        'usdt_contract' => BscReadiness::APPROVED_USDT_CONTRACT,
         'explorer_base_url' => 'https://bscscan.com',
         'explorer_allowed_hosts' => ['bscscan.com', 'www.bscscan.com'],
         'expected_token_decimals' => 18,
