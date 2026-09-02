@@ -1,0 +1,300 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Services\Sakurupiah\SakurupiahApplicationException;
+use App\Services\Sakurupiah\SakurupiahClient;
+use App\Services\Sakurupiah\SakurupiahCreateInvoice;
+use App\Services\Sakurupiah\SakurupiahHistoryFilter;
+use App\Services\Sakurupiah\SakurupiahHttpException;
+use App\Services\Sakurupiah\SakurupiahJsonException;
+use App\Services\Sakurupiah\SakurupiahProviderAdapter;
+use App\Services\Sakurupiah\SakurupiahReadinessException;
+use App\Services\Sakurupiah\SakurupiahSchemaException;
+use App\Services\Sakurupiah\SakurupiahTransportException;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
+
+class SakurupiahGatewayTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
+            'sandbox_api_id' => 'api-test',
+            'sandbox_api_key' => 'secret-key',
+            'http_timeout_seconds' => 4.5,
+            'http_connect_timeout_seconds' => 1.5,
+            'lookup_max_attempts' => 3,
+            'lookup_retry_delay_ms' => 0,
+            'lookup_retry_max_delay_ms' => 0,
+        ]));
+    }
+
+    public function test_provider_adapter_is_bound_without_activating_checkout(): void
+    {
+        $this->assertInstanceOf(SakurupiahClient::class, app(SakurupiahProviderAdapter::class));
+    }
+
+    public function test_create_posts_exact_sandbox_contract_and_signature_once(): void
+    {
+        Http::fake(fn () => Http::response([
+            'status' => '200',
+            'message' => 'success',
+            'data' => [[
+                'trx_id' => 'trx-408',
+                'merchant_ref' => 'INV-408',
+                'payment_kode' => 'QRIS',
+                'payment_status' => 'pending',
+                'amount' => '0012000',
+                'total' => '12084',
+                'fee' => '84',
+                'date' => '2026-09-02',
+                'time' => '12:00:00',
+                'expired' => '2026-09-03 12:00:00',
+            ]],
+        ], 200));
+
+        $invoice = $this->invoice();
+        $result = app(SakurupiahProviderAdapter::class)->createInvoice($invoice);
+
+        $this->assertSame('trx-408', $result->transactionId());
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => $request->method() === 'POST'
+            && $request->url() === 'https://sakurupiah.id/api-sanbox/create.php'
+            && $request->hasHeader('Authorization', 'Bearer secret-key')
+            && $request->hasHeader('Content-Type', 'application/x-www-form-urlencoded')
+            && $request->hasHeader('Accept', 'application/json')
+            && $request['api_id'] === 'api-test'
+            && $request['method'] === 'QRIS'
+            && $request['phone'] === '08123456789'
+            && $request['amount'] === '0012000'
+            && $request['merchant_fee'] === 1
+            && $request['merchant_ref'] === 'INV-408'
+            && $request['callback_url'] === 'https://store.example.test/api/webhook/sakurupiah'
+            && $request['return_url'] === 'https://store.example.test/shop/orders/INV-408'
+            && $request['signature'] === 'b391f6c916a551d6deb83d37e408f5616b1566094f137528f536ce7a50e49054');
+    }
+
+    public function test_list_channels_posts_provider_path_and_returns_typed_metadata(): void
+    {
+        Http::fake(fn () => Http::response([
+            'status' => '200',
+            'data' => [[
+                'kode' => 'QRIS',
+                'nama' => 'QRIS',
+                'minimal' => '500',
+                'maksimal' => 2_000_000,
+                'biaya' => '0.7%',
+                'percent' => '0.7',
+                'tipe' => 'DIRECT',
+                'status' => 'Aktif',
+                'addition' => ['default_expired' => '24'],
+            ]],
+        ], 200));
+
+        $channels = app(SakurupiahProviderAdapter::class)->listChannels();
+
+        $this->assertCount(1, $channels);
+        $this->assertTrue($channels[0]->isQris());
+        $this->assertTrue($channels[0]->isActive());
+        $this->assertSame(500, $channels[0]->minimumAmount());
+        $this->assertSame('0.7%', $channels[0]->fee?->submitted());
+        $this->assertSame('0.7', $channels[0]->percent);
+        Http::assertSent(fn ($request) => $request->url() === 'https://sakurupiah.id/api-sanbox/list-payment.php'
+            && $request['api_id'] === 'api-test'
+            && $request['method'] === 'list');
+    }
+
+    public function test_balance_posts_provider_path_and_returns_typed_amount(): void
+    {
+        Http::fake(fn () => Http::response([
+            'status' => '200',
+            'data' => ['saldo' => '12345', 'currency' => 'IDR'],
+        ], 200));
+
+        $balance = app(SakurupiahProviderAdapter::class)->checkBalance();
+
+        $this->assertSame(12345, $balance->value());
+        Http::assertSent(fn ($request) => $request->url() === 'https://sakurupiah.id/api-sanbox/check_balance.php'
+            && $request['api_id'] === 'api-test'
+            && $request['method'] === 'balance');
+    }
+
+    public function test_readiness_failure_precedes_signature_and_http(): void
+    {
+        config()->set('services.sakurupiah.sandbox_api_key', null);
+        Http::fake();
+
+        try {
+            app(SakurupiahProviderAdapter::class)->createInvoice($this->invoice());
+            $this->fail('Expected readiness failure.');
+        } catch (SakurupiahReadinessException $exception) {
+            $this->assertStringContainsString('API key', $exception->getMessage());
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_status_retries_429(): void
+    {
+        Http::fakeSequence()
+            ->push(['status' => '429', 'message' => 'retry'], 429)
+            ->push(['status' => '200', 'data' => [['status' => 'pending']]], 200);
+
+        $status = app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+
+        $this->assertTrue($status->isPending());
+        Http::assertSentCount(2);
+    }
+
+    public function test_status_retries_5xx(): void
+    {
+        Http::fakeSequence()
+            ->push(['status' => '500', 'message' => 'retry'], 500)
+            ->push(['status' => '200', 'data' => [['status' => 'pending']]], 200);
+
+        $status = app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+
+        $this->assertTrue($status->isPending());
+        Http::assertSentCount(2);
+    }
+
+    public function test_status_does_not_retry_unauthorized_http_failure(): void
+    {
+        Http::fake(fn () => Http::response(['status' => '401'], 401));
+
+        try {
+            app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+            $this->fail('Expected HTTP failure.');
+        } catch (SakurupiahHttpException $exception) {
+            $this->assertSame(401, $exception->httpStatus);
+        }
+        Http::assertSentCount(1);
+    }
+
+    public function test_create_transport_failure_is_outcome_unknown_and_never_retried(): void
+    {
+        $attempts = 0;
+        Http::fake(function () use (&$attempts) {
+            $attempts++;
+            throw new ConnectionException('connection failed');
+        });
+
+        try {
+            app(SakurupiahProviderAdapter::class)->createInvoice($this->invoice());
+            $this->fail('Expected create transport failure.');
+        } catch (SakurupiahTransportException $exception) {
+            $this->assertTrue($exception->isOutcomeUnknown());
+        }
+
+        $this->assertSame(1, $attempts);
+    }
+
+    public function test_create_http_failure_is_outcome_unknown_and_never_retried(): void
+    {
+        $attempts = 0;
+        Http::fake(function () use (&$attempts) {
+            $attempts++;
+
+            return Http::response(['status' => '503'], 503);
+        });
+
+        try {
+            app(SakurupiahProviderAdapter::class)->createInvoice($this->invoice());
+            $this->fail('Expected create HTTP failure.');
+        } catch (SakurupiahHttpException $exception) {
+            $this->assertTrue($exception->isOutcomeUnknown());
+        }
+
+        $this->assertSame(1, $attempts);
+    }
+
+    public function test_client_distinguishes_json_application_failure(): void
+    {
+        Http::fake(fn () => Http::response(['status' => '400', 'message' => 'rejected'], 200));
+
+        $this->expectException(SakurupiahApplicationException::class);
+        app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+    }
+
+    public function test_client_distinguishes_invalid_json(): void
+    {
+        Http::fake(fn () => Http::response('not-json', 200));
+
+        $this->expectException(SakurupiahJsonException::class);
+        app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+    }
+
+    public function test_client_distinguishes_schema_failure(): void
+    {
+        Http::fake(fn () => Http::response(['status' => '200'], 200));
+
+        $this->expectException(SakurupiahSchemaException::class);
+        app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+    }
+
+    public function test_client_rejects_overflowing_application_status_without_casting(): void
+    {
+        Http::fake(fn () => Http::response([
+            'status' => '999999999999999999999999999999',
+        ], 200));
+
+        $this->expectException(SakurupiahSchemaException::class);
+        app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+    }
+
+    public function test_client_distinguishes_http_failure(): void
+    {
+        Http::fake(fn () => Http::response(['status' => '400'], 400));
+
+        $this->expectException(SakurupiahHttpException::class);
+        app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+    }
+
+    public function test_history_preserves_provider_mechant_spelling(): void
+    {
+        Http::fake(fn () => Http::response([
+            'status' => '200',
+            'data' => [[
+                'trx_id' => 'trx-408',
+                'merchant_ref' => 'INV-408',
+                'payment_kode' => 'QRIS',
+                'amount' => '12000',
+                'status' => 'pending',
+            ]],
+        ], 200));
+
+        $items = app(SakurupiahProviderAdapter::class)->transactionHistory(new SakurupiahHistoryFilter(
+            mechant: 1,
+            trxId: 'trx-408',
+            merchantRef: 'INV-408',
+        ));
+
+        $this->assertCount(1, $items);
+        Http::assertSent(fn ($request) => $request->url() === 'https://sakurupiah.id/api-sanbox/transaction.php'
+            && $request['api_id'] === 'api-test'
+            && $request['method'] === 'transaction'
+            && $request['mechant'] === 1
+            && $request['trx_id'] === 'trx-408'
+            && $request['merchant_ref'] === 'INV-408'
+            && ! array_key_exists('merchant', $request->data()));
+    }
+
+    private function invoice(): SakurupiahCreateInvoice
+    {
+        return new SakurupiahCreateInvoice(
+            method: 'QRIS',
+            phone: '08123456789',
+            amount: '0012000',
+            merchantFee: 1,
+            merchantRef: 'INV-408',
+            callbackUrl: 'https://store.example.test/api/webhook/sakurupiah',
+            returnUrl: 'https://store.example.test/shop/orders/INV-408',
+        );
+    }
+}

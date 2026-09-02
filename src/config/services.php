@@ -152,6 +152,27 @@ return [
         'reporting_max_limit' => (int) env('KLIKQRIS_REPORTING_MAX_LIMIT', 100),
     ],
 
+    'sakurupiah' => [
+        // Keep sandbox and production credentials/configuration separate.
+        // The provider remains disabled until its external contract gates
+        // have been qualified and an owner explicitly enables it.
+        'sandbox_enabled' => (bool) env('SAKURUPIAH_SANDBOX_ENABLED', false),
+        'sandbox_base_url' => env('SAKURUPIAH_SANDBOX_BASE_URL', 'https://sakurupiah.id/api-sanbox/'),
+        'sandbox_api_id' => env('SAKURUPIAH_SANDBOX_API_ID'),
+        'sandbox_api_key' => env('SAKURUPIAH_SANDBOX_API_KEY'),
+        'production_enabled' => (bool) env('SAKURUPIAH_PRODUCTION_ENABLED', false),
+        'production_base_url' => env('SAKURUPIAH_PRODUCTION_BASE_URL', 'https://sakurupiah.id/api/'),
+        'production_api_id' => env('SAKURUPIAH_PRODUCTION_API_ID'),
+        'production_api_key' => env('SAKURUPIAH_PRODUCTION_API_KEY'),
+        'timezone' => env('SAKURUPIAH_TIMEZONE', 'Asia/Jakarta'),
+        'callback_expired_status_codes' => [2],
+        'http_timeout_seconds' => (float) env('SAKURUPIAH_HTTP_TIMEOUT_SECONDS', 10),
+        'http_connect_timeout_seconds' => (float) env('SAKURUPIAH_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
+        'lookup_max_attempts' => (int) env('SAKURUPIAH_LOOKUP_MAX_ATTEMPTS', 3),
+        'lookup_retry_delay_ms' => (int) env('SAKURUPIAH_LOOKUP_RETRY_DELAY_MS', 250),
+        'lookup_retry_max_delay_ms' => (int) env('SAKURUPIAH_LOOKUP_RETRY_MAX_DELAY_MS', 1000),
+    ],
+
     // Verification budgets intentionally differ by caller. Interactive
     // surfaces get one visible retry, webhook work is bounded before it is
     // acknowledged, and reconciliation is allowed to be persistent.
