@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\PaymentReceiptReport;
+use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Telegram\SalesProofPostNumbering;
 use App\Support\Money;
 use App\Support\PaymentProvider;
@@ -20,6 +21,7 @@ final class AdminDashboardStatsData
 {
     public function __construct(
         private readonly KlikQrisProviderReadiness $klikQrisReadiness,
+        private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
         private readonly SalesProofPostNumbering $salesProofNumbers,
         private readonly PaymentReceiptReport $receiptReport,
         private readonly CheckoutMaintenance $maintenance,
@@ -153,23 +155,33 @@ final class AdminDashboardStatsData
         $isKlikQrisConfigured = $klikQrisReadiness->isReady();
         $isKlikQrisEnabled = $requestedMode === PaymentProvider::KLIKQRIS && $isKlikQrisConfigured;
         $isKlikQrisRequestedButUnavailable = $requestedMode === PaymentProvider::KLIKQRIS && ! $isKlikQrisConfigured;
+        $sakurupiahReadiness = $this->sakurupiahReadiness->observe();
+        $isSakurupiahConfigured = $sakurupiahReadiness->isReady();
+        $isSakurupiahEnabled = $requestedMode === PaymentProvider::SAKURUPIAH && $isSakurupiahConfigured;
+        $isSakurupiahRequestedButUnavailable = $requestedMode === PaymentProvider::SAKURUPIAH && ! $isSakurupiahConfigured;
         $isPakasirRequested = $requestedMode === PaymentProvider::PAKASIR;
         $effectiveMode = $requestedMode;
 
         $label = match (true) {
             $isPakasirRequested => 'Pakasir retired — checkout blocked',
+            $isSakurupiahEnabled => 'Sakurupiah aktif',
+            $isSakurupiahRequestedButUnavailable => 'Sakurupiah aktif — belum siap',
             $isKlikQrisEnabled => 'KlikQRIS aktif',
             $isKlikQrisRequestedButUnavailable => 'KlikQRIS aktif — belum siap',
             default => 'Manual /payment aktif',
         };
         $hint = match (true) {
             $isPakasirRequested => 'Setting lama Pakasir dipertahankan tanpa fallback. Selesaikan cutover provider sebelum membuka checkout baru.',
+            $isSakurupiahEnabled => 'Provider Sakurupiah untuk checkout baru. Payment lama tetap diproses berdasarkan provider yang tersimpan.',
+            $isSakurupiahRequestedButUnavailable => 'Sakurupiah tetap menjadi provider aktif dan tidak dialihkan otomatis. Perbaiki readiness sebelum checkout baru dibuka.',
             $isKlikQrisEnabled => 'Provider KlikQRIS untuk checkout baru. Payment lama tetap diproses berdasarkan provider yang tersimpan.',
             $isKlikQrisRequestedButUnavailable => 'KlikQRIS tetap menjadi provider aktif dan tidak dialihkan otomatis. Perbaiki readiness sebelum checkout baru dibuka.',
             default => 'Provider Manual: QR manual LHIE STORE, bukti /payment, dan approval admin.',
         };
         $statusBadge = match (true) {
             $isPakasirRequested => 'PAKASIR RETIRED',
+            $isSakurupiahEnabled => 'SAKURUPIAH',
+            $isSakurupiahRequestedButUnavailable => 'SAKURUPIAH BELUM SIAP',
             $isKlikQrisEnabled => 'KLIKQRIS',
             $isKlikQrisRequestedButUnavailable => 'KLIKQRIS BELUM SIAP',
             default => 'MANUAL',
@@ -186,6 +198,12 @@ final class AdminDashboardStatsData
                 'ready' => $isKlikQrisConfigured,
                 'reason' => $isKlikQrisConfigured ? null : $klikQrisReadiness->configurationMessage(),
                 'can_activate' => $isKlikQrisConfigured,
+            ],
+            PaymentProvider::SAKURUPIAH => [
+                'label' => PaymentProvider::label(PaymentProvider::SAKURUPIAH),
+                'ready' => $isSakurupiahConfigured,
+                'reason' => $isSakurupiahConfigured ? null : $sakurupiahReadiness->configurationMessage(),
+                'can_activate' => $isSakurupiahConfigured,
             ],
         ];
         $pending = $this->pendingPayments();
@@ -210,13 +228,21 @@ final class AdminDashboardStatsData
             'klikqris_guard_message' => $isKlikQrisConfigured
                 ? null
                 : 'Provider KlikQRIS belum siap. '.$klikQrisReadiness->configurationMessage(),
+            'is_sakurupiah_enabled' => $isSakurupiahEnabled,
+            'is_sakurupiah_configured' => $isSakurupiahConfigured,
+            'can_enable_sakurupiah' => $isSakurupiahConfigured,
+            'sakurupiah_config_missing' => $sakurupiahReadiness->missing(),
+            'sakurupiah_config_invalid' => array_keys($sakurupiahReadiness->invalid()),
+            'sakurupiah_guard_message' => $isSakurupiahConfigured
+                ? null
+                : 'Provider Sakurupiah belum siap. '.$sakurupiahReadiness->configurationMessage(),
             'providers' => $providers,
             'pending_by_provider' => $pending['counts'],
             'oldest_pending_by_provider' => $pending['oldest'],
             'switch_audit' => $this->switchAudits(),
             'label' => $label,
             'hint' => $hint,
-            'tone' => $isPakasirRequested ? 'rose' : ($isKlikQrisEnabled ? 'purple' : 'amber'),
+            'tone' => $isPakasirRequested ? 'rose' : (($isSakurupiahEnabled || $isKlikQrisEnabled) ? 'purple' : 'amber'),
             'is_pakasir_retired' => $isPakasirRequested,
             'source' => $settings ? 'dashboard_setting' : 'dashboard_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),

@@ -8,4 +8,5 @@ enum CheckoutPostCreationBehavior
     case BinancePayInstructions;
     case BscInstructions;
     case KlikQrisInstructions;
+    case SakurupiahInstructions;
 }

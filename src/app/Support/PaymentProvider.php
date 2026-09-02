@@ -10,16 +10,18 @@ final class PaymentProvider
 
     public const KLIKQRIS = 'klikqris';
 
+    public const SAKURUPIAH = 'sakurupiah';
+
     /** @return list<string> */
     public static function allowed(): array
     {
-        return [self::MANUAL, self::KLIKQRIS];
+        return [self::MANUAL, self::KLIKQRIS, self::SAKURUPIAH];
     }
 
     /** @return list<string> */
     public static function known(): array
     {
-        return [self::MANUAL, self::PAKASIR, self::KLIKQRIS];
+        return [self::MANUAL, self::PAKASIR, self::KLIKQRIS, self::SAKURUPIAH];
     }
 
     public static function normalize(mixed $provider): string
@@ -34,6 +36,7 @@ final class PaymentProvider
         return match (self::normalize($provider)) {
             self::PAKASIR => 'Pakasir',
             self::KLIKQRIS => 'KlikQRIS',
+            self::SAKURUPIAH => 'Sakurupiah',
             default => 'Manual',
         };
     }

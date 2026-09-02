@@ -164,7 +164,7 @@
                         <p class="mt-3 text-[11px] font-semibold text-brand-muted">
                             Setiap perubahan meminta konfirmasi provider lama → baru dan hanya memengaruhi checkout baru.
                         </p>
-                        <div class="mt-3 grid gap-2 md:grid-cols-2">
+                        <div class="mt-3 grid gap-2 md:grid-cols-3">
                             <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="Manual" x-on:submit.prevent="openPaymentProviderSwitch($event)">
                                 @csrf
                                 <input type="hidden" name="update_scope" value="provider_switch">
@@ -183,6 +183,16 @@
                                 <input type="hidden" name="confirm_provider_switch" value="1">
                                 <x-admin-dashboard.button type="submit" :variant="$paymentControl['requested_mode'] === 'klikqris' ? 'purple' : 'neutral'" size="sm" class="w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-60" :disabled="! $paymentControl['can_enable_klikqris']" title="{{ $paymentControl['klikqris_guard_message'] }}">
                                     KlikQRIS
+                                </x-admin-dashboard.button>
+                            </form>
+                            <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="Sakurupiah" x-on:submit.prevent="openPaymentProviderSwitch($event)">
+                                @csrf
+                                <input type="hidden" name="update_scope" value="provider_switch">
+                                <input type="hidden" name="payment_mode" value="sakurupiah">
+                                <input type="hidden" name="payment_provider_version" value="{{ $paymentControl['payment_provider_version'] }}">
+                                <input type="hidden" name="confirm_provider_switch" value="1">
+                                <x-admin-dashboard.button type="submit" :variant="$paymentControl['requested_mode'] === 'sakurupiah' ? 'purple' : 'neutral'" size="sm" class="w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-60" :disabled="! $paymentControl['can_enable_sakurupiah']" title="{{ $paymentControl['sakurupiah_guard_message'] }}">
+                                    Sakurupiah
                                 </x-admin-dashboard.button>
                             </form>
                         </div>

@@ -141,6 +141,7 @@ class AdminPaymentModeController extends Controller
 
         return match ($mode) {
             PaymentProvider::KLIKQRIS => 'KlikQRIS diaktifkan. Checkout baru memakai KlikQRIS; payment lama tetap memakai provider asal.',
+            PaymentProvider::SAKURUPIAH => 'Sakurupiah diaktifkan. Checkout baru memakai Sakurupiah; payment lama tetap memakai provider asal.',
             default => 'QR manual LHIE STORE diaktifkan. Checkout baru memakai Manual; payment lama tetap memakai provider asal.',
         };
     }

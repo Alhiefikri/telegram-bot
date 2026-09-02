@@ -76,6 +76,7 @@ final readonly class PaymentProviderResolver
 
         return match ($provider) {
             PaymentProvider::KLIKQRIS => CheckoutPaymentIntents::klikQris(),
+            PaymentProvider::SAKURUPIAH => CheckoutPaymentIntents::sakurupiah(),
             default => CheckoutPaymentIntents::manualQris(),
         };
     }

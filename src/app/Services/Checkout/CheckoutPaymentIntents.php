@@ -85,4 +85,9 @@ final class CheckoutPaymentIntents
     {
         return new KlikQrisCheckoutIntent;
     }
+
+    public static function sakurupiah(): SakurupiahCheckoutIntent
+    {
+        return new SakurupiahCheckoutIntent;
+    }
 }

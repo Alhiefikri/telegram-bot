@@ -4,6 +4,7 @@ namespace App\Http\Requests\Admin;
 
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -89,6 +90,16 @@ class UpdatePaymentModeRequest extends FormRequest
                         $validator->errors()->add(
                             'payment_mode',
                             'Provider KlikQRIS belum bisa diaktifkan. '.$readiness->configurationMessage(),
+                        );
+                    }
+                }
+
+                if ($this->input('payment_mode') === PaymentProvider::SAKURUPIAH) {
+                    $readiness = app(SakurupiahProviderReadiness::class)->observe();
+                    if (! $readiness->isReady()) {
+                        $validator->errors()->add(
+                            'payment_mode',
+                            'Provider Sakurupiah belum bisa diaktifkan. '.$readiness->configurationMessage(),
                         );
                     }
                 }

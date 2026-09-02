@@ -3,6 +3,9 @@
 namespace App\Services\Sakurupiah;
 
 use App\Enums\SakurupiahEnvironment;
+use App\Exceptions\InvalidCheckout;
+use App\Models\ManualPaymentSetting;
+use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
@@ -170,6 +173,48 @@ final class SakurupiahProviderReadiness
         ?SakurupiahEnvironment $environment = null,
     ): void {
         $this->report($environment)->assertReady($message);
+    }
+
+    /**
+     * Re-check only local configuration and the immutable channel observation
+     * inside the checkout transaction. No provider HTTP is allowed here.
+     */
+    public function assertCheckoutSnapshot(
+        ?SakurupiahProviderReadinessReport $report,
+        ?ManualPaymentSetting $setting,
+    ): void {
+        if ($report === null || ! $report->isReady()) {
+            $message = trim((string) $report?->configurationMessage());
+            throw new InvalidCheckout(
+                'Sakurupiah QRIS checkout is not ready.'
+                .($message === '' ? '' : ' '.$message),
+            );
+        }
+
+        $environment = SakurupiahEnvironment::runtime();
+        if ($report->environment() !== $environment
+            || $report->configurationFingerprint() !== $this->configurationFingerprint(
+                $environment,
+                includeOperational: true,
+            )
+        ) {
+            throw new InvalidCheckout('Sakurupiah QRIS checkout readiness changed. Try again.');
+        }
+
+        if ($setting === null
+            || ! $setting->is_active
+            || $setting->paymentProvider() !== PaymentProvider::SAKURUPIAH
+        ) {
+            throw new InvalidCheckout('Sakurupiah QRIS provider selection changed. Try again.');
+        }
+
+        if (! $report->channelObserved()
+            || $report->qrisChannel() === null
+            || ! $report->qrisChannel()->isQris()
+            || ! $report->qrisChannel()->isActive()
+        ) {
+            throw new InvalidCheckout('Sakurupiah QRIS channel is no longer ready. Try again.');
+        }
     }
 
     /**

@@ -658,11 +658,13 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
     private function assertSupportedPostCreationBehavior(CheckoutPostCreationBehavior $behavior): void
     {
         match ($behavior) {
-
             CheckoutPostCreationBehavior::BinancePayInstructions,
             CheckoutPostCreationBehavior::BscInstructions,
             CheckoutPostCreationBehavior::ManualQrisInstructions,
             CheckoutPostCreationBehavior::KlikQrisInstructions => null,
+            CheckoutPostCreationBehavior::SakurupiahInstructions => throw new InvalidCheckout(
+                'Sakurupiah checkout instructions are not available in Telegram yet.',
+            ),
         };
     }
 

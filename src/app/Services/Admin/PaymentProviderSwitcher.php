@@ -8,6 +8,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\DB;
 
@@ -15,6 +16,7 @@ final class PaymentProviderSwitcher
 {
     public function __construct(
         private readonly KlikQrisProviderReadiness $klikQrisReadiness,
+        private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
         private readonly AuditLogger $auditLogger,
     ) {}
 
@@ -28,6 +30,7 @@ final class PaymentProviderSwitcher
         ?string $ip,
     ): array {
         $provider = PaymentProvider::normalize($provider);
+        $this->assertReady($provider);
 
         return DB::transaction(function () use ($provider, $expectedVersion, $actor, $ip): array {
             $setting = $this->lockedSetting();
@@ -38,8 +41,6 @@ final class PaymentProviderSwitcher
                     'Konfigurasi provider berubah sebelum permintaan ini selesai. Muat ulang Ringkasan lalu konfirmasi ulang.',
                 );
             }
-
-            $this->assertReady($provider);
 
             $wasActive = (bool) $setting->is_active;
             $oldProvider = $wasActive ? $setting->paymentProvider() : PaymentProvider::MANUAL;
@@ -103,6 +104,17 @@ final class PaymentProviderSwitcher
     {
         if (! in_array($provider, PaymentProvider::allowed(), true)) {
             throw new PaymentProviderNotReady('Provider '.$provider.' sudah dipensiunkan untuk checkout baru.');
+        }
+
+        if ($provider === PaymentProvider::SAKURUPIAH) {
+            $readiness = $this->sakurupiahReadiness->observe();
+            if (! $readiness->isReady()) {
+                throw new PaymentProviderNotReady(
+                    'Provider Sakurupiah belum bisa diaktifkan. '.$readiness->configurationMessage(),
+                );
+            }
+
+            return;
         }
 
         if ($provider !== PaymentProvider::KLIKQRIS) {
