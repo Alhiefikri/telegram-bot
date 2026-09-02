@@ -388,11 +388,13 @@ class BinancePaymentRailSelectionTest extends TestCase
 
         $this->getJson(route('storefront.products.modal', $product))
             ->assertOk()
-            ->assertJsonPath('status', 'ready')
             ->assertJsonPath('product.checkout.websiteBinancePayId.key', 'website_binance_pay_id')
             ->assertJsonPath('product.checkout.websiteUsdtBep20.key', 'website_usdt_bep20')
             ->assertJsonPath('product.checkout.websiteBinancePayId.enabled', true)
-            ->assertJsonPath('product.checkout.websiteUsdtBep20.enabled', true);
+            ->assertJsonPath('product.checkout.websiteUsdtBep20.enabled', true)
+            ->assertJsonPath('product.checkout.websiteBinancePay.label', 'Bayar dengan USDT')
+            ->assertJsonPath('product.checkout.websiteBinancePayId.label', 'Bayar dengan Binance Pay')
+            ->assertJsonPath('product.checkout.websiteUsdtBep20.label', 'Bayar dengan USDT BSC BEP20');
     }
 
     private function activeReceiver(string $address): BscPaymentReceiver

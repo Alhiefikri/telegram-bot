@@ -222,7 +222,8 @@ class StorefrontProductPresentationTest extends TestCase
             'websiteBinancePay',
             'websiteBinancePayId',
         ], array_keys($payload['checkout']));
-        $this->assertSame('Pay with Binance Pay ID', $payload['checkout']['websiteBinancePayId']['label']);
+        $this->assertSame('Bayar dengan USDT', $payload['checkout']['websiteBinancePay']['label']);
+        $this->assertSame('Bayar dengan Binance Pay', $payload['checkout']['websiteBinancePayId']['label']);
         $this->assertStringContainsString('Binance Pay ID', $payload['checkout']['websiteBinancePayId']['description']);
     }
 

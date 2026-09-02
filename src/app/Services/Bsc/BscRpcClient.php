@@ -120,6 +120,12 @@ final class BscRpcClient implements BscVerificationRpcClientInterface
     ): array {
         $contract = $this->normalizeAddress($contract, 'token contract');
 
+        if ($this->isLatestBlockAlias($fromBlock) || $this->isLatestBlockAlias($toBlock)) {
+            $latestBlock = $this->latestBlockNumber();
+            $fromBlock = $this->isLatestBlockAlias($fromBlock) ? $latestBlock : $fromBlock;
+            $toBlock = $this->isLatestBlockAlias($toBlock) ? $latestBlock : $toBlock;
+        }
+
         $fromNumber = $this->numericBlock($fromBlock);
         $toNumber = $this->numericBlock($toBlock);
         $maxBlocks = max(1, (int) config('services.bsc.max_scan_blocks', 10_000));
@@ -200,6 +206,7 @@ final class BscRpcClient implements BscVerificationRpcClientInterface
     {
         return Http::acceptJson()
             ->asJson()
+            ->withOptions(['force_ip_resolve' => 'v4'])
             ->timeout(max(1, (int) ceil((float) config('services.bsc.rpc_timeout_seconds', 5.0))))
             ->connectTimeout(max(1, (int) ceil((float) config('services.bsc.rpc_connect_timeout_seconds', 2.0))))
             ->retry(
@@ -228,6 +235,16 @@ final class BscRpcClient implements BscVerificationRpcClientInterface
         }
 
         return $value;
+    }
+
+    private function isLatestBlockAlias(string|int $blockNumber): bool
+    {
+        return is_string($blockNumber) && strtolower(trim($blockNumber)) === 'latest';
+    }
+
+    private function latestBlockNumber(): int
+    {
+        return $this->hexQuantityToInt((string) $this->call('eth_blockNumber'));
     }
 
     private function numericBlock(string|int $blockNumber): ?int

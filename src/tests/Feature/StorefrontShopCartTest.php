@@ -182,7 +182,7 @@ class StorefrontShopCartTest extends TestCase
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->get(route('storefront.shop.checkout.start'))
             ->assertOk()
-            ->assertSee('Pay with Binance Pay ID');
+            ->assertSee('Bayar dengan Binance Pay');
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->post(route('storefront.shop.checkout'), [

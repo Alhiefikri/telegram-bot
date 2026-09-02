@@ -19,6 +19,8 @@ final class BscReadiness
 
     private const DEFAULT_CACHE_SECONDS = 60;
 
+    private const READINESS_PROBE_RECEIVER = '0x0000000000000000000000000000000000000001';
+
     public function __construct(private readonly BscRpcClientInterface $rpc) {}
 
     public function check(?ManualPaymentSetting $setting = null): BscReadinessReport
@@ -181,16 +183,15 @@ final class BscReadiness
 
     private function assertTransferLogScanningSupported(string $contract): void
     {
-        // BscRpcClientInterface intentionally stays small because many
         // readiness-only callers use lightweight fakes. Production's client
-        // exposes transferLogs, so this bounded empty range is a real
-        // eth_getLogs capability probe without scanning data. A legacy
+        // resolves the latest block before calling eth_getLogs, so this probe
+        // does not require archive access from public RPC endpoints. A legacy
         // metadata-only fake is treated as compatible for old unit seams.
         if (! method_exists($this->rpc, 'transferLogs')) {
             return;
         }
 
-        $this->rpc->{'transferLogs'}($contract, 0, 0);
+        $this->rpc->{'transferLogs'}($contract, 'latest', 'latest', self::READINESS_PROBE_RECEIVER);
     }
 
     private function indexedSourceConfigured(): bool

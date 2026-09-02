@@ -290,8 +290,8 @@
                                                 </label>
                                             </div>
                                         </template>
-                                        <div x-show="paymentMethod === 'binance_pay'" x-cloak class="mt-2 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3" aria-label="Binance payment rail selector">
-                                            <p class="text-sm font-black text-[var(--sf-ink)]">Choose a Binance payment rail</p>
+                                        <div x-show="paymentMethod === 'binance_pay'" x-cloak class="mt-2 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3" aria-label="USDT payment rail selector">
+                                            <p class="text-sm font-black text-[var(--sf-ink)]">Pilih metode pembayaran USDT</p>
                                             <div class="mt-2 grid gap-2">
                                                 <template x-for="choice in binanceRailChoices()" :key="choice.key">
                                                     <label class="flex cursor-pointer items-start gap-2 rounded-md border-2 border-[var(--sf-border)] bg-white px-3 py-2 text-left text-sm font-black text-[var(--sf-ink)]">
@@ -300,7 +300,7 @@
                                                     </label>
                                                 </template>
                                             </div>
-                                            <button type="button" class="mt-3 text-sm font-black text-[var(--sf-accent)] underline" x-on:click="cancelBinanceRailSelection()">Cancel</button>
+                                            <button type="button" class="mt-3 text-sm font-black text-[var(--sf-accent)] underline" x-on:click="cancelBinanceRailSelection()">Kembali</button>
                                         </div>
                                         @error('payment_method')
                                             <p id="storefront-payment-method-error" role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
@@ -313,7 +313,7 @@
                                             <p class="mt-1 text-sm font-bold leading-6 text-[var(--sf-muted)]" x-text="selectedCheckoutChoice()?.description || 'Ikuti instruksi pembayaran pada invoice.'">Ikuti instruksi pembayaran pada invoice.</p>
                                         </div>
                                     </div>
-                                    <p x-show="paymentMethod === 'binance_pay'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">Choose a Binance payment rail before submitting. The final rail is sent explicitly with this checkout.</p>
+                                    <p x-show="paymentMethod === 'binance_pay'" class="rounded-md bg-[var(--sf-surface-warm)] px-3 py-2 text-base font-bold leading-7 text-[var(--sf-muted)]">Pilih metode pembayaran USDT sebelum melanjutkan.</p>
                                     <label for="storefront-terms-accepted" class="flex items-start gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-ink)]">
                                         <input id="storefront-terms-accepted"
                                                name="terms_accepted"

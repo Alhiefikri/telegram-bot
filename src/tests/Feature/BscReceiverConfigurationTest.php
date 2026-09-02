@@ -130,6 +130,37 @@ class BscReceiverConfigurationTest extends TestCase
         Queue::assertPushed(SendBscReceiverMutationNotification::class, 1);
     }
 
+    public function test_owner_can_add_receiver_before_bsc_token_configuration_is_ready(): void
+    {
+        Queue::fake();
+        $originalContract = config('services.bsc.usdt_contract');
+        config()->set('services.bsc.usdt_contract', '');
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $address = '0xaac58212Ab1E3C9c8d4dbB3FD3cdAF9d4cff9012';
+
+        try {
+            $this->actingAs($owner)
+                ->withSession(['auth.password_confirmed_at' => now()->timestamp])
+                ->post(route('admin.bsc.receivers.store'), [
+                    'label' => 'Wallet sebelum readiness',
+                    'address' => $address,
+                ])
+                ->assertRedirect('/admin?tab=stats#admin-bsc-settings')
+                ->assertSessionHasNoErrors();
+        } finally {
+            config()->set('services.bsc.usdt_contract', $originalContract);
+        }
+
+        $this->assertDatabaseHas('bsc_payment_receivers', [
+            'label' => 'Wallet sebelum readiness',
+            'address_normalized' => strtolower($address),
+            'chain_id' => 56,
+            'token_contract' => self::CONTRACT,
+            'token_decimals' => 18,
+            'is_active' => true,
+        ]);
+    }
+
     public function test_owner_can_add_receiver_with_unicode_boundary_whitespace(): void
     {
         Queue::fake();

@@ -453,6 +453,9 @@ test("keeps customer checkout QRIS-first across browser locales", async ({
         dialog.getByRole("button", { name: "Bayar via QR Manual" })
       ).toBeVisible();
       await expect(
+        dialog.getByText("Bayar dengan USDT", { exact: true })
+      ).toBeVisible();
+      await expect(
         dialog.getByText(
           "Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS."
         )
@@ -467,9 +470,12 @@ test("keeps customer checkout QRIS-first across browser locales", async ({
         dialog.getByRole("button", { name: /Binance Pay/ })
       ).toBeVisible();
       await expect(
-        dialog.getByText(
-          "Choose a Binance payment rail before submitting. The final rail is sent explicitly with this checkout."
-        )
+        dialog.getByText("Pilih metode pembayaran USDT sebelum melanjutkan.")
+      ).toBeVisible();
+      await expect(
+        dialog
+          .locator('[aria-label="USDT payment rail selector"]')
+          .getByText("Bayar dengan Binance Pay", { exact: true })
       ).toBeVisible();
 
       await dialog

@@ -151,11 +151,11 @@ class StorefrontProductPresenter
         if ($binancePayAvailable || $bscAvailable) {
             $choices['website_binance_pay'] = new StorefrontProductCheckoutChoice(
                 key: 'website_binance_pay',
-                label: 'Bayar dengan Binance',
+                label: 'Bayar dengan USDT',
                 description: match (true) {
-                    $binancePayAvailable && $bscAvailable => 'Pilih Binance Pay ID atau USDT BEP20 (BSC) pada langkah berikutnya.',
-                    $binancePayAvailable => 'Checkout dengan Binance Pay ID pada langkah berikutnya.',
-                    default => 'Checkout dengan USDT BEP20 (BSC) pada langkah berikutnya.',
+                    $binancePayAvailable && $bscAvailable => 'Pilih metode pembayaran USDT: Binance Pay atau USDT BSC BEP20.',
+                    $binancePayAvailable => 'Checkout dengan Binance Pay.',
+                    default => 'Checkout dengan USDT BSC BEP20.',
                 },
                 url: route('storefront.shop.checkout'),
                 method: 'POST',
@@ -166,8 +166,8 @@ class StorefrontProductPresenter
             if ($binancePayAvailable) {
                 $choices['website_binance_pay_id'] = new StorefrontProductCheckoutChoice(
                     key: 'website_binance_pay_id',
-                    label: 'Pay with Binance Pay ID',
-                    description: 'Send the exact USDT amount through Binance Pay ID. Follow the payment and verification instructions on the invoice.',
+                    label: 'Bayar dengan Binance Pay',
+                    description: 'Kirim jumlah USDT persis melalui Binance Pay ID. Ikuti instruksi pembayaran pada invoice.',
                     url: route('storefront.shop.checkout'),
                     method: 'POST',
                     enabled: true,
@@ -178,8 +178,8 @@ class StorefrontProductPresenter
             if ($bscAvailable) {
                 $choices['website_usdt_bep20'] = new StorefrontProductCheckoutChoice(
                     key: 'website_usdt_bep20',
-                    label: 'Pay with USDT BEP20 (BSC)',
-                    description: 'Send the exact USDT amount on BNB Smart Chain (BEP20). Submit the transaction hash after paying.',
+                    label: 'Bayar dengan USDT BSC BEP20',
+                    description: 'Kirim jumlah USDT persis melalui BNB Smart Chain (BEP20). Masukkan TX hash setelah membayar.',
                     url: route('storefront.shop.checkout'),
                     method: 'POST',
                     enabled: true,

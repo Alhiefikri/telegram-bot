@@ -28,7 +28,7 @@ final class BscReceiverManager
         $this->assertOwner($actor);
         $label = $this->normalizeLabel($label);
         $address = BscPaymentReceiver::normalizeAddress($address);
-        [$chainId, $tokenContract, $tokenDecimals] = $this->configuredToken();
+        [$chainId, $tokenContract, $tokenDecimals] = $this->registrationToken();
 
         try {
             return DB::transaction(function () use ($label, $address, $actor, $ip, $chainId, $tokenContract, $tokenDecimals): BscReceiverRegistration {
@@ -326,6 +326,15 @@ final class BscReceiverManager
     }
 
     /** @return array{0:int,1:string,2:int} */
+    private function registrationToken(): array
+    {
+        // Receiver registration is allowed before readiness is enabled. The
+        // approved chain/token snapshot remains fixed; runtime configuration
+        // still gates checkout and activation.
+        return [56, BscReadiness::APPROVED_USDT_CONTRACT, 18];
+    }
+
+    /** @return array{0:int,1:string,2:int} */
     private function configuredToken(): array
     {
         $chainId = (int) config('services.bsc.chain_id', 56);
@@ -333,7 +342,11 @@ final class BscReceiverManager
             throw new InvalidArgumentException('BSC_CHAIN_ID harus 56 untuk receiver BNB Smart Chain.');
         }
 
-        $contract = BscPaymentReceiver::normalizeAddress((string) config('services.bsc.usdt_contract'));
+        try {
+            $contract = BscPaymentReceiver::normalizeAddress((string) config('services.bsc.usdt_contract'));
+        } catch (InvalidArgumentException $exception) {
+            throw new InvalidArgumentException('BSC_USDT_CONTRACT harus berupa address EVM yang valid.', previous: $exception);
+        }
         if ($contract !== BscReadiness::APPROVED_USDT_CONTRACT) {
             throw new InvalidArgumentException('BSC_USDT_CONTRACT harus approved USDT BNB Smart Chain contract.');
         }

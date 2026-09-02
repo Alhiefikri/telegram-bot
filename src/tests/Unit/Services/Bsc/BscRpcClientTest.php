@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services\Bsc;
 
 use App\Services\Bsc\BscRpcClient;
+use App\Services\Bsc\BscRpcException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -23,6 +24,40 @@ class BscRpcClientTest extends TestCase
         $this->assertSame(56, $client->chainId());
         $this->assertSame('0x60016001', $client->contractCode('0x55d398326f99059ff775485246999027b3197955'));
         $this->assertSame(18, $client->tokenDecimals('0x55d398326f99059ff775485246999027b3197955'));
+    }
+
+    public function test_transfer_logs_resolves_latest_block_for_non_archive_rpc_endpoints(): void
+    {
+        config()->set('services.bsc.rpc_url', 'https://bsc-rpc.test');
+
+        Http::fakeSequence()
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x100'])
+            ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => []]);
+
+        $logs = (new BscRpcClient)->transferLogs(
+            '0x55d398326f99059ff775485246999027b3197955',
+            'latest',
+            'latest',
+        );
+
+        $this->assertSame([], $logs);
+        Http::assertSentCount(2);
+        Http::assertSent(fn (Request $request): bool => $request->data()['method'] === 'eth_blockNumber');
+        Http::assertSent(fn (Request $request): bool => $request->data()['method'] === 'eth_getLogs'
+            && data_get($request->data(), 'params.0.fromBlock') === '0x100'
+            && data_get($request->data(), 'params.0.toBlock') === '0x100');
+
+        config()->set('services.bsc.max_scan_blocks', 1);
+        try {
+            (new BscRpcClient)->transferLogs(
+                '0x55d398326f99059ff775485246999027b3197955',
+                0,
+                1,
+            );
+            $this->fail('Expected oversized BSC log ranges to be rejected.');
+        } catch (BscRpcException $exception) {
+            $this->assertStringContainsString('bounded window', $exception->getMessage());
+        }
     }
 
     public function test_it_uses_the_erc1271_magic_value_and_abi_encodes_the_signature(): void
