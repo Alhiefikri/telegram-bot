@@ -95,14 +95,16 @@ class PaymentDocumentationTest extends TestCase
 
         $this->assertStringContainsString('bsc:check-readiness --json', $readme);
         $this->assertStringContainsString('ManualFulfillmentReview', $readme);
-        $this->assertStringContainsString('BSC_USDT_CONTRACT', $runbook);
+        $this->assertStringContainsString('BSC_RPC_URL', $runbook);
+        $this->assertStringContainsString('approved USDT contract', $runbook);
         $this->assertStringContainsString('payment_bsc_details', $runbook);
-        $this->assertStringContainsString('BSC_USDT_DECIMALS', $compose);
-        $this->assertStringContainsString('BSC_PENDING_BACKLOG_ALERT_THRESHOLD', $compose);
+        $this->assertStringContainsString('BSC_RPC_URL', $compose);
+        $this->assertStringNotContainsString('BSC_USDT_DECIMALS', $compose);
+        $this->assertStringNotContainsString('BSC_PENDING_BACKLOG_ALERT_THRESHOLD', $compose);
         $this->assertStringNotContainsString('RAILWAY_', $runbook);
     }
 
-    public function test_bsc_environment_examples_keep_receivers_out_of_environment_and_forward_rpc_identity(): void
+    public function test_bsc_environment_examples_keep_only_the_rpc_credential(): void
     {
         $envExamples = [
             file_get_contents(base_path('../.env.example')),
@@ -110,16 +112,40 @@ class PaymentDocumentationTest extends TestCase
         ];
         $compose = file_get_contents(base_path('../docker-compose.yml'));
         [$sharedAppEnvironment] = explode("\nservices:", $compose, 2);
+        $nonEnvironmentSettings = [
+            'BSC_INDEXED_SOURCE',
+            'BSC_INDEXER_URL',
+            'BSC_CHAIN_ID',
+            'BSC_USDT_CONTRACT',
+            'BSC_USDT_DECIMALS',
+            'BSC_EXPLORER_BASE_URL',
+            'BSC_EXPLORER_ALLOWED_HOSTS',
+            'BSC_RPC_TIMEOUT_SECONDS',
+            'BSC_RPC_CONNECT_TIMEOUT_SECONDS',
+            'BSC_RPC_MAX_ATTEMPTS',
+            'BSC_RPC_RETRY_DELAY_MS',
+            'BSC_MAX_SCAN_BLOCKS',
+            'BSC_MAX_SCAN_LOGS',
+            'BSC_PENDING_BACKLOG_ALERT_THRESHOLD',
+            'BSC_LATE_PAYMENT_LOOKBACK_HOURS',
+            'BSC_OWNER_ALERT_COOLDOWN_SECONDS',
+            'BSC_READINESS_CACHE_SECONDS',
+        ];
 
         foreach ($envExamples as $envExample) {
             $this->assertMatchesRegularExpression('/^BSC_RPC_URL=$/m', $envExample);
-            $this->assertMatchesRegularExpression('/^BSC_CHAIN_ID=56$/m', $envExample);
-            $this->assertMatchesRegularExpression('/^BSC_USDT_CONTRACT=$/m', $envExample);
+            foreach ($nonEnvironmentSettings as $variable) {
+                $this->assertStringNotContainsString($variable.'=', $envExample);
+            }
             $this->assertStringNotContainsString('BSC_RECEIVER_ADDRESS=', $envExample);
         }
 
-        foreach (['BSC_RPC_URL', 'BSC_CHAIN_ID', 'BSC_USDT_CONTRACT', 'BSC_USDT_DECIMALS'] as $variable) {
-            $this->assertStringContainsString('  '.$variable.': ${'.$variable, $sharedAppEnvironment);
+        $this->assertStringContainsString(
+            '  BSC_RPC_URL: ${BSC_RPC_URL:-}',
+            $sharedAppEnvironment,
+        );
+        foreach ($nonEnvironmentSettings as $variable) {
+            $this->assertStringNotContainsString($variable.': ${'.$variable, $sharedAppEnvironment);
         }
     }
 }

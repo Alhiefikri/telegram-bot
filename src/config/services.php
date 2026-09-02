@@ -9,29 +9,25 @@ return [
     ],
 
     'bsc' => [
-        // The receiver pool is database-managed. These are the only BSC
-        // deployment values that belong in environment configuration.
+        // The RPC endpoint is the only BSC environment value because it may
+        // contain provider credentials. Network identity and operational
+        // limits are pinned here.
         'rpc_url' => env('BSC_RPC_URL'),
-        'indexed_source' => env('BSC_INDEXED_SOURCE'),
-        'indexer_url' => env('BSC_INDEXER_URL'),
-        'chain_id' => (int) env('BSC_CHAIN_ID', 56),
-        'usdt_contract' => env('BSC_USDT_CONTRACT'),
-        'explorer_base_url' => env('BSC_EXPLORER_BASE_URL', 'https://bscscan.com'),
-        'explorer_allowed_hosts' => array_values(array_filter(array_map(
-            static fn (string $host): string => strtolower(trim($host)),
-            explode(',', (string) env('BSC_EXPLORER_ALLOWED_HOSTS', 'bscscan.com,www.bscscan.com')),
-        ))),
-        'expected_token_decimals' => (int) env('BSC_USDT_DECIMALS', 18),
-        'rpc_timeout_seconds' => (float) env('BSC_RPC_TIMEOUT_SECONDS', 5),
-        'rpc_connect_timeout_seconds' => (float) env('BSC_RPC_CONNECT_TIMEOUT_SECONDS', 2),
-        'rpc_max_attempts' => (int) env('BSC_RPC_MAX_ATTEMPTS', 2),
-        'rpc_retry_delay_ms' => (int) env('BSC_RPC_RETRY_DELAY_MS', 150),
-        'max_scan_blocks' => (int) env('BSC_MAX_SCAN_BLOCKS', 10_000),
-        'max_scan_logs' => (int) env('BSC_MAX_SCAN_LOGS', 1_000),
-        'pending_backlog_alert_threshold' => (int) env('BSC_PENDING_BACKLOG_ALERT_THRESHOLD', 50),
-        'late_payment_lookback_hours' => (int) env('BSC_LATE_PAYMENT_LOOKBACK_HOURS', 72),
-        'owner_alert_cooldown_seconds' => (int) env('BSC_OWNER_ALERT_COOLDOWN_SECONDS', 900),
-        'readiness_cache_seconds' => (int) env('BSC_READINESS_CACHE_SECONDS', 60),
+        'chain_id' => 56,
+        'usdt_contract' => \App\Services\Bsc\BscReadiness::APPROVED_USDT_CONTRACT,
+        'explorer_base_url' => 'https://bscscan.com',
+        'explorer_allowed_hosts' => ['bscscan.com', 'www.bscscan.com'],
+        'expected_token_decimals' => 18,
+        'rpc_timeout_seconds' => 5,
+        'rpc_connect_timeout_seconds' => 2,
+        'rpc_max_attempts' => 2,
+        'rpc_retry_delay_ms' => 150,
+        'max_scan_blocks' => 10_000,
+        'max_scan_logs' => 1_000,
+        'pending_backlog_alert_threshold' => 50,
+        'late_payment_lookback_hours' => 72,
+        'owner_alert_cooldown_seconds' => 900,
+        'readiness_cache_seconds' => 60,
         'ownership_challenge_ttl_minutes' => 10,
         'max_unique_amount_candidates' => 1000,
     ],

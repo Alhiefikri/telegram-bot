@@ -181,15 +181,6 @@ final class BscReadinessTest extends TestCase
         $this->assertArrayHasKey('BSC_USDT_DECIMALS', $report->invalid);
     }
 
-    public function test_configured_indexed_source_can_replace_rpc_log_scanning(): void
-    {
-        $this->rpc->logsSupported = false;
-        config()->set('services.bsc.indexed_source', 'https://indexer.test/transfers');
-
-        $report = app(BscReadiness::class)->check();
-
-        $this->assertTrue($report->isReady());
-    }
 
     public function test_readiness_is_cached_and_invalidated_after_setting_and_receiver_mutations(): void
     {

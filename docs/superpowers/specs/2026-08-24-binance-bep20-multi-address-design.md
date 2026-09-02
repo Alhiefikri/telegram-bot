@@ -102,17 +102,15 @@ The feature must not be gated by a per-address ENV variable or hardcoded wallet 
 
 ### Deploy-time infrastructure configuration
 
-ENV contains only the BSC authority and immutable network identity:
+ENV contains only the BSC authority endpoint:
 
 ```env
 BSC_RPC_URL=https://<rpc-provider-endpoint>
-BSC_CHAIN_ID=56
-BSC_USDT_CONTRACT=0x55d398326f99059fF775485246999027B3197955
 ```
 
-`BSC_RPC_URL` is an HTTP JSON-RPC endpoint used to read BSC state/history. A public BNB Chain endpoint is acceptable for development and direct TX-hash lookup; production automatic amount scanning requires an endpoint or indexed provider that supports `eth_getLogs`. The URL and any provider credential remain server-side.
+`BSC_RPC_URL` is an HTTP JSON-RPC endpoint used to read BSC state/history. A public BNB Chain endpoint is acceptable for development and direct TX-hash lookup; production automatic amount scanning requires an endpoint that supports `eth_getLogs`. The URL and any provider credential remain server-side.
 
-`BSC_CHAIN_ID=56` identifies BSC Mainnet. `BSC_USDT_CONTRACT` identifies the approved USDT token contract; it is not a receiving address and must not be editable as arbitrary customer data from the dashboard. The application readiness check must verify that the runtime chain and contract metadata match the configured allowlist.
+The application pins BSC Mainnet (`chain_id=56`), the approved USDT contract, 18 token decimals, the safe explorer host, and bounded RPC/scan limits. These values are not operator environment settings. A receiving address is stored in the database and must not be hardcoded or exposed as an environment variable.
 
 The v1 verifier reuses the existing `services.binance.verification_queue`/`binance-verification` queue. Do not add a second BSC worker or a new queue ENV in this feature slice. A separate queue is a later capacity decision, not a prerequisite for activation.
 
@@ -503,11 +501,8 @@ Add a BSC-specific readiness/configuration surface without changing historical B
 - `bsc_confirmation_grace_minutes`, default `3`;
 - `bsc_unique_amount_increment_micro`, default `100`;
 - `bsc_hash_attempt_limit`, default `5`;
-- `BSC_RPC_URL` or an ordered server-side RPC URL list;
-- `BSC_CHAIN_ID`, fixed to `56` in production;
-- `BSC_USDT_CONTRACT`, pinned to the approved contract;
-- `BSC_USDT_DECIMALS`, readiness-checked rather than blindly trusted;
-- `BSC_EXPLORER_BASE_URL`, used only to build a safe display link;
+- `BSC_RPC_URL`, the server-side RPC authority endpoint;
+- BSC network identity, approved token contract, token decimals, explorer host, and RPC/scan limits, pinned in application configuration;
 - existing `BINANCE_VERIFICATION_QUEUE`, reused by BSC verification jobs in v1.
 
 BSC is considered ready only when it is enabled, the approved RPC responds, chain ID is 56, the token contract is reachable, decimals are valid, and at least one active BSC Receiving Address exists.

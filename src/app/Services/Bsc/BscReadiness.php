@@ -124,7 +124,7 @@ final class BscReadiness
                 $invalid['BSC_RPC'] = 'Readiness RPC BSC gagal.';
             }
 
-            if ($invalid === [] && ! $this->indexedSourceConfigured()) {
+            if ($invalid === []) {
                 try {
                     $this->assertTransferLogScanningSupported($contract);
                 } catch (BscRpcException $exception) {
@@ -194,11 +194,6 @@ final class BscReadiness
         $this->rpc->{'transferLogs'}($contract, 'latest', 'latest', self::READINESS_PROBE_RECEIVER);
     }
 
-    private function indexedSourceConfigured(): bool
-    {
-        return filled(config('services.bsc.indexed_source'))
-            || filled(config('services.bsc.indexer_url'));
-    }
 
     private function cacheSeconds(): int
     {
@@ -230,8 +225,6 @@ final class BscReadiness
             'chain_id' => (int) config('services.bsc.chain_id', 56),
             'contract' => strtolower(trim((string) config('services.bsc.usdt_contract'))),
             'expected_decimals' => (int) config('services.bsc.expected_token_decimals', 18),
-            'indexed_source' => trim((string) config('services.bsc.indexed_source')),
-            'indexer_url' => trim((string) config('services.bsc.indexer_url')),
         ], JSON_THROW_ON_ERROR));
     }
 
