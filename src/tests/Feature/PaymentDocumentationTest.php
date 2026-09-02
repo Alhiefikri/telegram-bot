@@ -37,6 +37,85 @@ class PaymentDocumentationTest extends TestCase
         }
     }
 
+    public function test_sakurupiah_runtime_configuration_is_forwarded_without_presentation_settings(): void
+    {
+        $envExamples = [
+            'root .env.example' => file_get_contents(base_path('../.env.example')),
+            'src/.env.example' => file_get_contents(base_path('.env.example')),
+        ];
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        [$sharedAppEnvironment] = explode("\nservices:", $compose, 2);
+        $variables = [
+            'SAKURUPIAH_SANDBOX_ENABLED',
+            'SAKURUPIAH_SANDBOX_BASE_URL',
+            'SAKURUPIAH_SANDBOX_API_ID',
+            'SAKURUPIAH_SANDBOX_API_KEY',
+            'SAKURUPIAH_SANDBOX_CALLBACK_URL',
+            'SAKURUPIAH_SANDBOX_RETURN_URL',
+            'SAKURUPIAH_SANDBOX_ALLOWED_HOSTS',
+            'SAKURUPIAH_SANDBOX_CALLBACK_ALLOWED_HOSTS',
+            'SAKURUPIAH_SANDBOX_RETURN_ALLOWED_HOSTS',
+            'SAKURUPIAH_SANDBOX_ALLOWED_IPS',
+            'SAKURUPIAH_PRODUCTION_ENABLED',
+            'SAKURUPIAH_PRODUCTION_BASE_URL',
+            'SAKURUPIAH_PRODUCTION_API_ID',
+            'SAKURUPIAH_PRODUCTION_API_KEY',
+            'SAKURUPIAH_PRODUCTION_CALLBACK_URL',
+            'SAKURUPIAH_PRODUCTION_RETURN_URL',
+            'SAKURUPIAH_PRODUCTION_ALLOWED_HOSTS',
+            'SAKURUPIAH_PRODUCTION_CALLBACK_ALLOWED_HOSTS',
+            'SAKURUPIAH_PRODUCTION_RETURN_ALLOWED_HOSTS',
+            'SAKURUPIAH_PRODUCTION_ALLOWED_IPS',
+            'SAKURUPIAH_TIMEZONE',
+            'SAKURUPIAH_HTTP_TIMEOUT_SECONDS',
+            'SAKURUPIAH_HTTP_CONNECT_TIMEOUT_SECONDS',
+            'SAKURUPIAH_LOOKUP_MAX_ATTEMPTS',
+            'SAKURUPIAH_LOOKUP_RETRY_DELAY_MS',
+            'SAKURUPIAH_LOOKUP_RETRY_MAX_DELAY_MS',
+            'SAKURUPIAH_LOCK_LEASE_SECONDS',
+            'SAKURUPIAH_WEBHOOK_RATE_LIMIT_PER_MINUTE',
+            'SAKURUPIAH_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE',
+            'SAKURUPIAH_READINESS_CACHE_SECONDS',
+        ];
+        $blankVariables = [
+            'SAKURUPIAH_SANDBOX_API_ID',
+            'SAKURUPIAH_SANDBOX_API_KEY',
+            'SAKURUPIAH_SANDBOX_CALLBACK_URL',
+            'SAKURUPIAH_SANDBOX_RETURN_URL',
+            'SAKURUPIAH_PRODUCTION_API_ID',
+            'SAKURUPIAH_PRODUCTION_API_KEY',
+            'SAKURUPIAH_PRODUCTION_CALLBACK_URL',
+            'SAKURUPIAH_PRODUCTION_RETURN_URL',
+        ];
+
+        foreach ($envExamples as $name => $envExample) {
+            foreach ($variables as $variable) {
+                $this->assertStringContainsString($variable.'=', $envExample, $name.' must document '.$variable.'.');
+            }
+            foreach ($blankVariables as $variable) {
+                $this->assertMatchesRegularExpression('/^'.preg_quote($variable, '/').'=$/m', $envExample);
+            }
+            foreach ([
+                'SAKURUPIAH_QRIS_CURRENCY',
+                'SAKURUPIAH_QRIS_FEE_PAYER',
+                'SAKURUPIAH_QRIS_EXPIRY_HOURS',
+                'SAKURUPIAH_CHANNEL_LABEL',
+            ] as $presentationVariable) {
+                $this->assertStringNotContainsString($presentationVariable.'=', $envExample);
+            }
+        }
+
+        foreach ($variables as $variable) {
+            $this->assertStringContainsString(
+                '  '.$variable.': ${'.$variable,
+                $sharedAppEnvironment,
+                $variable.' must be forwarded to app and scheduler containers.',
+            );
+        }
+        $this->assertStringNotContainsString('SAKURUPIAH_QRIS_CURRENCY:', $sharedAppEnvironment);
+        $this->assertStringNotContainsString('SAKURUPIAH_QRIS_FEE_PAYER:', $sharedAppEnvironment);
+    }
+
     public function test_binance_pay_id_is_blank_in_env_examples_and_forwarded_by_shared_compose_environment(): void
     {
         $envExamples = [

@@ -2,6 +2,11 @@
 
 use App\Services\Bsc\BscReadiness;
 
+$sakurupiahCsv = static fn (string $value): array => array_values(array_filter(array_map(
+    static fn (string $entry): string => strtolower(trim($entry)),
+    explode(',', $value),
+)));
+
 return [
     'credentials' => [
         // Optional override. When omitted, CredentialIdentityFingerprint
@@ -160,17 +165,49 @@ return [
         'sandbox_base_url' => env('SAKURUPIAH_SANDBOX_BASE_URL', 'https://sakurupiah.id/api-sanbox/'),
         'sandbox_api_id' => env('SAKURUPIAH_SANDBOX_API_ID'),
         'sandbox_api_key' => env('SAKURUPIAH_SANDBOX_API_KEY'),
+        'sandbox_callback_url' => env('SAKURUPIAH_SANDBOX_CALLBACK_URL'),
+        'sandbox_return_url' => env('SAKURUPIAH_SANDBOX_RETURN_URL'),
+        'sandbox_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_SANDBOX_ALLOWED_HOSTS', '')),
+        'sandbox_callback_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_SANDBOX_CALLBACK_ALLOWED_HOSTS', '')),
+        'sandbox_return_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_SANDBOX_RETURN_ALLOWED_HOSTS', '')),
+        'sandbox_allowed_ips' => $sakurupiahCsv((string) env('SAKURUPIAH_SANDBOX_ALLOWED_IPS', '')),
         'production_enabled' => (bool) env('SAKURUPIAH_PRODUCTION_ENABLED', false),
         'production_base_url' => env('SAKURUPIAH_PRODUCTION_BASE_URL', 'https://sakurupiah.id/api/'),
         'production_api_id' => env('SAKURUPIAH_PRODUCTION_API_ID'),
         'production_api_key' => env('SAKURUPIAH_PRODUCTION_API_KEY'),
+        'production_callback_url' => env('SAKURUPIAH_PRODUCTION_CALLBACK_URL'),
+        'production_return_url' => env('SAKURUPIAH_PRODUCTION_RETURN_URL'),
+        'production_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_PRODUCTION_ALLOWED_HOSTS', '')),
+        'production_callback_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_PRODUCTION_CALLBACK_ALLOWED_HOSTS', '')),
+        'production_return_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_PRODUCTION_RETURN_ALLOWED_HOSTS', '')),
+        'production_allowed_ips' => $sakurupiahCsv((string) env('SAKURUPIAH_PRODUCTION_ALLOWED_IPS', '')),
         'timezone' => env('SAKURUPIAH_TIMEZONE', 'Asia/Jakarta'),
         'callback_expired_status_codes' => [2],
+        // These are intentionally code/config contract gates, not ENV
+        // presentation settings. They remain unqualified until sandbox
+        // evidence or written provider clarification is recorded.
+        'qris_contract' => [
+            'currency' => 'IDR',
+            'currency_confirmed' => false,
+            'fee_payer' => 'merchant',
+            'merchant_fee' => 1,
+            'fee_confirmed' => false,
+            'expiry_hours' => null,
+            'expiry_confirmed' => false,
+        ],
         'http_timeout_seconds' => (float) env('SAKURUPIAH_HTTP_TIMEOUT_SECONDS', 10),
         'http_connect_timeout_seconds' => (float) env('SAKURUPIAH_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
         'lookup_max_attempts' => (int) env('SAKURUPIAH_LOOKUP_MAX_ATTEMPTS', 3),
         'lookup_retry_delay_ms' => (int) env('SAKURUPIAH_LOOKUP_RETRY_DELAY_MS', 250),
         'lookup_retry_max_delay_ms' => (int) env('SAKURUPIAH_LOOKUP_RETRY_MAX_DELAY_MS', 1000),
+        'lock_lease_seconds' => (int) env('SAKURUPIAH_LOCK_LEASE_SECONDS', 90),
+        'webhook_rate_limit_per_minute' => (int) env('SAKURUPIAH_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
+        'status_refresh_rate_limit_per_minute' => (int) env('SAKURUPIAH_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),
+        'readiness_cache_seconds' => (int) env('SAKURUPIAH_READINESS_CACHE_SECONDS', 60),
+        'reconciliation_command' => 'sakurupiah:reconcile --chunk=100',
+        // The existing default worker is supervised in production. Do not
+        // introduce a queue name whose worker is not served by the release.
+        'verification_queue' => 'default',
     ],
 
     // Verification budgets intentionally differ by caller. Interactive

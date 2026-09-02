@@ -61,6 +61,27 @@ class ApplicationRateLimiterRegistrar
             return Limit::perMinute($limit)->by('pakasir:webhook:source:'.$source);
         });
 
+        $this->rateLimiter->for('sakurupiah-webhook', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.sakurupiah.webhook_rate_limit_per_minute', 30));
+            $source = $request->ip() ?: 'unknown';
+
+            return Limit::perMinute($limit)->by('sakurupiah:webhook:source:'.$source);
+        });
+
+        $this->rateLimiter->for('sakurupiah-status-refresh', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.sakurupiah.status_refresh_rate_limit_per_minute', 3));
+            $routeOrder = $request->route('order');
+            $order = is_object($routeOrder) && method_exists($routeOrder, 'getKey')
+                ? (string) $routeOrder->getKey()
+                : 'unknown';
+            $source = $request->ip() ?: 'unknown';
+
+            return [
+                Limit::perMinute($limit)->by('sakurupiah:status-refresh:order:'.$order),
+                Limit::perMinute($limit)->by('sakurupiah:status-refresh:source:'.$source),
+            ];
+        });
+
         $statusRefreshLimiter = function (Request $request, string $bucketPrefix = 'automatic-payment') {
             $limit = max(1, (int) $this->config->get('services.pakasir.status_refresh_rate_limit_per_minute', 3));
             $routeOrder = $request->route('order');

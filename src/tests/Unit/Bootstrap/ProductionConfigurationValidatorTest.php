@@ -30,6 +30,168 @@ class ProductionConfigurationValidatorTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    public function test_enabled_sakurupiah_requires_a_complete_credential_pair(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['sakurupiah'] = [
+            'production_enabled' => true,
+            'production_api_id' => 'production-id',
+            'production_api_key' => '',
+        ];
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('SAKURUPIAH_PRODUCTION_API_ID and SAKURUPIAH_PRODUCTION_API_KEY must be configured together.');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
+    public function test_enabled_sakurupiah_rejects_insecure_production_urls(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['sakurupiah'] = array_replace(
+            $this->validSakurupiahProductionConfiguration(),
+            ['production_base_url' => 'http://sakurupiah.id/api/'],
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('SAKURUPIAH_PRODUCTION_BASE_URL must use a safe HTTPS host');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
+    public function test_enabled_sakurupiah_rejects_callback_hosts_outside_the_allowlist(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['sakurupiah'] = array_replace(
+            $this->validSakurupiahProductionConfiguration(),
+            ['production_callback_url' => 'https://evil.example.test/api/webhook/sakurupiah'],
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('SAKURUPIAH_PRODUCTION_CALLBACK_URL must use a safe HTTPS host');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
+    public function test_enabled_sakurupiah_rejects_unqualified_qris_contract(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['sakurupiah'] = array_replace(
+            $this->validSakurupiahProductionConfiguration(),
+            ['qris_contract' => ['currency_confirmed' => false]],
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('SAKURUPIAH_QRIS_CURRENCY_CONTRACT must be qualified');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
+    public function test_enabled_sakurupiah_rejects_inconsistent_qris_fee_mapping(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['sakurupiah'] = array_replace(
+            $this->validSakurupiahProductionConfiguration(),
+            ['qris_contract' => [
+                'currency' => 'IDR',
+                'currency_confirmed' => true,
+                'fee_payer' => 'customer',
+                'merchant_fee' => 1,
+                'fee_confirmed' => true,
+                'expiry_hours' => 24,
+                'expiry_confirmed' => true,
+            ]],
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('SAKURUPIAH_QRIS_FEE_CONTRACT must be qualified');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
+    public function test_sakurupiah_sandbox_and_production_credentials_cannot_be_reused(): void
+    {
+        $configuration = $this->validConfiguration();
+        $sakurupiah = $this->validSakurupiahProductionConfiguration();
+        $sakurupiah['sandbox_api_id'] = $sakurupiah['production_api_id'];
+        $sakurupiah['sandbox_api_key'] = $sakurupiah['production_api_key'];
+        $configuration['services']['sakurupiah'] = $sakurupiah;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('must use different credentials');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
+    public function test_enabled_sakurupiah_rejects_private_production_ip_allowlists(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['sakurupiah'] = array_replace(
+            $this->validSakurupiahProductionConfiguration(),
+            ['production_allowed_ips' => ['10.0.0.1']],
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('SAKURUPIAH_PRODUCTION_ALLOWED_IPS must contain public IP addresses or CIDR ranges.');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
+    public function test_enabled_sakurupiah_rejects_unbounded_production_cidr_allowlists(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['sakurupiah'] = array_replace(
+            $this->validSakurupiahProductionConfiguration(),
+            ['production_allowed_ips' => ['8.8.8.8/0']],
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('SAKURUPIAH_PRODUCTION_ALLOWED_IPS must contain public IP addresses or CIDR ranges.');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validSakurupiahProductionConfiguration(): array
+    {
+        return [
+            'sandbox_enabled' => false,
+            'sandbox_api_id' => '',
+            'sandbox_api_key' => '',
+            'production_enabled' => true,
+            'production_base_url' => 'https://sakurupiah.id/api/',
+            'production_api_id' => 'production-id',
+            'production_api_key' => 'production-key',
+            'production_callback_url' => 'https://store.example.test/api/webhook/sakurupiah',
+            'production_return_url' => 'https://store.example.test/shop/orders',
+            'production_allowed_hosts' => ['sakurupiah.id'],
+            'production_callback_allowed_hosts' => ['store.example.test'],
+            'production_return_allowed_hosts' => ['store.example.test'],
+            'production_allowed_ips' => ['8.8.8.8'],
+            'http_timeout_seconds' => 10.0,
+            'http_connect_timeout_seconds' => 3.0,
+            'lookup_max_attempts' => 3,
+            'lookup_retry_delay_ms' => 250,
+            'lookup_retry_max_delay_ms' => 1000,
+            'lock_lease_seconds' => 90,
+            'webhook_rate_limit_per_minute' => 30,
+            'status_refresh_rate_limit_per_minute' => 3,
+            'readiness_cache_seconds' => 60,
+            'timezone' => 'Asia/Jakarta',
+            'qris_contract' => [
+                'currency' => 'IDR',
+                'currency_confirmed' => true,
+                'fee_payer' => 'merchant',
+                'merchant_fee' => 1,
+                'fee_confirmed' => true,
+                'expiry_hours' => 24,
+                'expiry_confirmed' => true,
+            ],
+        ];
+    }
+
     public function test_production_validation_ignores_removed_binance_canary_age_setting(): void
     {
         $configuration = $this->validConfiguration();

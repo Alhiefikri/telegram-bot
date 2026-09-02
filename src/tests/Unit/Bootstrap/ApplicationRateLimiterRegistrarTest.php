@@ -24,6 +24,7 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
             'services' => [
                 'telegram' => ['webhook_secret' => 'telegram-secret', 'webhook_rate_limit_per_minute' => 17],
                 'pakasir' => ['webhook_rate_limit_per_minute' => 23, 'status_refresh_rate_limit_per_minute' => 4],
+                'sakurupiah' => ['webhook_rate_limit_per_minute' => 29, 'status_refresh_rate_limit_per_minute' => 5],
                 'storefront' => ['checkout_rate_limit_per_minute' => 6, 'credential_access_rate_limit_per_minute' => 7],
             ],
         ])))->register();
@@ -35,7 +36,8 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
             'telegram',
             'pakasir-webhook',
             'pakasir-status-refresh',
-            'storefront-binance-order-id',
+            'sakurupiah-webhook',
+            'sakurupiah-status-refresh',
             'storefront-checkout',
             'storefront-order-access',
             'customer-login-link',
@@ -66,6 +68,39 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
         ]));
 
         $this->assertLimit($limit, 23, 60, 'pakasir:webhook:source:203.0.113.30');
+    }
+
+    public function test_sakurupiah_webhook_policy_preserves_source_bucket(): void
+    {
+        $limit = $this->limit('sakurupiah-webhook', Request::create('/', 'POST', [], [], [], [
+            'REMOTE_ADDR' => '203.0.113.35',
+        ]));
+
+        $this->assertLimit($limit, 29, 60, 'sakurupiah:webhook:source:203.0.113.35');
+    }
+
+    public function test_sakurupiah_status_refresh_policy_preserves_order_and_source_buckets(): void
+    {
+        $request = Request::create('/', 'POST');
+        $request->setRouteResolver(fn () => new class
+        {
+            public function parameter(string $name): object
+            {
+                return new class
+                {
+                    public function getKey(): int
+                    {
+                        return 654;
+                    }
+                };
+            }
+        });
+
+        $limits = $this->limits('sakurupiah-status-refresh', $request);
+
+        $this->assertCount(2, $limits);
+        $this->assertLimit($limits[0], 5, 60, 'sakurupiah:status-refresh:order:654');
+        $this->assertLimit($limits[1], 5, 60, 'sakurupiah:status-refresh:source:127.0.0.1');
     }
 
     public function test_pakasir_status_refresh_policy_preserves_order_bucket_and_custom_response(): void

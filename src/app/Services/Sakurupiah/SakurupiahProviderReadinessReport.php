@@ -2,6 +2,9 @@
 
 namespace App\Services\Sakurupiah;
 
+use App\Enums\SakurupiahEnvironment;
+use Carbon\CarbonImmutable;
+
 final readonly class SakurupiahProviderReadinessReport
 {
     /**
@@ -11,6 +14,12 @@ final readonly class SakurupiahProviderReadinessReport
     public function __construct(
         private array $missing,
         private array $invalid,
+        private ?SakurupiahEnvironment $environment = null,
+        private bool $enabled = false,
+        private ?SakurupiahChannel $qrisChannel = null,
+        private bool $channelObserved = false,
+        private ?CarbonImmutable $checkedAt = null,
+        private ?string $configurationFingerprint = null,
     ) {}
 
     public function isReady(): bool
@@ -36,6 +45,36 @@ final readonly class SakurupiahProviderReadinessReport
         return array_values(array_merge($this->missing, array_keys($this->invalid)));
     }
 
+    public function environment(): ?SakurupiahEnvironment
+    {
+        return $this->environment;
+    }
+
+    public function enabled(): bool
+    {
+        return $this->enabled;
+    }
+
+    public function qrisChannel(): ?SakurupiahChannel
+    {
+        return $this->qrisChannel;
+    }
+
+    public function channelObserved(): bool
+    {
+        return $this->channelObserved;
+    }
+
+    public function checkedAt(): ?CarbonImmutable
+    {
+        return $this->checkedAt;
+    }
+
+    public function configurationFingerprint(): ?string
+    {
+        return $this->configurationFingerprint;
+    }
+
     public function configurationMessage(): string
     {
         $messages = [];
@@ -48,6 +87,11 @@ final readonly class SakurupiahProviderReadinessReport
         }
 
         return implode(' ', $messages);
+    }
+
+    public function operatorReason(): string
+    {
+        return $this->configurationMessage();
     }
 
     public function assertReady(string $message = 'Sakurupiah provider is not ready.'): void

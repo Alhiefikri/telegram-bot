@@ -277,7 +277,7 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
 
     private function assertReady(): void
     {
-        $this->readiness->forEnvironment($this->environment)->assertReady(
+        $this->readiness->configurationReport($this->environment)->assertReady(
             'Sakurupiah '.$this->environment->label().' environment is not ready.',
         );
     }
