@@ -17,9 +17,19 @@ final readonly class SakurupiahStatus
 
     public ?SakurupiahAmount $amount;
 
+    public ?SakurupiahAmount $total;
+
+    public ?SakurupiahFee $fee;
+
+    public ?int $merchantFee;
+
     public ?CarbonImmutable $occurredAt;
 
     public ?CarbonImmutable $expiresAt;
+
+    private ?string $qrPayload;
+
+    private ?string $checkoutUrl;
 
     /** @var array<mixed> */
     public array $sanitizedPayload;
@@ -33,14 +43,24 @@ final readonly class SakurupiahStatus
         ?CarbonImmutable $occurredAt = null,
         ?CarbonImmutable $expiresAt = null,
         array $sanitizedPayload = [],
+        ?SakurupiahAmount $total = null,
+        ?SakurupiahFee $fee = null,
+        ?string $qr = null,
+        ?string $checkoutUrl = null,
+        ?int $merchantFee = null,
     ) {
         $this->trxId = self::text($trxId, 'transaction ID', 255);
         $this->status = $status;
         $this->merchantRef = $merchantRef === null ? null : self::text($merchantRef, 'merchant reference', 255);
         $this->paymentCode = $paymentCode === null ? null : self::text($paymentCode, 'payment code', 64);
         $this->amount = $amount;
+        $this->total = $total;
+        $this->fee = $fee;
+        $this->merchantFee = $merchantFee;
         $this->occurredAt = $occurredAt;
         $this->expiresAt = $expiresAt;
+        $this->qrPayload = $qr;
+        $this->checkoutUrl = $checkoutUrl;
         $this->sanitizedPayload = SakurupiahPayloadSanitizer::sanitize($sanitizedPayload);
     }
 
@@ -77,6 +97,11 @@ final readonly class SakurupiahStatus
             occurredAt: $occurredAt,
             expiresAt: SakurupiahPayloadReader::optionalExpiry($data, 'expired', $occurredAt),
             sanitizedPayload: $payload,
+            total: self::optionalAmount($data, 'total'),
+            fee: self::optionalFee($data, 'fee'),
+            merchantFee: self::optionalMerchantFee($data),
+            qr: SakurupiahPayloadReader::optionalString($data, 'qr', 1_000_000),
+            checkoutUrl: self::optionalCheckoutUrl($data),
         );
     }
 
@@ -116,6 +141,36 @@ final readonly class SakurupiahStatus
         return $this->status->isExpired();
     }
 
+    public function amountValue(): ?int
+    {
+        return $this->amount?->value();
+    }
+
+    public function totalValue(): ?int
+    {
+        return $this->total?->value();
+    }
+
+    public function feeValue(): ?int
+    {
+        return $this->fee?->fixedAmount();
+    }
+
+    public function merchantFee(): ?int
+    {
+        return $this->merchantFee;
+    }
+
+    public function qrPayload(): ?string
+    {
+        return $this->qrPayload;
+    }
+
+    public function checkoutUrl(): ?string
+    {
+        return $this->checkoutUrl;
+    }
+
     private static function optionalAmount(array $data, string $key): ?SakurupiahAmount
     {
         if (! array_key_exists($key, $data) || $data[$key] === null || $data[$key] === '') {
@@ -127,6 +182,58 @@ final readonly class SakurupiahStatus
         } catch (InvalidArgumentException $exception) {
             throw new SakurupiahSchemaException(previous: $exception);
         }
+    }
+
+    /** @param array<mixed> $data */
+    private static function optionalCheckoutUrl(array $data): ?string
+    {
+        $value = SakurupiahPayloadReader::optionalString($data, 'checkout_url', 2048);
+        if ($value === null) {
+            return null;
+        }
+
+        $parts = parse_url($value);
+        if (! is_array($parts)
+            || strtolower((string) ($parts['scheme'] ?? '')) !== 'https'
+            || ! isset($parts['host'])
+            || array_key_exists('user', $parts)
+            || array_key_exists('pass', $parts)
+            || array_key_exists('fragment', $parts)
+            || array_key_exists('port', $parts)
+        ) {
+            throw new SakurupiahSchemaException;
+        }
+
+        return $value;
+    }
+
+    /** @param array<mixed> $data */
+    private static function optionalFee(array $data, string $key): ?SakurupiahFee
+    {
+        if (! array_key_exists($key, $data)) {
+            return null;
+        }
+
+        try {
+            return SakurupiahFee::from($data[$key]);
+        } catch (InvalidArgumentException $exception) {
+            throw new SakurupiahSchemaException(previous: $exception);
+        }
+    }
+
+    /** @param array<mixed> $data */
+    private static function optionalMerchantFee(array $data): ?int
+    {
+        $value = SakurupiahPayloadReader::optionalString($data, 'merchant_fee', 64);
+        if ($value === null) {
+            return null;
+        }
+
+        return match (strtolower($value)) {
+            '1', 'merchant' => 1,
+            '2', 'buyer', 'customer' => 2,
+            default => throw new SakurupiahSchemaException,
+        };
     }
 
     private static function text(string $value, string $label, int $maxLength): string

@@ -21,11 +21,17 @@ final readonly class SakurupiahInvoice
 
     public ?SakurupiahFee $fee;
 
+    public ?int $merchantFee;
+
     public ?CarbonImmutable $createdAt;
 
     public ?CarbonImmutable $expiresAt;
 
     public bool $hasQrPayload;
+
+    private ?string $qrPayload;
+
+    private ?string $checkoutUrl;
 
     private bool $tokenizedCheckoutUrl;
 
@@ -45,6 +51,7 @@ final readonly class SakurupiahInvoice
         ?string $qr = null,
         ?string $checkoutUrl = null,
         array $sanitizedPayload = [],
+        ?int $merchantFee = null,
     ) {
         $this->trxId = self::text($trxId, 'transaction ID', 255);
         $this->merchantRef = self::text($merchantRef, 'merchant reference', 255);
@@ -53,9 +60,12 @@ final readonly class SakurupiahInvoice
         $this->total = self::amount($total, allowZero: false);
         $this->amount = $amount === null ? null : self::amount($amount, allowZero: false);
         $this->fee = $fee;
+        $this->merchantFee = $merchantFee;
         $this->createdAt = $createdAt;
         $this->expiresAt = $expiresAt;
         $this->hasQrPayload = $qr !== null;
+        $this->qrPayload = $qr;
+        $this->checkoutUrl = $checkoutUrl;
         $this->tokenizedCheckoutUrl = self::hasQueryOrFragment($checkoutUrl);
         $this->sanitizedPayload = SakurupiahPayloadSanitizer::sanitize($sanitizedPayload);
     }
@@ -89,6 +99,7 @@ final readonly class SakurupiahInvoice
             ?? SakurupiahPayloadReader::optionalTimestamp($data, 'tanggal', 'waktu');
         $expiresAt = SakurupiahPayloadReader::optionalExpiry($data, 'expired', $createdAt);
         $fee = self::optionalFee($data, 'fee');
+        $merchantFee = self::optionalMerchantFee($data);
 
         return new self(
             trxId: $trxId,
@@ -103,6 +114,7 @@ final readonly class SakurupiahInvoice
             qr: SakurupiahPayloadReader::optionalString($data, 'qr', 1_000_000),
             checkoutUrl: self::optionalCheckoutUrl($data),
             sanitizedPayload: $payload,
+            merchantFee: $merchantFee,
         );
     }
 
@@ -150,6 +162,21 @@ final readonly class SakurupiahInvoice
     public function hasQrPayload(): bool
     {
         return $this->hasQrPayload;
+    }
+
+    public function qrPayload(): ?string
+    {
+        return $this->qrPayload;
+    }
+
+    public function checkoutUrl(): ?string
+    {
+        return $this->checkoutUrl;
+    }
+
+    public function merchantFee(): ?int
+    {
+        return $this->merchantFee;
     }
 
     public function hasTokenizedCheckoutUrl(): bool
@@ -231,6 +258,20 @@ final readonly class SakurupiahInvoice
         } catch (InvalidArgumentException $exception) {
             throw new SakurupiahSchemaException(previous: $exception);
         }
+    }
+
+    private static function optionalMerchantFee(array $data): ?int
+    {
+        $value = SakurupiahPayloadReader::optionalString($data, 'merchant_fee', 64);
+        if ($value === null) {
+            return null;
+        }
+
+        return match (strtolower($value)) {
+            '1', 'merchant' => 1,
+            '2', 'buyer', 'customer' => 2,
+            default => throw new SakurupiahSchemaException,
+        };
     }
 
     private static function text(string $value, string $label, int $maxLength): string

@@ -71,6 +71,7 @@ class SakurupiahDtoTest extends TestCase
                 'total' => 12084,
                 'fee' => '84',
                 'date' => '2026-09-02',
+                'merchant_fee' => 'Merchant',
                 'time' => '12:00:00',
                 'expired' => '2026-09-03 12:00:00',
                 'qr' => 'raw-qr-payload',
@@ -82,6 +83,7 @@ class SakurupiahDtoTest extends TestCase
         $this->assertSame(SakurupiahTransactionStatus::Pending, $invoice->status);
         $this->assertSame(12084, $invoice->totalValue());
         $this->assertSame(12000, $invoice->amountValue());
+        $this->assertSame(1, $invoice->merchantFee());
         $this->assertTrue($invoice->hasTokenizedCheckoutUrl());
         $this->assertTrue($invoice->hasQrPayload());
         $this->assertSame('Asia/Jakarta', $invoice->createdAt?->getTimezone()->getName());

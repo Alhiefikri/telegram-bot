@@ -15,6 +15,7 @@
             <file>tests/Feature/AdminOrderPaymentOperationsTest.php</file>
             <file>tests/Feature/KlikQrisNativeQrisTest.php</file>
             <file>tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/SakurupiahInvoiceLifecyclePostgresConcurrencyTest.php</file>
         </testsuite>
     </testsuites>
     <source>

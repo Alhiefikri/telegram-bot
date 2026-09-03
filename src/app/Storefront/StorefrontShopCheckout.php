@@ -23,6 +23,7 @@ use App\Services\GuestOrderNotificationService;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\OrderCheckoutService;
+use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
@@ -39,6 +40,7 @@ class StorefrontShopCheckout
         private readonly StorefrontGuestCart $guestCarts,
         private readonly OrderCheckoutService $orders,
         private readonly KlikQrisNativeQrisService $klikQrisNativeQris,
+        private readonly SakurupiahInvoiceLifecycleService $sakurupiahLifecycle,
         private readonly PaymentProviderResolver $providerResolver,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontOrderAccess $orderAccess,
@@ -408,11 +410,17 @@ class StorefrontShopCheckout
             return;
         }
 
+        if ($payment->provider === PaymentProvider::SAKURUPIAH) {
+            $this->sakurupiahLifecycle->lifecycle($payment);
+        }
     }
 
     private function usesNativeQris(?Payment $payment): bool
     {
-        return $payment?->provider === PaymentProvider::KLIKQRIS;
+        return in_array($payment?->provider, [
+            PaymentProvider::KLIKQRIS,
+            PaymentProvider::SAKURUPIAH,
+        ], true);
     }
 
     private function hasPayableNativeQris(Payment $payment): bool
