@@ -147,6 +147,22 @@ final class SakurupiahInvoiceLifecycleService
             ->block(self::PAYMENT_LOCK_WAIT_SECONDS, $callback);
     }
 
+    /**
+     * Persist an authoritative callback/reconciliation observation while the
+     * caller holds this Payment's cache lock.
+     *
+     * The callback and reconciliation paths share the lock boundary with
+     * create/recovery; this method deliberately does not acquire it again.
+     */
+    public function persistAuthoritativeStatusObservation(
+        Payment $payment,
+        SakurupiahStatus $status,
+        string $state,
+        ?string $reason = null,
+    ): void {
+        $this->persistStatusObservation($payment, $status, $state, $reason);
+    }
+
     /** @param Closure(): mixed $callback */
     public function tryWithPaymentLock(Payment $payment, Closure $callback): mixed
     {

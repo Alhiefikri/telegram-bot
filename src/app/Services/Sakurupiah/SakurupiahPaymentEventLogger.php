@@ -24,6 +24,20 @@ final class SakurupiahPaymentEventLogger
         );
     }
 
+    public function logCallback(SakurupiahCallback $callback, ?Payment $payment): PaymentEvent
+    {
+        return $this->logCanonical(
+            type: PaymentEventType::Callback,
+            payment: $payment,
+            merchantRef: $callback->merchantRef,
+            providerReference: $callback->trxId,
+            providerStatus: $callback->statusValue(),
+            payload: $callback->sanitizedPayload(),
+            operation: 'callback',
+            paymentScoped: false,
+        );
+    }
+
     public function logReconciliation(Payment $payment, SakurupiahStatus $status): PaymentEvent
     {
         return $this->logCanonical(
@@ -76,30 +90,38 @@ final class SakurupiahPaymentEventLogger
     }
 
     /**
-     * The unique key is scoped to one Payment and one lifecycle observation.
-     * Concurrent callers therefore coalesce without merging separate orders.
+     * Lifecycle observations are scoped to one Payment. Callback observations
+     * intentionally use the provider reference and sanitized payload only, so
+     * an unknown callback can coalesce with a later correlated observation.
      *
      * @param  array<mixed>  $payload
      */
     private function logCanonical(
         PaymentEventType $type,
-        Payment $payment,
+        ?Payment $payment,
         ?string $merchantRef,
         ?string $providerReference,
         string $providerStatus,
         array $payload,
         string $operation,
+        bool $paymentScoped = true,
     ): PaymentEvent {
         $receivedAt = now();
         $canonicalPayload = SakurupiahPayloadSanitizer::sanitize($payload);
-        $idempotencyKey = hash('sha256', json_encode([
-            'payment_id' => $payment->getKey(),
+        $idempotencyPayload = [
             'operation' => $operation,
             'merchant_ref' => $merchantRef,
             'provider_reference' => $providerReference,
             'provider_status' => $providerStatus,
             'payload' => $this->canonicalize($canonicalPayload),
-        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+        ];
+        if ($paymentScoped) {
+            $idempotencyPayload['payment_id'] = $payment?->getKey();
+        }
+        $idempotencyKey = hash('sha256', json_encode(
+            $idempotencyPayload,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+        ));
 
         try {
             return DB::transaction(function () use (
@@ -121,7 +143,7 @@ final class SakurupiahPaymentEventLogger
 
                 if ($event === null) {
                     return PaymentEvent::create([
-                        'payment_id' => $payment->getKey(),
+                        'payment_id' => $payment?->getKey(),
                         'provider' => PaymentProvider::SAKURUPIAH,
                         'event_type' => $type,
                         'merchant_ref' => $merchantRef,
@@ -136,7 +158,7 @@ final class SakurupiahPaymentEventLogger
                 }
 
                 $event->forceFill([
-                    'payment_id' => $event->payment_id ?? $payment->getKey(),
+                    'payment_id' => $event->payment_id ?? $payment?->getKey(),
                     'provider_reference' => $event->provider_reference ?? $providerReference,
                     'last_received_at' => $receivedAt,
                     'received_count' => ((int) $event->received_count) + 1,
@@ -149,16 +171,22 @@ final class SakurupiahPaymentEventLogger
                 throw $exception;
             }
 
+            $updates = [
+                'last_received_at' => $receivedAt,
+                'received_count' => DB::raw('received_count + 1'),
+            ];
+            if ($payment !== null) {
+                $updates['payment_id'] = $payment->getKey();
+            }
+            if ($providerReference !== null) {
+                $updates['provider_reference'] = $providerReference;
+            }
+
             PaymentEvent::query()
                 ->where('provider', PaymentProvider::SAKURUPIAH)
                 ->where('event_type', $type->value)
                 ->where('idempotency_key', $idempotencyKey)
-                ->update([
-                    'payment_id' => $payment->getKey(),
-                    'provider_reference' => $providerReference,
-                    'last_received_at' => $receivedAt,
-                    'received_count' => DB::raw('received_count + 1'),
-                ]);
+                ->update($updates);
 
             return PaymentEvent::query()
                 ->where('provider', PaymentProvider::SAKURUPIAH)

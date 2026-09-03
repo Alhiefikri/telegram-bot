@@ -39,7 +39,15 @@ final readonly class SakurupiahCallback
         $this->status = $status;
         $this->statusCode = $statusCode;
         self::assertStatusCode($status, $statusCode);
-        $this->sanitizedPayload = SakurupiahPayloadSanitizer::sanitize($sanitizedPayload);
+        $this->sanitizedPayload = SakurupiahPayloadSanitizer::sanitize(array_replace(
+            $sanitizedPayload,
+            [
+                'trx_id' => $this->trxId,
+                'merchant_ref' => $this->merchantRef,
+                'status' => $this->status->value,
+                'status_kode' => $this->statusCode,
+            ],
+        ));
     }
 
     /**
@@ -59,6 +67,10 @@ final readonly class SakurupiahCallback
 
     public static function fromRawBody(string $rawBody, string $event = self::EVENT_PAYMENT_STATUS): self
     {
+        if (self::hasDuplicateCriticalKeys($rawBody)) {
+            throw new SakurupiahSchemaException;
+        }
+
         try {
             $payload = json_decode($rawBody, true, 32, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING);
         } catch (JsonException $exception) {
@@ -70,6 +82,94 @@ final readonly class SakurupiahCallback
         }
 
         return self::fromPayload($payload, $event);
+    }
+
+    public static function hasDuplicateCriticalKeys(string $json): bool
+    {
+        $critical = array_fill_keys(['trx_id', 'merchant_ref', 'status', 'status_kode'], true);
+        $seen = [];
+        $depth = 0;
+        $length = strlen($json);
+        $inString = false;
+        $escaped = false;
+        $string = '';
+
+        for ($index = 0; $index < $length; $index++) {
+            $char = $json[$index];
+
+            if ($inString) {
+                if ($escaped) {
+                    $string .= $char;
+                    $escaped = false;
+
+                    continue;
+                }
+
+                if ($char === '\\') {
+                    $string .= $char;
+                    $escaped = true;
+
+                    continue;
+                }
+
+                if ($char === '"') {
+                    $inString = false;
+                    $next = self::nextNonWhitespace($json, $index + 1);
+                    if ($depth === 1 && $next === ':') {
+                        try {
+                            $decoded = json_decode('"'.$string.'"', true, 2, JSON_THROW_ON_ERROR);
+                        } catch (JsonException) {
+                            $decoded = null;
+                        }
+
+                        if (is_string($decoded) && isset($critical[$decoded])) {
+                            if (isset($seen[$decoded])) {
+                                return true;
+                            }
+
+                            $seen[$decoded] = true;
+                        }
+                    }
+
+                    continue;
+                }
+
+                $string .= $char;
+
+                continue;
+            }
+
+            if ($char === '"') {
+                $inString = true;
+                $string = '';
+
+                continue;
+            }
+
+            if ($char === '{' || $char === '[') {
+                $depth++;
+
+                continue;
+            }
+
+            if ($char === '}' || $char === ']') {
+                $depth--;
+            }
+        }
+
+        return false;
+    }
+
+    private static function nextNonWhitespace(string $json, int $offset): ?string
+    {
+        $length = strlen($json);
+        for ($index = $offset; $index < $length; $index++) {
+            if (! ctype_space($json[$index])) {
+                return $json[$index];
+            }
+        }
+
+        return null;
     }
 
     public function statusValue(): string

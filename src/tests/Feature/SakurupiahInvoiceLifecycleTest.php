@@ -153,6 +153,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
 
     public function test_http_create_response_is_parsed_and_sent_once_after_local_payment_exists(): void
     {
+        $this->travelTo('2026-09-02 07:00:00');
         $payment = $this->payment();
         Http::fake(fn () => Http::response([
             'status' => '200',
