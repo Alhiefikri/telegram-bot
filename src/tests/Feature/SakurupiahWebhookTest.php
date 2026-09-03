@@ -361,6 +361,88 @@ class SakurupiahWebhookTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_paid_callback_on_overdue_but_still_pending_order_never_auto_fulfills(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        // The scheduler has not expired the order yet, but the local deadline
+        // has already passed: the callback processor must release the pending
+        // order before the late paid observation, so the paid evidence cannot
+        // auto-fulfill or re-reserve stock.
+        $order = $payment->order->fresh();
+        $order->update([
+            'expires_at' => now()->subMinute(),
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        $payment->update([
+            'expired_at' => now()->subMinute(),
+            'provider_expires_at' => now()->subMinute(),
+            'status' => PaymentStatus::Pending,
+        ]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, amount: $payment->amount),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))
+            ->assertOk()
+            ->assertExactJson(['success' => true]);
+
+        $payment->refresh();
+        $order = $payment->order->fresh();
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame(OrderStatus::Expired, $order->order_status);
+        $this->assertSame(1, ManualFulfillmentReview::query()->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->count());
+        $this->assertSame(0, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
+        $this->assertNotNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
+    }
+
+    public function test_out_of_order_callbacks_cause_one_paid_sale_and_stale_callbacks_are_acknowledged(): void
+    {
+        Queue::fake();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $payment = $this->payment();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, amount: $payment->amount),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $paid = $this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]);
+        $expired = $this->callbackBody($payment, ['status' => 'expired', 'status_kode' => 2]);
+        $pending = $this->callbackBody($payment, ['status' => 'pending', 'status_kode' => 0]);
+
+        // A paid callback arrives first and transitions exactly once.
+        $this->postCallback($paid)->assertOk()->assertExactJson(['success' => true]);
+        $payment->refresh();
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+
+        // A stale expired callback and a stale pending replay are acknowledged
+        // without any further lifecycle mutation.
+        $this->postCallback($expired)->assertOk()->assertExactJson(['success' => true]);
+        $this->postCallback($pending)->assertOk()->assertExactJson(['success' => true]);
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $payment->order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(1, SalesProofPost::query()->count());
+        $this->assertSame(0, ManualFulfillmentReview::query()->count());
+        $events = PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->orderBy('id')->get();
+        $this->assertCount(3, $events);
+        $this->assertSame([1, 1, 1], $events->pluck('received_count')->all());
+        $this->assertTrue($events->every(fn (PaymentEvent $event): bool => $event->processed_at !== null));
+    }
+
     private function payment(array $attributes = []): Payment
     {
         $amount = (int) ($attributes['amount'] ?? 12000);
