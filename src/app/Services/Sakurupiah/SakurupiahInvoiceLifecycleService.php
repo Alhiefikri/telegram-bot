@@ -87,8 +87,8 @@ final class SakurupiahInvoiceLifecycleService
     }
 
     /**
-     * Classify local state without provider I/O. Presentation is never rebuilt
-     * from the sanitized provider projection.
+     * Classify local state without provider I/O. Presentation is rebuilt only
+     * from the encrypted validated Payment snapshot, never provider_payload.
      */
     public function classify(Payment $payment): SakurupiahInvoiceLifecycleResult
     {
@@ -125,6 +125,19 @@ final class SakurupiahInvoiceLifecycleService
         } catch (LockTimeoutException) {
             return SakurupiahInvoiceLifecycleResult::state(SakurupiahInvoiceOutcome::Creating);
         }
+    }
+
+    /**
+     * Attempt one persisted-reference status refresh without waiting on the
+     * payment lock. The storefront uses this to return an in-progress result
+     * instead of allowing concurrent browser requests to overlap provider I/O.
+     */
+    public function tryRefreshStatus(Payment $payment): ?SakurupiahInvoiceLifecycleResult
+    {
+        return $this->tryWithPaymentLock(
+            $payment,
+            fn (): SakurupiahInvoiceLifecycleResult => $this->recoverLocked($payment),
+        );
     }
 
     /** @param Closure(): mixed $callback */
@@ -211,6 +224,7 @@ final class SakurupiahInvoiceLifecycleService
                 $invoice,
                 $assessment['state'],
                 $assessment['reason'],
+                $assessment['payable'],
             );
         } catch (Throwable $exception) {
             // A response was obtained but local persistence/validation did not
@@ -277,6 +291,7 @@ final class SakurupiahInvoiceLifecycleService
                 $status,
                 $assessment['state'],
                 $assessment['reason'],
+                $assessment['payable'],
             );
         } catch (Throwable $exception) {
             $this->markRecoveryUnconfirmed($payment, $this->exceptionCode($exception));
@@ -345,6 +360,11 @@ final class SakurupiahInvoiceLifecycleService
 
         $invoice = $this->invoiceFromStatus($payment, $status);
         if ($invoice === null) {
+            $payable = $this->persistedPayableForStatus($payment, $status);
+            if ($payable !== null) {
+                return $this->assessment(SakurupiahInvoiceOutcome::Payable, self::STATE_CREATED, null, $payable);
+            }
+
             return $this->assessment(
                 $status->isSuccessful()
                     ? SakurupiahInvoiceOutcome::InvalidProviderResult
@@ -354,7 +374,46 @@ final class SakurupiahInvoiceLifecycleService
             );
         }
 
-        return $this->assessInvoice($payment, $invoice);
+        $assessment = $this->assessInvoice($payment, $invoice);
+        if ($assessment['payable'] === null) {
+            $payable = $this->persistedPayableForStatus($payment, $status);
+            if ($payable !== null) {
+                return $this->assessment(SakurupiahInvoiceOutcome::Payable, self::STATE_CREATED, null, $payable);
+            }
+        }
+
+        return $assessment;
+    }
+
+    private function persistedPayableForStatus(Payment $payment, SakurupiahStatus $status): ?SakurupiahPayableInvoice
+    {
+        if (! $status->isPending()
+            || $status->qrPayload() !== null
+            || $status->checkoutUrl() !== null) {
+            return null;
+        }
+
+        if (($status->totalValue() !== null && $status->totalValue() !== $payment->provider_total_payment)
+            || ($status->feeValue() !== null && $status->feeValue() !== $payment->provider_fee)) {
+            return null;
+        }
+
+        $merchantFee = $status->merchantFee();
+        $configuredMerchantFee = config('services.sakurupiah.qris_contract.merchant_fee');
+        if ($merchantFee !== null
+            && (! is_int($configuredMerchantFee) || $merchantFee !== $configuredMerchantFee)) {
+            return null;
+        }
+
+        try {
+            return SakurupiahPayableInvoice::fromPersistedPayment(
+                payment: $payment,
+                environment: $this->runtimeEnvironment(),
+                observedExpiresAt: $status->expiresAt,
+            );
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -401,10 +460,11 @@ final class SakurupiahInvoiceLifecycleService
         SakurupiahInvoice $invoice,
         string $state,
         ?string $reason,
+        ?SakurupiahPayableInvoice $payable = null,
     ): void {
         $this->lifecycleCoordinator->withLockedOrderPayment(
             $payment,
-            function (Order $order, Payment $lockedPayment) use ($invoice, $state, $reason): void {
+            function (Order $order, Payment $lockedPayment) use ($invoice, $state, $reason, $payable): void {
                 $merchantMatches = $invoice->merchantRef === (string) $lockedPayment->merchant_ref;
                 $methodMatches = strtoupper($invoice->paymentCode) === SakurupiahCreateInvoice::METHOD_QRIS;
                 $referenceMatches = blank($lockedPayment->provider_reference)
@@ -419,9 +479,12 @@ final class SakurupiahInvoiceLifecycleService
                     'provider_payment_method' => $invoice->paymentCode,
                     'provider_total_payment' => $invoice->totalValue(),
                     'provider_fee' => $invoice->fee?->fixedAmount(),
+                    'provider_payload' => $invoice->sanitizedPayload(),
                     'provider_created_at' => $invoice->createdAt,
                     'provider_expires_at' => $invoice->expiresAt,
-                    'provider_payload' => $invoice->sanitizedPayload(),
+                    'provider_presentation' => $effectiveState === self::STATE_CREATED && $payable !== null
+                        ? $payable->persistenceSnapshot()
+                        : null,
                     'provider_create_state' => $effectiveState,
                     'provider_create_last_error' => $effectiveState === self::STATE_CREATED
                         ? null
@@ -447,10 +510,11 @@ final class SakurupiahInvoiceLifecycleService
         SakurupiahStatus $status,
         string $state,
         ?string $reason,
+        ?SakurupiahPayableInvoice $payable = null,
     ): void {
         $this->lifecycleCoordinator->withLockedOrderPayment(
             $payment,
-            function (Order $order, Payment $lockedPayment) use ($status, $state, $reason): void {
+            function (Order $order, Payment $lockedPayment) use ($status, $state, $reason, $payable): void {
                 if (filled($lockedPayment->provider_reference)
                     && $lockedPayment->provider_reference !== $status->trxId) {
                     $state = self::STATE_INVALID_PROVIDER_RESULT;
@@ -466,9 +530,12 @@ final class SakurupiahInvoiceLifecycleService
                     'provider_payment_method' => $status->paymentCode ?? $lockedPayment->provider_payment_method,
                     'provider_total_payment' => $status->totalValue() ?? $lockedPayment->provider_total_payment,
                     'provider_fee' => $status->feeValue() ?? $lockedPayment->provider_fee,
+                    'provider_payload' => $payload,
                     'provider_created_at' => $lockedPayment->provider_created_at ?? $status->occurredAt,
                     'provider_expires_at' => $status->expiresAt ?? $lockedPayment->provider_expires_at,
-                    'provider_payload' => $payload,
+                    'provider_presentation' => $state === self::STATE_CREATED && $payable !== null
+                        ? $payable->persistenceSnapshot()
+                        : null,
                     'provider_create_state' => $state,
                     'provider_create_last_error' => $state === self::STATE_CREATED ? null : ($reason ?? $state),
                 ];
@@ -672,12 +739,22 @@ final class SakurupiahInvoiceLifecycleService
 
     private function classifyPersisted(Payment $payment): SakurupiahInvoiceLifecycleResult
     {
+        if ($payment->provider_create_state === self::STATE_CREATED) {
+            try {
+                return SakurupiahInvoiceLifecycleResult::payableResult(
+                    SakurupiahPayableInvoice::fromPersistedPayment($payment, $this->runtimeEnvironment()),
+                );
+            } catch (Throwable) {
+                return SakurupiahInvoiceLifecycleResult::state(SakurupiahInvoiceOutcome::ProviderTotalPending);
+            }
+        }
+
         $outcome = match ($payment->provider_create_state) {
             self::STATE_OUTCOME_UNKNOWN, self::STATE_RECOVERY_UNCONFIRMED => SakurupiahInvoiceOutcome::RecoveryPending,
             self::STATE_CREATING, self::STATE_CREATE_FAILED, null => filled($payment->provider_reference)
                 ? SakurupiahInvoiceOutcome::RecoveryPending
                 : SakurupiahInvoiceOutcome::Creating,
-            self::STATE_PROVIDER_TOTAL_PENDING, self::STATE_PROVIDER_QRIS_UNUSABLE, self::STATE_CREATED => SakurupiahInvoiceOutcome::ProviderTotalPending,
+            self::STATE_PROVIDER_TOTAL_PENDING, self::STATE_PROVIDER_QRIS_UNUSABLE => SakurupiahInvoiceOutcome::ProviderTotalPending,
             self::STATE_PROVIDER_EXPIRED => SakurupiahInvoiceOutcome::Expired,
             default => SakurupiahInvoiceOutcome::InvalidProviderResult,
         };

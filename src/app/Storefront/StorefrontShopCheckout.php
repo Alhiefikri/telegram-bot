@@ -425,8 +425,12 @@ class StorefrontShopCheckout
 
     private function hasPayableNativeQris(Payment $payment): bool
     {
-        return $payment->provider === PaymentProvider::KLIKQRIS
-            && $this->klikQrisNativeQris->classify($payment)->outcome() === KlikQrisNativeQrisOutcome::Payable;
+        if ($payment->provider === PaymentProvider::KLIKQRIS) {
+            return $this->klikQrisNativeQris->classify($payment)->outcome() === KlikQrisNativeQrisOutcome::Payable;
+        }
+
+        return $payment->provider === PaymentProvider::SAKURUPIAH
+            && $this->sakurupiahLifecycle->classify($payment)->isPayable();
     }
 
     private function assertTermsAccepted(StorefrontShopCheckoutInput $input): void

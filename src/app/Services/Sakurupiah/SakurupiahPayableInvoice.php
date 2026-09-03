@@ -104,6 +104,100 @@ final readonly class SakurupiahPayableInvoice
         );
     }
 
+    /**
+     * Rebuild the safe presentation from the encrypted Payment snapshot.
+     * provider_payload is deliberately not consulted.
+     */
+    public static function fromPersistedPayment(
+        Payment $payment,
+        SakurupiahEnvironment $environment,
+        ?CarbonInterface $observedExpiresAt = null,
+    ): self
+    {
+        if ($payment->provider !== PaymentProvider::SAKURUPIAH
+            || strtoupper(trim((string) $payment->method)) !== SakurupiahCreateInvoice::METHOD_QRIS
+            || strtoupper(trim((string) $payment->currency)) !== 'IDR'
+            || $payment->provider_create_state !== 'created') {
+            throw new SakurupiahInvoiceIntegrityException('payment_identity');
+        }
+
+        $merchantRef = trim((string) $payment->merchant_ref);
+        $providerReference = trim((string) $payment->provider_reference);
+        $paymentMethod = strtoupper(trim((string) $payment->provider_payment_method));
+        $fee = $payment->provider_fee;
+        $total = $payment->provider_total_payment;
+        if ($merchantRef === '' || $providerReference === '' || $paymentMethod !== SakurupiahCreateInvoice::METHOD_QRIS) {
+            throw new SakurupiahInvoiceIntegrityException('payment_identity');
+        }
+        if ($payment->status !== \App\Enums\PaymentStatus::Pending
+            || ! is_int($fee)
+            || $fee < 0
+            || ! is_int($total)
+            || $total !== (int) $payment->amount + $fee
+            || (int) $payment->amount <= 0) {
+            throw new SakurupiahInvoiceIntegrityException('fee');
+        }
+
+        $snapshot = $payment->provider_presentation;
+        if (! is_array($snapshot)) {
+            throw new SakurupiahInvoiceIntegrityException('presentation_snapshot');
+        }
+
+        try {
+            $effectiveExpiresAt = CarbonImmutable::parse((string) ($snapshot['effective_expires_at'] ?? ''));
+        } catch (\Throwable $exception) {
+            throw new SakurupiahInvoiceIntegrityException('effective_expiry', previous: $exception);
+        }
+        if ($observedExpiresAt !== null) {
+            $observedExpiresAt = CarbonImmutable::instance($observedExpiresAt);
+            if ($observedExpiresAt->lt($effectiveExpiresAt)) {
+                $effectiveExpiresAt = $observedExpiresAt;
+            }
+        }
+        if (! $effectiveExpiresAt->isFuture()) {
+            throw new SakurupiahInvoiceIntegrityException('effective_expiry');
+        }
+        foreach ([$payment->provider_expires_at, $payment->expired_at] as $deadline) {
+            if ($deadline !== null && $effectiveExpiresAt->gt($deadline)) {
+                throw new SakurupiahInvoiceIntegrityException('effective_expiry');
+            }
+        }
+
+        $mode = $snapshot['mode'] ?? null;
+        $qrisPayload = $snapshot['qris_payload'] ?? null;
+        $checkoutUrl = $snapshot['checkout_url'] ?? null;
+        if ($mode === 'qris') {
+            if (! is_string($qrisPayload) || trim($qrisPayload) === '' || $checkoutUrl !== null) {
+                throw new SakurupiahInvoiceIntegrityException('qris_presentation');
+            }
+            try {
+                QrisEmvPayload::parse($qrisPayload)->assertMatchesIdrAmount($total);
+            } catch (\Throwable $exception) {
+                throw new SakurupiahInvoiceIntegrityException('qris_presentation', previous: $exception);
+            }
+        } elseif ($mode === 'hosted') {
+            if (! is_string($checkoutUrl)
+                || $checkoutUrl === ''
+                || $qrisPayload !== null
+                || ! self::isAllowedHostedUrl($checkoutUrl, $environment)) {
+                throw new SakurupiahInvoiceIntegrityException('hosted_presentation');
+            }
+        } else {
+            throw new SakurupiahInvoiceIntegrityException('presentation_snapshot');
+        }
+
+        return new self(
+            merchantRef: $merchantRef,
+            providerReference: $providerReference,
+            paymentMethod: $paymentMethod,
+            totalAmount: $total,
+            providerFee: $fee,
+            effectiveExpiresAt: $effectiveExpiresAt,
+            qrisPayload: $mode === 'qris' ? $qrisPayload : null,
+            checkoutUrl: $mode === 'hosted' ? $checkoutUrl : null,
+        );
+    }
+
     public function merchantRef(): string
     {
         return $this->merchantRef;
@@ -122,6 +216,11 @@ final readonly class SakurupiahPayableInvoice
     public function totalAmount(): int
     {
         return $this->totalAmount;
+    }
+
+    public function totalAmountDisplay(): string
+    {
+        return 'Rp'.number_format($this->totalAmount, 0, ',', '.');
     }
 
     public function providerFee(): int
@@ -152,6 +251,17 @@ final readonly class SakurupiahPayableInvoice
     public function isHosted(): bool
     {
         return $this->checkoutUrl !== null;
+    }
+
+    /** @return array{mode: 'qris'|'hosted', qris_payload: ?string, checkout_url: ?string, effective_expires_at: string} */
+    public function persistenceSnapshot(): array
+    {
+        return [
+            'mode' => $this->isDirectQris() ? 'qris' : 'hosted',
+            'qris_payload' => $this->qrisPayload,
+            'checkout_url' => $this->checkoutUrl,
+            'effective_expires_at' => $this->effectiveExpiresAt->toIso8601String(),
+        ];
     }
 
     private static function isAllowedHostedUrl(string $url, SakurupiahEnvironment $environment): bool

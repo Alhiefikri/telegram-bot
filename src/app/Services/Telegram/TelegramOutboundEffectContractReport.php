@@ -243,8 +243,9 @@ final class TelegramOutboundEffectContractReport
                 [
                     TelegramOutboundEffectType::ManualCheckoutInstructions->value,
                     TelegramOutboundEffectType::KlikQrisCheckoutInstructions->value,
-                    TelegramOutboundEffectType::PakasirCheckoutInstructions->value,
+                    TelegramOutboundEffectType::SakurupiahCheckoutInstructions->value,
                     TelegramOutboundEffectType::BinanceCheckoutInstructions->value,
+                    TelegramOutboundEffectType::PakasirCheckoutInstructions->value,
                     TelegramOutboundEffectType::BscCheckoutInstructions->value,
                     TelegramOutboundEffectType::ReceiptCredentials->value,
                     TelegramOutboundEffectType::AdminOrderPendingNotification->value,
@@ -310,8 +311,9 @@ final class TelegramOutboundEffectContractReport
                 [
                     TelegramOutboundEffectType::ManualCheckoutInstructions->value,
                     TelegramOutboundEffectType::KlikQrisCheckoutInstructions->value,
-                    TelegramOutboundEffectType::PakasirCheckoutInstructions->value,
+                    TelegramOutboundEffectType::SakurupiahCheckoutInstructions->value,
                     TelegramOutboundEffectType::BinanceCheckoutInstructions->value,
+                    TelegramOutboundEffectType::PakasirCheckoutInstructions->value,
                     TelegramOutboundEffectType::BscCheckoutInstructions->value,
                     TelegramOutboundEffectType::ReceiptCredentials->value,
                     TelegramOutboundEffectType::AdminOrderPendingNotification->value,

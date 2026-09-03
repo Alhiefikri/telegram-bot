@@ -17,6 +17,11 @@ use App\Services\KlikQris\KlikQrisNativeQrisLifecycleResult;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
+use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleResult;
+use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
+use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
+use App\Services\Sakurupiah\SakurupiahPayableInvoice;
+use App\Support\PaymentProvider;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleProjection;
 use App\Services\Telegram\TelegramQrCodeRenderer;
@@ -34,6 +39,7 @@ class StorefrontShopSignedInvoice
         private readonly BscPaymentVerification $bscVerification,
         private readonly BscExplorerUrl $bscExplorer,
         private readonly KlikQrisNativeQrisService $klikQris,
+        private readonly SakurupiahInvoiceLifecycleService $sakurupiah,
     ) {}
 
     public function read(Order $order): StorefrontShopSignedInvoiceReadResult
@@ -48,10 +54,13 @@ class StorefrontShopSignedInvoice
         $state = $this->state($projection);
         $redirectUrl = $this->redirectUrl($order);
         $klikQrisResult = $this->isKlikQrisPayment($payment) ? $this->klikQris->classify($payment) : null;
-        $qrisReadiness = $this->qrisReadiness($projection, $payment, $klikQrisResult);
+        $sakurupiahResult = $this->isSakurupiahPayment($payment) ? $this->sakurupiah->classify($payment) : null;
+        $qrisReadiness = $this->qrisReadiness($projection, $payment, $klikQrisResult, $sakurupiahResult);
         $delivery = $this->credentialPresentation->forOrder($order, $payment);
         $accountGroups = $this->accountGroups($delivery);
-        $payable = $projection->isPendingPayment ? $klikQrisResult?->payable() : null;
+        $klikPayable = $projection->isPendingPayment ? $klikQrisResult?->payable() : null;
+        $sakurupiahPayable = $projection->isPendingPayment ? $sakurupiahResult?->payable() : null;
+        $payable = $klikPayable ?? $sakurupiahPayable;
 
         return new StorefrontShopSignedInvoiceReadResult(
             order: $order,
@@ -71,10 +80,10 @@ class StorefrontShopSignedInvoice
             qrisReadinessMessage: $qrisReadiness['message'],
             qrisRetryLabel: $qrisReadiness['retry_label'],
             qrisImageDataUri: $this->qrisImageDataUri($projection, $payment),
-            qrisImageSource: $this->qrisImageSource($projection, $payment, $payable),
+            qrisImageSource: $this->qrisImageSource($order, $projection, $payment, $klikPayable, $sakurupiahPayable),
             payableAmountDisplay: $payable?->totalAmountDisplay(),
             qrisEffectiveExpiresAt: $payable?->effectiveExpiresAt(),
-            hostedPaymentUrl: $this->hostedPaymentUrl($projection, $payment),
+            hostedPaymentUrl: $this->hostedPaymentUrl($projection, $payment, $sakurupiahPayable),
             accountGroups: $accountGroups,
             usageGuides: $state === StorefrontShopSignedInvoiceState::Paid ? $delivery->usageGuides() : [],
             accountCopyText: $this->accountCopyText($accountGroups),
@@ -158,6 +167,11 @@ class StorefrontShopSignedInvoice
         return strtolower((string) $payment?->provider) === 'klikqris';
     }
 
+    private function isSakurupiahPayment(?Payment $payment): bool
+    {
+        return strtolower((string) $payment?->provider) === PaymentProvider::SAKURUPIAH;
+    }
+
     private function qrisImageDataUri(OrderLifecycleProjection $projection, ?Payment $payment): ?string
     {
         if (! $projection->isPendingPayment || $payment?->isPayableNativePakasirQris() !== true) {
@@ -167,14 +181,23 @@ class StorefrontShopSignedInvoice
         return 'data:image/png;base64,'.base64_encode($this->qrCodes->png($payment->provider_payment_number));
     }
 
-    private function qrisImageSource(OrderLifecycleProjection $projection, ?Payment $payment, ?KlikQrisPayableNativeQris $payable): ?string
-    {
+    private function qrisImageSource(
+        Order $order,
+        OrderLifecycleProjection $projection,
+        ?Payment $payment,
+        ?KlikQrisPayableNativeQris $klikPayable,
+        ?SakurupiahPayableInvoice $sakurupiahPayable,
+    ): ?string {
         if (! $projection->isPendingPayment) {
             return null;
         }
 
-        if ($payable !== null) {
-            return $payable->qrisUrl();
+        if ($klikPayable !== null) {
+            return $klikPayable->qrisUrl();
+        }
+
+        if ($sakurupiahPayable?->isDirectQris()) {
+            return $this->invoiceUrls->qrisImage($order);
         }
 
         if (! $this->hasPayableNativePakasirQris($payment)) {
@@ -184,9 +207,22 @@ class StorefrontShopSignedInvoice
         return $this->qrisImageDataUri($projection, $payment);
     }
 
-    private function hostedPaymentUrl(OrderLifecycleProjection $projection, ?Payment $payment): ?string
-    {
-        if (! $projection->isPendingPayment || ! $this->isPakasirPayment($payment)) {
+    private function hostedPaymentUrl(
+        OrderLifecycleProjection $projection,
+        ?Payment $payment,
+        ?SakurupiahPayableInvoice $sakurupiahPayable,
+    ): ?string {
+        if (! $projection->isPendingPayment) {
+            return null;
+        }
+
+        if ($this->isSakurupiahPayment($payment)) {
+            return $sakurupiahPayable?->isHosted() === true
+                ? $sakurupiahPayable->checkoutUrl()
+                : null;
+        }
+
+        if (! $this->isPakasirPayment($payment)) {
             return null;
         }
 
@@ -224,8 +260,12 @@ class StorefrontShopSignedInvoice
     /**
      * @return array{is_payable: bool, state: string, title: string, message: string, retry_label: string}
      */
-    private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment, ?KlikQrisNativeQrisLifecycleResult $klikQrisResult = null): array
-    {
+    private function qrisReadiness(
+        OrderLifecycleProjection $projection,
+        ?Payment $payment,
+        ?KlikQrisNativeQrisLifecycleResult $klikQrisResult = null,
+        ?SakurupiahInvoiceLifecycleResult $sakurupiahResult = null,
+    ): array {
         if (! $projection->isPendingPayment) {
             return ['is_payable' => false] + $this->terminalCopy->qrisReadiness('terminal');
         }
@@ -236,6 +276,17 @@ class StorefrontShopSignedInvoice
 
         if ($payment?->provider === 'pakasir' && $payment->method === 'hosted') {
             return ['is_payable' => false] + $this->terminalCopy->qrisReadiness('hosted');
+        }
+
+        if ($sakurupiahResult !== null) {
+            return match ($sakurupiahResult->outcome()) {
+                SakurupiahInvoiceOutcome::Payable => ['is_payable' => true] + $this->terminalCopy->qrisReadiness('ready'),
+                SakurupiahInvoiceOutcome::Creating => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('creating'),
+                SakurupiahInvoiceOutcome::RecoveryPending => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('recovery_pending'),
+                SakurupiahInvoiceOutcome::ProviderTotalPending => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('provider_total_pending'),
+                SakurupiahInvoiceOutcome::InvalidProviderResult => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('failed'),
+                SakurupiahInvoiceOutcome::Expired => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('expired'),
+            };
         }
 
         if ($klikQrisResult !== null) {

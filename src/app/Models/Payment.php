@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Model;
     'merchant_ref',
     'provider_reference',
     'provider_payload',
+    'provider_presentation',
     'klikqris_transaction_signature',
     'provider_fee',
     'provider_total_payment',
@@ -59,6 +60,7 @@ class Payment extends Model
 
     protected $hidden = [
         'klikqris_transaction_signature',
+        'provider_presentation',
     ];
 
     protected function casts(): array
@@ -72,6 +74,7 @@ class Payment extends Model
             'binance_verification_grace_until' => 'datetime',
             'binance_last_verified_at' => 'datetime',
             'provider_payload' => 'array',
+            'provider_presentation' => 'encrypted:array',
             'provider_fee' => 'integer',
             'provider_total_payment' => 'integer',
             'provider_created_at' => 'datetime',

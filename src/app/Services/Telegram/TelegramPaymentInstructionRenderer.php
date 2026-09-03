@@ -10,6 +10,8 @@ use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirQrisFeePolicy;
 use App\Services\Pakasir\PakasirQrisTransaction;
+use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
+use App\Services\Sakurupiah\SakurupiahPayableInvoice;
 use App\Support\DogfoodTiming;
 use Carbon\CarbonInterface;
 
@@ -253,6 +255,48 @@ class TelegramPaymentInstructionRenderer
         );
     }
 
+    public function sakurupiah(Order $order, SakurupiahPayableInvoice $payable, string $locale = 'id'): TelegramPaymentInstruction
+    {
+        $order->loadMissing('orderItems');
+        $paymentUrl = $payable->checkoutUrl();
+        $qrContent = $payable->qrisPayload() ?? $paymentUrl;
+        if ($qrContent === null) {
+            throw new \RuntimeException('Sakurupiah payable invoice has no presentation content.');
+        }
+
+        $lines = [
+            $this->text($locale, 'payment.sakurupiah.checkout_created'),
+            '━━━━━━━━━━━━━━',
+            $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            $this->text($locale, 'payment.products', ['items' => $this->orderItemsSummary($order)]),
+            $this->text($locale, 'payment.product_total', ['amount' => $this->formatRupiah($order->total_amount)]),
+            $this->text($locale, 'payment.qris_fee', ['fee' => $this->formatRupiah($payable->providerFee())]),
+            $this->text($locale, 'payment.qris_total', ['amount' => $payable->totalAmountDisplay()]),
+            $this->text($locale, 'payment.qris_fee_store'),
+            '',
+            $this->text($locale, 'payment.sakurupiah.exact_amount'),
+        ];
+
+        $lines[] = $payable->isDirectQris()
+            ? $this->text($locale, 'payment.sakurupiah.scan')
+            : $this->text($locale, 'payment.sakurupiah.hosted');
+        $lines[] = '';
+        $lines[] = $this->text($locale, 'payment.qris_deadline', [
+            'date' => $this->formatDate($payable->effectiveExpiresAt(), $locale),
+        ]);
+        $lines[] = $this->text($locale, 'payment.qris_deadline_guidance');
+        $lines[] = '';
+        $lines[] = $this->text($locale, 'payment.auto_delivery');
+        $lines[] = $this->text($locale, 'payment.check_if_missing');
+
+        return new TelegramPaymentInstruction(
+            photoContents: $this->qrCodes->png($qrContent),
+            filename: 'sakurupiah-'.$order->invoice_number.'.png',
+            captionLines: $lines,
+            replyMarkup: $this->sakurupiahPaymentActions($order, $paymentUrl, $locale),
+        );
+    }
+
     /**
      * Text-only retry state for a non-payable KlikQRIS outcome. No QR, total,
      * or provider data is presented; the customer either waits and retries on
@@ -285,6 +329,40 @@ class TelegramPaymentInstructionRenderer
             $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
             '',
             $this->text($locale, 'payment.klikqris.retry.'.$keySuffix.'_body'),
+        ]);
+    }
+
+    /**
+     * Text-only retry state for a non-payable Sakurupiah outcome. Provider
+     * response data never crosses this presentation boundary.
+     */
+    public function sakurupiahRetry(Order $order, SakurupiahInvoiceOutcome $outcome, string $locale = 'id'): string
+    {
+        if ($outcome === SakurupiahInvoiceOutcome::Expired) {
+            return implode("\n", [
+                $this->text($locale, 'payment.sakurupiah.retry.expired_title'),
+                '━━━━━━━━━━━━━━',
+                $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+                '',
+                $this->text($locale, 'payment.sakurupiah.retry.expired_body'),
+            ]);
+        }
+
+        $keySuffix = match ($outcome) {
+            SakurupiahInvoiceOutcome::Creating => 'creating',
+            SakurupiahInvoiceOutcome::RecoveryPending => 'recovery_pending',
+            SakurupiahInvoiceOutcome::ProviderTotalPending => 'total_pending',
+            SakurupiahInvoiceOutcome::InvalidProviderResult => 'invalid',
+            SakurupiahInvoiceOutcome::Payable => 'ready',
+            SakurupiahInvoiceOutcome::Expired => 'expired',
+        };
+
+        return implode("\n", [
+            $this->text($locale, 'payment.sakurupiah.retry.'.$keySuffix.'_lead'),
+            '━━━━━━━━━━━━━━',
+            $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            '',
+            $this->text($locale, 'payment.sakurupiah.retry.'.$keySuffix.'_body'),
         ]);
     }
 
@@ -368,6 +446,21 @@ class TelegramPaymentInstructionRenderer
                 [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
             ],
         ];
+    }
+
+    /**
+     * @return array{inline_keyboard: list<list<array{text: string, url?: string, callback_data?: string}>>}
+     */
+    private function sakurupiahPaymentActions(Order $order, ?string $paymentUrl, string $locale): array
+    {
+        $keyboard = [];
+        if ($paymentUrl !== null) {
+            $keyboard[] = [['text' => $this->text($locale, 'payment.action.website'), 'url' => $paymentUrl]];
+        }
+        $keyboard[] = [['text' => $this->text($locale, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]];
+        $keyboard[] = [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]];
+
+        return ['inline_keyboard' => $keyboard];
     }
 
     private function formatDate(CarbonInterface $date, string $locale): string

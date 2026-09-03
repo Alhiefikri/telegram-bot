@@ -87,10 +87,13 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->assertSame(1, $event->received_count);
         $this->assertArrayNotHasKey('checkout_url', $event->raw_payload['data'][0]);
 
-        // A checkout reuse sees the persisted safe state and never creates a
-        // second provider invoice or Payment.
+        // A checkout reuse sees the persisted encrypted presentation and
+        // never creates a second provider invoice or Payment.
         $second = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
-        $this->assertSame(SakurupiahInvoiceOutcome::ProviderTotalPending, $second->outcome());
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $second->outcome());
+        $this->assertSame(12084, $second->payable()?->totalAmount());
+        $this->assertSame($result->payable()?->effectiveExpiresAt()->toIso8601String(), $second->payable()?->effectiveExpiresAt()->toIso8601String());
+        $this->assertArrayNotHasKey('provider_presentation', $payment->toArray());
         $this->assertSame(1, Payment::query()->where('order_id', $payment->order_id)->count());
     }
 
@@ -324,6 +327,32 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $payment->refresh();
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->provider_create_state);
         $this->assertSame(1, $payment->paymentEvents()->where('event_type', 'reconciliation')->count());
+    }
+
+    public function test_pending_status_without_presentation_reuses_existing_validated_snapshot(): void
+    {
+        $payment = $this->payment();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->once()->andReturn($this->invoice($payment));
+        $provider->shouldReceive('transactionStatus')->once()->with('trx-411')->andReturn(new SakurupiahStatus(
+            trxId: 'trx-411',
+            status: SakurupiahTransactionStatus::Pending,
+            sanitizedPayload: [
+                'status' => '200',
+                'data' => [['trx_id' => 'trx-411', 'payment_status' => 'pending']],
+            ],
+        ));
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $lifecycle = app(SakurupiahInvoiceLifecycleService::class);
+        $created = $lifecycle->lifecycle($payment);
+        $refreshed = $lifecycle->refreshStatus($payment);
+
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $created->outcome());
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $refreshed->outcome());
+        $this->assertSame('https://sakurupiah.id/pay/invoice', $refreshed->payable()?->checkoutUrl());
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->fresh()->provider_create_state);
+        $this->assertSame('hosted', $payment->fresh()->provider_presentation['mode']);
     }
 
     public function test_provider_total_mismatch_is_never_payable(): void

@@ -4,27 +4,33 @@
     $hasNativeQris = $isPendingPayment && $isQrisPayable && filled($qrisImageSource ?? $qrisImageDataUri);
     $isManualQris = $isManualQris ?? false;
     $isHostedPakasir = $isHostedPakasir ?? false;
+    $isSakurupiah = $isSakurupiah ?? strtolower((string) $payment?->provider) === 'sakurupiah';
+    $isHostedSakurupiah = $isHostedSakurupiah ?? ($isSakurupiah && ! $hasNativeQris && filled($hostedPaymentUrl));
     $paymentDeadlineLabel = $paymentDeadline?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
-    $customerPaysQrisFee = config('services.pakasir.qris_fee.payer', 'customer') === 'customer';
+    $customerPaysQrisFee = isset($qrisFeePayer)
+        ? $qrisFeePayer === 'customer'
+        : (! $isSakurupiah && config('services.pakasir.qris_fee.payer', 'customer') === 'customer');
 @endphp
 
 <x-storefront.panel as="section" class="mt-5" aria-label="{{ __('storefront.invoice.qris.aria_label', [], $storefrontLocale) }}">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
             <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">
-                {{ __($isManualQris ? 'storefront.invoice.qris.eyebrow.manual' : ($isHostedPakasir ? 'storefront.invoice.qris.eyebrow.hosted' : 'storefront.invoice.qris.eyebrow.default'), [], $storefrontLocale) }}
+                {{ __($isManualQris ? 'storefront.invoice.qris.eyebrow.manual' : ($isHostedPakasir ? 'storefront.invoice.qris.eyebrow.hosted' : ($isSakurupiah ? 'storefront.invoice.qris.eyebrow.sakurupiah' : 'storefront.invoice.qris.eyebrow.default')), [], $storefrontLocale) }}
             </p>
             <h2 class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">
-                {{ __($isManualQris ? 'storefront.invoice.qris.title.manual' : ($isHostedPakasir ? 'storefront.invoice.qris.title.hosted' : 'storefront.invoice.qris.title.default'), [], $storefrontLocale) }}
+                {{ __($isManualQris ? 'storefront.invoice.qris.title.manual' : ($isHostedPakasir ? 'storefront.invoice.qris.title.hosted' : ($isSakurupiah ? 'storefront.invoice.qris.title.sakurupiah' : 'storefront.invoice.qris.title.default')), [], $storefrontLocale) }}
             </h2>
             <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
                 {{ __($isManualQris
                     ? 'storefront.invoice.qris.description.manual'
                     : ($isHostedPakasir
                         ? 'storefront.invoice.qris.description.hosted'
-                        : ($isQrisPayable
-                            ? 'storefront.invoice.qris.description.payable'
-                            : 'storefront.invoice.qris.description.not_ready')), [], $storefrontLocale) }}
+                        : ($isSakurupiah
+                            ? 'storefront.invoice.qris.description.sakurupiah'
+                            : ($isQrisPayable
+                                ? 'storefront.invoice.qris.description.payable'
+                                : 'storefront.invoice.qris.description.not_ready'))), [], $storefrontLocale) }}
             </p>
         </div>
 
@@ -64,7 +70,7 @@
         @include('storefront.partials.shop.payment-countdown')
     @endif
 
-    @if (! $isQrisPayable && ! $isManualQris && ! $isHostedPakasir)
+    @if (! $isQrisPayable && ! $isManualQris && ! $isHostedPakasir && ! $isHostedSakurupiah)
         <p class="mt-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3 text-sm font-black leading-6 text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
             {{ $qrisReadinessTitle }}. {{ $qrisReadinessMessage }}
         </p>
@@ -98,8 +104,8 @@
                 <div class="payment-qris-corners" aria-hidden="true"></div>
             </div>
         </div>
-    @elseif ($isHostedPakasir && $isPendingPayment && filled($hostedPaymentUrl))
-        <a href="{{ $hostedPaymentUrl }}" target="_blank" rel="noreferrer" class="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] sm:w-auto">{{ __('storefront.invoice.qris.button.pakasir', [], $storefrontLocale) }}</a>
+    @elseif (($isHostedPakasir || $isHostedSakurupiah) && $isPendingPayment && filled($hostedPaymentUrl))
+        <a href="{{ $hostedPaymentUrl }}" target="_blank" rel="noreferrer" class="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white shadow-[4px_4px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_var(--sf-shadow)] sm:w-auto">{{ __($isHostedSakurupiah ? 'storefront.invoice.qris.button.sakurupiah' : 'storefront.invoice.qris.button.pakasir', [], $storefrontLocale) }}</a>
     @elseif ($isPendingPayment && ! $isManualQris)
         <p class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-sm font-bold leading-6 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">
             {{ $qrisReadinessMessage }}

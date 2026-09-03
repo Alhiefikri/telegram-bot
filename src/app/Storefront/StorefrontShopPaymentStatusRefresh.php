@@ -18,6 +18,8 @@ use App\Services\OrderLifecycleProjection;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
+use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleResult;
+use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\ProviderVerification\ProviderVerificationProfile;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Support\PaymentProvider;
@@ -31,6 +33,7 @@ class StorefrontShopPaymentStatusRefresh
         private readonly PakasirCallbackProcessor $processor,
         private readonly KlikQrisNativeQrisService $klikQrisNativeQris,
         private readonly KlikQrisCallbackProcessor $klikQrisProcessor,
+        private readonly SakurupiahInvoiceLifecycleService $sakurupiahLifecycle,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontFunnelEvents $events,
         private readonly OrderLifecycle $orders,
@@ -157,9 +160,9 @@ class StorefrontShopPaymentStatusRefresh
             }
 
             if (! $qrisRecoveryFailed
-                && $this->isKlikQrisPayment($payment)
+                && ($this->isKlikQrisPayment($payment) || $this->isSakurupiahPayment($payment))
                 && $recoveryOutcome !== null
-                && ! in_array($recoveryOutcome, [KlikQrisNativeQrisOutcome::Payable, KlikQrisNativeQrisOutcome::ProviderTotalPending], true)) {
+                && ! in_array($recoveryOutcome, ['payable', 'provider_total_pending'], true)) {
                 $qrisRecoveryFailed = true;
             }
         }
@@ -180,8 +183,8 @@ class StorefrontShopPaymentStatusRefresh
 
         if ($this->shouldRefreshFromProvider($projection, $payment)) {
             $lock = null;
-            $skipProviderLookup = $this->coordinator->recentlyRefreshed($payment);
-
+            $skipProviderLookup = $qrisRecoveredDuringRetry
+                || $this->coordinator->recentlyRefreshed($payment);
             try {
                 if (! $skipProviderLookup && $this->isKlikQrisPayment($payment)) {
                     $lookupCompleted = $this->klikQrisNativeQris->tryWithPaymentLock($payment, function () use ($payment): bool {
@@ -191,6 +194,23 @@ class StorefrontShopPaymentStatusRefresh
                     });
 
                     if ($lookupCompleted === null) {
+                        $this->events->checkoutSubmitted(null, $order, [
+                            'status_endpoint_result' => 'in_progress',
+                        ]);
+
+                        return StorefrontShopSignedStatusRefreshResult::inProgress(
+                            $this->coordinator->retryAfterSeconds(),
+                        );
+                    }
+
+                    $this->coordinator->markRecentlyRefreshed($payment);
+                } elseif (! $skipProviderLookup && $this->isSakurupiahPayment($payment)) {
+                    $lookupResult = ProviderVerificationProfiles::using(
+                        ProviderVerificationProfile::Interactive,
+                        fn (): ?SakurupiahInvoiceLifecycleResult => $this->sakurupiahLifecycle->tryRefreshStatus($payment),
+                    );
+
+                    if ($lookupResult === null) {
                         $this->events->checkoutSubmitted(null, $order, [
                             'status_endpoint_result' => 'in_progress',
                         ]);
@@ -298,7 +318,9 @@ class StorefrontShopPaymentStatusRefresh
 
     private function isAutomaticQrisPayment(?Payment $payment): bool
     {
-        return $this->isPakasirPayment($payment) || $this->isKlikQrisPayment($payment);
+        return $this->isPakasirPayment($payment)
+            || $this->isKlikQrisPayment($payment)
+            || $this->isSakurupiahPayment($payment);
     }
 
     private function isPakasirPayment(?Payment $payment): bool
@@ -311,9 +333,15 @@ class StorefrontShopPaymentStatusRefresh
         return strtolower((string) $payment?->provider) === PaymentProvider::KLIKQRIS;
     }
 
+    private function isSakurupiahPayment(?Payment $payment): bool
+    {
+        return strtolower((string) $payment?->provider) === PaymentProvider::SAKURUPIAH;
+    }
+
     private function hasNativeQrisRail(?Payment $payment): bool
     {
-        return $this->isKlikQrisPayment($payment)
+        return $this->isSakurupiahPayment($payment)
+            || $this->isKlikQrisPayment($payment)
             || ($this->isPakasirPayment($payment) && $payment?->method === 'api_qris');
     }
 
@@ -344,13 +372,17 @@ class StorefrontShopPaymentStatusRefresh
 
     private function hasPayableNativeQris(?Payment $payment): bool
     {
+        if ($this->isSakurupiahPayment($payment)) {
+            return $this->sakurupiahLifecycle->classify($payment)->isPayable();
+        }
+
         return $payment?->isPayableNativePakasirQris() === true;
     }
 
     /**
-     * Whether the currently persisted state is payable. KlikQRIS payments are
-     * classified by the KlikQRIS lifecycle outcome; Pakasir keeps its legacy
-     * model-level readiness check.
+     * Whether the currently persisted state is payable. KlikQRIS and
+     * Sakurupiah payments are classified by their lifecycle; Pakasir keeps its
+     * legacy model-level readiness check.
      */
     private function isNativeQrisPayable(?Payment $payment): bool
     {
@@ -361,19 +393,23 @@ class StorefrontShopPaymentStatusRefresh
         return $this->hasPayableNativeQris($payment);
     }
 
-    private function isPayableOutcome(?KlikQrisNativeQrisOutcome $outcome, Payment $payment): bool
+    private function isPayableOutcome(?string $outcome, Payment $payment): bool
     {
         if ($outcome !== null) {
-            return $outcome === KlikQrisNativeQrisOutcome::Payable;
+            return $outcome === 'payable';
         }
 
         return $this->isNativeQrisPayable($payment);
     }
 
-    private function attemptNativeQrisRecovery(Payment $payment): ?KlikQrisNativeQrisOutcome
+    private function attemptNativeQrisRecovery(Payment $payment): ?string
     {
         if ($this->isKlikQrisPayment($payment)) {
-            return $this->klikQrisNativeQris->lifecycle($payment)->outcome();
+            return $this->klikQrisNativeQris->lifecycle($payment)->outcome()->value;
+        }
+
+        if ($this->isSakurupiahPayment($payment)) {
+            return $this->sakurupiahLifecycle->lifecycle($payment)->outcome()->value;
         }
 
         if ($this->isPakasirPayment($payment) && $payment->method === 'api_qris') {
@@ -415,7 +451,7 @@ class StorefrontShopPaymentStatusRefresh
     /**
      * @return array{state: string, title: string, message: string}
      */
-    private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment, ?KlikQrisNativeQrisOutcome $outcome = null): array
+    private function qrisReadiness(OrderLifecycleProjection $projection, ?Payment $payment, ?string $outcome = null): array
     {
         if (! $projection->isPendingPayment) {
             $copy = $this->terminalCopy->qrisReadiness('terminal');
@@ -429,12 +465,13 @@ class StorefrontShopPaymentStatusRefresh
 
         if ($outcome !== null) {
             $state = match ($outcome) {
-                KlikQrisNativeQrisOutcome::Payable => 'ready',
-                KlikQrisNativeQrisOutcome::Creating => 'creating',
-                KlikQrisNativeQrisOutcome::RecoveryPending => 'recovery_pending',
-                KlikQrisNativeQrisOutcome::ProviderTotalPending => 'provider_total_pending',
-                KlikQrisNativeQrisOutcome::InvalidProviderResult => 'failed',
-                KlikQrisNativeQrisOutcome::Expired => 'expired',
+                'payable' => 'ready',
+                'creating' => 'creating',
+                'recovery_pending' => 'recovery_pending',
+                'provider_total_pending' => 'provider_total_pending',
+                'invalid_provider_result' => 'failed',
+                'expired' => 'expired',
+                default => 'failed',
             };
             $copy = $this->terminalCopy->qrisReadiness($state);
 

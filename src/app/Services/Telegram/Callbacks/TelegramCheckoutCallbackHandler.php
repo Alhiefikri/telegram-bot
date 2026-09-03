@@ -10,6 +10,7 @@ use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendBscCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
+use App\Jobs\SendSakurupiahCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Models\Customer;
 use App\Models\Order;
@@ -633,6 +634,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID' => SendBinanceCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'USDT_BEP20' => SendBscCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             $payment->provider === PaymentProvider::KLIKQRIS => SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString()),
+            $payment->provider === PaymentProvider::SAKURUPIAH => SendSakurupiahCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             default => SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString()),
         };
 
@@ -661,10 +663,8 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             CheckoutPostCreationBehavior::BinancePayInstructions,
             CheckoutPostCreationBehavior::BscInstructions,
             CheckoutPostCreationBehavior::ManualQrisInstructions,
-            CheckoutPostCreationBehavior::KlikQrisInstructions => null,
-            CheckoutPostCreationBehavior::SakurupiahInstructions => throw new InvalidCheckout(
-                'Sakurupiah checkout instructions are not available in Telegram yet.',
-            ),
+            CheckoutPostCreationBehavior::KlikQrisInstructions,
+            CheckoutPostCreationBehavior::SakurupiahInstructions => null,
         };
     }
 

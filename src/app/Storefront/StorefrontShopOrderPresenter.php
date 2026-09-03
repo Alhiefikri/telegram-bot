@@ -8,6 +8,7 @@ use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\Bsc\BscVerificationOutcome;
 use App\Services\Bsc\BscVerificationStatus;
+use App\Support\PaymentProvider;
 use Carbon\Carbon;
 
 class StorefrontShopOrderPresenter
@@ -31,6 +32,7 @@ class StorefrontShopOrderPresenter
         $brand = $this->storefront->brand();
         $paymentDeadline = $invoice->qrisEffectiveExpiresAt
             ?? $this->localPaymentDeadline($invoice);
+        $isSakurupiah = strtolower((string) $invoice->payment?->provider) === PaymentProvider::SAKURUPIAH;
         $bscStatus = $this->bscStatus($invoice->bscVerificationStatus);
         $paymentKind = match (strtoupper((string) $invoice->payment?->method)) {
             'BINANCE_PAY_ID' => 'binance',
@@ -104,7 +106,10 @@ class StorefrontShopOrderPresenter
             'isBinancePay' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'BINANCE_PAY_ID',
             'isBscPayment' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'USDT_BEP20',
             'isManualQris' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'QR_MANUAL',
+            'isSakurupiah' => $isSakurupiah,
+            'isHostedSakurupiah' => $isSakurupiah && $invoice->isPendingPayment() && filled($invoice->hostedPaymentUrl),
             'isHostedPakasir' => $invoice->payment?->provider === 'pakasir' && $invoice->payment?->method === 'hosted',
+            'qrisFeePayer' => $isSakurupiah ? 'store' : config('services.pakasir.qris_fee.payer', 'customer'),
             'binanceVerificationMode' => $invoice->binanceVerificationStatus?->mode ?? 'amount_unique',
             'binanceVerificationStatus' => $this->binanceStatus($invoice->binanceVerificationStatus),
             'binanceVerificationAutomatic' => ($invoice->binanceVerificationStatus?->automatic ?? false)
@@ -185,8 +190,11 @@ class StorefrontShopOrderPresenter
     private function localPaymentDeadline(StorefrontShopSignedInvoiceReadResult $invoice): ?Carbon
     {
         $payment = $invoice->payment;
-        if ($payment !== null && strtolower((string) $payment->provider) === 'klikqris') {
-            return $payment->expired_at ?? $invoice->order->expires_at;
+        if ($payment !== null && in_array(strtolower((string) $payment->provider), [
+            PaymentProvider::KLIKQRIS,
+            PaymentProvider::SAKURUPIAH,
+        ], true)) {
+            return $payment->expired_at ?? $payment->provider_expires_at ?? $invoice->order->expires_at;
         }
 
         return $payment?->provider_expires_at

@@ -16,6 +16,8 @@ use App\Services\KlikQris\KlikQrisQrisImage;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
+use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
+use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Support\DogfoodTiming;
 use App\Support\PakasirCheckoutFlow;
 use InvalidArgumentException;
@@ -33,6 +35,7 @@ class TelegramCheckoutIntents
         private KlikQrisNativeQrisService $klikQris,
         private TelegramKlikQrisRecoveryEscalator $klikQrisAlerts,
         private KlikQrisQrisImage $klikQrisImages,
+        private SakurupiahInvoiceLifecycleService $sakurupiah,
         private PaymentProviderResolver $providerResolver,
         private BscReadiness $bscReadiness,
     ) {}
@@ -131,6 +134,49 @@ class TelegramCheckoutIntents
                 $locale,
             ),
         );
+    }
+
+    public function sendSakurupiahPaymentInstructions(string $chatId, Order $order, Payment $payment): array
+    {
+        $order->loadMissing('customer');
+        $locale = $this->locale->code($order->customer);
+
+        try {
+            $result = $this->sakurupiah->lifecycle($payment);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->sendSakurupiahRetryState(
+                $chatId,
+                $order,
+                SakurupiahInvoiceOutcome::InvalidProviderResult,
+                $locale,
+            );
+        }
+
+        $payable = $result->payable();
+        if ($payable === null) {
+            return $this->sendSakurupiahRetryState($chatId, $order, $result->outcome(), $locale);
+        }
+
+        return $this->sendPaymentInstruction(
+            $chatId,
+            $this->paymentInstructions->sakurupiah($order, $payable, $locale),
+        );
+    }
+
+    private function sendSakurupiahRetryState(
+        string $chatId,
+        Order $order,
+        SakurupiahInvoiceOutcome $outcome,
+        string $locale,
+    ): array {
+        return $this->bot->sendMessage($chatId, $this->paymentInstructions->sakurupiahRetry($order, $outcome, $locale), [
+            'inline_keyboard' => [
+                [['text' => $this->locale->translate($order->customer, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]],
+                [['text' => $this->locale->translate($order->customer, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+            ],
+        ]);
     }
 
     private function sendKlikQrisRetryState(string $chatId, Order $order, KlikQrisNativeQrisOutcome $outcome, string $locale): array
