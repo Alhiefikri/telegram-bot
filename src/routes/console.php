@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\ReconcileKlikQrisPayments;
 use App\Enums\KlikQrisEnvironment;
 use App\Jobs\SendDailyAdminStatsNotification;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
@@ -7,7 +8,9 @@ use Illuminate\Support\Facades\Schedule;
 
 $klikQrisEnvironment = KlikQrisEnvironment::runtime();
 if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnvironment)) {
-    Schedule::command((string) config('services.klikqris.reconciliation_command', 'klikqris:reconcile --chunk=100'))->everyMinute()->withoutOverlapping(3);
+    Schedule::command((string) config('services.klikqris.reconciliation_command', 'klikqris:reconcile --chunk=100'))
+        ->everyMinute()
+        ->withoutOverlapping(ReconcileKlikQrisPayments::schedulerMutexMinutes());
     Schedule::command('klikqris:backfill-in-flight --chunk=100')->everyFiveMinutes()->withoutOverlapping();
 }
 Schedule::command('pakasir:reconcile --chunk=100')->everyMinute()->withoutOverlapping();

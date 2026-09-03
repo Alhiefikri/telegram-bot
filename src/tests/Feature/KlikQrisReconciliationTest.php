@@ -481,7 +481,7 @@ class KlikQrisReconciliationTest extends TestCase
 
         $this->assertTrue(app(KlikQrisProviderReadiness::class)->sandboxSchedulingEnabled());
         $this->assertStringContainsString('klikqris:reconcile --chunk=100', $schedule);
-        $this->assertStringContainsString('withoutOverlapping(3)', $schedule);
+        $this->assertStringContainsString('withoutOverlapping(ReconcileKlikQrisPayments::schedulerMutexMinutes())', $schedule);
         $this->assertStringContainsString('schedulingEnabledFor', $schedule);
     }
 

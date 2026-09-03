@@ -416,7 +416,7 @@ Semua webhook provider harus aman terhadap duplicate delivery, mismatch, unknown
 
 Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php). Yang paling penting:
 
-- `klikqris:reconcile` tiap menit bila environment KlikQRIS aktif dan scheduling enabled (mutex `withoutOverlapping(3)` menit, lebih panjang dari execution budget 45 detik);
+- `klikqris:reconcile` tiap menit bila environment KlikQRIS aktif dan scheduling enabled; mutex `withoutOverlapping` dihitung dalam menit dari execution budget sweep ditambah retry/timeout status provider dan safety margin, sehingga satu lookup terburuk yang dimulai sebelum deadline tetap tidak overlap;
 - `pakasir:reconcile --chunk=100` tiap menit untuk payment legacy;
 - `binance:reconcile --chunk=100` tiap menit;
 - `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;

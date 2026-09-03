@@ -10,6 +10,7 @@ use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use App\Services\KlikQris\KlikQrisTransaction;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Telegram\TelegramKlikQrisRecoveryEscalator;
 use App\Support\PaymentProvider;
 use DateTimeImmutable;
@@ -339,6 +340,21 @@ class ReconcileKlikQrisPayments extends Command
      * expiry (withoutOverlapping) is configured above this value so a slow
      * provider cannot make consecutive sweeps overlap.
      */
+    public static function schedulerMutexMinutes(): int
+    {
+        $executionBudgetSeconds = max(
+            1.0,
+            (float) config('services.klikqris.reconcile_max_execution_seconds', 45),
+        );
+
+        return max(
+            1,
+            (int) ceil(
+                ($executionBudgetSeconds + ProviderVerificationProfiles::requiredLeaseSeconds()) / 60,
+            ),
+        );
+    }
+
     private function executionDeadline(): int
     {
         if ($this->deadlineFactory !== null) {

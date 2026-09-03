@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Console\Commands\ReconcileKlikQrisPayments;
 use App\Http\Middleware\RedirectToCanonicalHost;
 use App\Providers\AppServiceProvider;
 use App\Services\Telegram\TelegramBotClient;
@@ -130,6 +131,21 @@ class FoundationInfrastructureTest extends TestCase
 
         $this->assertNotNull($event);
         $this->assertSame(10, $event->expiresAt);
+    }
+
+    public function test_klikqris_reconciliation_mutex_covers_the_execution_and_provider_retry_budgets(): void
+    {
+        config()->set('services.klikqris.reconcile_max_execution_seconds', 45);
+        config()->set('services.provider_verification.reconciliation', [
+            'timeout_seconds' => 60,
+            'connect_timeout_seconds' => 3,
+            'max_attempts' => 3,
+            'retry_delay_ms' => 250,
+            'retry_max_delay_ms' => 1000,
+            'lock_safety_margin_seconds' => 8,
+        ]);
+
+        $this->assertSame(4, ReconcileKlikQrisPayments::schedulerMutexMinutes());
     }
 
     public function test_production_php_upload_limits_allow_product_images(): void
