@@ -13,17 +13,14 @@ use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\Telegram\TelegramKlikQrisRecoveryEscalator;
 use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class ReconcileKlikQrisPayments extends Command
 {
-    private const ELIGIBLE_PAYMENT_STATUSES = [
-        PaymentStatus::Pending->value,
-        PaymentStatus::Expired->value,
-        PaymentStatus::Failed->value,
-    ];
+    private const MAX_MAX_PAYMENTS = 100;
 
-    protected $signature = 'klikqris:reconcile {--chunk=100}';
+    protected $signature = 'klikqris:reconcile {--chunk=100} {--max-payments=10}';
 
     protected $description = 'Reconcile eligible KlikQRIS payments from authoritative transaction status.';
 
@@ -36,6 +33,12 @@ class ReconcileKlikQrisPayments extends Command
         $chunk = $this->validatedChunk();
         if ($chunk === null) {
             $this->error('klikqris:reconcile failed: chunk must be between 1 and 1000.');
+
+            return self::FAILURE;
+        }
+        $maxPayments = $this->validatedMaxPayments();
+        if ($maxPayments === null) {
+            $this->error('klikqris:reconcile failed: max-payments must be between 1 and 100.');
 
             return self::FAILURE;
         }
@@ -56,19 +59,30 @@ class ReconcileKlikQrisPayments extends Command
         $processed = 0;
         $skipped = 0;
         $failed = 0;
+        $selected = 0;
+        $startedAt = hrtime(true);
+        $releasedCutoff = now()->subHours($this->releasedLookbackHours());
 
         Payment::query()
             ->where('provider', PaymentProvider::KLIKQRIS)
             ->whereNotNull('merchant_ref')
-            ->whereIn('status', self::ELIGIBLE_PAYMENT_STATUSES)
-            ->where(function ($query): void {
+            ->where(function ($query) use ($releasedCutoff): void {
                 $query
-                    ->whereIn('status', [PaymentStatus::Pending->value, PaymentStatus::Expired->value, PaymentStatus::Failed->value])
+                    ->where('status', PaymentStatus::Pending->value)
+                    ->orWhere(fn ($query) => $query
+                        ->whereIn('status', [PaymentStatus::Expired->value, PaymentStatus::Failed->value])
+                        ->where('updated_at', '>=', $releasedCutoff))
                     ->orWhere('provider_create_state', 'outcome_unknown');
             })
             ->orderBy('id')
-            ->chunkById($chunk, function ($payments) use ($nativeQris, $processor, $escalator, &$processed, &$skipped, &$failed): void {
+            ->chunkById($chunk, function ($payments) use ($nativeQris, $processor, $escalator, $maxPayments, &$selected, &$processed, &$skipped, &$failed): bool {
                 foreach ($payments as $payment) {
+                    if ($selected >= $maxPayments) {
+                        return false;
+                    }
+
+                    $selected++;
+                    $paymentStartedAt = hrtime(true);
                     try {
                         $event = null;
                         $result = $nativeQris->reconcile(
@@ -84,21 +98,41 @@ class ReconcileKlikQrisPayments extends Command
 
                         if ($result === null || $event === null || $event->processed_at === null) {
                             $skipped++;
+                            $this->logPaymentResult($payment, $result, $event, $paymentStartedAt);
 
                             continue;
                         }
 
                         $processed++;
+                        $this->logPaymentResult($payment, $result, $event, $paymentStartedAt);
                     } catch (Throwable $exception) {
-                        report($exception);
                         $failed++;
                         $this->error('KlikQRIS reconciliation failed payment '.$payment->id.': '.$this->safeExceptionMessage($exception));
+                        Log::warning('klikqris.reconciliation.payment_failed', [
+                            'payment_id' => (string) $payment->getKey(),
+                            'exception' => $exception::class,
+                            'retryable' => $exception instanceof KlikQrisStatusUnavailableException,
+                            'duration_ms' => $this->elapsedMilliseconds($paymentStartedAt),
+                        ]);
                         $escalator->notifyFor($payment);
                     }
                 }
+
+                return $selected < $maxPayments;
             });
 
         $summary = "processed={$processed} skipped={$skipped} failed={$failed}";
+        Log::info('klikqris.reconciliation.completed', [
+            'environment' => $environment->value,
+            'chunk' => $chunk,
+            'max_payments' => $maxPayments,
+            'selected' => $selected,
+            'terminal_lookback_hours' => $this->releasedLookbackHours(),
+            'processed' => $processed,
+            'skipped' => $skipped,
+            'failed' => $failed,
+            'duration_ms' => $this->elapsedMilliseconds($startedAt),
+        ]);
 
         if ($failed > 0) {
             $this->error('klikqris:reconcile completed with partial failures: '.$summary);
@@ -125,6 +159,37 @@ class ReconcileKlikQrisPayments extends Command
         }
 
         return $chunk;
+    }
+
+    private function validatedMaxPayments(): ?int
+    {
+        $maxPayments = filter_var($this->option('max-payments'), FILTER_VALIDATE_INT);
+        if ($maxPayments === false || $maxPayments < 1 || $maxPayments > self::MAX_MAX_PAYMENTS) {
+            return null;
+        }
+
+        return $maxPayments;
+    }
+
+    private function releasedLookbackHours(): int
+    {
+        return max(1, (int) config('services.klikqris.reconcile_terminal_lookback_hours', 72));
+    }
+
+    private function logPaymentResult(Payment $payment, mixed $result, mixed $event, int $startedAt): void
+    {
+        Log::info('klikqris.reconciliation.payment', [
+            'payment_id' => (string) $payment->getKey(),
+            'outcome' => $result?->outcome()?->value ?? 'busy',
+            'processed' => $event?->processed_at !== null,
+            'provider_status' => $event?->provider_status,
+            'duration_ms' => $this->elapsedMilliseconds($startedAt),
+        ]);
+    }
+
+    private function elapsedMilliseconds(int $startedAt): float
+    {
+        return round((hrtime(true) - $startedAt) / 1_000_000, 2);
     }
 
     private function safeExceptionMessage(Throwable $exception): string

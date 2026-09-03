@@ -43,6 +43,28 @@ class KlikQrisNativeQrisTest extends TestCase
         return app(KlikQrisNativeQrisService::class)->lifecycle($payment);
     }
 
+    public function test_customer_status_refresh_requires_create_evidence_but_not_provider_total_or_method(): void
+    {
+        $unknown = KlikQrisSandboxScenarios::klikQrisPayment([
+            'provider_payment_method' => null,
+            'provider_total_payment' => null,
+            'provider_payload' => null,
+            'provider_create_state' => 'outcome_unknown',
+        ]);
+        $notSubmitted = KlikQrisSandboxScenarios::klikQrisPayment([
+            'merchant_ref' => 'INV/ORDER-NOT-SUBMITTED',
+            'provider_payment_method' => null,
+            'provider_total_payment' => null,
+            'provider_payload' => null,
+            'provider_create_state' => null,
+        ]);
+
+        $service = app(KlikQrisNativeQrisService::class);
+
+        $this->assertTrue($service->isCustomerStatusRefreshable($unknown));
+        $this->assertFalse($service->isCustomerStatusRefreshable($notSubmitted));
+    }
+
     public function test_lifecycle_creates_persists_sanitized_payable_and_shortens_deadline(): void
     {
         $order = app(OrderCheckoutService::class)->checkout($this->cartWithProduct(price: 1000), CheckoutPaymentIntents::klikQris());

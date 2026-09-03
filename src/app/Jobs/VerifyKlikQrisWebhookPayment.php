@@ -17,8 +17,6 @@ final class VerifyKlikQrisWebhookPayment implements ShouldQueue
 
     public int $tries = 4;
 
-    public string $queue = 'payments';
-
     /** @var list<int> */
     public array $backoff = [15, 60, 180];
 

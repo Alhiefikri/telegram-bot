@@ -13,6 +13,7 @@ use App\Models\PaymentEvent;
 use App\Services\Admin\AdminDashboardSalesData;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\Bsc\BscExplorerUrl;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\Money;
 use App\Support\PaymentProvider;
 use Illuminate\Http\Request;
@@ -27,7 +28,7 @@ class AdminOrderDetailController extends Controller
 
         Gate::authorize('view', $order);
 
-        $order->load(['customer', 'orderItems', 'payments.paymentEvents', 'payments.manualFulfillmentReview', 'payments.bscDetail.transferEvidence', 'salesProofPost']);
+        $order->load(['customer', 'orderItems', 'payments.paymentEvents', 'payments.manualFulfillmentReview', 'payments.bscDetail.transferEvidence', 'telegramOutboundEffects', 'salesProofPost']);
 
         $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID');
         $payload = is_array($binancePayment?->provider_payload) ? $binancePayment->provider_payload : [];
@@ -59,11 +60,11 @@ class AdminOrderDetailController extends Controller
             'bscReview' => $this->bscReview($bscPayment, $bscExplorer),
             'salesProof' => $salesData->salesProofState($order, (bool) $user->role?->canManagePaymentSettings()),
             'auditEntries' => $this->auditEntries($order),
-            'paymentDetails' => $order->payments->map(fn (Payment $payment): array => $this->paymentDetail($payment))->all(),
+            'paymentDetails' => $order->payments->map(fn (Payment $payment): array => $this->paymentDetail($payment, $order))->all(),
         ]);
     }
 
-    private function paymentDetail(Payment $payment): array
+    private function paymentDetail(Payment $payment, Order $order): array
     {
         $events = $payment->paymentEvents
             ->sortByDesc(fn (PaymentEvent $event) => $event->received_at?->getTimestamp() ?? 0)
@@ -77,6 +78,11 @@ class AdminOrderDetailController extends Controller
             ])
             ->values()
             ->all();
+
+        $checkoutEffect = $payment->provider === PaymentProvider::KLIKQRIS
+            ? $order->telegramOutboundEffects->first(fn ($effect): bool => $effect->effect_type === TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT)
+            : null;
+        $deliveryMetadata = is_array($checkoutEffect?->outcome_metadata) ? $checkoutEffect->outcome_metadata : [];
 
         return [
             'provider' => strtolower((string) $payment->provider),
@@ -93,6 +99,9 @@ class AdminOrderDetailController extends Controller
                 ->filter(fn (PaymentEvent $event): bool => $event->processed_at !== null)
                 ->sortByDesc(fn (PaymentEvent $event): int => $event->processed_at?->getTimestamp() ?? 0)
                 ->first()?->processed_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
+            'checkout_delivery_state' => $checkoutEffect?->state?->value ?? '-',
+            'checkout_delivery_outcome' => (string) ($deliveryMetadata['delivery_outcome'] ?? '-'),
+            'checkout_delivery_method' => (string) ($deliveryMetadata['delivery_method'] ?? '-'),
             'events' => $events,
         ];
     }

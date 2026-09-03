@@ -22,6 +22,7 @@ final class KlikQrisSandboxScenarios
             'recovery_alert_max_attempts' => 3,
             'webhook_rate_limit_per_minute' => 30,
             'status_refresh_rate_limit_per_minute' => 3,
+            'reconcile_terminal_lookback_hours' => 72,
             'reconciliation_command' => 'klikqris:reconcile --chunk=100',
         ];
     }

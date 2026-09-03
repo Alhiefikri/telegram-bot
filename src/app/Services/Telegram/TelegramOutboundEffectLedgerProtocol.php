@@ -74,13 +74,14 @@ class TelegramOutboundEffectLedgerProtocol
         });
     }
 
-    public function finalizeSent(string $effectId, string $claimToken, string $messageId): ?TelegramOutboundEffect
+    /** @param array<string, mixed> $metadata */
+    public function finalizeSent(string $effectId, string $claimToken, string $messageId, array $metadata = []): ?TelegramOutboundEffect
     {
         if (! $this->responseValidator->isValidMessageId($messageId)) {
             return null;
         }
 
-        return DB::transaction(function () use ($effectId, $claimToken, $messageId): ?TelegramOutboundEffect {
+        return DB::transaction(function () use ($effectId, $claimToken, $messageId, $metadata): ?TelegramOutboundEffect {
             $effect = TelegramOutboundEffect::query()->lockForUpdate()->find($effectId);
             if (! $this->claimMatches($effect, $claimToken)) {
                 return null;
@@ -98,7 +99,7 @@ class TelegramOutboundEffectLedgerProtocol
                 'next_attempt_at' => null,
                 'last_error_code' => null,
                 'last_error' => null,
-                'outcome_metadata' => $this->mergeOutcomeMetadata($effect, ['telegram_response' => 'ok']),
+                'outcome_metadata' => $this->mergeOutcomeMetadata($effect, array_merge($metadata, ['telegram_response' => 'ok'])),
             ])->save();
 
             return $effect->fresh();

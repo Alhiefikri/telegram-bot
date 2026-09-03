@@ -51,7 +51,7 @@ class FoundationInfrastructureTest extends TestCase
 
         $this->assertStringContainsString('queue:work database', $contents);
         $this->assertStringContainsString('[program:laravel-update-worker]', $contents);
-        $this->assertStringContainsString('--queue=default', $contents);
+        $this->assertStringContainsString('--queue=payments,default', $contents);
         $this->assertStringContainsString('--sleep=%(ENV_LARAVEL_UPDATE_WORKER_SLEEP)s', $contents);
         $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_UPDATE_WORKER_PROCESSES)s', $contents);
         $this->assertStringContainsString('[program:laravel-outbound-worker]', $contents);
@@ -100,6 +100,7 @@ class FoundationInfrastructureTest extends TestCase
         }
 
         $this->artisan('ops:health --queue-depth')
+            ->expectsOutput('Queue payments: depth=0 oldest_age=0s')
             ->expectsOutput('Queue default: depth=0 oldest_age=0s')
             ->expectsOutput('Queue telegram-outbound: depth=0 oldest_age=0s')
             ->expectsOutput('Queue notifications: depth=0 oldest_age=0s')

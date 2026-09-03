@@ -56,7 +56,9 @@ class TelegramOutboundEffectLedgerProtocolTest extends TestCase
         $protocol = app(TelegramOutboundEffectLedgerProtocol::class);
         $claimed = $protocol->claim($effect->id);
 
-        $finalized = $protocol->finalizeSent($effect->id, (string) $claimed->claim_token, '100001');
+        $finalized = $protocol->finalizeSent($effect->id, (string) $claimed->claim_token, '100001', [
+            'delivery_outcome' => 'retry_notice_sent',
+        ]);
 
         $this->assertNotNull($finalized);
         $this->assertSame(TelegramOutboundEffectState::Sent, $finalized->state);
@@ -65,6 +67,7 @@ class TelegramOutboundEffectLedgerProtocolTest extends TestCase
         $this->assertNull($finalized->lease_until);
         $this->assertNull($finalized->next_attempt_at);
         $this->assertSame('ok', $finalized->outcome_metadata['telegram_response']);
+        $this->assertSame('retry_notice_sent', $finalized->outcome_metadata['delivery_outcome']);
     }
 
     public function test_operator_resolution_uses_the_protocol_for_review_states(): void

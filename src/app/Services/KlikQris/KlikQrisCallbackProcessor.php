@@ -161,14 +161,21 @@ class KlikQrisCallbackProcessor
         }
 
         $providerTotal = $transaction->totalAmount();
-        $payment->update([
+        $paymentUpdates = [
             'provider_payload' => $transaction->sanitizedPayload(),
             'provider_fee' => $providerTotal >= (int) $payment->amount ? $providerTotal - (int) $payment->amount : null,
             'provider_total_payment' => $providerTotal,
             'provider_payment_method' => 'qris',
             'provider_create_state' => 'provider_SUCCESS',
             'provider_create_last_error' => null,
-        ]);
+        ];
+
+        if (filled($transaction->qrisUrl())
+            && KlikQrisTransaction::isAllowedQrisUrl($transaction->qrisUrl(), environment: $transaction->environment())) {
+            $paymentUpdates['provider_qris_url'] = $transaction->qrisUrl();
+        }
+
+        $payment->update($paymentUpdates);
 
         return $payment->fresh();
     }

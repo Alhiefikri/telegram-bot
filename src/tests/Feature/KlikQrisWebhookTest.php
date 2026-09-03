@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendTelegramReceipt;
+use App\Jobs\VerifyKlikQrisWebhookPayment;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -354,8 +355,9 @@ class KlikQrisWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_status_transient_outage_after_stored_callback_returns_success_but_readiness_and_contract_faults_surface(): void
+    public function test_status_transient_outage_is_acknowledged_and_readiness_faults_still_surface(): void
     {
+        Queue::fake();
         $payment = $this->payableKlikQrisPayment();
 
         Http::fake(fn () => Http::response(['message' => 'temporary'], 500));
@@ -363,6 +365,7 @@ class KlikQrisWebhookTest extends TestCase
             ->assertOk()
             ->assertExactJson(['success' => true]);
         $this->assertNull(PaymentEvent::query()->where('provider', 'klikqris')->sole()->processed_at);
+        Queue::assertPushed(VerifyKlikQrisWebhookPayment::class, fn (VerifyKlikQrisWebhookPayment $job): bool => $job->queue === 'payments');
 
         config()->set('services.klikqris.sandbox_api_key', null);
         Http::fake();
@@ -371,19 +374,23 @@ class KlikQrisWebhookTest extends TestCase
         $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment));
     }
 
-    public function test_invalid_status_json_fault_surfaces_after_durable_callback_log(): void
+    public function test_invalid_status_json_fault_is_acknowledged_after_durable_callback_log(): void
     {
+        Queue::fake();
         $payment = $this->payableKlikQrisPayment();
         Http::fake(fn () => Http::response('not-json', 200));
 
-        $this->withoutExceptionHandling();
-        $this->expectException(\RuntimeException::class);
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment))
+            ->assertOk()
+            ->assertExactJson(['success' => true]);
 
-        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment));
+        $this->assertNull(PaymentEvent::query()->where('provider', 'klikqris')->sole()->processed_at);
+        Queue::assertPushed(VerifyKlikQrisWebhookPayment::class);
     }
 
     public function test_status_outage_after_stored_callback_returns_success_and_persists_reconciliation_needed_event_without_secrets(): void
     {
+        Queue::fake();
         $payment = $this->payableKlikQrisPayment();
         Http::fake(fn () => throw new ConnectionException('socket body secret-message opaque-test-signature'));
 
@@ -398,6 +405,7 @@ class KlikQrisWebhookTest extends TestCase
         $this->assertArrayNotHasKey('signature', $event->raw_payload['nested']);
         $this->assertStringNotContainsString('opaque-test-signature', json_encode($event->raw_payload));
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        Queue::assertPushed(VerifyKlikQrisWebhookPayment::class, fn (VerifyKlikQrisWebhookPayment $job): bool => $job->queue === 'payments');
     }
 
     public function test_duplicate_callbacks_with_different_signatures_coalesce_and_fulfill_once(): void

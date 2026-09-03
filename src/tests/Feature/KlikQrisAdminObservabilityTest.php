@@ -7,7 +7,9 @@ use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Models\Order;
 use App\Models\PaymentEvent;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\Support\KlikQrisSandboxScenarios;
@@ -79,6 +81,18 @@ class KlikQrisAdminObservabilityTest extends TestCase
             'last_received_at' => Carbon::parse('2026-07-28 12:03:00'),
             'processed_at' => Carbon::parse('2026-07-28 12:04:00'),
         ]);
+        TelegramOutboundEffect::factory()->create([
+            'effect_type' => TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
+            'source_id' => $order->id,
+            'state' => 'sent',
+            'telegram_method' => 'sendMessage',
+            'telegram_message_id' => '700001',
+            'sent_at' => Carbon::parse('2026-07-28 12:05:00'),
+            'outcome_metadata' => [
+                'delivery_outcome' => 'retry_notice_sent',
+                'delivery_method' => 'sendMessage',
+            ],
+        ]);
 
         $html = $this->get(route('admin.orders.show', $order))
             ->assertOk()
@@ -93,6 +107,8 @@ class KlikQrisAdminObservabilityTest extends TestCase
             ->assertSee('2026-07-28 12:15')
             ->assertSee('Callback count')
             ->assertSee('2')
+            ->assertSee('retry_notice_sent')
+            ->assertSee('sendMessage')
             ->getContent();
 
         $this->assertMatchesRegularExpression(

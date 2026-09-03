@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Model;
     'merchant_ref',
     'provider_reference',
     'provider_payload',
+    'provider_qris_url',
     'provider_presentation',
     'klikqris_transaction_signature',
     'provider_fee',
@@ -60,6 +61,7 @@ class Payment extends Model
 
     protected $hidden = [
         'klikqris_transaction_signature',
+        'provider_qris_url',
         'provider_presentation',
     ];
 
@@ -74,6 +76,7 @@ class Payment extends Model
             'binance_verification_grace_until' => 'datetime',
             'binance_last_verified_at' => 'datetime',
             'provider_payload' => 'array',
+            'provider_qris_url' => 'encrypted',
             'provider_presentation' => 'encrypted:array',
             'provider_fee' => 'integer',
             'provider_total_payment' => 'integer',
@@ -198,6 +201,19 @@ class Payment extends Model
     {
         $payload = is_array($this->provider_payload) ? $this->provider_payload : [];
         $data = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
+        $encryptedUrl = trim((string) $this->provider_qris_url);
+        if ($encryptedUrl !== '') {
+            if (array_key_exists('qris_url', $data)
+                && (! is_scalar($data['qris_url']) || trim((string) $data['qris_url']) !== $encryptedUrl)) {
+                return null;
+            }
+
+            return KlikQrisTransaction::isAllowedQrisUrl(
+                $encryptedUrl,
+                environment: $environment ?? KlikQrisEnvironment::runtime(),
+            ) ? $encryptedUrl : null;
+        }
+
         $url = trim((string) ($data['qris_url'] ?? ''));
 
         return KlikQrisTransaction::isAllowedQrisUrl(

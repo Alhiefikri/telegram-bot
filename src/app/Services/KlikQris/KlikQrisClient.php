@@ -310,6 +310,13 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
             return;
         }
 
+        if ($operation === 'status') {
+            throw new KlikQrisStatusResponseException(
+                sprintf('KlikQRIS %s request failed with HTTP %d.', $operation, $response->status()),
+                $response->status(),
+            );
+        }
+
         throw new RuntimeException(sprintf('KlikQRIS %s request failed with HTTP %d.', $operation, $response->status()));
     }
 
@@ -344,21 +351,36 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
             $transaction->assertMatches($payment);
 
             return $transaction;
-        } catch (UnexpectedValueException $exception) {
-            throw new RuntimeException('KlikQRIS status response validation failed: '.class_basename($exception).'.', previous: $exception);
+        } catch (Throwable $exception) {
+            throw new KlikQrisStatusResponseException(
+                'KlikQRIS status response validation failed: '.class_basename($exception).'.',
+                previous: $exception,
+            );
         }
     }
 
     /** @return array<mixed> */
     private function jsonPayload(Response $response, string $operation): array
     {
-        $payload = $response->json();
+        try {
+            $payload = $response->json();
+        } catch (Throwable $exception) {
+            if ($operation === 'create') {
+                throw new KlikQrisCreateOutcomeUnknownException('KlikQRIS create outcome is unknown: invalid JSON.', $exception);
+            }
+
+            throw new KlikQrisStatusResponseException(
+                'KlikQRIS '.$operation.' response parse failed: invalid JSON.',
+                previous: $exception,
+            );
+        }
+
         if (! is_array($payload)) {
             if ($operation === 'create') {
                 throw new KlikQrisCreateOutcomeUnknownException('KlikQRIS create outcome is unknown: invalid JSON.');
             }
 
-            throw new RuntimeException('KlikQRIS '.$operation.' response parse failed: invalid JSON.');
+            throw new KlikQrisStatusResponseException('KlikQRIS '.$operation.' response parse failed: invalid JSON.');
         }
 
         return $payload;

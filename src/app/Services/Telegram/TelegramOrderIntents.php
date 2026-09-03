@@ -283,11 +283,7 @@ class TelegramOrderIntents
     private function refreshEligibleKlikQrisPayment(Customer $customer, Order $order, ?Payment $payment): ?string
     {
         if (! $payment
-            || $payment->provider !== PaymentProvider::KLIKQRIS
-            || ! in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true)
-            || blank($payment->merchant_ref)
-            || strtolower(trim((string) $payment->provider_payment_method)) !== 'qris'
-            || $payment->provider_total_payment === null
+            || ! $this->klikQrisNativeQris->isCustomerStatusRefreshable($payment)
             || ! $this->klikQrisReadiness->checkout()->isReady()) {
             return null;
         }

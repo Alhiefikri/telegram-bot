@@ -136,6 +136,6 @@ class HealthCheck extends Command
     /** @return list<string> */
     private function operationalQueues(): array
     {
-        return ['default', 'telegram-outbound', 'notifications', 'telegram-broadcast', (string) config('services.binance.verification_queue', 'binance-verification')];
+        return ['payments', 'default', 'telegram-outbound', 'notifications', 'telegram-broadcast', (string) config('services.binance.verification_queue', 'binance-verification')];
     }
 }

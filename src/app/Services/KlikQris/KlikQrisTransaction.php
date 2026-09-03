@@ -80,6 +80,22 @@ final readonly class KlikQrisTransaction
             throw new RuntimeException('Persisted KlikQRIS transaction payload is invalid.');
         }
 
+        $encryptedQrisUrl = trim((string) $payment->provider_qris_url);
+        if ($encryptedQrisUrl !== '') {
+            if (array_key_exists('qris_url', $data)
+                && self::optionalString($data['qris_url']) !== $encryptedQrisUrl) {
+                throw new RuntimeException('Persisted KlikQRIS transaction QRIS URL does not match its protected value.');
+            }
+
+            if (array_key_exists('data', $payload)) {
+                $payload['data']['qris_url'] = $encryptedQrisUrl;
+            } else {
+                $payload['qris_url'] = $encryptedQrisUrl;
+            }
+
+            $data = $payload['data'] ?? $payload;
+        }
+
         foreach (['order_id', 'amount', 'total_amount', 'status', 'qris_url', 'expired_at'] as $key) {
             if (! array_key_exists($key, $data)) {
                 throw new RuntimeException('Persisted KlikQRIS transaction payload is incomplete.');
@@ -131,7 +147,6 @@ final readonly class KlikQrisTransaction
             || array_key_exists('user', $parts)
             || array_key_exists('pass', $parts)
             || array_key_exists('port', $parts)
-            || array_key_exists('query', $parts)
             || array_key_exists('fragment', $parts)
         ) {
             return false;

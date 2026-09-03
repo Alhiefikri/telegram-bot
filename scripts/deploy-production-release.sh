@@ -498,6 +498,7 @@ verify_release_gates() {
   if ! compose exec -T app php artisan ops:check-queue-depth \
     --max=50 \
     --max-oldest-age=120 \
+    --queue=payments \
     --queue=default \
     --queue=telegram-outbound \
     --queue=notifications \

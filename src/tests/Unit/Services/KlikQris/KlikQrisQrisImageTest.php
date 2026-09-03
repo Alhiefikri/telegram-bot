@@ -28,6 +28,14 @@ class KlikQrisQrisImageTest extends TestCase
         $this->assertSame(self::PNG_BYTES, app(KlikQrisQrisImage::class)->contents($this->payable()));
     }
 
+    public function test_accepts_a_signed_query_and_valid_png_when_content_type_is_not_specific(): void
+    {
+        $url = 'https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png?token=opaque-token';
+        $this->fakeStreamedDownload(self::PNG_BYTES, url: $url, contentType: 'application/octet-stream');
+
+        $this->assertSame(self::PNG_BYTES, app(KlikQrisQrisImage::class)->contents($this->payable($url)));
+    }
+
     public function test_download_configures_bounded_streaming_sink_headers_progress_and_redirect_controls(): void
     {
         $this->fakeStreamedDownload(self::PNG_BYTES, assertOptions: true);
@@ -121,8 +129,12 @@ class KlikQrisQrisImageTest extends TestCase
         }
     }
 
-    private function fakeStreamedDownload(string $contents, bool $assertOptions = false): void
-    {
+    private function fakeStreamedDownload(
+        string $contents,
+        bool $assertOptions = false,
+        string $url = 'https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png',
+        string $contentType = 'image/png',
+    ): void {
         $pending = Mockery::mock(PendingRequest::class);
         $sink = null;
         Http::shouldReceive('timeout')->once()->with(4)->andReturn($pending);
@@ -145,11 +157,11 @@ class KlikQrisQrisImageTest extends TestCase
             ->andReturnSelf();
         $pending->shouldReceive('get')
             ->once()
-            ->with('https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png')
-            ->andReturnUsing(function () use (&$sink, $contents): Response {
+            ->with($url)
+            ->andReturnUsing(function () use (&$sink, $contents, $contentType): Response {
                 fwrite($sink, $contents);
 
-                return new Response(new Psr7Response(200, ['Content-Type' => 'image/png'], ''));
+                return new Response(new Psr7Response(200, ['Content-Type' => $contentType], ''));
             });
     }
 }

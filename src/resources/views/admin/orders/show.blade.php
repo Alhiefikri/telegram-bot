@@ -143,6 +143,11 @@
                                 <div><dt class="text-brand-muted">Expiry</dt><dd>{{ $detail['expires_at'] }}</dd></div>
                                 <div><dt class="text-brand-muted">Callback count</dt><dd>{{ $detail['callback_count'] }}</dd></div>
                                 <div><dt class="text-brand-muted">Latest reconciliation</dt><dd>{{ $detail['latest_reconciliation_at'] }}</dd></div>
+                                @if ($detail['provider'] === 'klikqris')
+                                    <div><dt class="text-brand-muted">Checkout delivery state</dt><dd>{{ $detail['checkout_delivery_state'] }}</dd></div>
+                                    <div><dt class="text-brand-muted">Checkout delivery outcome</dt><dd>{{ $detail['checkout_delivery_outcome'] }}</dd></div>
+                                    <div><dt class="text-brand-muted">Checkout delivery method</dt><dd>{{ $detail['checkout_delivery_method'] }}</dd></div>
+                                @endif
                             </dl>
                             @if ($detail['events'] !== [])
                                 <ul class="mt-3 space-y-1 text-xs text-brand-muted">

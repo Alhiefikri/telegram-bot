@@ -71,10 +71,8 @@ class KlikQrisQrisImage
                 throw $this->unavailable();
             }
 
-            $contentType = strtolower((string) $response->header('Content-Type'));
             $contentLength = (string) $response->header('Content-Length');
-            if (($contentLength !== '' && ctype_digit($contentLength) && (int) $contentLength > self::MAX_BYTES)
-                || ! str_contains($contentType, 'image/png')) {
+            if ($contentLength !== '' && ctype_digit($contentLength) && (int) $contentLength > self::MAX_BYTES) {
                 throw $this->unavailable();
             }
 

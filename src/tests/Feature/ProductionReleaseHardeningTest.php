@@ -800,6 +800,7 @@ SH);
 
         $this->assertStringContainsString('if ! compose exec -T app php artisan ops:check-failed-jobs', $release);
         $this->assertStringContainsString('if ! compose exec -T app php artisan ops:check-queue-depth', $release);
+        $this->assertStringContainsString('--queue=payments', $release);
         $this->assertStringContainsString('--queue=default', $release);
         $this->assertStringContainsString('--queue=telegram-outbound', $release);
         $this->assertStringContainsString('--queue=notifications', $release);

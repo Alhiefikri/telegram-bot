@@ -131,6 +131,9 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertNotNull($freshOrder->manual_checkout_customer_notified_at);
         $this->assertSame('12345', $freshOrder->manual_checkout_customer_notification_chat_id);
         $this->assertSame(123456, $freshOrder->manual_checkout_customer_notification_message_id);
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame('qris_sent', $effect->outcome_metadata['delivery_outcome'] ?? null);
+        $this->assertSame('sendPhoto', $effect->outcome_metadata['delivery_method'] ?? null);
     }
 
     public function test_production_create_uses_qris_image_when_qris_url_returns_invalid_png(): void
@@ -299,6 +302,9 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString($base64, $messageRequest->body());
         $this->assertStringNotContainsString('MERCHANT_SECRET_TELEGRAM', $messageRequest->body());
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame('retry_notice_sent', $effect->outcome_metadata['delivery_outcome'] ?? null);
+        $this->assertSame('sendMessage', $effect->outcome_metadata['delivery_method'] ?? null);
     }
 
     public function test_klikqris_job_releases_claim_after_definite_send_failure_and_keeps_provider_transaction(): void

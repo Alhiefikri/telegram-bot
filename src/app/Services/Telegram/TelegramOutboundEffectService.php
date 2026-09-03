@@ -194,6 +194,8 @@ class TelegramOutboundEffectService
         'payment_method',
         'late_evidence',
         'proof_status',
+        'delivery_outcome',
+        'delivery_method',
     ];
 
     public function __construct(

@@ -7,11 +7,13 @@ use App\Jobs\VerifyKlikQrisWebhookPayment;
 use App\Services\KlikQris\KlikQrisCallback;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Services\KlikQris\KlikQrisStatusResponseException;
 use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use App\Services\ProviderVerification\ProviderVerificationProfile;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use JsonException;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
@@ -55,15 +57,18 @@ class KlikQrisSandboxWebhookController extends Controller
 
         try {
             ProviderVerificationProfiles::using(ProviderVerificationProfile::Webhook, fn () => $processor->processCallback($payload));
-        } catch (KlikQrisStatusUnavailableException $exception) {
-            report($exception);
-            if (! app()->runningUnitTests()) {
-                // Webhooks must acknowledge after their bounded synchronous
-                // budget; force durable queueing so a sync queue cannot turn
-                // this follow-up into another request-time provider call.
-                // Replays are harmless because lifecycle transitions dedupe.
-                VerifyKlikQrisWebhookPayment::dispatch($payload)->onConnection('database')->onQueue('payments');
-            }
+        } catch (KlikQrisStatusUnavailableException|KlikQrisStatusResponseException $exception) {
+            Log::warning('klikqris.webhook.verification_deferred', [
+                'environment' => $environment->value,
+                'exception' => $exception::class,
+                'http_status' => $exception instanceof KlikQrisStatusResponseException ? $exception->httpStatus : null,
+                'merchant_ref_hash' => hash('sha256', (string) ($payload['order_id'] ?? '')),
+            ]);
+
+            // The callback event is already durable at this point. Queue the
+            // same payload for a later authoritative check and only surface a
+            // server error if the durability boundary itself cannot be reached.
+            VerifyKlikQrisWebhookPayment::dispatch($payload)->onConnection('database')->onQueue('payments');
         }
 
         return response()->json(['success' => true]);

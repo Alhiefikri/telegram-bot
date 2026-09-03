@@ -77,6 +77,7 @@ class FakeTelegramBotClient extends TelegramBotClient
             'result' => [
                 'message_id' => random_int(100000, 999999),
                 'chat' => ['id' => $chatId],
+                'photo' => [['file_id' => 'fake-photo-file-id']],
                 'caption' => $caption,
                 'reply_markup' => $replyMarkup,
                 ...$options,

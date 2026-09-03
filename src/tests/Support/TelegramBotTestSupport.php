@@ -39,7 +39,7 @@ abstract class TelegramBotTestSupport extends TestCase
         Http::preventStrayRequests();
         $wildcardFake = $extraFakes['https://api.telegram.org/*'] ?? Http::response(['ok' => true]);
         $defaults = [
-            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 123456]]),
+            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 123456, 'photo' => [['file_id' => 'fake-photo-file-id']]]]),
         ];
         if (! array_key_exists('https://api.telegram.org/*', $extraFakes)) {
             $defaults['https://api.telegram.org/*/sendMessage'] = Http::response(['ok' => true, 'result' => ['message_id' => 123457]]);

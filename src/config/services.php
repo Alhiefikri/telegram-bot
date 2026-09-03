@@ -152,6 +152,7 @@ return [
         'status_retry_delay_ms' => (int) env('KLIKQRIS_STATUS_RETRY_DELAY_MS', 250),
         'webhook_rate_limit_per_minute' => (int) env('KLIKQRIS_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
         'status_refresh_rate_limit_per_minute' => (int) env('KLIKQRIS_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),
+        'reconcile_terminal_lookback_hours' => (int) env('KLIKQRIS_RECONCILE_TERMINAL_LOOKBACK_HOURS', 72),
         'reconciliation_command' => 'klikqris:reconcile --chunk=100',
         'reporting_cache_seconds' => (int) env('KLIKQRIS_REPORTING_CACHE_SECONDS', 15),
         'reporting_max_limit' => (int) env('KLIKQRIS_REPORTING_MAX_LIMIT', 100),

@@ -12,6 +12,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\KlikQrisSandboxScenarios;
@@ -59,6 +60,64 @@ class KlikQrisReconciliationTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $pakasir->fresh()->status);
         Http::assertSentCount(2);
         Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    public function test_command_ignores_old_terminal_history_but_keeps_outcome_unknown_recovery_candidates(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $oldTerminal = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-OLD-TERMINAL',
+            'status' => PaymentStatus::Expired,
+        ]);
+        DB::table('payments')->where('id', $oldTerminal->getKey())->update([
+            'updated_at' => now()->subHours(73),
+        ]);
+        $unknown = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-PAID-UNKNOWN',
+            'status' => PaymentStatus::Paid,
+            'provider_create_state' => 'outcome_unknown',
+        ]);
+        $recentTerminal = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-RECENT-FAILED',
+            'status' => PaymentStatus::Failed,
+        ]);
+        DB::table('payments')->where('id', $recentTerminal->getKey())->update([
+            'updated_at' => now()->subHour(),
+        ]);
+
+        Http::fake(function ($request) use ($unknown, $recentTerminal, $oldTerminal) {
+            $this->assertStringNotContainsString((string) $oldTerminal->merchant_ref, $request->url());
+
+            return str_contains($request->url(), (string) $unknown->merchant_ref)
+                ? Http::response(KlikQrisSandboxScenarios::statusPayload($unknown), 200)
+                : Http::response(KlikQrisSandboxScenarios::statusPayload($recentTerminal, ['status' => 'PENDING']), 200);
+        });
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=10')
+            ->expectsOutputToContain('processed=1 skipped=1 failed=0')
+            ->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Expired, $oldTerminal->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $unknown->fresh()->status);
+        $this->assertSame(PaymentStatus::Failed, $recentTerminal->fresh()->status);
+        Http::assertSentCount(2);
+    }
+
+    public function test_command_stops_after_the_bounded_number_of_payments(): void
+    {
+        $payments = collect(range(1, 3))->map(fn (int $index): Payment => $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-BOUND-'.$index,
+        ]));
+        Http::fake(fn ($request) => Http::response(
+            KlikQrisSandboxScenarios::statusPayload($payments->first(fn (Payment $payment): bool => str_contains($request->url(), (string) $payment->merchant_ref)), ['status' => 'PENDING']),
+            200,
+        ));
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=2')
+            ->expectsOutputToContain('processed=0 skipped=2 failed=0')
+            ->assertSuccessful();
+
+        Http::assertSentCount(2);
     }
 
     public function test_command_creates_pending_native_qris_and_verifies_it_without_customer_refresh(): void
@@ -305,6 +364,8 @@ class KlikQrisReconciliationTest extends TestCase
     {
         $this->artisan('klikqris:reconcile --chunk=0')->assertExitCode(1);
         $this->artisan('klikqris:reconcile --chunk=1001')->assertExitCode(1);
+        $this->artisan('klikqris:reconcile --max-payments=0')->assertExitCode(1);
+        $this->artisan('klikqris:reconcile --max-payments=101')->assertExitCode(1);
     }
 
     public function test_schedule_registers_one_minute_klikqris_reconcile_without_overlap(): void
@@ -313,6 +374,7 @@ class KlikQrisReconciliationTest extends TestCase
 
         $this->assertTrue(app(KlikQrisProviderReadiness::class)->sandboxSchedulingEnabled());
         $this->assertStringContainsString('klikqris:reconcile --chunk=100', $schedule);
+        $this->assertStringContainsString('withoutOverlapping(2)', $schedule);
         $this->assertStringContainsString('schedulingEnabledFor', $schedule);
     }
 

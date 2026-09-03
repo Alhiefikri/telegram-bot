@@ -109,6 +109,7 @@ final class CheckoutInstructionDeliveryPipeline
                 'customer_correlation_id' => DogfoodTiming::correlation($order->customer->telegram_id),
                 'order_correlation_id' => DogfoodTiming::correlation($order->id),
             ], fn () => $this->sendInstructions($claimed, $checkoutIntents, $order, $payment));
+            $deliveryMetadata = $this->deliveryMetadata($claimed, $response);
             $messageId = $this->responseValidator->messageIdFromResponse(
                 $response,
                 'Telegram checkout instruction',
@@ -118,6 +119,7 @@ final class CheckoutInstructionDeliveryPipeline
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 (string) $messageId,
+                $deliveryMetadata,
             );
             if ($finalized === null) {
                 return;
@@ -258,6 +260,25 @@ final class CheckoutInstructionDeliveryPipeline
             ),
             default => throw new RuntimeException('Unsupported Telegram checkout effect type.'),
         };
+    }
+
+    /** @param array<mixed> $response
+     * @return array<string, string>
+     */
+    private function deliveryMetadata(TelegramOutboundEffect $effect, array $response): array
+    {
+        if ($effect->effect_type !== TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT) {
+            return [];
+        }
+
+        $telegramResult = $response['result'] ?? null;
+        $hasPhoto = is_array($telegramResult) && is_array($telegramResult['photo'] ?? null) && $telegramResult['photo'] !== [];
+        $outcome = $hasPhoto ? 'qris_sent' : 'retry_notice_sent';
+
+        return [
+            'delivery_outcome' => $outcome,
+            'delivery_method' => $outcome === 'qris_sent' ? 'sendPhoto' : 'sendMessage',
+        ];
     }
 
     private function timingStep(TelegramOutboundEffect $effect): string

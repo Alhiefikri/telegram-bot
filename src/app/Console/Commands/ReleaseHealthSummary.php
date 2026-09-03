@@ -17,6 +17,7 @@ class ReleaseHealthSummary extends Command
     {
         try {
             $operationalQueues = [
+                'payments',
                 'default',
                 'telegram-outbound',
                 'notifications',

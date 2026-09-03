@@ -219,7 +219,7 @@ class KlikQrisSandboxValidationCommandTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    public function test_actual_provider_qris_url_with_query_is_rejected_and_persisted_only_as_non_payable_state(): void
+    public function test_actual_provider_qris_url_with_signed_query_is_accepted_and_persisted_separately_from_redacted_payload(): void
     {
         $payment = KlikQrisSandboxScenarios::klikQrisPayment(['merchant_ref' => 'INV-KLIKQRIS-QUERY-SECRET']);
         $queryQrisUrl = 'https://klikqris.com/storage/sandbox/qris_sandbox_transaction.png?token=secret-query';
@@ -236,9 +236,10 @@ class KlikQrisSandboxValidationCommandTest extends TestCase
         ]);
         $output = Artisan::output();
 
-        $this->assertSame(1, $code, $output);
-        $this->assertStringContainsString('FAIL idempotent KlikQRIS create returned stable transaction', $output);
-        $this->assertStringContainsString('FAIL stored KlikQRIS QRIS fields match provider shape', $output);
+        $this->assertSame(0, $code, $output);
+        $this->assertStringContainsString('PASS idempotent KlikQRIS create returned stable transaction', $output);
+        $this->assertStringContainsString('PASS stored KlikQRIS QRIS fields match provider shape', $output);
+        $this->assertStringContainsString('PASS QR is payable or paid as expected', $output);
         $this->assertSensitiveDenyListAbsent($output, [
             $queryQrisUrl,
             'token=secret-query',
@@ -250,10 +251,11 @@ class KlikQrisSandboxValidationCommandTest extends TestCase
         ]);
 
         $payment->refresh();
-        $this->assertSame('provider_qris_unusable', $payment->provider_create_state);
+        $this->assertSame('created', $payment->provider_create_state);
+        $this->assertSame($queryQrisUrl, $payment->provider_qris_url);
         $persistedPayload = json_encode($payment->provider_payload, JSON_THROW_ON_ERROR);
         $this->assertIsArray($payment->provider_payload);
-        $this->assertStringNotContainsString($queryQrisUrl, $persistedPayload);
+        $this->assertArrayNotHasKey('qris_url', $payment->provider_payload['data'] ?? []);
         $this->assertStringNotContainsString('secret-query', $persistedPayload);
         $this->assertStringNotContainsString('opaque-test-signature', $persistedPayload);
         $this->assertStringNotContainsString('iVBORw0KGgo', $persistedPayload);

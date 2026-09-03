@@ -63,6 +63,25 @@ class KlikQrisNativeQrisService
     }
 
     /**
+     * Customer status refresh may recover a request whose create outcome is
+     * uncertain, but it must never turn a fresh, not-yet-submitted Payment into
+     * a provider status lookup or a second create attempt.
+     */
+    public function isCustomerStatusRefreshable(Payment $payment): bool
+    {
+        if (strtolower(trim((string) $payment->provider)) !== PaymentProvider::KLIKQRIS
+            || ! in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true)
+            || blank($payment->merchant_ref)) {
+            return false;
+        }
+
+        $state = trim((string) $payment->provider_create_state);
+
+        return ($state !== '' && $state !== 'create_failed')
+            || ($payment->provider_payment_method === 'qris' && is_array($payment->provider_payload));
+    }
+
+    /**
      * Observe the current lifecycle state and return an owner alert only when
      * the state is actionable and its retry policy has been met. This stays in
      * the lifecycle module so customer-facing callers never inspect Payment
@@ -580,7 +599,11 @@ class KlikQrisNativeQrisService
             $providerExpiresAt = $transaction->expiresAt()?->setTimezone((string) config('app.timezone'));
             $providerTotal = $transaction->totalAmount();
             $providerPayload = $transaction->sanitizedPayload();
-            if (filled($transaction->qrisUrl()) && ! KlikQrisTransaction::isAllowedQrisUrl($transaction->qrisUrl(), environment: $transaction->environment())) {
+            $providerQrisUrl = filled($transaction->qrisUrl())
+                && KlikQrisTransaction::isAllowedQrisUrl($transaction->qrisUrl(), environment: $transaction->environment())
+                ? $transaction->qrisUrl()
+                : null;
+            if (filled($transaction->qrisUrl()) && $providerQrisUrl === null) {
                 // Never persist untrusted provider media references.
                 $providerPayload = $this->withoutQrisUrlKeys($providerPayload);
             }
@@ -595,6 +618,7 @@ class KlikQrisNativeQrisService
             // non-payable state; it must never become Payable later.
             $paymentUpdates = [
                 'provider_payload' => $providerPayload,
+                'provider_qris_url' => $providerQrisUrl,
                 'provider_fee' => $providerTotal >= (int) $lockedPayment->amount ? $providerTotal - (int) $lockedPayment->amount : null,
                 'provider_total_payment' => $providerTotal,
                 'provider_payment_method' => 'qris',
