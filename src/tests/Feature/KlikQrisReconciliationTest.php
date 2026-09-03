@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Console\Commands\ReconcileKlikQrisPayments;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendTelegramReceipt;
@@ -118,6 +119,112 @@ class KlikQrisReconciliationTest extends TestCase
             ->assertSuccessful();
 
         Http::assertSentCount(2);
+    }
+
+    public function test_command_rotates_durable_cursor_so_newer_candidates_are_not_starved_by_always_eligible_older_rows(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $oldPending = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-OLD-PENDING',
+            'created_at' => now()->subDays(3),
+            'updated_at' => now()->subDays(3),
+        ]);
+        $newPending = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-NEW-PENDING',
+            'created_at' => now()->subMinute(),
+            'updated_at' => now()->subMinute(),
+        ]);
+
+        $requested = [];
+        Http::fake(function ($request) use ($oldPending, $newPending, &$requested) {
+            $requested[] = $request->url();
+
+            $payment = str_contains($request->url(), 'KLIK-OLD-PENDING') ? $oldPending : $newPending;
+
+            return Http::response(
+                KlikQrisSandboxScenarios::statusPayload($payment, ['status' => 'PENDING']),
+                200,
+            );
+        });
+
+        // Run 1: no persisted cursor yet, so the sweep starts at the oldest row.
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')
+            ->expectsOutputToContain('processed=0 skipped=1 failed=0')
+            ->assertSuccessful();
+        $this->assertCount(1, $requested);
+        $this->assertStringContainsString('KLIK-OLD-PENDING', $requested[0]);
+
+        // Run 2: the durable cursor from run 1 makes the sweep resume after the
+        // old row, so the newer candidate finally gets its turn.
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')
+            ->expectsOutputToContain('processed=0 skipped=1 failed=0')
+            ->assertSuccessful();
+        $this->assertCount(2, $requested);
+        $this->assertStringContainsString('KLIK-NEW-PENDING', $requested[1]);
+
+        $this->assertSame(PaymentStatus::Pending, $oldPending->fresh()->status);
+        $this->assertSame(PaymentStatus::Pending, $newPending->fresh()->status);
+    }
+
+    public function test_command_wraps_cursor_after_walking_the_whole_eligible_set(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $payment = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-ONLY-PENDING',
+            'created_at' => now()->subDays(1),
+            'updated_at' => now()->subDays(1),
+        ]);
+
+        $requested = [];
+        Http::fake(function ($request) use ($payment, &$requested) {
+            $requested[] = $request->url();
+
+            return Http::response(
+                KlikQrisSandboxScenarios::statusPayload($payment, ['status' => 'PENDING']),
+                200,
+            );
+        });
+
+        // First run walks the single eligible row to the end and wraps the cursor.
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=10')
+            ->expectsOutputToContain('processed=0 skipped=1 failed=0')
+            ->assertSuccessful();
+        $this->assertCount(1, $requested);
+        $this->assertNull(Cache::get('klikqris:reconcile:cursor:sandbox'));
+
+        // A fresh run starts from the beginning again because the cursor wrapped.
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=10')
+            ->expectsOutputToContain('processed=0 skipped=1 failed=0')
+            ->assertSuccessful();
+        $this->assertCount(2, $requested);
+        $this->assertStringContainsString('KLIK-ONLY-PENDING', $requested[1]);
+    }
+
+    public function test_command_stops_when_the_execution_budget_is_exhausted(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $first = $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-BUDGET-FIRST']);
+        $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-BUDGET-SECOND']);
+
+        Http::fake(fn ($request) => Http::response(
+            KlikQrisSandboxScenarios::statusPayload($first, ['status' => 'PENDING']),
+            200,
+        ));
+
+        // Inject a command whose execution deadline is already exhausted before
+        // the first payment, so no provider lookup may start.
+        $this->app->instance(
+            ReconcileKlikQrisPayments::class,
+            new ReconcileKlikQrisPayments(
+                deadlineFactory: fn (): int => (int) hrtime(true),
+            ),
+        );
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=10')
+            ->expectsOutputToContain('processed=0 skipped=0 failed=0')
+            ->assertSuccessful();
+
+        Http::assertNothingSent();
     }
 
     public function test_command_creates_pending_native_qris_and_verifies_it_without_customer_refresh(): void
@@ -374,7 +481,7 @@ class KlikQrisReconciliationTest extends TestCase
 
         $this->assertTrue(app(KlikQrisProviderReadiness::class)->sandboxSchedulingEnabled());
         $this->assertStringContainsString('klikqris:reconcile --chunk=100', $schedule);
-        $this->assertStringContainsString('withoutOverlapping(2)', $schedule);
+        $this->assertStringContainsString('withoutOverlapping(3)', $schedule);
         $this->assertStringContainsString('schedulingEnabledFor', $schedule);
     }
 

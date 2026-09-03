@@ -353,6 +353,8 @@ Tidak ada automatic fallback KlikQRIS ke Manual dan tidak ada Payment kedua. Sto
 
 `KlikQrisCallbackProcessor` memperlakukan callback sebagai signal. Ia melakukan status lookup authoritative, mencocokkan identity/amount/total, lalu baru memanggil `OrderLifecycle`. `klikqris:reconcile` memakai lock yang sama, memulihkan Payment outcome-unknown, dan dapat mengeskalasi kondisi actionable ke owner. Sandbox/production readiness dipisahkan oleh [`KlikQrisEnvironment`](../../src/app/Enums/KlikQrisEnvironment.php).
 
+`ReconcileKlikQrisPayments` memakai **fair rotating cursor** yang durable: posisi `(created_at, id)` terakhir disimpan di cache per environment (`klikqris:reconcile:cursor:{environment}`) dan setiap sweep scheduler melanjutkan dari posisi tersebut. Saat seluruh kandidat eligible sudah mendapat giliran dalam satu siklus, cursor di-reset sehingga kandidat lama yang masih stuck dapat dikunjungi lagi — tanpa men-starve Payment yang lebih baru. Sweep dibatasi `--max-payments` (default 10) **dan** execution budget (`KLIKQRIS_RECONCILE_MAX_EXECUTION_SECONDS`, default 45s) yang diukur dengan jam monotonik; batas ini lebih pendek dari mutex `withoutOverlapping` scheduler sehingga satu provider lambat tidak membuat sweep berikutnya overlap. Override manual `--after=<timestamp>` melanjutkan dari timestamp `created_at` tertentu.
+
 ### 5.5 Binance Pay
 
 Binance Pay ID memakai [`BinanceCheckoutPaymentPreparation`](../../src/app/Services/Checkout/BinanceCheckoutPaymentPreparation.php) untuk membentuk snapshot verification mode, base/unique amount, auto-verification setting, receiver type/value, dan initial verification status. Adapter itu tidak melakukan history read atau transaksi verification. [`BinancePaymentVerification`](../../src/app/Services/Binance/BinancePaymentVerification.php) tetap menjadi owner matching evidence, attempt/grace policy, manual review, dan `OrderLifecycle` delegation; queue jobs tetap transport adapter.
@@ -414,7 +416,7 @@ Semua webhook provider harus aman terhadap duplicate delivery, mismatch, unknown
 
 Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php). Yang paling penting:
 
-- `klikqris:reconcile` tiap menit bila environment KlikQRIS aktif dan scheduling enabled;
+- `klikqris:reconcile` tiap menit bila environment KlikQRIS aktif dan scheduling enabled (mutex `withoutOverlapping(3)` menit, lebih panjang dari execution budget 45 detik);
 - `pakasir:reconcile --chunk=100` tiap menit untuk payment legacy;
 - `binance:reconcile --chunk=100` tiap menit;
 - `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;

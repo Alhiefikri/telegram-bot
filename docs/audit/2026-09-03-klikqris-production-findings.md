@@ -21,6 +21,11 @@ Flow aplikasi ketika status provider tidak dapat dipastikan memang masuk ke kond
 
 Berdasarkan bukti yang tersedia, provider tidak terbukti mengalami outage total. Penyebab tunggal untuk invoice target belum dapat dibuktikan karena detail payment database, exception aplikasi lengkap, payload response terautentikasi, dan dashboard KlikQRIS tidak tersedia dalam audit ini.
 
+### Status remediasi
+
+- **F-01** (terminal lama tanpa batas): sebagian sudah diperbaiki lewat cutoff `updated_at` 72 jam untuk status `expired`/`failed`; fairness backlog ditindaklanjuti di issue #417.
+- **F-02** (starvation + overlap): diperbaiki di issue #417 dengan cursor rotasi durable per environment dan execution budget per sweep, serta mutex scheduler yang menutupi budget tersebut. Lihat `ReconcileKlikQrisPayments` dan `docs/agents/codebase.md` §5.4.
+
 ---
 
 ## 2. Temuan F-01: reconciliation memproses transaksi terminal lama tanpa batas waktu
