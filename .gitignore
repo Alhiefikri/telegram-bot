@@ -56,3 +56,4 @@ src/lhie_store_admin_dashboard.html
 # Local Superpowers execution workspaces
 .superpowers/
 .worktrees/
+.claude/

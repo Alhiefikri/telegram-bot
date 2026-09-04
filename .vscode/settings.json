@@ -1,1 +1,11 @@
-{}
+{
+  "intelephense.files.exclude": [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/.worktrees/**",
+    "**/.claude/**",
+    "**/.superpowers/**",
+    "**/.slim/**"
+  ]
+}

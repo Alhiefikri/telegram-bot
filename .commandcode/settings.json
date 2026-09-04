@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(gh:*)",
+      "Shell(gh issue view 417 --comments 2>&1; echo \"EXIT: $?\")",
+      "Shell(gh pr view 417 --comments 2>&1; echo \"EXIT: $?\"; echo \"---\"; gh auth status 2>&1)",
+      "Shell(grep -rn \"resolveCommands\\|addCommand\\|Kernel::class\\|Application::class\" /home/alhiefikri/telegram-bot/src/app/Providers/AppServiceProvider.php | head -20; echo '---'; ls /home/alhiefikri/telegram-bot/src/app/Console/Kernel.php 2>/dev/null; ls /home/alhiefikri/telegram-bot/src/app/Console 2>/dev/null)",
+      "Shell(php -l app/Console/Commands/ReconcileKlikQrisPayments.php)",
+      "Shell(php -l tests/Feature/KlikQrisReconciliationTest.php)",
+      "Shell(php -l database/migrations/2026_09_03_000003_add_klikqris_reconcile_cursor_index.php)",
+      "Shell(php -l routes/console.php)",
+      "Shell(php artisan test tests/Feature/KlikQrisReconciliationTest.php 2 >& 1)",
+      "Shell(php artisan test tests/Feature/KlikQrisReconciliationTest.php --filter rotates_durable_cursor|wraps_cursor|execution_budget 2 >& 1)",
+      "Shell(php artisan test --testsuite=Feature --filter KlikQris 2 >& 1)",
+      "Shell(php artisan test tests/Feature/Telegram/KlikQrisCheckoutTest.php --filter test_klikqris_job_dedupes 2 >& 1)",
+      "Shell(git:*)",
+      "Shell(php artisan test tests/Feature/KlikQrisCustomerSurfacesIntegrationTest.php --filter test_storefront_and_store_bot_render_the_same_payable_qris_outcome_payload 2 >& 1)",
+      "Shell(python3 -c import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('scripts',{}), indent=2)))",
+      "Shell(vendor/bin/pint:*)",
+      "Shell(php artisan test tests/Feature/KlikQrisReconciliationTest.php tests/Feature/KlikQrisOwnerAlertTest.php tests/Unit/Services/KlikQris/KlikQrisProviderReadinessTest.php tests/Feature/KlikQrisProductionReadinessTest.php 2 >& 1)",
+      "Shell(php artisan test 2 >& 1)",
+      "Shell(sed:*)",
+      "Shell(php artisan test --help 2 >& 1)",
+      "Shell(cd /home/alhiefikri/telegram-bot/src && php artisan test 2>&1 | sed 's/\\x1b\\[[0-9;]*m//g' > /tmp/commandcode/shellout/fullsuite.log; echo \"exit=$?\" >> /tmp/commandcode/shellout/fullsuite.log)",
+      "Shell(grep:*)",
+      "Shell(php artisan test tests/Unit/Services/PaidInvoiceRendererTest.php tests/Unit/Services/Telegram/TelegramAdminStatsIntentsTest.php tests/Feature/ProductionReleaseHardeningTest.php tests/Feature/Telegram/CommunityGateTest.php tests/Feature/Telegram/WebhookIngressTest.php 2 >& 1)",
+      "Shell(php artisan test tests/Feature/KlikQrisReconciliationTest.php tests/Feature/KlikQrisOwnerAlertTest.php 2 >& 1)",
+      "Shell(php -r 'echo extension_loaded(\"pdo_pgsql\") ? \"pdo_pgsql ok\\n\" : \"no pdo_pgsql\\n\"; echo function_exists(\"pcntl_fork\") ? \"pcntl ok\\n\" : \"no pcntl\\n\";' 2>&1; which psql pg_isready 2>&1 | head -3)",
+      "Shell(pg_isready 2>&1; echo \"---\"; cd /home/alhiefikri/telegram-bot && cat .env 2>/dev/null | grep -i \"^DB_\\|^CONCURRENCY\" | head; echo \"--- src env:\"; cat src/.env 2>/dev/null | grep -i \"^DB_\\|^CONCURRENCY\" | head)",
+      "Shell(docker:*)",
+      "Shell(docker exec telegram-bot-app-1 php -r 'echo getenv(\"DB_CONNECTION\").\" \".getenv(\"APP_ENV\").\"\\n\";' 2>&1; echo \"---\"; docker exec telegram-bot-app-1 ls /var/www/html/database/migrations/ 2>/dev/null | grep klikqris_reconcile | head)",
+      "Shell(docker port telegram-bot-db-1 2>&1; echo \"---\"; docker network inspect $(docker inspect telegram-bot-db-1 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}') --format '{{range .Containers}}{{.Name}} {{.IPv4Address}}{{println}}{{end}}' 2>&1 | head)",
+      "Shell(cd /home/alhiefikri/telegram-bot && PGPASSWORD=$(grep -E \"^POSTGRES_PASSWORD=\" .env | cut -d= -f2- | tr -d '\"') docker exec -e PGPASSWORD=\"$(grep -E '^POSTGRES_PASSWORD=' .env | cut -d= -f2- | tr -d '\"')\" telegram-bot-db-1 psql -U telegram_bot -d telegram_bot -v ON_ERROR_STOP=1 -c \"CREATE INDEX IF NOT EXISTS payments_klikqris_reconcile_cursor_idx ON payments (created_at, id) WHERE provider = 'klikqris' AND merchant_ref IS NOT NULL AND (status IN ('pending', 'expired', 'failed') OR provider_create_state = 'outcome_unknown');\" 2>&1)",
+      "Shell(cd /home/alhiefikri/telegram-bot && git commit -F - <<'EOF' fix(klikqris): make reconciliation fair and bounded without starvation Reconciliation always started from the lowest Payment id, so eligible rows that never advance (pending, outcome_unknown, recently released terminal) consumed the whole per-run cap every minute and starved newer Payments. - Replace earliest-first selection with a durable rotating keyset cursor (created_at, id) persisted per environment in the cache. Each sweep resumes after the last offered row and wraps once the whole eligible set had a turn, so a single stuck Payment no longer starves the rest. - Bound each sweep with a wall-clock execution budget (default 45s) measured on a monotonic clock, and widen the scheduler mutex to cover it so a slow provider cannot make consecutive sweeps overlap. - Add a Postgres partial index matching the cursor predicate, config defaults and env documentation, and regression tests proving newer candidates get a turn across runs, the cursor wraps after a full pass, and an exhausted execution budget stops the sweep. Recovery still reuses the same Payment, never creates a second one, and never falls back to another provider automatically. Closes #417 Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
+      "Shell(cd /home/alhiefikri/telegram-bot && gh issue comment 417 --body \"Fixed in 61855758 and released to \\`main\\`. Reconciliation now uses a durable rotating keyset cursor (\\`created_at\\`, \\`id\\`) persisted per environment in the cache: each sweep resumes where the last one stopped and wraps once the whole eligible set has had a turn, so an always-eligible older Payment (pending / outcome_unknown / stuck recovery) can no longer starve newer candidates. Each sweep is also bounded by a wall-clock execution budget (\\`KLIKQRIS_RECONCILE_MAX_EXECUTION_SECONDS\\`, default 45s) measured on a monotonic clock, and the scheduler mutex was widened to \\`withoutOverlapping(3)\\` so a slow provider cannot make consecutive sweeps overlap. A Postgres partial index (\\`payments_klikqris_reconcile_cursor_idx\\`) supports the cursor predicate. Safe behavior is preserved: recovery reuses the same Payment, never creates a second Payment, and never falls back to another provider automatically. Regression tests cover newer-candidate rotation across runs, cursor wrap after a full pass, and sweep stop when the execution budget is exhausted.\" && gh issue close 417 --comment \"Closing: implemented, verified, and released to main.\" 2>&1 | tail -3)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}
