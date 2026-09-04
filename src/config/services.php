@@ -208,6 +208,8 @@ return [
         'status_refresh_rate_limit_per_minute' => (int) env('SAKURUPIAH_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),
         'readiness_cache_seconds' => (int) env('SAKURUPIAH_READINESS_CACHE_SECONDS', 60),
         'reconciliation_command' => 'sakurupiah:reconcile --chunk=100',
+        'reconcile_terminal_lookback_hours' => (int) env('SAKURUPIAH_RECONCILE_TERMINAL_LOOKBACK_HOURS', 72),
+        'reconcile_max_execution_seconds' => (float) env('SAKURUPIAH_RECONCILE_MAX_EXECUTION_SECONDS', 45),
         // The existing default worker is supervised in production. Do not
         // introduce a queue name whose worker is not served by the release.
         'verification_queue' => 'default',

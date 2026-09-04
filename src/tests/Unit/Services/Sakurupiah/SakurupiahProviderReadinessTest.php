@@ -175,7 +175,8 @@ class SakurupiahProviderReadinessTest extends TestCase
         $this->assertFalse($report->isReady());
         $this->assertTrue($report->channelObserved());
         $this->assertArrayNotHasKey('SAKURUPIAH_PRODUCTION_CALLBACK_ROUTE', $report->invalid());
-        $this->assertArrayHasKey('SAKURUPIAH_RECONCILIATION_COMMAND', $report->invalid());
+        $this->assertArrayNotHasKey('SAKURUPIAH_RECONCILIATION_COMMAND', $report->invalid());
+        $this->assertArrayHasKey('SAKURUPIAH_RECONCILIATION_SCHEDULE', $report->invalid());
 
         config()->set('services.sakurupiah.production_callback_url', 'http://store.example.test/api/webhook/sakurupiah');
         $calls = 0;

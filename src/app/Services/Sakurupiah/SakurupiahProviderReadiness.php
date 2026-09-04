@@ -429,6 +429,15 @@ final class SakurupiahProviderReadiness
             $invalid['SAKURUPIAH_READINESS_CACHE_SECONDS'] = 'SAKURUPIAH_READINESS_CACHE_SECONDS must be an integer between 1 and 300.';
         }
 
+        $lookbackHours = config('services.sakurupiah.reconcile_terminal_lookback_hours', 72);
+        if (! $this->validInteger($lookbackHours, 1, 24 * 365)) {
+            $invalid['SAKURUPIAH_RECONCILE_TERMINAL_LOOKBACK_HOURS'] = 'SAKURUPIAH_RECONCILE_TERMINAL_LOOKBACK_HOURS must be an integer between 1 and 8760.';
+        }
+        $executionSeconds = config('services.sakurupiah.reconcile_max_execution_seconds', 45);
+        if (! is_numeric($executionSeconds) || (float) $executionSeconds < 1 || (float) $executionSeconds > 300) {
+            $invalid['SAKURUPIAH_RECONCILE_MAX_EXECUTION_SECONDS'] = 'SAKURUPIAH_RECONCILE_MAX_EXECUTION_SECONDS must be between 1 and 300 seconds.';
+        }
+
         $timezone = config('services.sakurupiah.timezone', 'Asia/Jakarta');
         try {
             if (! is_string($timezone) || trim($timezone) === '') {
@@ -935,6 +944,8 @@ final class SakurupiahProviderReadiness
             'webhook_rate_limit_per_minute' => config('services.sakurupiah.webhook_rate_limit_per_minute', 30),
             'status_refresh_rate_limit_per_minute' => config('services.sakurupiah.status_refresh_rate_limit_per_minute', 3),
             'readiness_cache_seconds' => config('services.sakurupiah.readiness_cache_seconds', self::DEFAULT_CACHE_SECONDS),
+            'reconcile_terminal_lookback_hours' => config('services.sakurupiah.reconcile_terminal_lookback_hours', 72),
+            'reconcile_max_execution_seconds' => config('services.sakurupiah.reconcile_max_execution_seconds', 45),
             'timezone' => config('services.sakurupiah.timezone', 'Asia/Jakarta'),
             'qris_contract' => config('services.sakurupiah.qris_contract', []),
         ];

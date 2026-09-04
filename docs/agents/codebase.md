@@ -374,6 +374,45 @@ USDT BEP20 memakai `provider=manual`, `method=USDT_BEP20`, dan authority BNB Sma
 
 `BscReadiness` checks the database activation flag, approved chain/token metadata, RPC response, bounded `eth_getLogs` support, and active receiver count. Receiver management is Owner-only: the submitted address is normalized and stored as an active `manual_verified` destination after re-authentication, without a wallet-signature challenge. Multiple distinct addresses are supported and the existing least-recently-assigned pool distributes new Payments across them. The BSC RPC endpoint is the only environment authority; chain/token identity, explorer, and operational limits are pinned in application configuration. Its short-lived result is shared across customer surfaces and invalidated after committed BSC setting/receiver mutations. [`BscCheckoutPaymentPreparation`](../../src/app/Services/Checkout/BscCheckoutPaymentPreparation.php) runs `preflight()` before checkout locks, then `prepare()` revalidates only the locked setting/configuration/receiver snapshot, selects the receiver, allocates the unique amount, calculates expected token units, and builds the `PaymentBscDetail` snapshot. `prepare()` performs no BSC RPC or other external I/O; `OrderCheckoutService` consumes only the resulting plan. `bsc:reconcile` uses the existing `binance-verification` queue and also checks late-payment candidates, readiness, and backlog alerts. `ops:health --bsc` is the release/operations health surface; receiver destinations remain database-managed and Storefront availability is version-invalidated after committed setting/receiver mutations.
 
+### 5.7 Sakurupiah QRIS
+
+Sakurupiah is an Owner-selectable provider for new QRIS checkout
+(`provider=sakurupiah`, `method=QRIS`, `currency=IDR`). Checkout preparation,
+post-commit invoice lifecycle, callback verification, and safe presentation
+live in [`src/app/Services/Sakurupiah/`](../../src/app/Services/Sakurupiah/).
+`SakurupiahInvoiceLifecycleService` owns create/recovery and classifies only
+safe outcomes (`Payable` carries presentation; all other states carry no
+provider payload).
+
+`SakurupiahCallbackProcessor::reconcilePayment()` is the reconciliation seam:
+under the same per-Payment cache lock used by create/callback/refresh, it
+performs an authoritative status lookup (never a create), validates identity
+and amount evidence, and delegates paid/expired transitions to `OrderLifecycle`.
+Late paid observations on terminal Orders become `ManualFulfillmentReview`
+without auto-fulfillment.
+
+[`ReconcileSakurupiahPayments`](../../src/app/Console/Commands/ReconcileSakurupiahPayments.php)
+(`sakurupiah:reconcile --chunk=100`) scans only Sakurupiah QRIS IDR Payments
+with a merchant reference in bounded eligible states, ordered deterministically
+by `(created_at, id)` with eager `order` loading. Terminal rows are bounded by
+a recent `updated_at` lookback. It reports only aggregate counts and redacted
+identifiers. The Postgres partial index
+`payments_sakurupiah_reconcile_cursor_idx` matches the scan predicate.
+
+The scheduler registers `sakurupiah:reconcile` every minute only when
+`SakurupiahProviderReadiness::schedulingEnabledFor($runtime)` is true, i.e. the
+environment is enabled, operationally ready, and the verification queue is the
+supervised `default` queue. `sakurupiah:check-readiness --json` and
+`ops:health --sakurupiah` are the operational surfaces;
+[`SakurupiahOperationalMetrics`](../../src/app/Services/Sakurupiah/SakurupiahOperationalMetrics.php)
+computes the bounded local backlog (`pending`, `verification_pending`,
+`terminal_recent`, oldest age) without provider HTTP. The admin Order detail
+exposes the sanitized payment/event summary and a manual reconcile action
+(`POST /admin/payments/{payment}/reconcile`) through
+`AdminPaymentOperations` + `PaymentPolicy::reconcile` (Owner/Admin/Finance) and
+writes the `payment.manually_reconciled` audit. The operational runbook is
+[`docs/runbook-sakurupiah-payment.md`](../../docs/runbook-sakurupiah-payment.md).
+
 ## 6. Order lifecycle dan inventory invariant
 
 Flow normal:
@@ -417,6 +456,7 @@ Semua webhook provider harus aman terhadap duplicate delivery, mismatch, unknown
 Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php). Yang paling penting:
 
 - `klikqris:reconcile` tiap menit bila environment KlikQRIS aktif dan scheduling enabled; mutex `withoutOverlapping` dihitung dalam menit dari execution budget sweep ditambah retry/timeout status provider dan safety margin, sehingga satu lookup terburuk yang dimulai sebelum deadline tetap tidak overlap;
+- `sakurupiah:reconcile --chunk=100` tiap menit hanya bila `SakurupiahProviderReadiness::schedulingEnabledFor()` true (environment enabled, operational ready, verification queue `default` yang disupervisi); mutex `withoutOverlapping` dihitung dari execution budget dan provider lookup budget;
 - `pakasir:reconcile --chunk=100` tiap menit untuk payment legacy;
 - `binance:reconcile --chunk=100` tiap menit;
 - `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;

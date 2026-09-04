@@ -1,9 +1,12 @@
 <?php
 
 use App\Console\Commands\ReconcileKlikQrisPayments;
+use App\Console\Commands\ReconcileSakurupiahPayments;
 use App\Enums\KlikQrisEnvironment;
+use App\Enums\SakurupiahEnvironment;
 use App\Jobs\SendDailyAdminStatsNotification;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use Illuminate\Support\Facades\Schedule;
 
 $klikQrisEnvironment = KlikQrisEnvironment::runtime();
@@ -12,6 +15,18 @@ if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnviron
         ->everyMinute()
         ->withoutOverlapping(ReconcileKlikQrisPayments::schedulerMutexMinutes());
     Schedule::command('klikqris:backfill-in-flight --chunk=100')->everyFiveMinutes()->withoutOverlapping();
+}
+
+// Sakurupiah reconciliation runs only when the environment is enabled,
+// operationally ready, and the verification queue is served by the release.
+// The reconciliation itself is synchronous scheduler work (no enqueue to an
+// unserved queue); deferred webhook verification already uses the supervised
+// default queue through SakurupiahProviderReadiness checks.
+$sakurupiahEnvironment = SakurupiahEnvironment::runtime();
+if (app(SakurupiahProviderReadiness::class)->schedulingEnabledFor($sakurupiahEnvironment)) {
+    Schedule::command((string) config('services.sakurupiah.reconciliation_command', 'sakurupiah:reconcile --chunk=100'))
+        ->everyMinute()
+        ->withoutOverlapping(ReconcileSakurupiahPayments::schedulerMutexMinutes());
 }
 Schedule::command('pakasir:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
 Schedule::command('binance:reconcile --chunk=100')->everyMinute()->withoutOverlapping();

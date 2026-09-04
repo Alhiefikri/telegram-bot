@@ -16,6 +16,7 @@ use App\Http\Controllers\Admin\AdminOrderManualCompleteController;
 use App\Http\Controllers\Admin\AdminOrderManualRejectController;
 use App\Http\Controllers\Admin\AdminPasswordConfirmationController;
 use App\Http\Controllers\Admin\AdminPaymentModeController;
+use App\Http\Controllers\Admin\AdminPaymentReconcileController;
 use App\Http\Controllers\Admin\AdminProductAccountStockController;
 use App\Http\Controllers\Admin\AdminProductCreateController;
 use App\Http\Controllers\Admin\AdminProductDeleteController;
@@ -170,6 +171,8 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('{order}/sales-proof/retry', AdminSalesProofRetryController::class)->name('sales-proof.retry');
                 Route::post('{order}/cancel-release', AdminOrderCancelReleaseController::class)->name('cancel-release');
             });
+
+            Route::post('payments/{payment}/reconcile', AdminPaymentReconcileController::class)->name('payments.reconcile');
 
             Route::prefix('manual-fulfillment-reviews')->name('manual-fulfillment-reviews.')->group(function (): void {
                 Route::get('/', [AdminManualFulfillmentReviewController::class, 'index'])->name('index');

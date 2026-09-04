@@ -5,6 +5,8 @@ namespace App\Console\Commands;
 use App\Services\Bsc\BscOperationalAlertNotifier;
 use App\Services\Bsc\BscOperationalMetrics;
 use App\Services\Bsc\BscReadiness;
+use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
+use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Process;
@@ -19,6 +21,7 @@ class HealthCheck extends Command
         {--queue-depth : Report queued job count and oldest queued age for operational queues.}
         {--supervisor}
         {--bsc : Check enabled BSC readiness and pending verification backlog.}
+        {--sakurupiah : Check enabled Sakurupiah readiness, schedule, and bounded verification backlog.}
         {--scheduler-heartbeat= : Maximum scheduler heartbeat age in seconds.}';
 
     protected $description = 'Check operational health for database, queue schema, supervisor-managed processes, and scheduler liveness.';
@@ -27,6 +30,8 @@ class HealthCheck extends Command
         BscReadiness $bscReadiness,
         BscOperationalMetrics $bscMetrics,
         BscOperationalAlertNotifier $bscAlerts,
+        SakurupiahProviderReadiness $sakurupiahReadiness,
+        SakurupiahOperationalMetrics $sakurupiahMetrics,
     ): int {
         $healthy = true;
 
@@ -105,6 +110,33 @@ class HealthCheck extends Command
             } catch (Throwable $exception) {
                 $healthy = false;
                 $this->error('BSC: failed safely - '.$exception->getMessage());
+            }
+        }
+
+        if ($this->option('sakurupiah')) {
+            try {
+                $report = $sakurupiahReadiness->report();
+                if (! $report->enabled()) {
+                    $this->info('Sakurupiah: disabled');
+                } elseif (! $report->isReady()) {
+                    $healthy = false;
+                    $this->error('Sakurupiah: failed - '.$report->configurationMessage());
+                } else {
+                    $mustBeScheduled = app()->environment('production');
+                    $schedulingReady = ! $mustBeScheduled || $sakurupiahReadiness->schedulingEnabledFor($report->environment());
+                    if (! $schedulingReady) {
+                        $healthy = false;
+                        $this->error('Sakurupiah: enabled but reconciliation is not scheduled.');
+                    } else {
+                        $this->info('Sakurupiah: ready scheduling=1');
+                    }
+                }
+
+                $backlog = $sakurupiahMetrics->pendingVerification();
+                $this->info("Sakurupiah backlog: pending={$backlog['pending']} verification_pending={$backlog['verification_pending']} terminal_recent={$backlog['terminal_recent']} oldest_age={$backlog['oldest_age_seconds']}s");
+            } catch (Throwable $exception) {
+                $healthy = false;
+                $this->error('Sakurupiah: failed safely - '.$exception->getMessage());
             }
         }
 

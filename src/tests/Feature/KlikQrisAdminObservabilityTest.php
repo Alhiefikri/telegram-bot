@@ -96,7 +96,7 @@ class KlikQrisAdminObservabilityTest extends TestCase
 
         $html = $this->get(route('admin.orders.show', $order))
             ->assertOk()
-            ->assertSee('KlikQRIS observability')
+            ->assertSee('Observability payment')
             ->assertSee('klikqris')
             ->assertSee('STORE/OR…')
             ->assertSee(hash('sha256', $payment->merchant_ref))

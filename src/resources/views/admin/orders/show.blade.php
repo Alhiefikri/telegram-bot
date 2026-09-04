@@ -128,7 +128,7 @@
 
         @if ($paymentDetails !== [])
             <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
-                <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">KlikQRIS observability</p>
+                <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Observability payment</p>
                 <div class="mt-3 space-y-3 text-sm font-semibold">
                     @foreach ($paymentDetails as $detail)
                         <div class="rounded-xl border-2 border-brand-border bg-[#f8fafc] p-3">
@@ -150,11 +150,18 @@
                                 @endif
                             </dl>
                             @if ($detail['events'] !== [])
-                                <ul class="mt-3 space-y-1 text-xs text-brand-muted">
+                                <p class="mt-3 text-[11px] font-black uppercase tracking-wider text-brand-muted">Event terbaru ({{ $detail['event_total'] }} total, {{ count($detail['events']) }} ditampilkan)</p>
+                                <ul class="mt-1 space-y-1 text-xs text-brand-muted">
                                     @foreach ($detail['events'] as $event)
                                         <li>{{ $event['type'] }} · @if ($event['condition'] !== '-'){{ $event['condition'] }} · @endif{{ $event['provider_status'] }} · received {{ $event['received_at'] }} · processed {{ $event['processed_at'] }} · deliveries {{ $event['received_count'] }}</li>
                                     @endforeach
                                 </ul>
+                            @endif
+                            @if ($detail['can_reconcile'])
+                                <form method="POST" action="{{ $detail['reconcile_url'] }}" class="mt-3" onsubmit="return confirm('Cek ulang status payment ini ke provider? Order/Payment hanya berubah bila observasi provider terbukti.');">
+                                    @csrf
+                                    <x-admin-dashboard.button type="submit" variant="neutral" size="sm">Cek ulang status (rekonsiliasi)</x-admin-dashboard.button>
+                                </form>
                             @endif
                         </div>
                     @endforeach

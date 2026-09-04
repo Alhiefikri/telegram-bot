@@ -163,6 +163,17 @@ final class SakurupiahInvoiceLifecycleService
         $this->persistStatusObservation($payment, $status, $state, $reason);
     }
 
+    /**
+     * Persist the recovery-unconfirmed state when an observation cannot be
+     * completed (missing reference or provider outage) while the caller holds
+     * the Payment lock. The Payment stays pending and is retried by the next
+     * bounded reconciliation sweep.
+     */
+    public function persistRecoveryUnconfirmed(Payment $payment, string $reason): void
+    {
+        $this->markRecoveryUnconfirmed($payment, $reason);
+    }
+
     /** @param Closure(): mixed $callback */
     public function tryWithPaymentLock(Payment $payment, Closure $callback): mixed
     {

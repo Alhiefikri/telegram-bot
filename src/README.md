@@ -425,6 +425,7 @@ Scheduler menjalankan command periodik dari `routes/console.php`:
 klikqris:reconcile --chunk=100 setiap menit jika environment aktif
 pakasir:reconcile --chunk=100  setiap menit hanya untuk Payment legacy sampai retirement gate passed
 binance:reconcile --chunk=100  setiap menit
+sakurupiah:reconcile --chunk=100 setiap menit jika environment Sakurupiah enabled dan operational ready
 orders:expire-pending           setiap menit
 telegram:recover-updates        setiap menit
 telegram:forward-payment-proofs setiap menit
@@ -741,6 +742,8 @@ Langkah cek:
 - `src/app/Console/Commands/CheckFailedJobs.php` — command `ops:check-failed-jobs {--max=0}` untuk alert sederhana jumlah failed jobs.
 - `src/app/Console/Commands/ExpirePendingOrders.php` — command `orders:expire-pending {--chunk=100}`.
 - `src/app/Console/Commands/ReconcileKlikQrisPayments.php` — command `klikqris:reconcile {--chunk=100}`.
+- `src/app/Console/Commands/ReconcileSakurupiahPayments.php` — command `sakurupiah:reconcile {--chunk=100}` dengan bounded scan, eager loading, dan single-flight lock per Payment.
+- `src/app/Console/Commands/CheckSakurupiahReadiness.php` — command `sakurupiah:check-readiness {--json}` untuk laporan readiness/backlog redacted.
 - `src/app/Console/Commands/ReconcilePakasirPayments.php` — command `pakasir:reconcile {--chunk=100}`.
 - `src/app/Console/Commands/ReconcileBinancePayments.php` — command `binance:reconcile {--chunk=100}`.
 - `src/routes/console.php` — jadwal scheduler untuk expire pending orders dan reconciliation payment.

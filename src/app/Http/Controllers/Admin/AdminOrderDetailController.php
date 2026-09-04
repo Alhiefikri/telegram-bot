@@ -10,8 +10,10 @@ use App\Models\AuditLog;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
+use App\Models\User;
 use App\Services\Admin\AdminDashboardSalesData;
 use App\Services\Admin\AdminOrderOperations;
+use App\Services\Admin\AdminPaymentOperations;
 use App\Services\Bsc\BscExplorerUrl;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\Money;
@@ -22,7 +24,7 @@ use Illuminate\View\View;
 
 class AdminOrderDetailController extends Controller
 {
-    public function __invoke(Request $request, Order $order, AdminDashboardSalesData $salesData, AdminOrderOperations $operations, BscExplorerUrl $bscExplorer): View
+    public function __invoke(Request $request, Order $order, AdminDashboardSalesData $salesData, AdminOrderOperations $operations, BscExplorerUrl $bscExplorer, AdminPaymentOperations $paymentOperations): View
     {
         $user = $request->attributes->get('adminUser');
 
@@ -60,14 +62,17 @@ class AdminOrderDetailController extends Controller
             'bscReview' => $this->bscReview($bscPayment, $bscExplorer),
             'salesProof' => $salesData->salesProofState($order, (bool) $user->role?->canManagePaymentSettings()),
             'auditEntries' => $this->auditEntries($order),
-            'paymentDetails' => $order->payments->map(fn (Payment $payment): array => $this->paymentDetail($payment, $order))->all(),
+            'paymentDetails' => $order->payments->map(fn (Payment $payment): array => $this->paymentDetail($payment, $order, $paymentOperations, $user))->all(),
         ]);
     }
 
-    private function paymentDetail(Payment $payment, Order $order): array
+    private function paymentDetail(Payment $payment, Order $order, AdminPaymentOperations $paymentOperations, ?User $user): array
     {
         $events = $payment->paymentEvents
-            ->sortByDesc(fn (PaymentEvent $event) => $event->received_at?->getTimestamp() ?? 0)
+            ->sortByDesc(fn (PaymentEvent $event) => $event->received_at?->getTimestamp() ?? 0);
+        $eventTotal = $events->count();
+        $eventSummary = $events
+            ->take(10)
             ->map(fn (PaymentEvent $event): array => [
                 'type' => $event->event_type?->value ?? (string) $event->event_type,
                 'provider_status' => $this->bounded((string) $event->provider_status, 40),
@@ -83,6 +88,11 @@ class AdminOrderDetailController extends Controller
             ? $order->telegramOutboundEffects->first(fn ($effect): bool => $effect->effect_type === TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT)
             : null;
         $deliveryMetadata = is_array($checkoutEffect?->outcome_metadata) ? $checkoutEffect->outcome_metadata : [];
+        $latestReconciliation = $payment->paymentEvents
+            ->where('event_type', PaymentEventType::Reconciliation)
+            ->filter(fn (PaymentEvent $event): bool => $event->processed_at !== null)
+            ->sortByDesc(fn (PaymentEvent $event): int => $event->processed_at?->getTimestamp() ?? 0)
+            ->first();
 
         return [
             'provider' => strtolower((string) $payment->provider),
@@ -91,18 +101,19 @@ class AdminOrderDetailController extends Controller
             'base_amount' => Money::idr((int) $payment->amount),
             'final_amount' => $payment->provider_total_payment !== null ? Money::idr((int) $payment->provider_total_payment) : '-',
             'provider_create_state' => $payment->provider_create_state ?: '-',
-            'provider_status' => $events[0]['provider_status'] ?? '-',
+            'provider_status' => $eventSummary[0]['provider_status'] ?? '-',
             'expires_at' => $payment->provider_expires_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
-            'callback_count' => collect($events)->where('type', 'callback')->sum('received_count'),
-            'latest_reconciliation_at' => $payment->paymentEvents
-                ->where('event_type', PaymentEventType::Reconciliation)
-                ->filter(fn (PaymentEvent $event): bool => $event->processed_at !== null)
-                ->sortByDesc(fn (PaymentEvent $event): int => $event->processed_at?->getTimestamp() ?? 0)
-                ->first()?->processed_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
+            'callback_count' => collect($eventSummary)->where('type', 'callback')->sum('received_count'),
+            'latest_reconciliation_at' => $latestReconciliation?->processed_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
             'checkout_delivery_state' => $checkoutEffect?->state?->value ?? '-',
             'checkout_delivery_outcome' => (string) ($deliveryMetadata['delivery_outcome'] ?? '-'),
             'checkout_delivery_method' => (string) ($deliveryMetadata['delivery_method'] ?? '-'),
-            'events' => $events,
+            'can_reconcile' => $user !== null
+                && Gate::forUser($user)->allows('reconcile', $payment)
+                && $paymentOperations->canReconcile($payment),
+            'reconcile_url' => route('admin.payments.reconcile', $payment),
+            'event_total' => $eventTotal,
+            'events' => $eventSummary,
         ];
     }
 

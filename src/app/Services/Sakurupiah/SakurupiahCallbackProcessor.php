@@ -80,6 +80,107 @@ final class SakurupiahCallbackProcessor
         return $this->processEvent($event, $callback, $payment, deferVerification: false);
     }
 
+    /**
+     * Reconcile one persisted Sakurupiah Payment from an authoritative status
+     * lookup under the same lock used by create/callback/refresh work.
+     *
+     * This path never issues a create request: a Payment without a confirmed
+     * provider reference cannot be recovered here and stays verification
+     * pending. Authoritative successful/expired observations are delegated to
+     * OrderLifecycle exactly like verified callbacks.
+     */
+    public function reconcilePayment(Payment $payment): SakurupiahReconciliationOutcome
+    {
+        $payment->refresh();
+
+        if ($payment->status === PaymentStatus::Paid || ! $this->isEligiblePayment($payment)) {
+            return SakurupiahReconciliationOutcome::Pending;
+        }
+
+        $result = $this->lifecycle->tryWithPaymentLock(
+            $payment,
+            fn (): SakurupiahReconciliationOutcome => $this->reconcileLocked($payment),
+        );
+
+        return $result ?? SakurupiahReconciliationOutcome::Busy;
+    }
+
+    private function reconcileLocked(Payment $payment): SakurupiahReconciliationOutcome
+    {
+        $payment->refresh();
+
+        if ($payment->status === PaymentStatus::Paid) {
+            return SakurupiahReconciliationOutcome::Pending;
+        }
+
+        $providerReference = trim((string) $payment->provider_reference);
+        if ($providerReference === '') {
+            $this->lifecycle->persistRecoveryUnconfirmed($payment, 'missing_provider_reference');
+
+            return SakurupiahReconciliationOutcome::VerificationPending;
+        }
+
+        try {
+            $status = $this->fetchStatus($providerReference);
+        } catch (SakurupiahStatusUnavailableException) {
+            $this->lifecycle->persistRecoveryUnconfirmed($payment, 'status_unavailable');
+
+            return SakurupiahReconciliationOutcome::VerificationPending;
+        }
+
+        $identityReason = $this->statusIdentityMismatchReason($payment, $status);
+        if ($identityReason !== null) {
+            $this->lifecycle->persistAuthoritativeStatusObservation(
+                $payment,
+                $status,
+                SakurupiahInvoiceLifecycleService::STATE_INVALID_PROVIDER_RESULT,
+                $identityReason,
+            );
+
+            return SakurupiahReconciliationOutcome::Invalid;
+        }
+
+        if ($status->isSuccessful()) {
+            $evidenceStatus = $this->statusWithAmountEvidence($payment, $status);
+            if ($evidenceStatus === null) {
+                // Payment Verification Pending: the provider has not yet shown
+                // amount-bearing evidence. Keep the Order unchanged and let the
+                // next bounded reconciliation sweep retry.
+                $this->events->logReconciliation($payment, $status);
+
+                return SakurupiahReconciliationOutcome::VerificationPending;
+            }
+
+            $this->lifecycle->persistAuthoritativeStatusObservation(
+                $payment,
+                $evidenceStatus,
+                SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL,
+            );
+            $this->expireOverduePendingPayment($payment);
+            $this->orders->applyPaymentPaid($payment);
+
+            return SakurupiahReconciliationOutcome::Paid;
+        }
+
+        if ($status->isExpired()) {
+            $this->lifecycle->persistAuthoritativeStatusObservation(
+                $payment,
+                $status,
+                SakurupiahInvoiceLifecycleService::STATE_PROVIDER_EXPIRED,
+                'provider_expired',
+            );
+            if ($payment->status === PaymentStatus::Pending) {
+                $this->orders->applyPaymentExpired($payment);
+            }
+
+            return SakurupiahReconciliationOutcome::Expired;
+        }
+
+        $this->events->logReconciliation($payment, $status);
+
+        return SakurupiahReconciliationOutcome::Pending;
+    }
+
     private function processEvent(
         PaymentEvent $event,
         SakurupiahCallback $callback,

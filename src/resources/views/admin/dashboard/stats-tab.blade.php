@@ -136,6 +136,9 @@
                                     @if ($paymentControl['oldest_pending_by_provider'][$provider] ?? null)
                                         · tertua {{ $paymentControl['oldest_pending_by_provider'][$provider] }}
                                     @endif
+                                    @if ($provider === 'sakurupiah' && ($paymentControl['sakurupiah_backlog']['verification_pending'] ?? 0) > 0)
+                                        · <span class="font-black text-amber-700">verifikasi {{ $paymentControl['sakurupiah_backlog']['verification_pending'] }}</span>
+                                    @endif
                                 </p>
                                 @if (! $providerStatus['ready'])
                                     <p class="mt-1 text-[10px] font-semibold text-brand-muted">{{ $providerStatus['reason'] }}</p>

@@ -76,6 +76,8 @@ class PaymentDocumentationTest extends TestCase
             'SAKURUPIAH_WEBHOOK_RATE_LIMIT_PER_MINUTE',
             'SAKURUPIAH_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE',
             'SAKURUPIAH_READINESS_CACHE_SECONDS',
+            'SAKURUPIAH_RECONCILE_TERMINAL_LOOKBACK_HOURS',
+            'SAKURUPIAH_RECONCILE_MAX_EXECUTION_SECONDS',
         ];
         $blankVariables = [
             'SAKURUPIAH_SANDBOX_API_ID',
@@ -164,6 +166,26 @@ class PaymentDocumentationTest extends TestCase
                 $variable.' must be forwarded to app and scheduler containers.',
             );
         }
+    }
+
+    public function test_sakurupiah_runbook_documents_operations_and_rollback(): void
+    {
+        $runbook = file_get_contents(base_path('../docs/runbook-sakurupiah-payment.md'));
+
+        foreach ([
+            'sakurupiah:check-readiness --json',
+            'sakurupiah:reconcile --chunk=100',
+            'ops:health',
+            'verification_pending',
+            'Outcome-unknown recovery',
+            'Callback duplicates',
+            'Late payment',
+            'Stop-new-checkout',
+            'Rollback',
+        ] as $section) {
+            $this->assertStringContainsString($section, $runbook);
+        }
+        $this->assertStringNotContainsString('RAILWAY_', $runbook);
     }
 
     public function test_bsc_operator_contract_documents_database_activation_and_shared_queue_configuration(): void

@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\PaymentReceiptReport;
+use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Telegram\SalesProofPostNumbering;
 use App\Support\Money;
@@ -26,6 +27,7 @@ final class AdminDashboardStatsData
         private readonly PaymentReceiptReport $receiptReport,
         private readonly CheckoutMaintenance $maintenance,
         private readonly BscDashboardData $bscDashboard,
+        private readonly SakurupiahOperationalMetrics $sakurupiahMetrics,
     ) {}
 
     /**
@@ -207,6 +209,7 @@ final class AdminDashboardStatsData
             ],
         ];
         $pending = $this->pendingPayments();
+        $sakurupiahBacklog = $this->sakurupiahMetrics->pendingVerification();
         $requestedProviderLabel = PaymentProvider::label($requestedMode);
         $effectiveProviderLabel = PaymentProvider::label($effectiveMode);
 
@@ -239,6 +242,7 @@ final class AdminDashboardStatsData
             'providers' => $providers,
             'pending_by_provider' => $pending['counts'],
             'oldest_pending_by_provider' => $pending['oldest'],
+            'sakurupiah_backlog' => $sakurupiahBacklog,
             'switch_audit' => $this->switchAudits(),
             'label' => $label,
             'hint' => $hint,
