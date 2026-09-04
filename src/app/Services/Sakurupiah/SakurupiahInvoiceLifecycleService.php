@@ -574,7 +574,21 @@ final class SakurupiahInvoiceLifecycleService
             },
         );
 
-        $payment->refresh();
+        $this->refreshPaymentAttributes($payment);
+    }
+
+    private function refreshPaymentAttributes(Payment $payment): void
+    {
+        $fresh = $payment->newQueryWithoutScopes()
+            ->select(SakurupiahReconciliationQuery::PAYMENT_COLUMNS)
+            ->useWritePdo()
+            ->whereKey($payment->getKey())
+            ->firstOrFail();
+
+        $payment->setRawAttributes(
+            array_replace($payment->getAttributes(), $fresh->getAttributes()),
+        );
+        $payment->syncOriginal();
     }
 
     private function markCreationAttempted(Payment $payment): bool
@@ -664,7 +678,7 @@ final class SakurupiahInvoiceLifecycleService
             },
         );
 
-        $payment->refresh();
+        $this->refreshPaymentAttributes($payment);
         $this->events->logRecoveryObservation($payment, self::STATE_RECOVERY_UNCONFIRMED, $reason);
     }
 
@@ -933,6 +947,10 @@ final class SakurupiahInvoiceLifecycleService
 
     private function paymentLockLeaseSeconds(): int
     {
-        return max(60, (int) config('services.sakurupiah.lock_lease_seconds', 90));
+        return max(
+            60,
+            (int) config('services.sakurupiah.lock_lease_seconds', 90),
+            SakurupiahProviderLookupBudget::requiredLeaseSeconds(),
+        );
     }
 }

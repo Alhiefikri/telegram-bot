@@ -3,8 +3,6 @@
 namespace App\Services\Sakurupiah;
 
 use App\Enums\PaymentStatus;
-use App\Models\Payment;
-use App\Support\PaymentProvider;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 
@@ -19,6 +17,7 @@ use Illuminate\Support\Carbon;
 final class SakurupiahOperationalMetrics
 {
     public function __construct(
+        private readonly SakurupiahReconciliationQuery $reconciliationQuery,
         private readonly ?int $terminalLookbackHours = null,
     ) {}
 
@@ -80,29 +79,7 @@ final class SakurupiahOperationalMetrics
 
     private function reconcilableQuery(Carbon $releasedCutoff): Builder
     {
-        return Payment::query()
-            ->where('provider', PaymentProvider::SAKURUPIAH)
-            ->whereNotNull('merchant_ref')
-            ->where('method', 'QRIS')
-            ->where('currency', 'IDR')
-            ->where(function (Builder $query) use ($releasedCutoff): void {
-                $query
-                    ->where(function (Builder $recoverable) use ($releasedCutoff): void {
-                        $recoverable
-                            ->whereNotNull('provider_reference')
-                            ->where(function (Builder $status) use ($releasedCutoff): void {
-                                $status
-                                    ->where('status', PaymentStatus::Pending->value)
-                                    ->orWhere(fn (Builder $terminal) => $terminal
-                                        ->whereIn('status', [PaymentStatus::Expired->value, PaymentStatus::Failed->value])
-                                        ->where('updated_at', '>=', $releasedCutoff));
-                            });
-                    })
-                    ->orWhereIn('provider_create_state', [
-                        SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN,
-                        SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED,
-                    ]);
-            });
+        return $this->reconciliationQuery->eligible($releasedCutoff);
     }
 
     private function releasedCutoff(): Carbon

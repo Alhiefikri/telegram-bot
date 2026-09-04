@@ -59,15 +59,24 @@ is registered only when the runtime environment is enabled, operationally
 ready, and the verification queue is the supervised `default` queue consumed by
 the release worker. Deferred webhook verification jobs also use that queue. Do
 not route Sakurupiah work to a `payments` queue that no supervised worker
-consumes.
+consumes. Before enabling the schedule, verify live worker ownership with:
+
+```bash
+php artisan ops:health --db --queue-schema --queue-depth --supervisor --sakurupiah
+```
+In production Compose, the scheduler depends on the app health check before
+starting its loop. That health check includes `--supervisor`, so live worker
+ownership is verified before the scheduler can run; the bootstrap readiness
+gate itself remains a non-invasive queue/schema/schedule configuration check.
 
 ## Reconciliation
 
 `sakurupiah:reconcile` scans only Sakurupiah QRIS IDR Payments in bounded
-eligible states, ordered deterministically by `(created_at, id)`, with eager
-relation loading and a per-Payment single-flight lock. It never issues a create
-request, never holds a database transaction across HTTP, and reports only
-aggregate counts and redacted identifiers:
+eligible states, ordered deterministically by `(created_at, id)`, with a fair
+persisted cursor, a hard execution deadline, eager relation loading, and a
+per-Payment single-flight lock. It never issues a create request, never holds a
+database transaction across HTTP, and reports only aggregate counts and redacted
+identifiers:
 
 ```bash
 php artisan sakurupiah:reconcile --chunk=100
@@ -84,6 +93,8 @@ Expected summary counters:
 - `invalid` — identity/amount mismatch recorded; no lifecycle change.
 - `busy` — the Payment lock was held by create/callback/refresh work.
 - `failed` — an unexpected error; inspect the sanitized log, never raw payloads.
+- `budget_exhausted=1` — the execution deadline stopped the page early; the
+  persisted cursor resumes the next bounded sweep.
 
 Command restart and duplicate scheduler execution are idempotent: a Payment
 that already advanced is not re-queried or re-applied.
@@ -172,17 +183,20 @@ To stop new Sakurupiah checkout without touching existing Payments:
 
 1. In Admin → Mode pembayaran, switch the active provider away from Sakurupiah
    (Owner-only, optimistic version + audit). Existing Sakurupiah Payments keep
-   their stored provider/environment/reference snapshots.
+   their stored provider, method, merchant/reference identity, and sanitized
+   provider snapshots; switching the active provider does not reinterpret them.
 2. If the switch is not enough (e.g., credentials must be disabled), disable
    the environment flag (`SAKURUPIAH_*_ENABLED=false`) and restart, or use the
    Owner dashboard readiness state. A disabled provider fails closed; it does
-   not resolve to Manual/KlikQRIS.
+   not resolve to Manual/KlikQRIS and pauses automatic Sakurupiah reconciliation.
 3. Verify `schedule:list` no longer shows `sakurupiah:reconcile` when the
    environment is disabled.
 
-Existing pending/verification-pending Sakurupiah Payments continue to be
-reconciled from their stored snapshots; do not delete credentials or drop
-columns while those rows exist.
+With Sakurupiah still enabled and ready, existing pending/verification-pending
+Payments continue to reconcile after an active-provider switch because their
+stored provider/reference state remains authoritative. If the environment is
+disabled, restore a ready configuration before expecting automatic provider
+lookups. Do not delete credentials or drop columns while those rows exist.
 
 ## Rollback
 

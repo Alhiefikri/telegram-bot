@@ -456,7 +456,7 @@ Semua webhook provider harus aman terhadap duplicate delivery, mismatch, unknown
 Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php). Yang paling penting:
 
 - `klikqris:reconcile` tiap menit bila environment KlikQRIS aktif dan scheduling enabled; mutex `withoutOverlapping` dihitung dalam menit dari execution budget sweep ditambah retry/timeout status provider dan safety margin, sehingga satu lookup terburuk yang dimulai sebelum deadline tetap tidak overlap;
-- `sakurupiah:reconcile --chunk=100` tiap menit hanya bila `SakurupiahProviderReadiness::schedulingEnabledFor()` true (environment enabled, operational ready, verification queue `default` yang disupervisi); mutex `withoutOverlapping` dihitung dari execution budget dan provider lookup budget;
+- `sakurupiah:reconcile --chunk=100` tiap menit hanya bila `SakurupiahProviderReadiness::scheduleRegistrationEnabledFor()` true (environment enabled, operational ready, verification queue `default` yang disupervisi); bounded page memakai predicate kandidat bersama, narrow select + eager `Order`, cursor `(created_at,id)` yang berputar, dan execution deadline; mutex `withoutOverlapping` dihitung dari execution budget dan provider lookup budget; setelah bootstrap, `schedulingEnabledFor()` memeriksa event scheduler yang terdaftar;
 - `pakasir:reconcile --chunk=100` tiap menit untuk payment legacy;
 - `binance:reconcile --chunk=100` tiap menit;
 - `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;

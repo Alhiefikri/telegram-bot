@@ -83,6 +83,9 @@ final class SakurupiahProviderReadiness
      * the method usable by preparation tests without constructing an HTTP
      * client. When omitted, the registered provider adapter is resolved
      * lazily. No provider call is made when static configuration is unsafe.
+     * Console-only scheduler registration is checked separately by
+     * schedulingEnabledFor(), so web activation remains independent of the
+     * CLI schedule registry.
      */
     public function observe(
         ?SakurupiahEnvironment $environment = null,
@@ -93,6 +96,7 @@ final class SakurupiahProviderReadiness
             $environment,
             includeOperationalPrerequisites: $environment === SakurupiahEnvironment::Production,
             includeQrisContract: true,
+            includeSchedule: false,
         );
         $localConfiguration = $this->evaluateConfiguration($environment);
 
@@ -152,6 +156,23 @@ final class SakurupiahProviderReadiness
 
     public function schedulingEnabledFor(SakurupiahEnvironment $environment): bool
     {
+        return $this->schedulingConfigurationReady($environment, requireRegisteredSchedule: true);
+    }
+
+    /**
+     * Configuration gate used while routes/console.php is registering the
+     * reconciliation event. The event cannot be required until registration
+     * has completed.
+     */
+    public function scheduleRegistrationEnabledFor(SakurupiahEnvironment $environment): bool
+    {
+        return $this->schedulingConfigurationReady($environment, requireRegisteredSchedule: false);
+    }
+
+    private function schedulingConfigurationReady(
+        SakurupiahEnvironment $environment,
+        bool $requireRegisteredSchedule,
+    ): bool {
         $reconciliationCommand = config('services.sakurupiah.reconciliation_command');
         if ($this->value($environment, 'enabled', false) !== true
             || ! $environment->isRuntimeAllowed()
@@ -161,11 +182,17 @@ final class SakurupiahProviderReadiness
             return false;
         }
 
-        $report = $this->evaluateConfiguration($environment, includeOperationalPrerequisites: true);
-        $invalid = $report->invalid();
-        unset($invalid['SAKURUPIAH_RECONCILIATION_SCHEDULE']);
+        $report = $this->evaluateConfiguration(
+            $environment,
+            includeOperationalPrerequisites: true,
+            includeSchedule: false,
+        );
 
-        return $report->missing() === [] && $invalid === [];
+        if ($requireRegisteredSchedule && ! $this->scheduledCommand((string) $reconciliationCommand)) {
+            return false;
+        }
+
+        return $report->missing() === [] && $report->invalid() === [];
     }
 
     public function assertReady(
@@ -344,6 +371,7 @@ final class SakurupiahProviderReadiness
         SakurupiahEnvironment $environment,
         bool $includeOperationalPrerequisites = false,
         bool $includeQrisContract = false,
+        bool $includeSchedule = true,
     ): SakurupiahProviderReadinessReport {
         $missing = $this->missingConfiguration($environment, $includeOperationalPrerequisites);
         $invalid = $this->invalidConfiguration($environment);
@@ -367,7 +395,7 @@ final class SakurupiahProviderReadiness
             && $environment === SakurupiahEnvironment::Production
             && $includeOperationalPrerequisites
         ) {
-            $invalid += $this->invalidOperationalConfiguration($environment);
+            $invalid += $this->invalidOperationalConfiguration($environment, $includeSchedule);
         }
 
         return new SakurupiahProviderReadinessReport(
@@ -454,8 +482,10 @@ final class SakurupiahProviderReadiness
     /**
      * @return array<string, string>
      */
-    private function invalidOperationalConfiguration(SakurupiahEnvironment $environment): array
-    {
+    private function invalidOperationalConfiguration(
+        SakurupiahEnvironment $environment,
+        bool $includeSchedule = true,
+    ): array {
         $invalid = [];
         try {
             $route = Route::getRoutes()->getByName(self::CALLBACK_ROUTE_NAME);
@@ -494,15 +524,16 @@ final class SakurupiahProviderReadiness
                 $invalid[$label] = 'Required Sakurupiah operational schema could not be verified.';
             }
         }
-
         $reconciliationCommand = config('services.sakurupiah.reconciliation_command');
         $reconciliationCommand = is_string($reconciliationCommand) ? trim($reconciliationCommand) : '';
         if (! class_exists('App\\Console\\Commands\\ReconcileSakurupiahPayments')) {
             $invalid['SAKURUPIAH_RECONCILIATION_COMMAND'] = 'Sakurupiah reconciliation command must be registered.';
         }
-        if ($reconciliationCommand !== self::RECONCILIATION_COMMAND
+
+        if ($includeSchedule && (
+            $reconciliationCommand !== self::RECONCILIATION_COMMAND
             || ! $this->scheduledCommand($reconciliationCommand)
-        ) {
+        )) {
             $invalid['SAKURUPIAH_RECONCILIATION_SCHEDULE'] = 'Sakurupiah reconciliation must be scheduled by the Laravel scheduler.';
         }
         $verificationQueue = config('services.sakurupiah.verification_queue', self::SUPERVISED_VERIFICATION_QUEUE);
@@ -510,6 +541,9 @@ final class SakurupiahProviderReadiness
             || trim($verificationQueue) !== self::SUPERVISED_VERIFICATION_QUEUE
         ) {
             $invalid['SAKURUPIAH_VERIFICATION_QUEUE'] = 'Sakurupiah verification must use the supervised default queue.';
+        }
+        if (! $this->supervisorOwnsVerificationQueue()) {
+            $invalid['SAKURUPIAH_SUPERVISOR_QUEUE'] = 'Supervisor must serve the payments and default queues through the release worker.';
         }
 
         return $invalid;
@@ -533,6 +567,28 @@ final class SakurupiahProviderReadiness
             }
         } catch (Throwable) {
             return false;
+        }
+
+        return false;
+    }
+
+    private function supervisorOwnsVerificationQueue(): bool
+    {
+        foreach ([
+            '/etc/supervisor/conf.d/supervisord.conf',
+            base_path('../supervisord.conf'),
+        ] as $path) {
+            if (! is_readable($path)) {
+                continue;
+            }
+
+            $contents = file_get_contents($path);
+            if (is_string($contents)
+                && str_contains($contents, '[program:laravel-update-worker]')
+                && str_contains($contents, 'queue:work database --queue=payments,default')
+            ) {
+                return true;
+            }
         }
 
         return false;

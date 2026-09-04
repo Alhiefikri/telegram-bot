@@ -738,7 +738,7 @@ Langkah cek:
 - `src/app/Storefront/StorefrontShopPaymentStatusRefresh.php` — signed invoice status refresh/recovery adapter.
 - `src/app/Services/Admin/AdminOrderOperations.php` — operasi admin untuk complete manual order dan resend receipt, termasuk audit log.
 - `src/app/Services/OrderStateMachine.php` — transisi status order/payment, release reservasi, sale stock movement, refund, cancel, dan expiry.
-- `src/app/Console/Commands/HealthCheck.php` — command `ops:health {--db} {--queue-schema} {--supervisor} {--bsc}`.
+- `src/app/Console/Commands/HealthCheck.php` — command `ops:health {--db} {--queue-schema} {--supervisor} {--bsc} {--sakurupiah}`.
 - `src/app/Console/Commands/CheckFailedJobs.php` — command `ops:check-failed-jobs {--max=0}` untuk alert sederhana jumlah failed jobs.
 - `src/app/Console/Commands/ExpirePendingOrders.php` — command `orders:expire-pending {--chunk=100}`.
 - `src/app/Console/Commands/ReconcileKlikQrisPayments.php` — command `klikqris:reconcile {--chunk=100}`.

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Models\AuditLog;
@@ -9,6 +10,7 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentEvent;
 use App\Models\User;
 use App\Services\Sakurupiah\SakurupiahAmount;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
@@ -93,6 +95,34 @@ class SakurupiahAdminReconcileTest extends TestCase
         $this->assertSame(0, AuditLog::query()->where('action', 'payment.manually_reconciled')->count());
     }
 
+    public function test_order_detail_bounds_payment_events_and_preserves_total_count(): void
+    {
+        $this->withoutVite();
+        $finance = User::factory()->create(['role' => UserRole::Finance]);
+        $payment = $this->sakurupiahPayment(['merchant_ref' => 'SAKU-EVENT-BOUND']);
+        $receivedAt = now()->subMinutes(12);
+
+        foreach (range(1, 12) as $index) {
+            PaymentEvent::factory()->for($payment, 'payment')->create([
+                'provider' => PaymentProvider::SAKURUPIAH,
+                'event_type' => PaymentEventType::Reconciliation,
+                'merchant_ref' => $payment->merchant_ref,
+                'provider_reference' => $payment->provider_reference,
+                'provider_status' => 'pending',
+                'raw_payload' => ['status' => 'pending'],
+                'idempotency_key' => 'admin-event-'.$index,
+                'received_at' => $receivedAt->copy()->addMinutes($index),
+                'last_received_at' => $receivedAt->copy()->addMinutes($index),
+                'processed_at' => $receivedAt->copy()->addMinutes($index),
+            ]);
+        }
+
+        $this->actingAs($finance)
+            ->get(route('admin.orders.show', $payment->order_id))
+            ->assertOk()
+            ->assertSee('12 total, 10 ditampilkan');
+    }
+
     public function test_order_detail_shows_manual_reconcile_action_only_when_reconcilable(): void
     {
         $this->withoutVite();
@@ -111,6 +141,7 @@ class SakurupiahAdminReconcileTest extends TestCase
 
         $this->assertStringContainsString(route('admin.payments.reconcile', $payment), $html);
         $this->assertStringNotContainsString('secret-key', $html);
+        $this->assertStringNotContainsString('SAKU-ACTION', $html);
     }
 
     public function test_admin_cannot_manually_reconcile_a_payment_without_a_provider_reference(): void

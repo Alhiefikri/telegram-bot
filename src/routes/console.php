@@ -23,7 +23,7 @@ if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnviron
 // unserved queue); deferred webhook verification already uses the supervised
 // default queue through SakurupiahProviderReadiness checks.
 $sakurupiahEnvironment = SakurupiahEnvironment::runtime();
-if (app(SakurupiahProviderReadiness::class)->schedulingEnabledFor($sakurupiahEnvironment)) {
+if (app(SakurupiahProviderReadiness::class)->scheduleRegistrationEnabledFor($sakurupiahEnvironment)) {
     Schedule::command((string) config('services.sakurupiah.reconciliation_command', 'sakurupiah:reconcile --chunk=100'))
         ->everyMinute()
         ->withoutOverlapping(ReconcileSakurupiahPayments::schedulerMutexMinutes());

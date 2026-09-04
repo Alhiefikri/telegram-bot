@@ -19,6 +19,7 @@ use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\Money;
 use App\Support\PaymentProvider;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\View\View;
 
@@ -30,7 +31,31 @@ class AdminOrderDetailController extends Controller
 
         Gate::authorize('view', $order);
 
-        $order->load(['customer', 'orderItems', 'payments.paymentEvents', 'payments.manualFulfillmentReview', 'payments.bscDetail.transferEvidence', 'telegramOutboundEffects', 'salesProofPost']);
+        $order->load([
+            'customer',
+            'orderItems',
+            'payments' => function ($payments): void {
+                $payments
+                    ->withCount('paymentEvents')
+                    ->withSum([
+                        'paymentEvents as callback_received_count' => fn ($events) => $events
+                            ->where('event_type', PaymentEventType::Callback->value),
+                    ], 'received_count')
+                    ->withMax([
+                        'paymentEvents as latest_reconciliation_processed_at' => fn ($events) => $events
+                            ->where('event_type', PaymentEventType::Reconciliation->value)
+                            ->whereNotNull('processed_at'),
+                    ], 'processed_at');
+            },
+            'payments.paymentEvents' => fn ($events) => $events
+                ->latest('received_at')
+                ->latest('id')
+                ->limit(10),
+            'payments.manualFulfillmentReview',
+            'payments.bscDetail.transferEvidence',
+            'telegramOutboundEffects',
+            'salesProofPost',
+        ]);
 
         $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID');
         $payload = is_array($binancePayment?->provider_payload) ? $binancePayment->provider_payload : [];
@@ -70,9 +95,8 @@ class AdminOrderDetailController extends Controller
     {
         $events = $payment->paymentEvents
             ->sortByDesc(fn (PaymentEvent $event) => $event->received_at?->getTimestamp() ?? 0);
-        $eventTotal = $events->count();
+        $eventTotal = (int) ($payment->payment_events_count ?? $events->count());
         $eventSummary = $events
-            ->take(10)
             ->map(fn (PaymentEvent $event): array => [
                 'type' => $event->event_type?->value ?? (string) $event->event_type,
                 'provider_status' => $this->bounded((string) $event->provider_status, 40),
@@ -93,18 +117,25 @@ class AdminOrderDetailController extends Controller
             ->filter(fn (PaymentEvent $event): bool => $event->processed_at !== null)
             ->sortByDesc(fn (PaymentEvent $event): int => $event->processed_at?->getTimestamp() ?? 0)
             ->first();
+        $latestReconciliationAt = $payment->latest_reconciliation_processed_at !== null
+            ? Carbon::parse((string) $payment->latest_reconciliation_processed_at)
+            : $latestReconciliation?->processed_at;
+        $callbackCount = $payment->callback_received_count
+            ?? collect($eventSummary)->where('type', 'callback')->sum('received_count');
 
         return [
             'provider' => strtolower((string) $payment->provider),
-            'merchant_ref_short' => $this->bounded((string) $payment->merchant_ref, 8),
+            'merchant_ref_short' => $payment->provider === PaymentProvider::SAKURUPIAH
+                ? $this->maskIdentifier((string) $payment->merchant_ref)
+                : $this->bounded((string) $payment->merchant_ref, 8),
             'merchant_ref_hash' => hash('sha256', (string) $payment->merchant_ref),
             'base_amount' => Money::idr((int) $payment->amount),
             'final_amount' => $payment->provider_total_payment !== null ? Money::idr((int) $payment->provider_total_payment) : '-',
             'provider_create_state' => $payment->provider_create_state ?: '-',
             'provider_status' => $eventSummary[0]['provider_status'] ?? '-',
             'expires_at' => $payment->provider_expires_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
-            'callback_count' => collect($eventSummary)->where('type', 'callback')->sum('received_count'),
-            'latest_reconciliation_at' => $latestReconciliation?->processed_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
+            'callback_count' => (int) $callbackCount,
+            'latest_reconciliation_at' => $latestReconciliationAt?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
             'checkout_delivery_state' => $checkoutEffect?->state?->value ?? '-',
             'checkout_delivery_outcome' => (string) ($deliveryMetadata['delivery_outcome'] ?? '-'),
             'checkout_delivery_method' => (string) ($deliveryMetadata['delivery_method'] ?? '-'),
@@ -115,6 +146,7 @@ class AdminOrderDetailController extends Controller
             'event_total' => $eventTotal,
             'events' => $eventSummary,
         ];
+
     }
 
     /** @return array<string, string>|null */

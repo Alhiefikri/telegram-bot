@@ -91,7 +91,6 @@ final class SakurupiahCallbackProcessor
      */
     public function reconcilePayment(Payment $payment): SakurupiahReconciliationOutcome
     {
-        $payment->refresh();
 
         if ($payment->status === PaymentStatus::Paid || ! $this->isEligiblePayment($payment)) {
             return SakurupiahReconciliationOutcome::Pending;
@@ -107,7 +106,7 @@ final class SakurupiahCallbackProcessor
 
     private function reconcileLocked(Payment $payment): SakurupiahReconciliationOutcome
     {
-        $payment->refresh();
+        $this->refreshPaymentAttributes($payment);
 
         if ($payment->status === PaymentStatus::Paid) {
             return SakurupiahReconciliationOutcome::Pending;
@@ -141,7 +140,13 @@ final class SakurupiahCallbackProcessor
         }
 
         if ($status->isSuccessful()) {
-            $evidenceStatus = $this->statusWithAmountEvidence($payment, $status);
+            try {
+                $evidenceStatus = $this->statusWithAmountEvidence($payment, $status);
+            } catch (SakurupiahStatusUnavailableException) {
+                $this->lifecycle->persistRecoveryUnconfirmed($payment, 'history_unavailable');
+
+                return SakurupiahReconciliationOutcome::VerificationPending;
+            }
             if ($evidenceStatus === null) {
                 $this->lifecycle->persistAuthoritativeStatusObservation(
                     $payment,
@@ -362,7 +367,7 @@ final class SakurupiahCallbackProcessor
         }
 
         $this->orders->applyPaymentExpired($payment);
-        $payment->refresh();
+        $this->refreshPaymentAttributes($payment);
     }
 
     private function deadlinePassed(Payment $payment, Order $order): bool
@@ -487,6 +492,20 @@ final class SakurupiahCallbackProcessor
             && in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true)
             && strcasecmp(trim((string) $payment->method), SakurupiahCreateInvoice::METHOD_QRIS) === 0
             && strtoupper(trim((string) $payment->currency)) === 'IDR';
+    }
+
+    private function refreshPaymentAttributes(Payment $payment): void
+    {
+        $fresh = $payment->newQueryWithoutScopes()
+            ->select(SakurupiahReconciliationQuery::PAYMENT_COLUMNS)
+            ->useWritePdo()
+            ->whereKey($payment->getKey())
+            ->firstOrFail();
+
+        $payment->setRawAttributes(
+            array_replace($payment->getAttributes(), $fresh->getAttributes()),
+        );
+        $payment->syncOriginal();
     }
 
     private function findPayment(string $merchantRef): ?Payment
