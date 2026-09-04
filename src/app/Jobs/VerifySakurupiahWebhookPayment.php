@@ -7,6 +7,7 @@ use App\Models\PaymentEvent;
 use App\Services\ProviderVerification\ProviderVerificationProfile;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
+use App\Services\Sakurupiah\SakurupiahStatusUnavailableException;
 use App\Support\PaymentProvider;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -46,9 +47,13 @@ final class VerifySakurupiahWebhookPayment implements ShouldBeUnique, ShouldQueu
             return;
         }
 
-        ProviderVerificationProfiles::using(
+        $processedEvent = ProviderVerificationProfiles::using(
             ProviderVerificationProfile::Reconciliation,
-            fn () => $processor->processQueuedEvent($event),
+            fn (): PaymentEvent => $processor->processQueuedEvent($event),
         );
+
+        if (! $processedEvent instanceof PaymentEvent || $processedEvent->processed_at === null) {
+            throw new SakurupiahStatusUnavailableException;
+        }
     }
 }

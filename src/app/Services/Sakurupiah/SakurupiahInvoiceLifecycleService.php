@@ -878,6 +878,10 @@ final class SakurupiahInvoiceLifecycleService
             && strtoupper($status->paymentCode) !== SakurupiahCreateInvoice::METHOD_QRIS) {
             return 'payment_method_mismatch';
         }
+        if ($status->currency !== null
+            && strtoupper(trim($status->currency)) !== strtoupper(trim((string) $payment->currency))) {
+            return 'currency_mismatch';
+        }
 
         if ($status->amountValue() !== null && $status->amountValue() !== (int) $payment->amount) {
             return 'amount_mismatch';

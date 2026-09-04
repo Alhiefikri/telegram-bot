@@ -478,7 +478,7 @@ Scheduler service hanya menjalankan `php artisan schedule:run`; jangan mengganda
 
 ### Queue ownership
 
-- `default` — Telegram update processing.
+- `default` — Telegram update processing and bounded Sakurupiah webhook verification.
 - `telegram-outbound` — checkout instructions dan pending-order admin notification.
 - `notifications` — receipt, paid/expired notifications, Sales Proof Post, cleanup instruction, KlikQRIS owner alert, and legacy Pakasir cancellation attempts.
 - `telegram-broadcast` — broadcast dan price/stock notification batches.

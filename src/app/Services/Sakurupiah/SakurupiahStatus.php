@@ -22,6 +22,7 @@ final readonly class SakurupiahStatus
     public ?SakurupiahFee $fee;
 
     public ?int $merchantFee;
+    public ?string $currency;
 
     public ?CarbonImmutable $occurredAt;
 
@@ -48,6 +49,7 @@ final readonly class SakurupiahStatus
         ?string $qr = null,
         ?string $checkoutUrl = null,
         ?int $merchantFee = null,
+        ?string $currency = null,
     ) {
         $this->trxId = self::text($trxId, 'transaction ID', 255);
         $this->status = $status;
@@ -57,6 +59,7 @@ final readonly class SakurupiahStatus
         $this->total = $total;
         $this->fee = $fee;
         $this->merchantFee = $merchantFee;
+        $this->currency = $currency === null ? null : self::text($currency, 'currency', 16);
         $this->occurredAt = $occurredAt;
         $this->expiresAt = $expiresAt;
         $this->qrPayload = $qr;
@@ -100,6 +103,7 @@ final readonly class SakurupiahStatus
             total: self::optionalAmount($data, 'total'),
             fee: self::optionalFee($data, 'fee'),
             merchantFee: self::optionalMerchantFee($data),
+            currency: SakurupiahPayloadReader::optionalString($data, 'currency', 16),
             qr: SakurupiahPayloadReader::optionalString($data, 'qr', 1_000_000),
             checkoutUrl: self::optionalCheckoutUrl($data),
         );

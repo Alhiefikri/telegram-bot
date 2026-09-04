@@ -195,10 +195,58 @@ class SakurupiahWebhookTest extends TestCase
 
         $payment->refresh();
         $this->assertSame(PaymentStatus::Pending, $payment->status);
+        $this->assertSame(
+            SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL,
+            $payment->provider_create_state,
+        );
         $this->assertSame(OrderStatus::PendingPayment, $payment->order->fresh()->order_status);
         $event = PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole();
         $this->assertNull($event->processed_at);
         Queue::assertPushed(VerifySakurupiahWebhookPayment::class, fn (VerifySakurupiahWebhookPayment $job): bool => $job->eventId === $event->id);
+    }
+
+    public function test_queued_verification_retries_when_authoritative_status_remains_pending(): void
+    {
+        config()->set('queue.default', 'database');
+        Queue::fake();
+        $payment = $this->payment();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->twice()->with($payment->provider_reference)->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Pending),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))
+            ->assertOk();
+        $event = PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole();
+
+        $this->expectException(SakurupiahStatusUnavailableException::class);
+        (new VerifySakurupiahWebhookPayment($event->id))->handle(app(SakurupiahCallbackProcessor::class));
+    }
+
+    public function test_authoritative_currency_mismatch_never_marks_paid(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, $payment->amount, 'USD'),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))
+            ->assertOk()
+            ->assertExactJson(['success' => true]);
+
+        $payment->refresh();
+        $this->assertSame(PaymentStatus::Pending, $payment->status);
+        $this->assertSame(
+            SakurupiahInvoiceLifecycleService::STATE_INVALID_PROVIDER_RESULT,
+            $payment->provider_create_state,
+        );
+        $this->assertNotNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
     }
 
     public function test_paid_callback_accepts_a_matching_history_amount_when_status_omits_amount(): void
@@ -495,6 +543,7 @@ class SakurupiahWebhookTest extends TestCase
         Payment $payment,
         SakurupiahTransactionStatus $status,
         ?int $amount = null,
+        ?string $currency = null,
     ): SakurupiahStatus {
         $data = [
             'trx_id' => $payment->provider_reference,
@@ -505,6 +554,9 @@ class SakurupiahWebhookTest extends TestCase
         if ($amount !== null) {
             $data['amount'] = (string) $amount;
         }
+        if ($currency !== null) {
+            $data['currency'] = $currency;
+        }
 
         return new SakurupiahStatus(
             trxId: (string) $payment->provider_reference,
@@ -512,6 +564,7 @@ class SakurupiahWebhookTest extends TestCase
             merchantRef: (string) $payment->merchant_ref,
             paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
             amount: $amount === null ? null : SakurupiahAmount::from($amount),
+            currency: $currency,
             sanitizedPayload: ['status' => '200', 'data' => [$data]],
         );
     }

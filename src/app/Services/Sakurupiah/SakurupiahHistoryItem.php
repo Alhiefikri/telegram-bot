@@ -17,6 +17,8 @@ final readonly class SakurupiahHistoryItem
 
     public SakurupiahTransactionStatus $status;
 
+    public ?string $currency;
+
     public ?CarbonImmutable $occurredAt;
 
     public ?CarbonImmutable $expiresAt;
@@ -33,12 +35,14 @@ final readonly class SakurupiahHistoryItem
         ?CarbonImmutable $occurredAt = null,
         ?CarbonImmutable $expiresAt = null,
         array $sanitizedPayload = [],
+        ?string $currency = null,
     ) {
         $this->trxId = self::text($trxId, 'transaction ID', 255);
         $this->merchantRef = self::text($merchantRef, 'merchant reference', 255);
         $this->paymentCode = self::text($paymentCode, 'payment code', 64);
         $this->amount = $amount instanceof SakurupiahAmount ? $amount : SakurupiahAmount::from($amount);
         $this->status = $status;
+        $this->currency = $currency === null ? null : self::text($currency, 'currency', 16);
         $this->occurredAt = $occurredAt;
         $this->expiresAt = $expiresAt;
         $this->sanitizedPayload = SakurupiahPayloadSanitizer::sanitize($sanitizedPayload);
@@ -62,6 +66,7 @@ final readonly class SakurupiahHistoryItem
                 status: SakurupiahTransactionStatus::fromProviderValue($data['status'] ?? null),
                 occurredAt: $occurredAt,
                 expiresAt: SakurupiahPayloadReader::optionalExpiry($data, 'expired', $occurredAt),
+                currency: SakurupiahPayloadReader::optionalString($data, 'currency', 16),
                 sanitizedPayload: $payload,
             );
         } catch (InvalidArgumentException $exception) {

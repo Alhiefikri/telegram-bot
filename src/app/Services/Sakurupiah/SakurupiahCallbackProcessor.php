@@ -143,10 +143,12 @@ final class SakurupiahCallbackProcessor
         if ($status->isSuccessful()) {
             $evidenceStatus = $this->statusWithAmountEvidence($payment, $status);
             if ($evidenceStatus === null) {
-                // Payment Verification Pending: the provider has not yet shown
-                // amount-bearing evidence. Keep the Order unchanged and let the
-                // next bounded reconciliation sweep retry.
-                $this->events->logReconciliation($payment, $status);
+                $this->lifecycle->persistAuthoritativeStatusObservation(
+                    $payment,
+                    $status,
+                    SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL,
+                    'authoritative_amount_unverified',
+                );
 
                 return SakurupiahReconciliationOutcome::VerificationPending;
             }
@@ -299,7 +301,12 @@ final class SakurupiahCallbackProcessor
 
             $evidenceStatus = $this->statusWithAmountEvidence($payment, $status);
             if ($evidenceStatus === null) {
-                $this->events->logReconciliation($payment, $status);
+                $this->lifecycle->persistAuthoritativeStatusObservation(
+                    $payment,
+                    $status,
+                    SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL,
+                    'authoritative_amount_unverified',
+                );
 
                 return ['processed' => false, 'defer' => true];
             }
@@ -381,7 +388,10 @@ final class SakurupiahCallbackProcessor
         }
 
         $history = $this->fetchMatchingHistory($payment);
-        if ($history === null || $history->amountValue() !== (int) $payment->amount) {
+        if ($history === null
+            || $history->amountValue() !== (int) $payment->amount
+            || ($history->currency !== null
+                && strtoupper(trim($history->currency)) !== strtoupper(trim((string) $payment->currency)))) {
             return null;
         }
 
@@ -399,6 +409,7 @@ final class SakurupiahCallbackProcessor
             qr: $status->qrPayload(),
             checkoutUrl: $status->checkoutUrl(),
             merchantFee: $status->merchantFee(),
+            currency: $status->currency ?? $history->currency,
         );
     }
 
@@ -445,6 +456,10 @@ final class SakurupiahCallbackProcessor
         if ($status->paymentCode !== null
             && strcasecmp($status->paymentCode, SakurupiahCreateInvoice::METHOD_QRIS) !== 0) {
             return 'provider_payment_method_mismatch';
+        }
+        if ($status->currency !== null
+            && strtoupper(trim($status->currency)) !== strtoupper(trim((string) $payment->currency))) {
+            return 'provider_currency_mismatch';
         }
 
         if ($status->totalValue() !== null && $status->totalValue() < (int) $payment->amount) {
