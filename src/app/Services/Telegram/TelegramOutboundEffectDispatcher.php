@@ -18,6 +18,7 @@ use App\Jobs\SendProductStockNotifications;
 use App\Jobs\SendSakurupiahCheckoutInstructions;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Jobs\SendTelegramReceipt;
+use App\Jobs\SendTelegramReceiptTxt;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\StockNotificationRecipient;
 use App\Models\TelegramBroadcastRecipient;
@@ -78,6 +79,11 @@ final class TelegramOutboundEffectDispatcher
             TelegramOutboundEffectType::ReceiptCredentials->value => SendTelegramReceipt::dispatch(
                 (string) $effect->source_id,
                 $force,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            TelegramOutboundEffectType::ReceiptTxtDownload->value => SendTelegramReceiptTxt::dispatch(
+                (string) $effect->source_id,
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),
             ),

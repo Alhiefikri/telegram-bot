@@ -49,6 +49,8 @@ class TelegramOutboundEffectService
 
     public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
 
+    public const TYPE_RECEIPT_TXT_DOWNLOAD = TelegramOutboundEffectType::ReceiptTxtDownload->value;
+
     public const TYPE_ADMIN_PENDING = TelegramOutboundEffectType::AdminOrderPendingNotification->value;
 
     public const TYPE_ADMIN_PAID = TelegramOutboundEffectType::AdminOrderPaidNotification->value;
@@ -111,6 +113,8 @@ class TelegramOutboundEffectService
     /** Explicit pre-send fallback when the invoice image cannot render. */
     public const TEMPLATE_RECEIPT_TEXT_FALLBACK = 'receipt-text-fallback-v1';
 
+    public const TEMPLATE_RECEIPT_TXT_DOWNLOAD = 'receipt-txt-v1';
+
     public const TEMPLATE_ADMIN_ORDER_PENDING = 'admin-order-pending-v1';
 
     public const TEMPLATE_ADMIN_ORDER_PAID = 'admin-order-paid-v1';
@@ -134,6 +138,8 @@ class TelegramOutboundEffectService
     public const TEMPLATE_PRICE_CHANGE_STORE_CHANNEL = 'price-change-store-channel-v1';
 
     public const RECEIPT_QUEUE = 'notifications';
+
+    public const RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS = TelegramOutboundEffectPolicy::RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS;
 
     public const SALES_PROOF_QUEUE = 'notifications';
 
@@ -196,6 +202,12 @@ class TelegramOutboundEffectService
         'proof_status',
         'delivery_outcome',
         'delivery_method',
+        'format',
+        'item_count',
+        'byte_size_bucket',
+        'origin_message_id',
+        'confirmation_nonce',
+        'correlation_id',
     ];
 
     public function __construct(
@@ -791,6 +803,84 @@ class TelegramOutboundEffectService
     }
 
     /**
+     * Materialize one explicitly confirmed, independently delivered TXT file.
+     *
+     * The request nonce is opaque and becomes the durable idempotency
+     * component. Credential values are intentionally not loaded here.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    public function recordReceiptTxtDownload(
+        Order $order,
+        string $requestNonce,
+        ?Customer $customer = null,
+        array $metadata = [],
+    ): ?TelegramOutboundEffect {
+        $requestNonce = self::normalizeTxtDownloadNonce($requestNonce);
+        $requestedMetadata = $this->safeReceiptTxtDownloadMetadata($metadata, $requestNonce);
+
+        return DB::transaction(function () use ($order, $requestNonce, $customer, $requestedMetadata): ?TelegramOutboundEffect {
+            $locked = Order::query()
+                ->with(['customer', 'payments', 'orderItems'])
+                ->lockForUpdate()
+                ->findOrFail($order->getKey());
+            $owner = $locked->customer;
+
+            if ($customer !== null && (string) $customer->getKey() !== (string) $locked->customer_id) {
+                return null;
+            }
+
+            if (! $this->receiptTxtDownloadEligible($locked, $owner)) {
+                return null;
+            }
+
+            $effectKey = self::receiptTxtDownloadEffectKey((string) $locked->getKey(), $requestNonce);
+            $existing = TelegramOutboundEffect::query()
+                ->where('effect_key', $effectKey)
+                ->lockForUpdate()
+                ->first();
+            if ($existing !== null) {
+                if ($existing->effect_type !== self::TYPE_RECEIPT_TXT_DOWNLOAD
+                    || $existing->source_type !== Order::class
+                    || (string) $existing->source_id !== (string) $locked->getKey()
+                    || $existing->target_type !== 'customer'
+                    || (string) $existing->telegram_chat_id !== (string) $owner?->telegram_id) {
+                    return null;
+                }
+
+                return $existing;
+            }
+
+            [$productCount, $itemCount] = $this->orderSummaryCounts($locked);
+            $safeMetadata = [
+                ...$requestedMetadata,
+                'product_count' => $productCount,
+                'item_count' => $itemCount,
+            ];
+            $now = now();
+
+            return TelegramOutboundEffect::query()->create([
+                'effect_key' => $effectKey,
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => self::TYPE_RECEIPT_TXT_DOWNLOAD,
+                'source_type' => Order::class,
+                'source_id' => (string) $locked->getKey(),
+                'target_type' => 'customer',
+                'telegram_chat_id' => (string) $owner->telegram_id,
+                'queue' => self::RECEIPT_QUEUE,
+                'telegram_method' => 'sendDocument',
+                'locale' => $owner->locale,
+                'template_version' => self::TEMPLATE_RECEIPT_TXT_DOWNLOAD,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => $now,
+                'outcome_metadata' => $safeMetadata,
+            ]);
+        }, 5);
+    }
+
+    /**
      * Materialize a safe text-only replacement after a v2 photo failed before
      * Telegram was called. The failed photo effect remains immutable history.
      */
@@ -876,6 +966,16 @@ class TelegramOutboundEffectService
     public static function receiptEffectKey(string $orderId, int $sequence): string
     {
         return self::receiptEffectGroupKey($orderId).':unit:'.$sequence;
+    }
+
+    public static function receiptTxtDownloadEffectKey(string $orderId, string $requestNonce): string
+    {
+        $orderId = trim($orderId);
+        if ($orderId === '' || preg_match('/\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z/D', $orderId) !== 1) {
+            throw new InvalidArgumentException('TXT download Order reference is invalid.');
+        }
+
+        return 'order:'.$orderId.':telegram_txt_download:'.self::normalizeTxtDownloadNonce($requestNonce).':v1';
     }
 
     public static function typeForPayment(Payment $payment): ?string
@@ -1497,6 +1597,150 @@ class TelegramOutboundEffectService
             && $customer?->telegram_id !== null;
     }
 
+    private function receiptTxtDownloadEligible(Order $order, ?Customer $customer): bool
+    {
+        if (! $this->receiptEligible($order, $customer)
+            || trim((string) $customer?->telegram_id) === ''
+            || $order->hasOpenLatePaymentReview()) {
+            return false;
+        }
+
+        $payment = $order->payments
+            ->sortByDesc(fn (Payment $candidate): array => [
+                $candidate->created_at?->getTimestamp() ?? 0,
+                (string) $candidate->getKey(),
+            ])
+            ->first();
+
+        return $payment instanceof Payment
+            && (string) $payment->order_id === (string) $order->getKey()
+            && $payment->status === PaymentStatus::Paid
+            && $payment->paid_at !== null;
+    }
+
+    /** @return array{0: int, 1: int} */
+    private function orderSummaryCounts(Order $order): array
+    {
+        $itemCount = 0;
+
+        foreach ($order->orderItems as $item) {
+            $quantity = $item->getAttribute('quantity');
+            if (! is_int($quantity)) {
+                $quantity = filter_var($quantity, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+            }
+            if (! is_int($quantity) || $itemCount > PHP_INT_MAX - $quantity) {
+                throw new InvalidArgumentException('TXT Order quantity is invalid.');
+            }
+
+            $itemCount += $quantity;
+        }
+
+        return [$order->orderItems->count(), $itemCount];
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     * @return array<string, int|string>
+     */
+    private function safeReceiptTxtDownloadMetadata(array $metadata, string $requestNonce): array
+    {
+        $allowed = [
+            'delivery_context',
+            'format',
+            'product_count',
+            'item_count',
+            'byte_size_bucket',
+            'origin_message_id',
+            'confirmation_nonce',
+            'correlation_id',
+        ];
+        foreach (array_keys($metadata) as $key) {
+            if (! is_string($key) || ! in_array($key, $allowed, true)) {
+                throw new InvalidArgumentException('TXT download metadata is not safe.');
+            }
+        }
+
+        if (array_key_exists('delivery_context', $metadata) && $metadata['delivery_context'] !== 'explicit_txt_download') {
+            throw new InvalidArgumentException('TXT download metadata is not safe.');
+        }
+        if (array_key_exists('format', $metadata) && $metadata['format'] !== 'txt') {
+            throw new InvalidArgumentException('TXT download metadata is not safe.');
+        }
+
+        $safe = [
+            'delivery_context' => 'explicit_txt_download',
+            'format' => 'txt',
+            'confirmation_nonce' => $requestNonce,
+        ];
+
+        foreach (['product_count', 'item_count'] as $key) {
+            if (array_key_exists($key, $metadata) && $metadata[$key] !== null) {
+                $safe[$key] = $this->safeTxtMetadataCount($metadata[$key]);
+            }
+        }
+
+        if (array_key_exists('byte_size_bucket', $metadata) && $metadata['byte_size_bucket'] !== null) {
+            $safe['byte_size_bucket'] = $this->safeTxtMetadataReference($metadata['byte_size_bucket']);
+        }
+
+        if (array_key_exists('origin_message_id', $metadata) && $metadata['origin_message_id'] !== null) {
+            $originMessageId = $this->safeTxtMetadataCount($metadata['origin_message_id']);
+            if ($originMessageId < 1) {
+                throw new InvalidArgumentException('TXT download metadata is not safe.');
+            }
+            $safe['origin_message_id'] = $originMessageId;
+        }
+
+        if (array_key_exists('confirmation_nonce', $metadata) && $metadata['confirmation_nonce'] !== null) {
+            $confirmationNonce = $this->safeTxtMetadataReference($metadata['confirmation_nonce']);
+            if (! hash_equals($requestNonce, $confirmationNonce)) {
+                throw new InvalidArgumentException('TXT download metadata is not safe.');
+            }
+            $safe['confirmation_nonce'] = $confirmationNonce;
+        }
+
+        if (array_key_exists('correlation_id', $metadata) && $metadata['correlation_id'] !== null) {
+            $safe['correlation_id'] = $this->safeTxtMetadataReference($metadata['correlation_id']);
+        }
+
+        return $safe;
+    }
+
+    private function safeTxtMetadataCount(mixed $value): int
+    {
+        if (is_int($value) && $value >= 0) {
+            return $value;
+        }
+
+        if (is_string($value)
+            && preg_match('/\A[0-9]{1,18}\z/D', $value) === 1
+            && filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) !== false) {
+            return (int) $value;
+        }
+
+        throw new InvalidArgumentException('TXT download metadata is not safe.');
+    }
+
+    private function safeTxtMetadataReference(mixed $value): string
+    {
+        if (! is_string($value)
+            || preg_match('/\A[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\z/D', $value) !== 1) {
+            throw new InvalidArgumentException('TXT download metadata is not safe.');
+        }
+
+        return $value;
+    }
+
+    private static function normalizeTxtDownloadNonce(string $requestNonce): string
+    {
+        $requestNonce = trim($requestNonce);
+        if (preg_match('/\A[A-Za-z0-9][A-Za-z0-9_-]{0,127}\z/D', $requestNonce) !== 1) {
+            throw new InvalidArgumentException('TXT download request reference is invalid.');
+        }
+
+        return $requestNonce;
+    }
+
     private static function receiptEffectKeyForGroup(string $groupKey, int $sequence): string
     {
         return $groupKey.':unit:'.$sequence;
@@ -1615,6 +1859,8 @@ class TelegramOutboundEffectService
                 'receipt_chunk_index',
                 'receipt_chunk_count',
                 'product_count',
+                'item_count',
+                'origin_message_id',
                 'account_count',
             ], true)
                 && ((is_int($value) && $value >= 0) || (is_string($value) && ctype_digit($value)))) {
@@ -1636,6 +1882,11 @@ class TelegramOutboundEffectService
                 'caption_length_bucket',
                 'continuation_length_bucket',
                 'render_mode',
+                'format',
+                'byte_size_bucket',
+                'confirmation_nonce',
+                'correlation_id',
+                'delivery_method',
             ], true) && is_string($value)) {
                 $safeValue = $this->safeErrorCode($value);
                 if ($safeValue !== null) {
@@ -1670,6 +1921,7 @@ class TelegramOutboundEffectService
             self::TYPE_BINANCE_CHECKOUT => self::TEMPLATE_BINANCE_CHECKOUT,
             self::TYPE_BSC_CHECKOUT => self::TEMPLATE_BSC_CHECKOUT,
             self::TYPE_RECEIPT_CREDENTIALS => self::TEMPLATE_RECEIPT_CREDENTIALS,
+            self::TYPE_RECEIPT_TXT_DOWNLOAD => self::TEMPLATE_RECEIPT_TXT_DOWNLOAD,
             self::TYPE_ADMIN_PENDING => self::TEMPLATE_ADMIN_ORDER_PENDING,
             self::TYPE_ADMIN_PAID => self::TEMPLATE_ADMIN_ORDER_PAID,
             self::TYPE_ADMIN_EXPIRED => self::TEMPLATE_ADMIN_ORDER_EXPIRED,

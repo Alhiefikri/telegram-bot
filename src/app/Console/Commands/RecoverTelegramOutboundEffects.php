@@ -51,7 +51,7 @@ class RecoverTelegramOutboundEffects extends Command
                 TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
-                TelegramOutboundEffectService::TYPE_ADMIN_PENDING,
+                TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD,
                 TelegramOutboundEffectService::TYPE_ADMIN_PAID,
                 TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
                 TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF,

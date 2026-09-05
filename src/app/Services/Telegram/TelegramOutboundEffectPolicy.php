@@ -19,6 +19,8 @@ final class TelegramOutboundEffectPolicy
 {
     public const RECEIPT_MAX_ATTEMPTS = 3;
 
+    public const RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS = 3;
+
     public const SALES_PROOF_MAX_ATTEMPTS = 3;
 
     public const ADMIN_BROADCAST_MAX_ATTEMPTS = 5;
@@ -37,7 +39,9 @@ final class TelegramOutboundEffectPolicy
         'checkout_payment_not_pending',
         'receipt_not_eligible',
         'receipt_render_changed',
-        'admin_notification_not_eligible',
+        'receipt_txt_not_eligible',
+        'receipt_txt_credentials_missing',
+        'receipt_txt_render_failed',
         'admin_target_missing',
         'proof_not_eligible',
         'proof_attachment_missing',
@@ -60,6 +64,7 @@ final class TelegramOutboundEffectPolicy
     /** @var array<string, int> */
     private const MAX_ATTEMPTS = [
         TelegramOutboundEffectType::ReceiptCredentials->value => self::RECEIPT_MAX_ATTEMPTS,
+        TelegramOutboundEffectType::ReceiptTxtDownload->value => self::RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS,
         TelegramOutboundEffectType::SalesProofPost->value => self::SALES_PROOF_MAX_ATTEMPTS,
         TelegramOutboundEffectType::AdminBroadcastRecipient->value => self::ADMIN_BROADCAST_MAX_ATTEMPTS,
         TelegramOutboundEffectType::StockNotificationRecipient->value => self::STOCK_NOTIFICATION_MAX_ATTEMPTS,
@@ -70,6 +75,7 @@ final class TelegramOutboundEffectPolicy
     /** @var array<string, string> */
     private const ATTEMPTS_EXHAUSTED_CODES = [
         TelegramOutboundEffectType::ReceiptCredentials->value => 'receipt_attempts_exhausted',
+        TelegramOutboundEffectType::ReceiptTxtDownload->value => 'receipt_txt_download_attempts_exhausted',
         TelegramOutboundEffectType::AdminBroadcastRecipient->value => 'broadcast_recipient_attempts_exhausted',
         TelegramOutboundEffectType::StockNotificationRecipient->value => 'stock_notification_attempts_exhausted',
         TelegramOutboundEffectType::PriceChangeNotificationRecipient->value => 'price_change_recipient_attempts_exhausted',

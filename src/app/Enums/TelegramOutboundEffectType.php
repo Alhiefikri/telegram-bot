@@ -20,4 +20,5 @@ enum TelegramOutboundEffectType: string
     case StockNotificationRecipient = 'stock.notification_recipient';
     case PriceChangeNotificationRecipient = 'price_change.notification_recipient';
     case PriceChangeStoreChannel = 'price_change.store_channel';
+    case ReceiptTxtDownload = 'receipt.txt_download';
 }

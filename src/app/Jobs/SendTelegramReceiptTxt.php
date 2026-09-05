@@ -1,0 +1,75 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Models\Order;
+use App\Models\TelegramOutboundEffect;
+use App\Services\Telegram\ReceiptTxtDeliveryPipeline;
+use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Support\DogfoodTiming;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+
+class SendTelegramReceiptTxt implements ShouldBeUnique, ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public int $tries = 3;
+
+    public int $uniqueFor = 86400;
+
+    public function __construct(
+        public readonly string $orderId,
+        public ?string $jobEnqueuedAt = null,
+        public ?string $effectId = null,
+    ) {}
+
+    public function uniqueId(): string
+    {
+        return $this->effectId === null ? $this->orderId : 'effect:'.$this->effectId;
+    }
+
+    public function backoff(): array
+    {
+        return [5, 30, 120];
+    }
+
+    public function handle(ReceiptTxtDeliveryPipeline $pipeline): void
+    {
+        $startedAt = DogfoodTiming::now();
+        $memoryBefore = memory_get_usage(true);
+        DogfoodTiming::resetQueries();
+
+        DogfoodTiming::log('dogfood.telegram.receipt_txt_job_picked_up', [
+            'correlation_id' => DogfoodTiming::correlation($this->orderId),
+            'job_enqueued_at' => $this->jobEnqueuedAt,
+            'job_picked_up_at' => now()->toISOString(),
+            'queue_wait_ms' => DogfoodTiming::queueWaitMs($this->jobEnqueuedAt),
+        ]);
+
+        try {
+            $effect = TelegramOutboundEffect::query()
+                ->where('source_type', Order::class)
+                ->where('source_id', $this->orderId)
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD)
+                ->when($this->effectId !== null, fn ($query) => $query->whereKey($this->effectId))
+                ->orderByDesc('created_at')
+                ->orderByDesc('id')
+                ->firstOrFail();
+
+            $pipeline->deliver($effect);
+        } finally {
+            DogfoodTiming::log('dogfood.telegram.receipt_txt_job_finished', DogfoodTiming::queryStats() + [
+                'correlation_id' => DogfoodTiming::correlation($this->orderId),
+                'effect_correlation_id' => DogfoodTiming::correlation($this->effectId),
+                'handler_duration_ms' => DogfoodTiming::elapsedMs($startedAt),
+                'memory_before_bytes' => $memoryBefore,
+                'memory_after_bytes' => memory_get_usage(true),
+            ]);
+        }
+    }
+}
