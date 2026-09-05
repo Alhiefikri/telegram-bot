@@ -898,7 +898,7 @@ SH);
 
         $this->assertStringContainsString('name: Application, browser, and PostgreSQL tests', $workflow);
         $this->assertStringContainsString('image: ghcr.io/alhiefikri/telegram-bot-ci-base:postgres-16-alpine', $workflow);
-        $this->assertStringContainsString('--health-cmd "pg_isready -U telegram_bot_ci -d telegram_bot_ci"', $workflow);
+        $this->assertStringContainsString('--health-cmd "pg_isready -U telegram_bot_ci -d telegram_bot_ci_test"', $workflow);
         $this->assertStringContainsString('DB_CONNECTION: pgsql', $workflow);
         $this->assertStringContainsString('POSTGRES_PASSWORD: ci-only-not-production', $workflow);
         $this->assertStringContainsString('php artisan migrate:fresh --force --ansi', $workflow);
