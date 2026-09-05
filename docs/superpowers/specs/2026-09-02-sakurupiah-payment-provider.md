@@ -240,6 +240,14 @@ Do not add ENV for channel labels, catalog content, price, fee display, or custo
 
 A readiness report must separately assess enabled/configured state, credential pair, HTTPS URLs, target runtime environment, callback route, QRIS active/limits from runtime channel data, fee/currency/expiry contract, schema, queue/scheduler, and production IP policy. An unready Sakurupiah selection fails closed; it does not resolve to Manual or KlikQRIS.
 
+Production activation additionally requires a versioned, non-secret
+`services.sakurupiah.contract_policy` record. The record must explicitly mark
+all twelve external gates as qualified, provide one redacted evidence reference
+per gate plus a redacted record reference, and contain explicit Owner approval
+for automatic fulfillment. The default policy is unqualified and fail-closed.
+Changing the policy is a release/configuration decision; it must not be exposed
+as an ENV presentation setting or inferred from provider documentation.
+
 ## External contract gates
 
 Before production activation, record redacted sandbox evidence for all of these:

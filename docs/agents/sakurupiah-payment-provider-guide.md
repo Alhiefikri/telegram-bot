@@ -408,6 +408,15 @@ Add only server-side provider/deployment settings to ENV/config, for example:
 
 Do not add ENV for catalog labels, product prices, customer-facing channel metadata, or editable presentation content. Runtime channel data comes from `list-payment.php`; owner-editable policy belongs in database/Admin.
 
+Production also requires the versioned non-secret
+`services.sakurupiah.contract_policy` record. Its twelve gates must each be
+qualified and point to a redacted evidence reference; the record itself must
+have a redacted reference and explicit Owner approval for automatic
+fulfillment. The committed default remains unqualified, so the provider stays
+disabled until the human qualification gate is complete. Never store
+credentials, raw provider payloads, QR values, or hosted URL tokens in this
+record.
+
 Readiness must fail closed when:
 
 - API ID/API KEY pair incomplete;

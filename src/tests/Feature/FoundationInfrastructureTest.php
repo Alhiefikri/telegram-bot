@@ -86,6 +86,23 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('laravel-broadcast-worker:*', $healthCheck);
     }
 
+    public function test_sakurupiah_verification_and_reconciliation_use_release_owned_paths(): void
+    {
+        $schedule = file_get_contents(base_path('routes/console.php'));
+        $supervisor = file_get_contents(base_path('../supervisord.conf'));
+        $healthCheck = file_get_contents(app_path('Console/Commands/HealthCheck.php'));
+        $verificationJob = file_get_contents(app_path('Jobs/VerifySakurupiahWebhookPayment.php'));
+
+        $this->assertSame('default', config('services.sakurupiah.verification_queue'));
+        $this->assertStringContainsString('sakurupiah:reconcile --chunk=100', $schedule);
+        $this->assertStringContainsString('->everyMinute()', $schedule);
+        $this->assertStringContainsString('withoutOverlapping(ReconcileSakurupiahPayments::schedulerMutexMinutes())', $schedule);
+        $this->assertStringContainsString('[program:laravel-update-worker]', $supervisor);
+        $this->assertStringContainsString('$this->onQueue(\'default\')', $verificationJob);
+        $this->assertStringContainsString('laravel-update-worker:*', $healthCheck);
+        $this->assertStringContainsString("'payments', 'default'", $healthCheck);
+    }
+
     public function test_ops_health_reports_operational_queue_depths(): void
     {
         if (! Schema::hasTable('jobs')) {

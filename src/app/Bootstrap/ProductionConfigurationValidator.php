@@ -3,6 +3,7 @@
 namespace App\Bootstrap;
 
 use App\Services\Bsc\BscReadiness;
+use App\Services\Sakurupiah\SakurupiahContractPolicy;
 use Illuminate\Contracts\Config\Repository;
 use RuntimeException;
 
@@ -196,6 +197,11 @@ class ProductionConfigurationValidator
                 || $contract['expiry_hours'] < 1
             ) {
                 throw new RuntimeException('SAKURUPIAH_QRIS_EXPIRY_CONTRACT must be qualified before production enablement.');
+            }
+            foreach (SakurupiahContractPolicy::invalid(
+                (array) $this->config->get('services.sakurupiah.contract_policy', []),
+            ) as $message) {
+                throw new RuntimeException($message);
             }
         }
     }

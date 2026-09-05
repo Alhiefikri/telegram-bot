@@ -2,12 +2,25 @@
 
 namespace Tests\Feature;
 
+use App\Enums\InventoryMovementType;
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Exceptions\InvalidOrderTransition;
 use App\Models\Customer;
+use App\Models\InventoryMovement;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\Product;
+use App\Models\ProductStockItem;
+use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
+use App\Models\TelegramOutboundEffect;
+use App\Services\OrderLifecycle;
 use App\Services\Sakurupiah\SakurupiahAmount;
 use App\Services\Sakurupiah\SakurupiahBalance;
+use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahFee;
 use App\Services\Sakurupiah\SakurupiahHistoryFilter;
@@ -16,21 +29,25 @@ use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahStatus;
 use App\Services\Sakurupiah\SakurupiahTransactionStatus;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
 use Tests\TestCase;
 
 /**
- * This test is intentionally opt-in through phpunit.postgres.xml. It refuses
- * to migrate a non-isolated database and skips when the normal SQLite suite is
- * running.
+ * These tests are intentionally opt-in through the PostgreSQL release and
+ * concurrency gates. They refuse to migrate a non-isolated database.
  */
+#[Group('concurrency')]
+#[Group('postgres-release')]
 class SakurupiahInvoiceLifecyclePostgresConcurrencyTest extends TestCase
 {
     public function test_same_payment_create_is_single_flight_across_postgres_workers(): void
@@ -92,6 +109,239 @@ class SakurupiahInvoiceLifecyclePostgresConcurrencyTest extends TestCase
         $this->assertCount(2, $successfulWorkers, json_encode($results, JSON_THROW_ON_ERROR));
         $this->assertSame(1, DB::table('sakurupiah_test_provider_effects')->count());
         $this->assertSame(1, Payment::findOrFail($payment->id)->paymentEvents()->where('event_type', 'provider_create')->count());
+    }
+
+    public function test_duplicate_paid_callbacks_across_postgres_workers_fulfill_once(): void
+    {
+        $this->prepareReleaseRaceLane();
+        $payment = $this->prepareRacePayment('INV-PG-416-CALLBACK');
+        $payload = $this->callbackPayload($payment);
+
+        DB::disconnect();
+        $results = $this->runConcurrently([
+            fn (): int => app(SakurupiahCallbackProcessor::class)->processCallback($payload)->id,
+            fn (): int => app(SakurupiahCallbackProcessor::class)->processCallback($payload)->id,
+        ]);
+        DB::reconnect();
+
+        $this->assertSame(2, $this->successfulWorkerCount($results), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertFulfillmentCardinalities($payment);
+    }
+
+    public function test_callback_reconciliation_and_expiry_race_preserves_one_valid_terminal_outcome(): void
+    {
+        $this->prepareReleaseRaceLane();
+        $payment = $this->prepareRacePayment('INV-PG-416-MIXED');
+        $payload = $this->callbackPayload($payment);
+
+        DB::disconnect();
+        $results = $this->runConcurrently([
+            fn (): int => app(SakurupiahCallbackProcessor::class)->processCallback($payload)->id,
+            fn (): string => app(SakurupiahCallbackProcessor::class)
+                ->reconcilePayment(Payment::findOrFail($payment->id))
+                ->value,
+            fn (): string => $this->expireRacePayment((string) $payment->id),
+        ]);
+        DB::reconnect();
+
+        $this->assertSame(3, $this->successfulWorkerCount($results), json_encode($results, JSON_THROW_ON_ERROR));
+
+        $freshPayment = $payment->fresh();
+        $order = Order::findOrFail($payment->order_id);
+        $saleCount = InventoryMovement::query()
+            ->where('order_id', $order->id)
+            ->where('type', InventoryMovementType::Sale)
+            ->count();
+        $releaseCount = InventoryMovement::query()
+            ->where('order_id', $order->id)
+            ->where('type', InventoryMovementType::Release)
+            ->count();
+
+        $paidOutcome = $freshPayment->status === PaymentStatus::Paid
+            && $order->order_status === OrderStatus::Processing
+            && $saleCount === 1
+            && $releaseCount === 0;
+        $expiredOutcome = $order->order_status === OrderStatus::Expired
+            && in_array($freshPayment->status, [PaymentStatus::Expired, PaymentStatus::Paid], true)
+            && $saleCount === 0
+            && $releaseCount === 1;
+
+        $this->assertTrue($paidOutcome || $expiredOutcome, json_encode([
+            'results' => $results,
+            'payment_status' => $freshPayment->status->value,
+            'order_status' => $order->order_status->value,
+            'sale_count' => $saleCount,
+            'release_count' => $releaseCount,
+        ], JSON_THROW_ON_ERROR));
+        $this->assertLessThanOrEqual(1, SalesProofPost::query()->where('order_id', $order->id)->count());
+        $this->assertLessThanOrEqual(1, ProductStockItem::query()->where('product_id', $this->raceProductId($order))->whereNotNull('order_item_id')->count());
+        foreach ([
+            TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            TelegramOutboundEffectService::TYPE_ADMIN_PAID,
+            TelegramOutboundEffectService::TYPE_SALES_PROOF,
+        ] as $effectType) {
+            $this->assertLessThanOrEqual(
+                1,
+                TelegramOutboundEffect::query()
+                    ->where('effect_type', $effectType)
+                    ->where('source_id', (string) $order->id)
+                    ->count(),
+            );
+        }
+    }
+
+    private function prepareReleaseRaceLane(): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            $this->markTestSkipped('PostgreSQL contention check runs only with the pgsql test connection.');
+        }
+        if (! function_exists('pcntl_fork') || ! function_exists('pcntl_signal')) {
+            $this->markTestSkipped('PostgreSQL contention check requires pcntl fork and signal support.');
+        }
+
+        $this->guardIsolatedPostgresTestingDatabase();
+        Artisan::call('migrate:fresh', [
+            '--force' => true,
+            '--drop-views' => true,
+            '--drop-types' => true,
+        ]);
+
+        config()->set('queue.default', 'sync');
+        config()->set('cache.default', 'database');
+        config()->set('services.telegram.token', 'bot-token');
+        Cache::purge('database');
+        $this->prepareEffectTable();
+        $this->configureReadySakurupiah();
+        ManualPaymentSetting::create([
+            'payment_mode' => PaymentProvider::MANUAL,
+            'admin_telegram_chat_id' => '123456',
+            'is_active' => true,
+        ]);
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        Queue::fake();
+        app()->bind(
+            SakurupiahProviderAdapter::class,
+            fn (): DatabaseBackedSakurupiahProviderAdapter => new DatabaseBackedSakurupiahProviderAdapter,
+        );
+    }
+
+    private function prepareRacePayment(string $merchantRef): Payment
+    {
+        $amount = 12_000;
+        $customer = Customer::factory()->create([
+            'telegram_id' => 123456,
+            'phone_number' => '08123456789',
+        ]);
+        $order = Order::factory()->for($customer, 'customer')->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+            'total_amount' => $amount,
+            'currency' => 'IDR',
+            'expires_at' => now()->addHours(2),
+        ]);
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 1,
+            'price_amount' => $amount,
+        ]);
+        $orderItem = OrderItem::factory()->for($order, 'order')->for($product, 'product')->create([
+            'quantity' => 1,
+            'unit_price' => $amount,
+            'subtotal' => $amount,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'order_item_id' => $orderItem->id,
+            'secret' => 'race-buyer@example.test|race-password',
+        ]);
+        InventoryMovement::create([
+            'product_id' => $product->id,
+            'order_id' => $order->id,
+            'type' => InventoryMovementType::Reservation,
+            'quantity' => 1,
+            'notes' => 'Order reservation',
+            'created_at' => now(),
+        ]);
+
+        return Payment::factory()->for($order, 'order')->create([
+            'provider' => PaymentProvider::SAKURUPIAH,
+            'merchant_ref' => $merchantRef,
+            'provider_reference' => 'trx-pg-416',
+            'provider_payment_method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_CREATED,
+            'method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'amount' => $amount,
+            'currency' => 'IDR',
+            'status' => PaymentStatus::Pending,
+            'expired_at' => now()->addHours(2),
+        ]);
+    }
+
+    /** @return array{trx_id:string,merchant_ref:string,status:string,status_kode:int} */
+    private function callbackPayload(Payment $payment): array
+    {
+        return [
+            'trx_id' => (string) $payment->provider_reference,
+            'merchant_ref' => (string) $payment->merchant_ref,
+            'status' => 'berhasil',
+            'status_kode' => 1,
+        ];
+    }
+
+    private function expireRacePayment(string $paymentId): string
+    {
+        try {
+            $result = app(OrderLifecycle::class)->applyPaymentExpired(Payment::findOrFail($paymentId));
+
+            return $result->newlyApplied ? 'expired' : 'already_terminal';
+        } catch (InvalidOrderTransition) {
+            return 'already_terminal';
+        }
+    }
+
+    /** @param list<array{ok:bool,exit_code:int}> $results */
+    private function successfulWorkerCount(array $results): int
+    {
+        return count(array_filter(
+            $results,
+            static fn (array $result): bool => $result['ok'] && $result['exit_code'] === 0,
+        ));
+    }
+
+    private function assertFulfillmentCardinalities(Payment $payment): void
+    {
+        $freshPayment = $payment->fresh();
+        $order = Order::findOrFail($payment->order_id);
+        $productId = $this->raceProductId($order);
+
+        $this->assertSame(PaymentStatus::Paid, $freshPayment->status);
+        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(1, InventoryMovement::query()->where('order_id', $order->id)->where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(1, ProductStockItem::query()->where('product_id', $productId)->whereNotNull('order_item_id')->count());
+        $this->assertSame(1, SalesProofPost::query()->where('order_id', $order->id)->count());
+
+        foreach ([
+            TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            TelegramOutboundEffectService::TYPE_ADMIN_PAID,
+            TelegramOutboundEffectService::TYPE_SALES_PROOF,
+        ] as $effectType) {
+            $this->assertSame(
+                1,
+                TelegramOutboundEffect::query()
+                    ->where('effect_type', $effectType)
+                    ->where('source_id', (string) $order->id)
+                    ->count(),
+            );
+        }
+    }
+
+    private function raceProductId(Order $order): int
+    {
+        return (int) $order->orderItems()->value('product_id');
     }
 
     private function configureReadySakurupiah(): void
@@ -323,7 +573,23 @@ final class DatabaseBackedSakurupiahProviderAdapter implements SakurupiahProvide
 
     public function transactionStatus(string $trxId): SakurupiahStatus
     {
-        throw new RuntimeException('The contention test must not recover a created invoice.');
+        if ($trxId !== 'trx-pg-416') {
+            throw new RuntimeException('The contention test received an unexpected provider reference.');
+        }
+
+        usleep(150_000);
+
+        return new SakurupiahStatus(
+            trxId: $trxId,
+            status: SakurupiahTransactionStatus::Successful,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            amount: SakurupiahAmount::from(12000),
+            sanitizedPayload: [
+                'trx_id' => $trxId,
+                'payment_status' => SakurupiahTransactionStatus::Successful->value,
+                'amount' => '12000',
+            ],
+        );
     }
 
     public function transactionHistory(?SakurupiahHistoryFilter $filter = null): array

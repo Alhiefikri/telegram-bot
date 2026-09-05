@@ -58,6 +58,9 @@ final class SakurupiahProviderReadiness
         if (! $this->evaluateConfiguration($environment)->isReady()) {
             return $configuration;
         }
+        if (! $this->externalContractPolicyReady($environment)) {
+            return $configuration;
+        }
 
         return $this->observeEnvironment($environment, $configuration);
     }
@@ -65,14 +68,14 @@ final class SakurupiahProviderReadiness
     /**
      * Validate only local request prerequisites.
      *
-     * list-payment.php is the channel observation itself, so the HTTP client
-     * must not require callback routes, queue workers, or a cached channel
-     * result before it can perform that bounded lookup.
+     * Production requests also require the versioned external contract policy;
+     * sandbox qualification keeps its local request prerequisites separate.
      */
     public function configurationReport(?SakurupiahEnvironment $environment = null): SakurupiahProviderReadinessReport
     {
         return $this->evaluateConfiguration(
             $this->resolveEnvironment($environment),
+            includeExternalContract: true,
         );
     }
 
@@ -101,6 +104,9 @@ final class SakurupiahProviderReadiness
         $localConfiguration = $this->evaluateConfiguration($environment);
 
         if (! $localConfiguration->isReady()) {
+            return $configuration;
+        }
+        if (! $this->externalContractPolicyReady($environment)) {
             return $configuration;
         }
 
@@ -372,6 +378,7 @@ final class SakurupiahProviderReadiness
         bool $includeOperationalPrerequisites = false,
         bool $includeQrisContract = false,
         bool $includeSchedule = true,
+        bool $includeExternalContract = false,
     ): SakurupiahProviderReadinessReport {
         $missing = $this->missingConfiguration($environment, $includeOperationalPrerequisites);
         $invalid = $this->invalidConfiguration($environment);
@@ -389,6 +396,14 @@ final class SakurupiahProviderReadiness
             && ($includeOperationalPrerequisites || $includeQrisContract)
         ) {
             $invalid += $this->invalidConfiguredQrisContract();
+        }
+        if ($this->value($environment, 'enabled', false) === true
+            && $environment === SakurupiahEnvironment::Production
+            && ($includeOperationalPrerequisites || $includeQrisContract || $includeExternalContract)
+        ) {
+            $invalid += SakurupiahContractPolicy::invalid(
+                (array) config('services.sakurupiah.contract_policy', []),
+            );
         }
 
         if ($this->value($environment, 'enabled', false) === true
@@ -634,9 +649,6 @@ final class SakurupiahProviderReadiness
         return $invalid;
     }
 
-    /**
-     * @param  array<string, string>  $invalid
-     */
     private function observeEnvironment(
         SakurupiahEnvironment $environment,
         SakurupiahProviderReadinessReport $configuration,
@@ -817,6 +829,14 @@ final class SakurupiahProviderReadiness
     private function resolveEnvironment(?SakurupiahEnvironment $environment): SakurupiahEnvironment
     {
         return $environment ?? $this->environment ?? SakurupiahEnvironment::runtime();
+    }
+
+    private function externalContractPolicyReady(SakurupiahEnvironment $environment): bool
+    {
+        return $environment !== SakurupiahEnvironment::Production
+            || SakurupiahContractPolicy::invalid(
+                (array) config('services.sakurupiah.contract_policy', []),
+            ) === [];
     }
 
     private function validNumber(mixed $value, float $minimum, float $maximum): bool
@@ -1004,6 +1024,7 @@ final class SakurupiahProviderReadiness
             'reconcile_max_execution_seconds' => config('services.sakurupiah.reconcile_max_execution_seconds', 45),
             'timezone' => config('services.sakurupiah.timezone', 'Asia/Jakarta'),
             'qris_contract' => config('services.sakurupiah.qris_contract', []),
+            'contract_policy' => config('services.sakurupiah.contract_policy', []),
         ];
 
         if ($includeOperational) {

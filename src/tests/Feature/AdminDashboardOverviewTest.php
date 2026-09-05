@@ -6,12 +6,14 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Http\Controllers\Admin\AdminDashboardController;
+use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardData;
+use App\Services\Admin\AdminDashboardSalesData;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -51,6 +53,8 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertDontSee('overflow-x-auto', false)
             ->assertSee('x-data', false)
             ->assertDontSee('Escrow')
+            ->assertDontSee('fi-wi-widget', false)
+            ->assertDontSee('filament.widgets', false)
             ->assertDontSee('fi-sidebar', false);
 
         $this->assertStringNotContainsString('<aside', $response->getContent());
@@ -92,6 +96,53 @@ class AdminDashboardOverviewTest extends TestCase
 
         $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'manual_payment_settings')));
         $this->assertFalse(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'sales_proof_posts')));
+    }
+
+    public function test_sakurupiah_sales_rows_eager_load_relations_without_n_plus_one(): void
+    {
+        foreach (range(1, 3) as $index) {
+            $customer = Customer::factory()->create();
+            $order = Order::factory()->for($customer)->create([
+                'invoice_number' => 'INV-SAK-ADMIN-'.$index,
+                'order_status' => OrderStatus::Processing,
+                'payment_status' => PaymentStatus::Paid,
+                'total_amount' => 20_000,
+            ]);
+            OrderItem::factory()->for($order)->create([
+                'product_name' => 'Sakurupiah product '.$index,
+                'quantity' => 1,
+                'unit_price' => 20_000,
+                'subtotal' => 20_000,
+            ]);
+            Payment::factory()->for($order)->create([
+                'provider' => 'sakurupiah',
+                'method' => 'QRIS',
+                'amount' => 20_000,
+                'currency' => 'IDR',
+                'status' => PaymentStatus::Paid,
+                'paid_at' => now(),
+            ]);
+        }
+
+        $queries = [];
+        DB::listen(function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = strtolower($query->sql);
+        });
+
+        $data = app(AdminDashboardSalesData::class)->forSales([], false, 'all');
+
+        $this->assertCount(3, $data['orders']);
+        foreach (['customers', 'order_items', 'payments', 'sales_proof_posts', 'telegram_outbound_effects'] as $table) {
+            $relationQueries = collect($queries)
+                ->filter(fn (string $sql): bool => str_contains($sql, 'from "'.$table.'"') && str_contains($sql, ' in ('))
+                ->values();
+
+            $this->assertCount(1, $relationQueries, implode("\n", $queries));
+            $this->assertTrue(
+                $relationQueries->every(fn (string $sql): bool => str_contains($sql, ' in (')),
+                implode("\n", $relationQueries->all()),
+            );
+        }
     }
 
     public function test_primary_admin_entry_uses_manual_dashboard_and_no_filament_routes(): void

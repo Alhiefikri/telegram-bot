@@ -58,6 +58,37 @@ class SakurupiahDtoTest extends TestCase
         ]);
     }
 
+    public function test_channel_parser_normalizes_provider_fee_unit_markers(): void
+    {
+        $percentage = SakurupiahChannel::fromPayload([
+            'kode' => 'QRISMU',
+            'nama' => 'QRISMU',
+            'minimal' => '500',
+            'maksimal' => '5000000',
+            'biaya' => '0.8',
+            'percent' => 'Percent',
+            'tipe' => 'DIRECT',
+            'status' => 'Aktif',
+        ]);
+
+        $nominal = SakurupiahChannel::fromPayload([
+            'kode' => 'BCAVA',
+            'nama' => 'BCA Virtual-Account',
+            'minimal' => '10000',
+            'maksimal' => '20000000',
+            'biaya' => '5500',
+            'percent' => 'Nominal',
+            'tipe' => 'DIRECT',
+            'status' => 'Aktif',
+        ]);
+
+        $this->assertSame('0.8%', $percentage->fee?->submitted());
+        $this->assertSame('0.8', $percentage->percent);
+        $this->assertSame('5500', $nominal->fee?->submitted());
+        $this->assertNull($nominal->percent);
+        $this->assertSame(5500, $nominal->feeAmount());
+    }
+
     public function test_invoice_parser_accepts_qualified_scalar_variants_and_exposes_typed_values(): void
     {
         $invoice = SakurupiahInvoice::fromPayload([

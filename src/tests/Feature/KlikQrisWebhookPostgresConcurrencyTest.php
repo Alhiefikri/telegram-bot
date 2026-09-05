@@ -10,10 +10,13 @@ use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\KlikQris\KlikQrisTransaction;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
 
+#[Group('concurrency')]
+#[Group('postgres-release')]
 class KlikQrisWebhookPostgresConcurrencyTest extends TestCase
 {
     protected function setUp(): void

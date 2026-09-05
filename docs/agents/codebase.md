@@ -384,6 +384,13 @@ live in [`src/app/Services/Sakurupiah/`](../../src/app/Services/Sakurupiah/).
 safe outcomes (`Payable` carries presentation; all other states carry no
 provider payload).
 
+Production activation is separately guarded by the versioned non-secret
+[`SakurupiahContractPolicy`](../../src/app/Services/Sakurupiah/SakurupiahContractPolicy.php):
+all twelve external gates require redacted evidence references and explicit
+Owner approval for automatic fulfillment. The committed defaults are
+unqualified, and readiness rejects production provider I/O before channel
+observation when this policy is incomplete.
+
 `SakurupiahCallbackProcessor::reconcilePayment()` is the reconciliation seam:
 under the same per-Payment cache lock used by create/callback/refresh, it
 performs an authoritative status lookup (never a create), validates identity

@@ -198,6 +198,30 @@ return [
             'expiry_hours' => null,
             'expiry_confirmed' => false,
         ],
+        // This non-secret policy record is the production activation gate.
+        // Every true gate requires a redacted evidence reference and an
+        // explicit Owner approval record. Keep defaults fail-closed.
+        'contract_policy' => [
+            'record_version' => 0,
+            'record_reference' => null,
+            'gates' => [
+                'request_encoding' => false,
+                'signature_canonicalization' => false,
+                'channel_contract' => false,
+                'expiry_contract' => false,
+                'create_response' => false,
+                'presentation' => false,
+                'amount_evidence' => false,
+                'duplicate_reference' => false,
+                'callback_contract' => false,
+                'error_limits' => false,
+                'production_network' => false,
+                'credential_operations' => false,
+            ],
+            'evidence_references' => [],
+            'automatic_fulfillment_approved' => false,
+            'owner_approval_reference' => null,
+        ],
         'http_timeout_seconds' => (float) env('SAKURUPIAH_HTTP_TIMEOUT_SECONDS', 10),
         'http_connect_timeout_seconds' => (float) env('SAKURUPIAH_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
         'lookup_max_attempts' => (int) env('SAKURUPIAH_LOOKUP_MAX_ATTEMPTS', 3),

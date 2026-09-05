@@ -31,6 +31,7 @@ use App\Models\ProductStockItem;
 use App\Models\StockNotificationEvent;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
+use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUpdate;
 use App\Models\User;
 use App\Services\Admin\AdminLoginThrottle;
@@ -130,6 +131,49 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(0, PaymentEvent::count());
         $this->assertNull($order->telegram_receipt_sent_at);
         $this->assertManagedInventoryInvariants($product);
+    }
+
+    public function test_concurrent_duplicate_checkout_key_reuses_one_order_payment_reservation_and_effect(): void
+    {
+        $this->requireConcurrencyLane();
+
+        ManualPaymentSetting::create([
+            'payment_mode' => PaymentProvider::MANUAL,
+            'is_active' => true,
+        ]);
+        $product = Product::factory()->create([
+            'price_amount' => 18_000,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'secret' => 'duplicate-checkout-key-secret',
+        ]);
+        $cart = $this->cartForProduct($product);
+        $checkoutKey = 'postgres-duplicate-checkout-key';
+
+        $results = $this->runConcurrently([
+            fn (): int => (int) app(OrderCheckoutService::class)
+                ->checkout(Cart::findOrFail($cart->id), CheckoutPaymentIntents::manualQris(), $checkoutKey)
+                ->id,
+            fn (): int => (int) app(OrderCheckoutService::class)
+                ->checkout(Cart::findOrFail($cart->id), CheckoutPaymentIntents::manualQris(), $checkoutKey)
+                ->id,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results), json_encode($results, JSON_THROW_ON_ERROR));
+        $orderIds = array_map(
+            static fn (array $result): int => (int) $result['value'],
+            $results,
+        );
+        $this->assertCount(1, array_unique($orderIds), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(1, Order::query()->count());
+        $this->assertSame(1, Payment::query()->count());
+        $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Reservation)->count());
+        $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        $this->assertSame(1, ProductStockItem::query()->whereNotNull('order_item_id')->count());
+        $this->assertSame(1, $product->fresh()->reserved_stock);
     }
 
     public function test_concurrent_admin_broadcast_text_workers_share_one_database_cache_window(): void
@@ -1364,7 +1408,7 @@ class ProductionConcurrencyTest extends TestCase
             }
         );
 
-        return AuditLog::where('action', 'telegram_update.concurrent_side_effect')->where('subject_id', (string) $updateId)->count();
+        return (int) AuditLog::where('action', 'telegram_update.concurrent_side_effect')->where('subject_id', (string) $updateId)->count();
     }
 
     private function successfulResultCount(array $results): int

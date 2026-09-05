@@ -28,6 +28,7 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
@@ -54,7 +55,12 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             'reserved_stock' => 0,
         ]);
         $cart = $this->cartForProduct($product, quantity: 2);
-        $this->travelTo($deadline->copy()->subMinutes($rail === 'klikqris' ? 15 : 10));
+        $minutesBeforeDeadline = match ($rail) {
+            'klikqris' => 15,
+            'sakurupiah' => 60,
+            default => 10,
+        };
+        $this->travelTo($deadline->copy()->subMinutes($minutesBeforeDeadline));
         $cart->update(['expires_at' => $deadline->copy()->addHour()]);
 
         try {
@@ -196,6 +202,12 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
                 'klikqris',
                 'QRIS',
                 TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
+            ],
+            'Sakurupiah QRIS' => [
+                'sakurupiah',
+                'sakurupiah',
+                'QRIS',
+                TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,
             ],
         ];
     }
@@ -339,8 +351,46 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
                 'is_active' => true,
             ]),
             'klikqris' => $this->configureKlikQris(),
+            'sakurupiah' => $this->configureSakurupiah(),
             default => throw new \InvalidArgumentException('Unknown characterization rail: '.$rail),
         };
+    }
+
+    private function configureSakurupiah(): void
+    {
+        config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
+            'sandbox_api_id' => 'sandbox-id',
+            'sandbox_api_key' => 'sandbox-key',
+            'qris_contract' => [
+                'currency' => 'IDR',
+                'currency_confirmed' => true,
+                'fee_payer' => 'merchant',
+                'merchant_fee' => 1,
+                'fee_confirmed' => true,
+                'expiry_hours' => 1,
+                'expiry_confirmed' => true,
+            ],
+        ]));
+        Http::fake([
+            'https://sakurupiah.id/api-sanbox/list-payment.php' => Http::response([
+                'status' => '200',
+                'data' => [[
+                    'kode' => 'QRIS',
+                    'nama' => 'QRIS',
+                    'minimal' => 500,
+                    'maksimal' => 2_000_000,
+                    'tipe' => 'DIRECT',
+                    'status' => 'Aktif',
+                    'addition' => ['default_expired' => 1],
+                ]],
+            ]),
+        ]);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'sakurupiah',
+            'is_active' => true,
+        ]);
     }
 
     private function configureKlikQris(): void
@@ -357,6 +407,7 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         return match ($rail) {
             'manual' => CheckoutPaymentIntents::manualQris(),
             'klikqris' => CheckoutPaymentIntents::klikQris(),
+            'sakurupiah' => CheckoutPaymentIntents::sakurupiah(),
             default => throw new \InvalidArgumentException('Unknown characterization rail: '.$rail),
         };
     }

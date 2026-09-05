@@ -10,13 +10,16 @@ use App\Jobs\VerifySakurupiahWebhookPayment;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\ManualFulfillmentReview;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramOutboundEffect;
 use App\Services\OrderLifecycle;
 use App\Services\Sakurupiah\SakurupiahAmount;
 use App\Services\Sakurupiah\SakurupiahCallback;
@@ -28,6 +31,7 @@ use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahStatus;
 use App\Services\Sakurupiah\SakurupiahStatusUnavailableException;
 use App\Services\Sakurupiah\SakurupiahTransactionStatus;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -320,6 +324,61 @@ class SakurupiahWebhookTest extends TestCase
         $this->assertSame(2, $event->received_count);
         $this->assertNotNull($event->processed_at);
         Queue::assertNotPushed(VerifySakurupiahWebhookPayment::class);
+    }
+
+    public function test_paid_callback_duplicate_materializes_each_fulfillment_effect_once(): void
+    {
+        Queue::fake();
+        config()->set('services.telegram.token', 'bot-token');
+        ManualPaymentSetting::create([
+            'payment_mode' => PaymentProvider::MANUAL,
+            'admin_telegram_chat_id' => '123456',
+            'is_active' => true,
+        ]);
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $payment = $this->payment();
+        $payment->order->customer()->update(['telegram_id' => 123456]);
+        $orderItem = $payment->order->orderItems()->sole();
+        ProductStockItem::create([
+            'product_id' => $orderItem->product_id,
+            'order_item_id' => $orderItem->id,
+            'secret' => 'sakurupiah-cardinality@example.test|password',
+        ]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, amount: $payment->amount),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $payload = $this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]);
+        $this->postCallback($payload)->assertOk();
+        $this->postCallback($payload)->assertOk();
+
+        $order = $payment->order->fresh();
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(1, ProductStockItem::query()->where('order_item_id', $orderItem->id)->count());
+        $this->assertSame(1, SalesProofPost::query()->where('order_id', $order->id)->count());
+
+        foreach ([
+            TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            TelegramOutboundEffectService::TYPE_ADMIN_PAID,
+            TelegramOutboundEffectService::TYPE_SALES_PROOF,
+        ] as $effectType) {
+            $this->assertSame(
+                1,
+                TelegramOutboundEffect::query()
+                    ->where('effect_type', $effectType)
+                    ->where('source_id', (string) $order->id)
+                    ->count(),
+            );
+        }
     }
 
     public function test_provider_outage_acknowledges_callback_and_queues_only_on_a_served_connection(): void

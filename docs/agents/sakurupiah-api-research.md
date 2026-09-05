@@ -293,4 +293,43 @@ These are conservative integration consequences of the observed contract, not ad
 
 Before enabling a production rail, use a merchant-owned sandbox credential and test only documented operations: list channels; create the smallest permitted invoice for a confirmed channel; capture raw request/response headers and body; follow the returned checkout URL where appropriate; observe callback signature and status transitions including expiry; perform status and history lookups; then repeat a callback payload to verify local deduplication. Record actual HTTP statuses, content type, field types, expiry timezone, duplicate-reference response, and retry behavior. Obtain written provider clarification for the checklist conflicts before moving to production.
 
-No sandbox credentials, live merchant account, or executable provider contract were available during this research, so no live API call was performed and no undocumented values are asserted here.
+A redacted merchant-sandbox smoke run on 2026-09-04 observed `HTTP 200` with
+JSON `status: "200"` for channel listing, 17 channel rows, and an active
+`QRIS` row with limits `500`–`2000000`, `biaya: "0.7"`,
+`percent: "Percent"`, and `addition.default_expired: "12"`. The adapter now
+normalizes that provider fee-unit representation to `0.7%`. Balance parsing
+also succeeded without recording the balance amount. One smallest-amount
+(`500`) QRIS invoice was created with a unique redacted merchant reference;
+same-day history recovered one pending row with an amount and expiry, while
+status lookup returned `pending` without amount fields. A non-mutating
+unsupported-method probe returned HTTP `400` with JSON `status: "400"` and a
+message. Repeating the same merchant reference was rejected with HTTP `400`
+and did not accept a second invoice. After its configured expiry, the same
+redacted invoice was observed as `expired` through both status and
+amount-bearing history. No payment or callback was observed; rate-limit,
+timeout, expiry-code mapping, callback, and production-network behavior remain
+unqualified. No production credential or endpoint was used. This observation
+is merchant-specific evidence, not production qualification.
+
+After the first invoice expired, one Owner-authorized fresh sandbox invoice
+was created at approximately 21:28 WIB for amount `500`. Its typed create
+response was `pending` with total `500`, merchant-fee mode `1`, and both QR and
+hosted-presentation fields present; the provider omitted a separate `amount`
+field. The Owner later changed the sandbox invoice to successful. Status
+lookup and amount-bearing history both reported `berhasil` for QRIS and amount
+`500`, while status lookup still omitted amount fields. No provider callback was
+observed by the application and the invoice was not linked to a local Payment.
+No presentation value or full identifier is recorded.
+
+A later app-linked sandbox checkout was exercised with the dedicated testing
+bot. The provider status lookup returned `berhasil` without an amount, so the
+application reconciliation path fetched same-day history and accepted the
+transition only after amount `500` matched the local IDR Payment. The Payment
+became `paid` with `paid_at`, the Order payment status became `paid`, and the
+Order remained `processing` for manual fulfillment. The paid Telegram admin
+outbound effect was recorded `sent`, and the signed Web invoice rendered the
+paid surface. Three identical signed pending callbacks remained deduplicated
+and acknowledged; no provider paid callback was observed. The app-linked
+create response omitted QR/hosted presentation, so the application held the
+initial Payment pending and non-payable. A separate app-linked expiry path and
+the unresolved provider/Owner production gates remain outstanding.

@@ -4,7 +4,10 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Models\AuditLog;
+use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
+use App\Models\Order;
+use App\Models\Payment;
 use App\Models\User;
 use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -44,6 +47,41 @@ final class SakurupiahProviderSwitchTest extends TestCase
         $this->assertSame(PaymentProvider::MANUAL, $audit->old_values['provider']);
         $this->assertSame(PaymentProvider::SAKURUPIAH, $audit->new_values['provider']);
         Http::assertSentCount(1);
+    }
+
+    public function test_switching_away_from_sakurupiah_keeps_existing_payment_provenance(): void
+    {
+        $this->configureReadySakurupiah();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => PaymentProvider::SAKURUPIAH,
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create();
+        $order = Order::factory()->for($customer, 'customer')->create([
+            'total_amount' => 12_000,
+            'currency' => 'IDR',
+        ]);
+        $payment = Payment::factory()->for($order, 'order')->create([
+            'provider' => PaymentProvider::SAKURUPIAH,
+            'method' => 'QRIS',
+            'currency' => 'IDR',
+            'amount' => 12_000,
+        ]);
+
+        $this->actingAs($owner)
+            ->post(route('admin.payment-mode.update'), [
+                'update_scope' => 'provider_switch',
+                'payment_mode' => PaymentProvider::MANUAL,
+                'confirm_provider_switch' => '1',
+            ])
+            ->assertRedirect('/admin?tab=stats#admin-payment-settings')
+            ->assertSessionDoesntHaveErrors();
+
+        $this->assertSame(PaymentProvider::MANUAL, $setting->fresh()->payment_mode);
+        $this->assertSame(PaymentProvider::SAKURUPIAH, $payment->fresh()->provider);
+        $this->assertSame('QRIS', $payment->fresh()->method);
+        $this->assertSame('IDR', $payment->fresh()->currency);
     }
 
     public function test_unready_sakurupiah_selection_fails_closed_and_preserves_the_current_provider(): void

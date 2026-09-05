@@ -6,6 +6,11 @@ itself; production activation requires the external contract gates recorded in
 the implementation map (#407) to be closed with redacted sandbox evidence and
 an explicit Owner activation through the Admin Payment Provider Switch.
 
+Automated release evidence and the current issue #416 gate decision are
+recorded in [`docs/sakurupiah-release-evidence.md`](sakurupiah-release-evidence.md).
+The current decision is **blocked** while PostgreSQL execution and external
+Sakurupiah qualification remain unproven.
+
 ## Deployment-time configuration
 
 Sakurupiah credentials and deployment controls belong in the server-side
@@ -28,9 +33,84 @@ SAKURUPIAH_PRODUCTION_CALLBACK_URL=
 SAKURUPIAH_PRODUCTION_RETURN_URL=
 ```
 
+For the current sandbox qualification, do not fill every variable in the
+template above. The minimum provider credentials are:
+
+```env
+SAKURUPIAH_SANDBOX_ENABLED=true
+SAKURUPIAH_SANDBOX_API_ID=provided-sandbox-api-id
+SAKURUPIAH_SANDBOX_API_KEY=provided-sandbox-api-key
+```
+
+The documented sandbox base URL is already the default. Add
+`SAKURUPIAH_SANDBOX_CALLBACK_URL` and
+`SAKURUPIAH_SANDBOX_RETURN_URL`, plus their callback/return host allowlists,
+only when running the end-to-end invoice and browser/bot flow. Sandbox
+`*_ALLOWED_IPS` and all `SAKURUPIAH_PRODUCTION_*` values are not needed for
+this qualification. The `.env.example` lists both environments for reference;
+it is not a checklist to fill completely.
+
+This repository has two environment-file consumers: Docker Compose reads the
+root `.env`, while Laravel Artisan uses `src` as its application base and
+reads `src/.env`. Use the root file through a Compose command, or configure
+the same needed sandbox values in the untracked `src/.env`; never copy
+credentials into tracked files or commit either file.
+
 Do not add ENV for channel labels, fees, expiry hours, or presentation copy;
 those are database/contract settings or typed provider constants. The provider
 spelling `api-sanbox` is intentional and must not be "corrected".
+
+## Telegram testing-bot boundary
+
+Sakurupiah sandbox qualification must use a dedicated, non-production Telegram
+bot and a disposable admin chat. Sakurupiah sandbox configuration does not
+select the Telegram bot: outbound delivery uses `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_ADMIN_CHAT_ID`. Never run a sandbox checkout with production bot
+credentials.
+
+Before creating a sandbox checkout:
+
+1. Keep `APP_ENV` outside production and inject the testing bot token and test
+   admin chat ID into the same process that runs Laravel. Do not paste either
+   value into chat, tickets, logs, or evidence.
+2. Call Telegram `getMe` through an operator-approved metadata check. Record
+   only the expected bot username and timestamp; stop if the identity is not
+   the dedicated testing bot.
+3. Confirm the target chat is disposable and belongs to the testing setup.
+4. Only then create the minimum sandbox invoice. The provider remains
+   Sakurupiah sandbox; Telegram bot identity is a separate safety gate.
+
+Changing `src/.env` requires restarting the local Artisan server and workers;
+it does not require rebuilding a Docker image. When Compose injects the
+variables, recreate only an isolated testing project:
+
+```bash
+docker compose --env-file <sandbox-env-file> \
+  -p telegram-bot-testing up -d --force-recreate --no-build
+```
+
+Use a testing database and a project name distinct from production. Compose
+`--build` is needed only when the Dockerfile or build context changes; an
+environment-only change needs container recreation, not an image rebuild.
+
+
+## External contract policy record
+
+Production readiness also requires the non-secret
+`services.sakurupiah.contract_policy` record. It is versioned in application
+configuration and defaults to fail closed. Every one of the twelve external
+contract gates must be `true` and have a redacted evidence reference; the
+record must also contain a redacted record reference and explicit Owner
+approval for automatic fulfillment. Do not set these values from static
+provider documentation or from a sandbox response that does not prove the
+specific gate.
+
+The policy covers request encoding, signature canonicalization, channel
+metadata, expiry, create response, QR/hosted presentation, amount-bearing
+status/history, duplicate-reference recovery, callback delivery, error/limit
+semantics, production network policy, and credential operations.
+A missing or unqualified external-contract policy gate prevents production
+readiness before any provider HTTP call.
 
 ## Readiness
 
@@ -115,6 +195,81 @@ Capture only redacted evidence. Key steps:
    Payment (paid/expired/pending), including after a restart.
 
 Never use a production transaction to discover undocumented provider behavior.
+
+### Latest redacted sandbox observation
+
+On 2026-09-04, the sandbox readiness check loaded the root Compose
+environment explicitly and reported `enabled=true`, `ready=true`, and no
+missing values. `list-payment.php` returned HTTP `200` / JSON `status: "200"`
+with 17 rows; the live `QRIS` row reported minimum `500`, maximum `2000000`,
+fee `0.7` with unit marker `Percent`, active status, direct type, and
+`default_expired=12`. `check_balance.php` returned a parseable typed balance;
+the amount is intentionally not recorded here. One `500` QRIS invoice was
+created with a unique redacted reference, recovered through same-day history
+as `pending` with amount and expiry, and confirmed by status lookup as
+`pending`. A non-mutating invalid-method probe returned HTTP `400` with JSON
+`status: "400"` and a message. Repeating the same merchant reference was
+rejected with HTTP `400`; no second invoice was accepted. After its configured
+expiry, the same redacted invoice was observed as `expired` through both
+status and amount-bearing history. No payment or callback was observed.
+Rate-limit, timeout, retry, expiry-code mapping, callback, and
+production-network behavior remain unqualified. This is sandbox evidence only;
+it does not qualify production gates or Owner approval.
+
+After that expiry observation, one Owner-authorized fresh sandbox invoice was
+created at approximately 21:28 WIB for amount `500`. Its typed create response
+was `pending` with total `500`, merchant-fee mode `1`, and both QR and hosted
+presentation fields present; the provider omitted a separate `amount` field.
+The Owner later changed the sandbox invoice to successful. Status lookup and
+amount-bearing history both reported `berhasil` for QRIS and amount `500`;
+status lookup still omitted amount fields. No provider callback was observed
+by the application, and the invoice was not linked to a local Payment.
+Do not record or share its QR, hosted URL/token, signature, or full identifiers.
+
+After the direct-provider payment observation, a separate Owner-authorized
+app-linked sandbox checkout was exercised with the dedicated testing bot. The
+provider status lookup returned `berhasil`; because it omitted amount, the
+application's reconciliation path fetched same-day history and accepted the
+transition only when the history amount `500` matched the local IDR Payment.
+The Payment became `paid` with `paid_at`, the Order payment status became
+`paid`, and the Order remained `processing` for manual fulfillment. The paid
+Telegram admin outbound effect was recorded `sent`, and the signed Web invoice
+rendered the paid surface. Three identical signed pending callbacks remained
+deduplicated and acknowledged, but no provider paid callback was observed.
+The app-linked create response omitted QR/hosted presentation, so the
+application correctly held the initial Payment pending and non-payable. A
+separate app-linked expiry path is still required; these observations do not
+qualify unresolved P0 gates or Owner production approval.
+
+### Evidence record mapping
+
+For each gate, retain a redacted capture or hash in the approved
+merchant/provider evidence system and put only its redacted reference or hash
+in `services.sakurupiah.contract_policy.evidence_references`. Do not copy API
+keys, bearer tokens, full HMAC signatures, raw QR values, raw payloads, or
+tokenized URLs into the repository, issue, comments, or artifacts. A reference
+is not qualification by itself: the capture must show the observed behavior or
+cite a written provider clarification.
+
+| Policy gate | Qualification capture | Issue/configuration record |
+| --- | --- | --- |
+| `request_encoding` | Endpoint, method, content type, field names, and accepted form encoding for every used request. | Redacted request-capture reference. |
+| `signature_canonicalization` | Exact canonical input ordering, amount representation, algorithm, and casing; keep secrets and signature output out of the issue. | Secure evidence hash/reference for the signature vector. |
+| `channel_contract` | Active QRIS metadata, IDR unit, min/max, fee payer, and returned fee/total semantics. | Sanitized channel-response reference. |
+| `expiry_contract` | Expiry range, `Asia/Jakarta` timezone, boundary behavior, and resolved `2` versus `-2` mapping. | Redacted expiry test or provider-clarification reference. |
+| `create_response` | Allowed response field types, `trx_id`, merchant reference, and durable local persistence. | Sanitized create-response reference with identifiers hashed. |
+| `presentation` | QR EMV/CRC and encoded amount validation, or HTTPS hosted-URL host/token behavior. | Redacted rendering/allowlist evidence reference. |
+| `amount_evidence` | Paid status/history response containing authoritative amount and currency matching the Payment snapshot. | Sanitized status/history reference. |
+| `duplicate_reference` | Repeated merchant reference and timeout/ambiguous-create recovery using the same persisted reference. | Redacted duplicate/recovery trace reference. |
+| `callback_contract` | Callback headers/body, event/status/code mapping, duplicate delivery, retry, and acknowledgement behavior. | Sanitized callback evidence reference. |
+| `error_limits` | HTTP/JSON error shapes, timeout behavior, retryable statuses, rate limits, and bounded retry results. | Redacted error/limits matrix reference. |
+| `production_network` | Production IP allowlist, reverse-proxy source identity, HTTPS host policy, and rejection behavior. | Redacted network-policy evidence reference. |
+| `credential_operations` | Credential rotation/revocation test, expiry handling, and provider support escalation path. | Provider process or test reference; never credentials. |
+
+The `record_reference` identifies the complete evidence set, while each
+per-gate reference identifies the corresponding row. Do not mark a gate true
+because documentation, a type declaration, or an unverified sandbox response
+looks plausible.
 
 ## Outcome-unknown recovery
 

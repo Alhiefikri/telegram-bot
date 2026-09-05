@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Services\Sakurupiah\SakurupiahContractPolicy;
 use Tests\TestCase;
 
 class PaymentDocumentationTest extends TestCase
@@ -45,6 +46,7 @@ class PaymentDocumentationTest extends TestCase
         ];
         $compose = file_get_contents(base_path('../docker-compose.yml'));
         [$sharedAppEnvironment] = explode("\nservices:", $compose, 2);
+        $phpunit = file_get_contents(base_path('phpunit.xml'));
         $variables = [
             'SAKURUPIAH_SANDBOX_ENABLED',
             'SAKURUPIAH_SANDBOX_BASE_URL',
@@ -116,6 +118,23 @@ class PaymentDocumentationTest extends TestCase
         }
         $this->assertStringNotContainsString('SAKURUPIAH_QRIS_CURRENCY:', $sharedAppEnvironment);
         $this->assertStringNotContainsString('SAKURUPIAH_QRIS_FEE_PAYER:', $sharedAppEnvironment);
+        foreach ([
+            'SAKURUPIAH_SANDBOX_ENABLED' => 'false',
+            'SAKURUPIAH_SANDBOX_API_ID' => '',
+            'SAKURUPIAH_SANDBOX_API_KEY' => '',
+            'SAKURUPIAH_PRODUCTION_ENABLED' => 'false',
+            'SAKURUPIAH_PRODUCTION_API_ID' => '',
+            'SAKURUPIAH_PRODUCTION_API_KEY' => '',
+        ] as $variable => $value) {
+            $this->assertSame(
+                2,
+                preg_match_all(
+                    '/<(?:env|server) name="'.preg_quote($variable, '/').'" value="'.preg_quote($value, '/').'" force="true"\/>/',
+                    $phpunit,
+                ),
+                $variable.' must be isolated in both env and server test scopes.',
+            );
+        }
     }
 
     public function test_binance_pay_id_is_blank_in_env_examples_and_forwarded_by_shared_compose_environment(): void
@@ -182,10 +201,63 @@ class PaymentDocumentationTest extends TestCase
             'Late payment',
             'Stop-new-checkout',
             'Rollback',
+            'Telegram testing-bot boundary',
+            'getMe',
+            '--force-recreate --no-build',
+            'does not require rebuilding',
+            'production bot',
+            'sakurupiah-release-evidence.md',
+            'blocked',
         ] as $section) {
             $this->assertStringContainsString($section, $runbook);
         }
+        $this->assertStringContainsString('Docker Compose reads the', $runbook);
+        $this->assertStringContainsString('Laravel Artisan uses `src`', $runbook);
         $this->assertStringNotContainsString('RAILWAY_', $runbook);
+    }
+
+    public function test_sakurupiah_release_evidence_records_commands_and_blocked_external_gate(): void
+    {
+        $evidence = file_get_contents(base_path('../docs/sakurupiah-release-evidence.md'));
+
+        foreach ([
+            'issue #416',
+            'BLOCKED',
+            'composer test',
+            'test:concurrency-gate',
+            '127.0.0.1:5432',
+            'npx playwright test',
+            'default',
+            'issue #415',
+            'one paid transition produces one sale',
+        ] as $section) {
+            $this->assertStringContainsString($section, $evidence);
+        }
+        $this->assertStringNotContainsString('RAILWAY_', $evidence);
+        $this->assertStringNotContainsString('automatic_fulfillment_approved: true', $evidence);
+    }
+
+    public function test_sakurupiah_external_contract_policy_is_explicit_and_fail_closed(): void
+    {
+        $policy = config('services.sakurupiah.contract_policy');
+        $runbook = file_get_contents(base_path('../docs/runbook-sakurupiah-payment.md'));
+
+        $this->assertSame(0, $policy['record_version']);
+        $this->assertSame(
+            array_fill_keys(array_keys(SakurupiahContractPolicy::REQUIRED_GATES), false),
+            $policy['gates'],
+        );
+        $this->assertSame([], $policy['evidence_references']);
+        $this->assertFalse($policy['automatic_fulfillment_approved']);
+        $this->assertStringContainsString('contract_policy', $runbook);
+        $this->assertStringContainsString('twelve external', $runbook);
+        $this->assertStringContainsString('fail closed', $runbook);
+        foreach (array_keys(SakurupiahContractPolicy::REQUIRED_GATES) as $gate) {
+            $this->assertStringContainsString('`'.$gate.'`', $runbook);
+        }
+        $this->assertStringContainsString('full HMAC signatures', $runbook);
+        $this->assertStringContainsString('do not fill every variable', $runbook);
+        $this->assertStringContainsString('not a checklist to fill completely', $runbook);
     }
 
     public function test_bsc_operator_contract_documents_database_activation_and_shared_queue_configuration(): void

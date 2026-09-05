@@ -66,7 +66,8 @@ final readonly class SakurupiahChannel
             );
         }
 
-        $percent = self::optionalPercent($payload);
+        $feeUnit = self::optionalFeeUnit($payload);
+        $percent = self::optionalPercent($payload, $feeUnit);
 
         return new self(
             code: SakurupiahPayloadReader::requiredString($payload, 'kode', 64),
@@ -75,7 +76,7 @@ final readonly class SakurupiahChannel
             maximum: SakurupiahPayloadReader::requiredInteger($payload, 'maksimal', allowZero: false),
             type: SakurupiahPayloadReader::requiredString($payload, 'tipe', 32),
             status: SakurupiahPayloadReader::requiredString($payload, 'status', 64),
-            fee: self::optionalFee($payload, 'biaya'),
+            fee: self::optionalFee($payload, 'biaya', $feeUnit === 'percent'),
             percent: $percent,
             addition: $addition,
         );
@@ -106,31 +107,74 @@ final readonly class SakurupiahChannel
         return $this->fee?->fixedAmount();
     }
 
-    /** @param array<mixed> $payload */
-    private static function optionalPercent(array $payload): ?string
+    /**
+     * The provider sends the fee value in `biaya` and its unit in `percent`
+     * (`Percent` or `Nominal`), rather than appending `%` to the value.
+     *
+     * @param  array<mixed>  $payload
+     */
+    private static function optionalFeeUnit(array $payload): ?string
     {
-        $percent = SakurupiahPayloadReader::optionalString($payload, 'percent', 32);
-        if ($percent === null) {
+        $unit = SakurupiahPayloadReader::optionalString($payload, 'percent', 32);
+
+        return $unit === null ? null : strtolower($unit);
+    }
+
+    /** @param array<mixed> $payload */
+    private static function optionalPercent(array $payload, ?string $feeUnit): ?string
+    {
+        if ($feeUnit === null || $feeUnit === 'nominal') {
             return null;
         }
 
+        if ($feeUnit === 'percent') {
+            if (! array_key_exists('biaya', $payload)) {
+                throw new SakurupiahSchemaException;
+            }
+
+            try {
+                $fee = SakurupiahFee::from(self::normalizeFeeValue($payload['biaya'], percent: true));
+                if ($fee === null || ! $fee->isPercentage()) {
+                    throw new InvalidArgumentException('Sakurupiah percentage fee is required.');
+                }
+            } catch (InvalidArgumentException $exception) {
+                throw new SakurupiahSchemaException(previous: $exception);
+            }
+
+            return $fee->percentage();
+        }
+
         try {
-            SakurupiahFee::from(rtrim($percent, '%').'%');
+            SakurupiahFee::from(rtrim($feeUnit, '%').'%');
         } catch (InvalidArgumentException $exception) {
             throw new SakurupiahSchemaException(previous: $exception);
         }
 
-        return $percent;
+        return rtrim($feeUnit, '%');
     }
 
-    private static function optionalFee(array $payload, string $key): ?SakurupiahFee
+    private static function normalizeFeeValue(mixed $value, bool $percent): mixed
+    {
+        if (! $percent || $value === null || $value === '') {
+            return $value;
+        }
+
+        if (! is_int($value) && ! is_string($value)) {
+            throw new InvalidArgumentException('Sakurupiah fee must be a scalar numeric value.');
+        }
+
+        return str_ends_with((string) $value, '%') ? $value : (string) $value.'%';
+    }
+
+    /** @param array<mixed> $payload */
+    private static function optionalFee(array $payload, string $key, bool $percent = false): ?SakurupiahFee
     {
         if (! array_key_exists($key, $payload)) {
             return null;
         }
 
         try {
-            return SakurupiahFee::from($payload[$key]);
+            return SakurupiahFee::from(self::normalizeFeeValue($payload[$key], $percent));
         } catch (InvalidArgumentException $exception) {
             throw new SakurupiahSchemaException(previous: $exception);
         }

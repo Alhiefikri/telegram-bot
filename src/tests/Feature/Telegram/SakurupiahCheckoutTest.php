@@ -15,8 +15,10 @@ use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\TelegramBotTestSupport;
@@ -90,6 +92,42 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('provider-secret', $body);
         $this->assertStringContainsString('buyer:cancel-pending:'.$order->id, $body);
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
+    }
+
+    public function test_sakurupiah_delivery_loads_the_checkout_graph_without_relation_n_plus_one(): void
+    {
+        $this->fakeTelegramHttp();
+        [$order, $payment] = $this->payment([
+            'invoice_number' => 'INV-SAK-TELEGRAM-QUERY-BUDGET',
+            'provider_presentation' => [
+                'mode' => 'qris',
+                'qris_payload' => self::DIRECT_QRIS,
+                'checkout_url' => null,
+            ],
+        ]);
+        $effect = app(TelegramOutboundEffectService::class)->recordCheckoutInstructions($order, $payment);
+
+        $queries = [];
+        DB::listen(function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = strtolower($query->sql);
+        });
+
+        (new SendSakurupiahCheckoutInstructions($order->id, null, $effect?->id))
+            ->handle(app(TelegramCheckoutIntents::class));
+
+        foreach (['customers', 'order_items'] as $table) {
+            $relationQueries = collect($queries)
+                ->filter(fn (string $sql): bool => str_contains($sql, 'from "'.$table.'"') && str_contains($sql, ' in ('))
+                ->values();
+
+            $this->assertCount(1, $relationQueries, implode("\n", $queries));
+        }
+
+        $paymentRelationQueries = collect($queries)
+            ->filter(fn (string $sql): bool => str_contains($sql, 'from "payments"') && str_contains($sql, ' in ('))
+            ->values();
+        $this->assertCount(1, $paymentRelationQueries, implode("\n", $queries));
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
     }
 
     public function test_hosted_sakurupiah_effect_uses_the_allowlisted_checkout_url_and_same_total(): void
