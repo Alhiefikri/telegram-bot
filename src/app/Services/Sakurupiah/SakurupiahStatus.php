@@ -22,6 +22,7 @@ final readonly class SakurupiahStatus
     public ?SakurupiahFee $fee;
 
     public ?int $merchantFee;
+
     public ?string $currency;
 
     public ?CarbonImmutable $occurredAt;

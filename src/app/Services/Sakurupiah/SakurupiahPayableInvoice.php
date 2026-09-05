@@ -2,6 +2,7 @@
 
 namespace App\Services\Sakurupiah;
 
+use App\Enums\PaymentStatus;
 use App\Enums\SakurupiahEnvironment;
 use App\Models\Payment;
 use App\Services\Pakasir\QrisEmvPayload;
@@ -112,8 +113,7 @@ final readonly class SakurupiahPayableInvoice
         Payment $payment,
         SakurupiahEnvironment $environment,
         ?CarbonInterface $observedExpiresAt = null,
-    ): self
-    {
+    ): self {
         if ($payment->provider !== PaymentProvider::SAKURUPIAH
             || strtoupper(trim((string) $payment->method)) !== SakurupiahCreateInvoice::METHOD_QRIS
             || strtoupper(trim((string) $payment->currency)) !== 'IDR'
@@ -129,7 +129,7 @@ final readonly class SakurupiahPayableInvoice
         if ($merchantRef === '' || $providerReference === '' || $paymentMethod !== SakurupiahCreateInvoice::METHOD_QRIS) {
             throw new SakurupiahInvoiceIntegrityException('payment_identity');
         }
-        if ($payment->status !== \App\Enums\PaymentStatus::Pending
+        if ($payment->status !== PaymentStatus::Pending
             || ! is_int($fee)
             || $fee < 0
             || ! is_int($total)
