@@ -144,54 +144,48 @@ Orders whose receipt group was already materialized under a legacy template are 
 
 The panel is a separate `sendMessage` after the final receipt chunk. It must not be appended to the credential-bearing caption or packed into a receipt continuation chunk.
 
-Canonical English copy from the requested UX:
+Canonical v1 action-panel copy uses the existing generic Support behavior. It must not promise in-chat issue resolution until a separate order-linked issue intake exists.
 
-```text
-🛟 Problem with this order? Don't DM — tap 🆘 Report an issue below and we'll fix it right here.
-```
-
-The exact copy is subject to the Report Issue dependency in Section 11. If only the generic Support URL is available, use copy that does not promise an in-chat fix, for example:
+English:
 
 ```text
 🛟 Need help with this order? Tap Support below and include your Order ID so we can help.
 ```
 
-Suggested Indonesian copy:
+Indonesian:
 
 ```text
-🛟 Ada masalah dengan pesanan ini? Jangan DM admin — tekan 🆘 Laporkan Masalah di bawah dan kami bantu dari sini.
+🛟 Butuh bantuan dengan pesanan ini? Tekan Support di bawah dan sertakan Order ID agar kami dapat membantu.
 ```
 
-Suggested Malay copy:
+Malay:
 
 ```text
-🛟 Ada masalah dengan pesanan ini? Jangan DM admin — tekan 🆘 Laporkan Masalah di bawah dan kami bantu dari sini.
+🛟 Perlukan bantuan dengan pesanan ini? Tekan Support di bawah dan sertakan Order ID supaya kami boleh membantu.
 ```
 
 All copies must be stored as locale keys, not hardcoded in a callback handler. Existing supported locales remain `id`, `en`, and `ms`.
 
 ### 6.3 Action panel keyboard
 
-Because Excel is out of scope, TXT uses a full-width row instead of the two-column TXT/Excel row shown in the reference image:
+Because Excel is out of scope, TXT uses a full-width row:
 
 ```text
 [ ⬇️ TXT                 ]
-[ 🆘 Report issue        ]
+[ 🛟 Support             ]
 [ 🎁 Buy Again           ]
 [ 📦 Main Menu           ]
 ```
 
-Localized labels are required. The keyboard must use callback buttons, not a reply keyboard, so the action remains attached to the paid Order context.
+Localized labels are required. Use one inline keyboard. TXT, Buy Again, and Main Menu are callback buttons; Support uses the configured existing support URL. The panel must remain attached to the paid Order context and contain no credential, Auth Token, OTP URL, Recovery Key, or other secret.
 
 If the paid Order has no deliverable credential, omit the TXT row. Keep only actions that remain meaningful:
 
 ```text
-[ 🆘 Report issue        ]
+[ 🛟 Support             ]
 [ 🎁 Buy Again           ]
 [ 📦 Main Menu           ]
 ```
-
-The panel contains no credential, Auth Token, OTP URL, Recovery Key, or other secret.
 
 ### 6.4 Buy Again
 
@@ -633,28 +627,22 @@ Buttons from a stale action panel must be safe after refund/cancellation: answer
 
 The repository currently has generic `/support` handling and a configured support contact, but no order-linked issue intake or ticket aggregate. A button labelled `Report issue` with the promise “we'll fix it right here” would be misleading if it only opens a generic DM/WhatsApp link.
 
-### 11.2 Recommended bounded implementation
+### 11.2 Chosen v1 behavior
 
-Treat Report Issue as a separate, adjacent workstream. The minimum viable order-linked flow is:
+For this implementation, `Support` uses the repository's existing configured Support URL/contact. It is the safe default because the repository has no order-linked issue intake or ticket aggregate.
 
-1. Buyer presses `Report issue` on the paid Order panel.
-2. Bot shows localized categories:
-   - cannot log in;
-   - credential does not work;
-   - missing/wrong item;
-   - other.
-3. Buyer selects a category.
-4. Bot asks for a short text description.
-5. A short-lived cache context binds the next message to Customer, chat, Order, category, and expiry.
-6. Bot creates a durable issue record or durable admin notification with a safe Order reference.
-7. Admin receives a redacted operational notification and handles the issue through the existing support process.
-8. Buyer receives a confirmation with the Order ID and safe next step.
+The v1 flow is:
 
-If the repository does not yet have a support/ticket owner, Phase 1 must use existing Support contact behavior and change the copy to “Need help? Tap Support”. It must not ship the stronger “fix it right here” copy with a no-op callback.
+1. Buyer presses `Support` on the paid Order panel.
+2. Telegram opens the existing Support destination.
+3. The localized panel copy asks the buyer to include the Order ID.
+4. No issue record, free-text capture, credential echo, or new support state is created by this feature.
 
-### 11.3 Report Issue security
+The action must be useful and must not acknowledge a nonexistent in-chat issue workflow. A future order-linked issue intake may add localized categories, short descriptions, durable issue state, and redacted admin notification as a separate feature.
 
-Issue descriptions may contain credentials pasted by the buyer. Therefore:
+### 11.3 Future issue intake security
+
+If the future issue intake is implemented, issue descriptions may contain credentials pasted by the buyer. Therefore:
 
 - do not put raw descriptions in logs or metrics;
 - encrypt any durable description if a new issue table is introduced;
@@ -663,7 +651,7 @@ Issue descriptions may contain credentials pasted by the buyer. Therefore:
 - do not include TXT contents or OTP URLs in admin effect metadata;
 - use a separate issue state model rather than overloading payment or receipt state.
 
-The Report Issue workstream is not required for TXT rendering, but the action panel copy and button must reflect whichever support behavior is actually deployed.
+The future Report Issue workstream is not required for TXT rendering. Until it exists, the action panel uses the generic Support label and copy defined in Section 6.
 
 ## 12. Localization contract
 
@@ -671,7 +659,7 @@ Add locale keys in `src/lang/id.json`, `src/lang/en.json`, and `src/lang/ms.json
 
 - action-panel lead text;
 - TXT button;
-- Report Issue button;
+- Support button;
 - Buy Again button;
 - Main Menu button;
 - TXT confirmation title;
@@ -683,7 +671,7 @@ Add locale keys in `src/lang/id.json`, `src/lang/en.json`, and `src/lang/ms.json
 - unavailable/not-eligible message;
 - successful document caption;
 - generation/render failure message;
-- generic Support fallback copy if Report Issue is not enabled.
+- generic Support copy.
 
 Use `TelegramLocale::translate()` or `translateLocale()` consistently. Do not derive language from Telegram's current client language after the Order; use the stored Customer locale used by the receipt.
 
@@ -709,7 +697,7 @@ The implementation should be organized around these ownership boundaries:
 | TXT delivery | dedicated TXT pipeline/job | Claim/finalize `sendDocument`; render just-in-time; no secret persistence. |
 | Callback routing | new callback handler | Ownership, nonce, confirmation, effect creation, and safe acknowledgement. |
 | Buy Again/Main Menu | existing catalog/menu adapters | Reuse existing entry points and clear interaction state. |
-| Report Issue | separate support/issue module | Only if the in-chat issue contract is approved. |
+| Support fallback | existing configured Support route | Open real Support behavior without promising in-chat issue resolution. |
 
 ### 13.2 Transport method contract
 
@@ -829,7 +817,7 @@ The operational review projection must display only safe categories and counts. 
 
 - Approve this specification and the full-export privacy decision.
 - Confirm that downloadable TXT intentionally has no Telegram content protection.
-- Decide whether Phase 1 uses generic Support or the bounded Report Issue intake.
+- Confirm the v1 Support fallback; do not add order-linked issue intake to this release.
 - No source, schema, queue, or production change before approval.
 
 ### Phase 1 — transport and exporter
@@ -859,12 +847,10 @@ The operational review projection must display only safe categories and counts. 
 
 ### Phase 4 — support action
 
-Choose one before activating the stronger requested copy:
-
-- reuse existing Support URL and use generic Support copy; or
-- implement the bounded order-linked Report Issue intake in Section 11.
-
-Do not ship a button that acknowledges successfully but performs no useful action.
+- Add the existing Support URL/contact as an inline action.
+- Use the generic localized Support copy and ask the buyer to include the Order ID.
+- Do not add free-text capture, ticket persistence, or a stronger in-chat repair promise.
+- Treat order-linked Report Issue intake as a separate future feature.
 
 ### Phase 5 — staging verification
 
@@ -1030,13 +1016,13 @@ The implementation should be split into small reviewable changes with each commi
 7. Add localized action-panel copy and panel effect.
 8. Add post-receipt handoff/recovery for the panel.
 9. Wire Buy Again/Main Menu to existing adapters.
-10. Wire either generic Support fallback or the approved Report Issue workstream.
+10. Wire the generic Support fallback action.
 11. Add performance benchmark and safe observability counters.
 12. Run focused tests, full tests, concurrency evidence where applicable, staging smoke, and secret scans.
 
 No commit may add an environment variable, a second outbound ledger, a plaintext credential cache, or a permanent generated-file table.
 
-## 21. Open decisions before implementation
+## 21. Decisions before implementation
 
 The following product decisions are resolved for this plan:
 
@@ -1049,11 +1035,8 @@ The following product decisions are resolved for this plan:
 - file generation: explicit confirmation only;
 - file lifetime: transient on VPS; Telegram owns the delivered document copy;
 - queue: existing `notifications` queue;
-- Excel: not implemented.
+- Excel: not implemented;
+- Report Issue v1: existing generic Support route with copy that includes the Order ID;
+- order-linked issue intake: deferred to a separate feature.
 
-The only remaining product gate is the Report Issue behavior:
-
-- **Safer immediate scope:** use the existing Support contact and soften the panel copy.
-- **Full requested UX:** implement the bounded order-linked issue intake before shipping the “we'll fix it right here” wording.
-
-Until that gate is selected, the TXT implementation can proceed independently, but the final action-panel copy must not overpromise support behavior.
+The implementation is agent-ready after this gate. No action-panel text may claim in-chat issue resolution until the deferred issue-intake feature is implemented and approved.
