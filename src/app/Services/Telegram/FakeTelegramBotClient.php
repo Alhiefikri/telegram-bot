@@ -6,6 +6,9 @@ use App\Support\DogfoodTiming;
 
 class FakeTelegramBotClient extends TelegramBotClient
 {
+    /** @var list<array<string, mixed>> */
+    public array $calls = [];
+
     public function getChat(int|string $chatId): array
     {
         $this->record('getChat');
@@ -85,6 +88,39 @@ class FakeTelegramBotClient extends TelegramBotClient
         ];
     }
 
+    public function sendDocument(
+        int|string $chatId,
+        string $documentContents,
+        string $filename,
+        ?string $caption = null,
+        array $replyMarkup = [],
+        array $options = [],
+    ): array {
+        $filename = $this->sanitizeDocumentFilename($filename);
+        $response = [
+            'ok' => true,
+            'result' => [
+                ...$options,
+                'message_id' => random_int(100000, 999999),
+                'chat' => ['id' => $chatId],
+                'document' => ['file_id' => 'fake-document-file-id', 'file_name' => $filename],
+                'caption' => $caption,
+                'reply_markup' => $replyMarkup,
+            ],
+        ];
+
+        $this->record('sendDocument', [
+            'chat_id' => $chatId,
+            'filename' => $filename,
+            'caption' => $caption,
+            'reply_markup' => $replyMarkup,
+            'options' => $options,
+            'response' => $response,
+        ]);
+
+        return $response;
+    }
+
     public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = [], array $options = []): array
     {
         $this->record('sendPhotoReference');
@@ -116,8 +152,9 @@ class FakeTelegramBotClient extends TelegramBotClient
         $this->record('deleteMessage');
     }
 
-    private function record(string $operation): void
+    private function record(string $operation, array $metadata = []): void
     {
+        $this->calls[] = ['method' => $operation, ...$metadata];
         $startedAt = DogfoodTiming::now();
         usleep((int) config('services.dogfood_timing.fake_telegram_latency_us', 1000));
 

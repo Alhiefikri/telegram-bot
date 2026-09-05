@@ -12,9 +12,14 @@ class TelegramBotClient
 {
     private readonly TelegramBotApiRequestFactory $requests;
 
-    public function __construct(?TelegramBotApiRequestFactory $requests = null)
-    {
+    private readonly TelegramOutboundResponseValidator $responseValidator;
+
+    public function __construct(
+        ?TelegramBotApiRequestFactory $requests = null,
+        ?TelegramOutboundResponseValidator $responseValidator = null,
+    ) {
         $this->requests = $requests ?? new TelegramBotApiRequestFactory;
+        $this->responseValidator = $responseValidator ?? new TelegramOutboundResponseValidator;
     }
 
     public function getChat(int|string $chatId): array
@@ -158,6 +163,47 @@ class TelegramBotClient
         return $response;
     }
 
+    public function sendDocument(
+        int|string $chatId,
+        string $documentContents,
+        string $filename,
+        ?string $caption = null,
+        array $replyMarkup = [],
+        array $options = [],
+    ): array {
+        $request = $this->requests->request()->attach(
+            'document',
+            $documentContents,
+            $this->sanitizeDocumentFilename($filename),
+        );
+        $payload = array_merge($options, ['chat_id' => $chatId]);
+        unset($payload['document']);
+
+        if ($caption !== null && $caption !== '') {
+            $payload['caption'] = $caption;
+        } else {
+            unset($payload['caption']);
+        }
+        if (isset($payload['caption_entities']) && is_array($payload['caption_entities'])) {
+            $payload['caption_entities'] = json_encode($payload['caption_entities'], JSON_THROW_ON_ERROR);
+        }
+
+        if ($replyMarkup !== []) {
+            $payload['reply_markup'] = json_encode($replyMarkup, JSON_THROW_ON_ERROR);
+        } else {
+            unset($payload['reply_markup']);
+        }
+
+        $response = $this->timed(
+            'sendDocument',
+            fn () => $request->post($this->requests->url('sendDocument'), $payload)->throw()->json(),
+        );
+        $response = $this->successfulResponse('sendDocument', $response);
+        $this->responseValidator->messageIdFromResponse($response, 'Telegram sendDocument');
+
+        return $response;
+    }
+
     public function sendPhotoReference(int|string $chatId, string $photoFileId, ?string $caption = null, array $replyMarkup = [], array $options = []): array
     {
         $payload = array_merge(['chat_id' => $chatId, 'photo' => $photoFileId], $options);
@@ -204,6 +250,15 @@ class TelegramBotClient
     public function deleteMessage(int|string $chatId, int|string $messageId): void
     {
         $this->timed('deleteMessage', fn () => $this->requests->request()->post($this->requests->url('deleteMessage'), ['chat_id' => $chatId, 'message_id' => $messageId])->throw());
+    }
+
+    protected function sanitizeDocumentFilename(string $filename): string
+    {
+        $sanitized = preg_replace('/[^A-Za-z0-9._-]+/', '-', $filename) ?? '';
+        $sanitized = preg_replace('/\.{2,}/', '.', $sanitized) ?? '';
+        $sanitized = trim($sanitized, '.-');
+
+        return $sanitized !== '' ? $sanitized : 'document';
     }
 
     /**

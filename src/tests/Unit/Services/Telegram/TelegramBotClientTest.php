@@ -37,7 +37,7 @@ class TelegramBotClientTest extends TestCase
             $requests[$operation] = $request;
             $optionsByOperation[$operation] = $options;
 
-            return Http::response(['ok' => true, 'result' => ['id' => 12345]], 200);
+            return Http::response(['ok' => true, 'result' => ['id' => 12345, 'message_id' => 12345]], 200);
         });
 
         $client = app(TelegramBotClient::class);
@@ -48,6 +48,7 @@ class TelegramBotClientTest extends TestCase
         $client->editMessageText(12345, 777, 'Edited message', ['inline_keyboard' => [[['text' => 'Next', 'callback_data' => 'next']]]]);
         $client->sendPhoto(12345, 'binary-photo', 'receipt.png', 'Receipt');
         $client->sendPhotoReference(12345, 'telegram-file-id', 'Receipt reference');
+        $client->sendDocument(12345, 'binary-document', 'download.txt');
         $client->answerCallbackQuery('callback-query-id', 'Done');
         $client->deleteMessage(12345, 777);
 
@@ -58,10 +59,11 @@ class TelegramBotClientTest extends TestCase
             'editMessageText',
             'sendPhoto',
             'sendPhotoReference',
+            'sendDocument',
             'answerCallbackQuery',
             'deleteMessage',
         ], array_keys($optionsByOperation));
-        Http::assertSentCount(8);
+        Http::assertSentCount(9);
 
         foreach ($optionsByOperation as $operation => $options) {
             $this->assertArrayHasKey('timeout', $options, "{$operation} did not configure an HTTP timeout.");
@@ -77,6 +79,8 @@ class TelegramBotClientTest extends TestCase
         $this->assertSame('Edited message', $requests['editMessageText']['text']);
         $this->assertTrue($requests['sendPhoto']->isMultipart(), 'sendPhoto should use the multipart attach request path.');
         $this->assertTrue($requests['sendPhoto']->hasFile('photo', 'binary-photo', 'receipt.png'));
+        $this->assertTrue($requests['sendDocument']->isMultipart(), 'sendDocument should use the multipart attach request path.');
+        $this->assertTrue($requests['sendDocument']->hasFile('document', 'binary-document', 'download.txt'));
     }
 
     public function test_not_modified_edit_is_idempotent_without_a_duplicate_send(): void
@@ -158,6 +162,126 @@ class TelegramBotClientTest extends TestCase
         $this->assertSame(12345, $response['result']['chat']['id']);
     }
 
+    public function test_send_document_uses_multipart_payload_and_download_options(): void
+    {
+        $contents = "email@example.test\npassword=secret-value\n";
+        $replyMarkup = ['inline_keyboard' => [[['text' => 'Download', 'callback_data' => 'download']]]];
+        $captionEntities = [['type' => 'bold', 'offset' => 0, 'length' => 8]];
+
+        Http::fake(fn () => Http::response([
+            'ok' => true,
+            'result' => [
+                'message_id' => 987654,
+                'chat' => ['id' => 12345],
+            ],
+        ], 200));
+
+        $response = app(TelegramBotClient::class)->sendDocument(
+            12345,
+            $contents,
+            '../lhie store/ORDER:42.txt',
+            'Download',
+            $replyMarkup,
+            [
+                'caption_entities' => $captionEntities,
+                'protect_content' => false,
+            ],
+        );
+
+        $this->assertSame(987654, $response['result']['message_id']);
+
+        $requests = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument'));
+        $this->assertCount(1, $requests);
+        $request = $requests->sole()[0];
+
+        $this->assertTrue($request->isMultipart());
+        $this->assertTrue($request->hasFile('document', $contents, 'lhie-store-ORDER-42.txt'));
+        $this->assertSame('12345', (string) $this->multipartField($request, 'chat_id'));
+        $this->assertSame('Download', $this->multipartField($request, 'caption'));
+        $this->assertSame(
+            $replyMarkup,
+            json_decode((string) $this->multipartField($request, 'reply_markup'), true, 512, JSON_THROW_ON_ERROR),
+        );
+        $this->assertSame(
+            $captionEntities,
+            json_decode((string) $this->multipartField($request, 'caption_entities'), true, 512, JSON_THROW_ON_ERROR),
+        );
+        $this->assertFalse(filter_var($this->multipartField($request, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
+    }
+
+    public function test_send_document_requires_a_positive_message_id_for_successful_response(): void
+    {
+        Http::fake(fn () => Http::response([
+            'ok' => true,
+            'result' => ['message_id' => 0],
+        ], 200));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('positive integer');
+
+        app(TelegramBotClient::class)->sendDocument(12345, 'document-body', 'download.txt');
+    }
+
+    public function test_send_document_transport_failures_preserve_ambiguous_classification_without_body_output(): void
+    {
+        $contents = 'credential-body-must-not-appear';
+
+        Http::fake([
+            'https://api.telegram.org/*/sendDocument' => Http::failedConnection('socket reset'),
+        ]);
+
+        try {
+            app(TelegramBotClient::class)->sendDocument(12345, $contents, 'download.txt');
+            $this->fail('Expected the Telegram document transport failure.');
+        } catch (TelegramTransportException $exception) {
+            $this->assertStringContainsString('sendDocument', $exception->getMessage());
+            $this->assertStringNotContainsString($contents, $exception->getMessage());
+        }
+    }
+
+    public function test_fake_telegram_client_records_send_document_without_document_contents(): void
+    {
+        $contents = 'credential-body-must-not-appear';
+        $replyMarkup = ['inline_keyboard' => [[['text' => 'Download', 'callback_data' => 'download']]]];
+        $options = ['protect_content' => false];
+        $client = new FakeTelegramBotClient;
+
+        $response = $client->sendDocument(
+            12345,
+            $contents,
+            '../lhie store/ORDER:42.txt',
+            'Download',
+            $replyMarkup,
+            $options,
+        );
+
+        $this->assertTrue($response['ok']);
+        $this->assertIsInt($response['result']['message_id']);
+        $this->assertGreaterThan(0, $response['result']['message_id']);
+        $this->assertSame(12345, $response['result']['chat']['id']);
+        $this->assertSame('lhie-store-ORDER-42.txt', $response['result']['document']['file_name']);
+
+        $call = $client->calls[0];
+        $this->assertSame('sendDocument', $call['method']);
+        $this->assertSame(12345, $call['chat_id']);
+        $this->assertSame('lhie-store-ORDER-42.txt', $call['filename']);
+        $this->assertSame($options, $call['options']);
+        $this->assertSame($response, $call['response']);
+        $this->assertStringNotContainsString($contents, json_encode($client->calls, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_send_document_rejects_unsuccessful_api_response(): void
+    {
+        Http::fake(fn () => Http::response([
+            'ok' => false,
+            'description' => 'Document rejected',
+        ], 200));
+
+        $this->expectException(TelegramApiException::class);
+
+        app(TelegramBotClient::class)->sendDocument(12345, 'document-body', 'download.txt');
+    }
+
     public function test_fast_webhook_ack_skips_empty_worker_ack_but_preserves_callback_notification(): void
     {
         Http::fake();
@@ -210,6 +334,17 @@ class TelegramBotClientTest extends TestCase
         }
 
         return $method;
+    }
+
+    private function multipartField(mixed $request, string $field): mixed
+    {
+        foreach ($request->data() as $part) {
+            if (is_array($part) && ($part['name'] ?? null) === $field) {
+                return $part['contents'] ?? null;
+            }
+        }
+
+        return $request[$field] ?? null;
     }
 
     private function exceptionChainMessages(Throwable $exception): string
