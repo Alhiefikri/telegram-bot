@@ -38,11 +38,16 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
     {
         return $context->data === 'status'
             || preg_match('/^order:([^\s:]+)$/', $context->data) === 1
-            || preg_match('/^buyer:cancel-pending:([0-9a-fA-F-]+)$/', $context->data) === 1;
+            || preg_match('/^buyer:cancel-pending:([0-9a-fA-F-]+)$/', $context->data) === 1
+            || str_starts_with($context->data, 'txt:');
     }
 
     public function handle(TelegramCallbackContext $context): bool
     {
+        if (str_starts_with($context->data, 'txt:')) {
+            return false;
+        }
+
         if ($context->data === 'status') {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
             $this->orders->sendLatestOrderStatus($context->customer, $context->chatId);

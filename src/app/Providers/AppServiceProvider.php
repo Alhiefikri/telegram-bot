@@ -52,6 +52,7 @@ use App\Services\Telegram\Callbacks\TelegramCheckoutMaintenanceCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCommunityGateVerifyCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramLocaleCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramOrderCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramOrderTxtCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramPaymentProofCallbackHandler;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
@@ -111,6 +112,7 @@ class AppServiceProvider extends ServiceProvider
             $app->make(TelegramAdminStatsCallbackHandler::class),
             $app->make(TelegramCatalogCallbackHandler::class),
             $app->make(TelegramOrderCallbackHandler::class),
+            $app->make(TelegramOrderTxtCallbackHandler::class),
             $app->make(TelegramCartCallbackHandler::class),
             $app->make(TelegramCheckoutCallbackHandler::class),
             $app->make(TelegramBscVerifyCallbackHandler::class),
