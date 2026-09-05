@@ -39,6 +39,7 @@ final class TelegramOutboundEffectReviewProjection
             TelegramOutboundEffectType::AdminOrderPendingNotification->value,
             TelegramOutboundEffectType::AdminOrderPaidNotification->value,
             TelegramOutboundEffectType::AdminOrderExpiredNotification->value => $this->adminOrder($effect, $messageId, $at),
+            TelegramOutboundEffectType::ReceiptOrderActions->value => null,
             TelegramOutboundEffectType::ManualCheckoutInstructions->value,
             TelegramOutboundEffectType::KlikQrisCheckoutInstructions->value,
             TelegramOutboundEffectType::SakurupiahCheckoutInstructions->value,

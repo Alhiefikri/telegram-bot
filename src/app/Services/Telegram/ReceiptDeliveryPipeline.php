@@ -76,6 +76,7 @@ final class ReceiptDeliveryPipeline
             );
             if ($finalized !== null) {
                 $this->synchronizeSentProjection($finalized, $order->id);
+                $this->materializeCompletedActionPanel($finalized);
 
                 if ($dispatchNext) {
                     $next = $this->ledger->nextReceiptEffect(
@@ -144,6 +145,62 @@ final class ReceiptDeliveryPipeline
                 $this->dispatchNextReceiptEffect($finalized);
             }
         }
+    }
+
+    /**
+     * Materialize the panel only after every unit in a new receipt group is
+     * sent. The effect row is the durable handoff if dispatch is interrupted.
+     */
+    public function materializeCompletedActionPanel(
+        TelegramOutboundEffect $receiptEffect,
+        bool $dispatch = true,
+    ): ?TelegramOutboundEffect {
+        if (! $this->receiptGroupComplete($receiptEffect)) {
+            return null;
+        }
+
+        $panel = $this->outboundEffects->recordReceiptActionPanel($receiptEffect);
+        if ($panel !== null && $dispatch) {
+            $this->dispatcher->dispatch($panel);
+        }
+
+        return $panel;
+    }
+
+    /**
+     * Recover the committed receipt-complete to action-panel handoff. Only
+     * receipt groups explicitly opted into the panel are considered, so legacy
+     * and pre-panel groups remain immutable.
+     */
+    public function reconcileMissingActionPanels(int $chunk = 100, bool $dispatch = false): int
+    {
+        $materialized = 0;
+
+        TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
+            ->where('template_version', TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION)
+            ->where('sequence', 1)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->whereNotNull('effect_group_key')
+            ->orderBy('id')
+            ->chunkById(max(1, $chunk), function ($effects) use (&$materialized, $dispatch): void {
+                foreach ($effects as $first) {
+                    $last = TelegramOutboundEffect::query()
+                        ->where('effect_group_key', $first->effect_group_key)
+                        ->orderByDesc('sequence')
+                        ->first();
+                    if ($last === null) {
+                        continue;
+                    }
+
+                    if ($this->materializeCompletedActionPanel($last, $dispatch) !== null) {
+                        $materialized++;
+                    }
+                }
+            });
+
+        return $materialized;
     }
 
     /**

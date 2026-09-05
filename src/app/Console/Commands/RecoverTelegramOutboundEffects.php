@@ -36,6 +36,7 @@ class RecoverTelegramOutboundEffects extends Command
         $recovery = app(TelegramOutboundEffectRecovery::class);
         $staleLeases = $recovery->recoverExpiredLeases(now());
         $recovery->reconcileCompletedReceiptProjections((int) $this->option('chunk'));
+        $recovery->reconcileMissingReceiptActionPanels((int) $this->option('chunk'));
         $recovery->reconcileSentManualPaymentProofProjections((int) $this->option('chunk'));
         $recovery->reconcileSentSalesProofProjections((int) $this->option('chunk'));
         $recovery->reconcileSentAdminBroadcastProjections((int) $this->option('chunk'));
@@ -52,6 +53,7 @@ class RecoverTelegramOutboundEffects extends Command
                 TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
                 TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD,
+                TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS,
                 TelegramOutboundEffectService::TYPE_ADMIN_PAID,
                 TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
                 TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF,

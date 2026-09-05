@@ -51,6 +51,11 @@ class TelegramOutboundEffectService
 
     public const TYPE_RECEIPT_TXT_DOWNLOAD = TelegramOutboundEffectType::ReceiptTxtDownload->value;
 
+    public const TYPE_RECEIPT_ORDER_ACTIONS = TelegramOutboundEffectType::ReceiptOrderActions->value;
+
+    /** Compatibility alias for the shorter panel family name. */
+    public const TYPE_RECEIPT_ACTIONS = self::TYPE_RECEIPT_ORDER_ACTIONS;
+
     public const TYPE_ADMIN_PENDING = TelegramOutboundEffectType::AdminOrderPendingNotification->value;
 
     public const TYPE_ADMIN_PAID = TelegramOutboundEffectType::AdminOrderPaidNotification->value;
@@ -115,6 +120,13 @@ class TelegramOutboundEffectService
 
     public const TEMPLATE_RECEIPT_TXT_DOWNLOAD = 'receipt-txt-v1';
 
+    public const TEMPLATE_RECEIPT_ORDER_ACTIONS = 'receipt-actions-v1';
+
+    /** Compatibility alias for the shorter panel template name. */
+    public const TEMPLATE_RECEIPT_ACTIONS = self::TEMPLATE_RECEIPT_ORDER_ACTIONS;
+
+    public const RECEIPT_ACTIONS_OPT_IN_VERSION = 'v1';
+
     public const TEMPLATE_ADMIN_ORDER_PENDING = 'admin-order-pending-v1';
 
     public const TEMPLATE_ADMIN_ORDER_PAID = 'admin-order-paid-v1';
@@ -140,6 +152,8 @@ class TelegramOutboundEffectService
     public const RECEIPT_QUEUE = 'notifications';
 
     public const RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS = TelegramOutboundEffectPolicy::RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS;
+
+    public const RECEIPT_ACTIONS_MAX_ATTEMPTS = TelegramOutboundEffectPolicy::RECEIPT_ACTIONS_MAX_ATTEMPTS;
 
     public const SALES_PROOF_QUEUE = 'notifications';
 
@@ -208,6 +222,12 @@ class TelegramOutboundEffectService
         'origin_message_id',
         'confirmation_nonce',
         'correlation_id',
+        'action_count',
+        'txt_available',
+        'receipt_group_key',
+        'receipt_actions_version',
+        'copy_length_bucket',
+        'keyboard_length_bucket',
     ];
 
     public function __construct(
@@ -215,6 +235,7 @@ class TelegramOutboundEffectService
         private readonly AuditLogger $auditLogger,
         private readonly TelegramReceiptNotifier $receiptNotifier,
         private readonly TelegramAdminAccess $adminAccess,
+        private readonly TelegramReceiptActionPanel $receiptActionPanel,
     ) {}
 
     public function recordCheckoutInstructions(Order $order, Payment $payment, ?Customer $customer = null): ?TelegramOutboundEffect
@@ -803,6 +824,137 @@ class TelegramOutboundEffectService
     }
 
     /**
+     * Materialize the independent action panel after a newly opted-in receipt
+     * group has completed. The receipt group and its completion projection are
+     * the only source of the safe panel summary; credentials are never loaded.
+     */
+    public function recordReceiptActionPanel(TelegramOutboundEffect $receiptEffect): ?TelegramOutboundEffect
+    {
+        return DB::transaction(function () use ($receiptEffect): ?TelegramOutboundEffect {
+            // Lock the source Order before the receipt rows. Recovery and
+            // delivery paths can arrive with different receipt-unit IDs; a
+            // stable lock order prevents those paths from deadlocking while
+            // they inspect the same completed group.
+            $receiptReference = TelegramOutboundEffect::query()->find($receiptEffect->getKey());
+            if ($receiptReference === null || ! $this->receiptActionPanelSource($receiptReference)) {
+                return null;
+            }
+
+            $groupKey = (string) $receiptReference->effect_group_key;
+            $order = Order::query()
+                ->with(['customer', 'payments', 'orderItems'])
+                ->lockForUpdate()
+                ->find($receiptReference->source_id);
+            if ($order === null || $order->telegram_receipt_sent_at === null) {
+                return null;
+            }
+
+            $lockedReceipt = TelegramOutboundEffect::query()
+                ->lockForUpdate()
+                ->find($receiptReference->getKey());
+            if ($lockedReceipt === null || ! $this->receiptActionPanelSource($lockedReceipt)) {
+                return null;
+            }
+
+            $customer = $order->customer;
+            if (! $this->receiptActionPanelEligible($order, $customer)) {
+                return null;
+            }
+
+            $receiptEffects = TelegramOutboundEffect::query()
+                ->where('effect_type', self::TYPE_RECEIPT_CREDENTIALS)
+                ->where('effect_group_key', $groupKey)
+                ->orderBy('sequence')
+                ->lockForUpdate()
+                ->get();
+            $firstReceipt = $receiptEffects->first();
+            if ($firstReceipt === null
+                || $receiptEffects->contains(fn (TelegramOutboundEffect $effect): bool => $this->stateValue($effect) !== TelegramOutboundEffectState::Sent->value)
+                || $firstReceipt->sequence !== 1
+                || $firstReceipt->telegram_method !== 'sendPhoto'
+                || $firstReceipt->template_version !== self::TEMPLATE_RECEIPT_PHOTO_CAPTION) {
+                return null;
+            }
+
+            $effectKey = self::receiptActionPanelEffectKey((string) $order->getKey(), $groupKey);
+            $existing = TelegramOutboundEffect::query()
+                ->where('effect_key', $effectKey)
+                ->lockForUpdate()
+                ->first();
+            if ($existing !== null) {
+                if ($existing->effect_type !== self::TYPE_RECEIPT_ORDER_ACTIONS
+                    || $existing->source_type !== Order::class
+                    || (string) $existing->source_id !== (string) $order->getKey()
+                    || $existing->target_type !== 'customer'
+                    || (string) $existing->telegram_chat_id !== (string) $customer?->telegram_id) {
+                    return null;
+                }
+
+                return $existing;
+            }
+
+            $receiptMetadata = is_array($firstReceipt->outcome_metadata)
+                ? $firstReceipt->outcome_metadata
+                : [];
+            if (($receiptMetadata['receipt_actions_version'] ?? null) !== self::RECEIPT_ACTIONS_OPT_IN_VERSION) {
+                return null;
+            }
+
+            $accountCount = $this->optionalNonNegativeCount($receiptMetadata['account_count'] ?? null);
+            if ($accountCount === null) {
+                return null;
+            }
+
+            try {
+                [$fallbackProductCount, $itemCount] = $this->orderSummaryCounts($order);
+                $productCount = $this->optionalNonNegativeCount($receiptMetadata['product_count'] ?? null)
+                    ?? $fallbackProductCount;
+                $txtAvailable = $accountCount > 0;
+                $panel = $this->receiptActionPanel->render(
+                    $order,
+                    (string) ($customer?->locale ?? TelegramLocale::DEFAULT_LOCALE),
+                    $txtAvailable,
+                );
+                $keyboard = $panel->replyMarkup();
+                $keyboardBytes = strlen(json_encode($keyboard, JSON_THROW_ON_ERROR));
+            } catch (Throwable) {
+                return null;
+            }
+
+            $now = now();
+
+            return TelegramOutboundEffect::query()->create([
+                'effect_key' => $effectKey,
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => self::TYPE_RECEIPT_ORDER_ACTIONS,
+                'source_type' => Order::class,
+                'source_id' => (string) $order->getKey(),
+                'target_type' => 'customer',
+                'telegram_chat_id' => (string) $customer->telegram_id,
+                'queue' => self::RECEIPT_QUEUE,
+                'telegram_method' => 'sendMessage',
+                'locale' => $customer->locale,
+                'template_version' => self::TEMPLATE_RECEIPT_ORDER_ACTIONS,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => $now,
+                'outcome_metadata' => [
+                    'delivery_context' => 'receipt_actions',
+                    'action_count' => count($keyboard['inline_keyboard'] ?? []),
+                    'txt_available' => $txtAvailable,
+                    'product_count' => $productCount,
+                    'item_count' => $itemCount,
+                    'receipt_group_key' => $groupKey,
+                    'receipt_actions_version' => self::RECEIPT_ACTIONS_OPT_IN_VERSION,
+                    'copy_length_bucket' => $this->receiptLengthBucket($panel->characterLength()),
+                    'keyboard_length_bucket' => $this->receiptLengthBucket($keyboardBytes),
+                ],
+            ]);
+        }, 5);
+    }
+
+    /**
      * Materialize one explicitly confirmed, independently delivered TXT file.
      *
      * The request nonce is opaque and becomes the durable idempotency
@@ -978,6 +1130,43 @@ class TelegramOutboundEffectService
         return 'order:'.$orderId.':telegram_txt_download:'.self::normalizeTxtDownloadNonce($requestNonce).':v1';
     }
 
+    public static function receiptActionPanelEffectKey(string $orderId, string $receiptGroupKey): string
+    {
+        $orderId = trim($orderId);
+        if ($orderId === '' || preg_match('/\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z/D', $orderId) !== 1) {
+            throw new InvalidArgumentException('Receipt action panel Order reference is invalid.');
+        }
+
+        $baseGroupKey = self::receiptEffectGroupKey($orderId);
+        if ($receiptGroupKey === $baseGroupKey) {
+            $version = 'v2';
+        } elseif (preg_match('/\A'.preg_quote($baseGroupKey, '/').':resend:v([1-9][0-9]*)\z/D', $receiptGroupKey, $matches) === 1) {
+            $version = 'resend-v'.$matches[1];
+        } else {
+            throw new InvalidArgumentException('Receipt action panel receipt group reference is invalid.');
+        }
+
+        return 'order:'.$orderId.':telegram_receipt_actions:v1:'.$version;
+    }
+
+    /** Compatibility alias for callers that name the group explicitly. */
+    public static function receiptActionPanelEffectGroupKey(string $orderId, string $receiptGroupKey): string
+    {
+        return self::receiptActionPanelEffectKey($orderId, $receiptGroupKey);
+    }
+
+    /** Compatibility alias for the effect-family name. */
+    public static function receiptOrderActionsEffectKey(string $orderId, string $receiptGroupKey): string
+    {
+        return self::receiptActionPanelEffectKey($orderId, $receiptGroupKey);
+    }
+
+    /** Compatibility alias for the effect-family group name. */
+    public static function receiptOrderActionsEffectGroupKey(string $orderId, string $receiptGroupKey): string
+    {
+        return self::receiptActionPanelEffectKey($orderId, $receiptGroupKey);
+    }
+
     public static function typeForPayment(Payment $payment): ?string
     {
         return match (true) {
@@ -1125,6 +1314,10 @@ class TelegramOutboundEffectService
             return $this->resendReceiptEffect($effect, $actor, $ip);
         }
 
+        if ($effect->effect_type === self::TYPE_RECEIPT_ORDER_ACTIONS) {
+            return $this->resendReceiptActionPanel($effect, $actor, $ip);
+        }
+
         return DB::transaction(function () use ($effect, $actor, $ip): TelegramOutboundEffect {
             $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($effect->getKey());
             if (! $this->isReviewable($locked)) {
@@ -1166,6 +1359,94 @@ class TelegramOutboundEffectService
                     'delivery_context' => 'explicit_resend',
                     'duplicate_risk_acknowledged' => true,
                     'supersedes_effect_id' => (string) $locked->getKey(),
+                ],
+            ]);
+
+            $this->auditLogger->logWithResolvedContext(
+                'telegram_outbound_effect.resent',
+                $locked,
+                ['state' => $this->stateValue($locked)],
+                [
+                    'new_effect_id' => (string) $resend->getKey(),
+                    'sequence' => $sequence,
+                    'duplicate_risk_acknowledged' => true,
+                ],
+                $actor,
+                $ip,
+            );
+
+            return $resend;
+        });
+    }
+
+    private function resendReceiptActionPanel(TelegramOutboundEffect $effect, User $actor, ?string $ip = null): TelegramOutboundEffect
+    {
+        return DB::transaction(function () use ($effect, $actor, $ip): TelegramOutboundEffect {
+            $reference = TelegramOutboundEffect::query()->findOrFail($effect->getKey());
+            $lockedOrder = Order::query()
+                ->with(['customer', 'payments'])
+                ->lockForUpdate()
+                ->findOrFail($reference->source_id);
+            $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($reference->getKey());
+            if (! $this->isReviewable($locked)) {
+                throw new InvalidArgumentException('Only unknown or manual-review effects can be resent.');
+            }
+
+            $customer = $lockedOrder->customer;
+            if (! $this->receiptActionPanelEligible($lockedOrder, $customer)
+                || $lockedOrder->telegram_receipt_sent_at === null) {
+                throw new InvalidArgumentException('Receipt action panel can only be delivered for an eligible paid Order.');
+            }
+
+            $metadata = is_array($locked->outcome_metadata) ? $locked->outcome_metadata : [];
+            $receiptGroupKey = $metadata['receipt_group_key'] ?? null;
+            if (! is_string($receiptGroupKey)
+                || $receiptGroupKey === ''
+                || self::receiptActionPanelEffectKey((string) $lockedOrder->getKey(), $receiptGroupKey) !== (string) $locked->effect_group_key) {
+                throw new InvalidArgumentException('Receipt action panel source group is invalid.');
+            }
+
+            $latest = TelegramOutboundEffect::query()
+                ->where('effect_group_key', $locked->effect_group_key)
+                ->orderByDesc('sequence')
+                ->lockForUpdate()
+                ->first();
+            $sequence = max((int) $locked->sequence, (int) ($latest?->sequence ?? 0)) + 1;
+            $effectKey = (string) $locked->effect_group_key.':resend:v'.$sequence;
+
+            while (TelegramOutboundEffect::query()->where('effect_key', $effectKey)->exists()) {
+                $sequence++;
+                $effectKey = (string) $locked->effect_group_key.':resend:v'.$sequence;
+            }
+
+            $resend = TelegramOutboundEffect::query()->create([
+                'effect_key' => $effectKey,
+                'effect_group_key' => $locked->effect_group_key,
+                'supersedes_effect_id' => $locked->getKey(),
+                'sequence' => $sequence,
+                'effect_type' => self::TYPE_RECEIPT_ORDER_ACTIONS,
+                'source_type' => Order::class,
+                'source_id' => (string) $lockedOrder->getKey(),
+                'target_type' => 'customer',
+                'telegram_chat_id' => (string) $customer->telegram_id,
+                'queue' => self::RECEIPT_QUEUE,
+                'telegram_method' => 'sendMessage',
+                'locale' => $locked->locale ?: $customer->locale,
+                'template_version' => self::TEMPLATE_RECEIPT_ORDER_ACTIONS,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+                'outcome_metadata' => [
+                    'delivery_context' => 'explicit_resend',
+                    'duplicate_risk_acknowledged' => true,
+                    'supersedes_effect_id' => (string) $locked->getKey(),
+                    'action_count' => $this->optionalNonNegativeCount($metadata['action_count'] ?? null) ?? 0,
+                    'txt_available' => ($metadata['txt_available'] ?? false) === true,
+                    'product_count' => $this->optionalNonNegativeCount($metadata['product_count'] ?? null) ?? 0,
+                    'item_count' => $this->optionalNonNegativeCount($metadata['item_count'] ?? null) ?? 0,
+                    'receipt_group_key' => $receiptGroupKey,
+                    'receipt_actions_version' => self::RECEIPT_ACTIONS_OPT_IN_VERSION,
+                    ...$this->safePanelSizeMetadata($metadata),
                 ],
             ]);
 
@@ -1292,6 +1573,7 @@ class TelegramOutboundEffectService
             if (! $textFallback) {
                 $metadata['attachment_type'] = 'photo';
                 $metadata['attachment_present'] = true;
+                $metadata['receipt_actions_version'] = self::RECEIPT_ACTIONS_OPT_IN_VERSION;
             }
             if ($explicit) {
                 $metadata['duplicate_risk_acknowledged'] = true;
@@ -1597,6 +1879,47 @@ class TelegramOutboundEffectService
             && $customer?->telegram_id !== null;
     }
 
+    private function receiptActionPanelSource(TelegramOutboundEffect $effect): bool
+    {
+        if ($effect->effect_type !== self::TYPE_RECEIPT_CREDENTIALS
+            || $effect->source_type !== Order::class
+            || $effect->template_version !== self::TEMPLATE_RECEIPT_PHOTO_CAPTION
+            || $effect->effect_group_key === null) {
+            return false;
+        }
+
+        $groupKey = (string) $effect->effect_group_key;
+        $orderId = (string) $effect->source_id;
+        $baseGroupKey = self::receiptEffectGroupKey($orderId);
+
+        return $groupKey === $baseGroupKey
+            || preg_match('/\A'.preg_quote($baseGroupKey, '/').':resend:v[1-9][0-9]*\z/D', $groupKey) === 1;
+    }
+
+    private function receiptActionPanelEligible(Order $order, ?Customer $customer): bool
+    {
+        if (! $this->receiptEligible($order, $customer)
+            || ! preg_match('/\A[1-9][0-9]*\z/D', trim((string) $customer?->telegram_id))) {
+            return false;
+        }
+
+        if ($order->hasOpenLatePaymentReview()) {
+            return false;
+        }
+
+        $payment = $order->payments
+            ->sortByDesc(fn (Payment $candidate): array => [
+                $candidate->created_at?->getTimestamp() ?? 0,
+                (string) $candidate->getKey(),
+            ])
+            ->first();
+
+        return $payment instanceof Payment
+            && (string) $payment->order_id === (string) $order->getKey()
+            && $payment->status === PaymentStatus::Paid
+            && $payment->paid_at !== null;
+    }
+
     private function receiptTxtDownloadEligible(Order $order, ?Customer $customer): bool
     {
         if (! $this->receiptEligible($order, $customer)
@@ -1636,6 +1959,33 @@ class TelegramOutboundEffectService
         }
 
         return [$order->orderItems->count(), $itemCount];
+    }
+
+    private function optionalNonNegativeCount(mixed $value): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        try {
+            return $this->safeTxtMetadataCount($value);
+        } catch (InvalidArgumentException) {
+            return null;
+        }
+    }
+
+    /** @param array<string, mixed> $metadata @return array<string, string> */
+    private function safePanelSizeMetadata(array $metadata): array
+    {
+        $safe = [];
+        foreach (['copy_length_bucket', 'keyboard_length_bucket'] as $key) {
+            $value = $metadata[$key] ?? null;
+            if (is_string($value) && preg_match('/\A[0-9-]{1,24}\z/D', $value) === 1) {
+                $safe[$key] = $value;
+            }
+        }
+
+        return $safe;
     }
 
     /**
@@ -1862,10 +2212,11 @@ class TelegramOutboundEffectService
                 'item_count',
                 'origin_message_id',
                 'account_count',
+                'action_count',
             ], true)
                 && ((is_int($value) && $value >= 0) || (is_string($value) && ctype_digit($value)))) {
                 $safe[$key] = (int) $value;
-            } elseif (in_array($key, ['attachment_present', 'late_evidence', 'has_photo', 'has_header', 'has_footer'], true)
+            } elseif (in_array($key, ['attachment_present', 'late_evidence', 'has_photo', 'has_header', 'has_footer', 'txt_available'], true)
                 && is_bool($value)) {
                 $safe[$key] = $value;
             } elseif ($key === 'exception' && is_string($value)
@@ -1887,6 +2238,10 @@ class TelegramOutboundEffectService
                 'confirmation_nonce',
                 'correlation_id',
                 'delivery_method',
+                'receipt_group_key',
+                'receipt_actions_version',
+                'copy_length_bucket',
+                'keyboard_length_bucket',
             ], true) && is_string($value)) {
                 $safeValue = $this->safeErrorCode($value);
                 if ($safeValue !== null) {
@@ -1922,6 +2277,7 @@ class TelegramOutboundEffectService
             self::TYPE_BSC_CHECKOUT => self::TEMPLATE_BSC_CHECKOUT,
             self::TYPE_RECEIPT_CREDENTIALS => self::TEMPLATE_RECEIPT_CREDENTIALS,
             self::TYPE_RECEIPT_TXT_DOWNLOAD => self::TEMPLATE_RECEIPT_TXT_DOWNLOAD,
+            self::TYPE_RECEIPT_ORDER_ACTIONS => self::TEMPLATE_RECEIPT_ORDER_ACTIONS,
             self::TYPE_ADMIN_PENDING => self::TEMPLATE_ADMIN_ORDER_PENDING,
             self::TYPE_ADMIN_PAID => self::TEMPLATE_ADMIN_ORDER_PAID,
             self::TYPE_ADMIN_EXPIRED => self::TEMPLATE_ADMIN_ORDER_EXPIRED,

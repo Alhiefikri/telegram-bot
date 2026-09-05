@@ -22,6 +22,7 @@ final class TelegramOutboundEffectReviewService
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramOutboundEffectReviewProjection $projection,
         private readonly TelegramOutboundEffectDispatcher $dispatcher,
+        private readonly ReceiptDeliveryPipeline $receipts,
         private readonly AuditLogger $auditLogger,
     ) {}
 
@@ -73,10 +74,14 @@ final class TelegramOutboundEffectReviewService
                 );
                 if ($next !== null) {
                     $this->dispatcher->dispatch($next);
-                } elseif ($this->isExplicitReceiptEffect($resolved) && $this->receiptGroupComplete($resolved)) {
-                    DeleteBuyerCheckoutMessages::dispatch((string) $resolved->source_id, now()->toISOString())
-                        ->onQueue('notifications')
-                        ->afterCommit();
+                } else {
+                    DB::afterCommit(fn (): ?TelegramOutboundEffect => $this->receipts->materializeCompletedActionPanel($resolved));
+
+                    if ($this->isExplicitReceiptEffect($resolved) && $this->receiptGroupComplete($resolved)) {
+                        DeleteBuyerCheckoutMessages::dispatch((string) $resolved->source_id, now()->toISOString())
+                            ->onQueue('notifications')
+                            ->afterCommit();
+                    }
                 }
             }
 

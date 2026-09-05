@@ -41,6 +41,15 @@ final class TelegramOutboundEffectRecovery
     }
 
     /**
+     * Rebuild action-panel effects lost between receipt completion and queue
+     * dispatch without touching legacy receipt groups.
+     */
+    public function reconcileMissingReceiptActionPanels(int $chunk = 100): int
+    {
+        return $this->receipts->reconcileMissingActionPanels($chunk, dispatch: false);
+    }
+
+    /**
      * Repair sent admin Order-notification projections without redispatching.
      */
     public function reconcileSentAdminOrderProjections(int $chunk = 100): int
