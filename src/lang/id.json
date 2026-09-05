@@ -421,6 +421,7 @@
   "receipt.actions.support_button": "🛟 Support",
   "receipt.actions.buy_again_button": "🎁 Beli Lagi",
   "receipt.actions.main_menu_button": "📦 Menu Utama",
+  "receipt.actions.unavailable": "Aksi ini sudah tidak tersedia. Silakan gunakan menu atau buka katalog lagi.",
   "notification.broadcast.title": "📣 Info dari Admin",
   "notification.broadcast.help": "Butuh bantuan? Balas /support ya.",
   "notification.product.created.title": "🆕 Produk Baru",

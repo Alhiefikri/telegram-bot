@@ -420,6 +420,7 @@
   "receipt.actions.support_button": "🛟 Sokongan",
   "receipt.actions.buy_again_button": "🎁 Beli Lagi",
   "receipt.actions.main_menu_button": "📦 Menu Utama",
+  "receipt.actions.unavailable": "Tindakan ini tidak lagi tersedia. Sila gunakan menu atau buka katalog sekali lagi.",
   "notification.broadcast.title": "📣 Maklumat daripada Admin",
   "notification.broadcast.help": "Perlukan bantuan? Balas /support.",
   "notification.product.created.title": "🆕 Produk Baharu",

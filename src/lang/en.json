@@ -422,6 +422,7 @@
   "receipt.actions.support_button": "🛟 Support",
   "receipt.actions.buy_again_button": "🎁 Buy Again",
   "receipt.actions.main_menu_button": "📦 Main Menu",
+  "receipt.actions.unavailable": "This action is no longer available. Please use the menu or open the catalog again.",
   "notification.broadcast.title": "📣 Info from Admin",
   "notification.broadcast.help": "Need help? Reply with /support.",
   "notification.product.created.title": "🆕 New Product",
