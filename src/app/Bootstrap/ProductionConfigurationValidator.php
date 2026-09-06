@@ -112,10 +112,12 @@ class ProductionConfigurationValidator
 
     private function validateSakurupiah(): void
     {
+        $runtimeEnvironment = (string) $this->config->get('app.env', 'production');
         foreach (['sandbox', 'production'] as $environment) {
             $this->assertSakurupiahCredentialPair(
                 $environment,
-                required: $this->config->get('services.sakurupiah.'.$environment.'_enabled', false) === true,
+                required: $environment === $runtimeEnvironment
+                    && $this->config->get('services.sakurupiah.'.$environment.'_enabled', false) === true,
             );
         }
 

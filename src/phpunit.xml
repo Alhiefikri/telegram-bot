@@ -36,11 +36,9 @@
         <env name="TELEGRAM_ADMIN_CHAT_ID" value="" force="true"/>
         <env name="TELEGRAM_BOT_TOKEN" value="" force="true"/>
         <env name="PULSE_ENABLED" value="false" force="true"/>
-        <!-- Tests must never inherit merchant credentials or enable provider I/O. -->
-        <env name="SAKURUPIAH_SANDBOX_ENABLED" value="false" force="true"/>
+        <!-- Tests must never inherit merchant credentials or provider I/O. -->
         <env name="SAKURUPIAH_SANDBOX_API_ID" value="" force="true"/>
         <env name="SAKURUPIAH_SANDBOX_API_KEY" value="" force="true"/>
-        <env name="SAKURUPIAH_PRODUCTION_ENABLED" value="false" force="true"/>
         <env name="SAKURUPIAH_PRODUCTION_API_ID" value="" force="true"/>
         <env name="SAKURUPIAH_PRODUCTION_API_KEY" value="" force="true"/>
         <env name="TELESCOPE_ENABLED" value="false" force="true"/>
@@ -56,11 +54,9 @@
         <server name="DB_CONNECTION" value="sqlite" force="true"/>
         <server name="DB_DATABASE" value=":memory:" force="true"/>
         <server name="DB_URL" value="" force="true"/>
-        <!-- Mirror isolated environment values for Laravel's $_SERVER reads. -->
-        <server name="SAKURUPIAH_SANDBOX_ENABLED" value="false" force="true"/>
+        <!-- Mirror isolated credential values for Laravel's $_SERVER reads. -->
         <server name="SAKURUPIAH_SANDBOX_API_ID" value="" force="true"/>
         <server name="SAKURUPIAH_SANDBOX_API_KEY" value="" force="true"/>
-        <server name="SAKURUPIAH_PRODUCTION_ENABLED" value="false" force="true"/>
         <server name="SAKURUPIAH_PRODUCTION_API_ID" value="" force="true"/>
         <server name="SAKURUPIAH_PRODUCTION_API_KEY" value="" force="true"/>
         <server name="DB_FOREIGN_KEYS" value="true" force="true"/>

@@ -13,52 +13,55 @@ Sakurupiah qualification remain unproven.
 
 ## Deployment-time configuration
 
-Sakurupiah credentials and deployment controls belong in the server-side
-`.env`, never in the database, Admin presentation settings, logs, fixtures, or
-customer copy. Keep sandbox and production pairs separate:
+Only the separate merchant credential pairs belong in the server-side `.env`.
+Stable endpoints, callback/return routes, host policy, IP policy, transport
+budgets, and contract policy are pinned in application configuration. Never put
+credentials in the database, Admin presentation settings, logs, fixtures,
+customer copy, or repository files.
 
 ```env
-SAKURUPIAH_SANDBOX_ENABLED=false
-SAKURUPIAH_SANDBOX_BASE_URL=https://sakurupiah.id/api-sanbox/
 SAKURUPIAH_SANDBOX_API_ID=
 SAKURUPIAH_SANDBOX_API_KEY=
-SAKURUPIAH_SANDBOX_CALLBACK_URL=
-SAKURUPIAH_SANDBOX_RETURN_URL=
-
-SAKURUPIAH_PRODUCTION_ENABLED=false
-SAKURUPIAH_PRODUCTION_BASE_URL=https://sakurupiah.id/api/
 SAKURUPIAH_PRODUCTION_API_ID=
 SAKURUPIAH_PRODUCTION_API_KEY=
-SAKURUPIAH_PRODUCTION_CALLBACK_URL=
-SAKURUPIAH_PRODUCTION_RETURN_URL=
 ```
 
-For the current sandbox qualification, do not fill every variable in the
-template above. The minimum provider credentials are:
+Sandbox credentials are consumed only when `APP_ENV` is `local` or `testing`.
+The sandbox API endpoint is pinned to the provider's documented `api-sanbox`
+URL. For an end-to-end sandbox invoice, callback and return URLs are derived
+from a secure non-production application URL; no Sakurupiah-specific URL or
+allowlist variables are required. The sandbox URL is never derived from the
+canonical production host.
 
-```env
-SAKURUPIAH_SANDBOX_ENABLED=true
-SAKURUPIAH_SANDBOX_API_ID=provided-sandbox-api-id
-SAKURUPIAH_SANDBOX_API_KEY=provided-sandbox-api-key
-```
-
-The documented sandbox base URL is already the default. Add
-`SAKURUPIAH_SANDBOX_CALLBACK_URL` and
-`SAKURUPIAH_SANDBOX_RETURN_URL`, plus their callback/return host allowlists,
-only when running the end-to-end invoice and browser/bot flow. Sandbox
-`*_ALLOWED_IPS` and all `SAKURUPIAH_PRODUCTION_*` values are not needed for
-this qualification. The `.env.example` lists both environments for reference;
-it is not a checklist to fill completely.
+Production uses the separate production credential pair and the canonical
+application routes pinned by the release. The production activation gate is a
+reviewed code/configuration decision and remains disabled until the external
+contract policy, provider-approved network policy, and explicit Owner approval
+are released. Adding credentials alone never selects Sakurupiah for checkout.
 
 This repository has two environment-file consumers: Docker Compose reads the
 root `.env`, while Laravel Artisan uses `src` as its application base and
-reads `src/.env`. Use the root file through a Compose command, or configure
-the same needed sandbox values in the untracked `src/.env`; never copy
-credentials into tracked files or commit either file.
+reads `src/.env`. Use the root file through a Compose command, or configure the
+same credential pair in the untracked `src/.env`; never copy credentials into
+tracked files or commit either file.
 
-Do not add ENV for channel labels, fees, expiry hours, or presentation copy;
-those are database/contract settings or typed provider constants. The provider
-spelling `api-sanbox` is intentional and must not be "corrected".
+Do not add ENV for channel labels, fees, expiry hours, callback URLs, host/IP
+allowlists, retry budgets, or presentation copy. Those values are code/config
+policy. The provider spelling `api-sanbox` is intentional and must not be
+"corrected".
+
+Changing `src/.env` requires restarting the local Artisan server and workers;
+it does not require rebuilding a Docker image. When Compose injects credentials,
+recreate only an isolated testing project:
+
+```bash
+docker compose --env-file <sandbox-env-file> \
+  -p telegram-bot-testing up -d --force-recreate --no-build
+```
+
+Use a testing database and a project name distinct from production. Compose
+`--build` is needed only when the Dockerfile or build context changes; a
+credential-only change needs container recreation, not an image rebuild.
 
 ## Telegram testing-bot boundary
 

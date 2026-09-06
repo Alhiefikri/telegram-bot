@@ -2,10 +2,35 @@
 
 use App\Services\Bsc\BscReadiness;
 
-$sakurupiahCsv = static fn (string $value): array => array_values(array_filter(array_map(
-    static fn (string $entry): string => strtolower(trim($entry)),
-    explode(',', $value),
-)));
+$sakurupiahRuntime = (string) env('APP_ENV', 'production');
+$sakurupiahApplicationUrl = rtrim((string) env('APP_URL', 'http://localhost'), '/');
+$sakurupiahApplicationParts = parse_url($sakurupiahApplicationUrl);
+$sakurupiahApplicationHost = is_array($sakurupiahApplicationParts)
+    ? strtolower(rtrim((string) ($sakurupiahApplicationParts['host'] ?? ''), '.'))
+    : '';
+$sakurupiahApplicationOrigin = is_array($sakurupiahApplicationParts)
+    && strtolower((string) ($sakurupiahApplicationParts['scheme'] ?? '')) === 'https'
+    && $sakurupiahApplicationHost !== ''
+    && $sakurupiahApplicationHost !== 'lhiestore.web.id'
+    && ! array_key_exists('user', $sakurupiahApplicationParts)
+    && ! array_key_exists('pass', $sakurupiahApplicationParts)
+    && ! array_key_exists('port', $sakurupiahApplicationParts)
+    && ! array_key_exists('query', $sakurupiahApplicationParts)
+    && ! array_key_exists('fragment', $sakurupiahApplicationParts)
+        ? 'https://'.$sakurupiahApplicationHost
+        : null;
+
+$sakurupiahSandboxCallbackUrl = $sakurupiahApplicationOrigin === null
+    ? null
+    : $sakurupiahApplicationOrigin.'/api/webhook/sakurupiah';
+$sakurupiahSandboxReturnUrl = $sakurupiahApplicationOrigin === null
+    ? null
+    : $sakurupiahApplicationOrigin.'/shop/orders';
+$sakurupiahSandboxApplicationHosts = $sakurupiahApplicationOrigin === null
+    ? []
+    : [$sakurupiahApplicationHost];
+
+$sakurupiahSandboxRuntimeEnabled = in_array($sakurupiahRuntime, ['local', 'testing'], true);
 
 return [
     'credentials' => [
@@ -161,30 +186,36 @@ return [
     ],
 
     'sakurupiah' => [
-        // Keep sandbox and production credentials/configuration separate.
-        // The provider remains disabled until its external contract gates
-        // have been qualified and an owner explicitly enables it.
-        'sandbox_enabled' => (bool) env('SAKURUPIAH_SANDBOX_ENABLED', false),
-        'sandbox_base_url' => env('SAKURUPIAH_SANDBOX_BASE_URL', 'https://sakurupiah.id/api-sanbox/'),
+        // Only Sakurupiah-specific ENV inputs are merchant credential pairs.
+        // Global APP_ENV/APP_URL remain shared application configuration;
+        // stable provider and safety settings are pinned in this release and
+        // the Admin Payment Provider Switch controls new checkout traffic.
+        'sandbox_enabled' => $sakurupiahSandboxRuntimeEnabled,
+        'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
         'sandbox_api_id' => env('SAKURUPIAH_SANDBOX_API_ID'),
         'sandbox_api_key' => env('SAKURUPIAH_SANDBOX_API_KEY'),
-        'sandbox_callback_url' => env('SAKURUPIAH_SANDBOX_CALLBACK_URL'),
-        'sandbox_return_url' => env('SAKURUPIAH_SANDBOX_RETURN_URL'),
-        'sandbox_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_SANDBOX_ALLOWED_HOSTS', '')),
-        'sandbox_callback_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_SANDBOX_CALLBACK_ALLOWED_HOSTS', '')),
-        'sandbox_return_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_SANDBOX_RETURN_ALLOWED_HOSTS', '')),
-        'sandbox_allowed_ips' => $sakurupiahCsv((string) env('SAKURUPIAH_SANDBOX_ALLOWED_IPS', '')),
-        'production_enabled' => (bool) env('SAKURUPIAH_PRODUCTION_ENABLED', false),
-        'production_base_url' => env('SAKURUPIAH_PRODUCTION_BASE_URL', 'https://sakurupiah.id/api/'),
+        'sandbox_callback_url' => $sakurupiahSandboxCallbackUrl,
+        'sandbox_return_url' => $sakurupiahSandboxReturnUrl,
+        'sandbox_allowed_hosts' => ['sakurupiah.id'],
+        'sandbox_callback_allowed_hosts' => $sakurupiahSandboxApplicationHosts,
+        'sandbox_return_allowed_hosts' => $sakurupiahSandboxApplicationHosts,
+        'sandbox_allowed_ips' => [],
+        // Production enablement is a reviewed code/configuration decision,
+        // not a secret toggle. It stays disabled until the external contract
+        // policy and production network evidence are qualified.
+        'production_enabled' => false,
+        'production_base_url' => 'https://sakurupiah.id/api/',
         'production_api_id' => env('SAKURUPIAH_PRODUCTION_API_ID'),
         'production_api_key' => env('SAKURUPIAH_PRODUCTION_API_KEY'),
-        'production_callback_url' => env('SAKURUPIAH_PRODUCTION_CALLBACK_URL'),
-        'production_return_url' => env('SAKURUPIAH_PRODUCTION_RETURN_URL'),
-        'production_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_PRODUCTION_ALLOWED_HOSTS', '')),
-        'production_callback_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_PRODUCTION_CALLBACK_ALLOWED_HOSTS', '')),
-        'production_return_allowed_hosts' => $sakurupiahCsv((string) env('SAKURUPIAH_PRODUCTION_RETURN_ALLOWED_HOSTS', '')),
-        'production_allowed_ips' => $sakurupiahCsv((string) env('SAKURUPIAH_PRODUCTION_ALLOWED_IPS', '')),
-        'timezone' => env('SAKURUPIAH_TIMEZONE', 'Asia/Jakarta'),
+        'production_callback_url' => 'https://lhiestore.web.id/api/webhook/sakurupiah',
+        'production_return_url' => 'https://lhiestore.web.id/shop/orders',
+        'production_allowed_hosts' => ['sakurupiah.id'],
+        'production_callback_allowed_hosts' => ['lhiestore.web.id'],
+        'production_return_allowed_hosts' => ['lhiestore.web.id'],
+        // Provider-approved public IP/CIDR values must be added in a reviewed
+        // release; empty keeps production readiness fail-closed.
+        'production_allowed_ips' => [],
+        'timezone' => 'Asia/Jakarta',
         'callback_expired_status_codes' => [2],
         // These are intentionally code/config contract gates, not ENV
         // presentation settings. They remain unqualified until sandbox
@@ -222,18 +253,18 @@ return [
             'automatic_fulfillment_approved' => false,
             'owner_approval_reference' => null,
         ],
-        'http_timeout_seconds' => (float) env('SAKURUPIAH_HTTP_TIMEOUT_SECONDS', 10),
-        'http_connect_timeout_seconds' => (float) env('SAKURUPIAH_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
-        'lookup_max_attempts' => (int) env('SAKURUPIAH_LOOKUP_MAX_ATTEMPTS', 3),
-        'lookup_retry_delay_ms' => (int) env('SAKURUPIAH_LOOKUP_RETRY_DELAY_MS', 250),
-        'lookup_retry_max_delay_ms' => (int) env('SAKURUPIAH_LOOKUP_RETRY_MAX_DELAY_MS', 1000),
-        'lock_lease_seconds' => (int) env('SAKURUPIAH_LOCK_LEASE_SECONDS', 90),
-        'webhook_rate_limit_per_minute' => (int) env('SAKURUPIAH_WEBHOOK_RATE_LIMIT_PER_MINUTE', 30),
-        'status_refresh_rate_limit_per_minute' => (int) env('SAKURUPIAH_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE', 3),
-        'readiness_cache_seconds' => (int) env('SAKURUPIAH_READINESS_CACHE_SECONDS', 60),
+        'http_timeout_seconds' => 10.0,
+        'http_connect_timeout_seconds' => 3.0,
+        'lookup_max_attempts' => 3,
+        'lookup_retry_delay_ms' => 250,
+        'lookup_retry_max_delay_ms' => 1000,
+        'lock_lease_seconds' => 90,
+        'webhook_rate_limit_per_minute' => 30,
+        'status_refresh_rate_limit_per_minute' => 3,
+        'readiness_cache_seconds' => 60,
         'reconciliation_command' => 'sakurupiah:reconcile --chunk=100',
-        'reconcile_terminal_lookback_hours' => (int) env('SAKURUPIAH_RECONCILE_TERMINAL_LOOKBACK_HOURS', 72),
-        'reconcile_max_execution_seconds' => (float) env('SAKURUPIAH_RECONCILE_MAX_EXECUTION_SECONDS', 45),
+        'reconcile_terminal_lookback_hours' => 72,
+        'reconcile_max_execution_seconds' => 45,
         // The existing default worker is supervised in production. Do not
         // introduce a queue name whose worker is not served by the release.
         'verification_queue' => 'default',

@@ -38,7 +38,7 @@ class PaymentDocumentationTest extends TestCase
         }
     }
 
-    public function test_sakurupiah_runtime_configuration_is_forwarded_without_presentation_settings(): void
+    public function test_sakurupiah_runtime_configuration_keeps_only_credential_pairs_in_env(): void
     {
         $envExamples = [
             'root .env.example' => file_get_contents(base_path('../.env.example')),
@@ -47,11 +47,15 @@ class PaymentDocumentationTest extends TestCase
         $compose = file_get_contents(base_path('../docker-compose.yml'));
         [$sharedAppEnvironment] = explode("\nservices:", $compose, 2);
         $phpunit = file_get_contents(base_path('phpunit.xml'));
-        $variables = [
-            'SAKURUPIAH_SANDBOX_ENABLED',
-            'SAKURUPIAH_SANDBOX_BASE_URL',
+        $credentialVariables = [
             'SAKURUPIAH_SANDBOX_API_ID',
             'SAKURUPIAH_SANDBOX_API_KEY',
+            'SAKURUPIAH_PRODUCTION_API_ID',
+            'SAKURUPIAH_PRODUCTION_API_KEY',
+        ];
+        $nonEnvironmentSettings = [
+            'SAKURUPIAH_SANDBOX_ENABLED',
+            'SAKURUPIAH_SANDBOX_BASE_URL',
             'SAKURUPIAH_SANDBOX_CALLBACK_URL',
             'SAKURUPIAH_SANDBOX_RETURN_URL',
             'SAKURUPIAH_SANDBOX_ALLOWED_HOSTS',
@@ -60,8 +64,6 @@ class PaymentDocumentationTest extends TestCase
             'SAKURUPIAH_SANDBOX_ALLOWED_IPS',
             'SAKURUPIAH_PRODUCTION_ENABLED',
             'SAKURUPIAH_PRODUCTION_BASE_URL',
-            'SAKURUPIAH_PRODUCTION_API_ID',
-            'SAKURUPIAH_PRODUCTION_API_KEY',
             'SAKURUPIAH_PRODUCTION_CALLBACK_URL',
             'SAKURUPIAH_PRODUCTION_RETURN_URL',
             'SAKURUPIAH_PRODUCTION_ALLOWED_HOSTS',
@@ -81,23 +83,17 @@ class PaymentDocumentationTest extends TestCase
             'SAKURUPIAH_RECONCILE_TERMINAL_LOOKBACK_HOURS',
             'SAKURUPIAH_RECONCILE_MAX_EXECUTION_SECONDS',
         ];
-        $blankVariables = [
-            'SAKURUPIAH_SANDBOX_API_ID',
-            'SAKURUPIAH_SANDBOX_API_KEY',
-            'SAKURUPIAH_SANDBOX_CALLBACK_URL',
-            'SAKURUPIAH_SANDBOX_RETURN_URL',
-            'SAKURUPIAH_PRODUCTION_API_ID',
-            'SAKURUPIAH_PRODUCTION_API_KEY',
-            'SAKURUPIAH_PRODUCTION_CALLBACK_URL',
-            'SAKURUPIAH_PRODUCTION_RETURN_URL',
-        ];
 
         foreach ($envExamples as $name => $envExample) {
-            foreach ($variables as $variable) {
-                $this->assertStringContainsString($variable.'=', $envExample, $name.' must document '.$variable.'.');
+            foreach ($credentialVariables as $variable) {
+                $this->assertMatchesRegularExpression(
+                    '/^'.preg_quote($variable, '/').'=$/m',
+                    $envExample,
+                    $name.' must document '.$variable.' as a blank secret input.',
+                );
             }
-            foreach ($blankVariables as $variable) {
-                $this->assertMatchesRegularExpression('/^'.preg_quote($variable, '/').'=$/m', $envExample);
+            foreach ($nonEnvironmentSettings as $variable) {
+                $this->assertStringNotContainsString($variable.'=', $envExample, $name.' must not expose '.$variable.' as ENV.');
             }
             foreach ([
                 'SAKURUPIAH_QRIS_CURRENCY',
@@ -109,32 +105,42 @@ class PaymentDocumentationTest extends TestCase
             }
         }
 
-        foreach ($variables as $variable) {
+        foreach ($credentialVariables as $variable) {
             $this->assertStringContainsString(
                 '  '.$variable.': ${'.$variable,
                 $sharedAppEnvironment,
                 $variable.' must be forwarded to app and scheduler containers.',
             );
         }
-        $this->assertStringNotContainsString('SAKURUPIAH_QRIS_CURRENCY:', $sharedAppEnvironment);
-        $this->assertStringNotContainsString('SAKURUPIAH_QRIS_FEE_PAYER:', $sharedAppEnvironment);
-        foreach ([
-            'SAKURUPIAH_SANDBOX_ENABLED' => 'false',
-            'SAKURUPIAH_SANDBOX_API_ID' => '',
-            'SAKURUPIAH_SANDBOX_API_KEY' => '',
-            'SAKURUPIAH_PRODUCTION_ENABLED' => 'false',
-            'SAKURUPIAH_PRODUCTION_API_ID' => '',
-            'SAKURUPIAH_PRODUCTION_API_KEY' => '',
-        ] as $variable => $value) {
+        foreach ($nonEnvironmentSettings as $variable) {
+            $this->assertStringNotContainsString(
+                $variable.': ${'.$variable,
+                $sharedAppEnvironment,
+                $variable.' must not be forwarded from ENV.',
+            );
+        }
+        foreach ($credentialVariables as $variable) {
             $this->assertSame(
                 2,
                 preg_match_all(
-                    '/<(?:env|server) name="'.preg_quote($variable, '/').'" value="'.preg_quote($value, '/').'" force="true"\/>/',
+                    '/<(?:env|server) name="'.preg_quote($variable, '/').'" value="" force="true"\/>/',
                     $phpunit,
                 ),
                 $variable.' must be isolated in both env and server test scopes.',
             );
         }
+
+        $this->assertFalse(config('services.sakurupiah.production_enabled'));
+        $this->assertSame('https://sakurupiah.id/api/', config('services.sakurupiah.production_base_url'));
+        $this->assertSame(
+            'https://lhiestore.web.id/api/webhook/sakurupiah',
+            config('services.sakurupiah.production_callback_url'),
+        );
+        $this->assertSame('https://lhiestore.web.id/shop/orders', config('services.sakurupiah.production_return_url'));
+        $this->assertSame(['sakurupiah.id'], config('services.sakurupiah.production_allowed_hosts'));
+        $this->assertSame(['lhiestore.web.id'], config('services.sakurupiah.production_callback_allowed_hosts'));
+        $this->assertSame(['lhiestore.web.id'], config('services.sakurupiah.production_return_allowed_hosts'));
+        $this->assertSame([], config('services.sakurupiah.production_allowed_ips'));
     }
 
     public function test_binance_pay_id_is_blank_in_env_examples_and_forwarded_by_shared_compose_environment(): void
@@ -256,8 +262,8 @@ class PaymentDocumentationTest extends TestCase
             $this->assertStringContainsString('`'.$gate.'`', $runbook);
         }
         $this->assertStringContainsString('full HMAC signatures', $runbook);
-        $this->assertStringContainsString('do not fill every variable', $runbook);
-        $this->assertStringContainsString('not a checklist to fill completely', $runbook);
+        $this->assertStringContainsString('Only the separate merchant credential pairs', $runbook);
+        $this->assertStringContainsString('Adding credentials alone never selects Sakurupiah', $runbook);
     }
 
     public function test_bsc_operator_contract_documents_database_activation_and_shared_queue_configuration(): void
