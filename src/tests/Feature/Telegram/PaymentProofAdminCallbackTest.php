@@ -1963,7 +1963,11 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'payment_status' => PaymentStatus::Paid,
             'order_status' => OrderStatus::Completed,
         ]);
-        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
         $item = OrderItem::factory()->create([
             'order_id' => $order->id,
             'product_id' => $product->id,
@@ -1979,10 +1983,11 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         app(TelegramReceiptNotifier::class)->send($order);
 
-        $receiptText = Http::recorded(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && (string) $r['chat_id'] === '778')
-            ->map(fn (array $record): string => (string) ($record[0]['text'] ?? ''))
-            ->implode("\n");
+        $receiptPhotos = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && (string) $this->telegramRequestField($request, 'chat_id') === '778'
+            && str_contains($request->body(), 'filename="nota-b-'));
+        $this->assertCount(1, $receiptPhotos);
+        $receiptText = (string) $this->telegramRequestField($receiptPhotos->sole()[0], 'caption');
         $this->assertStringContainsString('email : legacy@example.test', $receiptText);
         $this->assertStringContainsString('password : Password', $receiptText);
         $this->assertStringNotContainsString('legacy@example.test|Password', $receiptText);
