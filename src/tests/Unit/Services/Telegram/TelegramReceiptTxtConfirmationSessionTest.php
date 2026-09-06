@@ -32,8 +32,23 @@ final class TelegramReceiptTxtConfirmationSessionTest extends TestCase
         $confirmation = $session->start($owner, '426002', 'order-426', 'ms');
 
         $this->assertNull($session->boundConfirmation($other, '426002', 'order-426', $confirmation['nonce']));
+        $this->assertSame($confirmation, Cache::get('telegram:receipt-txt-confirmation:426002:order-426'));
         $this->assertNull($session->consume($owner, '426003', 'order-426', $confirmation['nonce']));
-        $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:426002:order-426'));
+        $this->assertSame($confirmation, Cache::get('telegram:receipt-txt-confirmation:426002:order-426'));
+    }
+
+    public function test_wrong_nonce_validation_is_non_destructive_and_matching_nonce_remains_consumable(): void
+    {
+        $customer = $this->customer(426006);
+        $session = app(TelegramReceiptTxtConfirmationSession::class);
+        $confirmation = $session->start($customer, '426006', 'order-426', 'en');
+        $wrongNonce = $confirmation['nonce'];
+        $wrongNonce[0] = $wrongNonce[0] === 'a' ? 'b' : 'a';
+
+        $this->assertNull($session->boundConfirmation($customer, '426006', 'order-426', $wrongNonce));
+        $this->assertSame($confirmation, Cache::get('telegram:receipt-txt-confirmation:426006:order-426'));
+        $this->assertSame('order-426', $session->orderIdForNonce($customer, '426006', $confirmation['nonce']));
+        $this->assertSame($confirmation, $session->consume($customer, '426006', 'order-426', $confirmation['nonce']));
     }
 
     public function test_malformed_cached_state_and_expired_state_are_not_accepted(): void

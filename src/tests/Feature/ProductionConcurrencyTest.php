@@ -54,6 +54,7 @@ use App\Services\StockAdjustmentService;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
+use App\Services\Telegram\TelegramReceiptTxtConfirmationSession;
 use App\Services\Telegram\TelegramUpdateReplayGuard;
 use App\Support\PaymentProvider;
 use Illuminate\Cache\RateLimiter;
@@ -1220,6 +1221,35 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertNotNull($update->fresh()->processed_at);
         $this->assertNull($update->fresh()->processing_started_at);
         $this->assertSame(1, AuditLog::where('action', 'telegram_update.concurrent_side_effect')->where('subject_id', (string) $update->id)->count());
+    }
+
+    public function test_concurrent_txt_confirmation_consumption_accepts_only_one_callback(): void
+    {
+        $this->requireConcurrencyLane();
+        $this->useDatabaseLocks();
+        Cache::flush();
+
+        $customer = Customer::factory()->create(['telegram_id' => 990002]);
+        $session = app(TelegramReceiptTxtConfirmationSession::class);
+        $confirmation = $session->start($customer, '990002', 'order-429', 'en');
+        $nonce = (string) $confirmation['nonce'];
+
+        $results = $this->runConcurrently([
+            fn (): bool => app(TelegramReceiptTxtConfirmationSession::class)
+                ->consume(Customer::findOrFail($customer->id), '990002', 'order-429', $nonce) !== null,
+            fn (): bool => app(TelegramReceiptTxtConfirmationSession::class)
+                ->consume(Customer::findOrFail($customer->id), '990002', 'order-429', $nonce) !== null,
+        ]);
+
+        $this->assertSame(2, $this->successfulResultCount($results), json_encode($results, JSON_THROW_ON_ERROR));
+        $accepted = array_map(
+            static fn (array $result): bool => (bool) ($result['value'] ?? false),
+            $results,
+        );
+        sort($accepted);
+        $this->assertSame([false, true], $accepted);
+        $this->assertNull($session->orderIdForNonce($customer, '990002', $nonce));
+        $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:990002:order-429'));
     }
 
     private function requireConcurrencyLane(): void

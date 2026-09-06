@@ -72,7 +72,8 @@ final class TelegramReceiptTxtConfirmationSession
 
     /**
      * Validate a confirmation bound to this Customer, exact Telegram chat,
-     * and Order. The nonce is never revealed by a failed validation.
+     * and Order. This is a non-destructive lookup: a failed validation must
+     * not invalidate the live confirmation for that chat and Order.
      */
     public function boundConfirmation(Customer $customer, string $chatId, string $orderId, string $nonce): ?array
     {
@@ -84,8 +85,6 @@ final class TelegramReceiptTxtConfirmationSession
         if ((int) ($confirmation['customerId'] ?? 0) !== (int) $customer->getKey()
             || (string) ($confirmation['telegramChatId'] ?? '') !== $chatId
             || ! hash_equals((string) $confirmation['nonce'], $nonce)) {
-            $this->forget($chatId, $orderId);
-
             return null;
         }
 

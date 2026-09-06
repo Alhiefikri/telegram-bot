@@ -112,6 +112,45 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
         );
     }
 
+    public function test_unknown_valid_shape_nonce_does_not_invalidate_live_confirmation(): void
+    {
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendDocument' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 423116],
+            ]),
+        ]);
+        [$customer, $order] = $this->paidOrderWithCredential('unknown-nonce@example.test', 'Unknown-nonce-password', 'en');
+        $nonce = $this->startConfirmation($customer, $order, '423001');
+        $wrongNonce = $nonce;
+        $wrongNonce[0] = $wrongNonce[0] === 'a' ? 'b' : 'a';
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            5116,
+            'cb-txt-unknown-valid-shape',
+            'txt:send:'.$wrongNonce,
+            chatId: 423001,
+        ))->assertOk();
+
+        $confirmation = Cache::get('telegram:receipt-txt-confirmation:423001:'.$order->id);
+        $this->assertIsArray($confirmation);
+        $this->assertSame($nonce, (string) ($confirmation['nonce'] ?? ''));
+        $this->assertSame(0, TelegramOutboundEffect::query()->count());
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['text'] ?? null) === 'This request is no longer valid. Press TXT again to generate a new file.');
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            5117,
+            'cb-txt-send-after-unknown',
+            'txt:send:'.$nonce,
+            chatId: 423001,
+        ))->assertOk();
+
+        $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
+        $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:423001:'.$order->id));
+    }
+
     public function test_cancel_consumes_confirmation_and_creates_no_effect(): void
     {
         $this->fakeTelegramHttp();
