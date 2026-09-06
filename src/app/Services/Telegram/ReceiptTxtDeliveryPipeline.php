@@ -12,7 +12,7 @@ use InvalidArgumentException;
 use Throwable;
 
 /**
- * Delivers an explicitly confirmed paid-order TXT export through the shared
+ * Delivers an explicitly requested paid-order TXT export through the shared
  * Telegram Outbound Effect Ledger. Credential values exist only during the
  * current render and upload attempt.
  */

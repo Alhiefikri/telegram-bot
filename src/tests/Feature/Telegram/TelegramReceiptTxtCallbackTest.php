@@ -24,8 +24,9 @@ use Tests\Support\TelegramBotTestSupport;
 
 final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
 {
-    public function test_txt_request_shows_localized_confirmation_with_safe_summary_and_no_document_request(): void
+    public function test_txt_request_queues_download_without_confirmation(): void
     {
+        Queue::fake([SendTelegramReceiptTxt::class]);
         $this->fakeTelegramHttp();
         [$customer, $order] = $this->paidOrderWithCredential('safe@example.test', 'Safe-password', 'en');
         $queries = [];
@@ -36,56 +37,49 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
         $this->postTelegramWebhook(
             $this->callbackUpdate(5101, 'cb-txt-request', 'txt:request:'.$order->id, chatId: 423001),
         )->assertOk();
+
         $this->assertFalse(collect($queries)->contains(
             static fn (string $sql): bool => str_starts_with(ltrim($sql), 'select *')
                 && str_contains($sql, 'product_stock_items'),
         ));
+        $this->assertCount(0, Http::recorded(
+            fn ($request): bool => str_ends_with($request->url(), '/sendMessage'),
+        ));
 
-        $sent = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && (string) ($request['chat_id'] ?? '') === '423001');
-        $this->assertCount(1, $sent);
-        $text = (string) ($sent->first()[0]['text'] ?? '');
-        $this->assertStringContainsString('Confirm Download', $text);
-        $this->assertStringContainsString("📦 Product:\n📦 TXT Callback Product", $text);
-        $this->assertStringContainsString('Order: INV-423-TXT', $text);
-        $this->assertStringContainsString('Items: 1', $text);
-        $this->assertStringContainsString('complete product credentials', $text);
-        $this->assertStringContainsString('saved, copied, or forwarded', $text);
-        $this->assertStringNotContainsString('Safe-password', $text);
-        $this->assertStringNotContainsString('safe@example.test', $text);
-
-        $markup = $sent->first()[0]['reply_markup'] ?? [];
-        $callbackData = collect($markup['inline_keyboard'][0] ?? [])->pluck('callback_data')->all();
-        $this->assertCount(2, $callbackData);
-        $this->assertMatchesRegularExpression('/^txt:send:[a-f0-9]{32}$/', (string) $callbackData[0]);
-        $this->assertMatchesRegularExpression('/^txt:cancel:[a-f0-9]{32}$/', (string) $callbackData[1]);
-
-        $sendNonce = substr((string) $callbackData[0], strlen('txt:send:'));
-        $this->assertSame(
-            'order:'.$order->id.':telegram_txt_download:'.$sendNonce.':v1',
-            TelegramOutboundEffectService::receiptTxtDownloadEffectKey($order->id, $sendNonce),
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD)
+            ->sole();
+        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->state);
+        $this->assertSame((string) $customer->telegram_id, (string) $effect->telegram_chat_id);
+        $this->assertMatchesRegularExpression(
+            '/\A[a-f0-9]{32}\z/',
+            (string) ($effect->outcome_metadata['confirmation_nonce'] ?? ''),
+        );
+        $this->assertStringNotContainsString(
+            'Safe-password',
+            json_encode($effect->getAttributes(), JSON_THROW_ON_ERROR),
         );
 
-        $confirmation = Cache::get('telegram:receipt-txt-confirmation:423001:'.$order->id);
-        $this->assertIsArray($confirmation);
-        $this->assertSame((int) $customer->id, (int) ($confirmation['customerId'] ?? 0));
-        $this->assertSame('423001', (string) ($confirmation['telegramChatId'] ?? ''));
-        $this->assertSame($order->id, (string) ($confirmation['orderId'] ?? ''));
-        $this->assertSame('en', (string) ($confirmation['locale'] ?? ''));
-        $this->assertMatchesRegularExpression('/\A[a-f0-9]{32}\z/', (string) ($confirmation['nonce'] ?? ''));
-        $cacheDump = json_encode($confirmation, JSON_THROW_ON_ERROR);
-        $this->assertStringNotContainsString('Safe-password', $cacheDump);
-        $this->assertStringNotContainsString('safe@example.test', $cacheDump);
-        $this->assertSame(0, TelegramOutboundEffect::query()->count());
-
-        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendDocument'));
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
-            && ($request['callback_query_id'] ?? null) === 'cb-txt-request'
-            && ! isset($request['text']));
+        Queue::assertPushedOn(
+            'notifications',
+            SendTelegramReceiptTxt::class,
+            fn (SendTelegramReceiptTxt $job): bool => $job->orderId === (string) $order->id
+                && $job->effectId === (string) $effect->id,
+        );
+        $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:423001:'.$order->id));
+        $this->assertCount(0, Http::recorded(
+            fn ($request): bool => str_ends_with($request->url(), '/sendDocument'),
+        ));
+        Http::assertSent(
+            fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+                && ($request['callback_query_id'] ?? null) === 'cb-txt-request'
+                && ($request['text'] ?? null) === '✅ Request received. Your TXT file is being prepared.',
+        );
     }
 
-    public function test_confirmation_uses_full_order_key_when_invoice_is_absent(): void
+    public function test_txt_request_accepts_order_without_invoice(): void
     {
+        Queue::fake([SendTelegramReceiptTxt::class]);
         $this->fakeTelegramHttp();
         [, $order] = $this->paidOrderWithCredential('fallback@example.test', 'Fallback-password', 'en');
         $order->forceFill(['invoice_number' => ''])->save();
@@ -94,11 +88,14 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
             $this->callbackUpdate(5102, 'cb-txt-fallback-order', 'txt:request:'.$order->id, chatId: 423001),
         )->assertOk();
 
-        $sent = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && (string) ($request['chat_id'] ?? '') === '423001')->sole()[0];
-        $text = (string) ($sent['text'] ?? '');
-
-        $this->assertStringContainsString('Order: #'.$order->id, $text);
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD)
+            ->sole();
+        $this->assertSame((string) $order->id, (string) $effect->source_id);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->state);
+        $this->assertCount(0, Http::recorded(
+            fn ($request): bool => str_ends_with($request->url(), '/sendMessage'),
+        ));
     }
 
     public function test_send_file_creates_exactly_one_effect_and_answers_immediately(): void

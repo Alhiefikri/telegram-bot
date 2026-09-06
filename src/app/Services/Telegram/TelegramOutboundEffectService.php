@@ -975,7 +975,7 @@ class TelegramOutboundEffectService
     }
 
     /**
-     * Materialize one explicitly confirmed, independently delivered TXT file.
+     * Materialize one explicitly requested, independently delivered TXT file.
      *
      * The request nonce is opaque and becomes the durable idempotency
      * component. Credential values are intentionally not loaded here.

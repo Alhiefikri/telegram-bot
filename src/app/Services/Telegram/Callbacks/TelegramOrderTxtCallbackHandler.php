@@ -17,11 +17,12 @@ use App\Services\Telegram\TelegramReceiptTxtRateLimiter;
 use App\Support\DogfoodTiming;
 
 /**
- * Paid Order TXT export confirmation and authorization callbacks.
+ * Paid Order TXT export callbacks.
  *
- * The confirmation is deliberately small and credential-free. Credential
- * values are never hydrated or rendered inside the callback path; the
- * Send-file action only creates the durable outbound effect and returns.
+ * The TXT button is itself the explicit authorization to create the
+ * credential-bearing document. Credential values are never hydrated or
+ * rendered inside the callback path; the callback only creates the durable
+ * outbound effect and returns.
  */
 class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
 {
@@ -123,37 +124,7 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             return;
         }
 
-        $confirmation = $this->confirmation->start(
-            $context->customer,
-            $context->chatId,
-            (string) $order->getKey(),
-            $this->locale->code($context->customer),
-        );
-
-        $this->observability->txtRequestAccepted(
-            effect: null,
-            customer: $context->customer,
-            order: $order,
-            callbackQueryId: $context->callbackQueryId,
-            stage: 'confirmation',
-        );
-        $this->bot->answerCallbackQuery($context->callbackQueryId);
-        $this->bot->sendMessage(
-            $context->chatId,
-            $this->confirmationMessage($context, $order),
-            [
-                'inline_keyboard' => [[
-                    [
-                        'text' => $this->locale->translate($context->customer, 'receipt.txt.send_file_button'),
-                        'callback_data' => 'txt:send:'.$confirmation['nonce'],
-                    ],
-                    [
-                        'text' => $this->locale->translate($context->customer, 'receipt.txt.cancel_button'),
-                        'callback_data' => 'txt:cancel:'.$confirmation['nonce'],
-                    ],
-                ]],
-            ],
-        );
+        $this->queueFile($context, $order, bin2hex(random_bytes(16)));
     }
 
     private function handleSendFile(TelegramCallbackContext $context, string $nonce): void
@@ -202,11 +173,19 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             return;
         }
 
-        if (! $this->rateLimiter->allow($context->customer, $eligibleOrder)) {
+        $this->queueFile($context, $eligibleOrder, $nonce);
+    }
+
+    private function queueFile(
+        TelegramCallbackContext $context,
+        Order $order,
+        string $requestNonce,
+    ): void {
+        if (! $this->rateLimiter->allow($context->customer, $order)) {
             $this->observability->txtRequestRejected(
                 'download_window',
                 $context->customer,
-                $eligibleOrder,
+                $order,
                 $context->callbackQueryId,
                 'rate_limit',
             );
@@ -219,8 +198,8 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
         }
 
         $effect = $this->effects->recordReceiptTxtDownload(
-            $eligibleOrder,
-            $nonce,
+            $order,
+            $requestNonce,
             $context->customer,
             [
                 'origin_message_id' => $context->messageId,
@@ -232,7 +211,7 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             $this->observability->txtRequestRejected(
                 'effect_not_created',
                 $context->customer,
-                $eligibleOrder,
+                $order,
                 $context->callbackQueryId,
                 'effect',
             );
@@ -247,7 +226,7 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
         $this->observability->txtRequestAccepted(
             $effect,
             $context->customer,
-            $eligibleOrder,
+            $order,
             $context->callbackQueryId,
         );
         $this->bot->answerCallbackQuery(

@@ -97,9 +97,9 @@ final class TelegramPaidOrderTxtDownloadTest extends TelegramBotTestSupport
         $this->assertNoSecretValues($contents, ['legacy_one_raw' => $sensitive['legacy_one_raw']]);
     }
 
-    public function test_full_secrets_are_present_only_in_the_confirmed_document_request(): void
+    public function test_full_secrets_are_present_only_in_the_document_request(): void
     {
-        [$order, $customer, $sensitive] = $this->otpAndAuthOrder();
+        [$order, , $sensitive] = $this->otpAndAuthOrder();
         config()->set('services.telegram.admin_contact_url', 'https://t.me/lhie_support');
         $logs = $this->captureDogfoodLogs();
 
@@ -117,33 +117,14 @@ final class TelegramPaidOrderTxtDownloadTest extends TelegramBotTestSupport
             $this->callbackUpdate(42611, 'cb-426-txt-request', 'txt:request:'.$order->id, chatId: 426001),
         )->assertOk();
 
-        $confirmationMessages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'));
-        $this->assertCount(1, $confirmationMessages);
-        $confirmationMessage = $confirmationMessages->first()[0];
-        $this->assertNoSecretValues(
-            (string) ($confirmationMessage['text'] ?? '').json_encode($confirmationMessage->data(), JSON_THROW_ON_ERROR),
-            $sensitive,
-        );
-
-        $confirmation = Cache::get('telegram:receipt-txt-confirmation:426001:'.$order->id);
-        $this->assertIsArray($confirmation);
-        $this->assertSame((int) $customer->id, $confirmation['customerId']);
-        $this->assertSame('426001', $confirmation['telegramChatId']);
-        $this->assertSame((string) $order->id, $confirmation['orderId']);
-        $this->assertNoSecretValues(json_encode($confirmation, JSON_THROW_ON_ERROR), $sensitive);
-
-        $sendCallback = data_get($confirmationMessage->data(), 'reply_markup.inline_keyboard.0.0.callback_data');
-        $this->assertIsString($sendCallback);
-        $this->postTelegramWebhook(
-            $this->callbackUpdate(42612, 'cb-426-txt-send', $sendCallback, chatId: 426001, messageId: 42612),
-        )->assertOk();
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
+        $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:426001:'.$order->id));
 
         $effect = TelegramOutboundEffect::query()
             ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD)
             ->sole();
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
         $this->assertNoSecretValues(json_encode($effect->getAttributes(), JSON_THROW_ON_ERROR), $sensitive);
-
         $this->assertNoSecretValues(serialize(new SendTelegramReceiptTxt($order->id, null, $effect->id)), $sensitive);
 
         $documentRequest = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument'))->sole()[0];
@@ -169,52 +150,44 @@ final class TelegramPaidOrderTxtDownloadTest extends TelegramBotTestSupport
         $this->assertNoSecretValues(json_encode($logs->entries, JSON_THROW_ON_ERROR), $sensitive);
     }
 
-    #[DataProvider('confirmationLocaleCases')]
-    public function test_confirmation_and_cancel_feedback_use_the_stored_customer_locale(
+    #[DataProvider('directRequestLocaleCases')]
+    public function test_direct_request_feedback_uses_the_stored_customer_locale(
         string $locale,
-        string $title,
-        string $sendFileLabel,
-        string $cancelLabel,
-        string $cancelledCopy,
+        string $requestStartedCopy,
     ): void {
+        Queue::fake([SendTelegramReceiptTxt::class]);
         $this->fakeTelegramHttp();
         $telegramId = 426300 + array_search($locale, ['id', 'en', 'ms'], true);
         [$order, , $sensitive] = $this->otpAndAuthOrder(oneAccount: true, locale: $locale, telegramId: $telegramId);
 
         $this->postTelegramWebhook($this->callbackUpdate(
             42621,
-            'cb-426-locale-request-'.$locale,
+            'cb-426-direct-request-'.$locale,
             'txt:request:'.$order->id,
             chatId: $telegramId,
         ))->assertOk();
 
-        $confirmationMessage = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'))->sole()[0];
-        $text = (string) ($confirmationMessage['text'] ?? '');
-        $this->assertStringContainsString($title, $text);
-        $this->assertStringContainsString('TXT', $text);
-        $this->assertStringNotContainsString($sensitive['otp_url'], $text);
-
-        $keyboard = data_get($confirmationMessage->data(), 'reply_markup.inline_keyboard.0');
-        $this->assertSame($sendFileLabel, $keyboard[0]['text'] ?? null);
-        $this->assertSame($cancelLabel, $keyboard[1]['text'] ?? null);
-
-        $this->postTelegramWebhook($this->callbackUpdate(
-            42622,
-            'cb-426-locale-cancel-'.$locale,
-            (string) ($keyboard[1]['callback_data'] ?? ''),
-            chatId: $telegramId,
-        ))->assertOk();
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
+        $this->assertCount(1, TelegramOutboundEffect::query()->where(
+            'effect_type',
+            TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD,
+        )->get());
+        Queue::assertPushed(SendTelegramReceiptTxt::class);
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
-            && ($request['text'] ?? null) === $cancelledCopy);
-        $this->assertSame(0, TelegramOutboundEffect::query()->count());
+            && ($request['text'] ?? null) === $requestStartedCopy);
+        $this->assertNoSecretValues(
+            json_encode(Http::recorded()->map(fn (array $record): array => $record[0]->data())->all(), JSON_THROW_ON_ERROR),
+            $sensitive,
+        );
     }
 
-    /** @return iterable<string, array{string, string, string, string, string}> */
-    public static function confirmationLocaleCases(): iterable
+    /** @return iterable<string, array{string, string}> */
+    public static function directRequestLocaleCases(): iterable
     {
-        yield 'indonesian' => ['id', '⬇️ Konfirmasi Download', '✅ Kirim file', '❌ Batal', 'Dibatalkan. Tidak ada file yang akan dibuat.'];
-        yield 'english' => ['en', '⬇️ Confirm Download', '✅ Send file', '❌ Cancel', 'Cancelled. No file will be generated.'];
-        yield 'malay' => ['ms', '⬇️ Sahkan Muat Turun', '✅ Hantar fail', '❌ Batal', 'Dibatalkan. Tiada fail akan dijana.'];
+        yield 'indonesian' => ['id', '✅ Permintaan diterima. File TXT kamu sedang disiapkan.'];
+        yield 'english' => ['en', '✅ Request received. Your TXT file is being prepared.'];
+        yield 'malay' => ['ms', '✅ Permintaan diterima. Fail TXT anda sedang disediakan.'];
     }
 
     public function test_normal_receipt_remains_protected_while_txt_document_is_downloadable(): void
