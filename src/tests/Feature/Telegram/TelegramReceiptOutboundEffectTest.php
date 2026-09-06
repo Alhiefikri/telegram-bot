@@ -10,6 +10,7 @@ use App\Enums\TelegramOutboundEffectState;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendTelegramReceipt;
+use App\Jobs\SendTelegramReceiptActionPanel;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -506,6 +507,49 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         );
     }
 
+    public function test_legacy_receipt_groups_are_not_silently_upgraded_with_action_panels(): void
+    {
+        Queue::fake();
+        $order = $this->paidOrderWithoutCredentials();
+        $legacy = $this->recordLegacyReceiptGroup($order);
+        $sentAt = now()->subMinute();
+
+        TelegramOutboundEffect::query()
+            ->where('effect_group_key', $legacy->effect_group_key)
+            ->get()
+            ->each(function (TelegramOutboundEffect $effect) use ($sentAt): void {
+                $effect->forceFill([
+                    'state' => TelegramOutboundEffectState::Sent,
+                    'telegram_message_id' => (string) (891000 + (int) $effect->sequence),
+                    'sent_at' => $sentAt,
+                ])->save();
+            });
+        $order->forceFill(['telegram_receipt_sent_at' => $sentAt])->save();
+        $legacySnapshot = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $legacy->effect_group_key)
+            ->orderBy('sequence')
+            ->get()
+            ->map(fn (TelegramOutboundEffect $effect): array => $effect->getAttributes())
+            ->all();
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $this->assertSame(
+            0,
+            TelegramOutboundEffect::query()
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS)
+                ->count(),
+        );
+        Queue::assertNotPushed(SendTelegramReceiptActionPanel::class);
+        $this->assertSame($legacySnapshot, TelegramOutboundEffect::query()
+            ->where('effect_group_key', $legacy->effect_group_key)
+            ->orderBy('sequence')
+            ->get()
+            ->map(fn (TelegramOutboundEffect $effect): array => $effect->getAttributes())
+            ->all());
+    }
+
     public function test_recovery_materializes_a_paid_receipt_without_a_legacy_claim(): void
     {
         Queue::fake();
@@ -794,6 +838,12 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame(1, $requests->filter(
             static fn (array $record): bool => str_ends_with($record[0]->url(), '/sendPhoto'),
         )->count());
+        foreach ($requests as $record) {
+            $this->assertTrue(
+                filter_var($this->telegramRequestField($record[0], 'protect_content'), FILTER_VALIDATE_BOOLEAN),
+                'Every normal receipt unit must remain protected.',
+            );
+        }
 
         $texts = $requests->map(function (array $record): string {
             $request = $record[0];

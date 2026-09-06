@@ -77,10 +77,10 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         [$customer, $order] = $this->paidOrderWithCredential('send@example.test', 'Send-password', 'en');
-        $nonce = $this->startConfirmation($customer, $order, '423002');
+        $nonce = $this->startConfirmation($customer, $order, '423001');
 
-        $this->postTelegramWebhook($this->callbackUpdate(5111, 'cb-txt-send', 'txt:send:'.$nonce, from: ['id' => 423001], chatId: 423002, messageId: 9911))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(5112, 'cb-txt-send-replay', 'txt:send:'.$nonce, from: ['id' => 423001], chatId: 423002, messageId: 9911))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(5111, 'cb-txt-send', 'txt:send:'.$nonce, from: ['id' => 423001], chatId: 423001, messageId: 9911))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(5112, 'cb-txt-send-replay', 'txt:send:'.$nonce, from: ['id' => 423001], chatId: 423001, messageId: 9911))->assertOk();
 
         $effects = TelegramOutboundEffect::query()
             ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD)
@@ -94,7 +94,7 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('Send-password', json_encode($effect->getAttributes(), JSON_THROW_ON_ERROR));
 
         $this->assertSame(0, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendDocument'))->count());
-        $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:423002:'.$order->id));
+        $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:423001:'.$order->id));
         $this->assertCount(
             1,
             Http::recorded(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
@@ -111,12 +111,12 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         [$customer, $order] = $this->paidOrderWithCredential('cancel@example.test', 'Cancel-password', 'en');
-        $nonce = $this->startConfirmation($customer, $order, '423003');
+        $nonce = $this->startConfirmation($customer, $order, '423001');
 
-        $this->postTelegramWebhook($this->callbackUpdate(5121, 'cb-txt-cancel', 'txt:cancel:'.$nonce, from: ['id' => 423001], chatId: 423003))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(5121, 'cb-txt-cancel', 'txt:cancel:'.$nonce, from: ['id' => 423001], chatId: 423001))->assertOk();
 
         $this->assertDatabaseCount('telegram_outbound_effects', 0);
-        $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:423003:'.$order->id));
+        $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:423001:'.$order->id));
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
             && ($request['callback_query_id'] ?? null) === 'cb-txt-cancel'
             && ($request['text'] ?? null) === 'Cancelled. No file will be generated.');
@@ -129,22 +129,22 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
         [$customer, $order] = $this->paidOrderWithCredential('stale@example.test', 'Stale-password', 'en');
         $other = Customer::factory()->create(['telegram_id' => 423010, 'locale' => 'en']);
 
-        $nonce = $this->startConfirmation($customer, $order, '423004');
-        Cache::forget('telegram:receipt-txt-confirmation:423004:'.$order->id);
-        $this->postTelegramWebhook($this->callbackUpdate(5131, 'cb-txt-expired', 'txt:send:'.$nonce, from: ['id' => 423001], chatId: 423004))->assertOk();
+        $nonce = $this->startConfirmation($customer, $order, '423001');
+        Cache::forget('telegram:receipt-txt-confirmation:423001:'.$order->id);
+        $this->postTelegramWebhook($this->callbackUpdate(5131, 'cb-txt-expired', 'txt:send:'.$nonce, from: ['id' => 423001], chatId: 423001))->assertOk();
 
-        $nonce = $this->startConfirmation($customer, $order, '423005');
+        $nonce = $this->startConfirmation($customer, $order, '423001');
         $this->postTelegramWebhook($this->callbackUpdate(5132, 'cb-txt-wrong-customer', 'txt:send:'.$nonce, from: ['id' => 423010], chatId: 423010))->assertOk();
         $this->assertSame(0, TelegramOutboundEffect::query()->count());
         $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:423010:'.$order->id));
 
-        // The owner's entry for chat 423005 is untouched (the attacker's send
+        // The owner's entry for chat 423001 is untouched (the attacker's send
         // only scanned the attacker's own chat/order entries).
-        $ownerConfirmation = Cache::get('telegram:receipt-txt-confirmation:423005:'.$order->id);
+        $ownerConfirmation = Cache::get('telegram:receipt-txt-confirmation:423001:'.$order->id);
         $this->assertIsArray($ownerConfirmation);
         $this->assertSame($nonce, (string) ($ownerConfirmation['nonce'] ?? ''));
 
-        $this->postTelegramWebhook($this->callbackUpdate(5133, 'cb-txt-replay', 'txt:send:'.$nonce, from: ['id' => 423001], chatId: 423005))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(5133, 'cb-txt-replay', 'txt:send:'.$nonce, from: ['id' => 423001], chatId: 423001))->assertOk();
         $this->assertCount(
             1,
             TelegramOutboundEffect::query()
@@ -202,10 +202,10 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         [$customer, $order] = $this->paidOrderWithCredential('revoked@example.test', 'Revoked-password', 'en');
-        $nonce = $this->startConfirmation($customer, $order, '423021');
+        $nonce = $this->startConfirmation($customer, $order, '423001');
 
         $order->update(['payment_status' => PaymentStatus::Refunded]);
-        $this->postTelegramWebhook($this->callbackUpdate(5151, 'cb-txt-revoked', 'txt:send:'.$nonce, chatId: 423021))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(5151, 'cb-txt-revoked', 'txt:send:'.$nonce, chatId: 423001))->assertOk();
 
         $this->assertDatabaseCount('telegram_outbound_effects', 0);
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')

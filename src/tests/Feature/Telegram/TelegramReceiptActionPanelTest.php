@@ -22,6 +22,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
 final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
@@ -83,7 +84,55 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         foreach ($rows as $row) {
             $this->assertCount(1, $row);
         }
+        $labels = collect($rows)->flatten(1)->pluck('text')->all();
+        $this->assertNotContains('Excel', $labels);
         $this->assertStringNotContainsString($secret, $unit->text().json_encode($unit->replyMarkup(), JSON_THROW_ON_ERROR));
+    }
+
+    #[DataProvider('panelLocaleCases')]
+    public function test_panel_uses_the_stored_customer_locale_for_every_supported_locale(
+        string $locale,
+        string $message,
+        string $supportLabel,
+        string $buyAgainLabel,
+        string $mainMenuLabel,
+    ): void {
+        config()->set('services.telegram.admin_contact_url', 'https://t.me/lhie_support');
+        [$order] = $this->paidOrder(withCredential: true, locale: $locale, telegramId: 424100 + array_search($locale, ['id', 'en', 'ms'], true));
+
+        $unit = app(TelegramReceiptActionPanel::class)->render($order, $order->customer->locale, true);
+        $rows = $unit->replyMarkup()['inline_keyboard'] ?? [];
+        $labels = collect($rows)->flatten(1)->pluck('text')->all();
+
+        $this->assertSame($message, $unit->text());
+        $this->assertSame(['⬇️ TXT', $supportLabel, $buyAgainLabel, $mainMenuLabel], $labels);
+        $this->assertFalse(collect($labels)->contains(fn (string $label): bool => str_contains(strtolower($label), 'excel')));
+    }
+
+    /** @return iterable<string, array{string, string, string, string, string}> */
+    public static function panelLocaleCases(): iterable
+    {
+        yield 'indonesian' => [
+            'id',
+            '🛟 Butuh bantuan dengan pesanan ini? Tekan Support di bawah dan sertakan Order ID agar kami dapat membantu.',
+            '🛟 Support',
+            '🎁 Beli Lagi',
+            '📦 Menu Utama',
+        ];
+        yield 'english' => [
+            'en',
+            '🛟 Need help with this order? Tap Support below and include your Order ID so we can help.',
+            '🛟 Support',
+            '🎁 Buy Again',
+            '📦 Main Menu',
+        ];
+        yield 'malay' => [
+            'ms',
+            '🛟 Perlukan bantuan dengan pesanan ini? Tekan Sokongan di bawah dan sertakan Order ID supaya kami boleh membantu.',
+            '🛟 Sokongan',
+            '🎁 Beli Lagi',
+            '📦 Menu Utama',
+        ];
     }
 
     public function test_panel_omits_txt_when_the_completed_receipt_has_no_deliverable_credentials(): void
@@ -124,25 +173,27 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
                 'ok' => true,
                 'result' => ['message_id' => 424403],
             ]),
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 424404],
+            ]),
         ]);
         app(ReceiptDeliveryPipeline::class)->deliver($receipt, dispatchNext: false);
         $panel = TelegramOutboundEffect::query()
             ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS)
             ->sole();
 
-        Http::fake([
-            'https://api.telegram.org/*/sendMessage' => Http::response([
-                'ok' => true,
-                'result' => ['message_id' => 424404],
-            ]),
-            'https://api.telegram.org/*' => Http::response(['ok' => true]),
-        ]);
         app(ReceiptActionPanelDeliveryPipeline::class)->deliver($panel);
 
         $sent = $panel->fresh();
         $this->assertSame(TelegramOutboundEffectState::Sent, $sent->state);
         $this->assertTrue((int) $sent->telegram_message_id > 0);
         $message = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'))->sole()[0];
+        $deliveryRequests = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
+            || str_ends_with($request->url(), '/sendMessage'));
+        $this->assertCount(2, $deliveryRequests);
+        $this->assertTrue(str_ends_with($deliveryRequests->first()[0]->url(), '/sendPhoto'));
+        $this->assertTrue(str_ends_with($deliveryRequests->last()[0]->url(), '/sendMessage'));
         $this->assertStringContainsString('Order ID', (string) ($message['text'] ?? ''));
         $this->assertStringNotContainsString('protect_content', json_encode($message->data(), JSON_THROW_ON_ERROR));
         $this->assertSame(
@@ -204,12 +255,63 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         $order->forceFill(['telegram_receipt_sent_at' => now()])->save();
 
         Artisan::call('telegram:recover-outbound', ['--chunk' => 1]);
+        Artisan::call('telegram:recover-outbound', ['--chunk' => 1]);
 
         $panel = TelegramOutboundEffect::query()
             ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS)
             ->sole();
         $this->assertSame(TelegramOutboundEffectState::Pending, $panel->state);
         Queue::assertPushed(SendTelegramReceiptActionPanel::class, fn (SendTelegramReceiptActionPanel $job): bool => $job->effectId === (string) $panel->id);
+        Queue::assertPushedTimes(SendTelegramReceiptActionPanel::class, 1);
+    }
+
+    public function test_panel_failure_is_independent_from_the_successful_receipt(): void
+    {
+        Queue::fake();
+        [$order] = $this->paidOrder(withCredential: true, locale: 'en');
+        $receipt = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $this->assertNotNull($receipt);
+
+        $panelShouldFail = false;
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 424408],
+            ]),
+            'https://api.telegram.org/*/sendMessage' => function () use (&$panelShouldFail): mixed {
+                if ($panelShouldFail) {
+                    return Http::response([
+                        'ok' => false,
+                        'description' => 'Bad Request: panel rejected',
+                    ], 400);
+                }
+
+                return Http::response(['ok' => true, 'result' => ['message_id' => 424409]]);
+            },
+        ]);
+        app(ReceiptDeliveryPipeline::class)->deliver($receipt, dispatchNext: false);
+        $panel = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS)
+            ->sole();
+
+        $panelShouldFail = true;
+        $pipeline = app(ReceiptActionPanelDeliveryPipeline::class);
+        $pipeline->deliver($panel);
+        $pipeline->deliver($panel->fresh());
+
+        $failed = $panel->fresh();
+        $receiptStates = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $receipt->effect_group_key)
+            ->pluck('state')
+            ->all();
+        $this->assertSame(TelegramOutboundEffectState::Failed, $failed->state);
+        $this->assertSame('telegram_http_400', $failed->last_error_code);
+        $this->assertNull($failed->next_attempt_at);
+        $this->assertTrue(collect($receiptStates)->every(
+            fn (TelegramOutboundEffectState $state): bool => $state === TelegramOutboundEffectState::Sent,
+        ));
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
     }
 
     public function test_explicit_panel_resend_preserves_the_receipt_reference_and_safe_capabilities(): void
@@ -244,10 +346,10 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
     }
 
     /** @return array{0: Order, 1?: string} */
-    private function paidOrder(bool $withCredential, string $locale): array
+    private function paidOrder(bool $withCredential, string $locale, int $telegramId = 424001): array
     {
         $customer = Customer::factory()->create([
-            'telegram_id' => 424001,
+            'telegram_id' => $telegramId,
             'locale' => $locale,
         ]);
         $product = Product::factory()->create(['name' => 'Panel Product']);

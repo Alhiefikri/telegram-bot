@@ -224,6 +224,10 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
 
     private function customerOwnedEligibleOrder(TelegramCallbackContext $context, string $orderId): ?Order
     {
+        if ((string) $context->chatId !== trim((string) $context->customer->telegram_id)) {
+            return null;
+        }
+
         $order = Order::query()
             ->with(['customer', 'payments', 'orderItems'])
             ->whereKey($orderId)
