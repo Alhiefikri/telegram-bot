@@ -75,7 +75,12 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
 
     public function test_send_file_creates_exactly_one_effect_and_answers_immediately(): void
     {
-        $this->fakeTelegramHttp();
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendDocument' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 423111],
+            ]),
+        ]);
         [$customer, $order] = $this->paidOrderWithCredential('send@example.test', 'Send-password', 'en');
         $nonce = $this->startConfirmation($customer, $order, '423001');
 
@@ -87,13 +92,13 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
             ->get();
         $this->assertCount(1, $effects);
         $effect = $effects->sole();
-        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->state);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
         $this->assertSame($nonce, (string) ($effect->outcome_metadata['confirmation_nonce'] ?? ''));
         $this->assertSame(9911, (int) ($effect->outcome_metadata['origin_message_id'] ?? 0));
         $this->assertSame((string) $customer->telegram_id, (string) $effect->telegram_chat_id);
         $this->assertStringNotContainsString('Send-password', json_encode($effect->getAttributes(), JSON_THROW_ON_ERROR));
 
-        $this->assertSame(0, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendDocument'))->count());
+        $this->assertSame(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendDocument'))->count());
         $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:423001:'.$order->id));
         $this->assertCount(
             1,
@@ -125,7 +130,12 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
 
     public function test_expired_or_replayed_or_wrong_customer_token_fails_generically(): void
     {
-        $this->fakeTelegramHttp();
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendDocument' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 423131],
+            ]),
+        ]);
         [$customer, $order] = $this->paidOrderWithCredential('stale@example.test', 'Stale-password', 'en');
         $other = Customer::factory()->create(['telegram_id' => 423010, 'locale' => 'en']);
 
@@ -151,8 +161,6 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
                 ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD)
                 ->get(),
         );
-        $this->assertCount(0, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendDocument')));
-
         $answers = Http::recorded(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
             && ($request['text'] ?? null) === 'This request is no longer valid. Press TXT again to generate a new file.');
         $this->assertCount(2, $answers);
@@ -161,7 +169,7 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
             Http::recorded(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
                 && ($request['text'] ?? null) === '✅ Request received. Your TXT file is being prepared.'),
         );
-        $this->assertCount(0, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendDocument')));
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendDocument')));
     }
 
     public function test_txt_request_rejects_unpaid_refunded_cancelled_and_late_review_orders_without_leakage(): void

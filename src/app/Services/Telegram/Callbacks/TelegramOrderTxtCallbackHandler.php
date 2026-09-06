@@ -11,6 +11,7 @@ use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptObservability;
 use App\Services\Telegram\TelegramReceiptTxtConfirmationSession;
@@ -27,6 +28,8 @@ use Throwable;
  */
 class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
 {
+    private const MAX_FALLBACK_CONFIRMATION_ORDERS = 50;
+
     /** @var list<string> */
     private const CALLBACK_PATTERNS = [
         'txt:request:' => '/^txt:request:([0-9a-fA-F-]{36})$/D',
@@ -37,6 +40,7 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramLocale $locale,
+        private TelegramOutboundEffectDispatcher $dispatcher,
         private TelegramOutboundEffectService $effects,
         private CredentialDeliveryPresentation $presentation,
         private TelegramReceiptTxtConfirmationSession $confirmation,
@@ -253,6 +257,7 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             $context->callbackQueryId,
             $this->locale->translate($context->customer, 'receipt.txt.request_started'),
         );
+        $this->dispatcher->dispatch($effect);
     }
 
     private function handleCancel(TelegramCallbackContext $context, string $nonce): void
@@ -283,6 +288,24 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
      */
     private function consumeBoundOrder(TelegramCallbackContext $context, string $nonce): ?Order
     {
+        $indexedOrderId = $this->confirmation->orderIdForNonce($context->customer, $context->chatId, $nonce);
+        if ($indexedOrderId !== null) {
+            $confirmation = $this->confirmation->consume(
+                $context->customer,
+                $context->chatId,
+                $indexedOrderId,
+                $nonce,
+            );
+            if ($confirmation === null) {
+                return null;
+            }
+
+            return Order::query()
+                ->with(['customer', 'payments', 'orderItems'])
+                ->whereKey($indexedOrderId)
+                ->first();
+        }
+
         foreach ($this->ordersFor($context) as $orderId) {
             $confirmation = $this->confirmation->consume($context->customer, $context->chatId, $orderId, $nonce);
             if ($confirmation === null) {
@@ -306,6 +329,8 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
         return $context->customer->orders()
             ->whereIn('order_status', [OrderStatus::PendingPayment->value, OrderStatus::Processing->value, OrderStatus::Completed->value])
             ->where('payment_status', PaymentStatus::Paid->value)
+            ->latest('created_at')
+            ->limit(self::MAX_FALLBACK_CONFIRMATION_ORDERS)
             ->pluck('id')
             ->map(static fn ($id): string => (string) $id)
             ->all();

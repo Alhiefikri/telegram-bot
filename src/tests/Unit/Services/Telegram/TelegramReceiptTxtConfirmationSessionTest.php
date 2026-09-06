@@ -16,8 +16,10 @@ final class TelegramReceiptTxtConfirmationSessionTest extends TestCase
 
         $confirmation = $session->start($customer, '426001', 'order-426', 'en');
 
+        $this->assertSame('order-426', $session->orderIdForNonce($customer, '426001', $confirmation['nonce']));
         $this->assertSame($confirmation, $session->boundConfirmation($customer, '426001', 'order-426', $confirmation['nonce']));
         $this->assertSame($confirmation, $session->consume($customer, '426001', 'order-426', $confirmation['nonce']));
+        $this->assertNull($session->orderIdForNonce($customer, '426001', $confirmation['nonce']));
         $this->assertNull($session->consume($customer, '426001', 'order-426', $confirmation['nonce']));
         $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:426001:order-426'));
     }

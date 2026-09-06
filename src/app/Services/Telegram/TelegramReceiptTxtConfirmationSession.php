@@ -30,12 +30,44 @@ final class TelegramReceiptTxtConfirmationSession
         $lock = Cache::lock($this->lockKey($chatId, $orderId), 10);
         try {
             $lock->block(5);
-            Cache::put($this->key($chatId, $orderId), $confirmation, now()->addMinutes(self::TTL_MINUTES));
+            $expiresAt = now()->addMinutes(self::TTL_MINUTES);
+            Cache::put($this->key($chatId, $orderId), $confirmation, $expiresAt);
+            Cache::put($this->nonceKey($chatId, $customer->getKey(), $confirmation['nonce']), $orderId, $expiresAt);
         } finally {
             $lock->release();
         }
 
         return $confirmation;
+    }
+
+    /**
+     * Resolve a nonce through its short-lived, customer-bound index. This
+     * avoids scanning every paid Order for a Customer on the normal callback
+     * path. A null result is deliberately indistinguishable from a stale or
+     * unknown nonce.
+     */
+    public function orderIdForNonce(Customer $customer, string $chatId, string $nonce): ?string
+    {
+        if (preg_match('/\A[a-f0-9]{32}\z/D', $nonce) !== 1) {
+            return null;
+        }
+
+        $orderId = Cache::get($this->nonceKey($chatId, $customer->getKey(), $nonce));
+        if (! is_string($orderId) || $orderId === '') {
+            return null;
+        }
+
+        $confirmation = $this->state($chatId, $orderId);
+        if ($confirmation === null
+            || (int) ($confirmation['customerId'] ?? 0) !== (int) $customer->getKey()
+            || (string) ($confirmation['telegramChatId'] ?? '') !== $chatId
+            || ! hash_equals((string) ($confirmation['nonce'] ?? ''), $nonce)) {
+            Cache::forget($this->nonceKey($chatId, $customer->getKey(), $nonce));
+
+            return null;
+        }
+
+        return $orderId;
     }
 
     /**
@@ -86,7 +118,15 @@ final class TelegramReceiptTxtConfirmationSession
 
     public function forget(string $chatId, string $orderId): void
     {
+        $confirmation = Cache::get($this->key($chatId, $orderId));
         Cache::forget($this->key($chatId, $orderId));
+
+        if (is_array($confirmation)
+            && isset($confirmation['customerId'], $confirmation['nonce'])
+            && is_int($confirmation['customerId'])
+            && is_string($confirmation['nonce'])) {
+            Cache::forget($this->nonceKey($chatId, $confirmation['customerId'], $confirmation['nonce']));
+        }
     }
 
     private function state(string $chatId, string $orderId): ?array
@@ -125,5 +165,10 @@ final class TelegramReceiptTxtConfirmationSession
     private function lockKey(string $chatId, string $orderId): string
     {
         return $this->key($chatId, $orderId).':lock';
+    }
+
+    private function nonceKey(string $chatId, int|string $customerId, string $nonce): string
+    {
+        return 'telegram:receipt-txt-confirmation-nonce:'.$chatId.':'.$customerId.':'.$nonce;
     }
 }

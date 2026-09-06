@@ -17,7 +17,6 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\ReceiptTxtDeliveryPipeline;
-use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramPaidOrderTxtExporter;
@@ -142,19 +141,10 @@ final class TelegramPaidOrderTxtDownloadTest extends TelegramBotTestSupport
         $effect = TelegramOutboundEffect::query()
             ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD)
             ->sole();
-        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->state);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
         $this->assertNoSecretValues(json_encode($effect->getAttributes(), JSON_THROW_ON_ERROR), $sensitive);
 
-        Queue::fake();
-        app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
-        Queue::assertPushed(
-            SendTelegramReceiptTxt::class,
-            fn (SendTelegramReceiptTxt $job): bool => $job->effectId === (string) $effect->id
-                && $job->orderId === (string) $order->id,
-        );
         $this->assertNoSecretValues(serialize(new SendTelegramReceiptTxt($order->id, null, $effect->id)), $sensitive);
-
-        app(ReceiptTxtDeliveryPipeline::class)->deliver($effect);
 
         $documentRequest = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument'))->sole()[0];
         $documentContents = (string) $this->telegramRequestField($documentRequest, 'document');
@@ -410,7 +400,7 @@ final class TelegramPaidOrderTxtDownloadTest extends TelegramBotTestSupport
         ))->assertOk();
 
         $this->assertSame(1, TelegramOutboundEffect::query()->count());
-        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
         $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
     }
 
