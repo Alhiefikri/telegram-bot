@@ -153,7 +153,10 @@ jobs:
         run: composer validate --strict --no-check-publish
 
       - name: Install PHP dependencies
-        run: composer install --no-interaction --prefer-dist --no-progress
+        run: |
+          mkdir -p database
+          touch database/database.sqlite
+          composer install --no-interaction --prefer-dist --no-progress
 
       - name: Check PHP code style with Pint
         run: ./vendor/bin/pint --test
