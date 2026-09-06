@@ -18,18 +18,20 @@ Expected operator checks:
 
 ## 2. Required environment variable names
 
-Confirm the non-production `.env` contains values for these labels only. Do not print, paste, screenshot, or commit the values.
+Confirm the non-production `.env` contains only the small runtime and
+credential set below. Do not print, paste, screenshot, or commit the values.
 
 - `APP_ENV`
 - `APP_URL`
 - `APP_KEY`
 - `TELEGRAM_BOT_TOKEN`
-- `KLIKQRIS_SANDBOX_ENABLED`
-- `KLIKQRIS_SANDBOX_BASE_URL`
 - `KLIKQRIS_SANDBOX_API_KEY`
 - `KLIKQRIS_SANDBOX_MERCHANT_ID`
-- `KLIKQRIS_SANDBOX_CALLBACK_URL` (only when callbacks are exercised)
-- `KLIKQRIS_QRIS_TTL_MINUTES`
+
+The sandbox endpoint, callback path, 15-minute QRIS expiry, transport budgets,
+and enablement rule are pinned in application configuration. Sandbox enablement
+is derived from `APP_ENV=local` or `testing`; no KlikQRIS feature switch or URL
+variable belongs in `.env`.
 
 ## 3. Confirm the Telegram bot is the testing bot
 

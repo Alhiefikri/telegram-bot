@@ -49,34 +49,36 @@ class FoundationInfrastructureTest extends TestCase
     {
         $contents = file_get_contents(base_path('../supervisord.conf'));
         $compose = file_get_contents(base_path('../docker-compose.yml'));
+        $envExample = file_get_contents(base_path('../.env.example'));
 
         $this->assertStringContainsString('queue:work database', $contents);
         $this->assertStringContainsString('[program:laravel-update-worker]', $contents);
         $this->assertStringContainsString('--queue=payments,default', $contents);
-        $this->assertStringContainsString('--sleep=%(ENV_LARAVEL_UPDATE_WORKER_SLEEP)s', $contents);
-        $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_UPDATE_WORKER_PROCESSES)s', $contents);
+        $this->assertStringContainsString('--sleep=1', $contents);
+        $this->assertStringContainsString('numprocs=1', $contents);
         $this->assertStringContainsString('[program:laravel-outbound-worker]', $contents);
         $this->assertStringContainsString('--queue=telegram-outbound', $contents);
-        $this->assertStringContainsString('--sleep=%(ENV_LARAVEL_OUTBOUND_WORKER_SLEEP)s', $contents);
         $this->assertStringNotContainsString('--queue=telegram-outbound,notifications', $contents);
-        $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_OUTBOUND_WORKER_PROCESSES)s', $contents);
         $this->assertStringContainsString('[program:laravel-notification-worker]', $contents);
         $this->assertStringContainsString('--queue=notifications', $contents);
-        $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_NOTIFICATION_WORKER_PROCESSES)s', $contents);
         $this->assertStringContainsString('[program:laravel-broadcast-worker]', $contents);
         $this->assertStringContainsString('--queue=telegram-broadcast', $contents);
-        $this->assertStringContainsString('--sleep=%(ENV_LARAVEL_BROADCAST_WORKER_SLEEP)s', $contents);
-        $this->assertStringContainsString('numprocs=%(ENV_LARAVEL_BROADCAST_WORKER_PROCESSES)s', $contents);
-        $this->assertStringContainsString('--queue=%(ENV_BINANCE_VERIFICATION_QUEUE)s', $contents);
+        $this->assertStringContainsString('--queue=binance-verification', $contents);
+        $this->assertStringNotContainsString('ENV_LARAVEL_', $contents);
+        $this->assertStringNotContainsString('ENV_BINANCE_VERIFICATION_QUEUE', $contents);
 
-        foreach (['LARAVEL_UPDATE_WORKER_PROCESSES', 'LARAVEL_OUTBOUND_WORKER_PROCESSES', 'LARAVEL_NOTIFICATION_WORKER_PROCESSES', 'LARAVEL_BROADCAST_WORKER_PROCESSES', 'LARAVEL_BINANCE_VERIFICATION_WORKER_PROCESSES'] as $variable) {
-            $this->assertStringContainsString($variable.': ${'.$variable.':-1}', $compose);
-            $this->assertStringContainsString($variable.'=1', file_get_contents(base_path('.env.example')));
-        }
-
-        foreach (['LARAVEL_UPDATE_WORKER_SLEEP', 'LARAVEL_OUTBOUND_WORKER_SLEEP', 'LARAVEL_BROADCAST_WORKER_SLEEP'] as $variable) {
-            $this->assertStringContainsString($variable.': ${'.$variable.':-1}', $compose);
-            $this->assertStringContainsString($variable.'=1', file_get_contents(base_path('.env.example')));
+        foreach ([
+            'LARAVEL_UPDATE_WORKER_PROCESSES',
+            'LARAVEL_OUTBOUND_WORKER_PROCESSES',
+            'LARAVEL_NOTIFICATION_WORKER_PROCESSES',
+            'LARAVEL_BROADCAST_WORKER_PROCESSES',
+            'LARAVEL_BINANCE_VERIFICATION_WORKER_PROCESSES',
+            'LARAVEL_UPDATE_WORKER_SLEEP',
+            'LARAVEL_OUTBOUND_WORKER_SLEEP',
+            'LARAVEL_BROADCAST_WORKER_SLEEP',
+        ] as $variable) {
+            $this->assertStringNotContainsString($variable, $compose);
+            $this->assertStringNotContainsString($variable.'=', $envExample);
         }
 
         $healthCheck = file_get_contents(app_path('Console/Commands/HealthCheck.php'));
@@ -206,24 +208,26 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString("Schema::create('job_batches'", $contents);
     }
 
-    public function test_env_example_uses_postgresql_and_database_queue(): void
+    public function test_docker_compose_uses_postgresql_and_database_queue(): void
     {
-        $contents = file_get_contents(base_path('.env.example'));
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
 
-        $this->assertStringContainsString('DB_CONNECTION=pgsql', $contents);
-        $this->assertStringContainsString('DB_HOST=db', $contents);
-        $this->assertStringContainsString('QUEUE_CONNECTION=database', $contents);
+        $this->assertStringContainsString('DB_CONNECTION: pgsql', $compose);
+        $this->assertStringContainsString('DB_HOST: db', $compose);
+        $this->assertStringContainsString('QUEUE_CONNECTION: database', $compose);
+        $this->assertStringNotContainsString('DB_CONNECTION=pgsql', file_get_contents(base_path('../.env.example')));
     }
 
-    public function test_broadcast_rate_limit_is_consistent_across_runtime_environment_and_documentation(): void
+    public function test_broadcast_rate_limit_is_pinned_in_runtime_configuration_and_documentation(): void
     {
-        $environment = file_get_contents(base_path('.env.example'));
-        $documentation = file_get_contents(base_path('README.md'));
+        $documentation = file_get_contents(base_path('../README.md'));
+        $appDocumentation = file_get_contents(base_path('README.md'));
+        $environment = file_get_contents(base_path('../.env.example'));
 
         $this->assertSame(25, config('services.telegram.broadcast_rate_limit_per_second'));
-        $this->assertStringContainsString('TELEGRAM_BROADCAST_RATE_LIMIT_PER_SECOND=25', $environment);
-        $this->assertStringContainsString('TELEGRAM_BROADCAST_RATE_LIMIT_PER_SECOND', $documentation);
-        $this->assertStringContainsString('(default `25` pesan/detik)', $documentation);
+        $this->assertStringNotContainsString('TELEGRAM_BROADCAST_RATE_LIMIT_PER_SECOND=', $environment);
+        $this->assertStringContainsString('application configuration pada `25` pesan/detik', $appDocumentation);
+        $this->assertStringNotContainsString('TELEGRAM_BROADCAST_RATE_LIMIT_PER_SECOND', $documentation);
     }
 
     public function test_binance_order_id_canary_configuration_is_removed_from_runtime_surfaces(): void
@@ -272,16 +276,16 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertSame(TelegramBotClient::class, get_class($this->app->make(TelegramBotClient::class)));
     }
 
-    public function test_telegram_http_timeout_defaults_match_docker_runtime_configuration(): void
+    public function test_telegram_http_budgets_are_pinned_in_runtime_configuration(): void
     {
         $compose = file_get_contents(base_path('../docker-compose.yml'));
-        $environment = file_get_contents(base_path('.env.example'));
+        $environment = file_get_contents(base_path('../.env.example'));
 
         $this->assertSame(30.0, config('services.telegram.http_timeout_seconds'));
         $this->assertSame(10.0, config('services.telegram.http_connect_timeout_seconds'));
-        $this->assertStringContainsString('TELEGRAM_HTTP_TIMEOUT_SECONDS: ${TELEGRAM_HTTP_TIMEOUT_SECONDS:-30}', $compose);
-        $this->assertStringContainsString('TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS: ${TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS:-10}', $compose);
-        $this->assertStringContainsString('TELEGRAM_HTTP_TIMEOUT_SECONDS=30', $environment);
-        $this->assertStringContainsString('TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS=10', $environment);
+        $this->assertStringNotContainsString('TELEGRAM_HTTP_TIMEOUT_SECONDS', $compose);
+        $this->assertStringNotContainsString('TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS', $compose);
+        $this->assertStringNotContainsString('TELEGRAM_HTTP_TIMEOUT_SECONDS=', $environment);
+        $this->assertStringNotContainsString('TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS=', $environment);
     }
 }

@@ -21,20 +21,26 @@ class PaymentDocumentationTest extends TestCase
         $this->assertStringNotContainsString('selama KYC Pakasir', $readme);
     }
 
-    public function test_env_examples_keep_pakasir_credentials_without_mode_or_flow_switches(): void
+    public function test_env_examples_keep_provider_credentials_without_mode_or_transport_switches(): void
     {
         $rootEnvExample = file_get_contents(base_path('../.env.example'));
         $appEnvExample = file_get_contents(base_path('.env.example'));
 
         foreach ([$rootEnvExample, $appEnvExample] as $envExample) {
-            $this->assertStringNotContainsString('TELEGRAM_PAYMENT_MODE=', $envExample);
-            $this->assertStringNotContainsString('PAKASIR_QRIS_ONLY=', $envExample);
-            $this->assertStringNotContainsString('PAKASIR_CHECKOUT_FLOW=', $envExample);
-            $this->assertStringContainsString('PAKASIR_SLUG=', $envExample);
-            $this->assertStringContainsString('PAKASIR_API_KEY=', $envExample);
-            $this->assertMatchesRegularExpression('/^PAKASIR_REDIRECT_URL=$/m', $envExample);
-            $this->assertStringNotContainsString('PAKASIR_REDIRECT_URL=https://example.com/thanks', $envExample);
-            $this->assertStringNotContainsString('PAKASIR_REDIRECT_URL=${APP_URL}', $envExample);
+            foreach (['PAKASIR_SLUG', 'PAKASIR_API_KEY'] as $variable) {
+                $this->assertStringContainsString($variable.'=', $envExample);
+            }
+            foreach ([
+                'TELEGRAM_PAYMENT_MODE',
+                'PAKASIR_QRIS_ONLY',
+                'PAKASIR_CHECKOUT_FLOW',
+                'PAKASIR_BASE_URL',
+                'PAKASIR_REDIRECT_URL',
+                'PAKASIR_QRIS_FEE_PAYER',
+                'PAKASIR_HTTP_TIMEOUT_SECONDS',
+            ] as $variable) {
+                $this->assertStringNotContainsString($variable.'=', $envExample);
+            }
         }
     }
 
@@ -166,16 +172,30 @@ class PaymentDocumentationTest extends TestCase
         $this->assertSame([], $violations, implode("\n", $violations));
     }
 
-    public function test_klikqris_sandbox_configuration_is_forwarded_by_shared_compose_environment(): void
+    public function test_klikqris_examples_and_compose_keep_only_provider_credentials(): void
     {
+        $envExamples = [
+            file_get_contents(base_path('../.env.example')),
+            file_get_contents(base_path('.env.example')),
+        ];
         $compose = file_get_contents(base_path('../docker-compose.yml'));
         [$sharedAppEnvironment] = explode("\nservices:", $compose, 2);
-
-        foreach ([
-            'KLIKQRIS_SANDBOX_ENABLED',
-            'KLIKQRIS_SANDBOX_BASE_URL',
+        $credentialVariables = [
             'KLIKQRIS_SANDBOX_API_KEY',
             'KLIKQRIS_SANDBOX_MERCHANT_ID',
+            'KLIKQRIS_PRODUCTION_API_KEY',
+            'KLIKQRIS_PRODUCTION_MERCHANT_ID',
+        ];
+        $nonEnvironmentSettings = [
+            'KLIKQRIS_SANDBOX_ENABLED',
+            'KLIKQRIS_SANDBOX_BASE_URL',
+            'KLIKQRIS_SANDBOX_CALLBACK_URL',
+            'KLIKQRIS_SANDBOX_CALLBACK_ALLOWED_HOSTS',
+            'KLIKQRIS_PRODUCTION_ENABLED',
+            'KLIKQRIS_PRODUCTION_BASE_URL',
+            'KLIKQRIS_PRODUCTION_CALLBACK_URL',
+            'KLIKQRIS_PRODUCTION_ALLOWED_HOSTS',
+            'KLIKQRIS_PRODUCTION_CALLBACK_ALLOWED_HOSTS',
             'KLIKQRIS_QRIS_TTL_MINUTES',
             'KLIKQRIS_HTTP_TIMEOUT_SECONDS',
             'KLIKQRIS_HTTP_CONNECT_TIMEOUT_SECONDS',
@@ -184,13 +204,32 @@ class PaymentDocumentationTest extends TestCase
             'KLIKQRIS_STATUS_RETRY_DELAY_MS',
             'KLIKQRIS_WEBHOOK_RATE_LIMIT_PER_MINUTE',
             'KLIKQRIS_STATUS_REFRESH_RATE_LIMIT_PER_MINUTE',
-        ] as $variable) {
-            $this->assertStringContainsString(
-                '  '.$variable.': ${'.$variable,
-                $sharedAppEnvironment,
-                $variable.' must be forwarded to app and scheduler containers.',
-            );
+            'KLIKQRIS_RECONCILE_TERMINAL_LOOKBACK_HOURS',
+            'KLIKQRIS_RECONCILE_MAX_EXECUTION_SECONDS',
+            'KLIKQRIS_RECONCILE_CURSOR_SCAN_CAP',
+            'KLIKQRIS_REPORTING_CACHE_SECONDS',
+            'KLIKQRIS_REPORTING_MAX_LIMIT',
+        ];
+
+        foreach ($envExamples as $envExample) {
+            foreach ($credentialVariables as $variable) {
+                $this->assertMatchesRegularExpression('/^'.preg_quote($variable, '/').'=$/m', $envExample);
+            }
+            foreach ($nonEnvironmentSettings as $variable) {
+                $this->assertStringNotContainsString($variable.'=', $envExample);
+            }
         }
+
+        foreach ($credentialVariables as $variable) {
+            $this->assertStringContainsString('  '.$variable.': ${'.$variable, $sharedAppEnvironment);
+        }
+        foreach ($nonEnvironmentSettings as $variable) {
+            $this->assertStringNotContainsString($variable.': ${'.$variable, $sharedAppEnvironment);
+        }
+
+        $this->assertSame('https://klikqris.com/api/sandbox', config('services.klikqris.sandbox_base_url'));
+        $this->assertSame('https://klikqris.com/api', config('services.klikqris.production_base_url'));
+        $this->assertFalse(config('services.klikqris.production_enabled'));
     }
 
     public function test_sakurupiah_runbook_documents_operations_and_rollback(): void

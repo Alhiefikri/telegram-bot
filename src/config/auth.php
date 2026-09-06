@@ -17,8 +17,8 @@ return [
     */
 
     'defaults' => [
-        'guard' => env('AUTH_GUARD', 'web'),
-        'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),
+        'guard' => 'web',
+        'passwords' => 'users',
     ],
 
     /*
@@ -34,10 +34,10 @@ return [
     'admin_allowed_logins' => env('ADMIN_ALLOWED_LOGINS'),
 
     'admin_login_throttle' => [
-        'identity_max_attempts' => (int) env('ADMIN_LOGIN_IDENTITY_MAX_ATTEMPTS', 5),
-        'identity_decay_seconds' => (int) env('ADMIN_LOGIN_IDENTITY_DECAY_SECONDS', 60),
-        'ip_max_attempts' => (int) env('ADMIN_LOGIN_IP_MAX_ATTEMPTS', 10),
-        'ip_decay_seconds' => (int) env('ADMIN_LOGIN_IP_DECAY_SECONDS', 60),
+        'identity_max_attempts' => 5,
+        'identity_decay_seconds' => 60,
+        'ip_max_attempts' => 10,
+        'ip_decay_seconds' => 60,
     ],
 
     /*
@@ -88,7 +88,7 @@ return [
     'providers' => [
         'users' => [
             'driver' => 'eloquent',
-            'model' => env('AUTH_MODEL', User::class),
+            'model' => User::class,
         ],
         'customers' => [
             'driver' => 'eloquent',
@@ -123,7 +123,7 @@ return [
     'passwords' => [
         'users' => [
             'provider' => 'users',
-            'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
+            'table' => 'password_reset_tokens',
             'expire' => 60,
             'throttle' => 60,
         ],
@@ -140,6 +140,6 @@ return [
     |
     */
 
-    'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
+    'password_timeout' => 10_800,
 
 ];

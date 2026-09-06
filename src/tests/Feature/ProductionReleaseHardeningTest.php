@@ -92,19 +92,31 @@ class ProductionReleaseHardeningTest extends TestCase
         $this->assertStringStartsWith('http://localhost:8080/', URL::to('/build/assets/app.js'));
     }
 
-    public function test_logging_defaults_to_daily_rotation_and_env_example_exposes_defaults(): void
+    public function test_logging_defaults_to_daily_rotation_and_env_example_exposes_only_optional_mail_backup_inputs(): void
     {
         $logging = file_get_contents(config_path('logging.php'));
         $this->assertStringContainsString("env('LOG_STACK', 'daily')", $logging);
         $this->assertStringContainsString("'permission' => 0664", $logging);
 
-        $env = file_get_contents(base_path('.env.example'));
-        $this->assertStringContainsString('LOG_STACK=daily', $env);
-        $this->assertStringContainsString('LOG_DAILY_DAYS=14', $env);
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        foreach ([
+            'LOG_CHANNEL: stack',
+            'LOG_STACK: daily',
+            'LOG_LEVEL: info',
+            'LOG_DAILY_DAYS: 14',
+            'LOG_DEPRECATIONS_CHANNEL: null',
+        ] as $default) {
+            $this->assertStringContainsString($default, $compose);
+        }
+
+        $env = file_get_contents(base_path('../.env.example'));
         $this->assertStringContainsString('MAIL_MAILER=smtp', $env);
         $this->assertStringContainsString('GPG_RECIPIENT=', $env);
         $this->assertStringContainsString('GPG_PASSPHRASE=', $env);
-        $this->assertStringContainsString('DATA_RETENTION_DAYS=90', $env);
+        $this->assertSame(90, config('services.data_retention_days'));
+        $this->assertStringNotContainsString('LOG_STACK=', $env);
+        $this->assertStringNotContainsString('LOG_DAILY_DAYS=', $env);
+        $this->assertStringNotContainsString('DATA_RETENTION_DAYS=', $env);
         $this->assertStringNotContainsString('DOGFOOD_TIMING_LOG_CHANNEL=', $env);
     }
 
@@ -978,7 +990,7 @@ SH);
         );
     }
 
-    public function test_docker_compose_forwards_binance_auto_verification_configuration(): void
+    public function test_docker_compose_forwards_binance_credentials_without_transport_knobs(): void
     {
         $compose = file_get_contents(base_path('../docker-compose.yml'));
         $envExample = file_get_contents(base_path('../.env.example'));
@@ -986,13 +998,21 @@ SH);
         foreach ([
             'BINANCE_API_KEY',
             'BINANCE_API_SECRET',
+            'BINANCE_PAY_ID',
+            'BINANCE_PAY_UID',
+        ] as $name) {
+            $this->assertStringContainsString($name.': ${'.$name, $compose);
+            $this->assertStringContainsString($name.'=', $envExample);
+        }
+
+        foreach ([
             'BINANCE_API_BASE_URL',
             'BINANCE_HISTORY_CACHE_SECONDS',
             'BINANCE_HISTORY_LOCK_SECONDS',
             'BINANCE_VERIFY_CLOCK_SKEW_SECONDS',
         ] as $name) {
-            $this->assertStringContainsString($name.': ${'.$name, $compose);
-            $this->assertStringContainsString($name.'=', $envExample);
+            $this->assertStringNotContainsString($name, $compose);
+            $this->assertStringNotContainsString($name.'=', $envExample);
         }
     }
 
@@ -1030,10 +1050,9 @@ SH);
         $this->assertStringContainsString('APP_AUTO_MIGRATE: "false"', $compose);
         $this->assertStringContainsString('CREDENTIAL_IDENTITY_FINGERPRINT_KEY: ${CREDENTIAL_IDENTITY_FINGERPRINT_KEY:-}', $compose);
         $this->assertStringNotContainsString('CREDENTIAL_IDENTITY_FINGERPRINT_KEY is required', $compose);
-        $this->assertStringContainsString('APP_OPTIMIZE: ${APP_OPTIMIZE:-true}', $compose);
-        $this->assertStringContainsString('APP_AUTO_MIGRATE: "false"', $compose);
-        $this->assertStringContainsString('APP_AUTO_MIGRATE=false', $envExample);
-        $this->assertStringContainsString('APP_OPTIMIZE=true', $envExample);
+        $this->assertStringContainsString('APP_OPTIMIZE: "true"', $compose);
+        $this->assertStringNotContainsString('APP_AUTO_MIGRATE=', $envExample);
+        $this->assertStringNotContainsString('APP_OPTIMIZE=', $envExample);
     }
 
     public function test_ops_health_checks_scheduler_heartbeat(): void

@@ -135,7 +135,7 @@ Do not relabel historical Pakasir Payments as KlikQRIS or Manual. Do not use thi
 
 ### 3.5 KlikQRIS Native QRIS
 
-KlikQRIS dipilih melalui Payment Provider Switch dan hanya berlaku untuk checkout baru. Lifecycle terpusat di `App\Services\KlikQris\KlikQrisNativeQrisService`, yang mengurus create, recovery, persistence, expiry, payability, safe outcome, dan single-flight lock per Payment.
+KlikQRIS dipilih melalui Payment Provider Switch di **Admin → Mode pembayaran** dan hanya berlaku untuk checkout baru. Lifecycle terpusat di `App\Services\KlikQris\KlikQrisNativeQrisService`, yang mengurus create, recovery, persistence, expiry, payability, safe outcome, dan single-flight lock per Payment.
 
 Outcome yang dapat diterima caller adalah `Payable`, `Creating`, `RecoveryPending`, `ProviderTotalPending`, `InvalidProviderResult`, dan `Expired`. Store Bot maupun Web Storefront hanya boleh menampilkan QR ketika outcome `Payable`; outcome lain tidak boleh menampilkan QR, total final, atau raw provider data.
 
@@ -201,11 +201,18 @@ Receipt hanya bisa dikirim ulang untuk order yang sudah paid dan masih dalam sta
 
 ### 5.0 Docker startup and dogfood smoke checks
 
-The production Docker image runs pending Laravel migrations before Supervisor starts PHP-FPM and the queue worker. This keeps first boot from failing healthchecks because tables such as `cache` or `jobs` do not exist yet. Set `APP_AUTO_MIGRATE=false` if an environment requires manual migration orchestration.
+The production Docker Compose stack pins migration ownership and startup
+optimization in `docker-compose.yml`; the release workflow overrides those
+flags explicitly for one-off migration commands. The normal production `.env`
+does not need lifecycle or performance tuning variables.
 
-After migrations, the Docker entrypoint runs `php artisan optimize` by default. This creates Laravel's production cache artifacts for the live container environment: cached config, routes, events, and compiled Blade views. The command is intentionally run at container startup rather than during `docker build`, because the cached config file contains runtime values such as `APP_KEY`, database credentials, Telegram credentials, and Pakasir credentials. Do not bake `bootstrap/cache/config.php` into the image.
-
-Set `APP_OPTIMIZE=false` to skip startup optimization for one-off debugging. When runtime environment variables change, recreate the app and scheduler containers so the entrypoint rebuilds the cache from the new environment. Use `php artisan optimize` after manual runtime config changes, and use targeted clears such as `php artisan config:clear`, `php artisan route:clear`, `php artisan event:clear`, or `php artisan view:clear` when intentionally invalidating one artifact. Avoid routine `php artisan optimize:clear` on production boot because Laravel also clears keys from the default cache driver.
+The entrypoint runs `php artisan optimize` after the release-controlled
+migration step. This creates Laravel's production cache artifacts for the live
+container environment: cached config, routes, events, and compiled Blade views.
+The command runs at container startup rather than during `docker build`,
+because the cached config contains runtime values such as `APP_KEY`, database
+credentials, Telegram credentials, and Pakasir credentials. Do not bake
+`bootstrap/cache/config.php` into the image.
 
 The production-like Docker stack also starts a dedicated `scheduler` service from the same application image. The scheduler service does not run migrations; it waits for the healthy app service, then invokes Laravel's scheduler with `php artisan schedule:run` every minute and writes a heartbeat to `storage/framework/scheduler-heartbeat`.
 
@@ -388,9 +395,9 @@ Checklist operasional:
 - pastikan queue `default` diproses untuk update Telegram;
 - pastikan queue `telegram-outbound` diproses untuk instruksi pembayaran manual dan notifikasi pending order yang berasal dari checkout;
 - pastikan queue `notifications` diproses oleh worker pool terpisah karena receipt pembayaran, paid/expired notifications, Sales Proof Post, dan cleanup instruksi checkout dikirim melalui queue tersebut;
-- atur kapasitas Docker/Supervisor dengan `LARAVEL_UPDATE_WORKER_PROCESSES`, `LARAVEL_OUTBOUND_WORKER_PROCESSES`, `LARAVEL_NOTIFICATION_WORKER_PROCESSES`, dan `LARAVEL_BROADCAST_WORKER_PROCESSES` tanpa mengubah kode aplikasi.
+- worker count and sleep settings are pinned in `supervisord.conf`; scale them through a reviewed infrastructure change rather than adding more application `.env` knobs.
 
-Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, `laravel-outbound-worker` handles `telegram-outbound`, `laravel-notification-worker` handles `notifications`, and `laravel-broadcast-worker` handles `telegram-broadcast`. Manual checkout creates the pending order on the update worker, then dispatches customer payment instructions and pending-order admin notification to `telegram-outbound` so slow checkout `sendPhoto`/`sendMessage` calls do not occupy the update worker. Payment receipts, paid/expired admin notifications, Sales Proof Post publishing, and checkout-instruction cleanup run on `notifications`, so a burst of checkout instructions does not delay critical payment-facing work. Safe defaults are one process per pool; raise only the saturated pool after checking `php artisan ops:health --queue-depth` and container CPU/memory. Roll back safely by setting the changed `LARAVEL_*_WORKER_PROCESSES` value back to `1` and redeploying/restarting Supervisor; do not merge `notifications` back into `telegram-outbound` because that removes the isolation guarantee. Before changing worker counts again, run the dogfood benchmark from clean dogfood volumes and compare queue wait, update-worker handler time, manual outbound job time, notification job time, Telegram outbound time, failed jobs, and memory. The controlled run 2 benchmark in `docs/docker-dogfood-benchmark-run-2.md` measured queue wait at 17.865 ms average, 27 ms p95, and 43 ms max with zero failed jobs before the later notification split; use newer clean runs for current queue behavior.
+Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, `laravel-outbound-worker` handles `telegram-outbound`, `laravel-notification-worker` handles `notifications`, and `laravel-broadcast-worker` handles `telegram-broadcast`. Manual checkout creates the pending order on the update worker, then dispatches customer payment instructions and pending-order admin notification to `telegram-outbound` so slow checkout `sendPhoto`/`sendMessage` calls do not occupy the update worker. Payment receipts, paid/expired admin notifications, Sales Proof Post publishing, and checkout-instruction cleanup run on `notifications`, so a burst of checkout instructions does not delay critical payment-facing work. Each pool starts with one process; scaling is a reviewed `supervisord.conf` change. Before scaling, run the dogfood benchmark from clean volumes and compare queue wait, handler time, failed jobs, and memory.
 
 Manual checkout notification retry behavior:
 
@@ -401,7 +408,7 @@ Manual checkout notification retry behavior:
 - if the customer send succeeds and the admin send fails, retry sends only the admin notification;
 - if the customer send fails before the timestamp is written, retry sends the customer instructions again because Telegram delivery was not confirmed durably.
 
-Admin Broadcast memakai queue telegram-broadcast dengan batch maksimal 25 recipient dan shared cache limiter `TELEGRAM_BROADCAST_RATE_LIMIT_PER_SECOND` (default `25` pesan/detik), sehingga laju tetap di bawah batas broadcast Telegram 30 pesan/detik walaupun worker ditambah. Respons HTTP 429 memakai nilai retry_after yang dibatasi; recipient yang belum due tetap pending dan ditemukan kembali oleh command telegram:recover-outbound setelah window retry aman.
+Admin Broadcast memakai queue telegram-broadcast dengan batch maksimal 25 recipient dan shared cache limiter yang dipatok di application configuration pada `25` pesan/detik, sehingga laju tetap di bawah batas broadcast Telegram 30 pesan/detik. Respons HTTP 429 memakai nilai retry_after yang dibatasi; recipient yang belum due tetap pending dan ditemukan kembali oleh command telegram:recover-outbound setelah window retry aman.
 
 Sebelum release perubahan copy Store Bot, jalankan audit katalog tiga locale:
 
@@ -546,30 +553,22 @@ php artisan ops:check-failed-jobs --max=0
 
 ## 6. Environment / Configuration Checklist
 
-Sebelum production, cek minimal:
+The root `.env.example` is intentionally short. Docker Compose supplies stable
+database, queue, session, mail-default, worker, provider endpoint, timeout, and
+rate-limit settings from the repository. The production `.env` only needs:
 
-- [ ] `APP_ENV=production`.
-- [ ] `APP_DEBUG=false`.
-- [ ] `APP_URL` memakai HTTPS dan domain production yang benar.
-- [ ] `APP_KEY` sudah dibuat.
-- [ ] Database production (`DB_CONNECTION`, `DB_HOST`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`) benar dan migrasi sudah dijalankan.
-- [ ] `QUEUE_CONNECTION` sesuai; default project menggunakan `database`.
-- [ ] Tabel queue/cache/session/failed jobs tersedia.
-- [ ] `TELEGRAM_BOT_TOKEN` terisi.
-- [ ] `TELEGRAM_WEBHOOK_SECRET` terisi dan sama dengan secret webhook Telegram.
-- [ ] `TELEGRAM_API_BASE_URL` sesuai, biasanya `https://api.telegram.org`.
-- [ ] `TELEGRAM_WEBHOOK_RATE_LIMIT_PER_MINUTE` disesuaikan dengan trafik.
-- [ ] Setting payment manual/admin sudah benar: asset QR manual `public/qr-lhie.jpg`, nama QR `LHIE STORE`, `TELEGRAM_ADMIN_USERNAME`, `TELEGRAM_ADMIN_CHAT_ID`, atau sesuaikan dari admin payment settings project.
-- [ ] Provider checkout baru dipilih owner melalui panel "Mode pembayaran" di `/admin`: QR Manual atau KlikQRIS. Payment lama tidak ikut berpindah provider.
-- [ ] Pakasir hanya dipertahankan untuk settlement Payment lama sampai `pakasir:retirement-status --json` menunjukkan `gate=ready_for_contract`, `retirement_ready=true`, dan `legacy_queue_payloads=0`.
-- [ ] Owner telah merekam approval dengan `pakasir:retirement-approve <owner-id-or-email>` setelah settlement/queue clear; jalankan contract migration terpisah sebelum menghapus compatibility lane, credential Pakasir, atau endpoint legacy.
-- [ ] Credential KlikQRIS sandbox/production dipisahkan; aktifkan environment sesuai readiness dan approval rollout. KlikQRIS tidak fallback otomatis ke Manual.
-- [ ] Batas waktu checkout QRIS dan Binance Pay disesuaikan melalui dashboard admin bila diperlukan.
-- [ ] HTTPS aktif untuk semua webhook.
-- [ ] Queue worker berjalan di Supervisor/systemd/container process manager.
-- [ ] Scheduler Laravel aktif via cron atau scheduler runner platform deploy.
+- [ ] `APP_ENV=production` and the real HTTPS `APP_URL`.
+- [ ] `APP_KEY` and `POSTGRES_PASSWORD`.
+- [ ] `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET`.
+- [ ] `TRUSTED_PROXIES`/`TRUSTED_HOSTS` only when the deployment uses a reverse proxy or host allowlist.
+- [ ] Admin identifiers/access policy when the corresponding Telegram/admin controls are used.
+- [ ] Credentials for an enabled payment rail only: Pakasir legacy settlement, Binance verification, BSC RPC, KlikQRIS, or Sakurupiah.
+- [ ] `GPG_RECIPIENT` or `GPG_PASSPHRASE` only on the VPS when the destructive contract workflow requires an encrypted backup.
 
-Jika ada setting production yang dikelola di luar env, sesuaikan dengan config/env project dan panel admin yang tersedia.
+Payment mode, provider endpoint, callback URL, fee, expiry, retry, rate-limit,
+worker, and presentation values are not `.env` inputs. Payment Provider Switch
+and Admin Dashboard settings control the mutable operational choices that
+belong in the database.
 
 ## 7. Troubleshooting
 

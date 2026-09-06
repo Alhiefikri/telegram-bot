@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'name' => env('APP_NAME', 'Laravel'),
+    'name' => 'LHIE STORE',
 
     /*
     |--------------------------------------------------------------------------
@@ -72,12 +72,12 @@ return [
     |--------------------------------------------------------------------------
     |
     | Here you may specify the default timezone for your application. Store
-    | customer-facing Telegram timestamps and greetings use Indonesian WIB by
-    | default, while deployments may still override this with APP_TIMEZONE.
+    | customer-facing Telegram timestamps and greetings use Indonesian WIB, so
+    | this deployment pins the application timezone to Asia/Jakarta.
     |
     */
 
-    'timezone' => env('APP_TIMEZONE', 'Asia/Jakarta'),
+    'timezone' => 'Asia/Jakarta',
 
     /*
     |--------------------------------------------------------------------------
@@ -90,11 +90,11 @@ return [
     |
     */
 
-    'locale' => env('APP_LOCALE', 'en'),
+    'locale' => 'en',
 
-    'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
+    'fallback_locale' => 'en',
 
-    'faker_locale' => env('APP_FAKER_LOCALE', 'en_US'),
+    'faker_locale' => 'en_US',
 
     /*
     |--------------------------------------------------------------------------
@@ -131,8 +131,8 @@ return [
     */
 
     'maintenance' => [
-        'driver' => env('APP_MAINTENANCE_DRIVER', 'file'),
-        'store' => env('APP_MAINTENANCE_STORE', 'database'),
+        'driver' => 'file',
+        'store' => 'database',
     ],
 
 ];

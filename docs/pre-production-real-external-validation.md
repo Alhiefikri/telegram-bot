@@ -51,7 +51,7 @@ Verify the webhook target without printing the token or private URL:
 php -r '
 $token = getenv("TELEGRAM_BOT_TOKEN");
 $target = rtrim(getenv("APP_URL"), "/")."/api/webhook/telegram";
-$apiBase = rtrim(getenv("TELEGRAM_API_BASE_URL") ?: "https://api.telegram.org", "/");
+$apiBase = "https://api.telegram.org";
 $json = json_decode(file_get_contents($apiBase."/bot".$token."/getWebhookInfo"), true);
 $url = (string) ($json["result"]["url"] ?? "");
 echo json_encode([

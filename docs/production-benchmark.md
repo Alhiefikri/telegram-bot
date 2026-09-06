@@ -48,13 +48,13 @@ The command supplies safe dogfood defaults when the environment does not provide
 - `POSTGRES_PASSWORD=dogfood_password`
 - `TELEGRAM_BOT_TOKEN=benchmark-token`
 - `TELEGRAM_WEBHOOK_SECRET=benchmark-secret`
-- `APP_OPTIMIZE=true`
-- `SESSION_DRIVER=cookie`
 - `DOGFOOD_TIMING_ENABLED=true`
 - `DOGFOOD_TIMING_LOG_CHANNEL=stderr`
 - `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true`
 
-Override any of these by exporting the variable before running the command.
+Docker Compose pins application lifecycle, session, queue, and performance
+settings; those are not benchmark `.env` overrides. Override the listed
+dogfood inputs by exporting the variable before running the command.
 
 ## Coverage
 
@@ -69,7 +69,7 @@ The benchmark covers:
 - Operational commands: `ops:health --db --queue-schema --queue-depth --supervisor`, scheduler heartbeat health, `orders:expire-pending`, and `ops:check-failed-jobs --max=0`.
 - Final queue depth, failed job count, status counts, p50/p95/max latency, and container memory.
 
-The Docker default uses Laravel's encrypted cookie session driver for admin web sessions. This keeps login/logout and CSRF behavior stateful for the browser while avoiding database writes for anonymous `/admin/login` page requests under concurrency. Set `SESSION_DRIVER=database` before running the benchmark if you need to compare the older database-backed session path.
+The Docker default uses Laravel's database session driver for admin web sessions. This keeps login/logout and CSRF behavior stateful across the app replicas and matches the production-like Compose stack. The benchmark can override this through an explicit Compose change when comparing another session backend.
 
 ## Latest Issue 70 Run
 

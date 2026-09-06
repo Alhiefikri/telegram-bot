@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'locale' => env('STOREFRONT_LOCALE', 'id'),
+    'locale' => 'id',
 
     'meta' => [
         'title' => ':brand | Akun Premium & Produk Digital',
@@ -16,12 +16,12 @@ return [
     ],
 
     'links' => [
-        'telegram_bot_url' => env('STOREFRONT_TELEGRAM_BOT_URL', 'https://t.me/lhiestore_bot?start=landing'),
+        'telegram_bot_url' => 'https://t.me/lhiestore_bot?start=landing',
     ],
 
     'product_placeholder' => '/assets/product-placeholder.svg',
     'sitemap' => [
-        'max_urls' => (int) env('STOREFRONT_SITEMAP_MAX_URLS', 1000),
+        'max_urls' => 1000,
     ],
 
     'guide_catalog' => [
@@ -269,7 +269,7 @@ return [
             'eyebrow' => 'Syarat',
             'title' => 'Syarat Penggunaan',
             'description' => 'Aturan transaksi produk digital, akses pesanan, support, dan batas tanggung jawab Lhie Store.',
-            'version' => env('STOREFRONT_TERMS_VERSION', '2026-07-20'),
+            'version' => '2026-07-20',
             'updated' => '20 Juli 2026',
             'sections' => [
                 [
