@@ -2,13 +2,11 @@
 
 namespace App\Services\Telegram;
 
-use App\Enums\OrderStatus;
-use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\Customer;
 use App\Models\Order;
-use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Support\DogfoodTiming;
 use InvalidArgumentException;
 use Throwable;
@@ -22,6 +20,7 @@ final class ReceiptTxtDeliveryPipeline
 {
     public function __construct(
         private readonly TelegramOutboundEffectLedgerProtocol $ledger,
+        private readonly CredentialDeliveryEligibility $credentialEligibility,
         private readonly TelegramBotClient $bot,
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramPaidOrderTxtExporter $exporter,
@@ -213,24 +212,11 @@ final class ReceiptTxtDeliveryPipeline
             || (string) $customer->getKey() !== (string) $order->customer_id
             || preg_match('/\A[1-9][0-9]*\z/D', trim((string) $customer->telegram_id)) !== 1
             || (string) $effect->telegram_chat_id !== (string) $customer->telegram_id
-            || $effect->target_type !== 'customer'
-            || $order->payment_status !== PaymentStatus::Paid
-            || ! in_array($order->order_status, [OrderStatus::PendingPayment, OrderStatus::Processing, OrderStatus::Completed], true)
-            || $order->hasOpenLatePaymentReview()) {
+            || $effect->target_type !== 'customer') {
             return false;
         }
 
-        $payment = $order->payments
-            ->sortByDesc(fn (Payment $candidate): array => [
-                $candidate->created_at?->getTimestamp() ?? 0,
-                (string) $candidate->getKey(),
-            ])
-            ->first();
-
-        return $payment instanceof Payment
-            && (string) $payment->order_id === (string) $order->getKey()
-            && $payment->status === PaymentStatus::Paid
-            && $payment->paid_at !== null;
+        return $this->credentialEligibility->allows($order, $customer);
     }
 
     private function finalizeNotDeliverable(

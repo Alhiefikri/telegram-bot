@@ -4,14 +4,12 @@ namespace App\Services\Credentials;
 
 use App\Enums\CredentialAccessMethod;
 use App\Enums\CredentialFormat;
-use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\ProductStockItem;
 use App\Services\CredentialDeliveryFormatter;
-use App\Services\OrderLifecycleProjection;
 use App\Services\ProductUsageGuide;
 use Throwable;
 
@@ -25,17 +23,38 @@ final class CredentialDeliveryPresentation
     public function __construct(
         private readonly CredentialDeliveryFormatter $legacyFormatter,
         private readonly ProductUsageGuide $usageGuides,
+        private readonly CredentialDeliveryEligibility $eligibility,
     ) {}
 
     public function forOrder(Order $order, ?Payment $payment = null): CredentialDelivery
     {
         $order->loadMissing(['customer', 'payments', 'orderItems.stockItems', 'orderItems.product']);
-        $payment ??= $this->latestPayment($order);
 
-        if (! $this->isEligible($order, $payment)) {
+        if ($this->eligibility->rejectionReason($order, payment: $payment) !== null) {
             return CredentialDelivery::empty();
         }
 
+        return $this->project($order);
+    }
+
+    public function present(Order $order, ?Payment $payment = null): CredentialDelivery
+    {
+        return $this->forOrder($order, $payment);
+    }
+
+    public function forCustomer(Customer $customer, Order $order, ?Payment $payment = null): CredentialDelivery
+    {
+        $order->loadMissing(['customer', 'payments', 'orderItems.stockItems', 'orderItems.product']);
+
+        if ($this->eligibility->rejectionReason($order, $customer, $payment) !== null) {
+            return CredentialDelivery::empty();
+        }
+
+        return $this->project($order);
+    }
+
+    private function project(Order $order): CredentialDelivery
+    {
         try {
             $groups = [];
             foreach ($order->orderItems->sortBy('id')->values() as $item) {
@@ -65,43 +84,6 @@ final class CredentialDeliveryPresentation
             // credential response. The caller can render its safe fallback.
             return CredentialDelivery::empty();
         }
-    }
-
-    public function present(Order $order, ?Payment $payment = null): CredentialDelivery
-    {
-        return $this->forOrder($order, $payment);
-    }
-
-    public function forCustomer(Customer $customer, Order $order, ?Payment $payment = null): CredentialDelivery
-    {
-        if ((string) $customer->getKey() !== (string) $order->customer_id) {
-            return CredentialDelivery::empty();
-        }
-
-        return $this->forOrder($order, $payment);
-    }
-
-    private function latestPayment(Order $order): ?Payment
-    {
-        return $order->payments
-            ->sortByDesc(fn (Payment $payment): array => [
-                $payment->created_at?->getTimestamp() ?? 0,
-                (string) $payment->getKey(),
-            ])
-            ->first();
-    }
-
-    private function isEligible(Order $order, ?Payment $payment): bool
-    {
-        if ($payment === null
-            || (string) $payment->order_id !== (string) $order->getKey()
-            || $payment->status !== PaymentStatus::Paid
-            || $order->payment_status !== PaymentStatus::Paid
-            || $order->hasOpenLatePaymentReview()) {
-            return false;
-        }
-
-        return OrderLifecycleProjection::from($order, $payment)->isPaid;
     }
 
     private function account(ProductStockItem $stockItem, int $number, ?string $defaultTutorial): CredentialDeliveryAccount

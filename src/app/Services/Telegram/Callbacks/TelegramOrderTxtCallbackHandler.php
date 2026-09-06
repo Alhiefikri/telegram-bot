@@ -2,10 +2,8 @@
 
 namespace App\Services\Telegram\Callbacks;
 
-use App\Enums\OrderStatus;
-use App\Enums\PaymentStatus;
 use App\Models\Order;
-use App\Services\Credentials\CredentialDeliveryPresentation;
+use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -17,7 +15,6 @@ use App\Services\Telegram\TelegramReceiptObservability;
 use App\Services\Telegram\TelegramReceiptTxtConfirmationSession;
 use App\Services\Telegram\TelegramReceiptTxtRateLimiter;
 use App\Support\DogfoodTiming;
-use Throwable;
 
 /**
  * Paid Order TXT export confirmation and authorization callbacks.
@@ -42,7 +39,7 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
         private TelegramLocale $locale,
         private TelegramOutboundEffectDispatcher $dispatcher,
         private TelegramOutboundEffectService $effects,
-        private CredentialDeliveryPresentation $presentation,
+        private CredentialDeliveryEligibility $eligibility,
         private TelegramReceiptTxtConfirmationSession $confirmation,
         private TelegramReceiptObservability $observability,
         private TelegramReceiptTxtRateLimiter $rateLimiter,
@@ -111,7 +108,7 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             return;
         }
 
-        if (! $this->hasCredentialProjection($context, $order)) {
+        if (! $this->eligibility->hasAllocatedCredentials($order)) {
             $this->observability->txtRequestRejected(
                 'credential_projection_unavailable',
                 $context->customer,
@@ -190,7 +187,7 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             return;
         }
 
-        if (! $this->hasCredentialProjection($context, $eligibleOrder)) {
+        if (! $this->eligibility->hasAllocatedCredentials($eligibleOrder)) {
             $this->observability->txtRequestRejected(
                 'credential_projection_unavailable',
                 $context->customer,
@@ -327,8 +324,6 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
     private function ordersFor(TelegramCallbackContext $context): array
     {
         return $context->customer->orders()
-            ->whereIn('order_status', [OrderStatus::PendingPayment->value, OrderStatus::Processing->value, OrderStatus::Completed->value])
-            ->where('payment_status', PaymentStatus::Paid->value)
             ->latest('created_at')
             ->limit(self::MAX_FALLBACK_CONFIRMATION_ORDERS)
             ->pluck('id')
@@ -346,49 +341,18 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
         $order = Order::query()
             ->with(['customer', 'payments', 'orderItems'])
             ->whereKey($orderId)
-            ->where('customer_id', $context->customer->getKey())
             ->first();
 
         if ($order === null) {
             return [null, 'order_unavailable'];
         }
 
-        if ($order->payment_status !== PaymentStatus::Paid) {
-            return [null, 'payment_not_paid'];
-        }
-
-        if (! in_array($order->order_status, [OrderStatus::PendingPayment, OrderStatus::Processing, OrderStatus::Completed], true)) {
-            return [null, 'lifecycle_ineligible'];
-        }
-
-        if ($order->hasOpenLatePaymentReview()) {
-            return [null, 'late_payment_review'];
-        }
-
-        $payment = $order->payments
-            ->sortByDesc(fn ($candidate): array => [
-                $candidate->created_at?->getTimestamp() ?? 0,
-                (string) $candidate->getKey(),
-            ])
-            ->first();
-
-        if ($payment === null
-            || (string) $payment->order_id !== (string) $order->getKey()
-            || $payment->status !== PaymentStatus::Paid
-            || $payment->paid_at === null) {
-            return [null, 'payment_not_confirmed'];
+        $rejectionReason = $this->eligibility->rejectionReason($order, $context->customer);
+        if ($rejectionReason !== null) {
+            return [null, $rejectionReason];
         }
 
         return [$order, null];
-    }
-
-    private function hasCredentialProjection(TelegramCallbackContext $context, Order $order): bool
-    {
-        try {
-            return ! $this->presentation->forCustomer($context->customer, $order)->isEmpty();
-        } catch (Throwable) {
-            return false;
-        }
     }
 
     /** @return array<string, string> */

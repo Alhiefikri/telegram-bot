@@ -6,6 +6,7 @@ use App\Jobs\SendTelegramReceiptTxt;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Support\DogfoodTiming;
 use InvalidArgumentException;
 
@@ -33,6 +34,7 @@ final class TelegramReceiptTxtBenchmark
     public function __construct(
         private readonly TelegramOutboundEffectService $effects,
         private readonly TelegramOutboundEffectLedgerProtocol $ledger,
+        private readonly CredentialDeliveryEligibility $credentialEligibility,
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramPaidOrderTxtExporter $exporter,
         private readonly TelegramReceiptObservability $observability,
@@ -130,6 +132,7 @@ final class TelegramReceiptTxtBenchmark
         $bot = new FakeTelegramBotClient;
         $pipeline = new ReceiptTxtDeliveryPipeline(
             $this->ledger,
+            $this->credentialEligibility,
             $bot,
             $this->responseValidator,
             $this->exporter,

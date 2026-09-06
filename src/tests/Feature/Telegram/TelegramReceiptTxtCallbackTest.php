@@ -6,6 +6,7 @@ use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
+use App\Jobs\SendTelegramReceiptTxt;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -16,7 +17,9 @@ use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptTxtConfirmationSession;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\Support\TelegramBotTestSupport;
 
 final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
@@ -25,10 +28,18 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         [$customer, $order] = $this->paidOrderWithCredential('safe@example.test', 'Safe-password', 'en');
+        $queries = [];
+        DB::listen(static function ($query) use (&$queries): void {
+            $queries[] = strtolower((string) $query->sql);
+        });
 
         $this->postTelegramWebhook(
             $this->callbackUpdate(5101, 'cb-txt-request', 'txt:request:'.$order->id, chatId: 423001),
         )->assertOk();
+        $this->assertFalse(collect($queries)->contains(
+            static fn (string $sql): bool => str_starts_with(ltrim($sql), 'select *')
+                && str_contains($sql, 'product_stock_items'),
+        ));
 
         $sent = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '423001');
@@ -92,6 +103,7 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
 
     public function test_send_file_creates_exactly_one_effect_and_answers_immediately(): void
     {
+        Queue::fake([SendTelegramReceiptTxt::class]);
         $this->fakeTelegramHttp([
             'https://api.telegram.org/*/sendDocument' => Http::response([
                 'ok' => true,
@@ -100,6 +112,10 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
         ]);
         [$customer, $order] = $this->paidOrderWithCredential('send@example.test', 'Send-password', 'en');
         $nonce = $this->startConfirmation($customer, $order, '423001');
+        $queries = [];
+        DB::listen(static function ($query) use (&$queries): void {
+            $queries[] = strtolower((string) $query->sql);
+        });
 
         $this->postTelegramWebhook($this->callbackUpdate(5111, 'cb-txt-send', 'txt:send:'.$nonce, from: ['id' => 423001], chatId: 423001, messageId: 9911))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(5112, 'cb-txt-send-replay', 'txt:send:'.$nonce, from: ['id' => 423001], chatId: 423001, messageId: 9911))->assertOk();
@@ -109,13 +125,23 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
             ->get();
         $this->assertCount(1, $effects);
         $effect = $effects->sole();
-        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->fresh()->state);
         $this->assertSame($nonce, (string) ($effect->outcome_metadata['confirmation_nonce'] ?? ''));
         $this->assertSame(9911, (int) ($effect->outcome_metadata['origin_message_id'] ?? 0));
         $this->assertSame((string) $customer->telegram_id, (string) $effect->telegram_chat_id);
         $this->assertStringNotContainsString('Send-password', json_encode($effect->getAttributes(), JSON_THROW_ON_ERROR));
+        $this->assertFalse(collect($queries)->contains(
+            static fn (string $sql): bool => str_starts_with(ltrim($sql), 'select *')
+                && str_contains($sql, 'product_stock_items'),
+        ));
 
-        $this->assertSame(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendDocument'))->count());
+        $this->assertCount(0, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendDocument')));
+        Queue::assertPushedOn(
+            'notifications',
+            SendTelegramReceiptTxt::class,
+            fn (SendTelegramReceiptTxt $job): bool => $job->orderId === (string) $order->id
+                && $job->effectId === (string) $effect->id,
+        );
         $this->assertNull(Cache::get('telegram:receipt-txt-confirmation:423001:'.$order->id));
         $this->assertCount(
             1,

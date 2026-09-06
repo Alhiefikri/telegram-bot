@@ -19,6 +19,7 @@ use App\Models\TelegramBroadcastRecipient;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -237,6 +238,7 @@ class TelegramOutboundEffectService
 
     public function __construct(
         private readonly TelegramOutboundEffectLedgerProtocol $ledger,
+        private readonly CredentialDeliveryEligibility $credentialEligibility,
         private readonly AuditLogger $auditLogger,
         private readonly TelegramReceiptNotifier $receiptNotifier,
         private readonly TelegramAdminAccess $adminAccess,
@@ -1949,23 +1951,8 @@ class TelegramOutboundEffectService
 
     private function receiptTxtDownloadEligible(Order $order, ?Customer $customer): bool
     {
-        if (! $this->receiptEligible($order, $customer)
-            || trim((string) $customer?->telegram_id) === ''
-            || $order->hasOpenLatePaymentReview()) {
-            return false;
-        }
-
-        $payment = $order->payments
-            ->sortByDesc(fn (Payment $candidate): array => [
-                $candidate->created_at?->getTimestamp() ?? 0,
-                (string) $candidate->getKey(),
-            ])
-            ->first();
-
-        return $payment instanceof Payment
-            && (string) $payment->order_id === (string) $order->getKey()
-            && $payment->status === PaymentStatus::Paid
-            && $payment->paid_at !== null;
+        return trim((string) $customer?->telegram_id) !== ''
+            && $this->credentialEligibility->allows($order, $customer);
     }
 
     /** @return array{0: int, 1: int} */
