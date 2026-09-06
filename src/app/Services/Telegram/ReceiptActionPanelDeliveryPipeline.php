@@ -86,11 +86,12 @@ final class ReceiptActionPanelDeliveryPipeline
                     $metadata['txt_available'],
                 );
             } catch (Throwable) {
-                $this->finalizeNotDeliverable(
+                $finalized = $this->finalizeNotDeliverable(
                     $claimed,
                     'receipt_actions_render_failed',
                     'Receipt actions could not be rendered.',
                 );
+                $this->recordOutcome($finalized, 'failed', $deliveryStartedAt, $jobEnqueuedAt);
 
                 return;
             }

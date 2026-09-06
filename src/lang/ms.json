@@ -415,6 +415,7 @@
   "receipt.txt.stale": "Permintaan ini tidak lagi sah. Tekan TXT sekali lagi untuk membuat fail baharu.",
   "receipt.txt.unavailable": "Muat turun ini tidak tersedia untuk pesanan ini buat masa ini.",
   "receipt.txt.cancelled": "Dibatalkan. Tiada fail akan dijana.",
+  "receipt.txt.generation_failed": "Fail TXT tidak dapat disediakan dengan selamat, jadi tiada fail dihantar. Hubungi Sokongan dan sertakan Order ID.",
   "receipt.actions.message": "🛟 Perlukan bantuan dengan pesanan ini? Tekan Sokongan di bawah dan sertakan Order ID supaya kami boleh membantu.",
   "receipt.actions.txt_button": "⬇️ TXT",
   "receipt.actions.support_button": "🛟 Sokongan",

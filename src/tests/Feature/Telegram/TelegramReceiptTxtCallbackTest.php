@@ -73,6 +73,23 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
             && ! isset($request['text']));
     }
 
+    public function test_confirmation_uses_full_order_key_when_invoice_is_absent(): void
+    {
+        $this->fakeTelegramHttp();
+        [, $order] = $this->paidOrderWithCredential('fallback@example.test', 'Fallback-password', 'en');
+        $order->forceFill(['invoice_number' => ''])->save();
+
+        $this->postTelegramWebhook(
+            $this->callbackUpdate(5102, 'cb-txt-fallback-order', 'txt:request:'.$order->id, chatId: 423001),
+        )->assertOk();
+
+        $sent = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '423001')->sole()[0];
+        $text = (string) ($sent['text'] ?? '');
+
+        $this->assertStringContainsString('Order: #'.$order->id, $text);
+    }
+
     public function test_send_file_creates_exactly_one_effect_and_answers_immediately(): void
     {
         $this->fakeTelegramHttp([

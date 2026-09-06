@@ -416,6 +416,7 @@
   "receipt.txt.stale": "Permintaan ini tidak berlaku lagi. Tekan TXT lagi untuk membuat file baru.",
   "receipt.txt.unavailable": "Download ini tidak tersedia untuk pesanan ini saat ini.",
   "receipt.txt.cancelled": "Dibatalkan. Tidak ada file yang akan dibuat.",
+  "receipt.txt.generation_failed": "TXT tidak dapat disiapkan dengan aman, jadi tidak ada file yang dikirim. Hubungi Support dan sertakan Order ID.",
   "receipt.actions.message": "🛟 Butuh bantuan dengan pesanan ini? Tekan Support di bawah dan sertakan Order ID agar kami dapat membantu.",
   "receipt.actions.txt_button": "⬇️ TXT",
   "receipt.actions.support_button": "🛟 Support",

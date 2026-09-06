@@ -26,6 +26,8 @@ final class ReceiptTxtDeliveryPipeline
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramPaidOrderTxtExporter $exporter,
         private readonly TelegramReceiptObservability $observability,
+        private readonly TelegramLocale $locale,
+        private readonly TelegramSupportContact $supportContact,
     ) {}
 
     public function deliver(TelegramOutboundEffect $effect, ?string $jobEnqueuedAt = null): void
@@ -93,6 +95,9 @@ final class ReceiptTxtDeliveryPipeline
                     'TXT file could not be generated.',
                 );
                 $this->recordOutcome($finalized, 'failed', $deliveryStartedAt);
+                if ($finalized !== null) {
+                    $this->sendGenerationFailureNotice($claimed, $customer);
+                }
 
                 return;
             }
@@ -105,7 +110,7 @@ final class ReceiptTxtDeliveryPipeline
                 workerRssBeforeBytes: $renderRssBeforeBytes,
                 workerRssAfterBytes: DogfoodTiming::residentMemoryBytes(),
                 queryStats: DogfoodTiming::queryDelta($renderQuerySnapshot),
-                outcome: 'ok',
+                outcome: $payload === null ? 'failed' : 'ok',
             );
 
             if ($payload === null) {
@@ -115,6 +120,9 @@ final class ReceiptTxtDeliveryPipeline
                     'No downloadable product credentials are available.',
                 );
                 $this->recordOutcome($finalized, 'failed', $deliveryStartedAt);
+                if ($finalized !== null) {
+                    $this->sendGenerationFailureNotice($claimed, $customer);
+                }
 
                 return;
             }
@@ -169,6 +177,9 @@ final class ReceiptTxtDeliveryPipeline
                 ],
             );
             $this->recordOutcome($finalized, 'sent', $deliveryStartedAt);
+            if ($finalized !== null) {
+                $this->cleanupConfirmationButtons($claimed);
+            }
         } catch (Throwable $exception) {
             if ($this->ledger->isAmbiguous($exception)) {
                 $finalized = $this->ledger->finalizeUnknown(
@@ -233,6 +244,88 @@ final class ReceiptTxtDeliveryPipeline
             $reason,
             $message,
         );
+    }
+
+    private function sendGenerationFailureNotice(
+        TelegramOutboundEffect $effect,
+        ?Customer $customer,
+    ): void {
+        if ($customer === null) {
+            return;
+        }
+
+        $context = [
+            'effect_correlation_id' => DogfoodTiming::correlation($effect->getKey()),
+            'order_correlation_id' => DogfoodTiming::correlation($effect->source_id),
+            'customer_correlation_id' => DogfoodTiming::correlation($customer->getKey()),
+        ];
+        $supportAvailable = false;
+
+        try {
+            $locale = (string) ($effect->locale ?: $customer->locale);
+            $supportUrl = trim((string) ($this->supportContact->resolve()['url'] ?? ''));
+            $supportAvailable = $supportUrl !== '';
+            $replyMarkup = $supportAvailable
+                ? [
+                    'inline_keyboard' => [[[
+                        'text' => $this->locale->translateLocale($locale, 'receipt.actions.support_button'),
+                        'url' => $supportUrl,
+                    ]]],
+                ]
+                : [];
+
+            $response = $this->bot->sendMessage(
+                (string) $effect->telegram_chat_id,
+                $this->locale->translateLocale($locale, 'receipt.txt.generation_failed'),
+                $replyMarkup,
+            );
+            $this->responseValidator->messageIdFromResponse($response, 'Telegram TXT failure notice');
+
+            DogfoodTiming::log('dogfood.telegram.receipt_txt_failure_notice', $context + [
+                'outcome' => 'sent',
+                'support_available' => $supportAvailable,
+            ]);
+        } catch (Throwable $exception) {
+            DogfoodTiming::log('dogfood.telegram.receipt_txt_failure_notice', $context + [
+                'outcome' => 'failed',
+                'support_available' => $supportAvailable,
+                'exception' => $exception::class,
+            ]);
+        }
+    }
+
+    private function cleanupConfirmationButtons(TelegramOutboundEffect $effect): void
+    {
+        $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
+        $originMessageId = $metadata['origin_message_id'] ?? null;
+        if (is_string($originMessageId) && preg_match('/\A[1-9][0-9]{0,17}\z/D', $originMessageId) === 1) {
+            $originMessageId = (int) $originMessageId;
+        }
+        if (! is_int($originMessageId) || $originMessageId < 1) {
+            return;
+        }
+
+        $context = [
+            'effect_correlation_id' => DogfoodTiming::correlation($effect->getKey()),
+            'order_correlation_id' => DogfoodTiming::correlation($effect->source_id),
+        ];
+
+        try {
+            $this->bot->editMessageReplyMarkup(
+                (string) $effect->telegram_chat_id,
+                $originMessageId,
+                ['inline_keyboard' => []],
+            );
+
+            DogfoodTiming::log('dogfood.telegram.receipt_txt_confirmation_cleanup', $context + [
+                'outcome' => 'sent',
+            ]);
+        } catch (Throwable $exception) {
+            DogfoodTiming::log('dogfood.telegram.receipt_txt_confirmation_cleanup', $context + [
+                'outcome' => 'failed',
+                'exception' => $exception::class,
+            ]);
+        }
     }
 
     private function recordOutcome(

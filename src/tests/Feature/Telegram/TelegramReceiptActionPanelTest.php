@@ -16,13 +16,17 @@ use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Telegram\ReceiptActionPanelDeliveryPipeline;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
+use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptActionPanel;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Tests\Support\TelegramBotTestSupport;
 
 final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
@@ -312,6 +316,43 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         ));
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
         $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
+    }
+
+    public function test_panel_render_failure_emits_one_failed_observation(): void
+    {
+        Queue::fake();
+        config()->set('services.dogfood_timing.enabled', true);
+        $logs = [];
+        Log::shouldReceive('info')->zeroOrMoreTimes()->withArgs(function (string $event, array $context = []) use (&$logs): bool {
+            $logs[] = [$event, $context];
+
+            return true;
+        });
+        Log::shouldReceive('warning')->zeroOrMoreTimes();
+        Log::shouldReceive('error')->zeroOrMoreTimes();
+
+        [$order] = $this->paidOrder(withCredential: true, locale: 'en');
+        $receipt = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $this->assertNotNull($receipt);
+        $this->fakeTelegramHttp();
+        app(ReceiptDeliveryPipeline::class)->deliver($receipt, dispatchNext: false);
+        $panel = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS)
+            ->sole();
+
+        $locale = Mockery::mock(TelegramLocale::class);
+        $locale->shouldReceive('translateLocale')->andThrow(new RuntimeException('render failed'));
+        $this->app->instance(TelegramLocale::class, $locale);
+
+        app(ReceiptActionPanelDeliveryPipeline::class)->deliver($panel);
+
+        $failed = $panel->fresh();
+        $failureMetrics = collect($logs)->filter(
+            static fn (array $entry): bool => $entry[0] === 'dogfood.telegram.receipt_counter'
+                && ($entry[1]['metric'] ?? null) === 'receipt_actions_failed',
+        );
+        $this->assertSame(TelegramOutboundEffectState::Failed, $failed->state);
+        $this->assertCount(1, $failureMetrics);
     }
 
     public function test_explicit_panel_resend_preserves_the_receipt_reference_and_safe_capabilities(): void

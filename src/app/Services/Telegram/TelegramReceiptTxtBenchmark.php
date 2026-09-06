@@ -36,6 +36,8 @@ final class TelegramReceiptTxtBenchmark
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramPaidOrderTxtExporter $exporter,
         private readonly TelegramReceiptObservability $observability,
+        private readonly TelegramLocale $locale,
+        private readonly TelegramSupportContact $supportContact,
     ) {}
 
     /**
@@ -132,6 +134,8 @@ final class TelegramReceiptTxtBenchmark
             $this->responseValidator,
             $this->exporter,
             $this->observability,
+            $this->locale,
+            $this->supportContact,
         );
         $jobEnqueuedAt = now()->subMilliseconds(10)->toISOString();
         $queueWaitMs = DogfoodTiming::queueWaitMs($jobEnqueuedAt) ?? 0;

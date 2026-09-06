@@ -223,7 +223,8 @@ final class TelegramReceiptTxtDownloadTest extends TelegramBotTestSupport
             ],
         ]));
         $effect = $this->txtEffect($order, $customer, 'renderer-failure-confirmation');
-        Http::preventStrayRequests();
+        config()->set('services.telegram.admin_contact_url', 'https://t.me/lhie_support');
+        $this->fakeTelegramHttp();
 
         app(ReceiptTxtDeliveryPipeline::class)->deliver($effect);
 
@@ -234,6 +235,62 @@ final class TelegramReceiptTxtDownloadTest extends TelegramBotTestSupport
         $this->assertNull($failed->telegram_message_id);
         $this->assertStringNotContainsString($secret, json_encode($failed->getAttributes(), JSON_THROW_ON_ERROR));
         $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
+        $notice = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'))->sole()[0];
+        $this->assertStringContainsString('could not be prepared safely', (string) ($notice['text'] ?? ''));
+        $this->assertSame(
+            'https://t.me/lhie_support',
+            data_get($notice->data(), 'reply_markup.inline_keyboard.0.0.url'),
+        );
+        $this->assertStringNotContainsString($secret, json_encode($notice->data(), JSON_THROW_ON_ERROR));
+
+    }
+
+    public function test_successful_document_delivery_clears_confirmation_buttons_best_effort(): void
+    {
+        [$order, $customer] = $this->paidOrder();
+        $effect = $this->txtEffect($order, $customer, 'cleanup-success-confirmation', 422401);
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendDocument' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 422402],
+            ]),
+            'https://api.telegram.org/*/editMessageReplyMarkup' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 422401],
+            ]),
+        ]);
+
+        app(ReceiptTxtDeliveryPipeline::class)->deliver($effect);
+
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+        $cleanup = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/editMessageReplyMarkup'))->sole()[0];
+        $this->assertSame('422001', (string) ($cleanup['chat_id'] ?? ''));
+        $this->assertSame(422401, (int) ($cleanup['message_id'] ?? 0));
+        $this->assertSame(['inline_keyboard' => []], $cleanup['reply_markup'] ?? null);
+    }
+
+    public function test_confirmation_cleanup_failure_does_not_change_sent_delivery_state(): void
+    {
+        [$order, $customer] = $this->paidOrder();
+        $effect = $this->txtEffect($order, $customer, 'cleanup-failure-confirmation', 422403);
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendDocument' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 422404],
+            ]),
+            'https://api.telegram.org/*/editMessageReplyMarkup' => Http::response([
+                'ok' => false,
+                'description' => 'Bad Request: message to edit not found',
+            ], 400),
+        ]);
+
+        app(ReceiptTxtDeliveryPipeline::class)->deliver($effect);
+
+        $sent = $effect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Sent, $sent->state);
+        $this->assertSame('422404', (string) $sent->telegram_message_id);
+        $this->assertNull($sent->last_error_code);
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/editMessageReplyMarkup')));
     }
 
     public function test_recovery_redispatches_a_committed_pending_txt_effect_by_effect_id(): void
@@ -299,12 +356,18 @@ final class TelegramReceiptTxtDownloadTest extends TelegramBotTestSupport
         return [$order, $customer, $item];
     }
 
-    private function txtEffect(Order $order, Customer $customer, string $nonce): TelegramOutboundEffect
-    {
+    private function txtEffect(
+        Order $order,
+        Customer $customer,
+        string $nonce,
+        ?int $originMessageId = null,
+    ): TelegramOutboundEffect {
+        $metadata = $originMessageId === null ? [] : ['origin_message_id' => $originMessageId];
         $effect = app(TelegramOutboundEffectService::class)->recordReceiptTxtDownload(
             $order,
             $nonce,
             $customer,
+            $metadata,
         );
 
         return $effect ?? throw new InvalidArgumentException('Expected a TXT download effect.');

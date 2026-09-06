@@ -403,7 +403,7 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
 
         return [
             'product_lines' => implode("\n", $lines),
-            'order_reference' => $reference !== '' ? $reference : '#'.substr((string) $order->getKey(), 0, 8),
+            'order_reference' => $reference !== '' ? $reference : '#'.(string) $order->getKey(),
             'item_count' => (string) $this->sumQuantities($order),
         ];
     }

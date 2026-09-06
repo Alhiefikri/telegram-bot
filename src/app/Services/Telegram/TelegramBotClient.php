@@ -85,6 +85,27 @@ class TelegramBotClient
         return $this->successfulResponse('editMessageCaption', $response);
     }
 
+    public function editMessageReplyMarkup(
+        int|string $chatId,
+        int $messageId,
+        array $replyMarkup = ['inline_keyboard' => []],
+        array $options = [],
+    ): array {
+        $payload = array_merge([
+            'chat_id' => $chatId,
+            'message_id' => $messageId,
+            'reply_markup' => $replyMarkup,
+        ], $options);
+
+        try {
+            $response = $this->timed('editMessageReplyMarkup', fn () => $this->requests->request()->post($this->requests->url('editMessageReplyMarkup'), $payload)->throw()->json());
+        } catch (RequestException $exception) {
+            throw TelegramApiException::fromRequest('editMessageReplyMarkup', $exception);
+        }
+
+        return $this->successfulResponse('editMessageReplyMarkup', $response);
+    }
+
     public function editMessageTextOrSend(
         int|string $chatId,
         string $text,

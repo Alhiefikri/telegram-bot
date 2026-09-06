@@ -417,6 +417,7 @@
   "receipt.txt.stale": "This request is no longer valid. Press TXT again to generate a new file.",
   "receipt.txt.unavailable": "This download is not available for this order right now.",
   "receipt.txt.cancelled": "Cancelled. No file will be generated.",
+  "receipt.txt.generation_failed": "The TXT file could not be prepared safely, so no file was sent. Please contact Support and include your Order ID.",
   "receipt.actions.message": "🛟 Need help with this order? Tap Support below and include your Order ID so we can help.",
   "receipt.actions.txt_button": "⬇️ TXT",
   "receipt.actions.support_button": "🛟 Support",
