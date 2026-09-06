@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
+use App\Exceptions\TelegramAmbiguousResponseException;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Exceptions\TelegramTransportException;
 use App\Models\TelegramOutboundEffect;
@@ -300,6 +301,10 @@ class TelegramOutboundEffectLedgerProtocol
         }
 
         for ($candidate = $exception; $candidate !== null; $candidate = $candidate->getPrevious()) {
+            if ($candidate instanceof TelegramAmbiguousResponseException) {
+                return true;
+            }
+
             if ($candidate instanceof TelegramTransportException || $candidate instanceof ConnectionException) {
                 return true;
             }

@@ -432,7 +432,8 @@ final class TelegramPaidOrderTxtDownloadTest extends TelegramBotTestSupport
         $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
     }
 
-    public function test_definite_document_rejection_is_terminal_and_secret_free(): void
+    #[DataProvider('definiteDocumentRejectionStatuses')]
+    public function test_definite_document_rejection_is_terminal_and_secret_free(int $status): void
     {
         [$order, $customer, $sensitive] = $this->otpAndAuthOrder(oneAccount: true);
         $effect = $this->recordTxtEffect($order, $customer, 'terminal-426');
@@ -440,17 +441,24 @@ final class TelegramPaidOrderTxtDownloadTest extends TelegramBotTestSupport
             'https://api.telegram.org/*/sendDocument' => Http::response([
                 'ok' => false,
                 'description' => 'Bad Request: document rejected',
-            ], 400),
+            ], $status),
         ]);
 
         app(ReceiptTxtDeliveryPipeline::class)->deliver($effect);
 
         $failed = $effect->fresh();
         $this->assertSame(TelegramOutboundEffectState::Failed, $failed->state);
-        $this->assertSame('telegram_http_400', $failed->last_error_code);
+        $this->assertSame('telegram_http_'.$status, $failed->last_error_code);
         $this->assertNull($failed->next_attempt_at);
         $this->assertNoSecretValues(json_encode($failed->getAttributes(), JSON_THROW_ON_ERROR), $sensitive);
         $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
+    }
+
+    /** @return iterable<string, array{int}> */
+    public static function definiteDocumentRejectionStatuses(): iterable
+    {
+        yield 'bad request' => [400];
+        yield 'forbidden' => [403];
     }
 
     public function test_ambiguous_document_delivery_requires_review_and_is_not_resent(): void

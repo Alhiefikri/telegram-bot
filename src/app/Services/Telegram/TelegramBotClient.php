@@ -220,7 +220,7 @@ class TelegramBotClient
             fn () => $request->post($this->requests->url('sendDocument'), $payload)->throw()->json(),
         );
         $response = $this->successfulResponse('sendDocument', $response);
-        $this->responseValidator->messageIdFromResponse($response, 'Telegram sendDocument');
+        $this->responseValidator->messageIdFromDocumentResponse($response, 'Telegram sendDocument');
 
         return $response;
     }

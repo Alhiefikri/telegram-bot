@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services\Telegram;
 
+use App\Exceptions\TelegramAmbiguousResponseException;
 use App\Services\Telegram\TelegramOutboundResponseValidator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
@@ -21,6 +22,15 @@ class TelegramOutboundResponseValidatorTest extends TestCase
             'ok' => true,
             'result' => ['message_id' => $messageId],
         ]);
+    }
+
+    public function test_successful_document_response_without_a_valid_message_id_is_ambiguous(): void
+    {
+        $this->expectException(TelegramAmbiguousResponseException::class);
+
+        app(TelegramOutboundResponseValidator::class)->messageIdFromDocumentResponse([
+            'ok' => true,
+        ], 'Telegram sendDocument');
     }
 
     #[DataProvider('validMessageIds')]

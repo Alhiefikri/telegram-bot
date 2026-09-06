@@ -7,6 +7,7 @@ use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
+use App\Enums\UserRole;
 use App\Jobs\SendTelegramReceiptTxt;
 use App\Models\Customer;
 use App\Models\Order;
@@ -15,14 +16,18 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\TelegramOutboundEffect;
+use App\Models\User;
 use App\Services\Telegram\ReceiptTxtDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
+use App\Services\Telegram\TelegramOutboundEffectReviewService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
 final class TelegramReceiptTxtDownloadTest extends TelegramBotTestSupport
@@ -138,16 +143,17 @@ final class TelegramReceiptTxtDownloadTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString($otpUrl, json_encode($sent->getAttributes(), JSON_THROW_ON_ERROR));
     }
 
-    public function test_ambiguous_document_delivery_becomes_unknown_without_automatic_resend(): void
+    #[DataProvider('ambiguousDocumentTransportFailures')]
+    public function test_ambiguous_document_delivery_becomes_unknown_without_automatic_resend(string $message): void
     {
         [$order, $customer] = $this->paidOrder();
         $effect = $this->txtEffect($order, $customer, 'ambiguous-confirmation');
         $sendCount = 0;
         Http::preventStrayRequests();
         Http::fake([
-            'https://api.telegram.org/*/sendDocument' => function () use (&$sendCount): never {
+            'https://api.telegram.org/*/sendDocument' => function () use (&$sendCount, $message): never {
                 $sendCount++;
-                throw new ConnectionException('connection closed after Telegram accepted the request');
+                throw new ConnectionException($message);
             },
             'https://api.telegram.org/*' => Http::response(['ok' => true]),
         ]);
@@ -162,6 +168,90 @@ final class TelegramReceiptTxtDownloadTest extends TelegramBotTestSupport
         $this->assertNull($unknown->next_attempt_at);
         $this->assertSame(1, $sendCount);
         $this->assertStringNotContainsString('Txt-password', json_encode($unknown->getAttributes(), JSON_THROW_ON_ERROR));
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function ambiguousDocumentTransportFailures(): iterable
+    {
+        yield 'connection loss after acceptance' => ['connection closed after Telegram accepted the request'];
+        yield 'timeout after acceptance' => ['request timed out after Telegram accepted the request'];
+    }
+
+    public function test_operator_resolution_marks_ambiguous_txt_sent_without_resending_or_secrets(): void
+    {
+        [$order, $customer] = $this->paidOrder();
+        $effect = $this->txtEffect($order, $customer, 'operator-resolution');
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.telegram.org/*/sendDocument' => Http::response(['ok' => true]),
+        ]);
+
+        app(ReceiptTxtDeliveryPipeline::class)->deliver($effect);
+
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $this->assertTrue(app(TelegramOutboundEffectReviewService::class)->markSent(
+            $effect,
+            '422901',
+            $owner,
+        ));
+
+        $resolved = $effect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Sent, $resolved->state);
+        $this->assertSame('422901', $resolved->telegram_message_id);
+        $this->assertNotNull($resolved->manual_review_at);
+        $this->assertNull($resolved->next_attempt_at);
+        $this->assertSame('operator_marked_sent', $resolved->outcome_metadata['resolution']);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'telegram_outbound_effect.marked_sent',
+            'subject_type' => TelegramOutboundEffect::class,
+            'subject_id' => $effect->id,
+            'user_id' => $owner->id,
+        ]);
+        $this->assertStringNotContainsString('Txt-password', json_encode($resolved->getAttributes(), JSON_THROW_ON_ERROR));
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
+    }
+
+    public function test_explicit_txt_resend_creates_a_new_auditable_effect_without_mutating_ambiguous_history(): void
+    {
+        Queue::fake();
+        [$order, $customer] = $this->paidOrder();
+        $effect = $this->txtEffect($order, $customer, 'explicit-resend');
+        $effect->forceFill([
+            'state' => TelegramOutboundEffectState::Unknown,
+            'unknown_at' => now()->subMinute(),
+            'next_attempt_at' => null,
+            'last_error_code' => 'telegram_transport_ambiguous',
+            'last_error' => 'Telegram delivery outcome is unknown and requires review.',
+        ])->save();
+        $original = $effect->fresh()->getAttributes();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $resend = app(TelegramOutboundEffectService::class)->resend($effect, $owner);
+        app(TelegramOutboundEffectDispatcher::class)->dispatchExplicitResend($resend);
+
+        $effect->refresh();
+        $this->assertSame($original['effect_key'], $effect->effect_key);
+        $this->assertSame($original['state'], $effect->getRawOriginal('state'));
+        $this->assertNull($effect->supersedes_effect_id);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $resend->state);
+        $this->assertSame($effect->effect_group_key, $resend->effect_group_key);
+        $this->assertSame(2, (int) $resend->sequence);
+        $this->assertSame($effect->id, $resend->supersedes_effect_id);
+        $this->assertSame('explicit_resend', $resend->outcome_metadata['delivery_context']);
+        $this->assertTrue($resend->outcome_metadata['duplicate_risk_acknowledged']);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'telegram_outbound_effect.resent',
+            'subject_type' => TelegramOutboundEffect::class,
+            'subject_id' => $effect->id,
+            'user_id' => $owner->id,
+        ]);
+        Queue::assertPushed(
+            SendTelegramReceiptTxt::class,
+            fn (SendTelegramReceiptTxt $job): bool => $job->effectId === $resend->id,
+        );
+        foreach ([$effect, $resend] as $candidate) {
+            $this->assertStringNotContainsString('Txt-password', json_encode($candidate->getAttributes(), JSON_THROW_ON_ERROR));
+        }
     }
 
     public function test_retryable_rate_limit_uses_the_shared_bounded_retry_schedule(): void
@@ -185,24 +275,38 @@ final class TelegramReceiptTxtDownloadTest extends TelegramBotTestSupport
         $this->assertNull($failed->telegram_message_id);
     }
 
-    public function test_malformed_success_response_fails_without_persisting_document_content(): void
+    #[DataProvider('malformedSuccessResponses')]
+    public function test_malformed_success_response_becomes_unknown_without_persisting_document_content(array $response): void
     {
         [$order, $customer] = $this->paidOrder();
         $effect = $this->txtEffect($order, $customer, 'malformed-response-confirmation');
         $this->fakeTelegramHttp([
-            'https://api.telegram.org/*/sendDocument' => Http::response([
-                'ok' => true,
-                'result' => ['message_id' => 0],
-            ]),
+            'https://api.telegram.org/*/sendDocument' => Http::response($response),
         ]);
 
         app(ReceiptTxtDeliveryPipeline::class)->deliver($effect);
 
-        $failed = $effect->fresh();
-        $this->assertSame(TelegramOutboundEffectState::Failed, $failed->state);
-        $this->assertSame('telegram_response_missing_message_id', $failed->last_error_code);
-        $this->assertNotNull($failed->next_attempt_at);
-        $this->assertStringNotContainsString('Txt-password', json_encode($failed->getAttributes(), JSON_THROW_ON_ERROR));
+        $unknown = $effect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $unknown->state);
+        $this->assertSame('telegram_transport_ambiguous', $unknown->last_error_code);
+        $this->assertNull($unknown->next_attempt_at);
+        $this->assertFalse(
+            app(TelegramOutboundEffectLedgerProtocol::class)
+                ->readyToDispatchQuery(now()->addDay())
+                ->whereKey($effect->id)
+                ->exists(),
+        );
+        Queue::fake();
+        Artisan::call('telegram:recover-outbound', ['--chunk' => 100]);
+        Queue::assertNotPushed(SendTelegramReceiptTxt::class);
+        $this->assertStringNotContainsString('Txt-password', json_encode($unknown->getAttributes(), JSON_THROW_ON_ERROR));
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function malformedSuccessResponses(): iterable
+    {
+        yield 'missing message id' => [['ok' => true, 'result' => []]];
+        yield 'zero message id' => [['ok' => true, 'result' => ['message_id' => 0]]];
     }
 
     public function test_renderer_failure_is_terminal_and_never_sends_a_partial_document(): void

@@ -146,7 +146,7 @@ final class ReceiptTxtDeliveryPipeline
                         ['protect_content' => false],
                     ),
                 );
-                $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram TXT download');
+                $messageId = $this->responseValidator->messageIdFromDocumentResponse($response, 'Telegram TXT download');
                 $this->observability->txtDocumentAttempt(
                     $claimed,
                     DogfoodTiming::elapsedMs($sendStartedAt),
