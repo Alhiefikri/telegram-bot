@@ -241,6 +241,67 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         );
     }
 
+    public function test_recovery_dispatches_an_existing_pending_admin_effect(): void
+    {
+        $this->configureAdminTarget();
+        Queue::fake();
+
+        $order = $this->checkoutOrder();
+        $effect = app(TelegramOutboundEffectService::class)
+            ->forOrder($order->id, TelegramOutboundEffectService::TYPE_ADMIN_PENDING);
+        $this->assertNotNull($effect);
+
+        Queue::fake();
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
+        Queue::assertPushed(
+            SendAdminOrderPendingNotification::class,
+            fn (SendAdminOrderPendingNotification $job): bool => $job->orderId === $order->id
+                && $job->effectId === $effect->id,
+        );
+    }
+
+    public function test_ineligible_admin_notification_becomes_terminal_and_recovery_does_not_redispatch_it(): void
+    {
+        $this->configureAdminTarget();
+        Queue::fake();
+
+        $order = $this->checkoutOrder();
+        $effect = app(TelegramOutboundEffectService::class)
+            ->forOrder($order->id, TelegramOutboundEffectService::TYPE_ADMIN_PENDING);
+        $this->assertNotNull($effect);
+
+        $order->forceFill([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ])->save();
+
+        app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
+
+        $failed = $effect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Failed, $failed->state);
+        $this->assertSame('admin_notification_not_eligible', $failed->last_error_code);
+        $this->assertNull($failed->next_attempt_at);
+
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $this->assertTrue($ledger->isTerminalFailure($failed));
+        $this->assertFalse(
+            $ledger->readyToDispatchQuery(now()->addDay())->whereKey($failed->id)->exists(),
+        );
+
+        Queue::fake();
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        Queue::assertNotPushed(SendAdminOrderPendingNotification::class);
+    }
+
     public function test_paid_admin_effect_ambiguous_delivery_stays_unknown_without_a_duplicate_send(): void
     {
         $this->configureAdminTarget();

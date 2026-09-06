@@ -47,6 +47,7 @@ final class TelegramOutboundEffectPolicy
         'receipt_actions_not_eligible',
         'receipt_actions_render_failed',
         'admin_target_missing',
+        'admin_notification_not_eligible',
         'proof_not_eligible',
         'proof_attachment_missing',
         'proof_already_forwarded',
