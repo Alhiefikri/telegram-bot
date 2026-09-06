@@ -25,9 +25,10 @@ final class ReceiptTxtDeliveryPipeline
         private readonly TelegramBotClient $bot,
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramPaidOrderTxtExporter $exporter,
+        private readonly TelegramReceiptObservability $observability,
     ) {}
 
-    public function deliver(TelegramOutboundEffect $effect): void
+    public function deliver(TelegramOutboundEffect $effect, ?string $jobEnqueuedAt = null): void
     {
         if ($effect->effect_type !== TelegramOutboundEffectType::ReceiptTxtDownload->value
             || $effect->source_type !== Order::class) {
@@ -39,6 +40,7 @@ final class ReceiptTxtDeliveryPipeline
             return;
         }
 
+        $deliveryStartedAt = DogfoodTiming::now();
         $payload = null;
         $customerCorrelationId = null;
 
@@ -50,14 +52,19 @@ final class ReceiptTxtDeliveryPipeline
             $customerCorrelationId = DogfoodTiming::correlation($customer?->telegram_id);
 
             if (! $this->eligible($order, $customer, $claimed)) {
-                $this->finalizeNotDeliverable(
+                $finalized = $this->finalizeNotDeliverable(
                     $claimed,
                     'receipt_txt_not_eligible',
                     'TXT download was no longer eligible for delivery.',
                 );
+                $this->recordOutcome($finalized, 'failed', $deliveryStartedAt);
 
                 return;
             }
+
+            $renderStartedAt = DogfoodTiming::now();
+            $renderQuerySnapshot = DogfoodTiming::querySnapshot();
+            $renderRssBeforeBytes = DogfoodTiming::residentMemoryBytes();
 
             try {
                 $payload = DogfoodTiming::time(
@@ -71,71 +78,116 @@ final class ReceiptTxtDeliveryPipeline
                     fn (): ?TelegramDocumentPayload => $this->exporter->export($order, $customer),
                 );
             } catch (Throwable) {
-                $this->finalizeNotDeliverable(
+                $this->observability->txtRender(
+                    $claimed,
+                    DogfoodTiming::elapsedMs($renderStartedAt),
+                    outputBytes: null,
+                    workerRssBeforeBytes: $renderRssBeforeBytes,
+                    workerRssAfterBytes: DogfoodTiming::residentMemoryBytes(),
+                    queryStats: DogfoodTiming::queryDelta($renderQuerySnapshot),
+                    outcome: 'failed',
+                );
+                $finalized = $this->finalizeNotDeliverable(
                     $claimed,
                     'receipt_txt_render_failed',
                     'TXT file could not be generated.',
                 );
+                $this->recordOutcome($finalized, 'failed', $deliveryStartedAt);
 
                 return;
             }
 
+            $renderDurationMs = DogfoodTiming::elapsedMs($renderStartedAt);
+            $this->observability->txtRender(
+                $claimed,
+                $renderDurationMs,
+                outputBytes: $payload?->byteLength(),
+                workerRssBeforeBytes: $renderRssBeforeBytes,
+                workerRssAfterBytes: DogfoodTiming::residentMemoryBytes(),
+                queryStats: DogfoodTiming::queryDelta($renderQuerySnapshot),
+                outcome: 'ok',
+            );
+
             if ($payload === null) {
-                $this->finalizeNotDeliverable(
+                $finalized = $this->finalizeNotDeliverable(
                     $claimed,
                     'receipt_txt_credentials_missing',
                     'No downloadable product credentials are available.',
                 );
+                $this->recordOutcome($finalized, 'failed', $deliveryStartedAt);
 
                 return;
             }
 
             $byteLength = $payload->byteLength();
-            $response = DogfoodTiming::time(
-                'dogfood.telegram.receipt_txt_send',
-                [
-                    'step' => 'document_send',
-                    'effect_correlation_id' => DogfoodTiming::correlation($claimed->getKey()),
-                    'order_correlation_id' => DogfoodTiming::correlation($order->getKey()),
-                    'customer_correlation_id' => $customerCorrelationId,
-                ],
-                fn (): array => $this->bot->sendDocument(
-                    (string) $claimed->telegram_chat_id,
-                    $payload->documentContents(),
-                    $payload->filename(),
-                    null,
-                    [],
-                    ['protect_content' => false],
-                ),
-            );
-            $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram TXT download');
+            $sendStartedAt = DogfoodTiming::now();
+            try {
+                $response = DogfoodTiming::time(
+                    'dogfood.telegram.receipt_txt_send',
+                    [
+                        'step' => 'document_send',
+                        'effect_correlation_id' => DogfoodTiming::correlation($claimed->getKey()),
+                        'order_correlation_id' => DogfoodTiming::correlation($order->getKey()),
+                        'customer_correlation_id' => $customerCorrelationId,
+                    ],
+                    fn (): array => $this->bot->sendDocument(
+                        (string) $claimed->telegram_chat_id,
+                        $payload->documentContents(),
+                        $payload->filename(),
+                        null,
+                        [],
+                        ['protect_content' => false],
+                    ),
+                );
+                $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram TXT download');
+                $this->observability->txtDocumentAttempt(
+                    $claimed,
+                    DogfoodTiming::elapsedMs($sendStartedAt),
+                    'ok',
+                );
+            } catch (Throwable $exception) {
+                $this->observability->txtDocumentAttempt(
+                    $claimed,
+                    DogfoodTiming::elapsedMs($sendStartedAt),
+                    $this->ledger->isAmbiguous($exception) ? 'ambiguous' : 'failed',
+                );
 
-            $this->ledger->finalizeSent(
+                throw $exception;
+            }
+
+            $finalized = $this->ledger->finalizeSent(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 $messageId,
                 [
-                    'byte_size_bucket' => $this->byteSizeBucket($byteLength),
+                    'byte_size_bucket' => $this->observability->byteSizeBucket($byteLength),
+                    'output_size_bucket' => $this->observability->byteSizeBucket($byteLength),
+                    'render_duration_bucket' => $this->observability->durationBucket($renderDurationMs),
+                    'telegram_document_duration_bucket' => $this->observability->durationBucket(DogfoodTiming::elapsedMs($sendStartedAt)),
+                    'queue_wait_bucket' => $this->observability->queueWaitBucket(DogfoodTiming::queueWaitMs($jobEnqueuedAt)),
                     'delivery_method' => 'sendDocument',
                 ],
             );
+            $this->recordOutcome($finalized, 'sent', $deliveryStartedAt);
         } catch (Throwable $exception) {
             if ($this->ledger->isAmbiguous($exception)) {
-                $this->ledger->finalizeUnknown(
+                $finalized = $this->ledger->finalizeUnknown(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
                     $exception,
                 );
+                $this->recordOutcome($finalized, 'unknown', $deliveryStartedAt);
 
                 return;
             }
 
-            $this->ledger->finalizeFailed(
+            $finalized = $this->ledger->finalizeFailed(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 $exception,
                 $this->ledger->retryAfterSeconds($exception),
             );
+            $this->recordOutcome($finalized, 'failed', $deliveryStartedAt);
         } finally {
             unset($payload);
         }
@@ -174,8 +226,8 @@ final class ReceiptTxtDeliveryPipeline
         TelegramOutboundEffect $effect,
         string $reason,
         string $message,
-    ): void {
-        $this->ledger->finalizeNotDeliverable(
+    ): ?TelegramOutboundEffect {
+        return $this->ledger->finalizeNotDeliverable(
             (string) $effect->getKey(),
             (string) $effect->claim_token,
             $reason,
@@ -183,14 +235,20 @@ final class ReceiptTxtDeliveryPipeline
         );
     }
 
-    private function byteSizeBucket(int $bytes): string
-    {
-        return match (true) {
-            $bytes <= 1024 => '0-1024',
-            $bytes <= 16_384 => '1025-16384',
-            $bytes <= 65_536 => '16385-65536',
-            $bytes <= 262_144 => '65537-262144',
-            default => '262145-1048576',
-        };
+    private function recordOutcome(
+        ?TelegramOutboundEffect $effect,
+        string $outcome,
+        int $deliveryStartedAt,
+    ): void {
+        if ($effect === null) {
+            return;
+        }
+
+        $this->observability->txtOutcome(
+            $effect,
+            $outcome,
+            DogfoodTiming::elapsedMs($deliveryStartedAt),
+            $effect->last_error_code,
+        );
     }
 }

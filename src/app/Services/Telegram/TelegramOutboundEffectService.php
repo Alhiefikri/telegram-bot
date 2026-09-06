@@ -219,6 +219,11 @@ class TelegramOutboundEffectService
         'format',
         'item_count',
         'byte_size_bucket',
+        'output_size_bucket',
+        'render_duration_bucket',
+        'telegram_document_duration_bucket',
+        'queue_wait_bucket',
+        'effect_completion_duration_bucket',
         'origin_message_id',
         'confirmation_nonce',
         'correlation_id',
@@ -236,6 +241,7 @@ class TelegramOutboundEffectService
         private readonly TelegramReceiptNotifier $receiptNotifier,
         private readonly TelegramAdminAccess $adminAccess,
         private readonly TelegramReceiptActionPanel $receiptActionPanel,
+        private readonly TelegramReceiptObservability $observability,
     ) {}
 
     public function recordCheckoutInstructions(Order $order, Payment $payment, ?Customer $customer = null): ?TelegramOutboundEffect
@@ -830,7 +836,8 @@ class TelegramOutboundEffectService
      */
     public function recordReceiptActionPanel(TelegramOutboundEffect $receiptEffect): ?TelegramOutboundEffect
     {
-        return DB::transaction(function () use ($receiptEffect): ?TelegramOutboundEffect {
+        $created = false;
+        $panel = DB::transaction(function () use ($receiptEffect, &$created): ?TelegramOutboundEffect {
             // Lock the source Order before the receipt rows. Recovery and
             // delivery paths can arrive with different receipt-unit IDs; a
             // stable lock order prevents those paths from deadlocking while
@@ -923,6 +930,8 @@ class TelegramOutboundEffectService
 
             $now = now();
 
+            $created = true;
+
             return TelegramOutboundEffect::query()->create([
                 'effect_key' => $effectKey,
                 'effect_group_key' => $effectKey,
@@ -952,6 +961,12 @@ class TelegramOutboundEffectService
                 ],
             ]);
         }, 5);
+
+        if ($created && $panel !== null) {
+            $this->observability->actionPanelMaterialized($panel);
+        }
+
+        return $panel;
     }
 
     /**
@@ -1283,7 +1298,10 @@ class TelegramOutboundEffectService
         $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
 
         return [
-            'effect' => $effect,
+            // The review queue only needs a route key. Do not hand the raw
+            // Eloquent row (including last_error, chat IDs, or unfiltered
+            // metadata) to a view/serializer.
+            'effect' => $this->reviewRouteEffect($effect),
             'state' => $state,
             'effect_type' => (string) $effect->effect_type,
             'source_reference' => $this->sourceReference($effect),
@@ -1306,6 +1324,15 @@ class TelegramOutboundEffectService
             'sent_at' => $effect->sent_at?->format('Y-m-d H:i:s') ?? '—',
             'can_resolve' => in_array($state, self::REVIEW_STATES, true),
         ];
+    }
+
+    private function reviewRouteEffect(TelegramOutboundEffect $effect): TelegramOutboundEffect
+    {
+        $routeEffect = new TelegramOutboundEffect;
+        $routeEffect->setRawAttributes(['id' => (string) $effect->getKey()], true);
+        $routeEffect->exists = true;
+
+        return $routeEffect;
     }
 
     public function resend(TelegramOutboundEffect $effect, User $actor, ?string $ip = null): TelegramOutboundEffect
@@ -2235,6 +2262,11 @@ class TelegramOutboundEffectService
                 'render_mode',
                 'format',
                 'byte_size_bucket',
+                'output_size_bucket',
+                'render_duration_bucket',
+                'telegram_document_duration_bucket',
+                'queue_wait_bucket',
+                'effect_completion_duration_bucket',
                 'confirmation_nonce',
                 'correlation_id',
                 'delivery_method',

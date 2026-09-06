@@ -24,6 +24,7 @@ final class TelegramOutboundEffectReviewService
         private readonly TelegramOutboundEffectDispatcher $dispatcher,
         private readonly ReceiptDeliveryPipeline $receipts,
         private readonly AuditLogger $auditLogger,
+        private readonly TelegramReceiptObservability $observability,
     ) {}
 
     public function markSent(
@@ -51,6 +52,15 @@ final class TelegramOutboundEffectReviewService
             ]);
             if ($resolved === null) {
                 return false;
+            }
+
+            if ($resolved->effect_type === TelegramOutboundEffectType::ReceiptTxtDownload->value
+                && $oldState === TelegramOutboundEffectState::ManualReview->value) {
+                $this->observability->txtOutcome(
+                    $resolved,
+                    'manual_review',
+                    reason: $resolved->last_error_code,
+                );
             }
 
             $this->projection->synchronizeSent($resolved, $messageId, $now);

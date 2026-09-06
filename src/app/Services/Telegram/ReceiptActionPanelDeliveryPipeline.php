@@ -10,6 +10,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
+use App\Support\DogfoodTiming;
 use InvalidArgumentException;
 use Throwable;
 
@@ -27,9 +28,10 @@ final class ReceiptActionPanelDeliveryPipeline
         private readonly TelegramBotClient $bot,
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramReceiptActionPanel $panel,
+        private readonly TelegramReceiptObservability $observability,
     ) {}
 
-    public function deliver(TelegramOutboundEffect $effect): void
+    public function deliver(TelegramOutboundEffect $effect, ?string $jobEnqueuedAt = null): void
     {
         if ($effect->effect_type !== TelegramOutboundEffectType::ReceiptOrderActions->value
             || $effect->source_type !== Order::class
@@ -43,6 +45,8 @@ final class ReceiptActionPanelDeliveryPipeline
             return;
         }
 
+        $deliveryStartedAt = DogfoodTiming::now();
+
         try {
             $order = Order::query()
                 ->with(['customer', 'payments'])
@@ -53,22 +57,24 @@ final class ReceiptActionPanelDeliveryPipeline
                 || ! $customer instanceof Customer
                 || ! $this->eligible($order, $customer, $claimed)
                 || ! $this->receiptGroupCompleted($claimed)) {
-                $this->finalizeNotDeliverable(
+                $finalized = $this->finalizeNotDeliverable(
                     $claimed,
                     'receipt_actions_not_eligible',
                     'Receipt actions were no longer eligible for delivery.',
                 );
+                $this->recordOutcome($finalized, 'failed', $deliveryStartedAt, $jobEnqueuedAt);
 
                 return;
             }
 
             $metadata = is_array($claimed->outcome_metadata) ? $claimed->outcome_metadata : [];
             if (! is_bool($metadata['txt_available'] ?? null)) {
-                $this->finalizeNotDeliverable(
+                $finalized = $this->finalizeNotDeliverable(
                     $claimed,
                     'receipt_actions_render_failed',
                     'Receipt actions could not be rendered.',
                 );
+                $this->recordOutcome($finalized, 'failed', $deliveryStartedAt, $jobEnqueuedAt);
 
                 return;
             }
@@ -96,29 +102,32 @@ final class ReceiptActionPanelDeliveryPipeline
             );
             $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram receipt action panel');
 
-            $this->ledger->finalizeSent(
+            $finalized = $this->ledger->finalizeSent(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 $messageId,
                 ['delivery_method' => 'sendMessage'],
             );
+            $this->recordOutcome($finalized, 'sent', $deliveryStartedAt, $jobEnqueuedAt);
         } catch (Throwable $exception) {
             if ($this->ledger->isAmbiguous($exception)) {
-                $this->ledger->finalizeUnknown(
+                $finalized = $this->ledger->finalizeUnknown(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
                     $exception,
                 );
+                $this->recordOutcome($finalized, 'unknown', $deliveryStartedAt, $jobEnqueuedAt);
 
                 return;
             }
 
-            $this->ledger->finalizeFailed(
+            $finalized = $this->ledger->finalizeFailed(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 $exception,
                 $this->ledger->retryAfterSeconds($exception),
             );
+            $this->recordOutcome($finalized, 'failed', $deliveryStartedAt, $jobEnqueuedAt);
         }
     }
 
@@ -180,12 +189,31 @@ final class ReceiptActionPanelDeliveryPipeline
         TelegramOutboundEffect $effect,
         string $reason,
         string $message,
-    ): void {
-        $this->ledger->finalizeNotDeliverable(
+    ): ?TelegramOutboundEffect {
+        return $this->ledger->finalizeNotDeliverable(
             (string) $effect->getKey(),
             (string) $effect->claim_token,
             $reason,
             $message,
+        );
+    }
+
+    private function recordOutcome(
+        ?TelegramOutboundEffect $effect,
+        string $outcome,
+        int $deliveryStartedAt,
+        ?string $jobEnqueuedAt,
+    ): void {
+        if ($effect === null) {
+            return;
+        }
+
+        $this->observability->actionPanelOutcome(
+            $effect,
+            $outcome,
+            DogfoodTiming::elapsedMs($deliveryStartedAt),
+            $effect->last_error_code,
+            DogfoodTiming::queueWaitMs($jobEnqueuedAt),
         );
     }
 }

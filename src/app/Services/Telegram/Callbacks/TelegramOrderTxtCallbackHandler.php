@@ -12,7 +12,10 @@ use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramReceiptObservability;
 use App\Services\Telegram\TelegramReceiptTxtConfirmationSession;
+use App\Services\Telegram\TelegramReceiptTxtRateLimiter;
+use App\Support\DogfoodTiming;
 use Throwable;
 
 /**
@@ -37,6 +40,8 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
         private TelegramOutboundEffectService $effects,
         private CredentialDeliveryPresentation $presentation,
         private TelegramReceiptTxtConfirmationSession $confirmation,
+        private TelegramReceiptObservability $observability,
+        private TelegramReceiptTxtRateLimiter $rateLimiter,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -86,9 +91,29 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
 
     private function handleRequest(TelegramCallbackContext $context, string $orderId): void
     {
-        $order = $this->customerOwnedEligibleOrder($context, $orderId);
+        [$order, $rejectionCategory] = $this->eligibleOrderDecision($context, $orderId);
 
-        if ($order === null || ! $this->hasCredentialProjection($context, $order)) {
+        if ($order === null) {
+            $this->observability->txtRequestRejected(
+                $rejectionCategory ?? 'order_unavailable',
+                $context->customer,
+                callbackQueryId: $context->callbackQueryId,
+            );
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $this->locale->translate($context->customer, 'receipt.txt.unavailable'),
+            );
+
+            return;
+        }
+
+        if (! $this->hasCredentialProjection($context, $order)) {
+            $this->observability->txtRequestRejected(
+                'credential_projection_unavailable',
+                $context->customer,
+                $order,
+                $context->callbackQueryId,
+            );
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,
                 $this->locale->translate($context->customer, 'receipt.txt.unavailable'),
@@ -104,6 +129,13 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             $this->locale->code($context->customer),
         );
 
+        $this->observability->txtRequestAccepted(
+            effect: null,
+            customer: $context->customer,
+            order: $order,
+            callbackQueryId: $context->callbackQueryId,
+            stage: 'confirmation',
+        );
         $this->bot->answerCallbackQuery($context->callbackQueryId);
         $this->bot->sendMessage(
             $context->chatId,
@@ -127,6 +159,10 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
     {
         $order = $this->consumeBoundOrder($context, $nonce);
         if ($order === null) {
+            $this->observability->txtRequestStale(
+                $context->customer,
+                $context->callbackQueryId,
+            );
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,
                 $this->locale->translate($context->customer, 'receipt.txt.stale'),
@@ -135,8 +171,44 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             return;
         }
 
-        if (! $this->customerOwnedEligibleOrder($context, (string) $order->getKey()) instanceof Order
-            || ! $this->hasCredentialProjection($context, $order)) {
+        [$eligibleOrder, $rejectionCategory] = $this->eligibleOrderDecision($context, (string) $order->getKey());
+        if (! $eligibleOrder instanceof Order) {
+            $this->observability->txtRequestRejected(
+                $rejectionCategory ?? 'order_unavailable',
+                $context->customer,
+                callbackQueryId: $context->callbackQueryId,
+            );
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $this->locale->translate($context->customer, 'receipt.txt.unavailable'),
+            );
+
+            return;
+        }
+
+        if (! $this->hasCredentialProjection($context, $eligibleOrder)) {
+            $this->observability->txtRequestRejected(
+                'credential_projection_unavailable',
+                $context->customer,
+                $eligibleOrder,
+                $context->callbackQueryId,
+            );
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $this->locale->translate($context->customer, 'receipt.txt.unavailable'),
+            );
+
+            return;
+        }
+
+        if (! $this->rateLimiter->allow($context->customer, $eligibleOrder)) {
+            $this->observability->txtRequestRejected(
+                'download_window',
+                $context->customer,
+                $eligibleOrder,
+                $context->callbackQueryId,
+                'rate_limit',
+            );
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,
                 $this->locale->translate($context->customer, 'receipt.txt.unavailable'),
@@ -146,16 +218,23 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
         }
 
         $effect = $this->effects->recordReceiptTxtDownload(
-            $order,
+            $eligibleOrder,
             $nonce,
             $context->customer,
             [
                 'origin_message_id' => $context->messageId,
-                'correlation_id' => $context->callbackQueryId,
+                'correlation_id' => DogfoodTiming::correlation($context->callbackQueryId),
             ],
         );
 
         if ($effect === null) {
+            $this->observability->txtRequestRejected(
+                'effect_not_created',
+                $context->customer,
+                $eligibleOrder,
+                $context->callbackQueryId,
+                'effect',
+            );
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,
                 $this->locale->translate($context->customer, 'receipt.txt.unavailable'),
@@ -164,6 +243,12 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             return;
         }
 
+        $this->observability->txtRequestAccepted(
+            $effect,
+            $context->customer,
+            $eligibleOrder,
+            $context->callbackQueryId,
+        );
         $this->bot->answerCallbackQuery(
             $context->callbackQueryId,
             $this->locale->translate($context->customer, 'receipt.txt.request_started'),
@@ -173,6 +258,10 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
     private function handleCancel(TelegramCallbackContext $context, string $nonce): void
     {
         if ($this->consumeBoundOrder($context, $nonce) === null) {
+            $this->observability->txtRequestStale(
+                $context->customer,
+                $context->callbackQueryId,
+            );
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,
                 $this->locale->translate($context->customer, 'receipt.txt.stale'),
@@ -222,10 +311,11 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             ->all();
     }
 
-    private function customerOwnedEligibleOrder(TelegramCallbackContext $context, string $orderId): ?Order
+    /** @return array{0: ?Order, 1: ?string} */
+    private function eligibleOrderDecision(TelegramCallbackContext $context, string $orderId): array
     {
         if ((string) $context->chatId !== trim((string) $context->customer->telegram_id)) {
-            return null;
+            return [null, 'chat_mismatch'];
         }
 
         $order = Order::query()
@@ -235,34 +325,19 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             ->first();
 
         if ($order === null) {
-            return null;
+            return [null, 'order_unavailable'];
         }
 
-        if (! $this->presentationEligible($order)) {
-            return null;
+        if ($order->payment_status !== PaymentStatus::Paid) {
+            return [null, 'payment_not_paid'];
         }
 
-        return $order;
-    }
-
-    private function hasCredentialProjection(TelegramCallbackContext $context, Order $order): bool
-    {
-        try {
-            return ! $this->presentation->forCustomer($context->customer, $order)->isEmpty();
-        } catch (Throwable) {
-            return false;
-        }
-    }
-
-    private function presentationEligible(Order $order): bool
-    {
-        if ($order->payment_status !== PaymentStatus::Paid
-            || ! in_array($order->order_status, [OrderStatus::PendingPayment, OrderStatus::Processing, OrderStatus::Completed], true)) {
-            return false;
+        if (! in_array($order->order_status, [OrderStatus::PendingPayment, OrderStatus::Processing, OrderStatus::Completed], true)) {
+            return [null, 'lifecycle_ineligible'];
         }
 
         if ($order->hasOpenLatePaymentReview()) {
-            return false;
+            return [null, 'late_payment_review'];
         }
 
         $payment = $order->payments
@@ -272,10 +347,23 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
             ])
             ->first();
 
-        return $payment !== null
-            && (string) $payment->order_id === (string) $order->getKey()
-            && $payment->status === PaymentStatus::Paid
-            && $payment->paid_at !== null;
+        if ($payment === null
+            || (string) $payment->order_id !== (string) $order->getKey()
+            || $payment->status !== PaymentStatus::Paid
+            || $payment->paid_at === null) {
+            return [null, 'payment_not_confirmed'];
+        }
+
+        return [$order, null];
+    }
+
+    private function hasCredentialProjection(TelegramCallbackContext $context, Order $order): bool
+    {
+        try {
+            return ! $this->presentation->forCustomer($context->customer, $order)->isEmpty();
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /** @return array<string, string> */

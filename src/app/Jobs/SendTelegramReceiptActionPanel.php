@@ -42,6 +42,7 @@ final class SendTelegramReceiptActionPanel implements ShouldBeUnique, ShouldQueu
     {
         $startedAt = DogfoodTiming::now();
         $memoryBefore = memory_get_usage(true);
+        $rssBefore = DogfoodTiming::residentMemoryBytes();
         DogfoodTiming::resetQueries();
 
         DogfoodTiming::log('dogfood.telegram.receipt_actions_job_picked_up', [
@@ -62,15 +63,19 @@ final class SendTelegramReceiptActionPanel implements ShouldBeUnique, ShouldQueu
                 ->first();
 
             if ($effect !== null) {
-                $pipeline->deliver($effect);
+                $pipeline->deliver($effect, $this->jobEnqueuedAt);
             }
         } finally {
+            $rssAfter = DogfoodTiming::residentMemoryBytes();
             DogfoodTiming::log('dogfood.telegram.receipt_actions_job_finished', DogfoodTiming::queryStats() + [
                 'correlation_id' => DogfoodTiming::correlation($this->orderId),
                 'effect_correlation_id' => DogfoodTiming::correlation($this->effectId),
                 'handler_duration_ms' => DogfoodTiming::elapsedMs($startedAt),
                 'memory_before_bytes' => $memoryBefore,
                 'memory_after_bytes' => memory_get_usage(true),
+                'worker_rss_before_bytes' => $rssBefore,
+                'worker_rss_after_bytes' => $rssAfter,
+                'worker_rss_delta_bytes' => max(0, $rssAfter - $rssBefore),
             ]);
         }
     }

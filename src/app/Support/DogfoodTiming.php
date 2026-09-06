@@ -27,6 +27,25 @@ class DogfoodTiming
         return round((hrtime(true) - $startedAt) / 1_000_000, 2);
     }
 
+    /**
+     * Return the worker's resident set size when procfs is available.
+     *
+     * PHP's allocator usage is useful for local tests but does not include
+     * every page held by the worker. The procfs value is a better production
+     * signal; the allocator value is a deterministic fallback for platforms
+     * without procfs.
+     */
+    public static function residentMemoryBytes(): int
+    {
+        $status = @file_get_contents('/proc/self/status');
+        if (is_string($status)
+            && preg_match('/^VmRSS:\s+(\d+)\s+kB$/mi', $status, $matches) === 1) {
+            return (int) $matches[1] * 1024;
+        }
+
+        return memory_get_usage(true);
+    }
+
     public static function correlation(int|string|null $value): ?string
     {
         if ($value === null || $value === '') {

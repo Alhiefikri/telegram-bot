@@ -154,9 +154,11 @@ class FakeTelegramBotClient extends TelegramBotClient
 
     private function record(string $operation, array $metadata = []): void
     {
+        $callIndex = count($this->calls);
         $this->calls[] = ['method' => $operation, ...$metadata];
         $startedAt = DogfoodTiming::now();
         usleep((int) config('services.dogfood_timing.fake_telegram_latency_us', 1000));
+        $this->calls[$callIndex]['duration_ms'] = DogfoodTiming::elapsedMs($startedAt);
 
         DogfoodTiming::log('dogfood.outbound_http', [
             'provider' => 'telegram',
