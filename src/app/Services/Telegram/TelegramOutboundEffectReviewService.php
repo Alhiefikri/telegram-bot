@@ -84,10 +84,10 @@ final class TelegramOutboundEffectReviewService
                 );
                 if ($next !== null) {
                     $this->dispatcher->dispatch($next);
-                } else {
+                } elseif ($this->ledger->isReceiptGroupComplete($resolved->effect_group_key)) {
                     DB::afterCommit(fn (): ?TelegramOutboundEffect => $this->receipts->materializeCompletedActionPanel($resolved));
 
-                    if ($this->isExplicitReceiptEffect($resolved) && $this->receiptGroupComplete($resolved)) {
+                    if ($this->isExplicitReceiptEffect($resolved)) {
                         DeleteBuyerCheckoutMessages::dispatch((string) $resolved->source_id, now()->toISOString())
                             ->onQueue('notifications')
                             ->afterCommit();
@@ -110,15 +110,6 @@ final class TelegramOutboundEffectReviewService
     private function isExplicitReceiptEffect(TelegramOutboundEffect $effect): bool
     {
         return ($effect->outcome_metadata['delivery_context'] ?? null) === 'explicit_resend';
-    }
-
-    private function receiptGroupComplete(TelegramOutboundEffect $effect): bool
-    {
-        return $effect->effect_group_key !== null
-            && ! TelegramOutboundEffect::query()
-                ->where('effect_group_key', $effect->effect_group_key)
-                ->where('state', '<>', TelegramOutboundEffectState::Sent->value)
-                ->exists();
     }
 
     private function stateValue(TelegramOutboundEffect $effect): string

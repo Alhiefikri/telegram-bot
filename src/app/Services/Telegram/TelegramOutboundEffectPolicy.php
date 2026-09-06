@@ -193,6 +193,12 @@ final class TelegramOutboundEffectPolicy
         return $this->canClaim($effect, $at);
     }
 
+    public function isReceiptEffectComplete(TelegramOutboundEffect $effect): bool
+    {
+        return $this->stateValue($effect) === TelegramOutboundEffectState::Sent->value
+            || $this->isLegacyInvoiceOrderingException($effect);
+    }
+
     /** @return array<string, mixed> */
     public function claimMetadata(TelegramOutboundEffect $effect): array
     {
@@ -314,10 +320,11 @@ final class TelegramOutboundEffectPolicy
 
     private function isLegacyInvoiceOrderingException(TelegramOutboundEffect $effect): bool
     {
-        return in_array($this->stateValue($effect), [
-            TelegramOutboundEffectState::Failed->value,
-            TelegramOutboundEffectState::Unknown->value,
-        ], true)
+        return (int) $effect->sequence === 1
+            && in_array($this->stateValue($effect), [
+                TelegramOutboundEffectState::Failed->value,
+                TelegramOutboundEffectState::Unknown->value,
+            ], true)
             && $effect->telegram_method === 'sendPhoto'
             && $effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE;
     }

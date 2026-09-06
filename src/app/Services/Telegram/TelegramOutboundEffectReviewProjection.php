@@ -2,7 +2,6 @@
 
 namespace App\Services\Telegram;
 
-use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Models\Order;
@@ -23,6 +22,10 @@ use Carbon\CarbonInterface;
  */
 final class TelegramOutboundEffectReviewProjection
 {
+    public function __construct(
+        private readonly TelegramOutboundEffectLedgerProtocol $ledger,
+    ) {}
+
     public function synchronizeSent(
         TelegramOutboundEffect $effect,
         string $messageId,
@@ -72,12 +75,7 @@ final class TelegramOutboundEffectReviewProjection
             return;
         }
 
-        $hasUnsentTextUnit = TelegramOutboundEffect::query()
-            ->where('effect_group_key', $effect->effect_group_key)
-            ->where('state', '<>', TelegramOutboundEffectState::Sent->value)
-            ->get()
-            ->contains(fn (TelegramOutboundEffect $candidate): bool => ! $this->isInvoiceEffect($candidate));
-        if ($hasUnsentTextUnit) {
+        if (! $this->ledger->isReceiptGroupComplete($effect->effect_group_key)) {
             return;
         }
 
@@ -93,15 +91,6 @@ final class TelegramOutboundEffectReviewProjection
                 ->onQueue('notifications')
                 ->afterCommit();
         }
-    }
-
-    private function isInvoiceEffect(TelegramOutboundEffect $effect): bool
-    {
-        $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
-
-        return ($metadata['unit_role'] ?? null) === 'invoice'
-            || ($effect->telegram_method === 'sendPhoto'
-                && $effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE);
     }
 
     private function paymentProof(TelegramOutboundEffect $effect, CarbonInterface $at): void

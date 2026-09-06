@@ -878,10 +878,13 @@ class TelegramOutboundEffectService
                 ->get();
             $firstReceipt = $receiptEffects->first();
             if ($firstReceipt === null
-                || $receiptEffects->contains(fn (TelegramOutboundEffect $effect): bool => $this->stateValue($effect) !== TelegramOutboundEffectState::Sent->value)
                 || $firstReceipt->sequence !== 1
                 || $firstReceipt->telegram_method !== 'sendPhoto'
                 || $firstReceipt->template_version !== self::TEMPLATE_RECEIPT_PHOTO_CAPTION) {
+                return null;
+            }
+
+            if (! $this->ledger->isReceiptGroupComplete($groupKey)) {
                 return null;
             }
 

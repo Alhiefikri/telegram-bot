@@ -23,6 +23,7 @@ Receipt adapters use the protocol's `nextReceiptEffect()` successor seam for
 both initial group materialization (sequence `0`) and continuation selection;
 version-specific predecessor exceptions therefore have one query/readiness
 owner.
+`isReceiptGroupComplete()` applies the same family policy to distinguish a completed group from a blocked group when no successor is dispatchable. Materialization, delivery, recovery, and Manual Delivery Review must consume these protocol seams rather than repeat sequence/state selection.
 
 Effect-family adapters own only eligibility, source loading, rendering,
 Telegram transport, and their read projection. The dispatcher maps effect

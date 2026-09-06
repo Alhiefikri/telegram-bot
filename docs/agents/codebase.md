@@ -181,6 +181,7 @@ Receipt successor/readiness is exposed by
 Pass `0` for initial materialization; pass the completed sequence for a
 continuation. Materialization, delivery, recovery, and Manual Delivery Review
 must consume this seam rather than repeat sequence/state selection.
+`isReceiptGroupComplete($groupKey)` is the matching completion seam: it uses the same family policy to distinguish a completed group from a blocked group when no successor is dispatchable.
 
 Receipt legacy invoice-photo effects memiliki satu pengecualian ordering:
 unit `invoice` pertama memakai `sendPhoto` dan bukan unit credential. Jika

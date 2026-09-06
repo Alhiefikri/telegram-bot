@@ -17,7 +17,10 @@ use App\Models\User;
 use App\Services\Telegram\ReceiptActionPanelDeliveryPipeline;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
+use App\Services\Telegram\TelegramOutboundEffectPolicy;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramOutboundResponseValidator;
 use App\Services\Telegram\TelegramReceiptActionPanel;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
@@ -69,6 +72,48 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         $photo = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->sole()[0];
         $this->assertTrue(filter_var($this->telegramRequestField($photo, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
         $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
+    }
+
+    public function test_action_panel_readiness_is_delegated_to_the_ledger_completion_seam(): void
+    {
+        Queue::fake();
+        [$order] = $this->paidOrder(withCredential: true, locale: 'en');
+        $receipt = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $this->assertNotNull($receipt);
+
+        $receipt->forceFill([
+            'state' => TelegramOutboundEffectState::Pending,
+            'telegram_message_id' => null,
+            'sent_at' => null,
+        ])->save();
+        $order->forceFill(['telegram_receipt_sent_at' => now()])->save();
+
+        $ledger = Mockery::mock(TelegramOutboundEffectLedgerProtocol::class, [
+            app(TelegramOutboundResponseValidator::class),
+            app(TelegramOutboundEffectPolicy::class),
+        ])->makePartial();
+        $ledger->shouldReceive('isReceiptGroupComplete')
+            ->twice()
+            ->with((string) $receipt->effect_group_key)
+            ->andReturn(true);
+        $this->app->instance(TelegramOutboundEffectLedgerProtocol::class, $ledger);
+
+        $panel = app(TelegramOutboundEffectService::class)->recordReceiptActionPanel($receipt->fresh());
+        $this->assertNotNull($panel);
+
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 424410],
+            ]),
+        ]);
+        app(ReceiptActionPanelDeliveryPipeline::class)->deliver($panel);
+
+        $this->assertSame(TelegramOutboundEffectState::Sent, $panel->fresh()->state);
+        $this->assertCount(
+            1,
+            Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')),
+        );
     }
 
     public function test_panel_presentation_is_localized_and_uses_one_full_width_row_per_action(): void

@@ -71,7 +71,9 @@ is the only owner of durable delivery mechanics. It owns:
 Receipt successor selection uses the protocol's `nextReceiptEffect()` seam.
 Passing sequence `0` selects the first dispatchable unit for materialization;
 passing a completed unit's sequence selects its next dispatchable successor.
-The seam applies the legacy invoice-photo exception and strict
+`isReceiptGroupComplete()` is the matching completion query; it distinguishes a
+completed group from a blocked group when no successor is dispatchable. These
+seams apply the legacy invoice-photo exception and strict
 `receipt-photo-caption-v1`/text-fallback predecessor rules, so materialization,
 worker delivery, recovery, and Manual Delivery Review do not query receipt
 sequence or state locally.

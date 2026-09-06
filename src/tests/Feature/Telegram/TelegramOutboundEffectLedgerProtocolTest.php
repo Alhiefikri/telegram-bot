@@ -342,6 +342,103 @@ class TelegramOutboundEffectLedgerProtocolTest extends TestCase
         );
     }
 
+    public function test_receipt_completion_seam_preserves_legacy_exception_and_strict_versions(): void
+    {
+        $protocol = app(TelegramOutboundEffectLedgerProtocol::class);
+
+        $legacyGroup = 'order:receipt-completion-legacy:receipt.credentials:v1';
+        $legacyInvoice = TelegramOutboundEffect::factory()->create([
+            'effect_key' => $legacyGroup.':unit:1',
+            'effect_group_key' => $legacyGroup,
+            'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            'telegram_method' => 'sendPhoto',
+            'template_version' => TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE,
+            'state' => TelegramOutboundEffectState::Unknown,
+            'unknown_at' => now()->subMinute(),
+        ]);
+        TelegramOutboundEffect::factory()->create([
+            'effect_key' => $legacyGroup.':unit:2',
+            'effect_group_key' => $legacyGroup,
+            'sequence' => 2,
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_message_id' => '394001',
+            'sent_at' => now()->subMinute(),
+        ]);
+
+        $this->assertTrue($protocol->isReceiptGroupComplete($legacyGroup));
+
+        $legacyInvoice->forceFill([
+            'state' => TelegramOutboundEffectState::ManualReview,
+            'unknown_at' => null,
+            'manual_review_at' => now(),
+        ])->save();
+        $this->assertFalse($protocol->isReceiptGroupComplete($legacyGroup));
+
+        $strictGroup = 'order:receipt-completion-strict:receipt.credentials:v2';
+        $strictPhoto = TelegramOutboundEffect::factory()->create([
+            'effect_key' => $strictGroup.':unit:1',
+            'effect_group_key' => $strictGroup,
+            'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            'telegram_method' => 'sendPhoto',
+            'template_version' => TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION,
+            'state' => TelegramOutboundEffectState::Unknown,
+            'unknown_at' => now()->subMinute(),
+        ]);
+        $strictContinuation = TelegramOutboundEffect::factory()->create([
+            'effect_key' => $strictGroup.':unit:2',
+            'effect_group_key' => $strictGroup,
+            'sequence' => 2,
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_message_id' => '394002',
+            'sent_at' => now()->subMinute(),
+        ]);
+
+        $this->assertFalse($protocol->isReceiptGroupComplete($strictGroup));
+
+        $strictPhoto->forceFill([
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_message_id' => '394003',
+            'sent_at' => now(),
+            'unknown_at' => null,
+        ])->save();
+        $this->assertTrue($protocol->isReceiptGroupComplete($strictGroup));
+
+        $strictContinuation->forceFill([
+            'state' => TelegramOutboundEffectState::Pending,
+            'telegram_message_id' => null,
+            'sent_at' => null,
+        ])->save();
+        $this->assertFalse($protocol->isReceiptGroupComplete($strictGroup));
+
+        $explicitGroup = 'order:receipt-completion-explicit:receipt.credentials:v2:resend:v2';
+        TelegramOutboundEffect::factory()->create([
+            'effect_key' => $explicitGroup.':unit:1',
+            'effect_group_key' => $explicitGroup,
+            'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            'telegram_method' => 'sendPhoto',
+            'template_version' => TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION,
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_message_id' => '394004',
+            'sent_at' => now()->subMinute(),
+        ]);
+        TelegramOutboundEffect::factory()->create([
+            'effect_key' => $explicitGroup.':unit:2',
+            'effect_group_key' => $explicitGroup,
+            'sequence' => 2,
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_message_id' => '394005',
+            'sent_at' => now()->subMinute(),
+        ]);
+
+        $this->assertTrue($protocol->isReceiptGroupComplete($explicitGroup));
+    }
+
     /** @return iterable<string, array{mixed}> */
     public static function invalidMessageIds(): iterable
     {

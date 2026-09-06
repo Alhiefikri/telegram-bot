@@ -155,7 +155,7 @@ final class ReceiptDeliveryPipeline
         TelegramOutboundEffect $receiptEffect,
         bool $dispatch = true,
     ): ?TelegramOutboundEffect {
-        if (! $this->receiptGroupComplete($receiptEffect)) {
+        if (! $this->ledger->isReceiptGroupComplete($receiptEffect->effect_group_key)) {
             return null;
         }
 
@@ -326,12 +326,7 @@ final class ReceiptDeliveryPipeline
             return false;
         }
 
-        $hasUnsentTextUnit = TelegramOutboundEffect::query()
-            ->where('effect_group_key', $effect->effect_group_key)
-            ->where('state', '<>', 'sent')
-            ->get()
-            ->contains(fn (TelegramOutboundEffect $candidate): bool => ! $this->isInvoiceEffect($candidate));
-        if ($hasUnsentTextUnit) {
+        if (! $this->ledger->isReceiptGroupComplete($effect->effect_group_key)) {
             return false;
         }
 
@@ -357,15 +352,6 @@ final class ReceiptDeliveryPipeline
     private function isExplicitReceiptEffect(TelegramOutboundEffect $effect): bool
     {
         return ($effect->outcome_metadata['delivery_context'] ?? null) === 'explicit_resend';
-    }
-
-    private function receiptGroupComplete(TelegramOutboundEffect $effect): bool
-    {
-        return $effect->effect_group_key !== null
-            && ! TelegramOutboundEffect::query()
-                ->where('effect_group_key', $effect->effect_group_key)
-                ->where('state', '<>', 'sent')
-                ->exists();
     }
 
     private function dispatchReceiptCleanup(int|string $orderId): void

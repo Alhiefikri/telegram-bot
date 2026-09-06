@@ -359,6 +359,27 @@ class TelegramOutboundEffectLedgerProtocol
     }
 
     /**
+     * Return whether every receipt unit has reached the family completion
+     * state for the group. The policy owns version-specific exceptions, so
+     * callers do not inspect receipt states or ordering themselves.
+     */
+    public function isReceiptGroupComplete(?string $effectGroupKey): bool
+    {
+        if ($effectGroupKey === null || $effectGroupKey === '') {
+            return false;
+        }
+
+        $effects = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
+            ->where('effect_group_key', $effectGroupKey)
+            ->orderBy('sequence')
+            ->get();
+
+        return $effects->isNotEmpty()
+            && $effects->every(fn (TelegramOutboundEffect $effect): bool => $this->policy->isReceiptEffectComplete($effect));
+    }
+
+    /**
      * Return the first dispatchable receipt unit after the given sequence.
      *
      * Sequence zero starts at the beginning of a group. Receipt ordering and

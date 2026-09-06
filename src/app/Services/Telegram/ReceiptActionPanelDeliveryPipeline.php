@@ -4,7 +4,6 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
-use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\Customer;
 use App\Models\Order;
@@ -183,7 +182,7 @@ final class ReceiptActionPanelDeliveryPipeline
             && $first->telegram_method === 'sendPhoto'
             && $first->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION
             && ($firstMetadata['receipt_actions_version'] ?? null) === TelegramOutboundEffectService::RECEIPT_ACTIONS_OPT_IN_VERSION
-            && ! $receipts->contains(fn (TelegramOutboundEffect $receipt): bool => $receipt->state !== TelegramOutboundEffectState::Sent);
+            && $this->ledger->isReceiptGroupComplete($groupKey);
     }
 
     private function finalizeNotDeliverable(
