@@ -343,12 +343,8 @@ To stop new Sakurupiah checkout without touching existing Payments:
    (Owner-only, optimistic version + audit). Existing Sakurupiah Payments keep
    their stored provider, method, merchant/reference identity, and sanitized
    provider snapshots; switching the active provider does not reinterpret them.
-2. If the switch is not enough (e.g., credentials must be disabled), disable
-   the environment flag (`SAKURUPIAH_*_ENABLED=false`) and restart, or use the
-   Owner dashboard readiness state. A disabled provider fails closed; it does
-   not resolve to Manual/KlikQRIS and pauses automatic Sakurupiah reconciliation.
-3. Verify `schedule:list` no longer shows `sakurupiah:reconcile` when the
-   environment is disabled.
+2. For an emergency credential incident, revoke or rotate the production pair through the provider and recreate the app/scheduler containers. There is no `SAKURUPIAH_*_ENABLED` ENV switch; production enablement is a reviewed code/configuration gate. Preserve the recovery and reconciliation decision for existing Payments instead of silently switching them to another provider.
+3. After the reviewed code/configuration gate is disabled, verify `schedule:list` no longer shows `sakurupiah:reconcile`. An Admin provider switch alone intentionally leaves reconciliation available for existing Payments.
 
 With Sakurupiah still enabled and ready, existing pending/verification-pending
 Payments continue to reconcile after an active-provider switch because their
