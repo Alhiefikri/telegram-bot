@@ -352,6 +352,7 @@ class TelegramPaymentInstructionRenderer
             SakurupiahInvoiceOutcome::Creating => 'creating',
             SakurupiahInvoiceOutcome::RecoveryPending => 'recovery_pending',
             SakurupiahInvoiceOutcome::ProviderTotalPending => 'total_pending',
+            SakurupiahInvoiceOutcome::ProviderPresentationPending => 'presentation_pending',
             SakurupiahInvoiceOutcome::InvalidProviderResult => 'invalid',
             SakurupiahInvoiceOutcome::Payable => 'ready',
             SakurupiahInvoiceOutcome::Expired => 'expired',

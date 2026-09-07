@@ -158,7 +158,7 @@ A customer sees a QR or hosted instruction only from a typed safe `Payable` outc
 - either QRIS EMV/CRC + `360` currency + exact encoded amount, or HTTPS hosted URL on a confirmed allowlist;
 - no raw provider object crossing into Storefront/Telegram views.
 
-`Creating`, `RecoveryPending`, `ProviderTotalPending`, `InvalidProviderResult`, and `Expired` are safe no-payment states. They display retry/support copy, not QR/URL/raw error data.
+`Creating`, `RecoveryPending`, `ProviderTotalPending`, `ProviderPresentationPending`, `InvalidProviderResult`, and `Expired` are safe no-payment states. They display retry/support copy, not QR/URL/raw error data.
 
 ### Paid gate
 

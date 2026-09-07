@@ -278,6 +278,39 @@ class TelegramOutboundEffectService
         );
     }
 
+    public function recordSakurupiahPresentationRecovery(
+        Order $order,
+        Payment $payment,
+        ?Customer $customer = null,
+    ): ?TelegramOutboundEffect {
+        $customer ??= $order->customer;
+        if ($customer?->telegram_id === null || self::typeForPayment($payment) !== self::TYPE_SAKURUPIAH_CHECKOUT) {
+            return null;
+        }
+
+        $effectKey = self::sakurupiahPresentationRecoveryEffectKey((string) $payment->getKey());
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => self::checkoutEffectKey((string) $order->getKey(), self::TYPE_SAKURUPIAH_CHECKOUT),
+                'sequence' => 2,
+                'effect_type' => self::TYPE_SAKURUPIAH_CHECKOUT,
+                'source_type' => Order::class,
+                'source_id' => (string) $order->getKey(),
+                'target_type' => 'customer',
+                'telegram_chat_id' => (string) $customer->telegram_id,
+                'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE,
+                'telegram_method' => 'sendPhoto',
+                'locale' => $customer->locale,
+                'template_version' => self::TEMPLATE_SAKURUPIAH_CHECKOUT,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+            ],
+        );
+    }
+
     public function materializeCheckoutEffectForOrder(string $orderId, string $effectType): ?TelegramOutboundEffect
     {
         $order = Order::query()->with(['customer', 'payments'])->findOrFail($orderId);
@@ -1203,6 +1236,11 @@ class TelegramOutboundEffectService
     public static function checkoutEffectKey(string $orderId, string $effectType): string
     {
         return 'order:'.$orderId.':'.$effectType.':v1';
+    }
+
+    public static function sakurupiahPresentationRecoveryEffectKey(string $paymentId): string
+    {
+        return 'payment:'.$paymentId.':'.self::TYPE_SAKURUPIAH_CHECKOUT.':presentation-recovery:v1';
     }
 
     public static function adminOrderEffectKey(string $orderId, string $effectType): string

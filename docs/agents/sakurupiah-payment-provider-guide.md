@@ -321,7 +321,7 @@ Gunakan existing fields terlebih dahulu; migration baru hanya jika evidence memb
 6. Call create once.
 7. Parse response and assert provider, method, reference, amount/unit, status, and expiry.
 8. Persist sanitized projection and `trx_id` atomically under Order/Payment lock.
-9. Return only a safe Payable/Creating/RecoveryPending/Invalid/Expired-style outcome.
+9. Return only a safe Payable/Creating/RecoveryPending/ProviderPresentationPending/Invalid/Expired-style outcome.
 
 ### Ambiguous create
 

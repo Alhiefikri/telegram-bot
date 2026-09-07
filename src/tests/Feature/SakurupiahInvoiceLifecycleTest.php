@@ -144,10 +144,11 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->app->instance(SakurupiahProviderAdapter::class, $provider);
 
         $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
-        $this->assertSame(SakurupiahInvoiceOutcome::ProviderTotalPending, $result->outcome());
+        $this->assertSame(SakurupiahInvoiceOutcome::ProviderPresentationPending, $result->outcome());
         $this->assertNull($result->payable());
         $fresh = $payment->fresh();
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_PROVIDER_QRIS_UNUSABLE, $fresh->provider_create_state);
+        $this->assertSame('provider_presentation_unusable', $fresh->provider_create_last_error);
         $this->assertArrayNotHasKey('checkout_url', $fresh->provider_payload);
     }
 

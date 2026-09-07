@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirQrisTransaction;
+use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Telegram\TelegramPaymentInstruction;
 use App\Services\Telegram\TelegramPaymentInstructionRenderer;
 use App\Services\Telegram\TelegramQrCodeRenderer;
@@ -488,6 +489,21 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertStringContainsString('Jangan bayar jumlah produk sahaja', $retry);
         $this->assertStringContainsString('Semak Bayaran', json_encode($instruction->replyMarkup) ?: '');
         $this->assertStringContainsString('Batalkan Pesanan', json_encode($instruction->replyMarkup) ?: '');
+    }
+
+    public function test_sakurupiah_presentation_pending_retry_copy_warns_without_provider_data(): void
+    {
+        $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
+
+        $retry = $this->renderer()->sakurupiahRetry(
+            $order,
+            SakurupiahInvoiceOutcome::ProviderPresentationPending,
+            'en',
+        );
+
+        $this->assertStringContainsString('safe Sakurupiah payment display', $retry);
+        $this->assertStringContainsString('Do not pay', $retry);
+        $this->assertStringNotContainsString('provider-secret', $retry);
     }
 
     public function test_binance_instruction_uses_malay_copy_and_preserves_amount_and_receiver(): void

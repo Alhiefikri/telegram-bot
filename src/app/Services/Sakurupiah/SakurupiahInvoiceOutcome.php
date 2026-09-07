@@ -18,6 +18,9 @@ enum SakurupiahInvoiceOutcome: string
 
     case ProviderTotalPending = 'provider_total_pending';
 
+    /** The provider response exists, but no safe payment presentation is available yet. */
+    case ProviderPresentationPending = 'provider_presentation_pending';
+
     case InvalidProviderResult = 'invalid_provider_result';
 
     case Expired = 'expired';

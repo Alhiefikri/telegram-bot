@@ -325,7 +325,7 @@ class PaymentDocumentationTest extends TestCase
         $evidence = file_get_contents(base_path('../docs/sakurupiah-release-evidence.md'));
 
         foreach ([
-            'issue #416',
+            'issue #415',
             'NOT ACTIVATED',
             'credential pair',
             'composer test',

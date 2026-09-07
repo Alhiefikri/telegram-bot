@@ -284,6 +284,7 @@ class StorefrontShopSignedInvoice
                 SakurupiahInvoiceOutcome::Creating => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('creating'),
                 SakurupiahInvoiceOutcome::RecoveryPending => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('recovery_pending'),
                 SakurupiahInvoiceOutcome::ProviderTotalPending => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('provider_total_pending'),
+                SakurupiahInvoiceOutcome::ProviderPresentationPending => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('provider_presentation_pending'),
                 SakurupiahInvoiceOutcome::InvalidProviderResult => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('failed'),
                 SakurupiahInvoiceOutcome::Expired => ['is_payable' => false] + $this->terminalCopy->qrisReadiness('expired'),
             };

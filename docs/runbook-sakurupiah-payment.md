@@ -226,20 +226,37 @@ status lookup still omitted amount fields. No provider callback was observed
 by the application, and the invoice was not linked to a local Payment.
 Do not record or share its QR, hosted URL/token, signature, or full identifiers.
 
-After the direct-provider payment observation, a separate Owner-authorized
-app-linked sandbox checkout was exercised with the dedicated testing bot. The
-provider status lookup returned `berhasil`; because it omitted amount, the
-application's reconciliation path fetched same-day history and accepted the
-transition only when the history amount `500` matched the local IDR Payment.
-The Payment became `paid` with `paid_at`, the Order payment status became
-`paid`, and the Order remained `processing` for manual fulfillment. Telegram
-admin outbound effects were recorded `sent`, and the signed Web invoice
-rendered the paid surface. Three identical signed pending callbacks remained
-deduplicated and acknowledged, but no provider paid callback was observed.
-The app-linked create response omitted QR/hosted presentation, so the
-application correctly held the initial Payment pending and non-payable. A
-separate app-linked expiry path is still required before relying on that
-scenario.
+After the direct-provider observation, a separate Owner-authorized app-linked
+sandbox checkout was exercised with the dedicated testing bot and the minimum
+amount. The first attempt stopped before provider HTTP because the disposable
+test Customer had no phone number; after adding a test-only phone number, the
+same local Payment was retried without creating a second Order or Payment.
+
+The retried create persisted a provider reference, total `500`, fee `0`, and
+`pending`, but no payable presentation. A matching direct sandbox create using
+the app's request contract returned both QR and hosted fields; the QR failed
+the application's EMV/CRC/exact-amount validation, while the hosted URL was
+tokenized (query-bearing) and therefore rejected by the HTTPS/host allowlist
+policy. The Payment remains pending with
+`provider_create_state=provider_qris_unusable`,
+`provider_create_last_error=provider_presentation_unusable`, and the safe
+outcome `provider_presentation_pending`. No raw QR, hosted URL, or token was
+persisted in the sanitized provider payload or sent to Telegram.
+
+Status lookup for that same provider reference returned `pending` without
+amount/total/fee fields; bounded history returned one matching pending row and
+no successful amount evidence. This confirms the recovery path must keep the
+Payment pending until a safe presentation or authoritative paid evidence is
+available. A separate app-linked expiry path remains covered by the existing
+historical sandbox evidence and lifecycle tests.
+
+The storefront status action and Telegram `/order` detail path may retry the
+same persisted provider reference when this presentation-pending state is
+encountered. They never create another Order, Payment, or provider invoice.
+When a later status response yields a validated presentation, Telegram
+instructions are recorded through the durable outbound-effect ledger. An
+ambiguous Telegram delivery remains manual-review/unknown; it is never blindly
+resent.
 
 
 ### Evidence and secret handling

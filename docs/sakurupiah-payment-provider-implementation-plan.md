@@ -287,7 +287,7 @@ postCreationBehavior: SakurupiahInstructions
 
 - Direct QRIS: validate QR EMV/CRC, IDR currency, exact provider total, and effective expiry before image rendering.
 - Hosted invoice: validate HTTPS and configured provider host allowlist; never pass arbitrary `checkout_url` as redirect.
-- `Payable` is the only state allowed to show payment instruction. `Creating`, `RecoveryPending`, `ProviderTotalPending`, `InvalidProviderResult`, and `Expired` show safe status/retry/support copy without raw provider data.
+- `Payable` is the only state allowed to show payment instruction. `Creating`, `RecoveryPending`, `ProviderTotalPending`, `ProviderPresentationPending`, `InvalidProviderResult`, and `Expired` show safe status/retry/support copy without raw provider data.
 - Telegram effects use the existing claim/lease/unknown/manual-review protocol. A Telegram send ambiguity is not permission to call provider create again.
 
 **Acceptance:** Web Storefront and Store Bot keep public checkout contracts; no duplicate outbound effect; a failed/ambiguous effect is reviewable; presentation never leaks key/signature/raw payload; QR and final total are consistent.

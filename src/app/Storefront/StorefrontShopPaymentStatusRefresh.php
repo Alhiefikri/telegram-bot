@@ -22,6 +22,7 @@ use App\Services\ProviderVerification\ProviderVerificationProfile;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleResult;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
+use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Support\PaymentProvider;
 use Throwable;
 
@@ -162,7 +163,7 @@ class StorefrontShopPaymentStatusRefresh
             if (! $qrisRecoveryFailed
                 && ($this->isKlikQrisPayment($payment) || $this->isSakurupiahPayment($payment))
                 && $recoveryOutcome !== null
-                && ! in_array($recoveryOutcome, ['payable', 'provider_total_pending'], true)) {
+                && ! in_array($recoveryOutcome, ['payable', 'provider_total_pending', 'provider_presentation_pending'], true)) {
                 $qrisRecoveryFailed = true;
             }
         }
@@ -306,7 +307,8 @@ class StorefrontShopPaymentStatusRefresh
         }
 
         return ($this->isPakasirPayment($payment) && $payment->method === 'hosted')
-            || $this->isNativeQrisPayable($payment);
+            || $this->isNativeQrisPayable($payment)
+            || $this->isSakurupiahPresentationPending($payment);
     }
 
     private function shouldRecoverQris(OrderLifecycleProjection $projection, Payment $payment): bool
@@ -314,6 +316,13 @@ class StorefrontShopPaymentStatusRefresh
         return $this->hasNativeQrisRail($payment)
             && $projection->isPendingPayment
             && ! $this->isNativeQrisPayable($payment);
+    }
+
+    private function isSakurupiahPresentationPending(Payment $payment): bool
+    {
+        return $this->isSakurupiahPayment($payment)
+            && filled($payment->provider_reference)
+            && $this->sakurupiahLifecycle->classify($payment)->outcome() === SakurupiahInvoiceOutcome::ProviderPresentationPending;
     }
 
     private function isAutomaticQrisPayment(?Payment $payment): bool
@@ -469,6 +478,7 @@ class StorefrontShopPaymentStatusRefresh
                 'creating' => 'creating',
                 'recovery_pending' => 'recovery_pending',
                 'provider_total_pending' => 'provider_total_pending',
+                'provider_presentation_pending' => 'provider_presentation_pending',
                 'invalid_provider_result' => 'failed',
                 'expired' => 'expired',
                 default => 'failed',

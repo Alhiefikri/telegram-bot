@@ -19,6 +19,7 @@ use App\Storefront\StorefrontShopSignedInvoice;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\URL;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class SakurupiahStorefrontTest extends TestCase
@@ -127,10 +128,11 @@ class SakurupiahStorefrontTest extends TestCase
         $this->assertFalse($invoice->isQrisPayable);
         $this->assertNull($invoice->qrisImageSource);
         $this->assertNull($invoice->hostedPaymentUrl);
-        $this->assertSame('provider_total_pending', $invoice->qrisReadinessState);
+        $this->assertSame('provider_presentation_pending', $invoice->qrisReadinessState);
 
         $html = $this->get($invoice->redirectUrl)->assertOk()->getContent();
-        $this->assertStringContainsString('Provider belum memberi nominal', $html);
+        $this->assertStringContainsString('Tampilan pembayaran belum tersedia', $html);
+        $this->assertStringContainsString('QR/link pembayaran yang aman belum tersedia', $html);
         $this->assertStringNotContainsString('not-a-valid-qris', $html);
         $this->assertStringNotContainsString('https://sakurupiah.id/pay/invoice', $html);
         $this->assertStringNotContainsString('secret-provider-value', $html);
@@ -176,6 +178,62 @@ class SakurupiahStorefrontTest extends TestCase
         $response->assertJsonPath('should_reload', true);
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->fresh()->provider_create_state);
         $this->assertSame(1, $payment->fresh()->paymentEvents()->where('event_type', 'reconciliation')->count());
+    }
+
+    #[DataProvider('presentationPendingStates')]
+    public function test_status_refresh_retries_sakurupiah_presentation_pending_without_creating_again(string $providerCreateState): void
+    {
+        [$order, $payment] = $this->payment([
+            'invoice_number' => 'INV-SAK-STOREFRONT-PRESENTATION-RETRY',
+            'provider_create_state' => $providerCreateState,
+            'provider_presentation' => [
+                'mode' => 'qris',
+                'qris_payload' => 'not-a-valid-qris',
+                'checkout_url' => 'https://sakurupiah.id/pay/invoice?token=redacted',
+            ],
+        ]);
+        $status = new SakurupiahStatus(
+            trxId: (string) $payment->provider_reference,
+            status: SakurupiahTransactionStatus::Pending,
+            merchantRef: (string) $payment->merchant_ref,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            amount: SakurupiahAmount::from(20_000),
+            occurredAt: CarbonImmutable::now()->subMinute(),
+            expiresAt: $payment->expired_at->toImmutable(),
+            sanitizedPayload: [
+                'data' => [[
+                    'trx_id' => $payment->provider_reference,
+                    'merchant_ref' => $payment->merchant_ref,
+                    'payment_kode' => 'QRIS',
+                    'payment_status' => 'pending',
+                    'total' => '20450',
+                    'fee' => '450',
+                    'qr' => self::DIRECT_QRIS,
+                ]],
+            ],
+            total: SakurupiahAmount::from(20_450),
+            fee: SakurupiahFee::from(450),
+            qr: self::DIRECT_QRIS,
+            currency: 'IDR',
+        );
+        $provider = $this->mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn($status);
+
+        $response = $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
+            ->assertOk();
+
+        $response->assertJsonPath('qris_ready', true);
+        $response->assertJsonPath('should_reload', true);
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->fresh()->provider_create_state);
+        $this->assertSame(1, $payment->fresh()->paymentEvents()->where('event_type', 'reconciliation')->count());
+    }
+
+    public static function presentationPendingStates(): array
+    {
+        return [
+            'provider state' => [SakurupiahInvoiceLifecycleService::STATE_PROVIDER_QRIS_UNUSABLE],
+            'invalid persisted snapshot' => [SakurupiahInvoiceLifecycleService::STATE_CREATED],
+        ];
     }
 
     /** @return array{0: Order, 1: Payment} */

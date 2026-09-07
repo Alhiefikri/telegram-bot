@@ -395,9 +395,19 @@ final class SakurupiahInvoiceLifecycleService
             return $this->assessment(
                 $status->isSuccessful()
                     ? SakurupiahInvoiceOutcome::InvalidProviderResult
-                    : SakurupiahInvoiceOutcome::ProviderTotalPending,
-                $status->isSuccessful() ? self::STATE_PROVIDER_BERHASIL : self::STATE_PROVIDER_TOTAL_PENDING,
-                $status->isSuccessful() ? 'authoritative_amount_missing' : 'provider_total_pending',
+                    : ($payment->provider_create_state === self::STATE_PROVIDER_QRIS_UNUSABLE
+                        ? SakurupiahInvoiceOutcome::ProviderPresentationPending
+                        : SakurupiahInvoiceOutcome::ProviderTotalPending),
+                $status->isSuccessful()
+                    ? self::STATE_PROVIDER_BERHASIL
+                    : ($payment->provider_create_state === self::STATE_PROVIDER_QRIS_UNUSABLE
+                        ? self::STATE_PROVIDER_QRIS_UNUSABLE
+                        : self::STATE_PROVIDER_TOTAL_PENDING),
+                $status->isSuccessful()
+                    ? 'authoritative_amount_missing'
+                    : ($payment->provider_create_state === self::STATE_PROVIDER_QRIS_UNUSABLE
+                        ? 'provider_presentation_unusable'
+                        : 'provider_total_pending'),
             );
         }
 
@@ -473,7 +483,7 @@ final class SakurupiahInvoiceLifecycleService
                 'provider_fee_payer_invalid',
             ),
             'qris_presentation', 'hosted_presentation' => $this->assessment(
-                SakurupiahInvoiceOutcome::ProviderTotalPending,
+                SakurupiahInvoiceOutcome::ProviderPresentationPending,
                 self::STATE_PROVIDER_QRIS_UNUSABLE,
                 'provider_presentation_unusable',
             ),
@@ -785,6 +795,12 @@ final class SakurupiahInvoiceLifecycleService
                 return SakurupiahInvoiceLifecycleResult::payableResult(
                     SakurupiahPayableInvoice::fromPersistedPayment($payment, $this->runtimeEnvironment()),
                 );
+            } catch (SakurupiahInvoiceIntegrityException $exception) {
+                return SakurupiahInvoiceLifecycleResult::state(
+                    in_array($exception->reason, ['qris_presentation', 'hosted_presentation', 'presentation_snapshot'], true)
+                        ? SakurupiahInvoiceOutcome::ProviderPresentationPending
+                        : SakurupiahInvoiceOutcome::ProviderTotalPending,
+                );
             } catch (Throwable) {
                 return SakurupiahInvoiceLifecycleResult::state(SakurupiahInvoiceOutcome::ProviderTotalPending);
             }
@@ -795,7 +811,8 @@ final class SakurupiahInvoiceLifecycleService
             self::STATE_CREATING, self::STATE_CREATE_FAILED, null => filled($payment->provider_reference)
                 ? SakurupiahInvoiceOutcome::RecoveryPending
                 : SakurupiahInvoiceOutcome::Creating,
-            self::STATE_PROVIDER_TOTAL_PENDING, self::STATE_PROVIDER_QRIS_UNUSABLE => SakurupiahInvoiceOutcome::ProviderTotalPending,
+            self::STATE_PROVIDER_TOTAL_PENDING => SakurupiahInvoiceOutcome::ProviderTotalPending,
+            self::STATE_PROVIDER_QRIS_UNUSABLE => SakurupiahInvoiceOutcome::ProviderPresentationPending,
             self::STATE_PROVIDER_EXPIRED => SakurupiahInvoiceOutcome::Expired,
             default => SakurupiahInvoiceOutcome::InvalidProviderResult,
         };

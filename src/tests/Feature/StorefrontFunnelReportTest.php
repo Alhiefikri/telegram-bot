@@ -143,6 +143,49 @@ final class StorefrontFunnelReportTest extends TestCase
             ->assertSee('QR/provider outcomes');
     }
 
+    public function test_provider_presentation_pending_outcome_is_sakurupiah_specific(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $product = Product::factory()->create(['name' => 'QRIS Test']);
+
+        foreach (['sakurupiah', 'klikqris'] as $provider) {
+            $order = Order::factory()->create([
+                'order_status' => OrderStatus::PendingPayment,
+                'payment_status' => PaymentStatus::Pending,
+                'total_amount' => 500,
+                'currency' => 'IDR',
+                'created_at' => Carbon::parse('2026-08-20 10:00:00'),
+            ]);
+            OrderItem::factory()->create([
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'product_name' => $product->name,
+                'subtotal' => 500,
+            ]);
+            Payment::factory()->create([
+                'order_id' => $order->id,
+                'provider' => $provider,
+                'method' => 'QRIS',
+                'provider_create_state' => 'provider_qris_unusable',
+                'status' => PaymentStatus::Pending,
+                'amount' => 500,
+                'currency' => 'IDR',
+                'created_at' => Carbon::parse('2026-08-20 10:01:00'),
+            ]);
+        }
+
+        $report = app(StorefrontFunnelReport::class)->forAdmin($owner, [
+            'start_date' => '2026-08-20',
+            'end_date' => '2026-08-20',
+        ]);
+        $outcomes = collect($report['qris_outcomes'])
+            ->mapWithKeys(fn (array $row): array => [$row['provider'].'|'.$row['outcome'] => $row['count']]);
+
+        $this->assertSame(1, $outcomes['sakurupiah|provider_presentation_pending']);
+        $this->assertSame(1, $outcomes['klikqris|failed']);
+        $this->assertArrayNotHasKey('klikqris|provider_presentation_pending', $outcomes);
+    }
+
     public function test_filters_include_inactive_products_and_reject_unbounded_date_windows(): void
     {
         $owner = User::factory()->create(['role' => UserRole::Owner]);

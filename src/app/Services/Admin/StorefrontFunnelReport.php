@@ -77,6 +77,7 @@ final class StorefrontFunnelReport
         'creating' => 'Sedang dibuat',
         'recovery_pending' => 'Menunggu recovery',
         'provider_total_pending' => 'Total provider belum final',
+        'provider_presentation_pending' => 'Tampilan provider belum tersedia',
         'expired' => 'Expired',
         'failed' => 'Gagal',
         'other' => 'Lainnya',
@@ -723,7 +724,7 @@ final class StorefrontFunnelReport
                 continue;
             }
 
-            $outcome = $this->qrisOutcome((string) $payment->provider_create_state);
+            $outcome = $this->qrisOutcome($provider, (string) $payment->provider_create_state);
             $outcomeKey = $provider.'|'.$outcome;
             if (! isset($qrisOutcomes[$outcomeKey])) {
                 $qrisOutcomes[$outcomeKey] = [
@@ -1189,7 +1190,7 @@ final class StorefrontFunnelReport
         return array_key_exists($category, self::SUPPORT_CATEGORY_LABELS) ? $category : 'other';
     }
 
-    private function qrisOutcome(string $state): string
+    private function qrisOutcome(string $provider, string $state): string
     {
         return match (strtolower($state)) {
             'created', 'provider_success' => 'created',
@@ -1197,8 +1198,11 @@ final class StorefrontFunnelReport
 
             'outcome_unknown', 'recovery_unconfirmed' => 'recovery_pending',
             'transient_qris_image', 'provider_total_pending' => 'provider_total_pending',
+            'provider_qris_unusable' => $provider === PaymentProvider::SAKURUPIAH
+                ? 'provider_presentation_pending'
+                : 'failed',
             'provider_expired' => 'expired',
-            'create_failed', 'provider_qris_unusable', 'provider_total_invalid', 'financial_integrity_failed' => 'failed',
+            'create_failed', 'provider_total_invalid', 'financial_integrity_failed' => 'failed',
             default => 'other',
         };
     }

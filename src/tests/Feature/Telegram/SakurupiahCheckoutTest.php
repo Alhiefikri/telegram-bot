@@ -11,7 +11,13 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Sakurupiah\SakurupiahAmount;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
+use App\Services\Sakurupiah\SakurupiahFee;
+use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
+use App\Services\Sakurupiah\SakurupiahProviderAdapter;
+use App\Services\Sakurupiah\SakurupiahStatus;
+use App\Services\Sakurupiah\SakurupiahTransactionStatus;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -182,6 +188,53 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Check Payment', $body);
         $this->assertStringNotContainsString('never-send', $body);
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
+    }
+
+    public function test_store_bot_check_refreshes_presentation_pending_and_renders_recovered_instruction(): void
+    {
+        $this->fakeTelegramHttp();
+        [$order, $payment] = $this->payment([
+            'invoice_number' => 'INV-SAK-TELEGRAM-PRESENTATION-RETRY',
+            'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_PROVIDER_QRIS_UNUSABLE,
+            'provider_presentation' => [
+                'mode' => 'qris',
+                'qris_payload' => 'not-a-valid-qris',
+                'checkout_url' => 'https://sakurupiah.id/pay/invoice?token=redacted',
+            ],
+        ]);
+        $status = new SakurupiahStatus(
+            trxId: (string) $payment->provider_reference,
+            status: SakurupiahTransactionStatus::Pending,
+            merchantRef: (string) $payment->merchant_ref,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            amount: SakurupiahAmount::from(20_000),
+            occurredAt: now()->subMinute()->toImmutable(),
+            expiresAt: $payment->expired_at->toImmutable(),
+            sanitizedPayload: [],
+            total: SakurupiahAmount::from(20_450),
+            fee: SakurupiahFee::from(450),
+            qr: self::DIRECT_QRIS,
+            currency: 'IDR',
+        );
+        $this->mock(SakurupiahProviderAdapter::class)
+            ->shouldReceive('transactionStatus')
+            ->once()
+            ->with($payment->provider_reference)
+            ->andReturn($status);
+
+        $this->postTelegramWebhook($this->messageUpdate(380, '/order '.$order->invoice_number, ['id' => 7412001], 7412001))->assertOk();
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->fresh()->provider_create_state);
+        $sendPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $sendPhotos);
+        $body = $sendPhotos->first()[0]->body();
+        $this->assertStringContainsString('Rp20.450', $body);
+        $this->assertStringContainsString($order->invoice_number, $body);
+        $this->assertStringContainsString('Check Payment', $body);
+        $recoveryEffect = TelegramOutboundEffect::query()
+            ->where('effect_key', TelegramOutboundEffectService::sakurupiahPresentationRecoveryEffectKey((string) $payment->id))
+            ->firstOrFail();
+        $this->assertSame(TelegramOutboundEffectState::Sent, $recoveryEffect->state);
+        $this->assertStringNotContainsString(self::DIRECT_QRIS, $body);
     }
 
     public function test_ambiguous_sakurupiah_delivery_becomes_unknown_without_a_second_send(): void

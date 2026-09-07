@@ -128,6 +128,7 @@ final class StorefrontPaymentTerminalCopy
             'creating',
             'recovery_pending',
             'provider_total_pending',
+            'provider_presentation_pending',
             'failed',
             'expired',
         ], true) ? $state : 'creating';
