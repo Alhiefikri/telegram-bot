@@ -284,7 +284,7 @@ class PaymentDocumentationTest extends TestCase
 
         $this->assertSame('https://klikqris.com/api/sandbox', config('services.klikqris.sandbox_base_url'));
         $this->assertSame('https://klikqris.com/api', config('services.klikqris.production_base_url'));
-        $this->assertFalse(config('services.klikqris.production_enabled'));
+        $this->assertTrue(config('services.klikqris.production_enabled'));
     }
 
     public function test_sakurupiah_runbook_documents_operations_and_rollback(): void

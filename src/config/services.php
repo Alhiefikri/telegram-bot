@@ -164,7 +164,7 @@ return [
             ? null
             : $sakurupiahApplicationOrigin.'/api/webhook/klikqris/sandbox',
         'sandbox_callback_allowed_hosts' => $sakurupiahSandboxApplicationHosts,
-        'production_enabled' => false,
+        'production_enabled' => true,
         'production_base_url' => 'https://klikqris.com/api',
         'production_api_key' => env('KLIKQRIS_PRODUCTION_API_KEY'),
         'production_merchant_id' => env('KLIKQRIS_PRODUCTION_MERCHANT_ID'),
