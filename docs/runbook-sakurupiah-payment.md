@@ -217,17 +217,33 @@ A fresh amount-`200` app-linked checkout then returned provider method `QRISC`,
 status `pending`, fee `0`, and total `200`; the total equation matched
 `amount + fee`.
 
-The sanitized create row contained neither `qr` nor `checkout_url`. No
-presentation snapshot was persisted, and the lifecycle safely recorded
-`provider_qris_unusable` / `provider_presentation_pending`. Therefore there
-was no QR payload to parse: `qris_valid=false`, and no QR was sent to the
-testing bot. A separate non-payment test message through `LhieStoreTestBot`
-succeeded; the first durable checkout-instruction attempt ended `unknown` on a
-Telegram transport exception and was not blindly resent.
+The persisted create row is sanitized by design, so it contains neither
+`qr` nor `checkout_url`; those values are not stored in the audit payload. The
+application therefore persisted no presentation and safely recorded
+`provider_qris_unusable` / `provider_presentation_pending`. The app did not
+send a QR to the testing bot. A separate non-payment test message through
+`LhieStoreTestBot` succeeded; the first durable checkout-instruction attempt
+ended `unknown` on a Telegram transport exception and was not blindly resent.
 
-This is a QRISC presentation failure, not a successful QR qualification. Keep
-the Payment pending and request a valid redacted QRISC sandbox fixture or an
-approved non-tokenized hosted presentation from Sakurupiah.
+This established an API presentation-validation failure, not proof that the
+provider portal cannot render a QR. Keep the Payment pending and request a
+valid redacted QRISC sandbox fixture or an approved non-tokenized hosted
+presentation from Sakurupiah.
+
+### Raw sandbox create diagnostic
+
+A subsequent fresh sandbox create probe at amount `200` captured only response
+shapes before sanitization. The provider returned HTTP/application status `200`;
+`data[0].qr` was a string of length `63` and `data[0].checkout_url` was an HTTPS
+`sakurupiah.id` URL containing a query. `SakurupiahInvoice` parsed both fields,
+so the application parser did not lose the QR. `QrisEmvPayload` rejected the QR
+because it was missing the terminal CRC. The hosted URL was also rejected by
+the safety policy because query-bearing provider URLs are tokenized
+presentations. The provider portal Detail page may still render an image, but
+that does not make the API QR payload valid for customer checkout.
+
+The QRISC presentation gate remains unqualified. Production remains **NOT
+ACTIVATED**.
 
 ### Latest redacted sandbox observation
 

@@ -77,13 +77,22 @@ aligned to 24 hours. One fresh amount-`200` app-linked checkout returned
 provider method `QRISC`, `pending`, fee `0`, and total `200`; the amount
 equation matched exactly.
 
-The sanitized provider create row contained neither `qr` nor `checkout_url`.
-The application persisted no presentation and returned the safe
-`provider_qris_unusable` / `provider_presentation_pending` state. No EMV QR
-payload existed to parse, so `qris_valid=false` and no QR was sent to the
-testing bot. The first durable instruction effect ended `unknown` after a
-Telegram transport exception; it was not automatically resent. A separate
-non-payment test message through the testing bot succeeded.
+The persisted provider payload is sanitized by design, so it contains neither
+`qr` nor `checkout_url`; this does not prove that the provider portal lacks a
+QR. The application persisted no presentation and returned the safe
+`provider_qris_unusable` / `provider_presentation_pending` state. The first
+durable instruction effect ended `unknown` after a Telegram transport
+exception; it was not automatically resent. A separate non-payment test
+message through the testing bot succeeded.
+
+A subsequent fresh sandbox create probe at amount `200` received HTTP/application
+status `200`. Raw `data[0]` contained `qr` (string length `63`) and
+`checkout_url` (HTTPS `sakurupiah.id` with a query). The application parser
+recognized the QR, but EMV validation rejected it because the terminal CRC was
+missing. The hosted URL failed the non-tokenized presentation policy because
+it contained a query. The provider portal Detail page rendering a QR is
+therefore a portal/API presentation discrepancy, not evidence that the app
+should bypass its guardrail.
 
 The QRISC presentation gate remains unqualified. Production remains **NOT
 ACTIVATED**.

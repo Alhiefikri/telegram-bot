@@ -396,10 +396,21 @@ the checkout.
 
 One fresh amount-`200` app-linked checkout used provider method `QRISC` and
 returned `pending`, fee `0`, and total `200`; the amount equation matched. The
-sanitized invoice row contained neither `qr` nor `checkout_url`, so the
-application persisted no presentation and classified the Payment as
-`provider_qris_unusable` / `provider_presentation_pending`. There was no QR
-payload to run through EMV/CRC/exact-amount validation, and the Payment stayed
-pending. This closes neither the QRISC presentation gate nor production
-qualification; request a valid redacted QRISC fixture or an approved
-non-tokenized hosted presentation.
+persisted invoice row was sanitized, so it contained neither `qr` nor
+`checkout_url`; the application persisted no presentation and classified the
+Payment as `provider_qris_unusable` / `provider_presentation_pending`.
+The Payment stayed pending.
+
+A separate raw sandbox create probe at amount `200` returned HTTP/application
+status `200`. Its `data[0]` contained `qr` (string length `63`) and
+`checkout_url` (HTTPS `sakurupiah.id` with a query), and
+`SakurupiahInvoice` parsed the QR. `QrisEmvPayload` rejected that QR because it
+was missing the terminal CRC. The hosted URL was not eligible under the
+non-tokenized safety policy because it contained a query. The portal Detail
+page can render a QR while the API presentation remains unusable; the
+application guardrail is therefore detecting an invalid provider payload, not
+dropping a valid QR.
+
+This closes neither the QRISC presentation gate nor production qualification;
+request a complete EMV QR payload or an approved non-tokenized hosted
+presentation from Sakurupiah.
