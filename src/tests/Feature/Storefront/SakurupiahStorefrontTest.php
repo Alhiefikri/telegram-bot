@@ -112,13 +112,13 @@ class SakurupiahStorefrontTest extends TestCase
         $this->assertStringNotContainsString('secret-provider-value', $html);
     }
 
-    public function test_invalid_qris_presentation_fails_closed_without_hosted_fallback(): void
+    public function test_conflicting_presentation_modes_fail_closed(): void
     {
         [$order] = $this->payment([
             'invoice_number' => 'INV-SAK-STOREFRONT-INVALID',
             'provider_presentation' => [
                 'mode' => 'qris',
-                'qris_payload' => 'not-a-valid-qris',
+                'qris_payload' => 'provider-opaque-qr-content',
                 'checkout_url' => 'https://sakurupiah.id/pay/invoice',
             ],
         ]);
@@ -133,7 +133,7 @@ class SakurupiahStorefrontTest extends TestCase
         $html = $this->get($invoice->redirectUrl)->assertOk()->getContent();
         $this->assertStringContainsString('Tampilan pembayaran belum tersedia', $html);
         $this->assertStringContainsString('QR/link pembayaran yang aman belum tersedia', $html);
-        $this->assertStringNotContainsString('not-a-valid-qris', $html);
+        $this->assertStringNotContainsString('provider-opaque-qr-content', $html);
         $this->assertStringNotContainsString('https://sakurupiah.id/pay/invoice', $html);
         $this->assertStringNotContainsString('secret-provider-value', $html);
     }
@@ -188,7 +188,7 @@ class SakurupiahStorefrontTest extends TestCase
             'provider_create_state' => $providerCreateState,
             'provider_presentation' => [
                 'mode' => 'qris',
-                'qris_payload' => 'not-a-valid-qris',
+                'qris_payload' => 'stale-provider-qr-content',
                 'checkout_url' => 'https://sakurupiah.id/pay/invoice?token=redacted',
             ],
         ]);

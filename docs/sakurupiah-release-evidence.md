@@ -97,14 +97,72 @@ should bypass its guardrail.
 The QRISC presentation gate remains unqualified. Production remains **NOT
 ACTIVATED**.
 
+## Presentation contract correction
+
+The rejection above exposed an application contract mismatch. Sakurupiah's
+official create documentation defines `qr` only as a QRIS response string; it
+does not require consumers to reinterpret that field as an EMV payload or
+validate a terminal CRC. Its documented `checkout_url` example also contains
+provider query data.
+
+The application now follows that provider contract: it treats non-empty `qr`
+as opaque provider-issued QR content, and it permits query-bearing HTTPS hosted
+URLs only on the exact environment allowlist. Payment identity, method,
+amount/fee, pending status, expiry, HTTPS, host, presentation-mode exclusivity,
+encrypted snapshot storage, and payload sanitization remain enforced. Userinfo,
+custom ports, fragments, and non-allowlisted hosts remain rejected.
+
+This correction affects new create responses. The existing pending transaction
+cannot be reconstructed because its presentation was deliberately discarded
+and the provider status/history responses do not return `qr` or `checkout_url`.
+No production deployment or request was performed.
+
+One post-correction presentation-and-transport sandbox probe created a single
+minimum-amount `QRISC` invoice through the real sandbox API. The create response
+was pending, contained both documented presentation fields, and carried a `qr`
+string of length 63. The application accepted it as opaque provider content,
+rendered a PNG, and the verified `LhieStoreTestBot` Telegram API response
+contained a photo.
+
+This was deliberately an in-memory probe: it did not create a local Order,
+Payment, inventory reservation, presentation snapshot, or durable Telegram
+Outbound Effect. The photo was sent without callback buttons because no local
+Order existed for those callbacks to address. A later provider status change
+therefore cannot be correlated, reconciled, fulfilled, or delivered by the
+application. The probe used the configured disposable testing chat, exposed no
+identifiers or presentation payload in its evidence, and did not mark any local
+Payment paid.
+
+## Full persisted sandbox checkout lifecycle
+
+A separate durable local checkout then exercised the complete application
+lifecycle with one disposable credential-backed Product priced at the `QRISC`
+minimum. `OrderCheckoutService` created the pending Order, Payment, reservation,
+encrypted presentation snapshot, and durable checkout effect. The supervised
+worker delivered the QR photo through `LhieStoreTestBot` in one attempt.
+
+After the operator changed only the sandbox provider transaction to success,
+the normal `sakurupiah:reconcile` seam reported one paid transition. The local
+Payment became paid, inventory recorded reservation and sale movements, the
+credential was allocated, and the receipt photo plus action panel were each
+delivered in one attempt. An explicit TXT-download effect exported a valid
+UTF-8 document containing the product and credential fields and Telegram
+accepted it through `sendDocument` in one attempt.
+
+All six outbound effects for this Order finished `sent`; none finished failed,
+unknown, or manual review. The disposable Product was deactivated after its
+single stock item was sold. No raw credential, QR, hosted URL, provider
+identifier, merchant reference, Telegram message identifier, or chat identifier
+was printed or stored in this evidence.
+
 
 ## Current verification rerun
 
 The final workspace rerun after the presentation-pending and recovery changes
 produced the following redacted evidence:
 
-- `php artisan test --filter='Sakurupiah' --colors=never`: **PASS** — 143
-  tests, 140 passed, 3 skipped, 896 assertions.
+- `php artisan test --filter='Sakurupiah' --colors=never`: **PASS** — 144
+  tests, 141 passed, 3 skipped, 903 assertions.
 - `PaymentDocumentationTest`, `ProductionConfigurationValidatorTest`, and
   `SakurupiahProviderReadinessTest`: **PASS** — 44 tests, 408 assertions.
 - `composer test -- --parallel`: **PASS** — 2,266 tests, 2,214 passed, 52

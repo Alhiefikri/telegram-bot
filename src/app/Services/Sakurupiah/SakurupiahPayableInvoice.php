@@ -5,17 +5,15 @@ namespace App\Services\Sakurupiah;
 use App\Enums\PaymentStatus;
 use App\Enums\SakurupiahEnvironment;
 use App\Models\Payment;
-use App\Services\Pakasir\QrisEmvPayload;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 
 /**
- * Presentation-safe Sakurupiah invoice data.
- *
- * The payload contains only validated QRIS or hosted presentation data. It is
- * intentionally impossible to construct it from an unvalidated provider
- * response without passing the payment/reference/amount/expiry gates below.
+ * The payload contains only provider-issued QR content or hosted presentation
+ * data after the payment/reference/amount/expiry gates below pass. Sakurupiah
+ * documents `qr` as an opaque response string, so this boundary does not impose
+ * a provider-undocumented EMV/CRC contract on it.
  */
 final readonly class SakurupiahPayableInvoice
 {
@@ -80,13 +78,7 @@ final readonly class SakurupiahPayableInvoice
 
         $qrisPayload = $invoice->qrPayload();
         $checkoutUrl = null;
-        if ($qrisPayload !== null) {
-            try {
-                QrisEmvPayload::parse($qrisPayload)->assertMatchesIdrAmount($invoice->totalValue());
-            } catch (\Throwable $exception) {
-                throw new SakurupiahInvoiceIntegrityException('qris_presentation', previous: $exception);
-            }
-        } else {
+        if ($qrisPayload === null) {
             $checkoutUrl = $invoice->checkoutUrl();
             if ($checkoutUrl === null || ! self::isAllowedHostedUrl($checkoutUrl, $environment)) {
                 throw new SakurupiahInvoiceIntegrityException('hosted_presentation');
@@ -169,11 +161,6 @@ final readonly class SakurupiahPayableInvoice
         if ($mode === 'qris') {
             if (! is_string($qrisPayload) || trim($qrisPayload) === '' || $checkoutUrl !== null) {
                 throw new SakurupiahInvoiceIntegrityException('qris_presentation');
-            }
-            try {
-                QrisEmvPayload::parse($qrisPayload)->assertMatchesIdrAmount($total);
-            } catch (\Throwable $exception) {
-                throw new SakurupiahInvoiceIntegrityException('qris_presentation', previous: $exception);
             }
         } elseif ($mode === 'hosted') {
             if (! is_string($checkoutUrl)
@@ -273,7 +260,6 @@ final readonly class SakurupiahPayableInvoice
             || array_key_exists('user', $parts)
             || array_key_exists('pass', $parts)
             || array_key_exists('port', $parts)
-            || array_key_exists('query', $parts)
             || array_key_exists('fragment', $parts)
         ) {
             return false;

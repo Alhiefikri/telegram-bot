@@ -67,14 +67,23 @@ Gunakan scope paling kecil yang cocok dengan arsitektur saat ini:
 QRISC dipilih karena provider target memiliki beberapa varian QRIS aktif;
 readiness harus memilih tepat QRISC dan menolak channel set yang ambigu.
 
-### Keputusan presentasi yang wajib ditutup
+### Presentation contract
 
-Response create mendokumentasikan `qr` untuk QRIS dan `checkout_url`, tetapi format QR dan host URL belum menjadi kontrak yang cukup kuat. Sebelum production, pilih salah satu dan catat evidence:
+The official create response documents `qr` as a provider-issued QRIS string
+and `checkout_url` as the buyer redirect. It does not define `qr` as an EMV
+payload or require merchant-side CRC/currency/amount parsing. The application
+therefore treats a non-empty `qr` value as opaque provider presentation content
+and renders that exact value as a QR image after the invoice identity,
+amount/fee, status, and expiry gates pass.
 
-1. **Direct QRIS (rekomendasi bila sandbox membuktikan format EMV)**: validasi `qr` sebagai QRIS payload, pastikan CRC/currency/amount cocok, generate image melalui renderer yang sudah ada, dan jangan menyimpan/mengirim payload yang gagal validasi.
-2. **Hosted invoice**: hanya redirect ke `checkout_url` HTTPS dengan host allowlist provider yang dikonfirmasi. Jangan membuat open redirect dan jangan menganggap URL yang mengandung token aman untuk logging atau kolom plaintext.
+When `qr` is absent, `checkout_url` is accepted only with HTTPS and an exact
+environment allowlisted host. Provider-documented query parameters are allowed,
+but userinfo, custom ports, and fragments remain rejected. The complete URL is
+kept only in the encrypted `provider_presentation` snapshot and must never be
+copied to `provider_payload`, logs, events, or other plaintext diagnostics.
 
-Jangan menggabungkan kedua mode secara diam-diam. `checkout_url` bukan fallback otomatis ketika QR invalid; hasil invalid harus menjadi safe outcome dan owner-visible recovery.
+The modes remain exclusive: a response containing `qr` uses direct QR
+presentation; hosted presentation is considered only when `qr` is absent.
 
 ## Peta ownership repository
 
@@ -446,7 +455,7 @@ dummy tokens.
 - Channel metadata normalization, active filter, min/max/fee bounds, and runtime-vs-static precedence.
 - Expiry timezone/rounding policy and earliest effective deadline.
 - Amount/fee/merchant-fee semantics.
-- Hosted URL HTTPS/host allowlist or QR EMV/CRC/currency/amount validation.
+- Opaque provider QR persistence/rendering and hosted URL HTTPS/exact-host validation, including documented query parameters.
 - Sanitizer removes API keys, signatures, raw tokens, sensitive URL query values, and unnecessary buyer data.
 - Plan rejects incomplete/mismatched Sakurupiah snapshot.
 - `prepare()` has no transport invocation.

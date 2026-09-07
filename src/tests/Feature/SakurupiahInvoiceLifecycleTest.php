@@ -97,9 +97,10 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->assertSame(1, Payment::query()->where('order_id', $payment->order_id)->count());
     }
 
-    public function test_qris_emv_crc_currency_and_exact_amount_are_required_for_payable(): void
+    public function test_provider_qr_content_is_treated_as_opaque_presentation(): void
     {
         $payment = $this->payment(['amount' => 20000]);
+        $providerQrContent = 'provider-opaque-qr-content-without-terminal-crc';
         $invoice = new SakurupiahInvoice(
             trxId: 'trx-411-qris',
             merchantRef: (string) $payment->merchant_ref,
@@ -110,7 +111,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
             fee: SakurupiahFee::from(450),
             createdAt: CarbonImmutable::now()->subMinute(),
             expiresAt: CarbonImmutable::now()->addDay(),
-            qr: '0002010102125303360540820450.005802ID63045B6D',
+            qr: $providerQrContent,
         );
         $provider = Mockery::mock(SakurupiahProviderAdapter::class);
         $provider->shouldReceive('createInvoice')->once()->andReturn($invoice);
@@ -119,12 +120,13 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
 
         $this->assertSame(SakurupiahInvoiceOutcome::Payable, $result->outcome());
-        $this->assertSame('0002010102125303360540820450.005802ID63045B6D', $result->payable()?->qrisPayload());
+        $this->assertSame($providerQrContent, $result->payable()?->qrisPayload());
         $this->assertTrue($result->payable()?->isDirectQris());
         $this->assertNull($result->payable()?->checkoutUrl());
+        $this->assertSame($providerQrContent, $payment->fresh()->provider_presentation['qris_payload']);
     }
 
-    public function test_query_bearing_hosted_url_never_becomes_payable(): void
+    public function test_query_bearing_provider_hosted_url_becomes_payable(): void
     {
         $payment = $this->payment(['merchant_ref' => 'INV-411-QUERY']);
         $invoice = new SakurupiahInvoice(
@@ -144,12 +146,47 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->app->instance(SakurupiahProviderAdapter::class, $provider);
 
         $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
+
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $result->outcome());
+        $this->assertSame('https://sakurupiah.id/pay/invoice?source=provider', $result->payable()?->checkoutUrl());
+        $this->assertTrue($result->payable()?->isHosted());
+        $fresh = $payment->fresh();
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $fresh->provider_create_state);
+        $this->assertSame('hosted', $fresh->provider_presentation['mode']);
+        $this->assertArrayNotHasKey('checkout_url', $fresh->provider_payload);
+        $this->assertStringNotContainsString(
+            'source=provider',
+            (string) $fresh->getRawOriginal('provider_presentation'),
+        );
+    }
+
+    public function test_non_allowlisted_hosted_url_remains_unpayable(): void
+    {
+        $payment = $this->payment(['merchant_ref' => 'INV-411-HOST']);
+        $invoice = new SakurupiahInvoice(
+            trxId: 'trx-411-host',
+            merchantRef: (string) $payment->merchant_ref,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+            status: SakurupiahTransactionStatus::Pending,
+            total: 12084,
+            amount: 12000,
+            fee: SakurupiahFee::from(84),
+            createdAt: CarbonImmutable::now()->subMinute(),
+            expiresAt: CarbonImmutable::now()->addDay(),
+            checkoutUrl: 'https://payments.example.test/pay?source=provider',
+        );
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->once()->andReturn($invoice);
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
+
         $this->assertSame(SakurupiahInvoiceOutcome::ProviderPresentationPending, $result->outcome());
         $this->assertNull($result->payable());
-        $fresh = $payment->fresh();
-        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_PROVIDER_QRIS_UNUSABLE, $fresh->provider_create_state);
-        $this->assertSame('provider_presentation_unusable', $fresh->provider_create_last_error);
-        $this->assertArrayNotHasKey('checkout_url', $fresh->provider_payload);
+        $this->assertSame(
+            SakurupiahInvoiceLifecycleService::STATE_PROVIDER_QRIS_UNUSABLE,
+            $payment->fresh()->provider_create_state,
+        );
     }
 
     public function test_http_create_response_is_parsed_and_sent_once_after_local_payment_exists(): void

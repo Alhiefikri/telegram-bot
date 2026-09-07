@@ -31,7 +31,7 @@ use Tests\Support\TelegramBotTestSupport;
 
 class SakurupiahCheckoutTest extends TelegramBotTestSupport
 {
-    private const DIRECT_QRIS = '0002010102125303360540820450.005802ID63045B6D';
+    private const DIRECT_QRIS = 'provider-opaque-qr-content-without-terminal-crc';
 
     protected function setUp(): void
     {
@@ -55,7 +55,7 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         ]));
     }
 
-    public function test_direct_sakurupiah_effect_dispatches_and_delivers_only_validated_qris_instructions(): void
+    public function test_direct_sakurupiah_effect_dispatches_and_delivers_provider_qr_content(): void
     {
         Queue::fake();
         $this->fakeTelegramHttp();
@@ -198,7 +198,7 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
             'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_PROVIDER_QRIS_UNUSABLE,
             'provider_presentation' => [
                 'mode' => 'qris',
-                'qris_payload' => 'not-a-valid-qris',
+                'qris_payload' => 'stale-provider-qr-content',
                 'checkout_url' => 'https://sakurupiah.id/pay/invoice?token=redacted',
             ],
         ]);
