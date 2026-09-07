@@ -203,8 +203,34 @@ has now confirmed that the approved channel is `QRISC` (`QRIS Custom Merchant`,
 minimum `200`, maximum `20,000,000`, `0.7%`, additional fee `100`, settlement
 `H+1`). Those earlier `QRIS` observations are not qualification evidence for
 `QRISC`; current application requests and readiness selection target `QRISC`.
+### QRISC-specific local rerun
+
+On 2026-09-07, the isolated Compose project `telegram-bot-testing` was rebuilt
+from the current source with `APP_ENV=local`. Telegram metadata confirmed the
+dedicated testing bot `LhieStoreTestBot`; no production bot or production
+endpoint was used.
+
+The live sandbox observation selected `QRISC` and reported `minimum=200`,
+`maximum=20,000,000`, active status, `default_expired=24`, and settlement
+`H+1`. The local expiry contract was aligned to 24 hours before checkout.
+A fresh amount-`200` app-linked checkout then returned provider method `QRISC`,
+status `pending`, fee `0`, and total `200`; the total equation matched
+`amount + fee`.
+
+The sanitized create row contained neither `qr` nor `checkout_url`. No
+presentation snapshot was persisted, and the lifecycle safely recorded
+`provider_qris_unusable` / `provider_presentation_pending`. Therefore there
+was no QR payload to parse: `qris_valid=false`, and no QR was sent to the
+testing bot. A separate non-payment test message through `LhieStoreTestBot`
+succeeded; the first durable checkout-instruction attempt ended `unknown` on a
+Telegram transport exception and was not blindly resent.
+
+This is a QRISC presentation failure, not a successful QR qualification. Keep
+the Payment pending and request a valid redacted QRISC sandbox fixture or an
+approved non-tokenized hosted presentation from Sakurupiah.
 
 ### Latest redacted sandbox observation
+
 
 On 2026-09-04, the sandbox readiness check loaded the root Compose
 environment explicitly and reported `enabled=true`, `ready=true`, and no

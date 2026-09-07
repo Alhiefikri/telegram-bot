@@ -224,7 +224,7 @@ return [
             'fee_payer' => 'merchant',
             'merchant_fee' => 1,
             'fee_confirmed' => true,
-            'expiry_hours' => 12,
+            'expiry_hours' => 24,
             'expiry_confirmed' => true,
         ],
         'http_timeout_seconds' => 10.0,

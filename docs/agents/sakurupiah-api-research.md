@@ -386,3 +386,20 @@ The earlier app and direct observations in this note used provider code
 the approved channel. The application now keeps local customer rail
 `Payment.method=QRIS` separate from provider API `method=QRISC`, and readiness
 selects exactly `QRISC` while rejecting an ambiguous QRIS channel set.
+
+## 2026-09-07 — QRISC local presentation rerun
+
+The rebuilt local app observed the merchant sandbox `QRISC` channel as active
+with minimum `200`, maximum `20,000,000`, `default_expired=24`, and settlement
+`H+1`. The local contract was aligned to the observed 24-hour expiry before
+the checkout.
+
+One fresh amount-`200` app-linked checkout used provider method `QRISC` and
+returned `pending`, fee `0`, and total `200`; the amount equation matched. The
+sanitized invoice row contained neither `qr` nor `checkout_url`, so the
+application persisted no presentation and classified the Payment as
+`provider_qris_unusable` / `provider_presentation_pending`. There was no QR
+payload to run through EMV/CRC/exact-amount validation, and the Payment stayed
+pending. This closes neither the QRISC presentation gate nor production
+qualification; request a valid redacted QRISC fixture or an approved
+non-tokenized hosted presentation.

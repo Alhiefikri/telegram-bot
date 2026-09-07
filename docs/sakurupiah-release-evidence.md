@@ -65,6 +65,30 @@ required. The provider must supply a valid EMV QRIS payload for channel
 can become payable. Callback delivery/acknowledgement and Owner production
 approval remain unobserved. Production remains **NOT ACTIVATED**.
 
+## Latest QRISC-specific local rerun
+
+On 2026-09-07, the isolated `telegram-bot-testing` Compose project was
+rebuilt from the current source with `APP_ENV=local`. Telegram metadata
+confirmed `LhieStoreTestBot`; no production bot or endpoint was used.
+
+Sandbox readiness selected `QRISC` with minimum `200`, maximum `20,000,000`,
+active status, and `default_expired=24`. The local QRIS expiry contract was
+aligned to 24 hours. One fresh amount-`200` app-linked checkout returned
+provider method `QRISC`, `pending`, fee `0`, and total `200`; the amount
+equation matched exactly.
+
+The sanitized provider create row contained neither `qr` nor `checkout_url`.
+The application persisted no presentation and returned the safe
+`provider_qris_unusable` / `provider_presentation_pending` state. No EMV QR
+payload existed to parse, so `qris_valid=false` and no QR was sent to the
+testing bot. The first durable instruction effect ended `unknown` after a
+Telegram transport exception; it was not automatically resent. A separate
+non-payment test message through the testing bot succeeded.
+
+The QRISC presentation gate remains unqualified. Production remains **NOT
+ACTIVATED**.
+
+
 ## Current verification rerun
 
 The final workspace rerun after the presentation-pending and recovery changes
