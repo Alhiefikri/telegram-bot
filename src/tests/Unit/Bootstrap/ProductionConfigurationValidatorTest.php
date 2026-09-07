@@ -3,7 +3,6 @@
 namespace Tests\Unit\Bootstrap;
 
 use App\Bootstrap\ProductionConfigurationValidator;
-use App\Services\Sakurupiah\SakurupiahContractPolicy;
 use Illuminate\Config\Repository;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -110,38 +109,6 @@ class ProductionConfigurationValidatorTest extends TestCase
         (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
     }
 
-    public function test_enabled_sakurupiah_rejects_an_unqualified_external_contract_gate(): void
-    {
-        $configuration = $this->validConfiguration();
-        $policy = $this->qualifiedSakurupiahContractPolicy();
-        $policy['gates']['amount_evidence'] = false;
-        $configuration['services']['sakurupiah'] = array_replace(
-            $this->validSakurupiahProductionConfiguration(),
-            ['contract_policy' => $policy],
-        );
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('SAKURUPIAH_EXTERNAL_AMOUNT_EVIDENCE');
-
-        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
-    }
-
-    public function test_enabled_sakurupiah_rejects_missing_owner_approval_reference(): void
-    {
-        $configuration = $this->validConfiguration();
-        $policy = $this->qualifiedSakurupiahContractPolicy();
-        $policy['owner_approval_reference'] = null;
-        $configuration['services']['sakurupiah'] = array_replace(
-            $this->validSakurupiahProductionConfiguration(),
-            ['contract_policy' => $policy],
-        );
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('redacted Owner approval reference');
-
-        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
-    }
-
     public function test_sakurupiah_sandbox_and_production_credentials_cannot_be_reused(): void
     {
         $configuration = $this->validConfiguration();
@@ -222,27 +189,6 @@ class ProductionConfigurationValidatorTest extends TestCase
                 'expiry_hours' => 24,
                 'expiry_confirmed' => true,
             ],
-            'contract_policy' => $this->qualifiedSakurupiahContractPolicy(),
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function qualifiedSakurupiahContractPolicy(): array
-    {
-        $evidenceReferences = [];
-        foreach (array_keys(SakurupiahContractPolicy::REQUIRED_GATES) as $gate) {
-            $evidenceReferences[$gate] = 'issue-415-redacted-'.$gate;
-        }
-
-        return [
-            'record_version' => SakurupiahContractPolicy::CURRENT_RECORD_VERSION,
-            'record_reference' => 'issue-415-redacted-evidence',
-            'gates' => array_fill_keys(array_keys(SakurupiahContractPolicy::REQUIRED_GATES), true),
-            'evidence_references' => $evidenceReferences,
-            'automatic_fulfillment_approved' => true,
-            'owner_approval_reference' => 'issue-415-owner-approval',
         ];
     }
 

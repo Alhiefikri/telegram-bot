@@ -5,7 +5,6 @@ namespace Tests\Unit\Services\Sakurupiah;
 use App\Enums\SakurupiahEnvironment;
 use App\Services\Sakurupiah\SakurupiahChannel;
 use App\Services\Sakurupiah\SakurupiahChannelAddition;
-use App\Services\Sakurupiah\SakurupiahContractPolicy;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -24,7 +23,6 @@ class SakurupiahProviderReadinessTest extends TestCase
         $report = app(SakurupiahProviderReadiness::class)->report(SakurupiahEnvironment::Sandbox);
 
         $this->assertFalse($report->isReady());
-        $this->assertContains('provider enabled flag', $report->missing());
         $this->assertContains('API key', $report->missing());
     }
 
@@ -162,34 +160,6 @@ class SakurupiahProviderReadinessTest extends TestCase
         $this->assertArrayHasKey('SAKURUPIAH_QRIS_EXPIRY_CONTRACT', $report->invalid());
     }
 
-    public function test_production_requires_the_external_contract_policy_before_observation(): void
-    {
-        $this->app->instance('env', 'production');
-        $this->configureProduction();
-        config()->set('services.sakurupiah.contract_policy.gates.amount_evidence', false);
-        Http::fake();
-
-        $report = app(SakurupiahProviderReadiness::class)->observe(SakurupiahEnvironment::Production);
-
-        $this->assertFalse($report->isReady());
-        $this->assertArrayHasKey('SAKURUPIAH_EXTERNAL_AMOUNT_EVIDENCE', $report->invalid());
-        Http::assertNothingSent();
-    }
-
-    public function test_production_report_requires_the_external_contract_policy_before_registered_observation(): void
-    {
-        $this->app->instance('env', 'production');
-        $this->configureProduction();
-        config()->set('services.sakurupiah.contract_policy.gates.amount_evidence', false);
-        Http::fake();
-
-        $report = app(SakurupiahProviderReadiness::class)->production();
-
-        $this->assertFalse($report->isReady());
-        $this->assertArrayHasKey('SAKURUPIAH_EXTERNAL_AMOUNT_EVIDENCE', $report->invalid());
-        Http::assertNothingSent();
-    }
-
     public function test_production_observation_checks_operational_prerequisites_and_never_calls_unsafe_urls(): void
     {
         $this->app->instance('env', 'production');
@@ -265,7 +235,6 @@ class SakurupiahProviderReadinessTest extends TestCase
             'production_return_allowed_hosts' => ['store.example.test'],
             'production_allowed_ips' => ['8.8.8.8'],
             'qris_contract' => $this->qualifiedQrisContract(),
-            'contract_policy' => $this->qualifiedContractPolicy(),
         ]));
     }
 
@@ -282,26 +251,6 @@ class SakurupiahProviderReadinessTest extends TestCase
             'fee_confirmed' => true,
             'expiry_hours' => 24,
             'expiry_confirmed' => true,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function qualifiedContractPolicy(): array
-    {
-        $evidenceReferences = [];
-        foreach (array_keys(SakurupiahContractPolicy::REQUIRED_GATES) as $gate) {
-            $evidenceReferences[$gate] = 'issue-415-redacted-'.$gate;
-        }
-
-        return [
-            'record_version' => SakurupiahContractPolicy::CURRENT_RECORD_VERSION,
-            'record_reference' => 'issue-415-redacted-evidence',
-            'gates' => array_fill_keys(array_keys(SakurupiahContractPolicy::REQUIRED_GATES), true),
-            'evidence_references' => $evidenceReferences,
-            'automatic_fulfillment_approved' => true,
-            'owner_approval_reference' => 'issue-415-owner-approval',
         ];
     }
 }

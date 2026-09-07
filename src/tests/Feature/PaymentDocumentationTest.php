@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Services\Sakurupiah\SakurupiahContractPolicy;
+use Illuminate\Support\Env;
 use Tests\TestCase;
 
 class PaymentDocumentationTest extends TestCase
@@ -149,6 +149,61 @@ class PaymentDocumentationTest extends TestCase
         $this->assertSame([], config('services.sakurupiah.production_allowed_ips'));
     }
 
+    public function test_sakurupiah_production_enablement_follows_complete_credential_pair(): void
+    {
+        $keys = [
+            'SAKURUPIAH_PRODUCTION_API_ID',
+            'SAKURUPIAH_PRODUCTION_API_KEY',
+        ];
+        $original = [];
+        foreach ($keys as $key) {
+            $original[$key] = [
+                'env_present' => array_key_exists($key, $_ENV),
+                'env' => $_ENV[$key] ?? null,
+                'server_present' => array_key_exists($key, $_SERVER),
+                'server' => $_SERVER[$key] ?? null,
+                'getenv' => getenv($key),
+            ];
+        }
+
+        try {
+            foreach ($keys as $key) {
+                $_ENV[$key] = 'production-'.$key;
+                $_SERVER[$key] = 'production-'.$key;
+                putenv($key.'=production-'.$key);
+            }
+            Env::enablePutenv();
+            $services = require config_path('services.php');
+            $this->assertTrue($services['sakurupiah']['production_enabled']);
+
+            $_ENV['SAKURUPIAH_PRODUCTION_API_KEY'] = '';
+            $_SERVER['SAKURUPIAH_PRODUCTION_API_KEY'] = '';
+            putenv('SAKURUPIAH_PRODUCTION_API_KEY=');
+            Env::enablePutenv();
+            $services = require config_path('services.php');
+            $this->assertFalse($services['sakurupiah']['production_enabled']);
+        } finally {
+            foreach ($original as $key => $values) {
+                if ($values['env_present']) {
+                    $_ENV[$key] = $values['env'];
+                } else {
+                    unset($_ENV[$key]);
+                }
+                if ($values['server_present']) {
+                    $_SERVER[$key] = $values['server'];
+                } else {
+                    unset($_SERVER[$key]);
+                }
+                if ($values['getenv'] === false) {
+                    putenv($key);
+                } else {
+                    putenv($key.'='.$values['getenv']);
+                }
+            }
+            Env::enablePutenv();
+        }
+    }
+
     public function test_binance_pay_id_is_blank_in_env_examples_and_forwarded_by_shared_compose_environment(): void
     {
         $envExamples = [
@@ -252,57 +307,39 @@ class PaymentDocumentationTest extends TestCase
             'does not require rebuilding',
             'production bot',
             'sakurupiah-release-evidence.md',
-            'blocked',
+            'complete production credential pair',
+            'Admin → Mode pembayaran',
         ] as $section) {
             $this->assertStringContainsString($section, $runbook);
         }
+        $this->assertStringContainsString('production_enabled', $runbook);
+        $this->assertStringNotContainsString('contract_policy', $runbook);
+        $this->assertStringNotContainsString('Adding credentials alone never selects Sakurupiah', $runbook);
         $this->assertStringContainsString('Docker Compose reads the', $runbook);
         $this->assertStringContainsString('Laravel Artisan uses `src`', $runbook);
         $this->assertStringNotContainsString('RAILWAY_', $runbook);
     }
 
-    public function test_sakurupiah_release_evidence_records_commands_and_blocked_external_gate(): void
+    public function test_sakurupiah_release_evidence_records_commands_and_activation_status(): void
     {
         $evidence = file_get_contents(base_path('../docs/sakurupiah-release-evidence.md'));
 
         foreach ([
             'issue #416',
-            'BLOCKED',
+            'NOT ACTIVATED',
+            'credential pair',
             'composer test',
             'test:concurrency-gate',
             '127.0.0.1:5432',
             'npx playwright test',
             'default',
-            'issue #415',
             'one paid transition produces one sale',
         ] as $section) {
             $this->assertStringContainsString($section, $evidence);
         }
         $this->assertStringNotContainsString('RAILWAY_', $evidence);
         $this->assertStringNotContainsString('automatic_fulfillment_approved: true', $evidence);
-    }
-
-    public function test_sakurupiah_external_contract_policy_is_explicit_and_fail_closed(): void
-    {
-        $policy = config('services.sakurupiah.contract_policy');
-        $runbook = file_get_contents(base_path('../docs/runbook-sakurupiah-payment.md'));
-
-        $this->assertSame(0, $policy['record_version']);
-        $this->assertSame(
-            array_fill_keys(array_keys(SakurupiahContractPolicy::REQUIRED_GATES), false),
-            $policy['gates'],
-        );
-        $this->assertSame([], $policy['evidence_references']);
-        $this->assertFalse($policy['automatic_fulfillment_approved']);
-        $this->assertStringContainsString('contract_policy', $runbook);
-        $this->assertStringContainsString('twelve external', $runbook);
-        $this->assertStringContainsString('fail closed', $runbook);
-        foreach (array_keys(SakurupiahContractPolicy::REQUIRED_GATES) as $gate) {
-            $this->assertStringContainsString('`'.$gate.'`', $runbook);
-        }
-        $this->assertStringContainsString('full HMAC signatures', $runbook);
-        $this->assertStringContainsString('Only the separate merchant credential pairs', $runbook);
-        $this->assertStringContainsString('Adding credentials alone never selects Sakurupiah', $runbook);
+        $this->assertStringNotContainsString('external qualification gate', $evidence);
     }
 
     public function test_bsc_operator_contract_documents_database_activation_and_shared_queue_configuration(): void

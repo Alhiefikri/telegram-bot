@@ -1,21 +1,24 @@
 # Runbook: Sakurupiah QRIS Payment Provider
 
 This runbook covers activation, observation, recovery, and rollback of the
-Sakurupiah QRIS Payment rail. It does not authorize production checkout by
-itself; production activation requires the external contract gates recorded in
-the implementation map (#407) to be closed with redacted sandbox evidence and
-an explicit Owner activation through the Admin Payment Provider Switch.
+Sakurupiah QRIS Payment rail.
 
-Automated release evidence and the current issue #416 gate decision are
-recorded in [`docs/sakurupiah-release-evidence.md`](sakurupiah-release-evidence.md).
-The current decision is **blocked** while PostgreSQL execution and external
-Sakurupiah qualification remain unproven.
+Production enablement is intentionally simple: when both
+`SAKURUPIAH_PRODUCTION_API_ID` and `SAKURUPIAH_PRODUCTION_API_KEY` are
+non-empty, the application marks Sakurupiah production as enabled. No separate
+enable flag or contract-policy record is required. The Owner still selects
+Sakurupiah for new checkout through the Admin Payment Provider Switch after the
+readiness check passes.
+
+Automated release evidence is recorded in
+[`docs/sakurupiah-release-evidence.md`](sakurupiah-release-evidence.md). This
+runbook and the evidence document never contain production credentials.
 
 ## Deployment-time configuration
 
 Only the separate merchant credential pairs belong in the server-side `.env`.
-Stable endpoints, callback/return routes, host policy, IP policy, transport
-budgets, and contract policy are pinned in application configuration. Never put
+Stable endpoints, callback/return routes, host policy, transport budgets, and
+QRIS settlement defaults are pinned in application configuration. Never put
 credentials in the database, Admin presentation settings, logs, fixtures,
 customer copy, or repository files.
 
@@ -34,10 +37,11 @@ allowlist variables are required. The sandbox URL is never derived from the
 canonical production host.
 
 Production uses the separate production credential pair and the canonical
-application routes pinned by the release. The production activation gate is a
-reviewed code/configuration decision and remains disabled until the external
-contract policy, provider-approved network policy, and explicit Owner approval
-are released. Adding credentials alone never selects Sakurupiah for checkout.
+application routes pinned by the release. When both production credentials are
+present at application startup, `services.sakurupiah.production_enabled` is
+`true`; when either credential is missing, it is `false` and a partial pair
+fails configuration validation. There is no separate
+`SAKURUPIAH_PRODUCTION_ENABLED` environment variable.
 
 This repository has two environment-file consumers: Docker Compose reads the
 root `.env`, while Laravel Artisan uses `src` as its application base and
@@ -45,9 +49,9 @@ reads `src/.env`. Use the root file through a Compose command, or configure the
 same credential pair in the untracked `src/.env`; never copy credentials into
 tracked files or commit either file.
 
-Do not add ENV for channel labels, fees, expiry hours, callback URLs, host/IP
+Do not add ENV for channel labels, fees, expiry hours, callback URLs, host
 allowlists, retry budgets, or presentation copy. Those values are code/config
-policy. The provider spelling `api-sanbox` is intentional and must not be
+settings. The provider spelling `api-sanbox` is intentional and must not be
 "corrected".
 
 Changing `src/.env` requires restarting the local Artisan server and workers;
@@ -97,23 +101,16 @@ Use a testing database and a project name distinct from production. Compose
 environment-only change needs container recreation, not an image rebuild.
 
 
-## External contract policy record
+## Production activation
 
-Production readiness also requires the non-secret
-`services.sakurupiah.contract_policy` record. It is versioned in application
-configuration and defaults to fail closed. Every one of the twelve external
-contract gates must be `true` and have a redacted evidence reference; the
-record must also contain a redacted record reference and explicit Owner
-approval for automatic fulfillment. Do not set these values from static
-provider documentation or from a sandbox response that does not prove the
-specific gate.
+After adding the complete production credential pair to the root `.env`,
+recreate the app and scheduler containers so Laravel loads the new environment.
+No image rebuild is needed for a credential-only change. Run the readiness
+check, then select **Sakurupiah** in **Admin → Mode pembayaran**. The switch
+changes new checkout only; existing Payments keep their stored provider.
 
-The policy covers request encoding, signature canonicalization, channel
-metadata, expiry, create response, QR/hosted presentation, amount-bearing
-status/history, duplicate-reference recovery, callback delivery, error/limit
-semantics, production network policy, and credential operations.
-A missing or unqualified external-contract policy gate prevents production
-readiness before any provider HTTP call.
+If the pair is absent, production is disabled automatically. A partial pair is
+invalid and must be corrected before startup.
 
 ## Readiness
 
@@ -131,11 +128,11 @@ php artisan schedule:list
 
 Readiness separately assesses enabled/configured state, credential pair, HTTPS
 URLs and host policy, runtime environment, callback route, QRIS channel
-activity/limits, fee/currency/expiry contract, queue/scheduler, and (in
-production) the IP policy. A disabled provider is a safe state; an enabled but
-unready provider is a release failure. `sakurupiah:check-readiness` reports
-the bounded local backlog counts (`pending`, `verification_pending`,
-`terminal_recent`) without calling the provider.
+activity/limits, fee/currency/expiry contract, and queue/scheduler. A disabled
+provider is a safe state; an enabled but unready provider is a release failure.
+`sakurupiah:check-readiness` reports the bounded local backlog counts
+(`pending`, `verification_pending`, `terminal_recent`) without calling the
+provider.
 
 The reconciliation schedule (`sakurupiah:reconcile --chunk=100`, every minute)
 is registered only when the runtime environment is enabled, operationally
@@ -215,9 +212,9 @@ as `pending` with amount and expiry, and confirmed by status lookup as
 rejected with HTTP `400`; no second invoice was accepted. After its configured
 expiry, the same redacted invoice was observed as `expired` through both
 status and amount-bearing history. No payment or callback was observed.
-Rate-limit, timeout, retry, expiry-code mapping, callback, and
-production-network behavior remain unqualified. This is sandbox evidence only;
-it does not qualify production gates or Owner approval.
+Rate-limit, timeout, retry, expiry-code mapping, and callback behavior remain
+operational observations to monitor. They do not create extra ENV activation
+settings, and sandbox credentials remain separate from production credentials.
 
 After that expiry observation, one Owner-authorized fresh sandbox invoice was
 created at approximately 21:28 WIB for amount `500`. Its typed create response
@@ -235,44 +232,23 @@ provider status lookup returned `berhasil`; because it omitted amount, the
 application's reconciliation path fetched same-day history and accepted the
 transition only when the history amount `500` matched the local IDR Payment.
 The Payment became `paid` with `paid_at`, the Order payment status became
-`paid`, and the Order remained `processing` for manual fulfillment. The paid
-Telegram admin outbound effect was recorded `sent`, and the signed Web invoice
+`paid`, and the Order remained `processing` for manual fulfillment. Telegram
+admin outbound effects were recorded `sent`, and the signed Web invoice
 rendered the paid surface. Three identical signed pending callbacks remained
 deduplicated and acknowledged, but no provider paid callback was observed.
 The app-linked create response omitted QR/hosted presentation, so the
 application correctly held the initial Payment pending and non-payable. A
-separate app-linked expiry path is still required; these observations do not
-qualify unresolved P0 gates or Owner production approval.
+separate app-linked expiry path is still required before relying on that
+scenario.
 
-### Evidence record mapping
 
-For each gate, retain a redacted capture or hash in the approved
-merchant/provider evidence system and put only its redacted reference or hash
-in `services.sakurupiah.contract_policy.evidence_references`. Do not copy API
-keys, bearer tokens, full HMAC signatures, raw QR values, raw payloads, or
-tokenized URLs into the repository, issue, comments, or artifacts. A reference
-is not qualification by itself: the capture must show the observed behavior or
-cite a written provider clarification.
+### Evidence and secret handling
 
-| Policy gate | Qualification capture | Issue/configuration record |
-| --- | --- | --- |
-| `request_encoding` | Endpoint, method, content type, field names, and accepted form encoding for every used request. | Redacted request-capture reference. |
-| `signature_canonicalization` | Exact canonical input ordering, amount representation, algorithm, and casing; keep secrets and signature output out of the issue. | Secure evidence hash/reference for the signature vector. |
-| `channel_contract` | Active QRIS metadata, IDR unit, min/max, fee payer, and returned fee/total semantics. | Sanitized channel-response reference. |
-| `expiry_contract` | Expiry range, `Asia/Jakarta` timezone, boundary behavior, and resolved `2` versus `-2` mapping. | Redacted expiry test or provider-clarification reference. |
-| `create_response` | Allowed response field types, `trx_id`, merchant reference, and durable local persistence. | Sanitized create-response reference with identifiers hashed. |
-| `presentation` | QR EMV/CRC and encoded amount validation, or HTTPS hosted-URL host/token behavior. | Redacted rendering/allowlist evidence reference. |
-| `amount_evidence` | Paid status/history response containing authoritative amount and currency matching the Payment snapshot. | Sanitized status/history reference. |
-| `duplicate_reference` | Repeated merchant reference and timeout/ambiguous-create recovery using the same persisted reference. | Redacted duplicate/recovery trace reference. |
-| `callback_contract` | Callback headers/body, event/status/code mapping, duplicate delivery, retry, and acknowledgement behavior. | Sanitized callback evidence reference. |
-| `error_limits` | HTTP/JSON error shapes, timeout behavior, retryable statuses, rate limits, and bounded retry results. | Redacted error/limits matrix reference. |
-| `production_network` | Production IP allowlist, reverse-proxy source identity, HTTPS host policy, and rejection behavior. | Redacted network-policy evidence reference. |
-| `credential_operations` | Credential rotation/revocation test, expiry handling, and provider support escalation path. | Provider process or test reference; never credentials. |
-
-The `record_reference` identifies the complete evidence set, while each
-per-gate reference identifies the corresponding row. Do not mark a gate true
-because documentation, a type declaration, or an unverified sandbox response
-looks plausible.
+Keep provider evidence redacted and outside the repository when it contains
+merchant-specific data. Do not copy API keys, bearer tokens, full HMAC
+signatures, raw QR values, raw payloads, or tokenized URLs into chat, logs,
+tickets, or artifacts. Use the sanitized readiness, health, and reconciliation
+reports for operational evidence.
 
 ## Outcome-unknown recovery
 
@@ -343,14 +319,20 @@ To stop new Sakurupiah checkout without touching existing Payments:
    (Owner-only, optimistic version + audit). Existing Sakurupiah Payments keep
    their stored provider, method, merchant/reference identity, and sanitized
    provider snapshots; switching the active provider does not reinterpret them.
-2. For an emergency credential incident, revoke or rotate the production pair through the provider and recreate the app/scheduler containers. There is no `SAKURUPIAH_*_ENABLED` ENV switch; production enablement is a reviewed code/configuration gate. Preserve the recovery and reconciliation decision for existing Payments instead of silently switching them to another provider.
-3. After the reviewed code/configuration gate is disabled, verify `schedule:list` no longer shows `sakurupiah:reconcile`. An Admin provider switch alone intentionally leaves reconciliation available for existing Payments.
+2. For an emergency credential incident, revoke or rotate the production pair
+   through the provider. To disable the provider through configuration, remove
+   both production credential variables and recreate the app/scheduler
+   containers. A complete pair enables production again at the next startup.
+3. Verify `sakurupiah:check-readiness --json` reports the disabled state and
+   `schedule:list` no longer shows `sakurupiah:reconcile`. An Admin provider
+   switch alone intentionally leaves reconciliation available for existing
+   Payments.
 
 With Sakurupiah still enabled and ready, existing pending/verification-pending
 Payments continue to reconcile after an active-provider switch because their
-stored provider/reference state remains authoritative. If the environment is
-disabled, restore a ready configuration before expecting automatic provider
-lookups. Do not delete credentials or drop columns while those rows exist.
+stored provider/reference state remains authoritative. If the credentials are
+removed, restore a complete pair before expecting automatic provider lookups.
+Do not delete credentials or drop columns while those rows exist.
 
 ## Rollback
 

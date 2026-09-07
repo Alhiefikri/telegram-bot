@@ -1,6 +1,6 @@
 # Sakurupiah Payment Provider Implementation Specification
 
-- **Status:** Proposed — implementation must not enable production checkout until every external contract gate is closed.
+- **Status:** Implemented — production enablement follows the complete Sakurupiah production credential pair.
 - **Date:** 2026-09-02
 - **Scope:** Add Sakurupiah as an Owner-selectable Payment Provider for new QRIS checkout in the Web Storefront and Store Bot.
 - **Primary sources:** [Sakurupiah API documentation](https://sakurupiah.id/developers/api-dokumentasi), [official Postman collection](https://sakurupiah.id/SAKURUPIAH-DOKUMENTASI-API-v2.1Postman.json), and [official-linked signature example](https://raw.githubusercontent.com/SAKURUPIAH/SIGNATURE_INVOICE/main/PHP_version.php).
@@ -22,7 +22,9 @@ Payment.method   = QRIS
 Payment.currency = IDR
 ```
 
-`IDR`, fee payer, requested expiry, QR rendering, and hosted-URL policy are production-gated contract decisions, not assumptions. V1 does **not** expose VA, e-wallet, retail, QRISMU, QRIS2, QRISC, or customer channel selection.
+`IDR`, fee payer, requested expiry, QR rendering, and hosted-URL policy are
+pinned provider settings validated by readiness. V1 does **not** expose VA,
+e-wallet, retail, QRISMU, QRIS2, QRISC, or customer channel selection.
 
 The active provider remains Owner-controlled through the existing Payment Provider Switch. Switching affects **only new checkout**. Existing Payments retain their stored provider, method, environment/reference snapshot, and lifecycle interpretation.
 
@@ -214,8 +216,7 @@ The schedule uses `withoutOverlapping()` and runs only after its queue/worker co
 - Signature comparison uses `hash_equals`; do not accept case/normalization variants until qualified.
 - Webhook parsing rejects duplicate critical top-level keys, oversized bodies, and malformed JSON.
 - Use typed DTOs and whitelist sanitizers, not raw associative provider field bags.
-- Callback failure messages are generic; they must not reveal whether a merchant reference exists.
-- Production configuration validates credential pairing, environment matching, HTTPS, callback route, and confirmed host/IP policy.
+- Production configuration validates credential pairing, environment matching, HTTPS, callback route, and configured host policy.
 
 ## Performance and query requirements
 
@@ -229,43 +230,21 @@ The schedule uses `withoutOverlapping()` and runs only after its queue/worker co
 
 ## Required configuration/readiness
 
-Environment/config may hold only secrets and deployment controls:
+Environment/config may hold only the separate sandbox/production API ID and
+API key pairs plus shared deployment secrets. Stable provider endpoints,
+callback/return routes, host policy, QRIS settlement defaults, and operational
+budgets stay pinned in application configuration.
 
-- separate sandbox/production enabled flags, API ID, API key, base URL;
-- callback/return URL;
-- HTTP connect/request limits, lookup retry budget, lock lease, webhook/status throttle;
-- confirmed allowed hosts and production IP controls.
+Do not add ENV for channel labels, catalog content, price, fee display, or
+customer presentation. Production is enabled automatically when both
+production credentials are present; there is no separate enabled flag.
 
-Do not add ENV for channel labels, catalog content, price, fee display, or customer presentation. If Owner needs a mutable policy, use database setting + Admin UI/version/audit.
+A readiness report must separately assess enabled/configured state, credential
+pair, HTTPS URLs, target runtime environment, callback route, QRIS active
+limits from runtime channel data, fee/currency/expiry contract, schema, and
+queue/scheduler. An unready Sakurupiah selection fails closed; it does not
+resolve to Manual or KlikQRIS.
 
-A readiness report must separately assess enabled/configured state, credential pair, HTTPS URLs, target runtime environment, callback route, QRIS active/limits from runtime channel data, fee/currency/expiry contract, schema, queue/scheduler, and production IP policy. An unready Sakurupiah selection fails closed; it does not resolve to Manual or KlikQRIS.
-
-Production activation additionally requires a versioned, non-secret
-`services.sakurupiah.contract_policy` record. The record must explicitly mark
-all twelve external gates as qualified, provide one redacted evidence reference
-per gate plus a redacted record reference, and contain explicit Owner approval
-for automatic fulfillment. The default policy is unqualified and fail-closed.
-Changing the policy is a release/configuration decision; it must not be exposed
-as an ENV presentation setting or inferred from provider documentation.
-
-## External contract gates
-
-Before production activation, record redacted sandbox evidence for all of these:
-
-1. accepted form encoding for every used endpoint;
-2. exact signature canonicalization and casing;
-3. QRIS availability, min/max, fee payer, total, and currency unit;
-4. expiry range, timezone, and boundary behavior;
-5. create response field presence/type and `trx_id` persistence;
-6. direct QR EMV validity or hosted URL host/token behavior;
-7. status/history amount-bearing authoritative evidence;
-8. duplicate `merchant_ref` and ambiguous-create recovery behavior;
-9. callback body/header/status-code mapping, duplicate delivery, retry/ack behavior;
-10. 200/400 JSON/HTTP semantics, error shape, rate/timeout limits;
-11. production IP allowlist and reverse-proxy source identity;
-12. credential rotation/revocation and support escalation process.
-
-An unresolved financial integrity gate blocks automatic production fulfillment. An owner may approve a documented manual-review-only mode only if customer copy and operations explicitly state the limitation.
 
 ## Test and release acceptance
 
@@ -295,14 +274,19 @@ Run the focused provider suite, full `cd src && composer test`, and `cd src && c
 
 ## Rollout and rollback
 
-1. Deploy code/config/migrations disabled.
-2. Verify readiness, route, schedule, supervisor queue consumption, and health.
-3. Run qualified sandbox end-to-end paths on both Store Bot and Web Storefront.
-4. Enable controlled non-production traffic and observe pending/recovery/verification backlogs, event dedupe, queue depth, and safe presentation.
-5. Owner reviews production contract evidence, then explicitly activates the provider switch.
-6. Perform one controlled low-value production transaction; monitor before broader use.
+1. Deploy code/config/migrations with the production credential pair absent.
+2. Run readiness and health checks.
+3. Run sandbox qualification on a dedicated testing bot and non-production Web Storefront.
+4. Set the complete production credential pair and recreate the app/scheduler.
+5. Verify readiness, callback/reconciliation behavior, queue depth, and safe presentation.
+6. Owner explicitly activates the provider switch and performs one controlled low-value production transaction.
 
-Rollback disables only new Sakurupiah checkout. It never rewrites/deletes historical Payment snapshots, references, events, or credentials needed to reconcile pending rows. Existing Sakurupiah Payments continue reconciliation/manual review. Never compensate an uncertain invoice with a different provider or second Payment.
+Rollback disables only new Sakurupiah checkout by switching provider in Admin
+or removing both production credentials and recreating the app/scheduler. It
+never rewrites/deletes historical Payment snapshots, references, events, or
+credentials needed to reconcile pending rows. Existing Sakurupiah Payments
+continue reconciliation/manual review. Never compensate an uncertain invoice
+with a different provider or second Payment.
 
 ## Non-goals
 
@@ -311,4 +295,4 @@ Rollback disables only new Sakurupiah checkout. It never rewrites/deletes histor
 - Pakasir retirement, schema cleanup, or reclassification of historical rows.
 - Automatic fallback among providers.
 - Multi-channel Sakurupiah selection in V1.
-- Production activation from static documentation alone.
+- Production activation is controlled by the complete production credential pair and the Owner provider switch.

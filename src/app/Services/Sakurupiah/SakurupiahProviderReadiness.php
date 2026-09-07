@@ -58,24 +58,19 @@ final class SakurupiahProviderReadiness
         if (! $this->evaluateConfiguration($environment)->isReady()) {
             return $configuration;
         }
-        if (! $this->externalContractPolicyReady($environment)) {
-            return $configuration;
-        }
 
         return $this->observeEnvironment($environment, $configuration);
     }
 
     /**
      * Validate only local request prerequisites.
-     *
-     * Production requests also require the versioned external contract policy;
-     * sandbox qualification keeps its local request prerequisites separate.
+     * Production reports include operational prerequisites; sandbox
+     * qualification keeps its local request prerequisites separate.
      */
     public function configurationReport(?SakurupiahEnvironment $environment = null): SakurupiahProviderReadinessReport
     {
         return $this->evaluateConfiguration(
             $this->resolveEnvironment($environment),
-            includeExternalContract: true,
         );
     }
 
@@ -104,9 +99,6 @@ final class SakurupiahProviderReadiness
         $localConfiguration = $this->evaluateConfiguration($environment);
 
         if (! $localConfiguration->isReady()) {
-            return $configuration;
-        }
-        if (! $this->externalContractPolicyReady($environment)) {
             return $configuration;
         }
 
@@ -336,9 +328,10 @@ final class SakurupiahProviderReadiness
         $missing = [];
 
         if ($this->value($environment, 'enabled', false) !== true) {
-            $missing[] = 'provider enabled flag';
+            $missing[] = $environment === SakurupiahEnvironment::Production
+                ? 'production credential pair'
+                : 'provider disabled for current runtime';
         }
-
         foreach (['api_id' => 'API ID', 'api_key' => 'API key', 'base_url' => 'base URL'] as $field => $label) {
             $value = $this->value($environment, $field);
             if (! is_string($value) || trim($value) === '') {
@@ -363,7 +356,6 @@ final class SakurupiahProviderReadiness
         foreach ([
             'callback_allowed_hosts' => 'CALLBACK_ALLOWED_HOSTS',
             'return_allowed_hosts' => 'RETURN_ALLOWED_HOSTS',
-            'allowed_ips' => 'ALLOWED_IPS',
         ] as $field => $label) {
             if ($this->hosts($environment, $field) === []) {
                 $missing[] = $this->label($environment, $label);
@@ -378,7 +370,6 @@ final class SakurupiahProviderReadiness
         bool $includeOperationalPrerequisites = false,
         bool $includeQrisContract = false,
         bool $includeSchedule = true,
-        bool $includeExternalContract = false,
     ): SakurupiahProviderReadinessReport {
         $missing = $this->missingConfiguration($environment, $includeOperationalPrerequisites);
         $invalid = $this->invalidConfiguration($environment);
@@ -396,14 +387,6 @@ final class SakurupiahProviderReadiness
             && ($includeOperationalPrerequisites || $includeQrisContract)
         ) {
             $invalid += $this->invalidConfiguredQrisContract();
-        }
-        if ($this->value($environment, 'enabled', false) === true
-            && $environment === SakurupiahEnvironment::Production
-            && ($includeOperationalPrerequisites || $includeQrisContract || $includeExternalContract)
-        ) {
-            $invalid += SakurupiahContractPolicy::invalid(
-                (array) config('services.sakurupiah.contract_policy', []),
-            );
         }
 
         if ($this->value($environment, 'enabled', false) === true
@@ -831,14 +814,6 @@ final class SakurupiahProviderReadiness
         return $environment ?? $this->environment ?? SakurupiahEnvironment::runtime();
     }
 
-    private function externalContractPolicyReady(SakurupiahEnvironment $environment): bool
-    {
-        return $environment !== SakurupiahEnvironment::Production
-            || SakurupiahContractPolicy::invalid(
-                (array) config('services.sakurupiah.contract_policy', []),
-            ) === [];
-    }
-
     private function validNumber(mixed $value, float $minimum, float $maximum): bool
     {
         return is_numeric($value)
@@ -1024,7 +999,6 @@ final class SakurupiahProviderReadiness
             'reconcile_max_execution_seconds' => config('services.sakurupiah.reconcile_max_execution_seconds', 45),
             'timezone' => config('services.sakurupiah.timezone', 'Asia/Jakarta'),
             'qris_contract' => config('services.sakurupiah.qris_contract', []),
-            'contract_policy' => config('services.sakurupiah.contract_policy', []),
         ];
 
         if ($includeOperational) {

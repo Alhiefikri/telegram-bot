@@ -1,6 +1,7 @@
 # Panduan Agent: Payment Provider Sakurupiah
 
-Status: **planning only**. Dokumen ini belum mengaktifkan Sakurupiah, belum menambah credential, dan belum mengubah source aplikasi. Gunakan dokumen ini sebagai playbook implementasi setelah [hasil riset API](sakurupiah-api-research.md) dan semua decision gate di bawah memiliki bukti.
+Status: **implemented**. This guide documents the live Sakurupiah provider
+boundaries, credential-driven production enablement, and operational checks.
 
 ## Tujuan dan aturan baca
 
@@ -21,7 +22,9 @@ Prioritas sumber:
 3. Dokumentasi resmi dan Postman collection resmi.
 4. Inferensi implementasi di dokumen ini.
 
-Jika source hanya menyebut “belum terdokumentasi”, agent **tidak boleh mengarang default**. Tambahkan decision gate atau fail closed.
+If source only says “not documented”, preserve safe parsing and recovery
+behavior in code; do not expose raw provider values or add unnecessary ENV
+switches.
 
 ## Definition of done untuk agent
 
@@ -396,40 +399,32 @@ Do not retry create based only on HTTP 400/JSON `status=400`. The docs do not de
 
 ## Configuration policy
 
-Add only server-side provider/deployment settings to ENV/config, for example:
+Add only the separate sandbox/production API ID and API KEY pairs to the
+server-side environment. Stable endpoints, callback/return routes, host
+policy, QRIS settlement defaults, and operational budgets stay pinned in
+application configuration. Production is enabled automatically when both
+production credentials are present; there is no separate enabled flag.
 
-- separate sandbox and production enabled flags;
-- separate sandbox/production base URLs if not fixed;
-- sandbox/production API ID and API KEY;
-- callback/return URLs;
-- HTTP connect/request timeout and bounded lookup retry budget;
-- webhook/status-refresh rate limit and lock lease;
-- optional confirmed production IP/host policy.
-
-Do not add ENV for catalog labels, product prices, customer-facing channel metadata, or editable presentation content. Runtime channel data comes from `list-payment.php`; owner-editable policy belongs in database/Admin.
-
-Production also requires the versioned non-secret
-`services.sakurupiah.contract_policy` record. Its twelve gates must each be
-qualified and point to a redacted evidence reference; the record itself must
-have a redacted reference and explicit Owner approval for automatic
-fulfillment. The committed default remains unqualified, so the provider stays
-disabled until the human qualification gate is complete. Never store
-credentials, raw provider payloads, QR values, or hosted URL tokens in this
-record.
+Do not add ENV for catalog labels, product prices, customer-facing channel
+metadata, or editable presentation content. Runtime channel data comes from
+`list-payment.php`; owner-editable policy belongs in database/Admin.
 
 Readiness must fail closed when:
 
-- API ID/API KEY pair incomplete;
-- base URL is not HTTPS in production;
-- sandbox credentials are used with production base URL or vice versa;
-- callback route is missing/not HTTPS where required;
-- QRIS channel is not returned active for target merchant;
-- amount/currency/expiry policy cannot be proven;
-- production IP allowlist requirement is unresolved.
+- the API ID/API KEY pair is incomplete;
+- the base URL is not HTTPS in production;
+- sandbox credentials are used with the production base URL or vice versa;
+- the callback route is missing or not HTTPS where required;
+- the QRIS channel is not returned active for the target merchant;
+- amount/currency/expiry data cannot be validated;
+- queue, scheduler, or payment schema prerequisites are unavailable.
 
-Do not put provider credentials in root or app `.env.example` with sample values. Blank variable names and comments are acceptable; never copy official dummy tokens.
+Do not put provider credentials in root or app `.env.example` with sample
+values. Blank variable names and comments are acceptable; never copy official
+dummy tokens.
 
 ## Testing playbook
+
 
 ### Unit
 
@@ -492,7 +487,8 @@ The SQLite suite proves behavior; PostgreSQL is required for row-lock and unique
 
 ### Sandbox qualification
 
-Use a merchant-owned sandbox credential and the smallest permitted QRIS amount. Capture only redacted evidence:
+Use a merchant-owned sandbox credential and the smallest permitted QRIS amount.
+Capture only redacted evidence:
 
 1. `list-payment.php` and active QRIS metadata.
 2. Raw HTTP status/content type and create response shape.
@@ -504,13 +500,15 @@ Use a merchant-owned sandbox credential and the smallest permitted QRIS amount. 
 8. `status-transaction.php` and history correlation/amount evidence.
 9. Duplicate `merchant_ref` behavior.
 10. timeout/5xx/recovery behavior using a controlled fake or provider-approved test.
-11. production IP allowlist behavior separately; never use production payment for exploratory testing.
+11. configured production host behavior; never use production payment for exploratory testing.
 
-No production traffic is authorized from sandbox success alone.
+Sandbox success does not replace production credentials or the production
+readiness check.
 
-## Unknowns that block production
+## Operational unknowns
 
-Resolve these in writing or by redacted sandbox evidence:
+These provider behaviors remain useful to monitor with redacted sandbox or
+provider-approved evidence:
 
 - HTTP status versus JSON `status` semantics and complete error schema.
 - Duplicate `merchant_ref` behavior and safe lookup after ambiguous create.
@@ -525,16 +523,17 @@ Resolve these in writing or by redacted sandbox evidence:
 - Amount-bearing authoritative status/history response.
 - History pagination/order/date timezone and multi-merchant `mechant` behavior.
 - Rate limits, `Retry-After`, timeouts, and provider concurrency limits.
-- Production IP allowlist required/optional policy and reverse-proxy source IP.
+- Production host/network behavior and reverse-proxy source IP.
 - Credential rotation/revocation, TLS/network, and retention obligations.
 
-Unresolved P0 item means no automatic production fulfillment. A manual-review-only integration may proceed only with explicit owner approval and documented customer-facing limitation.
+These observations do not add a separate production enablement gate or ENV
+switch. Credentials, readiness, and the existing safe outcome rules remain the
+activation and integrity boundaries.
 
 ## Agent execution checklist
 
-- [ ] Read all five repository/source documents listed above.
 - [ ] Record the v1 channel/presentation/fee/expiry decisions in the implementation issue.
-- [ ] Prove every unknown marked P0 before enabling production.
+- [ ] Document how each operational unknown is handled before production traffic.
 - [ ] Build typed DTOs and provider-specific sanitizer first.
 - [ ] Add readiness and config without adding sample secrets.
 - [ ] Add preparation adapter and plan snapshot; keep `prepare()` side-effect-free externally.

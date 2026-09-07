@@ -367,18 +367,19 @@ If amount evidence cannot be obtained, retain `Payment Verification Pending`, re
 - provider switch changes only new checkout;
 - existing Sakurupiah Payment continues with its environment/reference snapshot even after switch away;
 - no automatic fallback when readiness/create fails;
-- production flag and credentials stay disabled until sandbox/release gates pass.
+- production enablement follows the complete production credential pair;
+- a missing pair keeps production disabled and a partial pair fails validation.
 
 **Canary:**
 
-1. Deploy code/config with Sakurupiah disabled.
+1. Deploy code/config with the production credential pair absent.
 2. Run migrations only if Phase 3 proves a new schema is necessary.
 3. Run readiness and health checks.
 4. Run sandbox qualification end-to-end.
 5. Enable only for controlled non-production merchant/bot.
 6. Observe create success, callback verification, pending backlog, reconciliation, queue depth, errors, and Telegram/Web safe presentation.
-7. Owner explicitly enables production provider switch.
-8. Execute one low-value controlled production transaction only after all production approvals.
+7. Add the complete production credential pair and recreate the app/scheduler.
+8. Owner selects the production provider switch and performs one controlled low-value transaction.
 9. Monitor before increasing traffic.
 
 ### Phase 7 — Optional additional channels
@@ -450,13 +451,10 @@ Every retry budget must be visible in config/readiness and covered by test. Do n
 
 ### Allowed in ENV/config
 
-- sandbox/production enable flags;
-- sandbox/production API ID and API KEY;
-- fixed provider base URLs or deployment override, always HTTPS in production;
-- callback and return URLs;
+- sandbox/production API ID and API KEY credential pairs;
+- stable provider endpoints, callback/return routes, and host policy pinned in code;
 - HTTP timeout/connect timeout and bounded lookup retry budget;
-- webhook/status refresh rate limits and lock lease;
-- confirmed host/IP allowlist values when they are deployment security controls.
+- webhook/status refresh rate limits and lock lease.
 
 API ID is not a customer-facing value but must still remain server-side. No credential-like value belongs in docs or fixtures.
 
@@ -475,11 +473,12 @@ A Sakurupiah readiness report should separately expose:
 - callback route readiness;
 - target channel active and within current runtime limits;
 - amount/currency/fee/expiry contract readiness;
-- production IP policy status;
 - schema/table/queue/scheduler readiness;
 - last bounded provider observation and safe failure reason.
 
-A provider requested but unready must not silently resolve to Manual or KlikQRIS.
+Production is enabled automatically when both production credentials are
+present. A provider requested but unready must not silently resolve to Manual
+or KlikQRIS.
 
 ## Test plan
 
@@ -579,20 +578,20 @@ Do not use production transactions to discover undocumented behavior.
 ### Rollout
 
 1. Merge research/decision record and contract tests.
-2. Deploy foundation disabled; verify configuration validator, route registration, queue schema, and scheduler list.
+2. Deploy foundation with the production credential pair absent; verify configuration validator, route registration, queue schema, and scheduler list.
 3. Run sandbox qualification on testing bot and non-production Web Storefront.
 4. Enable provider only for controlled non-production traffic.
 5. Verify PaymentEvent, callback dedupe, reconciliation, safe presentation, queue depth, failed jobs, and no duplicate effects.
 6. Run SQLite and PostgreSQL gates.
-7. Owner reviews production credential/IP/fee/expiry/amount evidence.
-8. Deploy production code through existing GitHub Actions/VPS workflow from green `main`.
-9. Keep Sakurupiah disabled until deployment health passes.
-10. Owner enables provider switch and performs one controlled low-value transaction.
+7. Deploy production code through the existing GitHub Actions/VPS workflow from green `main`.
+8. Set the complete production credential pair and recreate the app/scheduler.
+9. Verify deployment health and readiness.
+10. Owner enables the provider switch and performs one controlled low-value transaction.
 11. Monitor pending/outcome-unknown/verification-pending backlog and provider error rate before widening use.
 
 ### Rollback
 
-- Stop new Sakurupiah checkout by switching provider in Admin or disabling provider readiness/feature flag.
+- Stop new Sakurupiah checkout by switching provider in Admin or removing both production credential variables and recreating the app/scheduler.
 - Do not rewrite historical Sakurupiah Payment rows.
 - Continue reconciliation/manual review for existing pending/paid/late payments according to their stored provider.
 - Do not delete provider credentials/config or drop columns while historical rows reference them.
@@ -707,7 +706,7 @@ Any schema change must use expand/contract compatibility and preserve historical
 | Provider fee changes payable total | High | V1 merchant-fee policy + response validation + customer display |
 | Provider expiry longer than local TTL | High | Explicit earliest-deadline/late-payment policy |
 | Untrusted QR/checkout URL | High | EMV/host allowlist, safe DTO, no open redirect |
-| Production IP allowlist mismatch | High | Confirm proxy/IP policy before enablement |
+| Production host/network mismatch | High | Validate HTTPS and configured host policy through readiness |
 | Queue not consumed | High | Reuse monitored queue or add worker with health evidence |
 | Static channel metadata stale | Medium | Runtime list endpoint wins; cache bounded and invalidatable |
 | New provider branch leaks into checkout core | Medium | Preparation seam + provider lifecycle module + deletion test |

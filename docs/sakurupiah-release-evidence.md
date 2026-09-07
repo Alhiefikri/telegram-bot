@@ -2,13 +2,16 @@
 
 Evidence date: 2026-09-05 (UTC)
 
-## Release decision
+## Production activation status
 
-**BLOCKED — do not activate Sakurupiah fulfillment in production.**
+**NOT ACTIVATED — this evidence document contains no production credentials.**
 
-This document records repository and non-production verification evidence. It is not a production authorization. The external qualification gate in [issue #415](https://github.com/alhiefikri/telegram-bot/issues/415) remains open. The checked-in Sakurupiah contract policy is still fail-closed: all required gates are false, no evidence references are recorded, and owner approval is false.
-
-Production activation therefore remains disabled. Do not add credentials, references, or approval metadata to this document.
+This document records repository and non-production verification evidence. It
+is not a production authorization and it never contains API IDs or keys.
+Production `services.sakurupiah.production_enabled` follows the complete
+production credential pair at application startup. After readiness passes, an
+Owner must select Sakurupiah for new checkout in the Admin Payment Provider
+Switch.
 
 ## Automated verification
 
@@ -44,11 +47,13 @@ Sakurupiah webhook verification is explicitly queued on `default`. The release u
 
 The release path must use the supervised `default` queue. Do not move Sakurupiah verification to an unserved queue or add a second worker without updating the readiness contract and release evidence.
 
-## External qualification status
+## External behavior notes
 
-The remaining external gates are tracked in [issue #415](https://github.com/alhiefikri/telegram-bot/issues/415) and the operator procedures in [`runbook-sakurupiah-payment.md`](runbook-sakurupiah-payment.md). Redacted sandbox observations and signature vectors stay in the issue evidence area; raw credentials, full references, callback secrets, and provider tokens do not belong in this repository document.
-
-Open external status includes provider callback acknowledgement/retry behavior, expiry-code contract conflict, timeout/rate-limit behavior, production network/IP and credential lifecycle checks, and explicit owner approval. Non-production qualification may continue, but it does not authorize production fulfillment.
+Sandbox observations and regression evidence are recorded here for operators.
+Production credentials remain deployment-time inputs in the server-side
+environment file. Callback, expiry, timeout, rate-limit, and reconciliation
+behavior remain operational concerns covered by the readiness and health
+commands; they are not separate ENV activation gates.
 
 ## Reproduction commands
 

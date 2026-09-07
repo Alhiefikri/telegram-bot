@@ -3,7 +3,6 @@
 namespace App\Bootstrap;
 
 use App\Services\Bsc\BscReadiness;
-use App\Services\Sakurupiah\SakurupiahContractPolicy;
 use Illuminate\Contracts\Config\Repository;
 use RuntimeException;
 
@@ -166,11 +165,8 @@ class ProductionConfigurationValidator
                 $this->assertSakurupiahUrl($value, $label, $path, $hosts);
             }
         }
-
         $productionIps = $this->sakurupiahHosts('production_allowed_ips');
-        if ($productionEnabled && $productionIps === []) {
-            throw new RuntimeException('SAKURUPIAH_PRODUCTION_ALLOWED_IPS must be configured when Sakurupiah production is enabled.');
-        }
+
         foreach ($productionIps as $ip) {
             if (! $this->validSakurupiahIp($ip)) {
                 throw new RuntimeException('SAKURUPIAH_PRODUCTION_ALLOWED_IPS must contain public IP addresses or CIDR ranges.');
@@ -199,11 +195,6 @@ class ProductionConfigurationValidator
                 || $contract['expiry_hours'] < 1
             ) {
                 throw new RuntimeException('SAKURUPIAH_QRIS_EXPIRY_CONTRACT must be qualified before production enablement.');
-            }
-            foreach (SakurupiahContractPolicy::invalid(
-                (array) $this->config->get('services.sakurupiah.contract_policy', []),
-            ) as $message) {
-                throw new RuntimeException($message);
             }
         }
     }

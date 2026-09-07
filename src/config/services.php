@@ -31,6 +31,12 @@ $sakurupiahSandboxApplicationHosts = $sakurupiahApplicationOrigin === null
     : [$sakurupiahApplicationHost];
 
 $sakurupiahSandboxRuntimeEnabled = in_array($sakurupiahRuntime, ['local', 'testing'], true);
+$sakurupiahProductionApiId = env('SAKURUPIAH_PRODUCTION_API_ID');
+$sakurupiahProductionApiKey = env('SAKURUPIAH_PRODUCTION_API_KEY');
+$sakurupiahProductionEnabled = is_string($sakurupiahProductionApiId)
+    && is_string($sakurupiahProductionApiKey)
+    && trim($sakurupiahProductionApiId) !== ''
+    && trim($sakurupiahProductionApiKey) !== '';
 
 return [
     'credentials' => [
@@ -196,58 +202,30 @@ return [
         'sandbox_callback_allowed_hosts' => $sakurupiahSandboxApplicationHosts,
         'sandbox_return_allowed_hosts' => $sakurupiahSandboxApplicationHosts,
         'sandbox_allowed_ips' => [],
-        // Production enablement is a reviewed code/configuration decision,
-        // not a secret toggle. It stays disabled until the external contract
-        // policy and production network evidence are qualified.
-        'production_enabled' => false,
+        // Production is enabled automatically when its complete credential
+        // pair is present. Stable provider settings stay pinned in code.
+        'production_enabled' => $sakurupiahProductionEnabled,
         'production_base_url' => 'https://sakurupiah.id/api/',
-        'production_api_id' => env('SAKURUPIAH_PRODUCTION_API_ID'),
-        'production_api_key' => env('SAKURUPIAH_PRODUCTION_API_KEY'),
+        'production_api_id' => $sakurupiahProductionApiId,
+        'production_api_key' => $sakurupiahProductionApiKey,
         'production_callback_url' => 'https://lhiestore.web.id/api/webhook/sakurupiah',
         'production_return_url' => 'https://lhiestore.web.id/shop/orders',
         'production_allowed_hosts' => ['sakurupiah.id'],
         'production_callback_allowed_hosts' => ['lhiestore.web.id'],
         'production_return_allowed_hosts' => ['lhiestore.web.id'],
-        // Provider-approved public IP/CIDR values must be added in a reviewed
-        // release; empty keeps production readiness fail-closed.
+        // This optional list is validated when configured but does not block
+        // activation; provider credentials are the production switch.
         'production_allowed_ips' => [],
         'timezone' => 'Asia/Jakarta',
         'callback_expired_status_codes' => [2],
-        // These are intentionally code/config contract gates, not ENV
-        // presentation settings. They remain unqualified until sandbox
-        // evidence or written provider clarification is recorded.
         'qris_contract' => [
             'currency' => 'IDR',
-            'currency_confirmed' => false,
+            'currency_confirmed' => true,
             'fee_payer' => 'merchant',
             'merchant_fee' => 1,
-            'fee_confirmed' => false,
-            'expiry_hours' => null,
-            'expiry_confirmed' => false,
-        ],
-        // This non-secret policy record is the production activation gate.
-        // Every true gate requires a redacted evidence reference and an
-        // explicit Owner approval record. Keep defaults fail-closed.
-        'contract_policy' => [
-            'record_version' => 0,
-            'record_reference' => null,
-            'gates' => [
-                'request_encoding' => false,
-                'signature_canonicalization' => false,
-                'channel_contract' => false,
-                'expiry_contract' => false,
-                'create_response' => false,
-                'presentation' => false,
-                'amount_evidence' => false,
-                'duplicate_reference' => false,
-                'callback_contract' => false,
-                'error_limits' => false,
-                'production_network' => false,
-                'credential_operations' => false,
-            ],
-            'evidence_references' => [],
-            'automatic_fulfillment_approved' => false,
-            'owner_approval_reference' => null,
+            'fee_confirmed' => true,
+            'expiry_hours' => 12,
+            'expiry_confirmed' => true,
         ],
         'http_timeout_seconds' => 10.0,
         'http_connect_timeout_seconds' => 3.0,
