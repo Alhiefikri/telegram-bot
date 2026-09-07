@@ -271,9 +271,9 @@ class SakurupiahInvoiceLifecyclePostgresConcurrencyTest extends TestCase
             'provider' => PaymentProvider::SAKURUPIAH,
             'merchant_ref' => $merchantRef,
             'provider_reference' => 'trx-pg-416',
-            'provider_payment_method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'provider_payment_method' => SakurupiahCreateInvoice::METHOD_QRISC,
             'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_CREATED,
-            'method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'method' => SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS,
             'amount' => $amount,
             'currency' => 'IDR',
             'status' => PaymentStatus::Pending,
@@ -560,7 +560,7 @@ final class DatabaseBackedSakurupiahProviderAdapter implements SakurupiahProvide
         return new SakurupiahInvoice(
             trxId: 'trx-pg-411',
             merchantRef: $invoice->merchantRef,
-            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
             status: SakurupiahTransactionStatus::Pending,
             total: SakurupiahAmount::from(12084),
             amount: SakurupiahAmount::from(12000),
@@ -582,7 +582,7 @@ final class DatabaseBackedSakurupiahProviderAdapter implements SakurupiahProvide
         return new SakurupiahStatus(
             trxId: $trxId,
             status: SakurupiahTransactionStatus::Successful,
-            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
             amount: SakurupiahAmount::from(12000),
             sanitizedPayload: [
                 'trx_id' => $trxId,

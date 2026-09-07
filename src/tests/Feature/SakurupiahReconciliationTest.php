@@ -477,11 +477,11 @@ class SakurupiahReconciliationTest extends TestCase
             'provider' => PaymentProvider::SAKURUPIAH,
             'merchant_ref' => 'SAKU-'.$order->id,
             'provider_reference' => 'trx-saku-'.$order->id,
-            'provider_payment_method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'provider_payment_method' => SakurupiahCreateInvoice::METHOD_QRISC,
             'provider_total_payment' => $amount + 84,
             'provider_fee' => 84,
             'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_CREATED,
-            'method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'method' => SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS,
             'amount' => $amount,
             'currency' => 'IDR',
             'status' => PaymentStatus::Pending,
@@ -497,7 +497,7 @@ class SakurupiahReconciliationTest extends TestCase
         $data = [
             'trx_id' => $payment->provider_reference,
             'merchant_ref' => $payment->merchant_ref,
-            'payment_kode' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'payment_kode' => SakurupiahCreateInvoice::METHOD_QRISC,
             'payment_status' => $status->value,
         ];
         if ($amount !== null) {
@@ -508,7 +508,7 @@ class SakurupiahReconciliationTest extends TestCase
             trxId: (string) $payment->provider_reference,
             status: $status,
             merchantRef: (string) $payment->merchant_ref,
-            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
             amount: $amount === null ? null : SakurupiahAmount::from($amount),
             sanitizedPayload: ['status' => '200', 'data' => [$data]],
         );

@@ -4,6 +4,7 @@ namespace App\Services\Checkout;
 
 use App\Exceptions\InvalidCheckout;
 use App\Services\Checkout\PaymentPlan\SakurupiahCheckoutPaymentSnapshot;
+use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahProviderReadinessReport;
 use App\Support\PaymentProvider;
@@ -11,7 +12,7 @@ use Illuminate\Support\Collection;
 
 final readonly class SakurupiahCheckoutPaymentPreparation implements CheckoutPaymentPreparation
 {
-    public const METHOD = 'QRIS';
+    public const METHOD = SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS;
 
     public const PAYMENT_CURRENCY = 'IDR';
 

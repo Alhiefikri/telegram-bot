@@ -186,7 +186,7 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    private function configureReadySakurupiah(int $minimum = 500, int $maximum = 2_000_000): void
+    private function configureReadySakurupiah(int $minimum = 200, int $maximum = 20_000_000): void
     {
         config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
             'sandbox_enabled' => true,
@@ -206,8 +206,8 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
         Http::fake(fn () => Http::response([
             'status' => '200',
             'data' => [[
-                'kode' => 'QRIS',
-                'nama' => 'QRIS',
+                'kode' => 'QRISC',
+                'nama' => 'QRISC Custom Merchant',
                 'minimal' => $minimum,
                 'maksimal' => $maximum,
                 'tipe' => 'DIRECT',

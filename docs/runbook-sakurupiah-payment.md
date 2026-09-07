@@ -196,6 +196,14 @@ Capture only redacted evidence. Key steps:
 
 Never use a production transaction to discover undocumented provider behavior.
 
+### Channel correction
+
+The historical observations below exercised provider code `QRIS`. The merchant
+has now confirmed that the approved channel is `QRISC` (`QRIS Custom Merchant`,
+minimum `200`, maximum `20,000,000`, `0.7%`, additional fee `100`, settlement
+`H+1`). Those earlier `QRIS` observations are not qualification evidence for
+`QRISC`; current application requests and readiness selection target `QRISC`.
+
 ### Latest redacted sandbox observation
 
 On 2026-09-04, the sandbox readiness check loaded the root Compose

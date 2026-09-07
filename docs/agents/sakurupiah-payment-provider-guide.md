@@ -43,18 +43,29 @@ Implementasi baru boleh dianggap siap hanya jika semua kondisi ini terbukti:
 
 ## Keputusan scope yang direkomendasikan
 
-### V1: satu channel QRIS
+### V1: satu channel QRIS yang disetujui
 
 Gunakan scope paling kecil yang cocok dengan arsitektur saat ini:
 
 - `Payment.provider = sakurupiah`.
-- `Payment.method = QRIS` sebagai kode channel provider yang dikonfirmasi aktif.
-- `Payment.currency = IDR` hanya setelah merchant mengonfirmasi bahwa `amount` memang rupiah integer.
-- Checkout customer tetap memilih rail QRIS yang sama; jangan menambah pemilih 17 channel baru pada release pertama.
-- `merchant_fee = 1` direkomendasikan agar beban fee berada di merchant dan nominal customer tetap sama dengan amount Order. Ini harus dikonfirmasi lewat sandbox karena response provider memiliki `total`, `fee`, dan `amount_merchant` dengan aturan yang belum lengkap.
-- Channel, fee, dan expiry bukan data katalog. Jangan menambah ENV untuk label/price/channel presentation. Jika nantinya harus dapat diubah Owner, simpan di setting database/Admin; credential dan deployment knobs tetap server-side.
+- `Payment.method = QRIS` sebagai identitas rail customer lokal.
+- Request provider Sakurupiah memakai `method=QRISC`, yaitu channel yang
+  dikonfirmasi aktif dan disetujui untuk merchant target.
+- `Payment.currency = IDR` hanya setelah merchant mengonfirmasi bahwa `amount`
+  memang rupiah integer.
+- Checkout customer tetap memilih rail QRIS yang sama; jangan menambah pemilih
+  17 channel baru pada release pertama.
+- `merchant_fee = 1` direkomendasikan agar beban fee berada di merchant dan
+  nominal customer tetap sama dengan amount Order. Ini harus dikonfirmasi lewat
+  sandbox karena response provider memiliki `total`, `fee`, dan `amount_merchant`
+  dengan aturan yang belum lengkap.
+- Channel, fee, dan expiry bukan data katalog. Jangan menambah ENV untuk
+  label/price/channel presentation. Jika nantinya harus dapat diubah Owner,
+  simpan di setting database/Admin; credential dan deployment knobs tetap
+  server-side.
 
-Mengapa QRIS dulu: provider mendokumentasikan field `qr` khusus QRIS, channel type `DIRECT`, dan channel limits dinamis. Ini menghindari UI channel-selection, fulfillment copy, dan status policy yang belum ada di repository. Dukungan VA/e-wallet/retail adalah fase terpisah.
+QRISC dipilih karena provider target memiliki beberapa varian QRIS aktif;
+readiness harus memilih tepat QRISC dan menolak channel set yang ambigu.
 
 ### Keputusan presentasi yang wajib ditutup
 
@@ -146,7 +157,7 @@ Field yang didokumentasikan:
 | Field | Rule provider | Kebijakan adapter |
 | --- | --- | --- |
 | `api_id` | Required | Ambil dari environment target |
-| `method` | Required channel code | V1 fixed `QRIS`; validasi channel runtime |
+| `method` | Required channel code | V1 fixed `QRISC`; validasi channel runtime |
 | `name` | Optional | Kirim buyer name bila contract/privacy mengizinkan |
 | `email` | Optional | Kirim hanya bila diperlukan; jangan log |
 | `phone` | Required; contoh `08`, `62`, `60` | Perlakukan sebagai string, normalisasi hanya setelah dikonfirmasi |
@@ -295,8 +306,8 @@ Gunakan existing fields terlebih dahulu; migration baru hanya jika evidence memb
 | `provider` | `sakurupiah` | Immutable provenance |
 | `merchant_ref` | local generated reference | Idempotency/correlation key |
 | `provider_reference` | `trx_id` | Required before status lookup |
-| `method` | `QRIS` v1 | Customer rail identity |
-| `provider_payment_method` | `payment_kode` | Preserve provider code |
+| `method` | `QRIS` | Customer rail identity |
+| `provider_payment_method` | `QRISC` from `payment_kode` | Preserve exact approved provider code |
 | `amount` | local Order payable amount | Integer only after IDR confirmation |
 | `currency` | `IDR` v1 | No provider currency field; gate required |
 | `provider_total_payment` | validated response `total` | Never blindly cast untrusted value |

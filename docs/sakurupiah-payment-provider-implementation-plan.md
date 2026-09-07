@@ -18,17 +18,21 @@ Sakurupiah memakai API invoice berbasis bearer token + HMAC, callback JSON, dan 
 
 ## Keputusan utama
 
-### 1. V1 hanya satu channel QRIS
+### 1. V1 satu channel QRIS provider
 
 Release awal menggunakan:
 
 - provider identity `sakurupiah`;
-- provider method `QRIS`;
+- local payment method `QRIS`;
+- provider API method `QRISC`, yaitu channel yang disetujui merchant target;
 - currency lokal `IDR` **hanya setelah dikonfirmasi oleh merchant test/provider**;
 - `merchant_fee = 1` sebagai default kebijakan awal agar fee ditanggung merchant dan nominal customer tetap sama dengan Order;
 - provider switch Owner yang berlaku hanya untuk checkout baru.
 
-Dukungan DANA, GOPAY, ShopeePay, Virtual Account, Alfamart, Indomaret, QRISMU, QRIS2, QRISC, atau channel lain bukan bagian V1. Setiap channel tambahan mempunyai mode `DIRECT`/`REDIRECT`, batas, fee, expiry, dan copy instruksi sendiri; perlu qualification dan acceptance terpisah.
+Dukungan DANA, GOPAY, ShopeePay, Virtual Account, Alfamart, Indomaret,
+QRISMU, QRIS2, channel QRIS generic, atau channel lain bukan bagian V1.
+Setiap channel tambahan mempunyai mode `DIRECT`/`REDIRECT`, batas, fee,
+expiry, dan copy instruksi sendiri; perlu qualification dan acceptance terpisah.
 
 ### 2. Provider memiliki module sendiri
 
@@ -149,7 +153,7 @@ Dokumen provider yang tidak menjawab gate bukan bukti bahwa behavior aman.
 
 1. Buat sandbox merchant terpisah dari production.
 2. Panggil `list-payment.php`; simpan hanya metadata redacted dan hash reference.
-3. Konfirmasi channel `QRIS`, `tipe`, current min/max, fee, `addition.default_expired`, dan status aktif.
+3. Konfirmasi channel `QRISC`, `tipe`, current min/max, fee, `addition.default_expired`, dan status aktif.
 4. Uji `create.php` dengan nominal terkecil yang diizinkan.
 5. Uji signature dengan method dan amount representation yang sama persis dengan request.
 6. Capture raw HTTP status, content type, JSON root status, response fields, date/time/expiry, `trx_id`, `merchant_ref`, `qr`, dan `checkout_url` tanpa menyalin secret/token.
@@ -206,7 +210,7 @@ Client bertanggung jawab atas HTTP transport, bearer header, body `api_id`, form
 **Perubahan:**
 
 - tambah `PaymentProvider::SAKURUPIAH`, `known()`, `allowed()` sesuai feature/readiness policy, dan label;
-- tambah `SakurupiahCheckoutIntent` atau intent provider-bound yang mengembalikan `provider=sakurupiah`, `method=QRIS`, dan post-creation behavior baru;
+- tambah `SakurupiahCheckoutIntent` atau intent provider-bound yang mengembalikan `provider=sakurupiah`, local `method=QRIS`, provider API method `QRISC`, dan post-creation behavior baru;
 - tambah `SakurupiahCheckoutPaymentPreparation`;
 - tambah `PaymentPlan/SakurupiahCheckoutPaymentSnapshot`;
 - register adapter pada `CheckoutPaymentPreparationResolver` di `AppServiceProvider`;
@@ -460,7 +464,7 @@ API ID is not a customer-facing value but must still remain server-side. No cred
 
 ### Not allowed as new presentation ENV
 
-Do not introduce ENV for product names, prices, icons, channel marketing labels, or other Admin-editable catalogue data. V1 channel `QRIS` may remain a typed provider constant. If Owner must change channel, fee payer, or expiry policy, add a database setting and Admin workflow with version/audit/optimistic locking rather than a rebuild-only environment switch.
+- Do not introduce ENV for product names, prices, icons, channel marketing labels, or other Admin-editable catalogue data. The local rail remains `QRIS`; the provider method is the typed `QRISC` constant. If Owner must change channel, fee payer, or expiry policy, add a database setting and Admin workflow with version/audit/optimistic locking rather than a rebuild-only environment switch.
 
 ### Readiness
 

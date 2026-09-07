@@ -377,10 +377,10 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             'https://sakurupiah.id/api-sanbox/list-payment.php' => Http::response([
                 'status' => '200',
                 'data' => [[
-                    'kode' => 'QRIS',
-                    'nama' => 'QRIS',
-                    'minimal' => 500,
-                    'maksimal' => 2_000_000,
+                    'kode' => 'QRISC',
+                    'nama' => 'QRISC Custom Merchant',
+                    'minimal' => 200,
+                    'maksimal' => 20_000_000,
                     'tipe' => 'DIRECT',
                     'status' => 'Aktif',
                     'addition' => ['default_expired' => 1],

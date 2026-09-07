@@ -12,13 +12,13 @@ class SakurupiahSignatureTest extends TestCase
     {
         $signature = SakurupiahSignature::invoice(
             apiId: 'api-test',
-            method: 'QRIS',
+            method: 'QRISC',
             merchantRef: 'INV-408',
             amountSubmitted: '0012000',
             apiKey: 'secret-key',
         );
 
-        $this->assertSame('b391f6c916a551d6deb83d37e408f5616b1566094f137528f536ce7a50e49054', $signature);
+        $this->assertSame('b6bc2c4327846d2cd5c661a7ed9a5c1b2537512837a36bc6b709060776f544c2', $signature);
     }
 
     public function test_callback_signature_uses_raw_body_without_reencoding(): void
@@ -39,6 +39,6 @@ class SakurupiahSignatureTest extends TestCase
         $this->assertFalse(SakurupiahSignature::verifyCallback('body', 'signature', ''));
 
         $this->expectException(InvalidArgumentException::class);
-        SakurupiahSignature::invoice('api-test', 'QRIS', 'INV-408', '12.50', 'secret-key');
+        SakurupiahSignature::invoice('api-test', 'QRISC', 'INV-408', '12.50', 'secret-key');
     }
 }

@@ -149,7 +149,7 @@ class SakurupiahStorefrontTest extends TestCase
             trxId: (string) $payment->provider_reference,
             status: SakurupiahTransactionStatus::Pending,
             merchantRef: (string) $payment->merchant_ref,
-            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
             amount: SakurupiahAmount::from(20_000),
             occurredAt: CarbonImmutable::now()->subMinute(),
             expiresAt: $payment->expired_at->toImmutable(),
@@ -157,7 +157,7 @@ class SakurupiahStorefrontTest extends TestCase
                 'data' => [[
                     'trx_id' => $payment->provider_reference,
                     'merchant_ref' => $payment->merchant_ref,
-                    'payment_kode' => 'QRIS',
+                    'payment_kode' => 'QRISC',
                     'payment_status' => 'pending',
                     'total' => '20450',
                     'fee' => '450',
@@ -196,7 +196,7 @@ class SakurupiahStorefrontTest extends TestCase
             trxId: (string) $payment->provider_reference,
             status: SakurupiahTransactionStatus::Pending,
             merchantRef: (string) $payment->merchant_ref,
-            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
             amount: SakurupiahAmount::from(20_000),
             occurredAt: CarbonImmutable::now()->subMinute(),
             expiresAt: $payment->expired_at->toImmutable(),
@@ -204,7 +204,7 @@ class SakurupiahStorefrontTest extends TestCase
                 'data' => [[
                     'trx_id' => $payment->provider_reference,
                     'merchant_ref' => $payment->merchant_ref,
-                    'payment_kode' => 'QRIS',
+                    'payment_kode' => 'QRISC',
                     'payment_status' => 'pending',
                     'total' => '20450',
                     'fee' => '450',
@@ -269,10 +269,10 @@ class SakurupiahStorefrontTest extends TestCase
 
         $payment = Payment::factory()->for($order)->create(array_merge([
             'provider' => 'sakurupiah',
-            'method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'method' => SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS,
             'merchant_ref' => $invoiceNumber,
             'provider_reference' => 'trx-'.$invoiceNumber,
-            'provider_payment_method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'provider_payment_method' => SakurupiahCreateInvoice::METHOD_QRISC,
             'provider_total_payment' => 20_450,
             'provider_fee' => 450,
             'provider_created_at' => now()->subMinute(),
@@ -282,7 +282,7 @@ class SakurupiahStorefrontTest extends TestCase
                 'data' => [[
                     'trx_id' => 'trx-'.$invoiceNumber,
                     'merchant_ref' => $invoiceNumber,
-                    'payment_kode' => 'QRIS',
+                    'payment_kode' => 'QRISC',
                     'payment_status' => 'pending',
                     'total' => '20450',
                     'fee' => '450',

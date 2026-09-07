@@ -503,7 +503,7 @@ final class SakurupiahInvoiceLifecycleService
             $payment,
             function (Order $order, Payment $lockedPayment) use ($invoice, $state, $reason, $payable): void {
                 $merchantMatches = $invoice->merchantRef === (string) $lockedPayment->merchant_ref;
-                $methodMatches = strtoupper($invoice->paymentCode) === SakurupiahCreateInvoice::METHOD_QRIS;
+                $methodMatches = strtoupper($invoice->paymentCode) === SakurupiahCreateInvoice::METHOD_QRISC;
                 $referenceMatches = blank($lockedPayment->provider_reference)
                     || $lockedPayment->provider_reference === $invoice->trxId;
 
@@ -745,7 +745,7 @@ final class SakurupiahInvoiceLifecycleService
             }
 
             return new SakurupiahCreateInvoice(
-                method: SakurupiahCreateInvoice::METHOD_QRIS,
+                method: SakurupiahCreateInvoice::METHOD_QRISC,
                 phone: $phone,
                 amount: (int) $payment->amount,
                 merchantFee: $merchantFee,
@@ -766,7 +766,7 @@ final class SakurupiahInvoiceLifecycleService
     private function classifyLocalState(Payment $payment): ?SakurupiahInvoiceOutcome
     {
         if ($payment->provider !== PaymentProvider::SAKURUPIAH
-            || strtoupper(trim((string) $payment->method)) !== SakurupiahCreateInvoice::METHOD_QRIS
+            || strtoupper(trim((string) $payment->method)) !== SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS
             || strtoupper(trim((string) $payment->currency)) !== 'IDR') {
             return SakurupiahInvoiceOutcome::InvalidProviderResult;
         }
@@ -906,7 +906,7 @@ final class SakurupiahInvoiceLifecycleService
         }
 
         if ($status->paymentCode !== null
-            && strtoupper($status->paymentCode) !== SakurupiahCreateInvoice::METHOD_QRIS) {
+            && strtoupper($status->paymentCode) !== SakurupiahCreateInvoice::METHOD_QRISC) {
             return 'payment_method_mismatch';
         }
         if ($status->currency !== null
@@ -931,7 +931,7 @@ final class SakurupiahInvoiceLifecycleService
             trxId: $status->trxId,
             merchantRef: $status->merchantRef ?? (string) $payment->merchant_ref,
             paymentCode: $status->paymentCode === null
-                ? SakurupiahCreateInvoice::METHOD_QRIS
+                ? SakurupiahCreateInvoice::METHOD_QRISC
                 : strtoupper($status->paymentCode),
             status: $status->status,
             total: $status->total,

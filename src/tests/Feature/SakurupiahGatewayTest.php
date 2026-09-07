@@ -48,7 +48,7 @@ class SakurupiahGatewayTest extends TestCase
             'data' => [[
                 'trx_id' => 'trx-408',
                 'merchant_ref' => 'INV-408',
-                'payment_kode' => 'QRIS',
+                'payment_kode' => 'QRISC',
                 'payment_status' => 'pending',
                 'amount' => '0012000',
                 'total' => '12084',
@@ -70,14 +70,14 @@ class SakurupiahGatewayTest extends TestCase
             && $request->hasHeader('Content-Type', 'application/x-www-form-urlencoded')
             && $request->hasHeader('Accept', 'application/json')
             && $request['api_id'] === 'api-test'
-            && $request['method'] === 'QRIS'
+            && $request['method'] === 'QRISC'
             && $request['phone'] === '08123456789'
             && $request['amount'] === '0012000'
             && $request['merchant_fee'] === 1
             && $request['merchant_ref'] === 'INV-408'
             && $request['callback_url'] === 'https://store.example.test/api/webhook/sakurupiah'
             && $request['return_url'] === 'https://store.example.test/shop/orders/INV-408'
-            && $request['signature'] === 'b391f6c916a551d6deb83d37e408f5616b1566094f137528f536ce7a50e49054');
+            && $request['signature'] === 'b6bc2c4327846d2cd5c661a7ed9a5c1b2537512837a36bc6b709060776f544c2');
     }
 
     public function test_list_channels_posts_provider_path_and_returns_typed_metadata(): void
@@ -85,10 +85,10 @@ class SakurupiahGatewayTest extends TestCase
         Http::fake(fn () => Http::response([
             'status' => '200',
             'data' => [[
-                'kode' => 'QRIS',
-                'nama' => 'QRIS',
-                'minimal' => '500',
-                'maksimal' => 2_000_000,
+                'kode' => 'QRISC',
+                'nama' => 'QRISC Custom Merchant',
+                'minimal' => '200',
+                'maksimal' => 20_000_000,
                 'biaya' => '0.7%',
                 'percent' => '0.7',
                 'tipe' => 'DIRECT',
@@ -102,7 +102,7 @@ class SakurupiahGatewayTest extends TestCase
         $this->assertCount(1, $channels);
         $this->assertTrue($channels[0]->isQris());
         $this->assertTrue($channels[0]->isActive());
-        $this->assertSame(500, $channels[0]->minimumAmount());
+        $this->assertSame(200, $channels[0]->minimumAmount());
         $this->assertSame('0.7%', $channels[0]->fee?->submitted());
         $this->assertSame('0.7', $channels[0]->percent);
         Http::assertSent(fn ($request) => $request->url() === 'https://sakurupiah.id/api-sanbox/list-payment.php'
@@ -263,7 +263,7 @@ class SakurupiahGatewayTest extends TestCase
             'data' => [[
                 'trx_id' => 'trx-408',
                 'merchant_ref' => 'INV-408',
-                'payment_kode' => 'QRIS',
+                'payment_kode' => 'QRISC',
                 'amount' => '12000',
                 'status' => 'pending',
             ]],
@@ -288,7 +288,7 @@ class SakurupiahGatewayTest extends TestCase
     private function invoice(): SakurupiahCreateInvoice
     {
         return new SakurupiahCreateInvoice(
-            method: 'QRIS',
+            method: 'QRISC',
             phone: '08123456789',
             amount: '0012000',
             merchantFee: 1,

@@ -15,6 +15,12 @@ Switch.
 
 ## Current blocker resolution update
 
+The earlier sandbox evidence in this document used provider code `QRIS`. The
+merchant has since confirmed that the approved channel is `QRISC`; the
+application now separates local rail `QRIS` from provider API method `QRISC`.
+The earlier invalid-presentation result therefore does not establish that
+`QRISC` itself returns an invalid presentation.
+
 The checkout lifecycle now exposes a distinct `provider_presentation_pending`
 safe outcome when a provider reference exists but QR/hosted presentation fails
 local validation. The Payment stays pending; no raw QR, hosted URL, token,
@@ -52,11 +58,12 @@ The external qualification matrix remains open. The sanitized matrix
 `qualified=false`: request encoding, signature canonicalization, channel
 contract, expiry contract, create response, presentation, amount evidence,
 duplicate reference, callback contract, error limits, production network, and
-credential operations. This update adds sandbox observations but does not
-qualify any of those gates. In particular, the provider must still supply a
-valid EMV QRIS payload or an approved non-tokenized hosted presentation before
-a new checkout can become payable. Callback delivery/acknowledgement and Owner
-production approval remain unobserved. Production remains **NOT ACTIVATED**.
+credential operations. This matrix remains unqualified. Because those
+observations used the former `QRIS` provider code, a new QRISC-specific run is
+required. The provider must supply a valid EMV QRIS payload for channel
+`QRISC` or an approved non-tokenized hosted presentation before a new checkout
+can become payable. Callback delivery/acknowledgement and Owner production
+approval remain unobserved. Production remains **NOT ACTIVATED**.
 
 ## Current verification rerun
 

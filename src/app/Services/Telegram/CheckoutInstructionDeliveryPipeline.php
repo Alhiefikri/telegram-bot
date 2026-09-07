@@ -203,7 +203,7 @@ final class CheckoutInstructionDeliveryPipeline
                 && $payment->method === 'QR_MANUAL',
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT => static fn (Payment $payment): bool => $payment->provider === PaymentProvider::KLIKQRIS,
             TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT => static fn (Payment $payment): bool => $payment->provider === PaymentProvider::SAKURUPIAH
-                && strtoupper((string) $payment->method) === SakurupiahCreateInvoice::METHOD_QRIS,
+                && strtoupper((string) $payment->method) === SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS,
             TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => static fn (Payment $payment): bool => $payment->provider === PaymentProvider::PAKASIR,
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT => static fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL
                 && $payment->method === 'BINANCE_PAY_ID',

@@ -378,9 +378,9 @@ USDT BEP20 memakai `provider=manual`, `method=USDT_BEP20`, dan authority BNB Sma
 ### 5.7 Sakurupiah QRIS
 
 Sakurupiah is an Owner-selectable provider for new QRIS checkout
-(`provider=sakurupiah`, `method=QRIS`, `currency=IDR`). Checkout preparation,
-post-commit invoice lifecycle, callback verification, and safe presentation
-live in [`src/app/Services/Sakurupiah/`](../../src/app/Services/Sakurupiah/).
+(`provider=sakurupiah`, local `method=QRIS`, provider API `method=QRISC`,
+`currency=IDR`). Checkout preparation, post-commit invoice lifecycle, callback
+verification, and safe presentation live in [`src/app/Services/Sakurupiah/`](../../src/app/Services/Sakurupiah/).
 `SakurupiahInvoiceLifecycleService` owns create/recovery and classifies only
 safe outcomes (`Payable` carries presentation; all other states carry no
 provider payload).

@@ -45,7 +45,7 @@ final class SakurupiahReconciliationQuery
             ->select(self::PAYMENT_COLUMNS)
             ->where('provider', PaymentProvider::SAKURUPIAH)
             ->whereNotNull('merchant_ref')
-            ->where('method', SakurupiahCreateInvoice::METHOD_QRIS)
+            ->where('method', SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS)
             ->where('currency', 'IDR')
             ->where(function (Builder $query) use ($releasedCutoff): void {
                 $query

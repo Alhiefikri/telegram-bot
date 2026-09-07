@@ -89,7 +89,7 @@ final readonly class SakurupiahChannel
 
     public function isQris(): bool
     {
-        return strtoupper($this->code) === 'QRIS';
+        return strtoupper($this->code) === SakurupiahCreateInvoice::METHOD_QRISC;
     }
 
     public function minimumAmount(): int

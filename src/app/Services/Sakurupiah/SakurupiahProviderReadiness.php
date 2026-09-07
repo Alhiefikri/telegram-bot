@@ -15,7 +15,7 @@ use Throwable;
 
 final class SakurupiahProviderReadiness
 {
-    public const QRIS_METHOD = 'QRIS';
+    public const QRIS_METHOD = SakurupiahCreateInvoice::METHOD_QRISC;
 
     private const CACHE_VERSION_KEY = 'sakurupiah.readiness.version';
 

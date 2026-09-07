@@ -76,7 +76,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
 
         $payment->refresh();
         $this->assertSame('trx-411', $payment->provider_reference);
-        $this->assertSame('QRIS', $payment->provider_payment_method);
+        $this->assertSame('QRISC', $payment->provider_payment_method);
         $this->assertSame(12084, $payment->provider_total_payment);
         $this->assertSame(84, $payment->provider_fee);
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->provider_create_state);
@@ -103,7 +103,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $invoice = new SakurupiahInvoice(
             trxId: 'trx-411-qris',
             merchantRef: (string) $payment->merchant_ref,
-            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
             status: SakurupiahTransactionStatus::Pending,
             total: 20450,
             amount: 20000,
@@ -130,7 +130,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $invoice = new SakurupiahInvoice(
             trxId: 'trx-411-query',
             merchantRef: (string) $payment->merchant_ref,
-            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
             status: SakurupiahTransactionStatus::Pending,
             total: 12084,
             amount: 12000,
@@ -161,7 +161,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
             'data' => [[
                 'trx_id' => 'trx-411',
                 'merchant_ref' => $payment->merchant_ref,
-                'payment_kode' => 'QRIS',
+                'payment_kode' => 'QRISC',
                 'payment_status' => 'pending',
                 'amount' => '12000',
                 'total' => '12084',
@@ -178,7 +178,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->assertSame(SakurupiahInvoiceOutcome::Payable, $result->outcome());
         Http::assertSentCount(1);
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/create.php')
-            && $request['method'] === 'QRIS'
+            && $request['method'] === 'QRISC'
             && $request['merchant_ref'] === $payment->merchant_ref
             && $request['amount'] === '12000');
     }
@@ -222,7 +222,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
             'data' => [[
                 'trx_id' => 'trx-411',
                 'merchant_ref' => $payment->merchant_ref,
-                'payment_kode' => 'QRIS',
+                'payment_kode' => 'QRISC',
                 'payment_status' => 'pending',
             ]],
         ], 200));
@@ -296,7 +296,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
             trxId: 'trx-411',
             status: SakurupiahTransactionStatus::Pending,
             merchantRef: (string) $payment->merchant_ref,
-            paymentCode: 'QRIS',
+            paymentCode: 'QRISC',
             amount: SakurupiahAmount::from(12000),
             occurredAt: CarbonImmutable::now()->subMinute(),
             expiresAt: CarbonImmutable::now()->addDay(),
@@ -305,7 +305,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
                 'data' => [[
                     'trx_id' => 'trx-411',
                     'merchant_ref' => $payment->merchant_ref,
-                    'payment_kode' => 'QRIS',
+                    'payment_kode' => 'QRISC',
                     'payment_status' => 'pending',
                     'amount' => '12000',
                     'total' => '12084',
@@ -452,7 +452,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         return Payment::factory()->for($order, 'order')->create(array_merge([
             'provider' => PaymentProvider::SAKURUPIAH,
             'merchant_ref' => 'INV-411',
-            'method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'method' => SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS,
             'amount' => $amount,
             'currency' => 'IDR',
             'status' => PaymentStatus::Pending,
@@ -469,7 +469,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         return new SakurupiahInvoice(
             trxId: 'trx-411',
             merchantRef: (string) $payment->merchant_ref,
-            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
             status: SakurupiahTransactionStatus::Pending,
             total: $total,
             amount: 12000,
@@ -482,7 +482,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
                 'data' => [[
                     'trx_id' => 'trx-411',
                     'merchant_ref' => $payment->merchant_ref,
-                    'payment_kode' => 'QRIS',
+                    'payment_kode' => 'QRISC',
                     'payment_status' => 'pending',
                     'amount' => '12000',
                     'total' => (string) $total,

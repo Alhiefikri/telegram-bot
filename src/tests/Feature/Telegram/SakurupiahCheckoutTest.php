@@ -206,7 +206,7 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
             trxId: (string) $payment->provider_reference,
             status: SakurupiahTransactionStatus::Pending,
             merchantRef: (string) $payment->merchant_ref,
-            paymentCode: SakurupiahCreateInvoice::METHOD_QRIS,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
             amount: SakurupiahAmount::from(20_000),
             occurredAt: now()->subMinute()->toImmutable(),
             expiresAt: $payment->expired_at->toImmutable(),
@@ -299,9 +299,9 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
 
         $payment = Payment::factory()->for($order)->create(array_merge([
             'provider' => 'sakurupiah',
-            'method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'method' => SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS,
             'provider_reference' => 'trx-'.$order->invoice_number,
-            'provider_payment_method' => SakurupiahCreateInvoice::METHOD_QRIS,
+            'provider_payment_method' => SakurupiahCreateInvoice::METHOD_QRISC,
             'provider_total_payment' => 20_450,
             'provider_fee' => 450,
             'provider_created_at' => now()->subMinute(),
@@ -311,7 +311,7 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
                 'data' => [[
                     'trx_id' => 'trx-'.$order->invoice_number,
                     'merchant_ref' => $order->invoice_number,
-                    'payment_kode' => 'QRIS',
+                    'payment_kode' => 'QRISC',
                     'payment_status' => 'pending',
                     'total' => '20450',
                     'fee' => '450',

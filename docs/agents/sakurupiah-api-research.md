@@ -371,3 +371,18 @@ This dated section re-checks the create-invoice presentation and status/history 
 No application-source change is justified by the inspected first-party material. Preserve the current fail-closed flow: require a pending create result; expose a direct QR only after EMV/CRC and exact-total validation; otherwise accept a hosted route only after HTTPS and configured-host validation; and keep a missing/invalid presentation as non-payable `provider_presentation_pending`. Do not synthesize QR, strip provider URL tokens/query components, or mark an invoice successful to obtain presentation. Use the status endpoint for status, history for amount-bearing reconciliation, and do not expect either to provide QR/hosted instructions. Revisit only after Sakurupiah provides a valid redacted sandbox fixture or a written clarification that defines the presentation contract; this note does not qualify production or add an environment/policy gate.
 
 **Official sources rechecked on 2026-09-07:** [D1](https://sakurupiah.id/developers/api-dokumentasi), [P1](https://sakurupiah.id/SAKURUPIAH-DOKUMENTASI-API-v2.1Postman.json), [S1](https://raw.githubusercontent.com/SAKURUPIAH/SIGNATURE_INVOICE/main/PHP_version.php).
+
+## 2026-09-07 — Approved merchant channel correction
+
+The merchant-provided channel catalog identifies several QRIS variants. The
+approved target channel is provider code `QRISC` (`QRIS Custom Merchant`):
+minimum `Rp200`, maximum `Rp20,000,000`, fee `0.7%`, additional fee `Rp100`,
+settlement `H+1`, type `QRIS`, status `Online`. This is merchant-specific
+qualification evidence, not a claim that every Sakurupiah account has the same
+channel set.
+
+The earlier app and direct observations in this note used provider code
+`QRIS`, not `QRISC`. They therefore cannot establish a presentation failure for
+the approved channel. The application now keeps local customer rail
+`Payment.method=QRIS` separate from provider API `method=QRISC`, and readiness
+selects exactly `QRISC` while rejecting an ambiguous QRIS channel set.

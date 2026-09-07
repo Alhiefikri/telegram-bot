@@ -6,7 +6,9 @@ use InvalidArgumentException;
 
 final readonly class SakurupiahCreateInvoice
 {
-    public const METHOD_QRIS = 'QRIS';
+    public const PAYMENT_METHOD_QRIS = 'QRIS';
+
+    public const METHOD_QRISC = 'QRISC';
 
     public SakurupiahAmount $amount;
 
@@ -42,8 +44,8 @@ final readonly class SakurupiahCreateInvoice
     ) {
         $this->method = self::requiredText($method, 'method', 64);
         $this->phone = self::requiredText($phone, 'phone', 32);
-        if ($this->method !== self::METHOD_QRIS) {
-            throw new InvalidArgumentException('Sakurupiah invoice method must be QRIS.');
+        if ($this->method !== self::METHOD_QRISC) {
+            throw new InvalidArgumentException('Sakurupiah invoice method must be QRISC.');
         }
         $this->amount = $amount instanceof SakurupiahAmount
             ? $amount

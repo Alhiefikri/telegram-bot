@@ -37,7 +37,7 @@ final readonly class SakurupiahPayableInvoice
         SakurupiahEnvironment $environment,
     ): self {
         if ($payment->provider !== PaymentProvider::SAKURUPIAH
-            || $payment->method !== SakurupiahCreateInvoice::METHOD_QRIS
+            || $payment->method !== SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS
             || $payment->currency !== 'IDR') {
             throw new SakurupiahInvoiceIntegrityException('payment_identity');
         }
@@ -46,7 +46,7 @@ final readonly class SakurupiahPayableInvoice
             throw new SakurupiahInvoiceIntegrityException('merchant_reference');
         }
 
-        if ($invoice->paymentCode !== SakurupiahCreateInvoice::METHOD_QRIS) {
+        if ($invoice->paymentCode !== SakurupiahCreateInvoice::METHOD_QRISC) {
             throw new SakurupiahInvoiceIntegrityException('payment_method');
         }
 
@@ -115,7 +115,7 @@ final readonly class SakurupiahPayableInvoice
         ?CarbonInterface $observedExpiresAt = null,
     ): self {
         if ($payment->provider !== PaymentProvider::SAKURUPIAH
-            || strtoupper(trim((string) $payment->method)) !== SakurupiahCreateInvoice::METHOD_QRIS
+            || strtoupper(trim((string) $payment->method)) !== SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS
             || strtoupper(trim((string) $payment->currency)) !== 'IDR'
             || $payment->provider_create_state !== 'created') {
             throw new SakurupiahInvoiceIntegrityException('payment_identity');
@@ -126,7 +126,7 @@ final readonly class SakurupiahPayableInvoice
         $paymentMethod = strtoupper(trim((string) $payment->provider_payment_method));
         $fee = $payment->provider_fee;
         $total = $payment->provider_total_payment;
-        if ($merchantRef === '' || $providerReference === '' || $paymentMethod !== SakurupiahCreateInvoice::METHOD_QRIS) {
+        if ($merchantRef === '' || $providerReference === '' || $paymentMethod !== SakurupiahCreateInvoice::METHOD_QRISC) {
             throw new SakurupiahInvoiceIntegrityException('payment_identity');
         }
         if ($payment->status !== PaymentStatus::Pending

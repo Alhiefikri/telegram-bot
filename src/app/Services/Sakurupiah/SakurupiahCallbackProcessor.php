@@ -437,7 +437,7 @@ final class SakurupiahCallbackProcessor
             $history,
             static fn (SakurupiahHistoryItem $item): bool => $item->trxId === $providerReference
                 && $item->merchantRef === $merchantRef
-                && strcasecmp($item->paymentCode, SakurupiahCreateInvoice::METHOD_QRIS) === 0
+                && strcasecmp($item->paymentCode, SakurupiahCreateInvoice::METHOD_QRISC) === 0
                 && $item->isSuccessful(),
         ));
 
@@ -459,7 +459,7 @@ final class SakurupiahCallbackProcessor
         }
 
         if ($status->paymentCode !== null
-            && strcasecmp($status->paymentCode, SakurupiahCreateInvoice::METHOD_QRIS) !== 0) {
+            && strcasecmp($status->paymentCode, SakurupiahCreateInvoice::METHOD_QRISC) !== 0) {
             return 'provider_payment_method_mismatch';
         }
         if ($status->currency !== null
@@ -490,7 +490,7 @@ final class SakurupiahCallbackProcessor
     {
         return strtolower(trim((string) $payment->provider)) === PaymentProvider::SAKURUPIAH
             && in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true)
-            && strcasecmp(trim((string) $payment->method), SakurupiahCreateInvoice::METHOD_QRIS) === 0
+            && strcasecmp(trim((string) $payment->method), SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS) === 0
             && strtoupper(trim((string) $payment->currency)) === 'IDR';
     }
 

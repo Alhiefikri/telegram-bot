@@ -81,21 +81,27 @@ class SakurupiahProviderReadinessTest extends TestCase
         ]));
 
         $channel = new SakurupiahChannel(
-            code: 'QRIS',
-            name: 'QRIS',
-            minimum: 500,
-            maximum: 2_000_000,
+            code: 'QRISC',
+            name: 'QRISC Custom Merchant',
+            minimum: 200,
+            maximum: 20_000_000,
             type: 'DIRECT',
             status: 'Aktif',
             addition: new SakurupiahChannelAddition(defaultExpiredHours: 24),
         );
+        $channels = [
+            new SakurupiahChannel('QRISMU', 'QRISMU', 500, 5_000_000, 'DIRECT', 'Online'),
+            new SakurupiahChannel('QRIS2', 'QRIS2', 100, 10_000_000, 'DIRECT', 'Online'),
+            new SakurupiahChannel('QRIS', 'QRIS', 500, 2_000_000, 'DIRECT', 'Online'),
+            $channel,
+        ];
         $readiness = app(SakurupiahProviderReadiness::class);
         $readiness->invalidate();
         $calls = 0;
-        $reader = function () use (&$calls, $channel): array {
+        $reader = function () use (&$calls, $channels): array {
             $calls++;
 
-            return [$channel];
+            return $channels;
         };
 
         $first = $readiness->observe(SakurupiahEnvironment::Sandbox, $reader);
@@ -138,10 +144,10 @@ class SakurupiahProviderReadinessTest extends TestCase
             ],
         ]));
         $channel = new SakurupiahChannel(
-            'QRIS',
-            'QRIS',
-            500,
-            2_000_000,
+            'QRISC',
+            'QRISC Custom Merchant',
+            200,
+            20_000_000,
             'DIRECT',
             'Aktif',
             addition: new SakurupiahChannelAddition(defaultExpiredHours: 24),
@@ -164,7 +170,7 @@ class SakurupiahProviderReadinessTest extends TestCase
     {
         $this->app->instance('env', 'production');
         $this->configureProduction();
-        $channel = new SakurupiahChannel('QRIS', 'QRIS', 500, 2_000_000, 'DIRECT', 'Aktif');
+        $channel = new SakurupiahChannel('QRISC', 'QRISC Custom Merchant', 200, 20_000_000, 'DIRECT', 'Aktif');
 
         $report = app(SakurupiahProviderReadiness::class)->observe(
             SakurupiahEnvironment::Production,
@@ -202,10 +208,10 @@ class SakurupiahProviderReadinessTest extends TestCase
         Http::fake(fn () => Http::response([
             'status' => '200',
             'data' => [[
-                'kode' => 'QRIS',
-                'nama' => 'QRIS',
-                'minimal' => 500,
-                'maksimal' => 2_000_000,
+                'kode' => 'QRISC',
+                'nama' => 'QRISC Custom Merchant',
+                'minimal' => 200,
+                'maksimal' => 20_000_000,
                 'tipe' => 'DIRECT',
                 'status' => 'Aktif',
                 'addition' => ['default_expired' => 24],
@@ -217,7 +223,7 @@ class SakurupiahProviderReadinessTest extends TestCase
         $report = $readiness->production();
 
         $this->assertTrue($report->channelObserved());
-        $this->assertSame('QRIS', $report->qrisChannel()?->code);
+        $this->assertSame('QRISC', $report->qrisChannel()?->code);
         Http::assertSentCount(1);
     }
 

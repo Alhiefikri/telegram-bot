@@ -23,7 +23,7 @@ class SakurupiahDtoTest extends TestCase
         $body = $invoice->toProviderPayload('api-test', 'signature-test');
 
         $this->assertSame('0012000', $body['amount']);
-        $this->assertSame('QRIS', $body['method']);
+        $this->assertSame('QRISC', $body['method']);
         $this->assertSame(1, $body['merchant_fee']);
         $this->assertSame('INV-408', $body['merchant_ref']);
     }
@@ -48,8 +48,8 @@ class SakurupiahDtoTest extends TestCase
         $this->expectException(SakurupiahSchemaException::class);
 
         SakurupiahChannel::fromPayload([
-            'kode' => 'QRIS',
-            'nama' => 'QRIS',
+            'kode' => 'QRISC',
+            'nama' => 'QRISC Custom Merchant',
             'minimal' => '1',
             'maksimal' => '2',
             'tipe' => 'DIRECT',
@@ -96,7 +96,7 @@ class SakurupiahDtoTest extends TestCase
             'data' => [[
                 'trx_id' => 'trx-408',
                 'merchant_ref' => 'INV-408',
-                'payment_kode' => 'QRIS',
+                'payment_kode' => 'QRISC',
                 'payment_status' => 'pending',
                 'amount' => '0012000',
                 'total' => 12084,
@@ -140,7 +140,7 @@ class SakurupiahDtoTest extends TestCase
         SakurupiahInvoice::fromPayload([
             'data' => [[
                 'merchant_ref' => 'INV-408',
-                'payment_kode' => 'QRIS',
+                'payment_kode' => 'QRISC',
                 'payment_status' => 'pending',
                 'total' => '12000',
             ]],
@@ -159,7 +159,7 @@ class SakurupiahDtoTest extends TestCase
             SakurupiahInvoice::fromPayload(['data' => [[
                 'trx_id' => 'trx-408',
                 'merchant_ref' => 'INV-408',
-                'payment_kode' => 'QRIS',
+                'payment_kode' => 'QRISC',
                 'payment_status' => 'pending',
                 'total' => '999999999999999999999999999999',
             ]]], $this->invoice());
@@ -172,7 +172,7 @@ class SakurupiahDtoTest extends TestCase
         SakurupiahInvoice::fromPayload(['data' => [[
             'trx_id' => 'trx-408',
             'merchant_ref' => 'INV-408',
-            'payment_kode' => 'QRIS',
+            'payment_kode' => 'QRISC',
             'payment_status' => 'pending',
             'total' => '12000',
             'date' => '2026-99-99',
@@ -217,7 +217,7 @@ class SakurupiahDtoTest extends TestCase
     private function invoice(): SakurupiahCreateInvoice
     {
         return new SakurupiahCreateInvoice(
-            method: 'QRIS',
+            method: 'QRISC',
             phone: '08123456789',
             amount: '0012000',
             merchantFee: 1,
