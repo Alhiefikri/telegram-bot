@@ -11,6 +11,12 @@ use Throwable;
 
 final class BscOperationalAlertNotifier
 {
+    private const READINESS_STATE_KEY = 'bsc.owner-alert.readiness.active';
+
+    private const READINESS_LOCK_KEY = 'bsc.owner-alert.readiness.lock';
+
+    private const READINESS_LOCK_SECONDS = 30;
+
     public function __construct(
         private readonly TelegramAdminAccess $adminAccess,
         private readonly TelegramBotClient $bot,
@@ -19,12 +25,28 @@ final class BscOperationalAlertNotifier
     public function notifyReadiness(BscReadinessReport $report): void
     {
         if (! $report->enabled || $report->isReady()) {
+            $this->rememberReadinessIncident(null);
+
+            return;
+        }
+
+        $chatId = $this->adminAccess->adminChatId();
+        if ($chatId === null) {
+            Log::warning('BSC owner alert has no Telegram target.', [
+                'alert_key' => 'readiness',
+            ]);
+
             return;
         }
 
         $problems = [...$report->missing, ...array_keys($report->invalid)];
-        $this->sendOnce(
-            'readiness:'.hash('sha256', implode('|', $problems)),
+        $fingerprint = hash('sha256', implode('|', $problems));
+        if (! $this->rememberReadinessIncident($fingerprint)) {
+            return;
+        }
+
+        $this->sendToChat(
+            $chatId,
             "🚨 BSC readiness gagal\n━━━━━━━━━━━━━━\nMasalah: ".implode(', ', $problems)."\nReceiver aktif: {$report->activeReceiverCount}",
         );
     }
@@ -74,10 +96,42 @@ final class BscOperationalAlertNotifier
             return;
         }
 
+        $this->sendToChat($chatId, $message);
+    }
+
+    private function sendToChat(string $chatId, string $message): void
+    {
         try {
             $this->bot->sendMessage($chatId, $message);
         } catch (Throwable $exception) {
             report($exception);
+        }
+    }
+
+    private function rememberReadinessIncident(?string $fingerprint): bool
+    {
+        $lock = Cache::lock(self::READINESS_LOCK_KEY, self::READINESS_LOCK_SECONDS);
+        if (! $lock->get()) {
+            return false;
+        }
+
+        try {
+            if ($fingerprint === null) {
+                Cache::forget(self::READINESS_STATE_KEY);
+
+                return false;
+            }
+
+            $active = Cache::get(self::READINESS_STATE_KEY);
+            if (is_string($active) && hash_equals($active, $fingerprint)) {
+                return false;
+            }
+
+            Cache::forever(self::READINESS_STATE_KEY, $fingerprint);
+
+            return true;
+        } finally {
+            $lock->release();
         }
     }
 }

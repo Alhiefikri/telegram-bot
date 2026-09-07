@@ -17,12 +17,18 @@ use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\Product;
 use App\Models\User;
+use App\Services\Bsc\BscOperationalAlertNotifier;
 use App\Services\Bsc\BscPaymentVerification;
+use App\Services\Bsc\BscReadinessReport;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
+use App\Services\Telegram\FakeTelegramBotClient;
+use App\Services\Telegram\TelegramAdminAccess;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -210,6 +216,44 @@ class BscOperationsTest extends TestCase
             ->assertFailed()
             ->expectsOutputToContain('BSC backlog: pending=2')
             ->expectsOutputToContain('BSC backlog exceeds the configured alert threshold.');
+    }
+
+    public function test_bsc_readiness_alert_is_once_per_incident_and_reopens_after_recovery(): void
+    {
+        Cache::flush();
+        ManualPaymentSetting::current()->update(['admin_telegram_chat_id' => '123456']);
+
+        $bot = new FakeTelegramBotClient;
+        $notifier = new BscOperationalAlertNotifier(new TelegramAdminAccess, $bot);
+        $failed = new BscReadinessReport(
+            enabled: true,
+            missing: [],
+            invalid: ['BSC_RPC' => 'RPC unavailable.'],
+            activeReceiverCount: 1,
+        );
+        $ready = new BscReadinessReport(
+            enabled: true,
+            missing: [],
+            invalid: [],
+            activeReceiverCount: 1,
+        );
+        $startedAt = Carbon::now();
+        Carbon::setTestNow($startedAt);
+
+        try {
+            $notifier->notifyReadiness($failed);
+            Carbon::setTestNow($startedAt->copy()->addSeconds(901));
+            $notifier->notifyReadiness($failed);
+
+            $this->assertCount(1, $bot->calls);
+
+            $notifier->notifyReadiness($ready);
+            $notifier->notifyReadiness($failed);
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        $this->assertCount(2, $bot->calls);
     }
 
     public function test_admin_order_detail_shows_only_sanitized_bsc_evidence_and_safe_explorer_link(): void

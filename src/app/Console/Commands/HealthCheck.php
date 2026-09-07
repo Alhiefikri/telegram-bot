@@ -89,12 +89,12 @@ class HealthCheck extends Command
         if ($this->option('bsc')) {
             try {
                 $report = $bscReadiness->check();
+                $bscAlerts->notifyReadiness($report);
                 if (! $report->enabled) {
                     $this->info('BSC: disabled');
                 } elseif (! $report->isReady()) {
                     $healthy = false;
                     $this->error('BSC: failed - '.$report->configurationMessage());
-                    $bscAlerts->notifyReadiness($report);
                 } else {
                     $this->info("BSC: ready active_receivers={$report->activeReceiverCount} chain={$report->rpcChainId} decimals={$report->tokenDecimals}");
                 }

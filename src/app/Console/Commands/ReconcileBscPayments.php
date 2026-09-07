@@ -33,12 +33,10 @@ final class ReconcileBscPayments extends Command
         }
 
         $setting = ManualPaymentSetting::current();
-        if ($setting?->bsc_payment_enabled) {
-            $readinessReport = $readiness->check($setting);
-            if (! $readinessReport->isReady()) {
-                $alerts->notifyReadiness($readinessReport);
-                $this->warn('bsc:reconcile readiness warning: '.$readinessReport->configurationMessage());
-            }
+        $readinessReport = $readiness->check($setting);
+        $alerts->notifyReadiness($readinessReport);
+        if ($setting?->bsc_payment_enabled && ! $readinessReport->isReady()) {
+            $this->warn('bsc:reconcile readiness warning: '.$readinessReport->configurationMessage());
         }
 
         $backlog = $metrics->pendingVerification();
