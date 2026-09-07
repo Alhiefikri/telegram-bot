@@ -229,8 +229,12 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->openFamilyFromDeepLink($customer, 41017, $family);
         $before = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->count();
         $validOptionsCallback = $this->optionsCallback($family->id);
-        $lastCharacter = substr($validOptionsCallback, -1);
-        $tamperedOptionsCallback = substr($validOptionsCallback, 0, -1).($lastCharacter === 'a' ? 'b' : 'a');
+        $tamperedOptionsCallback = substr_replace(
+            $validOptionsCallback,
+            $validOptionsCallback[-2] === 'a' ? 'b' : 'a',
+            -2,
+            1,
+        );
         $cases = [
             ['out-of-range', $this->optionsCallback($family->id, 99)],
             ['cross-family', $this->optionsCallback($otherFamily->id)],
