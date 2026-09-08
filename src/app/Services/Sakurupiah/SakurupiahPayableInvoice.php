@@ -5,6 +5,7 @@ namespace App\Services\Sakurupiah;
 use App\Enums\PaymentStatus;
 use App\Enums\SakurupiahEnvironment;
 use App\Models\Payment;
+use App\Services\Pakasir\QrisEmvPayload;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -77,7 +78,7 @@ final readonly class SakurupiahPayableInvoice
 
         $qrisPayload = $invoice->qrPayload();
         $checkoutUrl = $invoice->checkoutUrl();
-        if ($qrisPayload !== null && self::isValidQrisPayload($qrisPayload)) {
+        if ($qrisPayload !== null && self::isValidQrisPayload($qrisPayload, $invoice->totalValue())) {
             $checkoutUrl = null;
         } else {
             $qrisPayload = null;
@@ -161,7 +162,7 @@ final readonly class SakurupiahPayableInvoice
         $checkoutUrl = $snapshot['checkout_url'] ?? null;
         if ($mode === 'qris') {
             if (! is_string($qrisPayload)
-                || ! self::isValidQrisPayload($qrisPayload)
+                || ! self::isValidQrisPayload($qrisPayload, $total)
                 || $checkoutUrl !== null) {
                 throw new SakurupiahInvoiceIntegrityException('qris_presentation');
             }
@@ -254,33 +255,15 @@ final readonly class SakurupiahPayableInvoice
         ];
     }
 
-    private static function isValidQrisPayload(string $payload): bool
+    private static function isValidQrisPayload(string $payload, int $total): bool
     {
-        if (! str_starts_with($payload, '000201')
-            || preg_match('/6304([0-9A-F]{4})$/i', $payload, $matches) !== 1) {
+        try {
+            QrisEmvPayload::parse($payload)->assertMatchesIdrAmount($total);
+
+            return true;
+        } catch (\Throwable) {
             return false;
         }
-
-        $expected = strtoupper($matches[1]);
-        $crcInput = substr($payload, 0, -4);
-
-        return hash_equals($expected, self::crc16CcittFalse($crcInput));
-    }
-
-    private static function crc16CcittFalse(string $payload): string
-    {
-        $crc = 0xFFFF;
-        $length = strlen($payload);
-        for ($index = 0; $index < $length; $index++) {
-            $crc ^= ord($payload[$index]) << 8;
-            for ($bit = 0; $bit < 8; $bit++) {
-                $crc = ($crc & 0x8000) !== 0
-                    ? (($crc << 1) ^ 0x1021) & 0xFFFF
-                    : ($crc << 1) & 0xFFFF;
-            }
-        }
-
-        return sprintf('%04X', $crc);
     }
 
     private static function isAllowedHostedUrl(string $url, SakurupiahEnvironment $environment): bool

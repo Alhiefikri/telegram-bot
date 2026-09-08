@@ -35,6 +35,8 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
 {
     private const DIRECT_QRIS = '0002010102125303360540820450.005802ID63045B6D';
 
+    private const DIRECT_QRIS_20_000 = '0002010102125303360540820000.005802ID6304EEF1';
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -143,7 +145,7 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
             'provider_fee' => 450,
             'provider_presentation' => [
                 'mode' => 'qris',
-                'qris_payload' => self::DIRECT_QRIS,
+                'qris_payload' => self::DIRECT_QRIS_20_000,
                 'checkout_url' => null,
             ],
             'provider_payload' => [
@@ -207,7 +209,7 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
             fee: SakurupiahFee::from(450),
             createdAt: now()->subMinute()->toImmutable(),
             expiresAt: now()->addMinutes(20)->toImmutable(),
-            qr: self::DIRECT_QRIS,
+            qr: self::DIRECT_QRIS_20_000,
             merchantFee: 1,
         );
         $this->mock(SakurupiahProviderAdapter::class)
