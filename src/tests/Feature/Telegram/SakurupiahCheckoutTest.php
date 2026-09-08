@@ -14,6 +14,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Services\Sakurupiah\SakurupiahAmount;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahFee;
+use App\Services\Sakurupiah\SakurupiahInvoice;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahStatus;
@@ -163,6 +164,61 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Rp20.000', $body);
         $this->assertStringNotContainsString('Rp20.450', $body);
         $this->assertStringNotContainsString('could not be prepared', $body);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
+    }
+
+    public function test_checkout_without_customer_phone_creates_and_delivers_provider_qr(): void
+    {
+        $this->fakeTelegramHttp();
+        [$order, $payment] = $this->payment([
+            'invoice_number' => 'INV-SAK-TELEGRAM-NO-PHONE',
+            'provider_reference' => null,
+            'provider_payment_method' => null,
+            'provider_total_payment' => null,
+            'provider_fee' => null,
+            'provider_created_at' => null,
+            'provider_expires_at' => null,
+            'provider_presentation' => null,
+            'provider_payload' => null,
+            'provider_create_state' => null,
+        ]);
+        $order->customer()->update(['phone_number' => null]);
+        $order->update([
+            'support_contact_channel' => null,
+            'support_contact_value' => null,
+        ]);
+        $invoice = new SakurupiahInvoice(
+            trxId: 'trx-no-phone',
+            merchantRef: (string) $payment->merchant_ref,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+            status: SakurupiahTransactionStatus::Pending,
+            total: 20_000,
+            amount: 20_000,
+            fee: SakurupiahFee::from(450),
+            createdAt: now()->subMinute()->toImmutable(),
+            expiresAt: now()->addMinutes(20)->toImmutable(),
+            qr: self::DIRECT_QRIS,
+            merchantFee: 1,
+        );
+        $this->mock(SakurupiahProviderAdapter::class)
+            ->shouldReceive('createInvoice')
+            ->once()
+            ->withArgs(function (SakurupiahCreateInvoice $request): bool {
+                return $request->phone === null
+                    && ! array_key_exists('phone', $request->toProviderPayload('api-test', 'test-signature'));
+            })
+            ->andReturn($invoice);
+
+        $effect = app(TelegramOutboundEffectService::class)->recordCheckoutInstructions($order, $payment);
+        (new SendSakurupiahCheckoutInstructions($order->id, null, $effect?->id))
+            ->handle(app(TelegramCheckoutIntents::class));
+
+        $sendPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertCount(1, $sendPhotos);
+        $this->assertCount(0, $sendMessages);
+        $this->assertStringContainsString('Rp20.000', $sendPhotos->first()[0]->body());
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->fresh()->provider_create_state);
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
     }
 

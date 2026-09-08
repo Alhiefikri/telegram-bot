@@ -740,13 +740,10 @@ final class SakurupiahInvoiceLifecycleService
             if ($phone === '' && $order?->support_contact_channel === 'whatsapp') {
                 $phone = trim((string) $order->support_contact_value);
             }
-            if ($phone === '') {
-                throw new SakurupiahCreatePreRequestException('Sakurupiah customer phone is required before invoice creation.');
-            }
 
             return new SakurupiahCreateInvoice(
                 method: SakurupiahCreateInvoice::METHOD_QRISC,
-                phone: $phone,
+                phone: $phone === '' ? null : $phone,
                 amount: (int) $payment->amount,
                 merchantFee: $merchantFee,
                 merchantRef: (string) $payment->merchant_ref,
