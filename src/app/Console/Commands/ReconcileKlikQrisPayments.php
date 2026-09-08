@@ -12,6 +12,8 @@ use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Telegram\TelegramKlikQrisRecoveryEscalator;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use DateTimeImmutable;
 use DateTimeInterface;
@@ -42,6 +44,8 @@ class ReconcileKlikQrisPayments extends Command
         KlikQrisCallbackProcessor $processor,
         KlikQrisProviderReadiness $readiness,
         TelegramKlikQrisRecoveryEscalator $escalator,
+        TelegramOutboundEffectService $outboundEffects,
+        TelegramOutboundEffectDispatcher $outboundEffectDispatcher,
     ): int {
         $chunk = $this->validatedChunk();
         if ($chunk === null) {
@@ -135,6 +139,21 @@ class ReconcileKlikQrisPayments extends Command
 
                     if ($result !== null) {
                         $escalator->notifyFor($payment);
+                    }
+                    if ($result?->isPayable()) {
+                        $recoveredPayment = $payment->fresh(['order.customer']);
+                        $recoveredOrder = $recoveredPayment?->order;
+                        $recoveredCustomer = $recoveredOrder?->customer;
+                        if ($recoveredPayment !== null && $recoveredOrder !== null && $recoveredCustomer !== null) {
+                            $effect = $outboundEffects->recordKlikQrisPresentationRecovery(
+                                $recoveredOrder,
+                                $recoveredPayment,
+                                $recoveredCustomer,
+                            );
+                            if ($effect !== null) {
+                                $outboundEffectDispatcher->dispatch($effect);
+                            }
+                        }
                     }
 
                     if ($result === null || $event === null || $event->processed_at === null) {

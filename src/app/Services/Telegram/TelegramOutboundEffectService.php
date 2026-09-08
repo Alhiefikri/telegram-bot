@@ -311,6 +311,51 @@ class TelegramOutboundEffectService
         );
     }
 
+    public function recordKlikQrisPresentationRecovery(
+        Order $order,
+        Payment $payment,
+        ?Customer $customer = null,
+    ): ?TelegramOutboundEffect {
+        $customer ??= $order->customer;
+        if ($customer?->telegram_id === null
+            || self::typeForPayment($payment) !== self::TYPE_KLIKQRIS_CHECKOUT
+            || $order->order_status !== OrderStatus::PendingPayment
+            || $payment->status !== PaymentStatus::Pending) {
+            return null;
+        }
+
+        $checkoutEffect = TelegramOutboundEffect::query()
+            ->where('effect_key', self::checkoutEffectKey((string) $order->getKey(), self::TYPE_KLIKQRIS_CHECKOUT))
+            ->first();
+        if ($checkoutEffect === null
+            || $checkoutEffect->state !== TelegramOutboundEffectState::Sent
+            || data_get($checkoutEffect->outcome_metadata, 'delivery_outcome') !== 'retry_notice_sent') {
+            return null;
+        }
+
+        $effectKey = self::klikQrisPresentationRecoveryEffectKey((string) $payment->getKey());
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => self::checkoutEffectKey((string) $order->getKey(), self::TYPE_KLIKQRIS_CHECKOUT),
+                'sequence' => 2,
+                'effect_type' => self::TYPE_KLIKQRIS_CHECKOUT,
+                'source_type' => Order::class,
+                'source_id' => (string) $order->getKey(),
+                'target_type' => 'customer',
+                'telegram_chat_id' => (string) $customer->telegram_id,
+                'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE,
+                'telegram_method' => 'sendPhoto',
+                'locale' => $customer->locale,
+                'template_version' => self::TEMPLATE_KLIKQRIS_CHECKOUT,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+            ],
+        );
+    }
+
     public function materializeCheckoutEffectForOrder(string $orderId, string $effectType): ?TelegramOutboundEffect
     {
         $order = Order::query()->with(['customer', 'payments'])->findOrFail($orderId);
@@ -1236,6 +1281,11 @@ class TelegramOutboundEffectService
     public static function checkoutEffectKey(string $orderId, string $effectType): string
     {
         return 'order:'.$orderId.':'.$effectType.':v1';
+    }
+
+    public static function klikQrisPresentationRecoveryEffectKey(string $paymentId): string
+    {
+        return 'payment:'.$paymentId.':'.self::TYPE_KLIKQRIS_CHECKOUT.':presentation-recovery:v1';
     }
 
     public static function sakurupiahPresentationRecoveryEffectKey(string $paymentId): string

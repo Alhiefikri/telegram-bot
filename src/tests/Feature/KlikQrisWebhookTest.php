@@ -107,6 +107,32 @@ class KlikQrisWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_paid_callback_with_unknown_local_total_still_runs_authoritative_verification(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $payment = $this->payableKlikQrisPayment();
+        $payment->update([
+            'provider_total_payment' => null,
+            'provider_fee' => null,
+            'provider_create_state' => 'outcome_unknown',
+        ]);
+        $payment->refresh();
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200));
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment, [
+            'total_amount' => 10016,
+        ]))->assertOk()->assertExactJson(['success' => true]);
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $event = PaymentEvent::query()
+            ->where('provider', 'klikqris')
+            ->where('event_type', PaymentEventType::Callback->value)
+            ->sole();
+        $this->assertNotNull($event->processed_at);
+        Http::assertSentCount(1);
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
     public function test_callback_amount_or_total_mismatch_is_acknowledged_without_status_call_or_fulfillment(): void
     {
         Queue::fake([SendTelegramReceipt::class]);

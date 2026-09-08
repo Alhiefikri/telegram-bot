@@ -118,9 +118,11 @@ class TelegramOrderIntents
         }
 
         $payment = $order->payments->first();
-        $presentationPendingBeforeRefresh = $this->isSakurupiahPresentationPending($payment);
+        $sakurupiahPresentationPendingBeforeRefresh = $this->isSakurupiahPresentationPending($payment);
+        $klikQrisPresentationPendingBeforeRefresh = $this->isKlikQrisPresentationPending($payment);
         $refreshNotice = $this->refreshProviderPaymentStatus($customer, $order, $payment);
         $sakurupiahPresentationRecovered = false;
+        $klikQrisPresentationRecovered = false;
         if ($refreshNotice !== null) {
             $order = $order->fresh([
                 'orderItems.stockItems',
@@ -128,9 +130,13 @@ class TelegramOrderIntents
                 'payments' => fn ($query) => $query->latest(),
             ]);
             $payment = $order->payments->first();
-            $sakurupiahPresentationRecovered = $presentationPendingBeforeRefresh
+            $sakurupiahPresentationRecovered = $sakurupiahPresentationPendingBeforeRefresh
                 && $payment?->provider_create_state === SakurupiahInvoiceLifecycleService::STATE_CREATED
                 && $this->sakurupiahLifecycle->classify($payment)->isPayable();
+            $klikQrisPresentationRecovered = $klikQrisPresentationPendingBeforeRefresh
+                && $payment?->provider === PaymentProvider::KLIKQRIS
+                && $payment?->status === PaymentStatus::Pending
+                && $this->klikQrisNativeQris->classify($payment)->isPayable();
         }
         $paymentStatus = $payment?->status ?? $order->payment_status;
         $orderStatusLabel = $this->locale->orderStatus($customer, $order->order_status);
@@ -223,6 +229,12 @@ class TelegramOrderIntents
                 $this->outboundEffectDispatcher->dispatch($effect);
             }
         }
+        if ($klikQrisPresentationRecovered) {
+            $effect = $this->outboundEffects->recordKlikQrisPresentationRecovery($order, $payment, $customer);
+            if ($effect !== null) {
+                $this->outboundEffectDispatcher->dispatch($effect);
+            }
+        }
 
         $messageId = data_get($lastResponse, 'result.message_id');
         if ($payment?->provider === PaymentProvider::KLIKQRIS && $paymentStatus === PaymentStatus::Pending && is_numeric($messageId)) {
@@ -308,6 +320,14 @@ class TelegramOrderIntents
             && $payment->status === PaymentStatus::Pending
             && filled($payment->provider_reference)
             && $this->sakurupiahLifecycle->classify($payment)->outcome() === SakurupiahInvoiceOutcome::ProviderPresentationPending;
+    }
+
+    private function isKlikQrisPresentationPending(?Payment $payment): bool
+    {
+        return $payment !== null
+            && strtolower(trim((string) $payment->provider)) === PaymentProvider::KLIKQRIS
+            && $payment->status === PaymentStatus::Pending
+            && ! $this->klikQrisNativeQris->classify($payment)->isPayable();
     }
 
     private function refreshEligibleKlikQrisPayment(Customer $customer, Order $order, ?Payment $payment): ?string

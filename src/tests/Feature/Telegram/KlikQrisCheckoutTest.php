@@ -21,6 +21,7 @@ use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -305,6 +306,79 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $effect = TelegramOutboundEffect::query()->sole();
         $this->assertSame('retry_notice_sent', $effect->outcome_metadata['delivery_outcome'] ?? null);
         $this->assertSame('sendMessage', $effect->outcome_metadata['delivery_method'] ?? null);
+    }
+
+    public function test_customer_order_check_redispatches_qris_after_initial_retry_notice(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $base64 = KlikQrisSandboxScenarios::pngDataUri('telegram-base64-only');
+        $qrisUrl = 'https://klikqris.com/storage/sandbox/qris_recovered.png';
+
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 654321]]),
+            'https://klikqris.com/api/sandbox/qris/create' => Http::response(['data' => [
+                'order_id' => 'INV-KLIK-RECOVER',
+                'amount' => 1000,
+                'total_amount' => 1016,
+                'status' => 'PENDING',
+                'qris_url' => null,
+                'qris_image' => $base64,
+                'signature' => 'initial-signature',
+                'expired_at' => now()->addMinutes(15)->toISOString(),
+            ]], 200),
+            'https://klikqris.com/api/sandbox/qris/status/INV-KLIK-RECOVER' => Http::response(['data' => [
+                'order_id' => 'INV-KLIK-RECOVER',
+                'amount' => 1000,
+                'total_amount' => 1016,
+                'status' => 'PENDING',
+                'qris_url' => $qrisUrl,
+                'signature' => 'recovered-signature',
+                'expired_at' => now()->addMinutes(15)->toISOString(),
+            ]], 200),
+            $qrisUrl => Http::response(self::PNG_BYTES, 200, ['Content-Type' => 'image/png']),
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $order = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-KLIK-RECOVER',
+            'order_status' => OrderStatus::PendingPayment,
+            'expires_at' => now()->addMinutes(14),
+        ]);
+        $payment = Payment::factory()->for($order)->create([
+            'provider' => 'klikqris',
+            'provider_payment_method' => 'qris',
+            'merchant_ref' => 'INV-KLIK-RECOVER',
+            'amount' => 1000,
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        (new SendKlikQrisCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
+
+        $checkoutEffect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame('retry_notice_sent', $checkoutEffect->outcome_metadata['delivery_outcome'] ?? null);
+
+        $this->postTelegramWebhook($this->callbackUpdate(9004, 'cb-recover', 'order:INV-KLIK-RECOVER'))
+            ->assertOk();
+        $this->processQueuedTelegramWebhookJob();
+        $this->assertNotEmpty(Http::recorded(fn (Request $request): bool => str_contains($request->url(), '/qris/status/INV-KLIK-RECOVER')));
+        $this->assertSame($qrisUrl, $payment->fresh()->provider_qris_url);
+        $this->artisan('queue:work --once --queue=telegram-outbound --stop-when-empty')->assertSuccessful();
+
+        $effects = TelegramOutboundEffect::query()->orderBy('sequence')->get();
+        $this->assertCount(2, $effects);
+        $recoveryEffect = $effects->last();
+        $this->assertSame(
+            TelegramOutboundEffectService::klikQrisPresentationRecoveryEffectKey($payment->id),
+            $recoveryEffect->effect_key,
+        );
+        $this->assertSame('sent', $recoveryEffect->state->value);
+        $this->assertSame('qris_sent', $recoveryEffect->outcome_metadata['delivery_outcome'] ?? null);
+        $this->assertSame('sendPhoto', $recoveryEffect->outcome_metadata['delivery_method'] ?? null);
+        $this->assertSame(1, $order->payments()->count());
+        $this->assertCount(
+            1,
+            Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto')),
+        );
     }
 
     public function test_klikqris_job_releases_claim_after_definite_send_failure_and_keeps_provider_transaction(): void

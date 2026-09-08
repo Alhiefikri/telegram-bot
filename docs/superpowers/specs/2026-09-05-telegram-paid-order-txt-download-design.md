@@ -1,6 +1,6 @@
 # Telegram Paid Order TXT Download and Action Panel
 
-- **Status:** Proposed — planning only; no implementation or production change is authorized by this document.
+- **Status:** Implemented — release gate #428 closed after owner-confirmed testing.
 - **Date:** 2026-09-05
 - **Primary sources:** [Telegram Bot API — sendDocument](https://core.telegram.org/bots/api#senddocument), [Telegram Bot API — answerCallbackQuery](https://core.telegram.org/bots/api#answercallbackquery), and [Telegram Bot API — InlineKeyboardButton](https://core.telegram.org/bots/api#inlinekeyboardbutton).
 - **Companion documents:** [`2026-08-22-telegram-combined-paid-receipt-rfc.md`](2026-08-22-telegram-combined-paid-receipt-rfc.md) and [`ADR-0007`](../../adr/0007-telegram-outbound-effects.md).
@@ -1039,4 +1039,4 @@ The following product decisions are resolved for this plan:
 - Report Issue v1: existing generic Support route with copy that includes the Order ID;
 - order-linked issue intake: deferred to a separate feature.
 
-The implementation is agent-ready after this gate. No action-panel text may claim in-chat issue resolution until the deferred issue-intake feature is implemented and approved.
+The implementation is complete after release gate #428. No action-panel text may claim in-chat issue resolution until the deferred issue-intake feature is implemented and approved.

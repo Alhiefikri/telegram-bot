@@ -191,7 +191,8 @@ class KlikQrisCallbackProcessor
     private function isProcessablePayment(Payment $payment): bool
     {
         if ($this->isEligiblePayment($payment)) {
-            return (int) $payment->provider_total_payment >= (int) $payment->amount;
+            return $payment->provider_total_payment !== null
+                && (int) $payment->provider_total_payment >= (int) $payment->amount;
         }
 
         return strtolower(trim((string) $payment->provider)) === PaymentProvider::KLIKQRIS
@@ -205,7 +206,7 @@ class KlikQrisCallbackProcessor
         return strtolower(trim((string) $payment->provider)) === PaymentProvider::KLIKQRIS
             && in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true)
             && strtolower(trim((string) $payment->provider_payment_method)) === 'qris'
-            && $payment->provider_total_payment !== null;
+            && ($payment->provider_total_payment !== null || $this->nativeQris->isCustomerStatusRefreshable($payment));
     }
 
     private function findPayment(string $merchantRef): ?Payment

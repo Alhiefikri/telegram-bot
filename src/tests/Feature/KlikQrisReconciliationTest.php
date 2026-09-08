@@ -5,10 +5,14 @@ namespace Tests\Feature;
 use App\Console\Commands\ReconcileKlikQrisPayments;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
+use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
+use App\Models\TelegramOutboundEffect;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
@@ -61,6 +65,57 @@ class KlikQrisReconciliationTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $pakasir->fresh()->status);
         Http::assertSentCount(2);
         Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    public function test_command_dispatches_qris_recovery_after_retry_notice_becomes_payable(): void
+    {
+        Queue::fake();
+        $qrisUrl = 'https://klikqris.com/storage/sandbox/qris_reconcile_recovered.png';
+        $payment = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-RECOVER-PRESENTATION',
+            'provider_total_payment' => null,
+            'provider_fee' => null,
+            'provider_payload' => null,
+            'provider_qris_url' => null,
+            'provider_create_state' => 'outcome_unknown',
+        ]);
+        $order = $payment->order->fresh(['customer']);
+        $checkoutEffect = app(TelegramOutboundEffectService::class)
+            ->recordCheckoutInstructions($order, $payment, $order->customer);
+        $checkoutEffect->forceFill([
+            'state' => TelegramOutboundEffectState::Sent->value,
+            'sent_at' => now(),
+            'telegram_message_id' => 654321,
+            'outcome_metadata' => [
+                'delivery_outcome' => 'retry_notice_sent',
+                'delivery_method' => 'sendMessage',
+            ],
+        ])->save();
+        Http::fake(fn () => Http::response(['data' => [
+            'order_id' => $payment->merchant_ref,
+            'amount' => $payment->amount,
+            'total_amount' => 1016,
+            'status' => 'PENDING',
+            'qris_url' => $qrisUrl,
+            'signature' => 'recovered-signature',
+            'expired_at' => now()->addMinutes(15)->toISOString(),
+        ]], 200));
+
+        $this->artisan('klikqris:reconcile --chunk=100')
+            ->expectsOutputToContain('processed=0 skipped=1 failed=0')
+            ->assertSuccessful();
+
+        $recoveryEffect = TelegramOutboundEffect::query()
+            ->where('effect_key', TelegramOutboundEffectService::klikQrisPresentationRecoveryEffectKey($payment->id))
+            ->sole();
+        $this->assertSame(TelegramOutboundEffectState::Pending, $recoveryEffect->state);
+        Queue::assertPushedOn(
+            'telegram-outbound',
+            SendKlikQrisCheckoutInstructions::class,
+            fn (SendKlikQrisCheckoutInstructions $job): bool => $job->orderId === $order->id
+                && $job->effectId === $recoveryEffect->id,
+        );
+        $this->assertSame(1, $order->payments()->count());
     }
 
     public function test_command_ignores_old_terminal_history_but_keeps_outcome_unknown_recovery_candidates(): void
