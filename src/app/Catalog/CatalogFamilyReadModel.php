@@ -26,6 +26,7 @@ final readonly class CatalogFamilyReadModel
         public bool $isAvailable,
         public ?string $createdAt,
         public array $members,
+        public ?string $telegramImagePath = null,
         public bool $matchesSearch = false,
     ) {}
 

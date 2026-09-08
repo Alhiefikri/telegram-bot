@@ -26,9 +26,10 @@ class AdminProductCreateController extends Controller
         $validated = $request->validated();
 
         $imagePath = $request->hasFile('image') ? $images->store($request->file('image')) : null;
+        $telegramImagePath = $request->hasFile('telegram_image') ? $images->storeTelegram($request->file('telegram_image')) : null;
 
         try {
-            $product = DB::transaction(function () use ($validated, $imagePath, $auditLogger, $user, $request): Product {
+            $product = DB::transaction(function () use ($validated, $imagePath, $telegramImagePath, $auditLogger, $user, $request): Product {
                 $categoryId = $validated['category_id'] ?? null;
 
                 if ($categoryId !== null) {
@@ -48,6 +49,7 @@ class AdminProductCreateController extends Controller
                     'usdt_price_amount' => $validated['usdt_price_amount'] ?? null,
                     'currency' => 'IDR',
                     'image_path' => $imagePath,
+                    'telegram_image_path' => $telegramImagePath,
                     'is_active' => true,
                 ]);
                 $product->stock = 0;
@@ -58,7 +60,7 @@ class AdminProductCreateController extends Controller
                     'product.created',
                     $product,
                     null,
-                    $product->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']),
+                    $product->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']),
                     $user,
                     $request->ip(),
                 );
@@ -68,6 +70,9 @@ class AdminProductCreateController extends Controller
         } catch (Throwable $exception) {
             if ($imagePath !== null) {
                 $images->deleteManagedImage($imagePath);
+            }
+            if ($telegramImagePath !== null) {
+                $images->deleteManagedImage($telegramImagePath);
             }
 
             throw $exception;

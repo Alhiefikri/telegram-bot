@@ -15,6 +15,10 @@ final class ProductImageOptimizer
 
     private const PLACEHOLDER_DIRECTORY = 'storefront/placeholders';
 
+    private const TELEGRAM_DIRECTORY = 'telegram-products';
+
+    private const TELEGRAM_FAMILY_DIRECTORY = 'telegram-product-families';
+
     private const MAX_DIMENSION = 1600;
 
     private const WEBP_QUALITY = 84;
@@ -22,6 +26,16 @@ final class ProductImageOptimizer
     public function store(UploadedFile $image): string
     {
         return $this->storeInDirectory($image, self::DIRECTORY);
+    }
+
+    public function storeTelegram(UploadedFile $image): string
+    {
+        return $this->storeInDirectory($image, self::TELEGRAM_DIRECTORY);
+    }
+
+    public function storeTelegramFamily(UploadedFile $image): string
+    {
+        return $this->storeInDirectory($image, self::TELEGRAM_FAMILY_DIRECTORY);
     }
 
     public function storeFamily(UploadedFile $image): string
@@ -99,7 +113,8 @@ final class ProductImageOptimizer
     public function telegramUrl(?string $path): ?string
     {
         if ($path === null
-            || ! str_starts_with($path, self::DIRECTORY.'/')
+            || (! str_starts_with($path, self::TELEGRAM_DIRECTORY.'/')
+                && ! str_starts_with($path, self::TELEGRAM_FAMILY_DIRECTORY.'/'))
             || str_contains($path, '..')
             || ! Storage::disk('public')->exists($path)) {
             return null;
@@ -165,7 +180,9 @@ final class ProductImageOptimizer
         if (! $path
             || (! str_starts_with($path, self::DIRECTORY.'/')
                 && ! str_starts_with($path, self::FAMILY_DIRECTORY.'/')
-                && ! str_starts_with($path, self::PLACEHOLDER_DIRECTORY.'/'))) {
+                && ! str_starts_with($path, self::PLACEHOLDER_DIRECTORY.'/')
+                && ! str_starts_with($path, self::TELEGRAM_DIRECTORY.'/')
+                && ! str_starts_with($path, self::TELEGRAM_FAMILY_DIRECTORY.'/'))) {
             return;
         }
 

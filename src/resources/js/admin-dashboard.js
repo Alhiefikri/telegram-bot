@@ -30,7 +30,8 @@ const emptyProductForm = () => ({
   productUsageGuideUrl: "",
   productIsActive: true,
   productImageUrl: "",
-  productImageFileName: EMPTY_IMAGE_FILE_NAME,
+  telegramProductImageUrl: "",
+  telegramProductImageFileName: EMPTY_IMAGE_FILE_NAME,
 });
 
 const emptyCategoryForm = () => ({
@@ -51,7 +52,8 @@ const emptyProductFamilyForm = () => ({
   familyDescription: "",
   familySortOrder: 0,
   familyImageUrl: "",
-  familyImageFileName: EMPTY_IMAGE_FILE_NAME,
+  telegramFamilyImageUrl: "",
+  telegramFamilyImageFileName: EMPTY_IMAGE_FILE_NAME,
 });
 
 const STOCK_GROUPS = [
@@ -1137,7 +1139,8 @@ export default function adminDashboard(initialState = {}) {
         familyDescription: family.description ?? "",
         familySortOrder: family.sortOrder ?? 0,
         familyImageUrl: family.imageUrl ?? "",
-        familyImageFileName: EMPTY_IMAGE_FILE_NAME,
+        telegramFamilyImageUrl: family.telegramImageUrl ?? "",
+        telegramFamilyImageFileName: EMPTY_IMAGE_FILE_NAME,
       });
       this.$nextTick(() => this.$refs.familyName?.focus());
     },
@@ -1188,7 +1191,8 @@ export default function adminDashboard(initialState = {}) {
         productUsageGuideUrl: product.usageGuideUrl ?? "",
         productIsActive: product.isActive,
         productImageUrl: product.imageUrl ?? "",
-        productImageFileName: EMPTY_IMAGE_FILE_NAME,
+        telegramProductImageUrl: product.telegramImageUrl ?? "",
+        telegramProductImageFileName: EMPTY_IMAGE_FILE_NAME,
         productDeliveryNoteOpen:
           String(product.deliveryNote || "").trim().length > 0,
         productModalOpen: true,

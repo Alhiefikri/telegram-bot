@@ -21,6 +21,7 @@ class AdminProductFamilyDeleteController extends Controller
         );
 
         $images->deleteManagedImage($deleted['imagePath']);
+        $images->deleteManagedImage($deleted['telegramImagePath']);
 
         return $forms->productFamilyDeleted($deleted['family']->name, $deleted['productCount']);
     }

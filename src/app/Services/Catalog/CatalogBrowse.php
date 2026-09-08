@@ -52,13 +52,14 @@ final class CatalogBrowse
         'stock',
         'reserved_stock',
         'image_path',
+        'telegram_image_path',
         'is_active',
         'featured_rank',
         'created_at',
     ];
 
     /** @var list<string> */
-    private const FAMILY_COLUMNS = ['id', 'name', 'slug', 'description', 'image_path', 'sort_order', 'created_at'];
+    private const FAMILY_COLUMNS = ['id', 'name', 'slug', 'description', 'image_path', 'telegram_image_path', 'sort_order', 'created_at'];
 
     public function browsePublic(CatalogBrowseQuery|string|null $query = null): CatalogBrowseResult
     {
@@ -371,6 +372,7 @@ final class CatalogBrowse
             optionLabel: $optionLabel,
             imagePath: $product->image_path,
             imageUrl: $this->publicImageUrl($product->image_path),
+            telegramImagePath: $product->telegram_image_path,
             createdAt: $product->created_at?->toISOString(),
             icon: $product->icon,
         );
@@ -392,6 +394,7 @@ final class CatalogBrowse
             description: $family->description,
             imagePath: $family->image_path,
             imageUrl: $this->publicImageUrl($family->image_path),
+            telegramImagePath: $family->telegram_image_path,
             sortOrder: (int) $family->sort_order,
             categoryId: $firstMember?->categoryId,
             categoryName: $firstMember?->categoryName,
@@ -562,6 +565,7 @@ final class CatalogBrowse
             optionLabel: $product->optionLabel,
             imagePath: $product->imagePath,
             imageUrl: $product->imageUrl,
+            telegramImagePath: $product->telegramImagePath,
             createdAt: $product->createdAt,
             icon: $product->icon,
             matchesSearch: $matches,

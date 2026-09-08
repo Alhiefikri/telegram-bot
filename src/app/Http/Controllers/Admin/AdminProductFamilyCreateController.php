@@ -17,6 +17,7 @@ class AdminProductFamilyCreateController extends Controller
         $validated = $request->validated();
         $user = $request->attributes->get('adminUser');
         $imagePath = $request->hasFile('image') ? $images->storeFamily($request->file('image')) : null;
+        $telegramImagePath = $request->hasFile('telegram_image') ? $images->storeTelegramFamily($request->file('telegram_image')) : null;
 
         try {
             $family = $families->create([
@@ -24,10 +25,14 @@ class AdminProductFamilyCreateController extends Controller
                 'description' => $validated['description'] ?? null,
                 'sort_order' => (int) $validated['sort_order'],
                 'image_path' => $imagePath,
+                'telegram_image_path' => $telegramImagePath,
             ], $user, $request->ip());
         } catch (Throwable $exception) {
             if ($imagePath !== null) {
                 $images->deleteManagedImage($imagePath);
+            }
+            if ($telegramImagePath !== null) {
+                $images->deleteManagedImage($telegramImagePath);
             }
 
             throw $exception;

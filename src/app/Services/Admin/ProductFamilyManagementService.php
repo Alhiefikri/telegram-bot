@@ -13,7 +13,7 @@ use Illuminate\Support\Str;
 final class ProductFamilyManagementService
 {
     /** @var list<string> */
-    private const FAMILY_FIELDS = ['name', 'description', 'image_path', 'sort_order'];
+    private const FAMILY_FIELDS = ['name', 'description', 'image_path', 'telegram_image_path', 'sort_order'];
 
     public function __construct(
         private readonly AuditLogger $auditLogger,
@@ -21,7 +21,7 @@ final class ProductFamilyManagementService
     ) {}
 
     /**
-     * @param  array{name: string, description: ?string, sort_order: int, image_path?: ?string}  $attributes
+     * @param  array{name: string, description: ?string, sort_order: int, image_path?: ?string, telegram_image_path?: ?string}  $attributes
      */
     public function create(array $attributes, User $user, ?string $ip = null): ProductFamily
     {
@@ -33,7 +33,7 @@ final class ProductFamilyManagementService
                         'slug' => $this->uniqueSlug($attributes['name']),
                         'description' => $this->nullableTrim($attributes['description'] ?? null),
                         'image_path' => $attributes['image_path'] ?? null,
-                        'sort_order' => (int) ($attributes['sort_order'] ?? 0),
+                        'telegram_image_path' => $attributes['telegram_image_path'] ?? null,
                     ]);
 
                     $this->auditLogger->log(
@@ -58,7 +58,7 @@ final class ProductFamilyManagementService
     }
 
     /**
-     * @param  array{name: string, description: ?string, sort_order: int, image_path?: ?string}  $attributes
+     * @param  array{name: string, description: ?string, sort_order: int, image_path?: ?string, telegram_image_path?: ?string}  $attributes
      */
     public function update(ProductFamily $family, array $attributes, User $user, ?string $ip = null): ProductFamily
     {
@@ -131,8 +131,9 @@ final class ProductFamilyManagementService
                     'family_option_label' => null,
                     'updated_at' => now(),
                 ]);
-            $snapshot = $locked->only(['id', 'name', 'slug', 'description', 'image_path', 'sort_order']);
+            $snapshot = $locked->only(['id', 'name', 'slug', 'description', 'image_path', 'telegram_image_path', 'sort_order']);
             $imagePath = $locked->image_path;
+            $telegramImagePath = $locked->telegram_image_path;
             $locked->delete();
 
             $this->auditLogger->log(
@@ -144,7 +145,7 @@ final class ProductFamilyManagementService
                 $ip,
             );
 
-            return ['family' => $locked, 'productCount' => $productCount, 'imagePath' => $imagePath];
+            return ['family' => $locked, 'productCount' => $productCount, 'imagePath' => $imagePath, 'telegramImagePath' => $telegramImagePath];
         }, 5);
 
         return $result;

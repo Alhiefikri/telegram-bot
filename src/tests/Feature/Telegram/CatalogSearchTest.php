@@ -82,7 +82,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
     {
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         Storage::fake('public');
-        Storage::disk('public')->put('products/netflix.webp', 'webp');
+        Storage::disk('public')->put('telegram-products/netflix.webp', 'webp');
         $this->fakeTelegramHttp();
         $product = Product::factory()->create([
             'name' => 'Netflix Premium Image',
@@ -90,12 +90,13 @@ class CatalogSearchTest extends TelegramBotTestSupport
             'price_amount' => 13000,
             'stock' => 1,
             'reserved_stock' => 0,
-            'image_path' => 'products/netflix.webp',
+            'telegram_image_path' => 'telegram-products/netflix.webp',
         ]);
 
         $this->postTelegramWebhook($this->messageUpdate(113, '/start product_'.$product->id))->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && $request['photo'] === url('/storage/telegram-products/netflix.webp')
             && str_contains((string) ($request['caption'] ?? ''), 'Netflix Premium Image')
             && str_contains((string) ($request['caption'] ?? ''), 'Stok tersedia: 1'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
@@ -121,6 +122,34 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'Netflix Premium Text'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto'));
+    }
+
+    public function test_product_uses_family_telegram_image_when_product_override_is_empty(): void
+    {
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        Storage::fake('public');
+        Storage::disk('public')->put('telegram-product-families/netflix.webp', 'webp');
+        $family = ProductFamily::factory()->create([
+            'name' => 'Netflix Family',
+            'telegram_image_path' => 'telegram-product-families/netflix.webp',
+        ]);
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create([
+            'name' => 'Netflix Family Monthly',
+            'description' => 'Produk family.',
+            'price_amount' => 13000,
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'product_family_id' => $family->id,
+            'telegram_image_path' => null,
+        ]);
+        $this->postTelegramWebhook($this->messageUpdate(115, '/start product_'.$product->id))->assertOk();
+
+        $this->assertSame('telegram-product-families/netflix.webp', $family->fresh()->telegram_image_path);
+        $this->assertSame($family->id, $product->fresh()->product_family_id);
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && $request['photo'] === url('/storage/telegram-product-families/netflix.webp'));
     }
 
     public function test_indonesian_welcome_uses_banner_and_indonesian_fallback_copy(): void

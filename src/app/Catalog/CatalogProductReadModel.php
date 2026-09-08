@@ -32,6 +32,7 @@ final readonly class CatalogProductReadModel
         public ?string $imageUrl,
         public ?string $createdAt,
         public ?string $icon = null,
+        public ?string $telegramImagePath = null,
         public bool $matchesSearch = false,
     ) {}
 

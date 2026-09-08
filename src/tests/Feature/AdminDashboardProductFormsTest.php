@@ -54,8 +54,11 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->get('/admin?tab=produk')
             ->assertOk()
             ->assertSee('Pilih gambar')
-            ->assertSee('productImageFileName', false)
             ->assertSee('Gambar default katalog')
+            ->assertSee('Gambar Telegram')
+            ->assertSee('telegram-product-image', false)
+            ->assertSee('Gambar Telegram family')
+            ->assertSee('telegram-product-family-image', false)
             ->assertSee('admin-product-placeholder', false)
             ->assertSee('Default bawaan aktif')
             ->assertSee('sr-only', false)
@@ -293,6 +296,31 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertSame(IMAGETYPE_WEBP, $type);
         $this->assertSame(900, $width);
         $this->assertSame(1200, $height);
+    }
+
+    public function test_admin_can_upload_separate_telegram_product_image(): void
+    {
+        Storage::fake('public');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.store'), [
+                'name' => 'Telegram Poster Product',
+                'price_amount' => '13000',
+                'description' => 'Poster khusus Telegram.',
+                'image' => UploadedFile::fake()->image('storefront-square.png', 800, 800),
+                'telegram_image' => UploadedFile::fake()->image('telegram-landscape.png', 2400, 1000),
+            ])
+            ->assertRedirect('/admin?tab=produk#product-1');
+
+        $product = Product::query()->where('name', 'Telegram Poster Product')->firstOrFail();
+        $this->assertStringStartsWith('products/', (string) $product->image_path);
+        $this->assertStringStartsWith('telegram-products/', (string) $product->telegram_image_path);
+        Storage::disk('public')->assertExists($product->image_path);
+        Storage::disk('public')->assertExists($product->telegram_image_path);
+        [$width, $height] = getimagesize(Storage::disk('public')->path($product->telegram_image_path));
+        $this->assertSame(1600, $width);
+        $this->assertSame(667, $height);
     }
 
     public function test_failed_product_image_upload_returns_actionable_validation_message(): void

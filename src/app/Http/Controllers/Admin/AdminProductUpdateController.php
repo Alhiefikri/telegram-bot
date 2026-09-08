@@ -14,7 +14,6 @@ use App\Services\AuditLogger;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
-use Throwable;
 
 class AdminProductUpdateController extends Controller
 {
@@ -24,15 +23,18 @@ class AdminProductUpdateController extends Controller
 
         $validated = $request->validated();
         $newImagePath = $request->hasFile('image') ? $images->store($request->file('image')) : null;
+        $newTelegramImagePath = $request->hasFile('telegram_image') ? $images->storeTelegram($request->file('telegram_image')) : null;
         $oldImagePath = null;
+        $oldTelegramImagePath = null;
 
         try {
-            $event = DB::transaction(function () use ($product, $validated, $request, $auditLogger, $user, $priceNotifications, $newImagePath, &$oldImagePath, $coherence) {
+            $event = DB::transaction(function () use ($product, $validated, $request, $auditLogger, $user, $priceNotifications, $newImagePath, $newTelegramImagePath, &$oldImagePath, &$oldTelegramImagePath, $coherence) {
                 $categoryId = $validated['category_id'] ?? null;
 
                 $locked = $coherence->lockForCategoryChange($product, $categoryId);
-                $oldValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $oldValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
                 $oldImagePath = $oldValues['image_path'] ?? null;
+                $oldTelegramImagePath = $oldValues['telegram_image_path'] ?? null;
 
                 $locked->fill([
                     'category_id' => $validated['category_id'] ?? null,
@@ -52,9 +54,12 @@ class AdminProductUpdateController extends Controller
                 if ($newImagePath !== null) {
                     $locked->image_path = $newImagePath;
                 }
+                if ($newTelegramImagePath !== null) {
+                    $locked->telegram_image_path = $newTelegramImagePath;
+                }
                 $locked->save();
 
-                $newValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $newValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
 
                 $auditLogger->log(
                     'product.updated',
@@ -71,11 +76,8 @@ class AdminProductUpdateController extends Controller
             if ($newImagePath !== null) {
                 $images->deleteManagedImage($newImagePath);
             }
-
-            return $forms->productUpdateBusinessValidationError($request, $product, 'category_id', $exception->getMessage());
-        } catch (Throwable $exception) {
-            if ($newImagePath !== null) {
-                $images->deleteManagedImage($newImagePath);
+            if ($newTelegramImagePath !== null) {
+                $images->deleteManagedImage($newTelegramImagePath);
             }
 
             throw $exception;
@@ -83,6 +85,9 @@ class AdminProductUpdateController extends Controller
 
         if ($newImagePath !== null) {
             $images->deleteManagedImage($oldImagePath);
+        }
+        if ($newTelegramImagePath !== null) {
+            $images->deleteManagedImage($oldTelegramImagePath);
         }
 
         if ($event !== null) {

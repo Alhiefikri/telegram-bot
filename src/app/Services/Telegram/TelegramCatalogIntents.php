@@ -513,10 +513,12 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->qrisCrossBorderSupport($customer);
         }
         $text = implode("\n", $lines);
+        $product->loadMissing('family');
+        $telegramImagePath = $product->telegram_image_path ?? $product->family?->telegram_image_path;
 
         if ($messageId === null
             && mb_strlen($text, 'UTF-8') <= 1024
-            && ($imageUrl = $this->images->telegramUrl($product->image_path)) !== null) {
+            && ($imageUrl = $this->images->telegramUrl($telegramImagePath)) !== null) {
             $this->bot->sendPhotoReference(
                 $chatId,
                 $imageUrl,

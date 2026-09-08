@@ -141,6 +141,25 @@
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
                         </x-admin-dashboard.card>
+                        <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <x-admin-dashboard.field-label for="telegram-product-image" class="text-sm normal-case tracking-normal">📲 Gambar Telegram</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60">Opsional. Khusus detail produk di Store Bot Telegram; tidak mengubah gambar Storefront. Gunakan format landscape agar teks pada poster terbaca.</p>
+                                </div>
+                                <div x-show="telegramProductImageUrl" class="h-14 w-20 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]">
+                                    <img x-bind:src="telegramProductImageUrl" alt="" class="h-full w-full object-contain">
+                                </div>
+                            </div>
+                            <div class="mt-2 flex min-w-0 items-center gap-3 rounded-[1rem] border-[3px] border-neo-ink bg-white p-2 shadow-[4px_4px_0_0_#050505]">
+                                <label for="telegram-product-image" class="shrink-0 cursor-pointer rounded-lg bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih gambar</label>
+                                <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="telegramProductImageFileName">Tidak ada file yang dipilih</span>
+                            </div>
+                            <input type="file" id="telegram-product-image" name="telegram_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-on:change="telegramProductImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
+                            <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Kosongkan kalau gambar Telegram lama tetap dipakai.</p>
+                            @error('telegram_image', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                            @error('telegram_image', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                        </x-admin-dashboard.card>
 
                         <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
                             <x-admin-dashboard.field-label for="product-description" class="text-sm normal-case tracking-normal">📝 Deskripsi singkat</x-admin-dashboard.field-label>

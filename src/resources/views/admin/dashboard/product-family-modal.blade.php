@@ -71,6 +71,23 @@
                     @error('image', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     @error('image', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                 </div>
+                <div class="mt-3 rounded-xl border-2 border-neo-ink bg-white p-3 shadow-[2px_2px_0_#111827]">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <x-admin-dashboard.field-label for="telegram-product-family-image">Gambar Telegram family</x-admin-dashboard.field-label>
+                            <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Opsional. Default gambar Telegram untuk semua produk dalam family yang tidak memiliki gambar Telegram sendiri. Tidak mengubah gambar Storefront.</p>
+                        </div>
+                        <div x-show="telegramFamilyImageUrl" x-cloak class="h-14 w-20 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_#050505]"><img x-bind:src="telegramFamilyImageUrl" alt="" class="h-full w-full object-contain"></div>
+                    </div>
+                    <div class="mt-2 flex min-w-0 items-center gap-3 rounded-lg border-2 border-neo-ink bg-white p-2">
+                        <label for="telegram-product-family-image" class="shrink-0 cursor-pointer rounded-md bg-neo-ink px-3 py-2 text-xs font-black text-white">Pilih gambar</label>
+                        <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="telegramFamilyImageFileName">Tidak ada file yang dipilih</span>
+                    </div>
+                    <input type="file" id="telegram-product-family-image" name="telegram_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-on:change="telegramFamilyImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
+                    <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="familyFormMode === 'edit'">Kosongkan kalau gambar Telegram family lama tetap dipakai.</p>
+                    @error('telegram_image', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                    @error('telegram_image', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                </div>
 
                 <div class="mt-3 grid grid-cols-2 gap-2">
                     <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeProductFamilyModal()" x-bind:disabled="familyFormSubmitting">Batal</x-admin-dashboard.button>

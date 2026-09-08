@@ -79,8 +79,8 @@ final class AdminDashboardProductsData
                 : ($entry->product === null ? [] : [$entry->product]))
             ->keyBy('id');
         $products = Product::query()
-            ->with(['category:id,name', 'family:id,name'])
-            ->select(['id', 'category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'name', 'icon', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'is_active', 'featured_rank', 'created_at'])
+            ->with(['category:id,name', 'family:id,name,telegram_image_path'])
+            ->select(['id', 'category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'name', 'icon', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'created_at'])
             ->withExists('stockItems')
             ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')->whereNull('retired_at')])
             ->whereIn('id', $productIds->all())
@@ -130,6 +130,7 @@ final class AdminDashboardProductsData
                 $stockReturnUrl = route('admin.dashboard', ['tab' => 'produk']).'#product-'.$product->id;
                 $updateUrl = route('admin.products.update', ['product' => $product]);
                 $imageUrl = $this->images->publicUrl($product->image_path) ?? $placeholderUrl;
+                $telegramImageUrl = $this->images->telegramUrl($product->telegram_image_path);
                 $catalogProduct = $catalogProducts->get((int) $product->id);
 
                 return [(int) $product->id => [
@@ -164,6 +165,8 @@ final class AdminDashboardProductsData
                     'visibility_label' => $product->is_active ? '● Tampil di toko' : '○ Tidak tampil',
                     'visibility_color' => $product->is_active ? '#7BD10A' : '#ef4444',
                     'image_path' => $product->image_path,
+                    'telegram_image_path' => $product->telegram_image_path,
+                    'telegram_image_url' => $telegramImageUrl,
                     'image_url' => $imageUrl,
                     'visibility_action_label' => $product->is_active ? '⏸ Pause' : '▶ Play',
                     'update_url' => $updateUrl,
@@ -202,6 +205,7 @@ final class AdminDashboardProductsData
                         'usageGuideTitle' => $product->usage_guide_title,
                         'usageGuideUrl' => $product->usage_guide_url,
                         'isActive' => $product->is_active,
+                        'telegramImageUrl' => $telegramImageUrl,
                         'imageUrl' => $imageUrl,
                         'updateUrl' => $updateUrl,
                         'stockUrl' => $stockUrl,
@@ -294,7 +298,7 @@ final class AdminDashboardProductsData
             'description' => $family->description,
             'image_path' => $family->imagePath,
             'image_url' => $family->imageUrl,
-            'sort_order' => $family->sortOrder,
+            'telegram_image_path' => $family->telegramImagePath,
             'category' => $family->categoryName ?? 'Tanpa kategori',
             'member_count' => $family->optionCount,
             'available_member_count' => $family->availableOptionCount,
@@ -314,6 +318,7 @@ final class AdminDashboardProductsData
                 'name' => $family->name,
                 'description' => $family->description,
                 'sortOrder' => $family->sortOrder,
+                'telegramImageUrl' => $family->telegramImagePath === null ? null : $this->images->telegramUrl($family->telegramImagePath),
                 'imageUrl' => $family->imageUrl,
                 'updateUrl' => $updateUrl,
             ],
@@ -361,7 +366,7 @@ final class AdminDashboardProductsData
                 'slug' => $family->slug,
                 'description' => $family->description,
                 'image_url' => $family->imageUrl,
-                'sort_order' => $family->sortOrder,
+                'telegram_image_url' => $family->telegramImagePath === null ? null : $this->images->telegramUrl($family->telegramImagePath),
                 'category' => $family->categoryName ?? 'Tanpa kategori',
                 'member_count' => $family->optionCount,
                 'available_member_count' => $family->availableOptionCount,
@@ -376,6 +381,7 @@ final class AdminDashboardProductsData
                     'name' => $family->name,
                     'description' => $family->description,
                     'sortOrder' => $family->sortOrder,
+                    'telegramImageUrl' => $family->telegramImagePath === null ? null : $this->images->telegramUrl($family->telegramImagePath),
                     'imageUrl' => $family->imageUrl,
                     'updateUrl' => route('admin.product-families.update', ['productFamily' => $family->id]),
                 ],
