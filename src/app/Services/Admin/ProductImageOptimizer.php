@@ -132,6 +132,27 @@ final class ProductImageOptimizer
         return $url;
     }
 
+    /**
+     * @return array{contents: string, filename: string}|null
+     */
+    public function telegramPhoto(?string $path): ?array
+    {
+        if ($path === null
+            || (! str_starts_with($path, self::TELEGRAM_DIRECTORY.'/')
+                && ! str_starts_with($path, self::TELEGRAM_FAMILY_DIRECTORY.'/')
+                && ! str_starts_with($path, self::DIRECTORY.'/')
+                && ! str_starts_with($path, self::FAMILY_DIRECTORY.'/'))
+            || str_contains($path, '..')
+            || ! Storage::disk('public')->exists($path)) {
+            return null;
+        }
+        $contents = Storage::disk('public')->get($path);
+
+        return is_string($contents) && $contents !== ''
+            ? ['contents' => $contents, 'filename' => basename($path)]
+            : null;
+    }
+
     private function createImageResource(UploadedFile $image): \GdImage
     {
         $contents = file_get_contents($image->getRealPath());

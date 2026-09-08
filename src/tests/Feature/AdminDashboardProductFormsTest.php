@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\UserRole;
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use App\Models\StorefrontSetting;
 use App\Models\User;
@@ -321,6 +322,25 @@ class AdminDashboardProductFormsTest extends TestCase
         [$width, $height] = getimagesize(Storage::disk('public')->path($product->telegram_image_path));
         $this->assertSame(1600, $width);
         $this->assertSame(667, $height);
+    }
+
+    public function test_admin_can_upload_telegram_family_image(): void
+    {
+        Storage::fake('public');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.product-families.store'), [
+                'name' => 'Netflix Family',
+                'description' => 'Pilihan paket Netflix.',
+                'sort_order' => '1',
+                'telegram_image' => UploadedFile::fake()->image('family-telegram.png', 2400, 1000),
+            ])
+            ->assertRedirect();
+
+        $family = ProductFamily::query()->where('name', 'Netflix Family')->firstOrFail();
+        $this->assertStringStartsWith('telegram-product-families/', (string) $family->telegram_image_path);
+        Storage::disk('public')->assertExists($family->telegram_image_path);
     }
 
     public function test_failed_product_image_upload_returns_actionable_validation_message(): void

@@ -110,6 +110,7 @@ class AdminProductDashboardState
                 'familyDescription' => old('description', $editingFamily['description'] ?? ''),
                 'familySortOrder' => old('sort_order', $editingFamily['sort_order'] ?? 0),
                 'familyImageUrl' => $editingFamily['image_url'] ?? '',
+                'telegramFamilyImageUrl' => $editingFamily['telegram_image_url'] ?? '',
             ],
             'familyMembershipProductId' => old('family_product_id'),
             'familyMembershipErrors' => $familyMembershipErrors->toArray(),

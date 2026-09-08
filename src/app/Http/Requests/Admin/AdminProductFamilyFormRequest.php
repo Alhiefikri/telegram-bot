@@ -46,6 +46,11 @@ abstract class AdminProductFamilyFormRequest extends FormRequest
             'image.mimes' => 'Gambar family harus JPG, PNG, atau WebP.',
             'image.max' => 'Ukuran gambar family maksimal 5 MB.',
             'image.dimensions' => 'Dimensi gambar family maksimal 6000 x 6000 piksel.',
+            'telegram_image.uploaded' => 'Upload gambar Telegram family gagal. Maksimal 5 MB; coba kompres atau pilih gambar lain.',
+            'telegram_image.image' => 'File gambar Telegram family harus berupa gambar yang valid.',
+            'telegram_image.mimes' => 'Gambar Telegram family harus JPG, PNG, atau WebP.',
+            'telegram_image.max' => 'Ukuran gambar Telegram family maksimal 5 MB.',
+            'telegram_image.dimensions' => 'Dimensi gambar Telegram family maksimal 6000 x 6000 piksel.',
         ];
     }
 

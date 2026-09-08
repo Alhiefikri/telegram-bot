@@ -95,10 +95,18 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(113, '/start product_'.$product->id))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
-            && $request['photo'] === url('/storage/telegram-products/netflix.webp')
-            && str_contains((string) ($request['caption'] ?? ''), 'Netflix Premium Image')
-            && str_contains((string) ($request['caption'] ?? ''), 'Stok tersedia: 1'));
+        Http::assertSent(function ($request): bool {
+            $photo = collect($request->data())->first(
+                fn ($part): bool => is_array($part) && ($part['name'] ?? null) === 'photo',
+            );
+
+            return str_ends_with($request->url(), '/sendPhoto')
+                && is_array($photo)
+                && ($photo['filename'] ?? null) === 'netflix.webp'
+                && ($photo['contents'] ?? null) === 'webp'
+                && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Netflix Premium Image')
+                && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Stok tersedia: 1');
+        });
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'Netflix Premium Image'));
     }
@@ -148,8 +156,16 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertSame('telegram-product-families/netflix.webp', $family->fresh()->telegram_image_path);
         $this->assertSame($family->id, $product->fresh()->product_family_id);
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
-            && $request['photo'] === url('/storage/telegram-product-families/netflix.webp'));
+        Http::assertSent(function ($request): bool {
+            $photo = collect($request->data())->first(
+                fn ($part): bool => is_array($part) && ($part['name'] ?? null) === 'photo',
+            );
+
+            return str_ends_with($request->url(), '/sendPhoto')
+                && is_array($photo)
+                && ($photo['filename'] ?? null) === 'netflix.webp'
+                && ($photo['contents'] ?? null) === 'webp';
+        });
     }
 
     public function test_indonesian_welcome_uses_banner_and_indonesian_fallback_copy(): void

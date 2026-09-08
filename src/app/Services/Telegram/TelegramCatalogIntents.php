@@ -513,15 +513,19 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->qrisCrossBorderSupport($customer);
         }
         $text = implode("\n", $lines);
-        $product->loadMissing('family');
-        $telegramImagePath = $product->telegram_image_path ?? $product->family?->telegram_image_path;
+        $telegramImagePath = $product->telegram_image_path
+            ?? $product->family?->telegram_image_path
+            ?? $product->image_path
+            ?? $product->family?->image_path;
+        $telegramPhoto = $this->images->telegramPhoto($telegramImagePath);
 
         if ($messageId === null
             && mb_strlen($text, 'UTF-8') <= 1024
-            && ($imageUrl = $this->images->telegramUrl($telegramImagePath)) !== null) {
-            $this->bot->sendPhotoReference(
+            && $telegramPhoto !== null) {
+            $this->bot->sendPhoto(
                 $chatId,
-                $imageUrl,
+                $telegramPhoto['contents'],
+                $telegramPhoto['filename'],
                 $text,
                 ['inline_keyboard' => $keyboard],
             );
