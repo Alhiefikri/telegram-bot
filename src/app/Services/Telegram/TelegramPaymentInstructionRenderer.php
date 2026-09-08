@@ -257,13 +257,37 @@ class TelegramPaymentInstructionRenderer
 
     public function sakurupiah(Order $order, SakurupiahPayableInvoice $payable, string $locale = 'id'): TelegramPaymentInstruction
     {
-        $order->loadMissing('orderItems');
-        $paymentUrl = $payable->checkoutUrl();
-        $qrContent = $payable->qrisPayload() ?? $paymentUrl;
-        if ($qrContent === null) {
-            throw new \RuntimeException('Sakurupiah payable invoice has no presentation content.');
+        $qrContent = $payable->qrisPayload();
+        if ($qrContent === null || ! $payable->isDirectQris()) {
+            throw new \RuntimeException('Sakurupiah direct QRIS invoice has no QRIS payload.');
         }
 
+        return new TelegramPaymentInstruction(
+            photoContents: $this->qrCodes->png($qrContent),
+            filename: 'sakurupiah-'.$order->invoice_number.'.png',
+            captionLines: $this->sakurupiahLines($order, $payable, $locale),
+            replyMarkup: $this->sakurupiahPaymentActions($order, null, $locale),
+        );
+    }
+
+    /** @return array{text: string, reply_markup: array<string, mixed>} */
+    public function sakurupiahHosted(Order $order, SakurupiahPayableInvoice $payable, string $locale = 'id'): array
+    {
+        $paymentUrl = $payable->checkoutUrl();
+        if ($paymentUrl === null || ! $payable->isHosted()) {
+            throw new \RuntimeException('Sakurupiah hosted invoice has no checkout URL.');
+        }
+
+        return [
+            'text' => implode("\n", $this->sakurupiahLines($order, $payable, $locale)),
+            'reply_markup' => $this->sakurupiahPaymentActions($order, $paymentUrl, $locale),
+        ];
+    }
+
+    /** @return list<string> */
+    private function sakurupiahLines(Order $order, SakurupiahPayableInvoice $payable, string $locale): array
+    {
+        $order->loadMissing('orderItems');
         $lines = [
             $this->text($locale, 'payment.sakurupiah.checkout_created'),
             '━━━━━━━━━━━━━━',
@@ -275,26 +299,20 @@ class TelegramPaymentInstructionRenderer
             $this->text($locale, 'payment.qris_fee_store'),
             '',
             $this->text($locale, 'payment.sakurupiah.exact_amount'),
+            $payable->isDirectQris()
+                ? $this->text($locale, 'payment.sakurupiah.scan')
+                : $this->text($locale, 'payment.sakurupiah.hosted'),
+            '',
+            $this->text($locale, 'payment.qris_deadline', [
+                'date' => $this->formatDate($payable->effectiveExpiresAt(), $locale),
+            ]),
+            $this->text($locale, 'payment.qris_deadline_guidance'),
+            '',
+            $this->text($locale, 'payment.auto_delivery'),
+            $this->text($locale, 'payment.check_if_missing'),
         ];
 
-        $lines[] = $payable->isDirectQris()
-            ? $this->text($locale, 'payment.sakurupiah.scan')
-            : $this->text($locale, 'payment.sakurupiah.hosted');
-        $lines[] = '';
-        $lines[] = $this->text($locale, 'payment.qris_deadline', [
-            'date' => $this->formatDate($payable->effectiveExpiresAt(), $locale),
-        ]);
-        $lines[] = $this->text($locale, 'payment.qris_deadline_guidance');
-        $lines[] = '';
-        $lines[] = $this->text($locale, 'payment.auto_delivery');
-        $lines[] = $this->text($locale, 'payment.check_if_missing');
-
-        return new TelegramPaymentInstruction(
-            photoContents: $this->qrCodes->png($qrContent),
-            filename: 'sakurupiah-'.$order->invoice_number.'.png',
-            captionLines: $lines,
-            replyMarkup: $this->sakurupiahPaymentActions($order, $paymentUrl, $locale),
-        );
+        return $lines;
     }
 
     /**

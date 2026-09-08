@@ -97,10 +97,11 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->assertSame(1, Payment::query()->where('order_id', $payment->order_id)->count());
     }
 
-    public function test_provider_qr_content_is_treated_as_opaque_presentation(): void
+    public function test_invalid_provider_qr_falls_back_to_the_allowlisted_checkout_url(): void
     {
         $payment = $this->payment(['amount' => 20000]);
-        $providerQrContent = 'provider-opaque-qr-content-without-terminal-crc';
+        $invalidQrContent = 'provider-opaque-qr-content-without-terminal-crc';
+        $checkoutUrl = 'https://sakurupiah.id/pay/invoice?source=provider';
         $invoice = new SakurupiahInvoice(
             trxId: 'trx-411-qris',
             merchantRef: (string) $payment->merchant_ref,
@@ -111,7 +112,8 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
             fee: SakurupiahFee::from(450),
             createdAt: CarbonImmutable::now()->subMinute(),
             expiresAt: CarbonImmutable::now()->addDay(),
-            qr: $providerQrContent,
+            qr: $invalidQrContent,
+            checkoutUrl: $checkoutUrl,
         );
         $provider = Mockery::mock(SakurupiahProviderAdapter::class);
         $provider->shouldReceive('createInvoice')->once()->andReturn($invoice);
@@ -120,10 +122,10 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
 
         $this->assertSame(SakurupiahInvoiceOutcome::Payable, $result->outcome());
-        $this->assertSame($providerQrContent, $result->payable()?->qrisPayload());
-        $this->assertTrue($result->payable()?->isDirectQris());
-        $this->assertNull($result->payable()?->checkoutUrl());
-        $this->assertSame($providerQrContent, $payment->fresh()->provider_presentation['qris_payload']);
+        $this->assertNull($result->payable()?->qrisPayload());
+        $this->assertTrue($result->payable()?->isHosted());
+        $this->assertSame($checkoutUrl, $result->payable()?->checkoutUrl());
+        $this->assertSame('hosted', $payment->fresh()->provider_presentation['mode']);
     }
 
     public function test_query_bearing_provider_hosted_url_becomes_payable(): void

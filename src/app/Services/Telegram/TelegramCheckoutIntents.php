@@ -159,6 +159,16 @@ class TelegramCheckoutIntents
             return $this->sendSakurupiahRetryState($chatId, $order, $result->outcome(), $locale);
         }
 
+        if ($payable->isHosted()) {
+            $instruction = $this->paymentInstructions->sakurupiahHosted($order, $payable, $locale);
+
+            return $this->bot->sendMessage(
+                $chatId,
+                $instruction['text'],
+                $instruction['reply_markup'],
+            );
+        }
+
         return $this->sendPaymentInstruction(
             $chatId,
             $this->paymentInstructions->sakurupiah($order, $payable, $locale),

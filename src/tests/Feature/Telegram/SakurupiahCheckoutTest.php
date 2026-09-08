@@ -33,7 +33,7 @@ use Tests\Support\TelegramBotTestSupport;
 
 class SakurupiahCheckoutTest extends TelegramBotTestSupport
 {
-    private const DIRECT_QRIS = 'provider-opaque-qr-content-without-terminal-crc';
+    private const DIRECT_QRIS = '0002010102125303360540820450.005802ID63045B6D';
 
     protected function setUp(): void
     {
@@ -270,7 +270,7 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
     }
 
-    public function test_hosted_sakurupiah_effect_uses_the_allowlisted_checkout_url_and_same_total(): void
+    public function test_hosted_sakurupiah_effect_sends_the_checkout_link_without_a_fake_payment_qr(): void
     {
         $this->fakeTelegramHttp();
         [$order, $payment] = $this->payment([
@@ -287,14 +287,17 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
             ->handle(app(TelegramCheckoutIntents::class));
 
         $sendPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'));
-        $this->assertCount(1, $sendPhotos);
-        $body = $sendPhotos->first()[0]->body();
-        $request = $sendPhotos->first()[0];
-        $replyMarkup = json_decode((string) $this->telegramRequestField($request, 'reply_markup'), true, 512, JSON_THROW_ON_ERROR);
+        $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertCount(0, $sendPhotos);
+        $this->assertCount(1, $sendMessages);
+        $request = $sendMessages->first()[0];
+        $text = (string) $this->telegramRequestField($request, 'text');
+        $replyMarkup = $this->telegramRequestField($request, 'reply_markup');
+        $this->assertIsArray($replyMarkup);
         $this->assertSame('https://sakurupiah.id/pay/invoice', $replyMarkup['inline_keyboard'][0][0]['url']);
-        $this->assertStringContainsString('Rp20.450', $body);
-        $this->assertStringContainsString('Pay the exact final amount shown', $body);
-        $this->assertStringNotContainsString('provider-secret', $body);
+        $this->assertStringContainsString('Rp20.450', $text);
+        $this->assertStringContainsString('Pay the exact final amount shown', $text);
+        $this->assertStringNotContainsString('provider-secret', $text);
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
     }
 

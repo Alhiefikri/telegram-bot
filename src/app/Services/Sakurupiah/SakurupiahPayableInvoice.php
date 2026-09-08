@@ -10,10 +10,9 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 
 /**
- * The payload contains only provider-issued QR content or hosted presentation
- * data after the payment/reference/amount/expiry gates below pass. Sakurupiah
- * documents `qr` as an opaque response string, so this boundary does not impose
- * a provider-undocumented EMV/CRC contract on it.
+ * The payload contains only a provider-issued QRIS EMV payload with a valid
+ * terminal CRC, or an allowlisted hosted checkout URL. Provider QR strings
+ * that fail the QRIS integrity boundary fall back to hosted presentation.
  */
 final readonly class SakurupiahPayableInvoice
 {
@@ -77,11 +76,13 @@ final readonly class SakurupiahPayableInvoice
         }
 
         $qrisPayload = $invoice->qrPayload();
-        $checkoutUrl = null;
-        if ($qrisPayload === null) {
-            $checkoutUrl = $invoice->checkoutUrl();
+        $checkoutUrl = $invoice->checkoutUrl();
+        if ($qrisPayload !== null && self::isValidQrisPayload($qrisPayload)) {
+            $checkoutUrl = null;
+        } else {
+            $qrisPayload = null;
             if ($checkoutUrl === null || ! self::isAllowedHostedUrl($checkoutUrl, $environment)) {
-                throw new SakurupiahInvoiceIntegrityException('hosted_presentation');
+                throw new SakurupiahInvoiceIntegrityException('qris_presentation');
             }
         }
 
@@ -159,7 +160,9 @@ final readonly class SakurupiahPayableInvoice
         $qrisPayload = $snapshot['qris_payload'] ?? null;
         $checkoutUrl = $snapshot['checkout_url'] ?? null;
         if ($mode === 'qris') {
-            if (! is_string($qrisPayload) || trim($qrisPayload) === '' || $checkoutUrl !== null) {
+            if (! is_string($qrisPayload)
+                || ! self::isValidQrisPayload($qrisPayload)
+                || $checkoutUrl !== null) {
                 throw new SakurupiahInvoiceIntegrityException('qris_presentation');
             }
         } elseif ($mode === 'hosted') {
@@ -249,6 +252,35 @@ final readonly class SakurupiahPayableInvoice
             'checkout_url' => $this->checkoutUrl,
             'effective_expires_at' => $this->effectiveExpiresAt->toIso8601String(),
         ];
+    }
+
+    private static function isValidQrisPayload(string $payload): bool
+    {
+        if (! str_starts_with($payload, '000201')
+            || preg_match('/6304([0-9A-F]{4})$/i', $payload, $matches) !== 1) {
+            return false;
+        }
+
+        $expected = strtoupper($matches[1]);
+        $crcInput = substr($payload, 0, -4);
+
+        return hash_equals($expected, self::crc16CcittFalse($crcInput));
+    }
+
+    private static function crc16CcittFalse(string $payload): string
+    {
+        $crc = 0xFFFF;
+        $length = strlen($payload);
+        for ($index = 0; $index < $length; $index++) {
+            $crc ^= ord($payload[$index]) << 8;
+            for ($bit = 0; $bit < 8; $bit++) {
+                $crc = ($crc & 0x8000) !== 0
+                    ? (($crc << 1) ^ 0x1021) & 0xFFFF
+                    : ($crc << 1) & 0xFFFF;
+            }
+        }
+
+        return sprintf('%04X', $crc);
     }
 
     private static function isAllowedHostedUrl(string $url, SakurupiahEnvironment $environment): bool
