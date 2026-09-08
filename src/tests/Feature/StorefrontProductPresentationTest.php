@@ -12,6 +12,7 @@ use App\Models\ProductStockItem;
 use App\Models\StorefrontSetting;
 use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\StorefrontProductScenarios;
@@ -204,6 +205,55 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertNotNull($websiteQris);
         $this->assertSame('Bayar via KlikQRIS', $websiteQris->label);
         $this->assertStringContainsString('KlikQRIS', $websiteQris->description);
+    }
+
+    public function test_ready_sakurupiah_uses_native_qris_copy(): void
+    {
+        config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
+            'sandbox_api_id' => 'sandbox-id',
+            'sandbox_api_key' => 'sandbox-key',
+            'sandbox_callback_url' => 'https://store.example.test/api/webhook/sakurupiah',
+            'sandbox_return_url' => 'https://store.example.test/shop/orders',
+            'sandbox_allowed_hosts' => ['sakurupiah.id'],
+            'sandbox_callback_allowed_hosts' => ['store.example.test'],
+            'sandbox_return_allowed_hosts' => ['store.example.test'],
+            'qris_contract' => [
+                'currency' => 'IDR',
+                'currency_confirmed' => true,
+                'fee_payer' => 'merchant',
+                'merchant_fee' => 1,
+                'fee_confirmed' => true,
+                'expiry_hours' => 24,
+                'expiry_confirmed' => true,
+            ],
+        ]));
+        Http::fake(fn () => Http::response([
+            'status' => '200',
+            'data' => [[
+                'kode' => 'QRISC',
+                'nama' => 'QRISC Custom Merchant',
+                'minimal' => 200,
+                'maksimal' => 20_000_000,
+                'tipe' => 'DIRECT',
+                'status' => 'Aktif',
+                'addition' => ['default_expired' => 24],
+            ]],
+        ], 200));
+        ManualPaymentSetting::current()->update(['payment_mode' => 'sakurupiah']);
+        $product = $this->availableProduct(['name' => 'Sakurupiah Ready']);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+        $websiteQris = $presentation->checkoutChoice('website_qris');
+
+        $this->assertTrue($presentation->checkoutReadiness->ready);
+        $this->assertSame('sakurupiah', $presentation->checkoutReadiness->provider);
+        $this->assertSame('QRIS otomatis (Sakurupiah)', $presentation->checkoutReadiness->label);
+        $this->assertNotNull($websiteQris);
+        $this->assertSame('Bayar via Sakurupiah', $websiteQris->label);
+        $this->assertStringContainsString('Sakurupiah', $websiteQris->description);
+        $this->assertSame('sakurupiah', $websiteQris->provider);
     }
 
     public function test_binance_choice_exposes_only_configured_binance_pay_id_rail(): void
