@@ -44,6 +44,10 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
             'sandbox_api_id' => 'api-test',
             'sandbox_api_key' => 'secret-key',
             'sandbox_allowed_hosts' => ['sakurupiah.id'],
+            'sandbox_callback_url' => 'https://store.example.test/api/webhook/sakurupiah',
+            'sandbox_return_url' => 'https://store.example.test/shop/orders',
+            'sandbox_callback_allowed_hosts' => ['store.example.test'],
+            'sandbox_return_allowed_hosts' => ['store.example.test'],
             'qris_contract' => [
                 'currency' => 'IDR',
                 'currency_confirmed' => true,
