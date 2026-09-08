@@ -394,7 +394,7 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->assertSame('hosted', $payment->fresh()->provider_presentation['mode']);
     }
 
-    public function test_provider_total_mismatch_is_never_payable(): void
+    public function test_provider_total_below_order_amount_is_never_payable(): void
     {
         $payment = $this->payment();
         $invoice = $this->invoice($payment, total: 11999);
@@ -409,6 +409,26 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $payment->refresh();
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_PROVIDER_TOTAL_INVALID, $payment->provider_create_state);
         $this->assertSame('trx-411', $payment->provider_reference);
+    }
+
+    public function test_merchant_borne_provider_fee_does_not_increase_buyer_total(): void
+    {
+        $payment = $this->payment();
+        $invoice = $this->invoice($payment, total: 12000, merchantFee: 1);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->once()->andReturn($invoice);
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $lifecycle = app(SakurupiahInvoiceLifecycleService::class);
+        $created = $lifecycle->lifecycle($payment);
+        $persisted = $lifecycle->lifecycle($payment);
+
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $created->outcome());
+        $this->assertSame(12000, $created->payable()?->totalAmount());
+        $this->assertSame(84, $created->payable()?->providerFee());
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $persisted->outcome());
+        $this->assertSame(12000, $persisted->payable()?->totalAmount());
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->fresh()->provider_create_state);
     }
 
     public function test_expired_provider_deadline_is_never_payable(): void

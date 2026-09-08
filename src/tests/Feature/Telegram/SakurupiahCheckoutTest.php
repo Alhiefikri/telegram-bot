@@ -100,6 +100,72 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         $this->assertNotNull($order->fresh()->manual_checkout_customer_notified_at);
     }
 
+    public function test_customer_borne_fee_delivers_qr_with_provider_total(): void
+    {
+        config()->set('services.sakurupiah.qris_contract.fee_payer', 'customer');
+        config()->set('services.sakurupiah.qris_contract.merchant_fee', 2);
+        $this->fakeTelegramHttp();
+        [$order, $payment] = $this->payment([
+            'invoice_number' => 'INV-SAK-TELEGRAM-CUSTOMER-FEE',
+            'provider_total_payment' => 20_450,
+            'provider_fee' => 450,
+            'provider_presentation' => [
+                'mode' => 'qris',
+                'qris_payload' => self::DIRECT_QRIS,
+                'checkout_url' => null,
+            ],
+        ]);
+
+        $effect = app(TelegramOutboundEffectService::class)->recordCheckoutInstructions($order, $payment);
+        (new SendSakurupiahCheckoutInstructions($order->id, null, $effect?->id))
+            ->handle(app(TelegramCheckoutIntents::class));
+
+        $sendPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $sendPhotos);
+        $body = $sendPhotos->first()[0]->body();
+        $this->assertStringContainsString('Rp20.450', $body);
+        $this->assertStringNotContainsString('could not be prepared', $body);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
+    }
+
+    public function test_merchant_borne_fee_delivers_qr_without_increasing_buyer_total(): void
+    {
+        $this->fakeTelegramHttp();
+        [$order, $payment] = $this->payment([
+            'invoice_number' => 'INV-SAK-TELEGRAM-MERCHANT-FEE',
+            'provider_total_payment' => 20_000,
+            'provider_fee' => 450,
+            'provider_presentation' => [
+                'mode' => 'qris',
+                'qris_payload' => self::DIRECT_QRIS,
+                'checkout_url' => null,
+            ],
+            'provider_payload' => [
+                'data' => [[
+                    'trx_id' => 'trx-INV-SAK-TELEGRAM-MERCHANT-FEE',
+                    'merchant_ref' => 'INV-SAK-TELEGRAM-MERCHANT-FEE',
+                    'payment_kode' => 'QRISC',
+                    'payment_status' => 'pending',
+                    'total' => '20000',
+                    'fee' => '450',
+                    'merchant_fee' => 'Merchant',
+                ]],
+            ],
+        ]);
+
+        $effect = app(TelegramOutboundEffectService::class)->recordCheckoutInstructions($order, $payment);
+        (new SendSakurupiahCheckoutInstructions($order->id, null, $effect?->id))
+            ->handle(app(TelegramCheckoutIntents::class));
+
+        $sendPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $sendPhotos);
+        $body = $sendPhotos->first()[0]->body();
+        $this->assertStringContainsString('Rp20.000', $body);
+        $this->assertStringNotContainsString('Rp20.450', $body);
+        $this->assertStringNotContainsString('could not be prepared', $body);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
+    }
+
     public function test_sakurupiah_delivery_loads_the_checkout_graph_without_relation_n_plus_one(): void
     {
         $this->fakeTelegramHttp();

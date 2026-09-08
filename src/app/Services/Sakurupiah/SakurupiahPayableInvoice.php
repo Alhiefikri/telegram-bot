@@ -59,7 +59,7 @@ final readonly class SakurupiahPayableInvoice
         }
 
         $fee = $invoice->fee?->fixedAmount();
-        if ($fee === null || $invoice->totalValue() !== (int) $payment->amount + $fee) {
+        if ($fee === null || $invoice->totalValue() < (int) $payment->amount) {
             throw new SakurupiahInvoiceIntegrityException('fee');
         }
 
@@ -125,7 +125,7 @@ final readonly class SakurupiahPayableInvoice
             || ! is_int($fee)
             || $fee < 0
             || ! is_int($total)
-            || $total !== (int) $payment->amount + $fee
+            || $total < (int) $payment->amount
             || (int) $payment->amount <= 0) {
             throw new SakurupiahInvoiceIntegrityException('fee');
         }
