@@ -170,6 +170,7 @@ class KlikQrisOwnerAlertTest extends TestCase
         $this->assertStringNotContainsString('data:image', $text);
         $this->assertStringNotContainsString('ConnectionException', $text);
         $this->assertStringNotContainsString('recovery_unconfirmed', $text);
+        $this->assertStringContainsString('Endpoint status provider tidak tersedia', $text);
 
         $this->assertNotNull($customer);
         $this->assertStringNotContainsString((string) $customer->telegram_id, $text);

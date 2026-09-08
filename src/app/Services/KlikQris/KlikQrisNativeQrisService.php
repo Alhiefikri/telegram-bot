@@ -110,6 +110,7 @@ class KlikQrisNativeQrisService
                 $outcome,
                 $observation['observations'],
                 $this->ownerAlertRetryBudget(),
+                $this->recoveryDiagnostic($payment->provider_create_last_error),
             );
         });
 
@@ -748,21 +749,47 @@ class KlikQrisNativeQrisService
 
     private function markRecoveryUnconfirmed(Payment $payment, Throwable $exception): void
     {
-        $providerException = $exception->getPrevious() ?? $exception;
+        $diagnostic = $this->recoveryDiagnostic($exception);
 
-        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($providerException): void {
+        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($diagnostic): void {
             if ($this->hasPayablePersistedQris($lockedPayment)) {
                 return;
             }
 
             $lockedPayment->update([
                 'provider_create_state' => 'recovery_unconfirmed',
-                'provider_create_last_error' => substr($providerException::class, 0, 500),
+                'provider_create_last_error' => $diagnostic,
             ]);
         });
 
         $payment->refresh();
     }
+
+    private function recoveryDiagnostic(Throwable|string|null $value): string
+    {
+        if ($value instanceof KlikQrisStatusUnavailableException) {
+            return 'status_unavailable';
+        }
+
+        if ($value instanceof KlikQrisStatusResponseException) {
+            return $value->httpStatus === null
+                ? 'status_response_invalid'
+                : 'status_http_'.$value->httpStatus;
+        }
+
+        if (is_string($value)) {
+            return match (true) {
+                in_array($value, ['status_unavailable', 'status_response_invalid'], true) => $value,
+                str_starts_with($value, 'status_http_') => $value,
+                str_contains($value, KlikQrisStatusUnavailableException::class) => 'status_unavailable',
+                str_contains($value, KlikQrisStatusResponseException::class) => 'status_response_invalid',
+                default => 'recovery_failed',
+            };
+        }
+
+        return 'recovery_failed';
+    }
+
 
     private function hasPersistedQrisPayload(Payment $payment): bool
     {

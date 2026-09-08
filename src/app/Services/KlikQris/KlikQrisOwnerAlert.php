@@ -5,9 +5,9 @@ namespace App\Services\KlikQris;
 /**
  * One actionable KlikQRIS outcome that needs owner intervention.
  *
- * Carries only the module's safe outcome classification and the number of times
- * it has been observed. No provider payload, QR media, secret, or customer data
- * ever reaches an owner-facing adapter through this object.
+ * Carries only the module's safe outcome classification, diagnostic reason,
+ * and observation count. No provider payload, QR media, secret, or customer
+ * data ever reaches an owner-facing adapter through this object.
  */
 final readonly class KlikQrisOwnerAlert
 {
@@ -15,6 +15,7 @@ final readonly class KlikQrisOwnerAlert
         private KlikQrisNativeQrisOutcome $outcome,
         private int $observations,
         private int $retryBudget,
+        private ?string $reason = null,
     ) {}
 
     public function outcome(): KlikQrisNativeQrisOutcome
@@ -30,5 +31,10 @@ final readonly class KlikQrisOwnerAlert
     public function retryBudget(): int
     {
         return $this->retryBudget;
+    }
+
+    public function reason(): ?string
+    {
+        return $this->reason;
     }
 }

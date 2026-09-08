@@ -85,6 +85,10 @@ class TelegramKlikQrisRecoveryEscalator
             '📌 Kondisi: '.$this->outcomeLabel($outcome),
         ];
 
+        if ($alert->reason() !== null) {
+            $lines[] = '🔎 Detail: '.$this->reasonLabel($alert->reason());
+        }
+
         if ($outcome === KlikQrisNativeQrisOutcome::RecoveryPending) {
             $lines[] = '🔁 Percobaan pemulihan: '.$alert->observations().'x, batas '.$alert->retryBudget().'x';
         }
@@ -100,6 +104,16 @@ class TelegramKlikQrisRecoveryEscalator
         return match ($outcome) {
             KlikQrisNativeQrisOutcome::RecoveryPending => 'Status QR belum bisa dipastikan setelah pemulihan berulang.',
             KlikQrisNativeQrisOutcome::InvalidProviderResult => 'Data QR dari provider tidak valid untuk dibayar.',
+        };
+    }
+
+    private function reasonLabel(string $reason): string
+    {
+        return match (true) {
+            $reason === 'status_unavailable' => 'Endpoint status provider tidak tersedia setelah retry.',
+            $reason === 'status_response_invalid' => 'Respons status provider tidak valid.',
+            str_starts_with($reason, 'status_http_') => 'Endpoint status provider mengembalikan HTTP '.substr($reason, strlen('status_http_')).'.',
+            default => 'Gangguan recovery provider tidak terklasifikasi.',
         };
     }
 }

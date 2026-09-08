@@ -576,7 +576,10 @@ class KlikQrisNativeQrisTest extends TestCase
         }
 
         $this->assertSame(['GET', 'GET'], $methods);
-        $this->assertSame('recovery_unconfirmed', $payment->fresh()->provider_create_state);
+        $fresh = $payment->fresh();
+        $this->assertSame('recovery_unconfirmed', $fresh->provider_create_state);
+        $this->assertSame('status_http_404', $fresh->provider_create_last_error);
+
     }
 
     public function test_uncertain_create_never_switches_provider_or_creates_another_payment(): void
