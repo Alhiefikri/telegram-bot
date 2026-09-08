@@ -220,6 +220,7 @@ final class TelegramPaidOrderTxtExporter
             CredentialAccessMethod::OtpMailLink => $this->otpLines($lines, $account->accessValue()),
             CredentialAccessMethod::AuthToken => $this->authTokenLines($lines, $account->accessValue()),
         };
+
         return $lines;
     }
 

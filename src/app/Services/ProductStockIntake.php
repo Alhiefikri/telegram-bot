@@ -492,6 +492,7 @@ final class ProductStockIntake
         foreach ($submission->items() as $index => $value) {
             if (! is_string($value)) {
                 $errors["stock_items.{$index}"][] = 'Isi stok harus berupa teks.';
+
                 continue;
             }
 
@@ -504,6 +505,7 @@ final class ProductStockIntake
             $parts = $this->bulkReaderMailLinkParts($secret);
             if ($parts === null) {
                 $errors["stock_items.{$index}"][] = 'Format baris harus email|password|token|link atau email|password|email|password|token|UUID|link.';
+
                 continue;
             }
 
@@ -518,6 +520,7 @@ final class ProductStockIntake
                 );
             } catch (Throwable) {
                 $errors["stock_items.{$index}"][] = 'Akses token atau link reader mail pada baris tidak valid.';
+
                 continue;
             }
 

@@ -790,7 +790,6 @@ class KlikQrisNativeQrisService
         return 'recovery_failed';
     }
 
-
     private function hasPersistedQrisPayload(Payment $payment): bool
     {
         return $payment->provider_payment_method === 'qris' && is_array($payment->provider_payload);
