@@ -96,6 +96,27 @@ final class ProductImageOptimizer
         return '/storage/'.ltrim($path, '/');
     }
 
+    public function telegramUrl(?string $path): ?string
+    {
+        if ($path === null
+            || ! str_starts_with($path, self::DIRECTORY.'/')
+            || str_contains($path, '..')
+            || ! Storage::disk('public')->exists($path)) {
+            return null;
+        }
+
+        $url = url($this->publicUrl($path));
+        $parts = parse_url($url);
+        if (! is_array($parts)
+            || ! in_array(strtolower((string) ($parts['scheme'] ?? '')), ['http', 'https'], true)
+            || ! is_string($parts['host'] ?? null)
+            || $parts['host'] === '') {
+            return null;
+        }
+
+        return $url;
+    }
+
     private function createImageResource(UploadedFile $image): \GdImage
     {
         $contents = file_get_contents($image->getRealPath());

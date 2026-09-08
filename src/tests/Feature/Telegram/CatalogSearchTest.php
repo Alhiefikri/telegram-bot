@@ -17,6 +17,7 @@ use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -75,6 +76,51 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains(json_encode($request->data()), 'detail:pay:qris:'.$product->id.':'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'selamat datang di LHIE STORE'));
+    }
+
+    public function test_product_deep_link_sends_optimized_product_image_as_remote_photo_url(): void
+    {
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        Storage::fake('public');
+        Storage::disk('public')->put('products/netflix.webp', 'webp');
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create([
+            'name' => 'Netflix Premium Image',
+            'description' => 'Produk dengan gambar.',
+            'price_amount' => 13000,
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'image_path' => 'products/netflix.webp',
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(113, '/start product_'.$product->id))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains((string) ($request['caption'] ?? ''), 'Netflix Premium Image')
+            && str_contains((string) ($request['caption'] ?? ''), 'Stok tersedia: 1'));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Netflix Premium Image'));
+    }
+
+    public function test_product_without_existing_image_keeps_text_only_detail(): void
+    {
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        Storage::fake('public');
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create([
+            'name' => 'Netflix Premium Text',
+            'description' => 'Produk tanpa gambar.',
+            'price_amount' => 13000,
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'image_path' => null,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(114, '/start product_'.$product->id))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Netflix Premium Text'));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto'));
     }
 
     public function test_indonesian_welcome_uses_banner_and_indonesian_fallback_copy(): void

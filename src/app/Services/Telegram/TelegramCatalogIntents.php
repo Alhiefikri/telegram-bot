@@ -10,6 +10,7 @@ use App\Catalog\CatalogFamilyReadModel;
 use App\Catalog\CatalogProductReadModel;
 use App\Models\Customer;
 use App\Models\Product;
+use App\Services\Admin\ProductImageOptimizer;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
@@ -31,6 +32,7 @@ class TelegramCatalogIntents
         private ProductBrandIconResolver $icons,
         private TelegramCatalogQuerySession $catalogQueries,
         private TelegramFamilyCallbackToken $familyTokens,
+        private ProductImageOptimizer $images,
     ) {}
 
     public function sendCategoryCatalog(Customer $customer, string $chatId, ?int $messageId = null): void
@@ -510,8 +512,21 @@ class TelegramCatalogIntents
             $lines[] = '';
             $lines[] = $this->locale->qrisCrossBorderSupport($customer);
         }
-
         $text = implode("\n", $lines);
+
+        if ($messageId === null
+            && mb_strlen($text, 'UTF-8') <= 1024
+            && ($imageUrl = $this->images->telegramUrl($product->image_path)) !== null) {
+            $this->bot->sendPhotoReference(
+                $chatId,
+                $imageUrl,
+                $text,
+                ['inline_keyboard' => $keyboard],
+            );
+
+            return;
+        }
+
         $this->bot->editMessageTextOrSend(
             $chatId,
             $text,
