@@ -76,6 +76,7 @@
                                         <option value="legacy">Teks biasa / legacy</option>
                                         <option value="email_password_mfa_secret">email | password | MFA secret</option>
                                         <option value="email_password_access_token" x-bind:disabled="!structuredStockInputEnabled">email | password | akses token</option>
+                                        <option value="email_password_reader_mail_link" x-bind:disabled="!structuredStockInputEnabled">email | password | akses token | link reader mail</option>
                                     </select>
                                     <p class="mt-1.5 text-[10px] font-bold leading-4 text-neo-ink/70">
                                         Pilihan ini berlaku untuk semua baris yang diinput. Setiap baris harus berisi satu credential.
@@ -83,7 +84,10 @@
                                     <p x-show="stockInputFormat === 'email_password_access_token'" class="mt-1 text-[10px] font-bold leading-4 text-neo-ink/70">
                                         Untuk akses token, semua isi setelah <code>email|password|</code> dipertahankan sebagai satu nilai, termasuk bagian yang memakai tanda <code>|</code>.
                                     </p>
-                                    <p x-show="stockInputFormat === 'email_password_access_token' && !structuredStockInputEnabled" class="mt-1.5 text-[10px] font-black text-[#b91c1c]">
+                                    <p x-show="stockInputFormat === 'email_password_reader_mail_link'" class="mt-1 text-[10px] font-bold leading-4 text-neo-ink/70">
+                                        Format ini menerima bentuk ringkas <code>email|password|token|link</code> atau bentuk ekspor <code>email|password|email|password|token|UUID|link</code>.
+                                    </p>
+                                    <p x-show="stockInputFormat === 'email_password_access_token' && !structuredStockInputEnabled || stockInputFormat === 'email_password_reader_mail_link' && !structuredStockInputEnabled" class="mt-1.5 text-[10px] font-black text-[#b91c1c]">
                                         Format akses token menunggu pemeriksaan kesiapan identitas.
                                     </p>
                                 </div>
@@ -93,7 +97,7 @@
                                         id="stock-items"
                                         name="stock_items"
                                         rows="6"
-                                        x-bind:placeholder="stockInputFormat === 'email_password_mfa_secret' ? 'email@example.com|password|MFA-SECRET' + String.fromCharCode(10) + 'akun2@example.com|password2|MFA-SECRET-2' : (stockInputFormat === 'email_password_access_token' ? 'email@example.com|password|ACCESS-TOKEN|CLIENT-ID|recovery@example.com' + String.fromCharCode(10) + 'akun2@example.com|password2|ACCESS-TOKEN-2' : 'email@example.com|password' + String.fromCharCode(10) + 'KEY-XXXX-1234')"
+                                        x-bind:placeholder="stockInputFormat === 'email_password_mfa_secret' ? 'email@example.com|password|MFA-SECRET' + String.fromCharCode(10) + 'akun2@example.com|password2|MFA-SECRET-2' : (stockInputFormat === 'email_password_reader_mail_link' ? 'email@example.com|password|ACCESS-TOKEN|https://mail.example.com/reader/abc' + String.fromCharCode(10) + 'akun2@example.com|password2|ACCESS-TOKEN-2|https://mail.example.com/reader/def' : (stockInputFormat === 'email_password_access_token' ? 'email@example.com|password|ACCESS-TOKEN|CLIENT-ID|recovery@example.com' + String.fromCharCode(10) + 'akun2@example.com|password2|ACCESS-TOKEN-2' : 'email@example.com|password' + String.fromCharCode(10) + 'KEY-XXXX-1234'))"
                                         x-model="stockItems"
                                         x-ref="stockItems"
                                         required

@@ -110,6 +110,7 @@ final class CredentialDeliveryPresentation
                 accessMethod: $structured->accessMethod,
                 accessValue: $structured->accessValue,
                 tutorial: $tutorial,
+                readerMailLink: $structured->readerMailLink,
             );
         }
 

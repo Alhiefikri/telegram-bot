@@ -15,6 +15,7 @@ final readonly class StructuredCredentialPayload
         public CredentialAccessMethod $accessMethod,
         public ?string $accessValue,
         public ?string $tutorialOverride,
+        public ?string $readerMailLink = null,
         public int $version = self::VERSION,
     ) {}
 
@@ -38,6 +39,7 @@ final readonly class StructuredCredentialPayload
         $accessMethod = $payload['access_method'] ?? null;
         $accessValue = $payload['access_value'] ?? null;
         $tutorialOverride = $payload['tutorial_override'] ?? null;
+        $readerMailLink = $payload['reader_mail_link'] ?? null;
 
         if (! is_string($email)) {
             throw new InvalidArgumentException('Structured credential payload email is invalid.');
@@ -81,12 +83,21 @@ final readonly class StructuredCredentialPayload
         if ($accessValue !== null && trim($accessValue) === '') {
             $accessValue = null;
         }
+        if ($readerMailLink !== null && ! is_string($readerMailLink)) {
+            throw new InvalidArgumentException('Structured credential payload reader mail link is invalid.');
+        }
+        if ($readerMailLink !== null && trim($readerMailLink) === '') {
+            $readerMailLink = null;
+        }
 
         match ($method) {
             CredentialAccessMethod::None => self::assertNoAccessValue($accessValue),
             CredentialAccessMethod::OtpMailLink => self::assertOtpMailLink($accessValue),
             CredentialAccessMethod::AuthToken => self::assertAuthToken($accessValue),
         };
+        if ($readerMailLink !== null) {
+            self::assertOtpMailLink($readerMailLink);
+        }
 
         return new self(
             email: $normalizedEmail,
@@ -94,6 +105,7 @@ final readonly class StructuredCredentialPayload
             accessMethod: $method,
             accessValue: $accessValue,
             tutorialOverride: $tutorialOverride,
+            readerMailLink: $readerMailLink,
             version: $version,
         );
     }
@@ -104,6 +116,7 @@ final readonly class StructuredCredentialPayload
         CredentialAccessMethod|string $accessMethod,
         ?string $accessValue = null,
         ?string $tutorialOverride = null,
+        ?string $readerMailLink = null,
     ): self {
         return self::fromArray([
             'version' => self::VERSION,
@@ -112,15 +125,16 @@ final readonly class StructuredCredentialPayload
             'access_method' => $accessMethod,
             'access_value' => $accessValue,
             'tutorial_override' => $tutorialOverride,
+            'reader_mail_link' => $readerMailLink,
         ]);
     }
 
     /**
-     * @return array{version: int, email: string, password: string, access_method: string, access_value: ?string, tutorial_override: ?string}
+     * @return array<string, mixed>
      */
     public function toArray(): array
     {
-        return [
+        $payload = [
             'version' => $this->version,
             'email' => $this->email,
             'password' => $this->password,
@@ -128,6 +142,12 @@ final readonly class StructuredCredentialPayload
             'access_value' => $this->accessValue,
             'tutorial_override' => $this->tutorialOverride,
         ];
+
+        if ($this->readerMailLink !== null) {
+            $payload['reader_mail_link'] = $this->readerMailLink;
+        }
+
+        return $payload;
     }
 
     /**

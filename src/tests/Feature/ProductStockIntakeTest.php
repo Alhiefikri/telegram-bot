@@ -167,6 +167,33 @@ class ProductStockIntakeTest extends TestCase
         );
     }
 
+    public function test_bulk_reader_mail_link_format_preserves_token_and_link(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::bulk([
+                'reader@example.test|Reader-password|READER-TOKEN|https://mail.example.test/reader/abc',
+                'legacy-reader@example.test|Legacy-reader-password|legacy-reader@example.test|Legacy-reader-password|LEGACY-READER-TOKEN|9e5f94bc-e8a4-4e73-b8be-63364c29d753|https://mail.example.test/reader/legacy',
+            ], ProductStockIntakeSubmission::BULK_FORMAT_READER_MAIL_LINK),
+            $admin,
+            dispatchNotifications: false,
+        );
+
+        $items = ProductStockItem::query()->orderBy('id')->get();
+        $payload = $items[0]->credential_payload;
+        $this->assertSame('auth_token', $payload['access_method']);
+        $this->assertSame('READER-TOKEN', $payload['access_value']);
+        $this->assertSame('https://mail.example.test/reader/abc', $payload['reader_mail_link']);
+
+        $legacyPayload = $items[1]->credential_payload;
+        $this->assertSame('legacy-reader@example.test', $legacyPayload['email']);
+        $this->assertSame('LEGACY-READER-TOKEN', $legacyPayload['access_value']);
+        $this->assertSame('https://mail.example.test/reader/legacy', $legacyPayload['reader_mail_link']);
+    }
+
     public function test_bulk_triplet_validation_rejects_the_whole_batch_without_persisting_credentials(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);

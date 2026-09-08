@@ -27,7 +27,7 @@ class StoreProductStockRequest extends FormRequest
     {
         return [
             'stock_items' => ['required', 'string', 'max:5000'],
-            'stock_format' => ['nullable', 'string', 'in:legacy,email_password_mfa_secret,email_password_access_token,email_password_mfa,email_password_auth_token'],
+            'stock_format' => ['nullable', 'string', 'in:legacy,email_password_mfa_secret,email_password_access_token,email_password_reader_mail_link,email_password_mfa,email_password_auth_token,email_password_otp_mail_link'],
             'operation_key' => ['nullable', 'uuid'],
         ];
     }

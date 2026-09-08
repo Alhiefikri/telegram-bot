@@ -203,12 +203,23 @@ final class TelegramPaidOrderTxtExporter
             'password : '.$password,
         ];
 
+        if ($account->readerMailLink() !== null) {
+            $token = $this->credentialField($account->accessValue(), 'Akses Token');
+            if (mb_strlen($token, 'UTF-8') > 3500 || ! $this->validOtpMailLink($account->readerMailLink())) {
+                throw new InvalidArgumentException('TXT reader mail credential is invalid.');
+            }
+
+            $lines[] = 'akses token : '.$token;
+            $lines[] = 'link reader mail : '.$account->readerMailLink();
+
+            return $lines;
+        }
+
         match ($accessMethod) {
             CredentialAccessMethod::None => $this->assertNoAccessValue($account->accessValue()),
             CredentialAccessMethod::OtpMailLink => $this->otpLines($lines, $account->accessValue()),
             CredentialAccessMethod::AuthToken => $this->authTokenLines($lines, $account->accessValue()),
         };
-
         return $lines;
     }
 

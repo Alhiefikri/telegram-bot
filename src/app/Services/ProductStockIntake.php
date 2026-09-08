@@ -21,6 +21,7 @@ use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -340,6 +341,7 @@ final class ProductStockIntake
         return match (true) {
             $submission->isBulkMfaSecret() => $this->normalizeBulkMfaSecret($submission, $rejectSubmissionDuplicates),
             $submission->isBulkAccessToken() => $this->normalizeBulkAccessToken($submission, $rejectSubmissionDuplicates),
+            $submission->isBulkReaderMailLink() => $this->normalizeBulkReaderMailLink($submission, $rejectSubmissionDuplicates),
             $submission->isLegacy() => $this->normalizeLegacy($submission, $rejectSubmissionDuplicates),
             default => $this->normalizeStructured($submission, $rejectSubmissionDuplicates),
         };
@@ -448,6 +450,85 @@ final class ProductStockIntake
                 'identities' => $this->legacyIdentities($secret),
             ];
             $canonicalItems[] = ['secret' => $secret];
+        }
+
+        if ($rawLength > self::MAX_LEGACY_CHARACTERS) {
+            $errors['stock_items'][] = 'Catatan stok maksimal 5000 karakter.';
+        }
+        if ($items === []) {
+            $errors['stock_items'][] = 'Isi minimal satu baris stok.';
+        }
+
+        $submissionDuplicates = $this->submissionDuplicateKinds($items);
+        if ($rejectSubmissionDuplicates) {
+            $this->appendSubmissionDuplicateErrors($errors, $submissionDuplicates, structured: false);
+        }
+        $this->throwIfInvalid($errors);
+
+        return [
+            'items' => $items,
+            'canonical_items' => $canonicalItems,
+            'submission_duplicates' => $submissionDuplicates,
+        ];
+    }
+
+    /**
+     * The reader-mail-link bulk format creates structured OTP Mail Link
+     * credentials while keeping the URL as the customer-delivered value.
+     *
+     * @return array{
+     *     items:list<array{index:int, format:CredentialFormat, secret:?string, payload:?StructuredCredentialPayload, identities:list<array{kind:string,value:string}>}>,
+     *     canonical_items:list<array<string,mixed>>,
+     *     submission_duplicates:array<int,array<string,bool>>
+     * }
+     */
+    private function normalizeBulkReaderMailLink(ProductStockIntakeSubmission $submission, bool $rejectSubmissionDuplicates = true): array
+    {
+        $errors = [];
+        $items = [];
+        $canonicalItems = [];
+        $rawLength = 0;
+
+        foreach ($submission->items() as $index => $value) {
+            if (! is_string($value)) {
+                $errors["stock_items.{$index}"][] = 'Isi stok harus berupa teks.';
+                continue;
+            }
+
+            $secret = trim($value);
+            if ($secret === '') {
+                continue;
+            }
+
+            $rawLength += strlen($secret) + ($rawLength === 0 ? 0 : 1);
+            $parts = $this->bulkReaderMailLinkParts($secret);
+            if ($parts === null) {
+                $errors["stock_items.{$index}"][] = 'Format baris harus email|password|token|link atau email|password|email|password|token|UUID|link.';
+                continue;
+            }
+
+            try {
+                $payload = StructuredCredentialPayload::fromValues(
+                    $parts['email'],
+                    $parts['password'],
+                    CredentialAccessMethod::AuthToken,
+                    $parts['access_token'],
+                    null,
+                    $parts['reader_mail_link'],
+                );
+            } catch (Throwable) {
+                $errors["stock_items.{$index}"][] = 'Akses token atau link reader mail pada baris tidak valid.';
+                continue;
+            }
+
+            $items[] = [
+                'index' => (int) $index,
+                'format' => CredentialFormat::StructuredAccount,
+                'secret' => null,
+                'payload' => $payload,
+                'identities' => $payload->identityValues(),
+            ];
+            $canonicalItems[] = $payload->toArray();
         }
 
         if ($rawLength > self::MAX_LEGACY_CHARACTERS) {
@@ -584,6 +665,53 @@ final class ProductStockIntake
             'email' => $email,
             'password' => $password,
             'access_token' => $accessToken,
+        ];
+    }
+
+    /**
+     * Accept both the compact four-field format and the common exported
+     * seven-field format:
+     * email|password|email|password|token|uuid|reader-link.
+     *
+     * @return array{email:string,password:string,access_token:string,reader_mail_link:string}|null
+     */
+    private function bulkReaderMailLinkParts(string $secret): ?array
+    {
+        $parts = explode('|', $secret);
+        if (count($parts) === 4) {
+            [$email, $password, $accessToken, $readerMailLink] = $parts;
+        } elseif (count($parts) === 7
+            && trim((string) $parts[0]) === trim((string) $parts[2])
+            && (string) $parts[1] === (string) $parts[3]
+            && Str::isUuid(trim((string) $parts[5]))) {
+            [$email, $password, $accessToken, $readerMailLink] = [
+                $parts[0],
+                $parts[1],
+                $parts[4],
+                $parts[6],
+            ];
+        } else {
+            return null;
+        }
+
+        $email = trim((string) $email);
+        $password = (string) $password;
+        $accessToken = (string) $accessToken;
+        $readerMailLink = trim((string) $readerMailLink);
+
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false
+            || trim($password) === ''
+            || trim($accessToken) === ''
+            || $readerMailLink === ''
+            || strpbrk($email.$password.$accessToken.$readerMailLink, "\r\n") !== false) {
+            return null;
+        }
+
+        return [
+            'email' => $email,
+            'password' => $password,
+            'access_token' => $accessToken,
+            'reader_mail_link' => $readerMailLink,
         ];
     }
 
@@ -988,6 +1116,9 @@ final class ProductStockIntake
         }
         if ($submission->isBulkAccessToken()) {
             return "Tambah stok bulk email/password/akses token dashboard ({$itemCount} item).";
+        }
+        if ($submission->isBulkReaderMailLink()) {
+            return "Tambah stok bulk email/password/link reader mail dashboard ({$itemCount} item).";
         }
 
         return $submission->usesStructuredCredentials()

@@ -27,6 +27,7 @@ final readonly class CredentialDeliveryAccount
         private ?CredentialAccessMethod $accessMethod,
         private ?string $accessValue,
         private ?string $tutorial,
+        private ?string $readerMailLink = null,
     ) {}
 
     public function number(): int
@@ -88,6 +89,11 @@ final readonly class CredentialDeliveryAccount
     public function accessValue(): ?string
     {
         return $this->accessValue;
+    }
+
+    public function readerMailLink(): ?string
+    {
+        return $this->readerMailLink;
     }
 
     public function tutorial(): ?string

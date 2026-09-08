@@ -268,6 +268,31 @@ final class TelegramPaidOrderTxtExporterTest extends TelegramBotTestSupport
         $this->assertCount(1, $stockQueries, json_encode($queries, JSON_THROW_ON_ERROR));
     }
 
+    public function test_it_exports_reader_mail_link_bulk_credentials_with_token_and_link_labels(): void
+    {
+        [$order, $customer, $item] = $this->paidOrderWithItem();
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => $this->structured(
+                'reader@example.test',
+                'Reader-password',
+                CredentialAccessMethod::AuthToken,
+                'READER-TOKEN',
+                null,
+                'https://mail.example.test/reader/abc',
+            ),
+        ]);
+
+        $payload = app(TelegramPaidOrderTxtExporter::class)->export($order->fresh(), $customer);
+
+        $this->assertStringContainsString(
+            "email : reader@example.test\npassword : Reader-password\nakses token : READER-TOKEN\nlink reader mail : https://mail.example.test/reader/abc",
+            $payload?->documentContents() ?? '',
+        );
+    }
+
     /** @return array<string, mixed> */
     private function structured(
         string $email,
@@ -275,6 +300,7 @@ final class TelegramPaidOrderTxtExporterTest extends TelegramBotTestSupport
         CredentialAccessMethod $accessMethod,
         ?string $accessValue = null,
         ?string $tutorial = null,
+        ?string $readerMailLink = null,
     ): array {
         return [
             'version' => 1,
@@ -283,6 +309,7 @@ final class TelegramPaidOrderTxtExporterTest extends TelegramBotTestSupport
             'access_method' => $accessMethod->value,
             'access_value' => $accessValue,
             'tutorial_override' => $tutorial,
+            'reader_mail_link' => $readerMailLink,
         ];
     }
 

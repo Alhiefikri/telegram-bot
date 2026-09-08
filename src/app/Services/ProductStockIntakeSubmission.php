@@ -20,6 +20,8 @@ final readonly class ProductStockIntakeSubmission
 
     public const MODE_BULK_ACCESS_TOKEN = 'bulk_access_token';
 
+    public const MODE_BULK_READER_MAIL_LINK = 'bulk_reader_mail_link';
+
     public const MODE_STRUCTURED_ACCOUNT = 'structured_account';
 
     public const BULK_FORMAT_LEGACY = 'legacy';
@@ -27,6 +29,8 @@ final readonly class ProductStockIntakeSubmission
     public const BULK_FORMAT_MFA_SECRET = 'email_password_mfa_secret';
 
     public const BULK_FORMAT_ACCESS_TOKEN = 'email_password_access_token';
+
+    public const BULK_FORMAT_READER_MAIL_LINK = 'email_password_reader_mail_link';
 
     /**
      * @param  list<string|array<string, mixed>>  $items
@@ -44,6 +48,7 @@ final readonly class ProductStockIntakeSubmission
             self::MODE_LEGACY,
             self::MODE_BULK_MFA_SECRET,
             self::MODE_BULK_ACCESS_TOKEN,
+            self::MODE_BULK_READER_MAIL_LINK,
             self::MODE_STRUCTURED_ACCOUNT,
         ], true)) {
             throw new InvalidArgumentException('Stock intake mode is invalid.');
@@ -73,6 +78,7 @@ final readonly class ProductStockIntakeSubmission
             self::BULK_FORMAT_LEGACY => self::MODE_LEGACY,
             self::BULK_FORMAT_MFA_SECRET, 'email_password_mfa' => self::MODE_BULK_MFA_SECRET,
             self::BULK_FORMAT_ACCESS_TOKEN, 'email_password_auth_token' => self::MODE_BULK_ACCESS_TOKEN,
+            self::BULK_FORMAT_READER_MAIL_LINK, 'email_password_otp_mail_link' => self::MODE_BULK_READER_MAIL_LINK,
             default => throw new InvalidArgumentException('Bulk stock format is invalid.'),
         };
 
@@ -137,6 +143,7 @@ final readonly class ProductStockIntakeSubmission
             self::MODE_LEGACY => self::legacy($items, $operationKey),
             self::MODE_BULK_MFA_SECRET => self::bulk($items, self::BULK_FORMAT_MFA_SECRET, $operationKey),
             self::MODE_BULK_ACCESS_TOKEN => self::bulk($items, self::BULK_FORMAT_ACCESS_TOKEN, $operationKey),
+            self::MODE_BULK_READER_MAIL_LINK => self::bulk($items, self::BULK_FORMAT_READER_MAIL_LINK, $operationKey),
             self::MODE_STRUCTURED_ACCOUNT => self::structured($items, $operationKey),
             default => throw new InvalidArgumentException('Stock intake mode is invalid.'),
         };
@@ -157,9 +164,14 @@ final readonly class ProductStockIntakeSubmission
         return $this->mode === self::MODE_BULK_ACCESS_TOKEN;
     }
 
+    public function isBulkReaderMailLink(): bool
+    {
+        return $this->mode === self::MODE_BULK_READER_MAIL_LINK;
+    }
+
     public function usesStructuredCredentials(): bool
     {
-        return in_array($this->mode, [self::MODE_BULK_ACCESS_TOKEN, self::MODE_STRUCTURED_ACCOUNT], true);
+        return in_array($this->mode, [self::MODE_BULK_ACCESS_TOKEN, self::MODE_BULK_READER_MAIL_LINK, self::MODE_STRUCTURED_ACCOUNT], true);
     }
 
     /**
