@@ -113,6 +113,33 @@ class StorefrontShopCheckoutTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_sakurupiah_checkout_requires_a_whatsapp_phone_before_any_side_effect(): void
+    {
+        ManualPaymentSetting::create([
+            'payment_mode' => 'sakurupiah',
+            'is_active' => true,
+        ]);
+        $product = $this->availableProduct(['stock' => 1]);
+        Http::fake();
+
+        $this->from(route('storefront.home'))
+            ->post(route('storefront.shop.checkout'), [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'buyer_name' => 'buyer_test',
+                'payment_method' => 'qris',
+                'terms_accepted' => true,
+            ])
+            ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
+            ->assertSessionHasErrors([
+                'support_contact_channel',
+                'support_contact_value',
+            ]);
+
+        $this->assertNoLocalCheckoutRowsCreated('missing Sakurupiah customer phone');
+        Http::assertNothingSent();
+    }
+
     public function test_checkout_service_rejects_unaccepted_terms_before_any_side_effect(): void
     {
         $product = $this->availableProduct(['stock' => 1]);

@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests;
 
+use App\Models\ManualPaymentSetting;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Storefront\StorefrontUrl;
+use App\Support\PaymentProvider;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -19,14 +21,25 @@ class StorefrontShopCheckoutRequest extends FormRequest
      */
     public function rules(): array
     {
+        $requiresSakurupiahPhone = $this->requiresSakurupiahPhone();
+        $supportChannelRules = ['nullable', 'string', 'required_with:support_contact_value', Rule::in(
+            $requiresSakurupiahPhone ? ['whatsapp'] : ['telegram', 'whatsapp'],
+        )];
+        $supportValueRules = ['nullable', 'string', 'max:120', 'required_with:support_contact_channel'];
+        if ($requiresSakurupiahPhone) {
+            array_unshift($supportChannelRules, 'required');
+            array_unshift($supportValueRules, 'required');
+            $supportValueRules[] = 'regex:/^\+?[0-9][0-9 .-]{7,19}$/';
+        }
+
         return [
             'product_id' => ['nullable', 'integer', 'min:1'],
             'quantity' => ['nullable', 'integer', 'min:1', 'max:20', 'required_with:product_id'],
             'buyer_name' => ['required', 'string', 'min:2', 'max:40', 'regex:/^[A-Za-z0-9_ .-]+$/'],
             'terms_accepted' => ['required', 'accepted'],
             'email' => ['nullable', 'string', 'email:rfc', 'max:254'],
-            'support_contact_channel' => ['nullable', 'string', 'required_with:support_contact_value', Rule::in(['telegram', 'whatsapp'])],
-            'support_contact_value' => ['nullable', 'string', 'max:120', 'required_with:support_contact_channel'],
+            'support_contact_channel' => $supportChannelRules,
+            'support_contact_value' => $supportValueRules,
             'payment_method' => ['nullable', Rule::in(CheckoutPaymentIntents::acceptedPaymentRails())],
             'cart_snapshot' => ['nullable', 'string', 'max:64'],
         ];
@@ -47,8 +60,11 @@ class StorefrontShopCheckoutRequest extends FormRequest
             'email.email' => 'Masukkan alamat email yang valid.',
             'email.max' => 'Email maksimal 254 karakter.',
             'support_contact_channel.*' => 'Pilih kanal bantuan yang tersedia.',
+            'support_contact_channel.required' => 'Pilih WhatsApp untuk checkout Sakurupiah.',
             'support_contact_channel.required_with' => 'Pilih kanal bantuan atau kosongkan kontak bantuan.',
             'support_contact_value.required_with' => 'Isi kontak bantuan atau kosongkan kanal bantuan.',
+            'support_contact_value.required' => 'Masukkan nomor WhatsApp untuk checkout Sakurupiah.',
+            'support_contact_value.regex' => 'Masukkan nomor WhatsApp yang valid untuk checkout Sakurupiah.',
             'payment_method.*' => 'Pilih metode pembayaran yang tersedia.',
         ];
     }
@@ -66,6 +82,12 @@ class StorefrontShopCheckoutRequest extends FormRequest
             'support_contact_value' => is_string($value) && trim($value) !== '' ? trim($value) : null,
             'email' => is_string($email) && trim($email) !== '' ? mb_strtolower(trim($email)) : null,
         ]);
+    }
+
+    private function requiresSakurupiahPhone(): bool
+    {
+        return ManualPaymentSetting::current()?->paymentProvider() === PaymentProvider::SAKURUPIAH
+            && CheckoutPaymentIntents::normalizePaymentRail($this->input('payment_method')) === CheckoutPaymentIntents::RAIL_QRIS;
     }
 
     protected function getRedirectUrl(): string

@@ -14,7 +14,7 @@ final readonly class SakurupiahCreateInvoice
 
     public string $method;
 
-    public ?string $phone;
+    public string $phone;
 
     public int $merchantFee;
 
@@ -32,7 +32,7 @@ final readonly class SakurupiahCreateInvoice
 
     public function __construct(
         string $method,
-        ?string $phone,
+        string $phone,
         SakurupiahAmount|int|string $amount,
         int $merchantFee,
         string $merchantRef,
@@ -43,7 +43,7 @@ final readonly class SakurupiahCreateInvoice
         ?int $expired = null,
     ) {
         $this->method = self::requiredText($method, 'method', 64);
-        $this->phone = $phone === null ? null : self::optionalText($phone, 'phone', 32);
+        $this->phone = self::requiredText($phone, 'phone', 32);
         if ($this->method !== self::METHOD_QRISC) {
             throw new InvalidArgumentException('Sakurupiah invoice method must be QRISC.');
         }
@@ -74,7 +74,7 @@ final readonly class SakurupiahCreateInvoice
     {
         return new self(
             method: $attributes['method'] ?? throw new InvalidArgumentException('Sakurupiah invoice method is required.'),
-            phone: $attributes['phone'] ?? null,
+            phone: $attributes['phone'] ?? throw new InvalidArgumentException('Sakurupiah invoice phone is required.'),
             amount: $attributes['amount'] ?? throw new InvalidArgumentException('Sakurupiah invoice amount is required.'),
             merchantFee: $attributes['merchant_fee'] ?? throw new InvalidArgumentException('Sakurupiah invoice merchant fee is required.'),
             merchantRef: $attributes['merchant_ref'] ?? throw new InvalidArgumentException('Sakurupiah invoice merchant reference is required.'),
@@ -102,6 +102,7 @@ final readonly class SakurupiahCreateInvoice
         $payload = [
             'api_id' => $apiId,
             'method' => $this->method,
+            'phone' => $this->phone,
             'amount' => $this->amount->submitted(),
             'merchant_fee' => $this->merchantFee,
             'merchant_ref' => $this->merchantRef,
@@ -110,9 +111,6 @@ final readonly class SakurupiahCreateInvoice
             'signature' => $signature,
         ];
 
-        if ($this->phone !== null) {
-            $payload['phone'] = $this->phone;
-        }
         if ($this->name !== null) {
             $payload['name'] = $this->name;
         }

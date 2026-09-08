@@ -5,6 +5,7 @@ namespace App\Services\Sakurupiah;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\SakurupiahEnvironment;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\PaymentLifecycleCoordinator;
@@ -740,10 +741,16 @@ final class SakurupiahInvoiceLifecycleService
             if ($phone === '' && $order?->support_contact_channel === 'whatsapp') {
                 $phone = trim((string) $order->support_contact_value);
             }
+            if ($phone === '' && filled($customer?->telegram_id)) {
+                $phone = trim((string) ManualPaymentSetting::current()?->whatsappSupportNumber());
+            }
+            if ($phone === '') {
+                throw new SakurupiahCreatePreRequestException('Sakurupiah customer phone is required before invoice creation.');
+            }
 
             return new SakurupiahCreateInvoice(
                 method: SakurupiahCreateInvoice::METHOD_QRISC,
-                phone: $phone === '' ? null : $phone,
+                phone: $phone,
                 amount: (int) $payment->amount,
                 merchantFee: $merchantFee,
                 merchantRef: (string) $payment->merchant_ref,

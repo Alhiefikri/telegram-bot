@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\SendSakurupiahCheckoutInstructions;
 use App\Models\Customer;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -171,7 +172,7 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
     }
 
-    public function test_checkout_without_customer_phone_creates_and_delivers_provider_qr(): void
+    public function test_checkout_without_customer_phone_uses_merchant_phone_and_delivers_provider_qr(): void
     {
         $this->fakeTelegramHttp();
         [$order, $payment] = $this->payment([
@@ -191,6 +192,11 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
             'support_contact_channel' => null,
             'support_contact_value' => null,
         ]);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'sakurupiah',
+            'is_active' => true,
+            'whatsapp_support_number' => '08123456789',
+        ]);
         $invoice = new SakurupiahInvoice(
             trxId: 'trx-no-phone',
             merchantRef: (string) $payment->merchant_ref,
@@ -208,8 +214,10 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
             ->shouldReceive('createInvoice')
             ->once()
             ->withArgs(function (SakurupiahCreateInvoice $request): bool {
-                return $request->phone === null
-                    && ! array_key_exists('phone', $request->toProviderPayload('api-test', 'test-signature'));
+                $payload = $request->toProviderPayload('api-test', 'test-signature');
+
+                return $request->phone === '628123456789'
+                    && ($payload['phone'] ?? null) === '628123456789';
             })
             ->andReturn($invoice);
 

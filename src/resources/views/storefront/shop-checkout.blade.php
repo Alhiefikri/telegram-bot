@@ -129,8 +129,8 @@
                                     @enderror
                                 </div>
 
-                                <details class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3" @if(old('support_contact_channel') || old('support_contact_value')) open @endif>
-                                    <summary class="cursor-pointer text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['support_contact_label'] }} <span class="normal-case text-[var(--sf-muted)]">(opsional)</span></summary>
+                                <details class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3" @if(old('support_contact_channel') || old('support_contact_value') || $errors->has('support_contact_channel') || $errors->has('support_contact_value')) open @endif>
+                                    <summary class="cursor-pointer text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['support_contact_label'] }} <span class="normal-case text-[var(--sf-muted)]">(nomor WhatsApp wajib untuk Sakurupiah)</span></summary>
                                     <div class="mt-3 grid gap-2">
                                         <div class="grid gap-2 sm:grid-cols-[150px_1fr]">
                                             <label for="checkout-support-channel" class="sr-only">Kanal bantuan</label>

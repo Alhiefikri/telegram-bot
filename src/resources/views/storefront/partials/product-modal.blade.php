@@ -231,13 +231,18 @@
                                     </div>
 
                                     <details data-storefront-optional-support class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3" :open="supportContactOpen" @toggle="supportContactOpen = $event.target.open">
-                                        <summary class="cursor-pointer text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['support_contact_label'] }} <span class="normal-case text-[var(--sf-muted)]">(opsional)</span></summary>
+                                        <summary class="cursor-pointer text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">
+                                            {{ $copy['shop']['support_contact_label'] }}
+                                            <span x-show="selectedCheckoutChoice()?.provider !== 'sakurupiah'" class="normal-case text-[var(--sf-muted)]">(opsional)</span>
+                                            <span x-show="selectedCheckoutChoice()?.provider === 'sakurupiah'" class="normal-case text-[var(--sf-muted)]">(nomor WhatsApp wajib untuk Sakurupiah)</span>
+                                        </summary>
                                         <div class="mt-3 grid gap-2">
                                         <div class="grid gap-2 sm:grid-cols-[150px_1fr]">
                                             <select id="storefront-support-contact-channel"
                                                     name="support_contact_channel"
                                                     x-model="supportContactChannel"
                                                     aria-describedby="{{ $supportContactDescribedBy }}"
+                                                    x-bind:required="selectedCheckoutChoice()?.provider === 'sakurupiah'"
                                                     @if ($supportContactHasError) aria-invalid="true" @endif
                                                     class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)]">
                                                 <option value="">Tidak perlu</option>
@@ -248,6 +253,7 @@
                                                    name="support_contact_value"
                                                    type="text"
                                                    x-model.trim="supportContactValue"
+                                                   x-bind:required="selectedCheckoutChoice()?.provider === 'sakurupiah'"
                                                    placeholder="@username atau nomor WhatsApp"
                                                    aria-describedby="{{ $supportContactDescribedBy }}"
                                                    @if ($supportContactHasError) aria-invalid="true" @endif
