@@ -14,6 +14,7 @@ use App\Services\AuditLogger;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class AdminProductUpdateController extends Controller
 {
@@ -72,12 +73,16 @@ class AdminProductUpdateController extends Controller
 
                 return $priceNotifications->createEventForCommittedUpdate($locked, $oldValues, $newValues);
             }, 5);
-        } catch (ProductFamilyCategoryMismatch $exception) {
+        } catch (Throwable $exception) {
             if ($newImagePath !== null) {
                 $images->deleteManagedImage($newImagePath);
             }
             if ($newTelegramImagePath !== null) {
                 $images->deleteManagedImage($newTelegramImagePath);
+            }
+
+            if ($exception instanceof ProductFamilyCategoryMismatch) {
+                return $forms->productUpdateBusinessValidationError($request, $product, 'category_id', $exception->getMessage());
             }
 
             throw $exception;
