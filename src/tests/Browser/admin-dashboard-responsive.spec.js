@@ -24,6 +24,7 @@ const customerCheckoutViewports = [
   { width: 1440, height: 900 },
   { width: 1920, height: 1080 },
 ];
+const customerCheckoutTestPrefix = "customer checkout:";
 
 test.beforeAll(async () => {
   const tempDir = mkdtempSync(
@@ -35,35 +36,28 @@ test.beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${await findAvailablePort()}`;
 
   runArtisan(["optimize:clear"]);
-  runArtisan(["migrate:fresh", "--force"]);
-  runArtisan(["credentials:backfill-identity-registry"]);
-  invoiceFixtures = JSON.parse(
-    runArtisan(["tinker", "--execute", responsiveSeedScript])
-  );
+  resetResponsiveFixtures();
 
-  serverProcess = spawn(
-    "php",
-    [
-      "-S",
-      `127.0.0.1:${new URL(baseUrl).port}`,
-      "-t",
-      path.join(appDir, "public"),
-      path.join(__dirname, "laravel-browser-router.php"),
-    ],
-    {
-      cwd: appDir,
-      env: appEnv(),
-      stdio: ["ignore", "ignore", "ignore"],
-    }
-  );
+  await startBrowserServer();
+});
 
-  await waitForServer(`${baseUrl}/admin/login`);
+// Playwright isolates cookies and storage in each test context, but the PHP
+// server intentionally shares one SQLite database across this serial file.
+// Rebuild the database and restart the server before every customer test so
+// reservations, checked-out Carts, Orders, payment settings, and in-memory
+// response caches cannot leak between flows.
+test.beforeEach(async ({}, testInfo) => {
+  if (!testInfo.title.startsWith(customerCheckoutTestPrefix)) {
+    return;
+  }
+
+  await stopBrowserServer();
+  resetResponsiveFixtures();
+  await startBrowserServer();
 });
 
 test.afterAll(async () => {
-  if (serverProcess && !serverProcess.killed) {
-    serverProcess.kill();
-  }
+  await stopBrowserServer();
 
   if (dbPath) {
     rmSync(path.dirname(dbPath), { recursive: true, force: true });
@@ -196,6 +190,132 @@ test("customer checkout: keeps storefront card actions separate and keyboard rea
       ({ width, height }) => Math.round(width) < 44 || Math.round(height) < 44
     )
   ).toEqual([]);
+});
+
+test("customer checkout: asserts deterministic catalog checkout invoice navigation without duplicates", async ({
+  page,
+}) => {
+  const retiredRequests = observeRetiredCheckoutRequests(page);
+  const flow = observeCustomerNavigation(page);
+
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    let flowStart = flow.requests.length;
+    await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+    await navigateToCheckoutFromProductCard(page, "Browser QA Produk A");
+    await completeManualCheckout(page, "Navigation Home Buyer");
+    expectCustomerNavigationSequence(
+      flow,
+      flowStart,
+      [
+        /^GET \/$/,
+        /^GET \/shop\/checkout\/products\/\d+$/,
+        /^GET \/shop\/orders\/(?:\d+|[0-9a-f-]{36})$/i,
+      ],
+      "home direct checkout"
+    );
+    expectSingleCustomerCheckoutSubmission(
+      flow,
+      flowStart,
+      "home direct checkout"
+    );
+
+    await page.context().clearCookies();
+    flowStart = flow.requests.length;
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    const productCard = page
+      .locator("article.product-card")
+      .filter({ hasText: "Browser QA Produk B" })
+      .first();
+    await productCard
+      .getByRole("link", { name: "Detail", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/produk\/\d+/);
+    await page.locator("#product-checkout-cta").click();
+    await expectStorefrontPageCheckout(page);
+    await completeManualCheckout(page, "Navigation Product Buyer");
+    expectCustomerNavigationSequence(
+      flow,
+      flowStart,
+      [
+        /^GET \/shop$/,
+        /^GET \/produk\/\d+$/,
+        /^GET \/shop\/checkout\/products\/\d+$/,
+        /^GET \/shop\/orders\/(?:\d+|[0-9a-f-]{36})$/i,
+      ],
+      "Product detail checkout"
+    );
+    expectSingleCustomerCheckoutSubmission(
+      flow,
+      flowStart,
+      "Product detail checkout"
+    );
+
+    await page.context().clearCookies();
+    flowStart = flow.requests.length;
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    const familyCard = page
+      .locator("a.family-card")
+      .filter({ hasText: "Browser QA Product Family" });
+    await expect(familyCard).toBeVisible();
+    await familyCard.click();
+    await expect(page).toHaveURL(
+      /\/produk-keluarga\/browser-responsive-family/
+    );
+    const familyOption = page
+      .locator("#family-options article")
+      .filter({ hasText: "QA option" });
+    const familyCheckoutLink = familyOption.locator(
+      'a[href*="/shop/checkout/products/"]'
+    );
+    await expect(familyCheckoutLink).toHaveCount(1);
+    await familyCheckoutLink.click();
+    await expectStorefrontPageCheckout(page);
+    await completeManualCheckout(page, "Navigation Family Buyer");
+    expectCustomerNavigationSequence(
+      flow,
+      flowStart,
+      [
+        /^GET \/shop$/,
+        /^GET \/produk-keluarga\/browser-responsive-family$/,
+        /^GET \/shop\/checkout\/products\/\d+$/,
+        /^GET \/shop\/orders\/(?:\d+|[0-9a-f-]{36})$/i,
+      ],
+      "Family checkout"
+    );
+    expectSingleCustomerCheckoutSubmission(flow, flowStart, "Family checkout");
+
+    await page.context().clearCookies();
+    flowStart = flow.requests.length;
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    await addProductCardToCart(page, "Browser QA Produk A");
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    await addProductCardToCart(page, "Browser QA Produk B");
+    await page
+      .getByRole("link", { name: "Lanjut checkout", exact: true })
+      .click();
+    await expectStorefrontPageCheckout(page);
+    await completeManualCheckout(page, "Navigation Cart Buyer");
+    expectCustomerNavigationSequence(
+      flow,
+      flowStart,
+      [
+        /^GET \/shop$/,
+        /^GET \/shop\/cart$/,
+        /^GET \/shop$/,
+        /^GET \/shop\/cart$/,
+        /^GET \/shop\/checkout$/,
+        /^GET \/shop\/orders\/(?:\d+|[0-9a-f-]{36})$/i,
+      ],
+      "Cart checkout"
+    );
+    expectSingleCustomerCheckoutSubmission(flow, flowStart, "Cart checkout");
+  } finally {
+    flow.stop();
+  }
+
+  expect(retiredRequests).toEqual([]);
 });
 
 test("customer checkout: completes direct purchases from home, shop, Family, and Product detail", async ({
@@ -681,6 +801,7 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
     viewport: { width: 390, height: 844 },
   });
   const zoomPage = await zoomContext.newPage();
+  let zoomScale;
   try {
     await zoomPage.goto(
       `${baseUrl}${invoiceFixtures.longProductCheckoutPath}`,
@@ -688,24 +809,33 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
         waitUntil: "domcontentloaded",
       }
     );
-    const cdp = await zoomContext.newCDPSession(zoomPage);
-    await cdp.send("Emulation.setDeviceMetricsOverride", {
-      width: 195,
-      height: 422,
-      deviceScaleFactor: 1,
-      mobile: false,
+    zoomScale = await emulate200PercentCheckoutScale(zoomContext, zoomPage, {
+      width: 390,
+      height: 844,
     });
     await expectStorefrontPageCheckout(zoomPage);
-    const reflowViewport = await zoomPage.evaluate(() => ({
-      width: window.innerWidth,
-      height: window.innerHeight,
-    }));
-    await expectStorefrontCheckoutResponsiveContract(zoomPage, {
-      width: reflowViewport.width,
-      height: reflowViewport.height,
-    });
-    await cdp.send("Emulation.clearDeviceMetricsOverride");
+
+    if (zoomScale.mode === "cdp-page-scale") {
+      const pageScaleMetrics = await zoomPage.evaluate(() => ({
+        scale: window.visualViewport?.scale ?? 1,
+        width: window.visualViewport?.width ?? window.innerWidth,
+        height: window.visualViewport?.height ?? window.innerHeight,
+      }));
+      expect(pageScaleMetrics.scale).toBeCloseTo(2, 2);
+      expect(pageScaleMetrics.width).toBeLessThan(390);
+      expect(pageScaleMetrics.height).toBeLessThan(844);
+
+      await zoomScale.reset();
+      await zoomPage.setViewportSize(zoomScale.fallbackViewport);
+    }
+
+    await expectStorefrontPageCheckout(zoomPage);
+    await expectStorefrontCheckoutResponsiveContract(
+      zoomPage,
+      zoomScale.fallbackViewport
+    );
   } finally {
+    await zoomScale?.reset();
     await zoomContext.close();
   }
 
@@ -2797,6 +2927,115 @@ function observeRetiredCheckoutRequests(page) {
   return retiredRequests;
 }
 
+function observeCustomerNavigation(page) {
+  const requests = [];
+  const listener = (request) => {
+    if (
+      !request.isNavigationRequest() ||
+      request.frame() !== page.mainFrame()
+    ) {
+      return;
+    }
+
+    const url = new URL(request.url());
+    requests.push({
+      method: request.method(),
+      pathname: url.pathname,
+    });
+  };
+
+  page.on("request", listener);
+
+  return {
+    requests,
+    stop: () => page.off("request", listener),
+  };
+}
+
+function expectCustomerNavigationSequence(flow, start, expected, label) {
+  const actual = flow.requests
+    .slice(start)
+    .filter(({ method }) => method === "GET")
+    .map(({ method, pathname }) => `${method} ${pathname}`);
+
+  expect(
+    actual,
+    `${label} should have the expected document sequence`
+  ).toHaveLength(expected.length);
+  expected.forEach((matcher, index) => {
+    expect(actual[index], `${label} navigation ${index + 1}`).toMatch(matcher);
+  });
+}
+
+function expectSingleCustomerCheckoutSubmission(flow, start, label) {
+  const checkoutRequests = flow.requests
+    .slice(start)
+    .filter(
+      ({ method, pathname }) =>
+        method === "POST" && pathname === "/shop/checkout"
+    );
+  const checkoutNavigations = flow.requests
+    .slice(start)
+    .filter(({ pathname }) =>
+      /^\/shop\/checkout(?:\/products\/\d+)?$/.test(pathname)
+    );
+
+  expect(
+    checkoutRequests,
+    `${label} should submit checkout exactly once`
+  ).toHaveLength(1);
+  expect(
+    checkoutNavigations,
+    `${label} should visit review and submit exactly once`
+  ).toHaveLength(2);
+}
+// Chromium's CDP page scale changes the visual viewport and proves the real
+// 200% scale when supported. It does not change CSS media-query layout, so
+// the documented fallback halves the CSS viewport to exercise browser-zoom
+// reflow in headless or non-Chromium environments.
+async function emulate200PercentCheckoutScale(context, page, viewport) {
+  let cdp;
+
+  try {
+    cdp = await context.newCDPSession(page);
+    await cdp.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 });
+
+    const scale = await page.evaluate(() => window.visualViewport?.scale ?? 1);
+    if (Math.abs(scale - 2) <= 0.01) {
+      return {
+        mode: "cdp-page-scale",
+        fallbackViewport: {
+          width: Math.max(1, Math.floor(viewport.width / 2)),
+          height: Math.max(1, Math.floor(viewport.height / 2)),
+        },
+        reset: async () => {
+          await cdp
+            .send("Emulation.resetPageScaleFactor")
+            .catch(() => undefined);
+        },
+      };
+    }
+  } catch {
+    // Fall through to the CSS viewport fallback below.
+  }
+
+  if (cdp) {
+    await cdp.send("Emulation.resetPageScaleFactor").catch(() => undefined);
+  }
+
+  const fallbackViewport = {
+    width: Math.max(1, Math.floor(viewport.width / 2)),
+    height: Math.max(1, Math.floor(viewport.height / 2)),
+  };
+  await page.setViewportSize(fallbackViewport);
+
+  return {
+    mode: "half-viewport-fallback",
+    fallbackViewport,
+    reset: async () => undefined,
+  };
+}
+
 async function navigateToCheckoutFromProductCard(page, productName) {
   const card = page
     .locator("article.product-card")
@@ -2981,10 +3220,24 @@ async function expectStorefrontCheckoutResponsiveContract(page, viewport) {
         Number.parseFloat(window.getComputedStyle(element).fontSize)
       );
 
+    const horizontalOverflow = Array.from(document.querySelectorAll("body *"))
+      .filter(isVisible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+
+        return {
+          label: element.id || element.className || element.tagName,
+          left: rect.left,
+          right: rect.right,
+        };
+      })
+      .filter(({ left, right }) => left < -1 || right > window.innerWidth + 1);
+
     return {
       documentScrollWidth: document.documentElement.scrollWidth,
       bodyScrollWidth: document.body.scrollWidth,
       viewportWidth: window.innerWidth,
+      horizontalOverflow,
       controls: checkoutControls.map((element) => {
         const rect = rectFor(element);
 
@@ -3011,6 +3264,12 @@ async function expectStorefrontCheckoutResponsiveContract(page, viewport) {
   expect(metrics.documentScrollWidth).toBeLessThanOrEqual(viewport.width + 1);
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(viewport.width + 1);
   expect(
+    metrics.horizontalOverflow,
+    `visible elements overflow ${metrics.viewportWidth}px viewport: ${JSON.stringify(
+      metrics.horizontalOverflow
+    )}`
+  ).toEqual([]);
+  expect(
     metrics.controls.filter(
       ({ width, height }) => Math.round(width) < 44 || Math.round(height) < 44
     )
@@ -3020,6 +3279,8 @@ async function expectStorefrontCheckoutResponsiveContract(page, viewport) {
   expect(metrics.visibleDialogs).toBe(0);
   expect(metrics.normalTextSizes.every((size) => size >= 14)).toBe(true);
   expect(metrics.metadataTextSizes.every((size) => size >= 12)).toBe(true);
+
+  await expectStorefrontCheckoutFocusIndicators(page);
 
   if (viewport.width === 390) {
     const flowBudget = await page.evaluate(() => {
@@ -3062,6 +3323,164 @@ async function expectStorefrontCheckoutResponsiveContract(page, viewport) {
     viewport.height + 1
   );
 }
+async function expectStorefrontCheckoutFocusIndicators(page) {
+  const focusable = page.locator(
+    [
+      "#checkout-form a[href]",
+      "#checkout-form button",
+      "#checkout-form summary",
+      "#checkout-form select",
+      '#checkout-form input:not([type="hidden"])',
+    ].join(", ")
+  );
+  const reports = [];
+
+  for (let index = 0; index < (await focusable.count()); index += 1) {
+    const control = focusable.nth(index);
+    if (!(await control.isVisible())) {
+      continue;
+    }
+
+    await control.evaluate((element) =>
+      element.scrollIntoView({
+        block: "center",
+        inline: "nearest",
+        behavior: "instant",
+      })
+    );
+    await control.focus();
+    await expect(control).toBeFocused();
+    reports.push(
+      await control.evaluate((element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        const outlineWidth = Number.parseFloat(style.outlineWidth) || 0;
+        const outlineOffset = Number.parseFloat(style.outlineOffset) || 0;
+        const ringPadding = Math.max(0, outlineWidth + outlineOffset);
+        const ring = {
+          left: rect.left - ringPadding,
+          right: rect.right + ringPadding,
+          top: rect.top - ringPadding,
+          bottom: rect.bottom + ringPadding,
+        };
+        const clippedBy = [];
+
+        for (
+          let ancestor = element.parentElement;
+          ancestor;
+          ancestor = ancestor.parentElement
+        ) {
+          const ancestorStyle = window.getComputedStyle(ancestor);
+          const clipsX = ["hidden", "clip", "auto", "scroll"].includes(
+            ancestorStyle.overflowX
+          );
+          const clipsY = ["hidden", "clip", "auto", "scroll"].includes(
+            ancestorStyle.overflowY
+          );
+          if (!clipsX && !clipsY) {
+            continue;
+          }
+
+          const ancestorRect = ancestor.getBoundingClientRect();
+          if (
+            (clipsX &&
+              (ring.left < ancestorRect.left - 1 ||
+                ring.right > ancestorRect.right + 1)) ||
+            (clipsY &&
+              (ring.top < ancestorRect.top - 1 ||
+                ring.bottom > ancestorRect.bottom + 1))
+          ) {
+            clippedBy.push(
+              ancestor.id || ancestor.className || ancestor.tagName
+            );
+          }
+        }
+
+        return {
+          label: (
+            element.textContent ||
+            element.getAttribute("aria-label") ||
+            element.id ||
+            element.tagName
+          ).trim(),
+          focusVisible: element.matches(":focus-visible"),
+          outlineStyle: style.outlineStyle,
+          outlineWidth,
+          ring,
+          viewport: {
+            left: 0,
+            right: window.innerWidth,
+            top: 0,
+            bottom: window.innerHeight,
+          },
+          clippedBy,
+        };
+      })
+    );
+  }
+
+  const invalid = reports.filter(
+    ({ focusVisible, outlineStyle, outlineWidth, ring, viewport, clippedBy }) =>
+      !focusVisible ||
+      outlineStyle === "none" ||
+      outlineWidth <= 0 ||
+      ring.left < viewport.left - 1 ||
+      ring.right > viewport.right + 1 ||
+      ring.top < viewport.top - 1 ||
+      ring.bottom > viewport.bottom + 1 ||
+      clippedBy.length > 0
+  );
+
+  expect(
+    invalid,
+    `focused checkout controls have clipped or missing focus indicators: ${JSON.stringify(
+      invalid
+    )}`
+  ).toEqual([]);
+}
+
+async function startBrowserServer() {
+  serverProcess = spawn(
+    "php",
+    [
+      "-S",
+      `127.0.0.1:${new URL(baseUrl).port}`,
+      "-t",
+      path.join(appDir, "public"),
+      path.join(__dirname, "laravel-browser-router.php"),
+    ],
+    {
+      cwd: appDir,
+      env: appEnv(),
+      stdio: ["ignore", "ignore", "ignore"],
+    }
+  );
+
+  await waitForServer(`${baseUrl}/admin/login`);
+}
+
+async function stopBrowserServer() {
+  const processToStop = serverProcess;
+  serverProcess = null;
+
+  if (!processToStop || processToStop.exitCode !== null) {
+    return;
+  }
+
+  await new Promise((resolve) => {
+    processToStop.once("exit", resolve);
+    processToStop.kill();
+  });
+}
+
+function resetResponsiveFixtures() {
+  runArtisan(["migrate:fresh", "--force"]);
+  runArtisan(["credentials:backfill-identity-registry"]);
+  invoiceFixtures = JSON.parse(
+    runArtisan(["tinker", "--execute", responsiveSeedScript])
+  );
+}
+
 function runArtisan(args) {
   const result = spawnSync("php", ["artisan", ...args], {
     cwd: appDir,

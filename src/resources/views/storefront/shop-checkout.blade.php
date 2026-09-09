@@ -59,7 +59,7 @@
                 @endif
 
                 <div class="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
-                    <div class="grid min-w-0 gap-5">
+                    <div class="grid min-w-0 grid-cols-1 gap-5">
                         <section class="neo-panel bg-[var(--sf-surface)] p-4 sm:p-5" aria-labelledby="checkout-summary-title">
                             <div class="flex flex-wrap items-start justify-between gap-3 border-b-[3px] border-dashed border-[var(--sf-border)] pb-4">
                                 <div>
@@ -181,7 +181,7 @@
                                     : $paymentCopy($selectedPaymentOption);
                             @endphp
 
-                            <form id="checkout-form" method="POST" action="{{ $checkoutSubmitUrl }}" class="neo-panel grid min-w-0 gap-4 bg-[var(--sf-surface)] p-4 sm:p-5">
+                            <form id="checkout-form" method="POST" action="{{ $checkoutSubmitUrl }}" class="neo-panel grid grid-cols-1 min-w-0 gap-4 bg-[var(--sf-surface)] p-4 sm:p-5">
                                 @csrf
                                 @if ($checkoutSource === 'direct' && $checkoutProduct)
                                     <input type="hidden" name="product_id" value="{{ old('product_id', $checkoutProduct->id) }}">
