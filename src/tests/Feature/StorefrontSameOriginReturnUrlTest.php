@@ -60,6 +60,7 @@ class StorefrontSameOriginReturnUrlTest extends TestCase
         $this->withoutVite();
         config()->set('app.url', self::CANONICAL_URL);
         app('url')->useOrigin(self::CANONICAL_URL);
+        app('url')->forceScheme('https');
         config()->set('services.storefront.telegram_reservation_floor', 0);
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
@@ -208,6 +209,7 @@ class StorefrontSameOriginReturnUrlTest extends TestCase
         $this->app->instance('request', $canonicalRequest);
         app('url')->setRequest($canonicalRequest);
         config()->set('app.url', 'http://127.0.0.1:8000');
+        app('url')->forceScheme('http');
         app('url')->useOrigin('http://127.0.0.1:8000');
 
         $accepted = [
