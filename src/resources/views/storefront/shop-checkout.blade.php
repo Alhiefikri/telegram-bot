@@ -9,11 +9,11 @@
 
         <main class="flex-grow pb-24 pt-12">
             <section class="mx-auto max-w-5xl px-5 sm:px-6">
-                <a href="{{ $cartUrl }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]"><span aria-hidden="true">&larr;</span> Kembali ke keranjang</a>
+                <a href="{{ $checkoutReturnUrl }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]"><span aria-hidden="true">&larr;</span> {{ $checkoutReturnLabel }}</a>
                 <div class="mt-6">
                     <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-accent)]">Checkout web</p>
-                    <h1 class="mt-2 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">Review pesanan sebelum bayar.</h1>
-                    <p class="mt-3 max-w-2xl text-sm font-semibold leading-7 text-[var(--sf-muted)]">Semua item di bawah akan masuk ke satu order. Stok baru dicadangkan setelah checkout berhasil.</p>
+                    <h1 class="mt-2 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $checkoutSource === 'direct' ? 'Review produk sebelum bayar.' : 'Review pesanan sebelum bayar.' }}</h1>
+                    <p class="mt-3 max-w-2xl text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ $checkoutSource === 'direct' ? 'Pastikan produk dan jumlah sudah benar sebelum membuat order. Stok baru dicadangkan setelah checkout berhasil.' : 'Semua item di bawah akan masuk ke satu order. Stok baru dicadangkan setelah checkout berhasil.' }}</p>
                 </div>
 
                 @if (session('storefront_checkout_error'))
@@ -22,6 +22,11 @@
                     </x-storefront.notice>
                 @endif
                 @error('cart')
+                    <x-storefront.notice tone="danger" class="mt-6">
+                        {{ $message }}
+                    </x-storefront.notice>
+                @enderror
+                @error('product_id')
                     <x-storefront.notice tone="danger" class="mt-6">
                         {{ $message }}
                     </x-storefront.notice>
@@ -73,26 +78,38 @@
 
                         @if ($cartHasConflicts)
                             <x-storefront.notice tone="danger">
-                                Item keranjang berubah atau tidak lagi tersedia. Sesuaikan keranjang terlebih dahulu; tidak ada order yang dibuat dari snapshot ini.
+                                {{ $checkoutSource === 'direct' ? ($checkoutUnavailableNotice ?? 'Produk ini berubah atau tidak lagi tersedia. Periksa kembali sebelum checkout.') : 'Item keranjang berubah atau tidak lagi tersedia. Sesuaikan keranjang terlebih dahulu; tidak ada order yang dibuat dari snapshot ini.' }}
                             </x-storefront.notice>
                         @elseif ($checkoutMaintenance->active)
                             <x-storefront.notice>
                                 <p class="font-black">Checkout sedang maintenance.</p>
                                 <p class="mt-2 whitespace-pre-line">{{ $checkoutMaintenanceNotice }}</p>
                             </x-storefront.notice>
-                        @elseif ($checkoutPaymentOptions === [])
+                        @elseif ($checkoutPaymentOptions === [] || ! $checkoutCanSubmit)
                             <x-storefront.notice tone="danger">
-                                Metode pembayaran belum tersedia untuk seluruh item di keranjang. Kembali ke katalog atau hubungi support.
+                                {{ $checkoutUnavailableNotice ?? 'Metode pembayaran belum tersedia untuk seluruh item di keranjang. Kembali ke katalog atau hubungi support.' }}
                             </x-storefront.notice>
                         @else
                             @php
-                                $selectedPaymentMethod = old('payment_method', $checkoutPaymentOptions[0]['value'] ?? '');
+                                $selectedPaymentMethod = old('payment_method', $checkoutDefaultPaymentMethod ?? '');
                                 $termsAccepted = in_array(old('terms_accepted'), [true, 1, '1', 'on', 'yes', 'true'], true);
                             @endphp
                             <form method="POST" action="{{ route('storefront.shop.checkout') }}" class="neo-panel grid gap-5 bg-[var(--sf-surface)] p-4 sm:p-6">
                                 @csrf
-                                @if ($checkoutSnapshot)
+                                @if ($checkoutSource === 'direct' && $checkoutProduct)
+                                    <input type="hidden" name="product_id" value="{{ old('product_id', $checkoutProduct->id) }}">
+                                @elseif ($checkoutSnapshot)
                                     <input type="hidden" name="cart_snapshot" value="{{ $checkoutSnapshot }}">
+                                @endif
+                                @if ($checkoutSource === 'direct' && $checkoutProduct)
+                                    <div class="grid gap-2">
+                                        <label for="checkout-quantity" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">Jumlah</label>
+                                        <input id="checkout-quantity" name="quantity" type="number" min="1" max="{{ $checkoutQuantityMax }}" required value="{{ old('quantity', $checkoutQuantity) }}" class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)] @error('quantity') border-[#9f1d2d] @enderror">
+                                        <p class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">Maksimal {{ $checkoutQuantityMax }} unit untuk stok yang tersedia saat review.</p>
+                                        @error('quantity')
+                                            <p role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
+                                        @enderror
+                                    </div>
                                 @endif
 
                                 <fieldset class="grid gap-3" @if ($errors->has('payment_method')) aria-describedby="checkout-payment-error" @endif>

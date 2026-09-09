@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\Cart;
+use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -9,6 +11,8 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class StorefrontProductCheckoutTest extends TestCase
@@ -299,6 +303,107 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringNotContainsString('PRIVATE DELIVERY NOTE', $html);
         $this->assertStringNotContainsString('private-credential@example.test', $html);
         $this->assertStringNotContainsString('private-password', $html);
+    }
+
+    public function test_direct_checkout_review_is_canonical_bounded_private_and_side_effect_free(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Canonical Direct Review',
+            'price_amount' => 60000,
+            'stock' => 4,
+            'reserved_stock' => 0,
+        ]);
+        Http::fake();
+        Queue::fake();
+
+        $response = $this->get(route('storefront.shop.checkout.product', [
+            'product' => $product,
+            'quantity' => 999,
+        ]));
+
+        $response
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Referrer-Policy', 'no-referrer')
+            ->assertSee('<meta name="robots" content="noindex, nofollow, noarchive">', false)
+            ->assertSee('Canonical Direct Review')
+            ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
+            ->assertSee('name="product_id" value="'.$product->id.'"', false)
+            ->assertSee('name="quantity"', false)
+            ->assertSee('max="4"', false)
+            ->assertSee('value="4"', false)
+            ->assertSee('name="terms_accepted"', false);
+
+        $this->assertSame(0, Customer::query()->count());
+        $this->assertSame(0, Cart::query()->count());
+        $this->assertSame(0, Order::query()->count());
+        $this->assertSame(0, Payment::query()->count());
+        $this->assertSame(0, InventoryMovement::query()->count());
+        Http::assertNothingSent();
+        Queue::assertNothingPushed();
+    }
+
+    public function test_direct_review_does_not_probe_sakurupiah_provider(): void
+    {
+        ManualPaymentSetting::current()->update([
+            'payment_mode' => 'sakurupiah',
+            'is_active' => true,
+        ]);
+        $product = Product::factory()->create([
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        Http::fake();
+
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertOk();
+
+        Http::assertNothingSent();
+    }
+
+    public function test_hidden_or_inactive_product_cannot_open_direct_checkout_review(): void
+    {
+        $product = Product::factory()->create([
+            'is_active' => false,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertNotFound();
+    }
+
+    public function test_public_unavailable_product_has_no_direct_submit_form(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Unavailable Direct Review',
+            'stock' => 1,
+            'reserved_stock' => 1,
+        ]);
+
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product, 'quantity' => 20]))
+            ->assertOk()
+            ->assertSee('Unavailable Direct Review')
+            ->assertSee('Stok produk berubah menjadi 0.')
+            ->assertDontSee('Buat satu order dan lanjut bayar')
+            ->assertDontSee('action="'.route('storefront.shop.checkout').'"', false)
+            ->assertDontSee('name="product_id"', false);
+    }
+
+    public function test_direct_checkout_quantity_is_normalized_to_one_for_non_positive_input(): void
+    {
+        $product = Product::factory()->create([
+            'stock' => 30,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.shop.checkout.product', [
+            'product' => $product,
+            'quantity' => 0,
+        ]))
+            ->assertOk()
+            ->assertSee('max="20"', false)
+            ->assertSee('value="1"', false);
     }
 
     private function assertNoCheckoutSideEffects(): void

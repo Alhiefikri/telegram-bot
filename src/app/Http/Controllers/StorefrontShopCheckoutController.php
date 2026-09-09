@@ -51,12 +51,16 @@ class StorefrontShopCheckoutController extends Controller
                 'payment_method' => $request->validated()['payment_method'] ?? null,
             ]);
 
+            $recoveryUrl = $request->filled('product_id')
+                ? $request->checkoutRecoveryUrl()
+                : route('storefront.shop.checkout.start');
+
             return redirect()
-                ->to($request->checkoutRecoveryUrl())
+                ->to($recoveryUrl)
                 ->withInput()
                 ->with('storefront_checkout_error', $message)
                 ->withErrors([$errorKey => $message]);
-        } catch (InvalidCheckout|InvalidCartState|InsufficientStock $exception) {
+        } catch (InvalidCartState $exception) {
             $events->checkoutSubmitted($product, null, [
                 'status_endpoint_result' => 'rejected',
                 'failure_kind' => $exception::class,
@@ -65,6 +69,21 @@ class StorefrontShopCheckoutController extends Controller
             $recoveryUrl = $request->filled('product_id')
                 ? $request->checkoutRecoveryUrl()
                 : route('storefront.shop.cart');
+
+            return redirect()
+                ->to($recoveryUrl)
+                ->withInput()
+                ->with('storefront_checkout_error', $exception->getMessage())
+                ->withErrors([$errorKey => $exception->getMessage()]);
+        } catch (InvalidCheckout|InsufficientStock $exception) {
+            $events->checkoutSubmitted($product, null, [
+                'status_endpoint_result' => 'rejected',
+                'failure_kind' => $exception::class,
+                'payment_method' => $request->validated()['payment_method'] ?? null,
+            ]);
+            $recoveryUrl = $request->filled('product_id')
+                ? $request->checkoutRecoveryUrl()
+                : route('storefront.shop.checkout.start');
 
             return redirect()
                 ->to($recoveryUrl)

@@ -43,6 +43,19 @@ final class BscReadiness
         }
     }
 
+    /**
+     * Evaluate only local BSC configuration for advisory storefront pages.
+     *
+     * This path deliberately performs no RPC request. Checkout preparation
+     * still uses check() before the authoritative transaction.
+     */
+    public function configuration(?ManualPaymentSetting $setting = null): BscReadinessReport
+    {
+        $setting ??= ManualPaymentSetting::current();
+
+        return $this->evaluate($setting, probeProvider: false);
+    }
+
     public function invalidate(): void
     {
         try {
@@ -54,7 +67,7 @@ final class BscReadiness
         }
     }
 
-    private function evaluate(?ManualPaymentSetting $setting): BscReadinessReport
+    private function evaluate(?ManualPaymentSetting $setting, bool $probeProvider = true): BscReadinessReport
     {
         $enabled = (bool) $setting?->bsc_payment_enabled;
         $checkedAt = Carbon::now();
@@ -102,7 +115,7 @@ final class BscReadiness
             $missing[] = 'ACTIVE_VERIFIED_BSC_RECEIVER';
         }
 
-        if ($missing === [] && $invalid === []) {
+        if ($probeProvider && $missing === [] && $invalid === []) {
             try {
                 $rpcChainId = $this->rpc->chainId();
                 if ($rpcChainId !== 56) {

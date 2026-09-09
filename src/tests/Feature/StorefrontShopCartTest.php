@@ -125,6 +125,7 @@ class StorefrontShopCartTest extends TestCase
 
         $this->addToCart($first, sessionKey: $sessionKey);
         $this->addToCart($second, sessionKey: $sessionKey);
+        $snapshot = $this->checkoutSnapshot($sessionKey);
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->get(route('storefront.shop.checkout.start'))
             ->assertOk()
@@ -138,6 +139,7 @@ class StorefrontShopCartTest extends TestCase
         $response = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->post(route('storefront.shop.checkout'), [
                 'buyer_name' => 'Multi Buyer',
+                'cart_snapshot' => $snapshot,
                 'email' => 'multi@example.test',
                 'support_contact_channel' => 'telegram',
                 'support_contact_value' => '@multi_buyer',
@@ -183,9 +185,11 @@ class StorefrontShopCartTest extends TestCase
             ->get(route('storefront.shop.checkout.start'))
             ->assertOk()
             ->assertSee('Bayar dengan Binance Pay');
+        $snapshot = $this->checkoutSnapshot($sessionKey);
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->post(route('storefront.shop.checkout'), [
+                'cart_snapshot' => $snapshot,
                 'buyer_name' => 'Binance Cart Buyer',
                 'payment_method' => 'binance_pay_id',
                 'terms_accepted' => '1',
@@ -208,8 +212,10 @@ class StorefrontShopCartTest extends TestCase
         $sessionKey = 'duplicate-cart-session';
         $this->addToCart($first, sessionKey: $sessionKey);
         $this->addToCart($second, sessionKey: $sessionKey);
+        $snapshot = $this->checkoutSnapshot($sessionKey);
 
         $payload = [
+            'cart_snapshot' => $snapshot,
             'buyer_name' => 'Duplicate Buyer',
             'payment_method' => 'qris',
             'terms_accepted' => '1',
@@ -260,6 +266,7 @@ class StorefrontShopCartTest extends TestCase
         $product = $this->availableProduct(['name' => 'Stock Conflict Product', 'price_amount' => 12000, 'stock' => 2]);
         $sessionKey = 'stock-conflict-session';
         $this->addToCart($product, sessionKey: $sessionKey);
+        $snapshot = $this->checkoutSnapshot($sessionKey);
         $product->forceFill(['stock' => 0, 'reserved_stock' => 0])->save();
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
@@ -270,11 +277,12 @@ class StorefrontShopCartTest extends TestCase
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->post(route('storefront.shop.checkout'), [
+                'cart_snapshot' => $snapshot,
                 'buyer_name' => 'Conflict Buyer',
                 'payment_method' => 'qris',
                 'terms_accepted' => '1',
             ])
-            ->assertRedirect(route('storefront.shop.cart'));
+            ->assertRedirect(route('storefront.shop.checkout.start'));
 
         $this->assertSame(0, Order::query()->count());
         $this->assertSame(0, InventoryMovement::query()->count());
@@ -288,6 +296,7 @@ class StorefrontShopCartTest extends TestCase
         $product = $this->availableProduct(['name' => 'Maintenance Cart Product']);
         $sessionKey = 'maintenance-cart-session';
         $this->addToCart($product, sessionKey: $sessionKey);
+        $snapshot = $this->checkoutSnapshot($sessionKey);
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
             'is_active' => true,
             'version' => 1,
@@ -296,6 +305,7 @@ class StorefrontShopCartTest extends TestCase
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->post(route('storefront.shop.checkout'), [
+                'cart_snapshot' => $snapshot,
                 'buyer_name' => 'Maintenance Buyer',
                 'payment_method' => 'qris',
                 'terms_accepted' => '1',
@@ -320,9 +330,11 @@ class StorefrontShopCartTest extends TestCase
         $sessionKey = 'mixed-cart-session';
         $this->addToCart($credentialProduct, sessionKey: $sessionKey);
         $this->addToCart($plainProduct, sessionKey: $sessionKey);
+        $snapshot = $this->checkoutSnapshot($sessionKey);
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->post(route('storefront.shop.checkout'), [
+                'cart_snapshot' => $snapshot,
                 'buyer_name' => 'Mixed Buyer',
                 'payment_method' => 'qris',
                 'terms_accepted' => '1',
@@ -359,10 +371,21 @@ class StorefrontShopCartTest extends TestCase
                 'payment_method' => 'qris',
                 'terms_accepted' => '1',
             ])
-            ->assertRedirect(route('storefront.shop.cart'));
+            ->assertRedirect(route('storefront.shop.checkout.start'));
 
         $this->assertSame(0, Order::query()->count());
         $this->assertSame(0, InventoryMovement::query()->count());
+    }
+
+    private function checkoutSnapshot(string $sessionKey): string
+    {
+        $response = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->get(route('storefront.shop.checkout.start'))
+            ->assertOk();
+        preg_match('/name="cart_snapshot" value="([a-f0-9]+)"/', $response->getContent(), $matches);
+        $this->assertNotEmpty($matches[1] ?? null);
+
+        return $matches[1];
     }
 
     private function manualPaymentModeIsActive(): void

@@ -26,6 +26,10 @@ class StorefrontProductPresenter
 
     private ?StorefrontProductCheckoutReadiness $checkoutReadiness = null;
 
+    private ?bool $checkoutReadinessObservedExternally = null;
+
+    private ?bool $bscRailReadinessObservedExternally = null;
+
     public function __construct(
         private readonly StorefrontSupport $support,
         private readonly CheckoutMaintenance $maintenance,
@@ -35,8 +39,13 @@ class StorefrontProductPresenter
         private readonly StorefrontProductPlaceholder $placeholder,
     ) {}
 
-    public function present(Product $product, ?int $stockAvailable = null, ?int $soldQuantity = null, ?CheckoutMaintenanceState $maintenanceState = null): StorefrontProductPresentation
-    {
+    public function present(
+        Product $product,
+        ?int $stockAvailable = null,
+        ?int $soldQuantity = null,
+        ?CheckoutMaintenanceState $maintenanceState = null,
+        bool $observeExternalReadiness = true,
+    ): StorefrontProductPresentation {
         $stockAvailable ??= $product->availableStock();
         $maintenanceState ??= $this->maintenance->current();
         if ($soldQuantity === null) {
@@ -50,9 +59,9 @@ class StorefrontProductPresenter
 
         $isAvailable = $stockAvailable > 0;
         $paymentSetting = $this->paymentSetting();
-        $checkoutReadiness = $this->readinessFor($paymentSetting);
+        $checkoutReadiness = $this->readinessFor($paymentSetting, $observeExternalReadiness);
         $checkoutChoices = $isAvailable && ! $maintenanceState->active
-            ? $this->checkoutChoices($product, $paymentSetting, $checkoutReadiness)
+            ? $this->checkoutChoices($product, $paymentSetting, $checkoutReadiness, $observeExternalReadiness)
             : [];
         $isBuyable = $isAvailable && ! $maintenanceState->active && $checkoutChoices !== [];
         $statusLabel = ! $isAvailable
@@ -124,6 +133,7 @@ class StorefrontProductPresenter
         Product $product,
         ?ManualPaymentSetting $setting,
         StorefrontProductCheckoutReadiness $readiness,
+        bool $observeExternalReadiness,
     ): array {
         $choices = [];
 
@@ -155,7 +165,7 @@ class StorefrontProductPresenter
         }
 
         $binancePayAvailable = $this->binancePayEnabled($setting);
-        $bscAvailable = $this->bscRailAvailable($setting);
+        $bscAvailable = $this->bscRailAvailable($setting, $observeExternalReadiness);
 
         if ($binancePayAvailable || $bscAvailable) {
             $choices['website_binance_pay'] = new StorefrontProductCheckoutChoice(
@@ -210,11 +220,15 @@ class StorefrontProductPresenter
         return $this->paymentSetting;
     }
 
-    private function readinessFor(?ManualPaymentSetting $setting): StorefrontProductCheckoutReadiness
+    private function readinessFor(?ManualPaymentSetting $setting, bool $observeExternalReadiness): StorefrontProductCheckoutReadiness
     {
-        if ($this->checkoutReadiness !== null) {
+        if ($this->checkoutReadiness !== null
+            && $this->checkoutReadinessObservedExternally === $observeExternalReadiness
+        ) {
             return $this->checkoutReadiness;
         }
+
+        $this->checkoutReadinessObservedExternally = $observeExternalReadiness;
 
         if ($setting === null) {
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
@@ -254,7 +268,9 @@ class StorefrontProductPresenter
         }
 
         if ($provider === PaymentProvider::SAKURUPIAH) {
-            $readiness = $this->sakurupiahReadiness->observe();
+            $readiness = $observeExternalReadiness
+                ? $this->sakurupiahReadiness->observe()
+                : $this->sakurupiahReadiness->configurationReport();
 
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: $provider,
@@ -284,16 +300,20 @@ class StorefrontProductPresenter
         return $this->binancePayEnabled;
     }
 
-    private function bscRailAvailable(?ManualPaymentSetting $setting): bool
+    private function bscRailAvailable(?ManualPaymentSetting $setting, bool $observeExternalReadiness): bool
     {
-        if ($this->bscRailAvailable !== null) {
+        if ($this->bscRailAvailable !== null
+            && $this->bscRailReadinessObservedExternally === $observeExternalReadiness
+        ) {
             return $this->bscRailAvailable;
         }
 
-        if (! (bool) $setting?->bsc_payment_enabled) {
-            return $this->bscRailAvailable = false;
-        }
+        $this->bscRailReadinessObservedExternally = $observeExternalReadiness;
+        $this->bscRailAvailable = (bool) $setting?->bsc_payment_enabled
+            && ($observeExternalReadiness
+                ? $this->bscReadiness->check($setting)->isReady()
+                : $this->bscReadiness->configuration($setting)->isReady());
 
-        return $this->bscRailAvailable = $this->bscReadiness->check($setting)->isReady();
+        return $this->bscRailAvailable;
     }
 }

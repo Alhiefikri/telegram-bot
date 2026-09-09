@@ -95,6 +95,7 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
     Route::patch('cart/items/{product}', [StorefrontShopCartController::class, 'update'])->name('cart.items.update');
     Route::delete('cart/items/{product}', [StorefrontShopCartController::class, 'destroy'])->name('cart.items.destroy');
     Route::get('checkout', StorefrontShopCheckoutReviewController::class)->name('checkout.start');
+    Route::get('checkout/products/{product}', [StorefrontShopCheckoutReviewController::class, 'product'])->name('checkout.product');
     Route::post('checkout', StorefrontShopCheckoutController::class)->middleware('throttle:storefront-checkout')->name('checkout');
     Route::get('orders/{order}', StorefrontShopOrderController::class)->middleware('storefront.signed')->name('orders.show');
     Route::get('orders/{order}/qris', StorefrontShopOrderQrisController::class)->middleware('storefront.signed')->name('orders.qris');

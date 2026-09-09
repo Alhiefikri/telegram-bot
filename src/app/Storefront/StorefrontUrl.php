@@ -59,6 +59,11 @@ class StorefrontUrl
         return route('storefront.products.show', $parameters);
     }
 
+    public function checkoutProductUrl(Product $product): string
+    {
+        return route('storefront.shop.checkout.product', ['product' => $product]);
+    }
+
     public function productModalUrlForId(int $productId): string
     {
         return route('storefront.products.modal', ['product' => $productId]);
@@ -95,7 +100,7 @@ class StorefrontUrl
             $product = Product::query()->whereKey((int) $productId)->first();
 
             if ($product?->isPublicVisible()) {
-                return $this->productUrl($product, checkout: true);
+                return $this->checkoutProductUrl($product);
             }
         }
 

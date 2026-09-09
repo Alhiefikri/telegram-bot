@@ -47,6 +47,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertRouteContract('storefront.shop.index', 'GET', 'shop');
         $this->assertRouteContract('storefront.shop.checkout', 'POST', 'shop/checkout');
         $this->assertRouteContract('storefront.shop.checkout.start', 'GET', 'shop/checkout');
+        $this->assertRouteContract('storefront.shop.checkout.product', 'GET', 'shop/checkout/products/{product}');
         $this->assertRouteContract('storefront.products.show', 'GET', 'produk/{product}');
         $this->assertFalse(Route::has('storefront.products.payment'));
         $this->assertFalse(Route::has('storefront.products.checkout-manual'));
@@ -87,6 +88,37 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertRedirect(route('storefront.shop.index'));
     }
 
+    public function test_checkout_requires_exactly_one_review_source(): void
+    {
+        $product = $this->availableProduct(['stock' => 1]);
+
+        $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'cart_snapshot' => 'snapshot',
+            'buyer_name' => 'buyer_test',
+            'terms_accepted' => true,
+        ])
+            ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertSessionHasErrors(['product_id', 'cart_snapshot']);
+
+        $this->post(route('storefront.shop.checkout'), [
+            'buyer_name' => 'buyer_test',
+            'terms_accepted' => true,
+        ])
+            ->assertRedirect(route('storefront.shop.checkout.start'))
+            ->assertSessionHasErrors(['product_id', 'cart_snapshot']);
+
+        $this->post(route('storefront.shop.checkout'), [
+            'cart_snapshot' => 'snapshot',
+            'quantity' => 1,
+            'buyer_name' => 'buyer_test',
+            'terms_accepted' => true,
+        ])
+            ->assertRedirect(route('storefront.shop.checkout.start'))
+            ->assertSessionHasErrors('quantity');
+    }
+
     public function test_shop_checkout_rejects_missing_or_false_terms_consent_before_any_side_effect(): void
     {
         $product = $this->availableProduct(['stock' => 1]);
@@ -102,9 +134,11 @@ class StorefrontShopCheckoutTest extends TestCase
                 $payload['terms_accepted'] = $termsAccepted;
             }
 
-            $this->from(route('storefront.home'))
-                ->post(route('storefront.shop.checkout'), $payload)
-                ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
+            $response = $this->from(route('storefront.home'))
+                ->post(route('storefront.shop.checkout'), $payload);
+
+            $response
+                ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
                 ->assertSessionHasErrors('terms_accepted');
 
             $this->assertNoLocalCheckoutRowsCreated('terms consent rejection');
@@ -130,7 +164,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 'payment_method' => 'qris',
                 'terms_accepted' => true,
             ])
-            ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
+            ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHasErrors([
                 'support_contact_channel',
                 'support_contact_value',
@@ -371,12 +405,12 @@ class StorefrontShopCheckoutTest extends TestCase
             ]);
 
         $response
-            ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
+            ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHas('storefront_checkout_error', 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.')
             ->assertInvalid(['product_id' => 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.']);
 
         $this->followingRedirects()
-            ->get(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
+            ->get(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertOk()
             ->assertDontSee('data-checkout-product=', false)
             ->assertSee('Checkout pembayaran belum aktif. Hubungi admin atau coba lagi nanti.');
@@ -482,7 +516,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertDontSee('Bayar via QR Manual');
     }
 
-    public function test_failed_checkout_reopens_modal_state_and_renders_inline_buyer_error(): void
+    public function test_failed_checkout_reopens_direct_review_and_preserves_inline_buyer_error(): void
     {
         $this->manualPaymentModeIsActive();
         $product = $this->availableProduct([
@@ -500,11 +534,13 @@ class StorefrontShopCheckoutTest extends TestCase
                 'payment_method' => 'qris',
             ])
             ->assertOk()
-            ->assertSee('data-checkout-restore=', false)
+            ->assertSee('Review produk sebelum bayar.')
             ->assertSee('Retry Checkout Product')
-            ->assertSee('id="storefront-buyer-name-error"', false)
-            ->assertSee('aria-invalid="true"', false)
-            ->assertSee('aria-describedby="storefront-buyer-name-help storefront-buyer-name-error"', false);
+            ->assertSee('name="product_id"', false)
+            ->assertSee('name="quantity"', false)
+            ->assertSee('id="checkout-buyer-name"', false)
+            ->assertSee('value="x"', false)
+            ->assertSee('The buyer name field must be at least 2 characters.');
     }
 
     public function test_shop_checkout_creates_binance_pay_order_without_creating_a_qris_transaction(): void
@@ -677,7 +713,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'buyer_name' => 'buyer_test',
             'payment_method' => 'binance_pay',
             'terms_accepted' => '1',
-        ])->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
+        ])->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHas('storefront_checkout_error', 'Binance Pay belum tersedia untuk produk ini.');
 
         $this->assertNoLocalCheckoutRowsCreated('disabled Binance Pay after render');
@@ -839,7 +875,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $blocked = $this->postStorefrontShopCheckout($product, 1, 'buyer_test');
         $blocked
-            ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
+            ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHas('storefront_checkout_error', 'Checkout sedang dalam maintenance. Kamu tetap bisa melihat produk, stok, dan mengelola keranjang, tetapi belum dapat membuat pesanan baru. Pesanan yang sudah dibuat tetap diproses. Silakan cek status kembali beberapa saat lagi.');
         $this->assertNoLocalCheckoutRowsCreated('active maintenance before reopening');
 
@@ -1064,7 +1100,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $response = $this->postStorefrontShopCheckout($product, 1, 'buyer_test');
 
         $response
-            ->assertRedirect(route('storefront.products.show', ['product' => $product, 'checkout' => 1]))
+            ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHas('storefront_checkout_error', 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.')
             ->assertInvalid(['product_id' => 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.']);
         $this->assertNoLocalCheckoutRowsCreated('disabled native QRIS');

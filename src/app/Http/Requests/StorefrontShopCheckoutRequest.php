@@ -6,6 +6,7 @@ use App\Models\ManualPaymentSetting;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Storefront\StorefrontUrl;
 use App\Support\PaymentProvider;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -33,16 +34,46 @@ class StorefrontShopCheckoutRequest extends FormRequest
         }
 
         return [
-            'product_id' => ['nullable', 'integer', 'min:1'],
-            'quantity' => ['nullable', 'integer', 'min:1', 'max:20', 'required_with:product_id'],
+            'product_id' => [
+                'nullable',
+                'integer',
+                'min:1',
+                'required_without:cart_snapshot',
+                'prohibits:cart_snapshot',
+            ],
+            'quantity' => [
+                'nullable',
+                'integer',
+                'min:1',
+                'max:20',
+                'required_with:product_id',
+            ],
             'buyer_name' => ['required', 'string', 'min:2', 'max:40', 'regex:/^[A-Za-z0-9_ .-]+$/'],
             'terms_accepted' => ['required', 'accepted'],
             'email' => ['nullable', 'string', 'email:rfc', 'max:254'],
             'support_contact_channel' => $supportChannelRules,
             'support_contact_value' => $supportValueRules,
             'payment_method' => ['nullable', Rule::in(CheckoutPaymentIntents::acceptedPaymentRails())],
-            'cart_snapshot' => ['nullable', 'string', 'max:64'],
+            'cart_snapshot' => [
+                'nullable',
+                'string',
+                'max:64',
+                'required_without:product_id',
+                'prohibits:product_id',
+            ],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            if (! $this->filled('product_id') && $this->filled('quantity')) {
+                $validator->errors()->add(
+                    'quantity',
+                    'Jumlah hanya boleh dikirim untuk checkout langsung.',
+                );
+            }
+        });
     }
 
     /**
@@ -52,6 +83,8 @@ class StorefrontShopCheckoutRequest extends FormRequest
     {
         return [
             'product_id.required' => 'Pilih produk yang ingin dibeli.',
+            'product_id.required_without' => 'Pilih produk atau gunakan snapshot keranjang untuk checkout.',
+            'product_id.prohibits' => 'Pilih produk atau gunakan snapshot keranjang, bukan keduanya.',
             'quantity.*' => 'Jumlah produk tidak valid.',
             'buyer_name.required' => 'Isi nama pembeli dulu.',
             'buyer_name.regex' => 'Gunakan huruf, angka, spasi, titik, strip, atau underscore untuk nama pembeli.',
@@ -66,6 +99,8 @@ class StorefrontShopCheckoutRequest extends FormRequest
             'support_contact_value.required' => 'Masukkan nomor WhatsApp untuk checkout Sakurupiah.',
             'support_contact_value.regex' => 'Masukkan nomor WhatsApp yang valid untuk checkout Sakurupiah.',
             'payment_method.*' => 'Pilih metode pembayaran yang tersedia.',
+            'cart_snapshot.required_without' => 'Gunakan snapshot keranjang atau pilih satu produk untuk checkout.',
+            'cart_snapshot.prohibits' => 'Pilih snapshot keranjang atau satu produk, bukan keduanya.',
         ];
     }
 
