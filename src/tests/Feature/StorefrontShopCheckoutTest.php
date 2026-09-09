@@ -400,20 +400,33 @@ class StorefrontShopCheckoutTest extends TestCase
             ->post(route('storefront.shop.checkout'), [
                 'product_id' => $product->id,
                 'quantity' => 1,
-                'buyer_name' => 'buyer_test',
+                'buyer_name' => 'Recovered Provider Buyer',
+                'email' => 'provider-recovery@example.test',
+                'support_contact_channel' => 'telegram',
+                'support_contact_value' => '@provider_recovery',
+                'payment_method' => 'qris',
                 'terms_accepted' => '1',
+                'payment_secret' => 'must-not-be-flashed',
             ]);
 
         $response
             ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHas('storefront_checkout_error', 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.')
             ->assertInvalid(['product_id' => 'QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.']);
+        $response->assertSessionMissing('_old_input.payment_secret');
 
-        $this->followingRedirects()
-            ->get(route('storefront.shop.checkout.product', ['product' => $product]))
+        $html = $this->get($response->headers->get('Location'))
             ->assertOk()
             ->assertDontSee('data-checkout-product=', false)
-            ->assertSee('Checkout pembayaran belum aktif. Hubungi admin atau coba lagi nanti.');
+            ->assertSee('Checkout pembayaran belum aktif. Hubungi admin atau coba lagi nanti.')
+            ->getContent();
+
+        $this->assertStringContainsString('value="Recovered Provider Buyer"', $html);
+        $this->assertStringContainsString('value="provider-recovery@example.test"', $html);
+        $this->assertStringContainsString('value="@provider_recovery"', $html);
+        $this->assertStringContainsString('name="terms_accepted" type="checkbox" value="1" required checked', $html);
+        $this->assertStringContainsString('id="checkout-submit-disabled-help"', $html);
+        $this->assertStringNotContainsString('must-not-be-flashed', $html);
 
         $this->assertNoLocalCheckoutRowsCreated('disabled native QRIS from homepage');
         Http::assertNothingSent();
@@ -530,22 +543,32 @@ class StorefrontShopCheckoutTest extends TestCase
                 'product_id' => $product->id,
                 'quantity' => 2,
                 'buyer_name' => 'x',
+                'email' => 'validation-recovery@example.test',
+                'support_contact_channel' => 'telegram',
+                'support_contact_value' => '@validation_recovery',
                 'terms_accepted' => '1',
                 'payment_method' => 'qris',
+                'payment_secret' => 'must-not-be-flashed',
             ]);
-
         $response
             ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHasErrors(['buyer_name' => 'The buyer name field must be at least 2 characters.']);
+        $response->assertSessionMissing('_old_input.payment_secret');
 
-        $this->get($response->headers->get('Location'))
+        $html = $this->get($response->headers->get('Location'))
             ->assertOk()
             ->assertSee('Review produk sebelum bayar.')
             ->assertSee('Retry Checkout Product')
             ->assertSee('name="product_id"', false)
             ->assertSee('name="quantity"', false)
             ->assertSee('id="checkout-buyer-name"', false)
-            ->assertSee('value="x"', false);
+            ->assertSee('value="x"', false)
+            ->getContent();
+
+        $this->assertStringContainsString('value="validation-recovery@example.test"', $html);
+        $this->assertStringContainsString('value="@validation_recovery"', $html);
+        $this->assertStringContainsString('name="terms_accepted" type="checkbox" value="1" required checked', $html);
+        $this->assertStringNotContainsString('must-not-be-flashed', $html);
     }
 
     public function test_shop_checkout_creates_binance_pay_order_without_creating_a_qris_transaction(): void
@@ -858,6 +881,46 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertSame(1, Order::count());
         $this->assertSame(1, Payment::count());
         Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
+    }
+
+    public function test_direct_maintenance_recovery_restores_safe_fields_on_the_canonical_checkout_page(): void
+    {
+        Queue::fake();
+        $this->manualPaymentModeIsActive();
+        $product = $this->availableProduct([
+            'name' => 'Direct Maintenance Recovery',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
+            'is_active' => true,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+
+        $response = $this->from(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->post(route('storefront.shop.checkout'), [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'buyer_name' => 'Recovered Maintenance Buyer',
+                'email' => 'maintenance-recovery@example.test',
+                'support_contact_channel' => 'telegram',
+                'support_contact_value' => '@maintenance_recovery',
+                'payment_method' => 'qris',
+                'terms_accepted' => '1',
+            ])
+            ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertSessionHas('storefront_checkout_error');
+
+        $html = $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('value="Recovered Maintenance Buyer"', $html);
+        $this->assertStringContainsString('value="maintenance-recovery@example.test"', $html);
+        $this->assertStringContainsString('value="@maintenance_recovery"', $html);
+        $this->assertStringContainsString('name="terms_accepted" type="checkbox" value="1" required checked', $html);
+        $this->assertStringContainsString('id="checkout-submit-disabled-help"', $html);
     }
 
     public function test_fresh_web_checkout_succeeds_after_deactivation_with_revalidated_stock(): void

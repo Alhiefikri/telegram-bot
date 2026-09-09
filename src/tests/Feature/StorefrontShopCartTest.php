@@ -318,6 +318,48 @@ class StorefrontShopCartTest extends TestCase
         $this->assertSame(0, $product->fresh()->reserved_stock);
     }
 
+    public function test_cart_stock_recovery_restores_safe_fields_on_the_canonical_checkout_page(): void
+    {
+        Queue::fake();
+        $this->manualPaymentModeIsActive();
+        $product = $this->availableProduct([
+            'name' => 'Cart Stock Recovery',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $sessionKey = 'cart-stock-recovery-session';
+        $this->addToCart($product, sessionKey: $sessionKey);
+        $snapshot = $this->checkoutSnapshot($sessionKey);
+        $product->forceFill(['stock' => 0, 'reserved_stock' => 0])->save();
+
+        $response = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->post(route('storefront.shop.checkout'), [
+                'cart_snapshot' => $snapshot,
+                'buyer_name' => 'Recovered Cart Buyer',
+                'email' => 'cart-recovery@example.test',
+                'support_contact_channel' => 'telegram',
+                'support_contact_value' => '@cart_recovery',
+                'payment_method' => 'qris',
+                'terms_accepted' => '1',
+                'payment_secret' => 'must-not-be-flashed',
+            ])
+            ->assertRedirect(route('storefront.shop.checkout.start'))
+            ->assertSessionHas('storefront_checkout_error');
+
+        $response->assertSessionMissing('_old_input.payment_secret');
+        $html = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->get(route('storefront.shop.checkout.start'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('value="Recovered Cart Buyer"', $html);
+        $this->assertStringContainsString('value="cart-recovery@example.test"', $html);
+        $this->assertStringContainsString('value="@cart_recovery"', $html);
+        $this->assertStringContainsString('name="terms_accepted" type="checkbox" value="1" required checked', $html);
+        $this->assertStringContainsString('id="checkout-submit-disabled-help"', $html);
+        $this->assertStringNotContainsString('must-not-be-flashed', $html);
+    }
+
     public function test_mixed_credential_and_non_credential_products_keep_existing_fulfillment_allocation(): void
     {
         Queue::fake();

@@ -1198,22 +1198,10 @@ function initCheckoutReview() {
     "[data-checkout-contact-requirement]"
   );
   const contactHelp = document.querySelector("[data-checkout-contact-help]");
-  const selectedPaymentLabel = document.querySelector(
-    "[data-checkout-selected-payment-label]"
-  );
-  const selectedPaymentDescription = document.querySelector(
-    "[data-checkout-selected-payment-description]"
-  );
-  const paymentAmountLabel = document.querySelector(
-    "[data-checkout-payment-amount-label]"
-  );
-  const paymentAmountValue = document.querySelector(
-    "[data-checkout-payment-amount-value]"
-  );
-  const paymentAmountHelp = document.querySelector(
-    "[data-checkout-payment-amount-help]"
-  );
-  const submitButton = document.querySelector("[data-checkout-submit]");
+  const contactInputs = [
+    document.querySelector("#checkout-support-contact-channel"),
+    document.querySelector("#checkout-support-contact-value"),
+  ].filter(Boolean);
   const quantityAnnouncement = document.querySelector(
     "[data-checkout-quantity-announcement]"
   );
@@ -1234,16 +1222,10 @@ function initCheckoutReview() {
       paymentRoot
         .querySelector("[data-checkout-selected-option]")
         ?.getAttribute("data-payment-value");
-    const option =
-      options.find(
-        (candidate) =>
-          candidate.getAttribute("data-payment-value") === selectedValue &&
-          candidate.querySelector('input[name="payment_method"]')
-      ) ||
-      options.find(
-        (candidate) =>
-          candidate.getAttribute("data-payment-value") === selectedValue
-      );
+    const option = options.find(
+      (candidate) =>
+        candidate.getAttribute("data-payment-value") === selectedValue
+    );
 
     if (!option) {
       return;
@@ -1251,6 +1233,22 @@ function initCheckoutReview() {
 
     const provider = option.getAttribute("data-payment-provider");
     const amountKind = option.getAttribute("data-payment-amount-kind");
+    const selectedPaymentLabel = option.querySelector(
+      "[data-checkout-selected-payment-label]"
+    );
+    const selectedPaymentDescription = option.querySelector(
+      "[data-checkout-selected-payment-description]"
+    );
+    const paymentAmountLabel = option.querySelector(
+      "[data-checkout-payment-amount-label]"
+    );
+    const paymentAmountValue = option.querySelector(
+      "[data-checkout-payment-amount-value]"
+    );
+    const paymentAmountHelp = option.querySelector(
+      "[data-checkout-payment-amount-help]"
+    );
+    const submitButton = option.querySelector("[data-checkout-submit]");
 
     selectedPaymentLabel?.replaceChildren(
       document.createTextNode(option.getAttribute("data-payment-label") || "")
@@ -1288,20 +1286,27 @@ function initCheckoutReview() {
           : idrTotal?.textContent || "—";
     }
 
+    const requiresSakurupiahContact = provider === "sakurupiah";
+    contactInputs.forEach((input) => {
+      input.required = requiresSakurupiahContact;
+      if (requiresSakurupiahContact) {
+        input.setAttribute("aria-required", "true");
+      } else {
+        input.removeAttribute("aria-required");
+      }
+    });
     if (contactRequirement) {
-      contactRequirement.textContent =
-        provider === "sakurupiah"
-          ? "WhatsApp wajib untuk Sakurupiah"
-          : "Opsional";
+      contactRequirement.textContent = requiresSakurupiahContact
+        ? "WhatsApp wajib untuk Sakurupiah"
+        : "Opsional";
     }
     if (contactHelp) {
-      contactHelp.textContent =
-        provider === "sakurupiah"
-          ? "Nomor WhatsApp diperlukan untuk checkout Sakurupiah. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan."
-          : contactHelp.dataset.defaultContactHelp || "";
+      contactHelp.textContent = requiresSakurupiahContact
+        ? "Nomor WhatsApp diperlukan untuk checkout Sakurupiah. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan."
+        : contactHelp.dataset.defaultContactHelp || "";
     }
 
-    if (provider === "sakurupiah" && contactDetails) {
+    if (requiresSakurupiahContact && contactDetails) {
       contactDetails.open = true;
     }
   };

@@ -59,7 +59,7 @@ class StorefrontShopCheckoutController extends Controller
 
             return redirect()
                 ->to($recoveryUrl)
-                ->withInput()
+                ->withInput($request->checkoutRecoveryInput())
                 ->with('storefront_checkout_error', $message)
                 ->withErrors([$errorKey => $message]);
         } catch (InvalidCartState $exception) {
@@ -73,7 +73,7 @@ class StorefrontShopCheckoutController extends Controller
 
             return redirect()
                 ->to($recoveryUrl)
-                ->withInput()
+                ->withInput($request->checkoutRecoveryInput())
                 ->with('storefront_checkout_error', $exception->getMessage())
                 ->withErrors([$errorKey => $exception->getMessage()]);
         } catch (InvalidCheckout|InsufficientStock $exception) {
@@ -87,7 +87,7 @@ class StorefrontShopCheckoutController extends Controller
 
             return redirect()
                 ->to($recoveryUrl)
-                ->withInput()
+                ->withInput($request->checkoutRecoveryInput())
                 ->with('storefront_checkout_error', $exception->getMessage())
                 ->withErrors([$errorKey => $exception->getMessage()]);
         }

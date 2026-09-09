@@ -9,6 +9,7 @@ use App\Support\PaymentProvider;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class StorefrontShopCheckoutRequest extends FormRequest
 {
@@ -74,6 +75,36 @@ class StorefrontShopCheckoutRequest extends FormRequest
                 );
             }
         });
+    }
+
+    /**
+     * Flash only checkout fields that are safe to restore on the canonical review page.
+     *
+     * @return array<string, mixed>
+     */
+    public function checkoutRecoveryInput(): array
+    {
+        return $this->only([
+            'product_id',
+            'quantity',
+            'buyer_name',
+            'email',
+            'support_contact_channel',
+            'support_contact_value',
+            'payment_method',
+            'cart_snapshot',
+            'terms_accepted',
+        ]);
+    }
+
+    protected function failedValidation(Validator $validator): void
+    {
+        $response = redirect()
+            ->to($this->getRedirectUrl())
+            ->withInput($this->checkoutRecoveryInput())
+            ->withErrors($validator, $this->errorBag);
+
+        throw new ValidationException($validator, $response, $this->errorBag);
     }
 
     /**

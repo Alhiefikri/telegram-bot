@@ -144,6 +144,61 @@ test("customer checkout: keeps canonical checkout usable without JavaScript", as
   }
 });
 
+test("customer checkout: switches payment copy and CTA without JavaScript", async ({
+  browser,
+}) => {
+  await runArtisan([
+    "tinker",
+    "--execute",
+    `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => true]);`,
+  ]);
+
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: { width: 390, height: 900 },
+  });
+  const page = await context.newPage();
+
+  try {
+    await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.locator("#checkout-form")).toBeVisible();
+
+    const paymentDisclosure = page.locator("#checkout-payment-disclosure");
+    await paymentDisclosure.locator("summary").click();
+    const binanceRadio = page.getByRole("radio", { name: /Binance Pay/ });
+    await page.getByText("Bayar dengan Binance Pay", { exact: true }).click();
+    await expect(binanceRadio).toBeChecked();
+    await expect(
+      page.locator(
+        '[data-checkout-payment-option][data-payment-value="binance_pay_id"] [data-checkout-payment-copy]'
+      )
+    ).toContainText("Total dasar USDT / estimasi");
+    await expect(
+      page.getByRole("button", { name: /Buat invoice Binance Pay/ })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Buat invoice QR Manual/ })
+    ).toBeHidden();
+    await page.getByText("Bayar via QR Manual", { exact: true }).click();
+    await expect(page.getByRole("radio", { name: /QR Manual/ })).toBeChecked();
+    await expect(
+      page.getByRole("button", { name: /Buat invoice QR Manual/ })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Buat invoice Binance Pay/ })
+    ).toBeHidden();
+  } finally {
+    await context.close();
+    await runArtisan([
+      "tinker",
+      "--execute",
+      `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => false]);`,
+    ]);
+  }
+});
+
 test("customer checkout: keeps storefront card actions separate and keyboard reachable", async ({
   page,
 }) => {

@@ -433,6 +433,116 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertSame(0, preg_match('/<details id="checkout-payment-disclosure"[^>]*\\bopen\\b/', $html));
     }
 
+    public function test_multiple_payment_choices_render_method_specific_copy_for_no_javascript(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
+        $product = Product::factory()->create([
+            'name' => 'No JavaScript Payment Choices',
+            'price_amount' => 60000,
+            'usdt_price_amount' => 3_500_000,
+            'stock' => 4,
+            'reserved_stock' => 0,
+        ]);
+
+        $html = $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertSame(2, substr_count($html, 'data-checkout-payment-copy'));
+        $this->assertStringContainsString('data-payment-value="qris"', $html);
+        $this->assertStringContainsString('Subtotal review (IDR)', $html);
+        $this->assertStringContainsString('Buat invoice QR Manual &amp; lanjut bayar', $html);
+        $this->assertStringContainsString('data-payment-value="binance_pay_id"', $html);
+        $this->assertStringContainsString('Total dasar USDT / estimasi', $html);
+        $this->assertStringContainsString('Buat invoice Binance Pay &amp; lanjut bayar', $html);
+        $this->assertSame(2, substr_count($html, 'data-checkout-submit'));
+    }
+
+    public function test_sakurupiah_review_marks_required_contact_controls_without_javascript(): void
+    {
+        config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
+            'sandbox_api_id' => 'sandbox-id',
+            'sandbox_api_key' => 'sandbox-key',
+            'sandbox_callback_url' => 'https://store.example.test/api/webhook/sakurupiah',
+            'sandbox_return_url' => 'https://store.example.test/shop/orders',
+            'sandbox_allowed_hosts' => ['sakurupiah.id'],
+            'sandbox_callback_allowed_hosts' => ['store.example.test'],
+            'sandbox_return_allowed_hosts' => ['store.example.test'],
+            'qris_contract' => [
+                'currency' => 'IDR',
+                'currency_confirmed' => true,
+                'fee_payer' => 'merchant',
+                'merchant_fee' => 1,
+                'fee_confirmed' => true,
+                'expiry_hours' => 24,
+                'expiry_confirmed' => true,
+            ],
+        ]));
+        Http::fake(fn () => Http::response([
+            'status' => '200',
+            'data' => [[
+                'kode' => 'QRISC',
+                'nama' => 'QRISC Custom Merchant',
+                'minimal' => 200,
+                'maksimal' => 20_000_000,
+                'tipe' => 'DIRECT',
+                'status' => 'Aktif',
+                'addition' => ['default_expired' => 24],
+            ]],
+        ], 200));
+        ManualPaymentSetting::current()->update(['payment_mode' => 'sakurupiah']);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+
+        $html = $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertSame(1, preg_match('/<details id="checkout-contact-details"[^>]*\bopen\b/', $html));
+        $this->assertSame(1, preg_match('/<select[^>]+name="support_contact_channel"[^>]+\brequired\b[^>]+aria-required="true"/', $html));
+        $this->assertSame(1, preg_match('/<input[^>]+name="support_contact_value"[^>]+type="text"[^>]+required\b[^>]+aria-required="true"/', $html));
+        $this->assertStringContainsString('value=""', $html);
+        $this->assertStringContainsString('Nomor WhatsApp diperlukan untuk checkout Sakurupiah.', $html);
+        Http::assertNothingSent();
+    }
+
+    public function test_direct_stock_recovery_restores_safe_fields_when_checkout_is_blocked(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Direct Stock Recovery',
+            'stock' => 0,
+            'reserved_stock' => 0,
+        ]);
+        $response = $this->from(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->post(route('storefront.shop.checkout'), [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'buyer_name' => 'Recovered Buyer',
+                'email' => 'recovered@example.test',
+                'support_contact_channel' => 'telegram',
+                'support_contact_value' => '@recovered_buyer',
+                'payment_method' => 'qris',
+                'terms_accepted' => '1',
+                'payment_secret' => 'must-not-be-flashed',
+            ])
+            ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertSessionHasErrors('product_id');
+
+        $response->assertSessionMissing('_old_input.payment_secret');
+        $html = $this->get($response->headers->get('Location'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('value="Recovered Buyer"', $html);
+        $this->assertStringContainsString('value="recovered@example.test"', $html);
+        $this->assertStringContainsString('value="@recovered_buyer"', $html);
+        $this->assertStringContainsString('name="terms_accepted" type="checkbox" value="1" required checked', $html);
+        $this->assertStringContainsString('id="checkout-submit-disabled-help"', $html);
+        $this->assertStringNotContainsString('must-not-be-flashed', $html);
+    }
+
     public function test_checkout_error_reopens_contact_disclosure_and_focuses_error_summary(): void
     {
         $product = Product::factory()->create([
