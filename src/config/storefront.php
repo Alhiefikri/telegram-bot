@@ -40,29 +40,10 @@ return [
         'body' => 'Pilih produk, cek stok, lalu bayar QRIS langsung di website.',
         'primary_cta' => 'Lihat Produk',
         'secondary_cta' => 'Cara beli',
-        'tertiary_cta' => 'Lihat Produk',
         'popular_label' => 'Produk terlaris berdasarkan penjualan berbayar',
         'popular_empty' => 'Belum ada data penjualan berbayar selesai untuk menampilkan label produk terlaris.',
     ],
 
-    'trust_indicators' => [
-        [
-            'title' => 'Stok real-time',
-            'body' => 'Jumlah stok siap terlihat di setiap kartu produk.',
-        ],
-        [
-            'title' => 'Akses cepat',
-            'body' => 'Akun digital disiapkan setelah pembayaran terkonfirmasi.',
-        ],
-        [
-            'title' => 'Akses mandiri',
-            'body' => 'Untuk pesanan website, invoice dan Recovery Key membantu membuka kembali data pesanan.',
-        ],
-        [
-            'title' => 'Harga jelas',
-            'body' => 'Harga katalog tampil jelas sebelum Anda checkout.',
-        ],
-    ],
 
     'catalog' => [
         'eyebrow' => 'Katalog Lhie Store',
@@ -112,27 +93,7 @@ return [
         ],
     ],
 
-    'featured' => [
-        'eyebrow' => 'Pilihan utama dari admin',
-        'empty_title' => 'Belum ada pilihan utama.',
-        'empty_body' => 'Admin belum memilih produk aktif dengan stok tersedia untuk dijadikan pilihan utama. Katalog tetap bisa dibaca dan diperiksa lagi saat stok diperbarui.',
-        'empty_cta' => 'Minta rekomendasi ke support',
-    ],
 
-    'benefits' => [
-        [
-            'title' => 'Produk siap pakai',
-            'body' => 'Produk dikurasi untuk berbagai kebutuhan digital: akun premium, lisensi software, game keys, dan tools harian.',
-        ],
-        [
-            'title' => 'Tanpa tebak stok',
-            'body' => 'Status sisa stok dan kondisi habis tampil jelas sebelum Anda lanjut ke support.',
-        ],
-        [
-            'title' => 'Akses mandiri',
-            'body' => 'Untuk pesanan website, nomor invoice dan Recovery Key memberi akses ulang tanpa perlu membuat akun toko.',
-        ],
-    ],
 
     'payment_flow' => [
         'eyebrow' => 'Cara beli',
@@ -154,11 +115,6 @@ return [
         ],
     ],
 
-    'delivery' => [
-        'eyebrow' => 'Pengiriman digital',
-        'title' => 'Akses dikirim setelah pembayaran terkonfirmasi.',
-        'body' => 'Produk digital disiapkan setelah status pembayaran valid dan stok tervalidasi. Jika ada antrean verifikasi manual, support akan membantu memberi status order melalui kanal yang tersedia.',
-    ],
 
     'fulfillment' => [
         'automatic_default_instruction' => 'Login dari perangkat pribadi, ganti password setelah berhasil masuk, lalu pindahkan MFA/Authenticator ke perangkat Anda sendiri jika produk mendukungnya.',
@@ -190,16 +146,6 @@ return [
         'body' => 'Gunakan halaman Akses Pesanan bila ingin membuka kembali data akun dari pesanan website tanpa membuat akun Lhie Store. Pesanan Telegram dicek lewat bot.',
     ],
 
-    'testimonial' => [
-        'quote' => 'Butuh produk digital cepat untuk kebutuhan harian. Di Lhie Store, stoknya jelas dan proses tanyanya tidak ribet.',
-        'name' => 'Pelanggan Lhie Store',
-        'role' => 'Pelanggan Lhie Store',
-        'stats' => [
-            ['value' => 'Mandiri', 'label' => 'akses pesanan'],
-            ['value' => 'Real-time', 'label' => 'status stok katalog'],
-            ['value' => 'Digital', 'label' => 'pengiriman akses'],
-        ],
-    ],
 
     'faq' => [
         [

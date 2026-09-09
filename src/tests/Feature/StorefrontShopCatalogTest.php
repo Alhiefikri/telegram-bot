@@ -49,6 +49,29 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('Shop Search Product');
     }
 
+    public function test_shop_shell_reaches_catalog_controls_before_single_support_section(): void
+    {
+        Product::factory()->create(['name' => 'Shop Shell Product', 'stock' => 2, 'reserved_stock' => 0]);
+
+        $html = $this->get(route('storefront.shop.index'))->assertOk()->getContent();
+        $heroStart = strpos($html, '<section class="relative px-5 pb-6 pt-6');
+        $catalogStart = strpos($html, '<section id="products"');
+        $supportStart = strpos($html, '<section id="support"');
+
+        $this->assertNotFalse($heroStart);
+        $this->assertNotFalse($catalogStart);
+        $this->assertNotFalse($supportStart);
+        $this->assertLessThan($catalogStart, $heroStart);
+        $this->assertLessThan($supportStart, $catalogStart);
+        $this->assertSame(1, substr_count($html, 'id="products"'));
+        $this->assertSame(1, substr_count($html, 'id="support"'));
+        $this->assertSame(1, substr_count($html, 'id="verified-purchase-activity"'));
+        $this->assertStringContainsString('id="shop-search"', $html);
+        $this->assertStringContainsString('id="shop-sort"', $html);
+        $this->assertStringNotContainsString('Tentang Lhie Store', $html);
+        $this->assertStringNotContainsString('Mulai belanja', $html);
+    }
+
     public function test_shop_catalog_uses_page_checkout_urls_without_embedded_checkout_payload(): void
     {
         $product = Product::factory()->create([
@@ -588,13 +611,13 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertOk()
             ->assertSee('Lhie Store | Akun Premium &amp; Produk Digital', false)
             ->assertSee('Pilih produk digital sesuai kebutuhan.')
-            ->assertSee('action="'.url('/#products').'"', false)
+            ->assertSee('href="#products"', false)
             ->assertSee('Katalog aktif · 3 item katalog')
             ->assertSee('class="category-btn', false)
             ->assertSee('data-filter="'.$category->id.'"', false)
             ->assertSee('aria-controls="storefront-product-grid"', false)
             ->assertSee('storefront-product-grid', false)
-            ->assertSee('id="featured-offer"', false)
+            ->assertDontSee('id="featured-offer"', false)
             ->assertDontSee('Katalog produk digital siap pakai');
     }
 
@@ -693,7 +716,7 @@ class StorefrontShopCatalogTest extends TestCase
         $this->get(route('storefront.home'))
             ->assertOk()
             ->assertSee('Pilih produk digital sesuai kebutuhan.')
-            ->assertSee('action="'.url('/#products').'"', false)
+            ->assertSee('href="#products"', false)
             ->assertSee('label for="storefront-search" class="sr-only">Cari produk</label>', false)
             ->assertSee('input id="storefront-search"', false)
             ->assertSee('stroke-width="3" aria-hidden="true"', false)
@@ -707,6 +730,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertDontSee('data-product=', false)
             ->assertSee('Produk digital siap pakai, checkout tanpa ribet.')
             ->assertSee('Belanja produk digital dalam tiga langkah.')
+            ->assertSee('Lihat ringkasan checkout dan akses ulang')
             ->assertDontSee('Katalog produk digital siap pakai')
             ->assertDontSee('Belum ada produk siap dibeli.');
     }

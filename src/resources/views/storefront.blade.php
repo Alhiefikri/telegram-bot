@@ -8,23 +8,18 @@
         <div id="scroll-progress" class="scroll-progress" aria-hidden="true"></div>
         @include('storefront.partials.header')
 
-        <main class="flex-grow pb-32">
+        <main class="flex-grow pb-16">
             @include('storefront.partials.checkout-maintenance')
             @include('storefront.partials.shop.checkout-error')
             @include('storefront.partials.hero')
-            @include('storefront.partials.marquee')
             @include('storefront.partials.catalog')
-            @include('storefront.partials.featured-offer')
-            @include('storefront.partials.benefits')
+            @include('storefront.partials.verified-purchase-activity')
             @include('storefront.partials.purchase-flow')
-            @include('storefront.partials.testimonial')
-            @include('storefront.partials.metrics')
             @include('storefront.partials.faq')
             @include('storefront.partials.support')
         </main>
 
         @include('storefront.partials.footer')
-        @include('storefront.partials.verified-purchase-activity')
     </div>
 
 </body>

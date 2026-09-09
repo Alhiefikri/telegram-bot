@@ -1,5 +1,5 @@
 <aside id="verified-purchase-activity"
-       class="pointer-events-none fixed right-4 top-24 z-40 hidden max-w-[calc(100vw-2rem)] translate-x-6 opacity-0 transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none sm:max-w-sm"
+       class="mx-auto hidden w-full max-w-6xl px-5 py-4 opacity-0 transition-[opacity,transform] duration-300 ease-out sm:px-6 motion-reduce:transition-none"
        data-endpoint="{{ route('storefront.verified-purchase-activity') }}"
        data-activity-state="hidden"
        aria-hidden="true"

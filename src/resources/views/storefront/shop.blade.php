@@ -8,16 +8,16 @@
         @include('storefront.partials.header')
 
         @include('storefront.partials.breadcrumbs', ['metadata' => $metadata])
-        <main class="flex-grow pb-24">
+        <main class="flex-grow pb-16">
             @include('storefront.partials.checkout-maintenance')
             @include('storefront.partials.shop.checkout-error')
             @include('storefront.partials.shop.hero')
             @include('storefront.partials.shop.catalog')
+            @include('storefront.partials.verified-purchase-activity')
             @include('storefront.partials.support')
         </main>
 
         @include('storefront.partials.footer')
-        @include('storefront.partials.verified-purchase-activity')
     </div>
 
 </body>

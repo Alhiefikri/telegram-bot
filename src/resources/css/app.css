@@ -725,21 +725,6 @@
     box-shadow: 10px 10px 0 var(--sf-shadow);
   }
 
-  .neo-zigzag {
-    height: 18px;
-    background: linear-gradient(
-        135deg,
-        transparent 45%,
-        var(--sf-accent) 45% 55%,
-        transparent 55%
-      )
-      0 0 / 28px 18px repeat-x;
-  }
-
-  .neo-float-badge {
-    animation: neo-float-badge 4.8s ease-in-out infinite;
-  }
-
   .hover-lift {
     transition:
       transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
@@ -760,38 +745,6 @@
 
   .hero-preview-panel {
     animation: hero-panel-in 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-
-  .floating-ai-field {
-    position: absolute;
-    inset: 0;
-    overflow: hidden;
-  }
-
-  .floating-ai-icon {
-    position: absolute;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 2rem;
-    line-height: 1;
-    opacity: 0.78;
-    filter: drop-shadow(3px 3px 0 rgba(17, 17, 17, 0.14));
-    animation: ai-icon-float 8s ease-in-out infinite;
-  }
-
-  .floating-ai-icon:nth-child(2n) {
-    animation-duration: 9s;
-    animation-delay: 900ms;
-  }
-
-  .floating-ai-icon:nth-child(3n) {
-    animation-duration: 6.8s;
-    animation-delay: 1500ms;
-  }
-
-  .counter-number {
-    font-variant-numeric: tabular-nums;
   }
 
   .brand-wordmark {
@@ -818,7 +771,7 @@
   .hero-logo-stage {
     position: relative;
     isolation: isolate;
-    width: min(76vw, 18.5rem);
+    width: min(38vw, 10rem);
     margin-inline: auto;
     animation: logo-float 6.5s cubic-bezier(0.45, 0, 0.2, 1) infinite;
     will-change: transform;
@@ -1010,70 +963,12 @@
     border-bottom: 2px solid var(--sf-border);
   }
 
-  .neo-marquee {
-    overflow: hidden;
-    border-block: 3px solid var(--sf-border);
-    background: var(--sf-yellow);
-    box-shadow: 0 6px 0 var(--sf-shadow);
-  }
-
-  .neo-marquee-track {
-    display: flex;
-    width: max-content;
-    animation: marquee-scroll 28s linear infinite;
-    will-change: transform;
-  }
-
-  .neo-marquee:hover .neo-marquee-track {
-    animation-play-state: paused;
-  }
-
-  .neo-marquee-group {
-    display: flex;
-    align-items: center;
-    gap: 2.75rem;
-    padding: 0.85rem 1.375rem;
-  }
-
-  .neo-marquee-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 2.75rem;
-    white-space: nowrap;
-    font-family: var(--font-display);
-    font-size: 0.82rem;
-    font-weight: 800;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--sf-ink);
-  }
-
   .neo-panel-pop {
     border: 3px solid var(--sf-border);
     border-radius: 0.9rem;
     box-shadow:
       9px 9px 0 var(--sf-violet),
       9px 9px 0 3px var(--sf-border);
-  }
-
-  .neo-panel-pop-accent {
-    border: 3px solid var(--sf-border);
-    border-radius: 0.9rem;
-    box-shadow:
-      9px 9px 0 var(--sf-yellow),
-      9px 9px 0 3px var(--sf-border);
-  }
-
-  .ai-gradient-text {
-    background: linear-gradient(
-      92deg,
-      var(--sf-accent) 8%,
-      var(--sf-violet) 55%,
-      var(--sf-pink) 96%
-    );
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
   }
 
   .neo-sheen {
@@ -1109,65 +1004,6 @@
     will-change: transform;
   }
 
-  .neo-ai-sticker {
-    place-items: center;
-    width: 5.5rem;
-    height: 5.5rem;
-    filter: drop-shadow(4px 4px 0 rgb(11 18 32 / 0.28));
-  }
-
-  .neo-ai-sticker > svg {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-  }
-
-  .neo-ai-sticker > span {
-    position: relative;
-    z-index: 1;
-    font-family: var(--font-display);
-    font-weight: 900;
-    letter-spacing: 0.02em;
-  }
-
-  .ai-word-rotator {
-    display: inline-grid;
-    overflow: hidden;
-    vertical-align: bottom;
-  }
-
-  .ai-word-rotator > span {
-    grid-area: 1 / 1;
-    white-space: nowrap;
-    opacity: 0;
-    transform: translateY(90%);
-    animation: word-cycle 8s cubic-bezier(0.7, 0, 0.3, 1) infinite;
-  }
-
-  .ai-word-rotator > span:nth-child(2) {
-    animation-delay: 2s;
-  }
-  .ai-word-rotator > span:nth-child(3) {
-    animation-delay: 4s;
-  }
-  .ai-word-rotator > span:nth-child(4) {
-    animation-delay: 6s;
-  }
-
-  .headline-underline {
-    height: 9px;
-    border: 2px solid var(--sf-border);
-    border-radius: 999px;
-    background: linear-gradient(
-      90deg,
-      var(--sf-accent),
-      var(--sf-violet) 55%,
-      var(--sf-pink)
-    );
-    transform: rotate(-1deg);
-  }
-
   .reveal-armed {
     opacity: 0;
     transform: translate3d(0, 26px, 0) scale(0.97);
@@ -1186,17 +1022,6 @@
 
   .footer-dark .brand-wordmark > span:last-child {
     color: #fffdf8;
-  }
-}
-
-@keyframes neo-float-badge {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) rotate(-2deg);
-  }
-
-  50% {
-    transform: translate3d(0, -10px, 0) rotate(2deg);
   }
 }
 
@@ -1220,21 +1045,6 @@
   to {
     opacity: 1;
     transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes ai-icon-float {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) rotate(0deg);
-  }
-
-  42% {
-    transform: translate3d(-8px, -14px, 0) rotate(-5deg);
-  }
-
-  68% {
-    transform: translate3d(7px, -6px, 0) rotate(4deg);
   }
 }
 
@@ -1266,38 +1076,9 @@
   }
 }
 
-@keyframes marquee-scroll {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-
-  to {
-    transform: translate3d(-50%, 0, 0);
-  }
-}
-
 @keyframes sticker-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@keyframes word-cycle {
-  0% {
-    opacity: 0;
-    transform: translateY(90%);
-  }
-
-  4%,
-  25% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  29%,
-  100% {
-    opacity: 0;
-    transform: translateY(-90%);
   }
 }
 
@@ -1314,27 +1095,14 @@
 
   .hero-preview-panel,
   .hero-logo-stage,
-  .floating-ai-icon,
-  .neo-float-badge,
   .qris-scan-line {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
   }
 
-  .neo-marquee-track,
-  .neo-spin-slow,
-  .ai-word-rotator > span {
+  .neo-spin-slow {
     animation: none !important;
-  }
-
-  .ai-word-rotator > span {
-    opacity: 0;
-    transform: none !important;
-  }
-
-  .ai-word-rotator > span:first-child {
-    opacity: 1;
   }
 
   .neo-sheen::after {

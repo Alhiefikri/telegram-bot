@@ -197,61 +197,6 @@ function initMobileMenu() {
   });
 }
 
-function renderCounter(target) {
-  const limit = Number.parseInt(target.getAttribute("data-counter"), 10);
-  const suffix = target.getAttribute("data-suffix") || "";
-
-  if (!Number.isFinite(limit)) {
-    return;
-  }
-
-  let count = 0;
-  const duration = 1800;
-  const steps = 40;
-  const increment = Math.ceil(limit / steps);
-  const stepTime = duration / steps;
-
-  const timer = window.setInterval(() => {
-    count += increment;
-    if (count >= limit) {
-      target.textContent = limit.toLocaleString("id-ID") + suffix;
-      window.clearInterval(timer);
-      return;
-    }
-
-    target.textContent = count.toLocaleString("id-ID") + suffix;
-  }, stepTime);
-}
-
-function initCounters() {
-  const counters = document.querySelectorAll(".counter-number");
-
-  if (!counters.length) {
-    return;
-  }
-
-  if (!("IntersectionObserver" in window)) {
-    counters.forEach(renderCounter);
-    return;
-  }
-
-  const counterObserver = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) {
-          return;
-        }
-
-        renderCounter(entry.target);
-        counterObserver.unobserve(entry.target);
-      });
-    },
-    { threshold: 0.1 }
-  );
-
-  counters.forEach((counter) => counterObserver.observe(counter));
-}
-
 function initScrollProgress() {
   const bar = document.getElementById("scroll-progress");
 
@@ -1436,7 +1381,6 @@ export default function initStorefront() {
     initMobileMenu();
     initCatalogFilterFocus();
     initCheckoutReview();
-    initCounters();
     initScrollProgress();
     initVerifiedPurchaseActivity();
     initRevealStagger();

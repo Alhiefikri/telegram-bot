@@ -2,15 +2,11 @@
 
 namespace Tests\Feature;
 
-use App\Jobs\ProcessTelegramUpdate;
-use App\Jobs\SendTelegramReceipt;
 use App\Models\Category;
 use App\Models\ManualPaymentSetting;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class StorefrontLandingPageTest extends TestCase
@@ -33,8 +29,8 @@ class StorefrontLandingPageTest extends TestCase
 
         $response
             ->assertOk()
-            ->assertSee('Akun Premium & Produk Digital')
-            ->assertSee('Katalog produk digital premium')
+            ->assertSee('Akun Premium &amp; Produk Digital', false)
+            ->assertSee('stok transparan, harga jelas')
             ->assertSee('href="'.url('/').'"', false)
             ->assertSee('property="og:title"', false)
             ->assertDontSee('/admin/login', false)
@@ -78,23 +74,6 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertHtmlContainsLink($heroHtml, '#cara-beli', 'Cara beli', 'Hero secondary CTA should explain the web checkout flow.');
     }
 
-    public function test_landing_qris_card_is_explainer_not_static_payable_checkout(): void
-    {
-        $html = $this->get('/')->assertOk()->getContent();
-        $qrisHtml = $this->htmlBetween($html, '<aside class="qris-card', '</aside>');
-
-        $this->assertStringContainsString('aria-label="Ilustrasi QRIS Lhie Store"', $qrisHtml);
-        $this->assertStringContainsString('QRIS Website', $qrisHtml);
-        $this->assertStringContainsString('QRIS web dibuat per order', $qrisHtml);
-        $this->assertStringContainsString('QRIS final muncul di halaman invoice setelah checkout. Simpan invoice dan Recovery Key sebelum melanjutkan pembayaran; key ini hanya untuk pesanan website.', $qrisHtml);
-        $this->assertStringNotContainsString('Pakasir', $qrisHtml);
-        $this->assertHtmlContainsLink($qrisHtml, url('/#products'), 'Pilih Produk via QRIS', 'QRIS explainer CTA should start website checkout instead of Telegram support.');
-        $this->assertStringNotContainsString('data-telegram-link', $qrisHtml);
-        $this->assertStringNotContainsString('Konfirmasi ke Admin', $qrisHtml);
-        $this->assertStringNotContainsString('QRIS pembayaran manual', $qrisHtml);
-        $this->assertStringNotContainsString('/qr-lhie.jpg', $qrisHtml);
-        $this->assertStringNotContainsString('Scan QRIS untuk Bayar', $qrisHtml);
-    }
 
     public function test_storefront_omits_admin_dashboard_ctas_from_public_landing_page(): void
     {
@@ -148,31 +127,32 @@ class StorefrontLandingPageTest extends TestCase
             ->assertDontSee('bg-[#09090b]', false);
     }
 
-    public function test_root_path_renders_trust_payment_and_order_access_content_without_dispatching_webhook_jobs(): void
+    public function test_homepage_uses_a_catalog_first_hierarchy_without_duplicate_marketing_sections(): void
     {
-        Bus::fake([ProcessTelegramUpdate::class]);
-        Queue::fake([SendTelegramReceipt::class]);
+        $html = $this->get('/')->assertOk()->getContent();
+        $heroStart = strpos($html, '<section class="storefront-hero-card');
+        $catalogStart = strpos($html, '<section id="products"');
+        $heroHtml = $this->htmlBetween($html, '<section class="storefront-hero-card', '</section>');
+        $activityHtml = $this->htmlBetween($html, '<aside id="verified-purchase-activity"', '</aside>');
 
-        $this->get('/')
-            ->assertOk()
-            ->assertSee('Produk')
-            ->assertSee('Cara Beli')
-            ->assertSee('Pusat panduan')
-            ->assertSee('FAQ')
-            ->assertSee('Akses Pesanan')
-            ->assertSee('Belanja produk digital dalam tiga langkah')
-            ->assertSee('/panduan', false)
-            ->assertSee('Pilih produk dari katalog, checkout sebagai tamu di website, lalu simpan invoice dan Recovery Key untuk akses ulang pesanan website.')
-            ->assertSee('Pengiriman digital')
-            ->assertSee('Invoice dan Recovery Key untuk pesanan website.')
-            ->assertSee('Produk siap pakai')
-            ->assertSee('Tanpa tebak stok')
-            ->assertSee('Akses mandiri')
-            ->assertSee('Bagaimana cara membeli produk digital di Lhie Store?')
-            ->assertSee('Bagaimana cara membuka data pesanan lagi?');
-
-        Bus::assertNotDispatched(ProcessTelegramUpdate::class);
-        Queue::assertNotPushed(SendTelegramReceipt::class);
+        $this->assertNotFalse($heroStart);
+        $this->assertNotFalse($catalogStart);
+        $this->assertLessThan($catalogStart, $heroStart, 'The compact hero must precede the primary catalog task.');
+        $this->assertSame(1, substr_count($html, 'id="products"'));
+        $this->assertSame(1, substr_count($html, 'id="cara-beli"'));
+        $this->assertSame(1, substr_count($html, 'id="faq"'));
+        $this->assertSame(1, substr_count($html, 'id="support"'));
+        $this->assertSame(1, substr_count($heroHtml, 'href="#products"'));
+        $this->assertSame(1, substr_count($heroHtml, 'href="#cara-beli"'));
+        $this->assertStringNotContainsString('id="featured-offer"', $html);
+        $this->assertStringNotContainsString('id="features"', $html);
+        $this->assertStringNotContainsString('neo-marquee', $html);
+        $this->assertStringNotContainsString('fixed', $activityHtml);
+        $this->assertStringContainsString('data-endpoint="'.route('storefront.verified-purchase-activity').'"', $activityHtml);
+        $this->assertStringContainsString('Lihat ringkasan checkout dan akses ulang', $html);
+        $this->assertStringContainsString('QRIS final muncul di halaman invoice setelah checkout.', $html);
+        $this->assertStringContainsString('/panduan', $html);
+        $this->assertStringContainsString('Akses Pesanan', $html);
     }
 
     public function test_guide_hub_lists_chatgpt_login_methods_and_links_to_the_specific_guide(): void
@@ -337,98 +317,6 @@ class StorefrontLandingPageTest extends TestCase
             ->assertDontSee('Produk Kategori Terhapus');
     }
 
-    public function test_featured_offer_selects_available_public_product_only(): void
-    {
-        $category = Category::factory()->create([
-            'name' => 'Akun Premium',
-            'slug' => 'akun-premium',
-            'is_active' => true,
-        ]);
-        Product::factory()->create([
-            'category_id' => $category->id,
-            'name' => 'Akun Habis',
-            'description' => 'Produk aktif tetapi stoknya tidak tersedia.',
-            'stock' => 1,
-            'reserved_stock' => 1,
-            'is_active' => true,
-        ]);
-        Product::factory()->create([
-            'category_id' => $category->id,
-            'name' => 'Produk Nonaktif',
-            'stock' => 5,
-            'reserved_stock' => 0,
-            'is_active' => false,
-        ]);
-        $deleted = Product::factory()->create([
-            'category_id' => $category->id,
-            'name' => 'Produk Terhapus',
-            'stock' => 5,
-            'reserved_stock' => 0,
-        ]);
-        $deleted->delete();
-        $featuredProduct = Product::factory()->create([
-            'category_id' => $category->id,
-            'name' => 'Canva Pro Promo',
-            'description' => 'Offer utama dengan stok siap kirim.',
-            'price_amount' => 99000,
-            'stock' => 4,
-            'reserved_stock' => 1,
-            'is_active' => true,
-            'featured_rank' => 1,
-        ]);
-
-        $html = $this->get('/')
-            ->assertOk()
-            ->getContent();
-
-        $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="features"');
-
-        $this->assertStringContainsString('Canva Pro Promo', $featuredHtml);
-        $this->assertStringContainsString('Rp99.000', $featuredHtml);
-        $this->assertStringContainsString('Sisa 3', $featuredHtml);
-        $this->assertStringContainsString('Beli sekarang', $featuredHtml);
-        $this->assertStringContainsString(
-            'href="'.route('storefront.shop.checkout.product', ['product' => $featuredProduct]).'?from=',
-            $featuredHtml,
-        );
-        $this->assertStringNotContainsString('data-product=', $featuredHtml);
-        $this->assertStringNotContainsString('fomoTimer', $featuredHtml);
-        $this->assertStringNotContainsString('timeDisplay', $featuredHtml);
-        $this->assertStringNotContainsString('15:00', $featuredHtml);
-        $this->assertStringNotContainsString('Slot cek stok diperbarui', $featuredHtml);
-        $this->assertStringNotContainsString('Promo pilihan', $featuredHtml);
-        $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
-        $this->assertStringNotContainsString('Produk Nonaktif', $featuredHtml);
-        $this->assertStringNotContainsString('Produk Terhapus', $featuredHtml);
-    }
-
-    public function test_featured_offer_has_safe_empty_state_without_suitable_product(): void
-    {
-        Product::factory()->create([
-            'name' => 'Akun Habis',
-            'stock' => 2,
-            'reserved_stock' => 2,
-            'is_active' => true,
-        ]);
-        Product::factory()->create([
-            'name' => 'Produk Nonaktif Siap',
-            'stock' => 5,
-            'reserved_stock' => 0,
-            'is_active' => false,
-        ]);
-
-        $html = $this->get('/')
-            ->assertOk()
-            ->getContent();
-
-        $featuredHtml = $this->htmlBetween($html, '<section id="featured-offer"', '<section id="features"');
-
-        $this->assertStringContainsString('Belum ada pilihan utama.', $featuredHtml);
-        $this->assertStringContainsString('Lihat katalog', $featuredHtml);
-        $this->assertStringNotContainsString('Pesan via Admin', $featuredHtml);
-        $this->assertStringNotContainsString('Akun Habis', $featuredHtml);
-        $this->assertStringNotContainsString('Produk Nonaktif Siap', $featuredHtml);
-    }
 
     public function test_category_controls_render_ordered_accessible_filter_buttons(): void
     {
@@ -521,7 +409,7 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('value="chat"', false)
             ->getContent();
 
-        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<section id="featured-offer"');
+        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<aside id="verified-purchase-activity"');
 
         $this->assertStringContainsString('Chat GPT Plus', $catalogHtml);
         $this->assertStringNotContainsString('Canva Pro', $catalogHtml);

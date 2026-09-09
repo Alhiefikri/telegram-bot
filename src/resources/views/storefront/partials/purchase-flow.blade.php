@@ -1,55 +1,45 @@
-<section id="cara-beli" class="relative mx-auto mt-10 max-w-6xl border-t-[3px] border-[var(--sf-border)] px-5 py-28 sm:px-6">
-    <div class="mb-16 max-w-2xl">
-        <div class="mb-4 inline-flex rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">Cara beli</div>
-        <h2 class="font-display text-4xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $copy['payment_flow']['title'] }}</h2>
-        <p class="mt-3 max-w-lg text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['payment_flow']['body'] }}</p>
-    </div>
+<section id="cara-beli" class="mx-auto max-w-6xl px-5 py-8 sm:px-6 sm:py-10">
+    <div class="neo-panel bg-[var(--sf-surface)] p-5 sm:p-7">
+        <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div class="max-w-3xl">
+                <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">{{ $copy['payment_flow']['eyebrow'] }}</p>
+                <h2 class="mt-2 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-3xl">{{ $copy['payment_flow']['title'] }}</h2>
+                <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['payment_flow']['body'] }}</p>
+            </div>
 
-    <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-        <div class="grid gap-6 sm:grid-cols-3 lg:grid-cols-1">
-            @foreach ($copy['payment_flow']['steps'] as $index => $step)
-                <div class="neo-panel neo-hover reveal-item relative bg-[var(--sf-surface)] p-6">
-                    <span class="mb-5 flex h-12 w-12 -rotate-3 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] font-display text-base font-black shadow-[4px_4px_0_var(--sf-shadow)] {{ ['bg-[var(--sf-accent)] text-white', 'bg-[var(--sf-violet)] text-white', 'bg-[var(--sf-yellow)] text-[var(--sf-ink)]'][$index % 3] }}">
-                        0{{ $index + 1 }}
-                    </span>
-                    <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $step['title'] ?? 'Langkah' }}</h3>
-                    <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $step['body'] ?? $step }}</p>
+            <div class="flex shrink-0 flex-col gap-2 sm:flex-row lg:flex-col">
+                <a href="{{ route('storefront.guides.index') }}" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
+                    Pusat Panduan
+                </a>
+                <a href="{{ route('storefront.order-access.create') }}" class="inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-5 text-sm font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
+                    Akses Pesanan
+                </a>
+            </div>
+        </div>
+
+        <details class="mt-5 border-t-[3px] border-dashed border-[var(--sf-border)] pt-3">
+            <summary class="flex min-h-11 cursor-pointer items-center justify-between gap-4 text-sm font-black text-[var(--sf-ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]">
+                <span>Lihat ringkasan checkout dan akses ulang</span>
+                <span aria-hidden="true" class="text-xl leading-none">+</span>
+            </summary>
+
+            <div class="mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,24rem)]">
+                <ol class="grid gap-3 sm:grid-cols-3">
+                    @foreach ($copy['payment_flow']['steps'] as $index => $step)
+                        <li class="rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4">
+                            <span class="font-display text-sm font-black text-[var(--sf-accent)]">0{{ $index + 1 }}</span>
+                            <h3 class="mt-2 text-sm font-black text-[var(--sf-ink)]">{{ $step['title'] ?? 'Langkah' }}</h3>
+                            <p class="mt-1 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $step['body'] ?? $step }}</p>
+                        </li>
+                    @endforeach
+                </ol>
+
+                <div class="rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4">
+                    <h3 class="text-sm font-black text-[var(--sf-ink)]">Checkout aman untuk diingat</h3>
+                    <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['qris']['body'] }}</p>
+                    <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['recovery_access']['body'] }}</p>
                 </div>
-            @endforeach
-        </div>
-
-        @include('storefront.components.qris-card')
-    </div>
-
-    <div class="mt-8 flex flex-col gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-5 shadow-[5px_5px_0_var(--sf-shadow)] sm:flex-row sm:items-center sm:justify-between">
-        <div>
-            <h3 class="font-display text-base font-black text-[var(--sf-ink)]">Tidak perlu akun Lhie Store untuk checkout.</h3>
-            <p class="mt-1 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Kami hanya meminta kontak agar invoice dan bantuan pesanan bisa ditelusuri dengan cepat.</p>
-        </div>
-        <a href="{{ $storefront->catalogUrl() }}" class="neo-button inline-flex h-12 shrink-0 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Pilih Produk</a>
-    </div>
-
-    <div class="mt-16 grid gap-8 border-t-[3px] border-dashed border-[var(--sf-border)] pt-12 sm:grid-cols-2">
-        <div class="neo-panel-tight bg-[var(--sf-yellow)] p-6">
-            <p class="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--sf-ink)]">{{ $copy['delivery']['eyebrow'] }}</p>
-            <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $copy['delivery']['title'] }}</h3>
-            <p class="mt-3 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['delivery']['body'] }}</p>
-        </div>
-        <div class="neo-panel-tight bg-[var(--sf-blue)] p-6 text-[var(--sf-ink)]">
-            <p class="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--sf-ink)]/80">{{ $copy['recovery_access']['eyebrow'] }}</p>
-            <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $copy['recovery_access']['title'] }}</h3>
-            <p class="mt-3 text-sm font-semibold leading-relaxed text-[var(--sf-ink)]/90">{{ $copy['recovery_access']['body'] }}</p>
-        </div>
-    </div>
-
-    <div class="neo-panel mt-8 flex flex-col gap-4 bg-[var(--sf-surface)] p-6 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-            <p class="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Pusat panduan</p>
-            <h3 class="font-display text-lg font-black text-[var(--sf-ink)]">Pilih panduan sesuai produk dan metode login.</h3>
-            <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">Panduan ChatGPT untuk Outlook, iCloud, dan MFA sudah tersedia. Panduan produk lain dapat ditambahkan di halaman yang sama.</p>
-        </div>
-        <a href="{{ route('storefront.guides.index') }}" class="neo-button inline-flex h-12 shrink-0 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
-            Buka Pusat Panduan
-        </a>
+            </div>
+        </details>
     </div>
 </section>

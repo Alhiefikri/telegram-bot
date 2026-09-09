@@ -12,24 +12,21 @@
         </a>
 
         <nav class="hidden items-center gap-1.5 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] p-1 text-xs font-black text-[var(--sf-ink)] lg:flex" aria-label="Navigasi utama">
-            <a href="{{ $shopUrl }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Produk</a>
-            <a href="{{ $homeUrl }}#cara-beli" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Cara Beli</a>
-            <a href="{{ route('storefront.order-access.create') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akses Pesanan</a>
-            <a href="{{ $cartUrl }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">
+            <a href="{{ $shopUrl }}" class="inline-flex min-h-11 items-center rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Produk</a>
+            <a href="{{ $homeUrl }}#cara-beli" class="inline-flex min-h-11 items-center rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Cara Beli</a>
+            <a href="{{ route('storefront.order-access.create') }}" class="inline-flex min-h-11 items-center rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akses Pesanan</a>
+            <a href="{{ $cartUrl }}" class="inline-flex min-h-11 items-center rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">
                 Keranjang
                 @if (isset($cartItemCount))
                     <span>({{ $cartItemCount }})</span>
                 @endif
             </a>
-            <a href="{{ route('customer.account') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akun</a>
-            <a href="{{ route('storefront.guides.index') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan</a>
-            <a href="{{ $homeUrl }}#faq" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">FAQ</a>
+            <a href="{{ route('customer.account') }}" class="inline-flex min-h-11 items-center rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Akun</a>
+            <a href="{{ route('storefront.guides.index') }}" class="inline-flex min-h-11 items-center rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan</a>
+            <a href="{{ $homeUrl }}#faq" class="inline-flex min-h-11 items-center rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">FAQ</a>
         </nav>
 
         <div class="flex shrink-0 items-center gap-2 sm:gap-3">
-            <a href="{{ $shopUrl }}" class="neo-button neo-sheen hidden items-center justify-center gap-2 bg-[var(--sf-accent)] px-4 py-2 text-xs font-black text-white sm:inline-flex">
-                <span>Katalog Web</span>
-            </a>
 
             <button
                 id="mobile-menu-btn"

@@ -58,9 +58,6 @@ class StorefrontCatalogPageBuilder
         $listing = $this->publicProducts($query, paginate: $isShop);
         $catalogProducts = $this->catalogProducts($listing['standaloneReadModels']);
         $catalogEntries = $this->catalogEntries($listing['entries'], $catalogProducts);
-        $featuredProduct = $context === StorefrontCatalogPage::CONTEXT_HOME
-            ? $this->featuredProduct()
-            : null;
         $copy = config('storefront');
         $brand = $this->storefront->brand();
         $catalogReturnUrl = $isShop
@@ -94,7 +91,6 @@ class StorefrontCatalogPageBuilder
             categoryFilters: $this->categoryFilters($categories, $query, $isShop),
             products: $catalogProducts,
             popularProducts: $this->orderedPopularProducts($catalogProducts),
-            featuredProduct: $featuredProduct,
             search: $query->search,
             searchMaxLength: StorefrontCatalogSearch::MAX_LENGTH,
             searchAction: $isShop
@@ -317,14 +313,6 @@ class StorefrontCatalogPageBuilder
         ]));
     }
 
-    private function featuredProduct(): ?StorefrontCatalogProduct
-    {
-        $readModel = $this->catalog->featuredPublic();
-
-        return $readModel instanceof CatalogProductReadModel
-            ? new StorefrontCatalogProduct($this->catalogPresenter->present($readModel))
-            : null;
-    }
 
     private function coerceQuery(StorefrontCatalogQuery|string|null $query): StorefrontCatalogQuery
     {
