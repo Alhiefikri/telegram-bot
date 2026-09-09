@@ -313,7 +313,6 @@ class StorefrontCatalogPageBuilder
         ]));
     }
 
-
     private function coerceQuery(StorefrontCatalogQuery|string|null $query): StorefrontCatalogQuery
     {
         return $query instanceof StorefrontCatalogQuery ? $query : StorefrontCatalogQuery::fromSearch($query);

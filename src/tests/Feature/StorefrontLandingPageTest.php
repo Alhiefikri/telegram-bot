@@ -74,7 +74,6 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertHtmlContainsLink($heroHtml, '#cara-beli', 'Cara beli', 'Hero secondary CTA should explain the web checkout flow.');
     }
 
-
     public function test_storefront_omits_admin_dashboard_ctas_from_public_landing_page(): void
     {
         $this->get('/')
@@ -316,7 +315,6 @@ class StorefrontLandingPageTest extends TestCase
             ->assertDontSee('Produk Kategori Nonaktif')
             ->assertDontSee('Produk Kategori Terhapus');
     }
-
 
     public function test_category_controls_render_ordered_accessible_filter_buttons(): void
     {

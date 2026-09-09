@@ -120,7 +120,6 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->assertStringContainsString('category=category-09', $page->categoryFilters->last()->url);
     }
 
-
     public function test_products_order_credential_managed_products_by_available_product_invariant(): void
     {
         $this->credentialManagedProductWithClaimedCredentials(

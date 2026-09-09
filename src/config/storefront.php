@@ -44,7 +44,6 @@ return [
         'popular_empty' => 'Belum ada data penjualan berbayar selesai untuk menampilkan label produk terlaris.',
     ],
 
-
     'catalog' => [
         'eyebrow' => 'Katalog Lhie Store',
         'title' => 'Pilih produk digital sesuai kebutuhan.',
@@ -93,8 +92,6 @@ return [
         ],
     ],
 
-
-
     'payment_flow' => [
         'eyebrow' => 'Cara beli',
         'title' => 'Belanja produk digital dalam tiga langkah.',
@@ -114,7 +111,6 @@ return [
             ],
         ],
     ],
-
 
     'fulfillment' => [
         'automatic_default_instruction' => 'Login dari perangkat pribadi, ganti password setelah berhasil masuk, lalu pindahkan MFA/Authenticator ke perangkat Anda sendiri jika produk mendukungnya.',
@@ -145,7 +141,6 @@ return [
         'title' => 'Invoice dan Recovery Key untuk pesanan website.',
         'body' => 'Gunakan halaman Akses Pesanan bila ingin membuka kembali data akun dari pesanan website tanpa membuat akun Lhie Store. Pesanan Telegram dicek lewat bot.',
     ],
-
 
     'faq' => [
         [
