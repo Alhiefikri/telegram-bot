@@ -320,6 +320,65 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         Queue::assertPushed(SendProductWaitlistConfirmation::class);
     }
 
+    public function test_family_option_card_leads_with_price_availability_and_buy_before_long_details(): void
+    {
+        $family = ProductFamily::factory()->create([
+            'slug' => 'decision-order-family',
+            'name' => 'Decision Order Family',
+            'description' => 'Pilih paket sesuai kebutuhan.',
+        ]);
+        $product = Product::factory()->create([
+            'name' => 'Decision Order SKU',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'family_option_label' => 'Paket 30 Hari',
+            'description' => "Baris pertama penawaran.\nBaris panjang kedua yang memuat detail panjang berulang-ulang untuk membuktikan bahwa konten pendukung tidak boleh mengubur tombol Beli pada layar sempit.",
+            'product_type' => 'Akun premium',
+            'access_duration' => '30 hari',
+            'region' => 'Global',
+            'account_type' => 'Private',
+            'included_items' => "Akun siap pakai\nPanduan login",
+            'limitations' => 'Tidak untuk dijual kembali',
+            'fulfillment_expectation' => 'Dikirim setelah pembayaran terverifikasi.',
+            'warranty_policy' => 'Garansi login 7 hari.',
+            'support_policy' => 'Support pada jam operasional.',
+            'price_amount' => 99000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+        ]);
+
+        $html = $this->get(route('storefront.product-families.show', ['productFamily' => $family->slug]))
+            ->assertOk()
+            ->getContent();
+        preg_match('/<article id="family-option-'.$product->id.'"(.*?)<\/article>/s', $html, $card);
+        $this->assertNotEmpty($card[1] ?? null);
+        $cardHtml = $card[1];
+
+        $pricePosition = strpos($cardHtml, 'Rp99.000');
+        $durationChipPosition = strpos($cardHtml, 'Durasi 30 hari');
+        preg_match('/>\s*Beli\s*</', $cardHtml, $buyMatch, PREG_OFFSET_CAPTURE);
+        $summaryPosition = strpos($cardHtml, 'Baca detail lengkap');
+        $teaserPosition = strpos($cardHtml, 'Baris pertama penawaran.');
+        $merchandisingPosition = strpos($cardHtml, 'Region');
+
+        $this->assertNotFalse($pricePosition, 'Option card should show the price.');
+        $this->assertNotFalse($durationChipPosition, 'Option card should show the duration as a decision fact.');
+        $this->assertNotFalse($buyPosition = $buyMatch[0][1] ?? false, 'Option card should show the Beli action.');
+        $this->assertNotFalse($summaryPosition, 'Option card should keep details in a disclosure.');
+        $this->assertNotFalse($teaserPosition, 'Option card should keep the description reachable.');
+        $this->assertNotFalse($merchandisingPosition, 'Option card should keep merchandising reachable.');
+        $this->assertLessThan($buyPosition, $pricePosition, 'Price should appear above the Beli action.');
+        $this->assertLessThan($buyPosition, $durationChipPosition, 'Duration should appear above the Beli action.');
+        $this->assertLessThan($summaryPosition, $buyPosition, 'Beli should appear above the details disclosure.');
+        $this->assertLessThan($teaserPosition, $summaryPosition, 'Description should live inside the disclosure.');
+        $this->assertLessThan($merchandisingPosition, $summaryPosition, 'Merchandising should live inside the disclosure.');
+
+        $this->assertSame(1, preg_match('/<details data-family-option-details/', $cardHtml), 'Disclosure should be a native details element.');
+        $this->assertSame(0, preg_match('/<details data-family-option-details[^>]*\bopen\b/', $cardHtml), 'Details should start collapsed.');
+        $this->assertStringContainsString('Tersedia', $cardHtml, 'Availability should stay visible on the card.');
+        $this->assertStringContainsString('href="'.route('storefront.shop.checkout.product', ['product' => $product]).'?from=', $cardHtml, 'Beli should point at the direct checkout review.');
+    }
+
     private function manualPaymentModeIsActive(): void
     {
         ManualPaymentSetting::query()->create([

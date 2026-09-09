@@ -305,6 +305,31 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('from='.urlencode($returnUrl), false);
     }
 
+    public function test_shop_card_buy_now_keeps_filter_and_pagination_return_context(): void
+    {
+        $category = Category::factory()->create(['slug' => 'return-context-category', 'name' => 'Return Context']);
+        foreach (range(1, 25) as $number) {
+            Product::factory()->create([
+                'category_id' => $category->id,
+                'name' => sprintf('Shop Buy Context Product %02d', $number),
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+        }
+        $product = $category->products()->where('name', 'Shop Buy Context Product 25')->firstOrFail();
+        $pageUrl = route('storefront.shop.index', ['category' => $category->slug, 'page' => 2]);
+        $returnUrl = $pageUrl.'#product-'.$product->id;
+
+        $html = $this->get($pageUrl)
+            ->assertOk()
+            ->assertSee('Shop Buy Context Product 25')
+            ->getContent();
+
+        $expectedCheckoutHref = route('storefront.shop.checkout.product', ['product' => $product])
+            .'?from='.urlencode($returnUrl);
+        $this->assertStringContainsString('href="'.$expectedCheckoutHref.'"', $html);
+    }
+
     public function test_landing_search_is_normalized_bounded_and_case_appropriate(): void
     {
         Product::factory()->create(['name' => 'Chat GPT Plus Ready', 'description' => 'Akun premium AI', 'stock' => 2, 'reserved_stock' => 0]);

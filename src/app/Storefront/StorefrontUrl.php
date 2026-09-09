@@ -65,13 +65,35 @@ class StorefrontUrl
 
     public function checkoutPageSource(?string $returnUrl): string
     {
-        $path = is_string($returnUrl) && $this->isLocalUrl($returnUrl)
-            ? parse_url($returnUrl, PHP_URL_PATH)
-            : null;
+        $path = $this->localPath($returnUrl);
 
         return is_string($path) && str_starts_with($path, '/produk-keluarga/')
             ? 'family_direct_checkout_page'
             : 'direct_checkout_page';
+    }
+
+    /**
+     * Source-aware back-link label for the checkout review page. The label is
+     * derived from the same bounded same-origin URL that the link points at,
+     * so the two can never disagree for entry points owned by StorefrontUrl.
+     */
+    public function checkoutReturnLabel(?string $returnUrl): string
+    {
+        $path = $this->localPath($returnUrl);
+
+        return match (true) {
+            is_string($path) && str_starts_with($path, '/produk-keluarga/') => 'Kembali ke pilihan',
+            is_string($path) && str_starts_with($path, '/shop/cart') => 'Kembali ke keranjang',
+            is_string($path) && str_starts_with($path, '/produk/') => 'Kembali ke produk',
+            default => 'Kembali ke katalog',
+        };
+    }
+
+    private function localPath(?string $url): ?string
+    {
+        return is_string($url) && $this->isLocalUrl($url)
+            ? parse_url($url, PHP_URL_PATH)
+            : null;
     }
 
     public function waitlistUrlForId(int $productId): string

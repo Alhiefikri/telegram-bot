@@ -9,6 +9,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -356,6 +357,82 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertDontSee('Buat satu order dan lanjut bayar')
             ->assertDontSee('action="'.route('storefront.shop.checkout').'"', false)
             ->assertDontSee('name="product_id"', false);
+    }
+
+    public function test_direct_review_back_link_matches_product_detail_origin_or_bounded_default(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Product Origin Review',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $productUrl = route('storefront.products.show', $product);
+
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product, 'from' => $productUrl]))
+            ->assertOk()
+            ->assertSee('Kembali ke produk')
+            ->assertSee('href="'.$productUrl.'"', false);
+
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertOk()
+            ->assertSee('Kembali ke produk')
+            ->assertSee('href="'.$productUrl.'"', false);
+
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product, 'from' => 'https://evil.example/phish']))
+            ->assertOk()
+            ->assertSee('Kembali ke produk')
+            ->assertDontSee('evil.example');
+    }
+
+    public function test_direct_review_back_link_matches_family_option_origin(): void
+    {
+        $family = ProductFamily::factory()->create([
+            'slug' => 'review-return-family',
+            'name' => 'Review Return Family',
+        ]);
+        $product = Product::factory()->create([
+            'name' => 'Review Return Family SKU',
+            'product_family_id' => $family->id,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $familyUrl = route('storefront.product-families.show', ['productFamily' => $family->slug]);
+
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product, 'from' => $familyUrl]))
+            ->assertOk()
+            ->assertSee('Kembali ke pilihan')
+            ->assertSee('href="'.$familyUrl.'"', false);
+    }
+
+    public function test_direct_review_back_link_matches_catalog_card_origin(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Catalog Origin Review',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $homeReturnUrl = url('/#product-'.$product->id);
+
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product, 'from' => $homeReturnUrl]))
+            ->assertOk()
+            ->assertSee('Kembali ke katalog')
+            ->assertSee('href="'.$homeReturnUrl.'"', false);
+    }
+
+    public function test_catalog_card_buy_now_returns_to_the_card_anchor_not_product_detail(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Return Anchor Card Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $html = $this->get(route('storefront.home'))
+            ->assertOk()
+            ->getContent();
+
+        $expectedCheckoutHref = route('storefront.shop.checkout.product', ['product' => $product])
+            .'?from='.urlencode(url('/#product-'.$product->id));
+        $this->assertStringContainsString('href="'.$expectedCheckoutHref.'"', $html);
     }
 
     public function test_direct_checkout_quantity_is_normalized_to_one_for_non_positive_input(): void

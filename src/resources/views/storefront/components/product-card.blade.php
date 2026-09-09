@@ -6,7 +6,7 @@
         ? $catalogPage->productReturnUrl($presentation->id)
         : $storefront->catalogUrl($presentation->id);
     $productUrl = $storefront->productUrl($presentation->id, $catalogReturnUrl);
-    $checkoutUrl = $storefront->checkoutProductUrl($presentation->id, $productUrl);
+    $checkoutUrl = $storefront->checkoutProductUrl($presentation->id, $catalogReturnUrl);
 @endphp
 
 <article

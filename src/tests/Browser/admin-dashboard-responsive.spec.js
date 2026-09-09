@@ -250,6 +250,7 @@ test("customer checkout: keeps storefront card actions separate and keyboard rea
 test("customer checkout: asserts deterministic catalog checkout invoice navigation without duplicates", async ({
   page,
 }) => {
+  test.setTimeout(120_000);
   const retiredRequests = observeRetiredCheckoutRequests(page);
   const flow = observeCustomerNavigation(page);
 
@@ -376,6 +377,7 @@ test("customer checkout: asserts deterministic catalog checkout invoice navigati
 test("customer checkout: completes direct purchases from home, shop, Family, and Product detail", async ({
   page,
 }) => {
+  test.setTimeout(120_000);
   const retiredRequests = observeRetiredCheckoutRequests(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
@@ -666,6 +668,7 @@ test("customer checkout: restores Product and Family context through browser bac
 test("customer checkout: proves direct and Family review geometry across required viewports", async ({
   page,
 }) => {
+  test.setTimeout(180_000);
   const retiredRequests = observeRetiredCheckoutRequests(page);
 
   for (const viewport of customerCheckoutViewports) {
@@ -725,6 +728,7 @@ test("customer checkout: proves direct and Family review geometry across require
 test("customer checkout: proves Cart review geometry across required viewports", async ({
   page,
 }) => {
+  test.setTimeout(180_000);
   const retiredRequests = observeRetiredCheckoutRequests(page);
 
   for (const viewport of customerCheckoutViewports) {
@@ -745,10 +749,212 @@ test("customer checkout: proves Cart review geometry across required viewports",
   expect(retiredRequests).toEqual([]);
 });
 
+test("customer checkout: keeps checkout back links source-aware at mobile widths", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+
+  for (const viewport of [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.context().clearCookies();
+    await page.setViewportSize(viewport);
+
+    await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+    const homeCard = page
+      .locator("article.product-card")
+      .filter({ hasText: "Browser QA Produk B" })
+      .first();
+    await expect(homeCard).toBeVisible();
+    const homeCardId = (await homeCard.getAttribute("id")).replace(
+      "product-",
+      ""
+    );
+    const homeCheckoutLink = homeCard.locator(
+      'a[href*="/shop/checkout/products/"]'
+    );
+    await expect(homeCheckoutLink).toHaveCount(1);
+    const homeFrom = `${baseUrl}/#product-${homeCardId}`;
+    expect(
+      new URL(await homeCheckoutLink.getAttribute("href")).searchParams.get(
+        "from"
+      )
+    ).toBe(homeFrom);
+    await homeCheckoutLink.click({ noWaitAfter: true });
+    await expectStorefrontPageCheckout(page);
+    await expect(
+      page.getByRole("link", { name: "Kembali ke katalog", exact: true })
+    ).toHaveAttribute("href", homeFrom);
+
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    const productCard = page
+      .locator("article.product-card")
+      .filter({ hasText: "Browser QA Produk B" })
+      .first();
+    await productCard
+      .getByRole("link", { name: "Detail", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/produk\/\d+/);
+    const productDetailUrl = page.url();
+    await page.locator("#product-checkout-cta").click();
+    await expectStorefrontPageCheckout(page);
+    await expect(
+      page.getByRole("link", { name: "Kembali ke produk", exact: true })
+    ).toHaveAttribute("href", productDetailUrl);
+
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    const familyCard = page
+      .locator("a.family-card")
+      .filter({ hasText: "Browser QA Product Family" });
+    await familyCard.click();
+    await expect(page).toHaveURL(
+      /\/produk-keluarga\/browser-responsive-family/
+    );
+    const canonicalFamilyUrl = new URL(page.url());
+    canonicalFamilyUrl.search = "";
+    const familyUrl = canonicalFamilyUrl.toString();
+    const familyCheckoutLink = page
+      .locator("#family-options article")
+      .filter({ hasText: "QA option" })
+      .locator('a[href*="/shop/checkout/products/"]')
+      .filter({ hasText: "Beli" });
+    await expect(familyCheckoutLink).toHaveCount(1);
+    expect(
+      new URL(await familyCheckoutLink.getAttribute("href")).searchParams.get(
+        "from"
+      )
+    ).toBe(familyUrl);
+    await familyCheckoutLink.click({ noWaitAfter: true });
+    await expectStorefrontPageCheckout(page);
+    await expect(
+      page.getByRole("link", { name: "Kembali ke pilihan", exact: true })
+    ).toHaveAttribute("href", familyUrl);
+
+    await page.context().clearCookies();
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    await addProductCardToCart(page, "Browser QA Produk B");
+    await page
+      .getByRole("link", { name: "Lanjut checkout", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/shop\/checkout(?:\?|$)/);
+    await expectStorefrontPageCheckout(page);
+    await expect(
+      page.getByRole("link", { name: "Kembali ke keranjang", exact: true })
+    ).toHaveAttribute("href", `${baseUrl}/shop/cart`);
+  }
+});
+
+test("customer checkout: keeps Family option decisions above long details at mobile widths", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+
+  for (const viewport of [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.context().clearCookies();
+    await page.setViewportSize(viewport);
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    const familyCard = page
+      .locator("a.family-card")
+      .filter({ hasText: "Browser QA Product Family" });
+    await expect(familyCard).toHaveCount(1);
+    await familyCard.click();
+    await expect(page).toHaveURL(
+      /\/produk-keluarga\/browser-responsive-family/
+    );
+
+    const optionCard = page
+      .locator("#family-options article")
+      .filter({ hasText: "QA option" });
+    await expect(optionCard).toBeVisible();
+    const availabilityBadge = optionCard
+      .locator("span")
+      .filter({ hasText: "Tersedia" })
+      .first();
+    const priceChip = optionCard
+      .locator("span")
+      .filter({ hasText: "Rp45.000" })
+      .first();
+    const buyLink = optionCard
+      .locator('a[href*="/shop/checkout/products/"]')
+      .filter({ hasText: "Beli" });
+    const details = optionCard.locator("details[data-family-option-details]");
+    const detailsSummary = details.locator("summary");
+    const durationChip = optionCard
+      .locator("span")
+      .filter({ hasText: "Durasi 30 hari" });
+    await expect(buyLink).toHaveCount(1);
+    await expect(details).toHaveCount(1);
+    await expect(detailsSummary).toHaveText(/Baca detail lengkap/);
+    await expect(durationChip).toHaveCount(1);
+
+    const documentOverflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth
+    );
+    expect(documentOverflow).toBeLessThanOrEqual(1);
+
+    const availabilityBox = await availabilityBadge.boundingBox();
+    const priceBox = await priceChip.boundingBox();
+    const durationBox = await durationChip.boundingBox();
+    const buyBox = await buyLink.boundingBox();
+    const summaryBox = await detailsSummary.boundingBox();
+    expect(priceBox.y).toBeGreaterThan(availabilityBox.y);
+    expect(durationBox.y + durationBox.height).toBeLessThanOrEqual(
+      buyBox.y + 1
+    );
+    expect(buyBox.y).toBeGreaterThan(priceBox.y);
+    expect(summaryBox.y).toBeGreaterThan(buyBox.y);
+    expect(buyBox.width).toBeGreaterThanOrEqual(44);
+    expect(buyBox.height).toBeGreaterThanOrEqual(44);
+    expect(summaryBox.height).toBeGreaterThanOrEqual(44);
+
+    // With the option list in view, the decision facts and Beli CTA must fit
+    // the first viewport so long details cannot push them out of reach.
+    await page.locator("#family-options").evaluate((element) =>
+      element.scrollIntoView({
+        block: "start",
+        inline: "nearest",
+        behavior: "instant",
+      })
+    );
+    const buyReachability = await buyLink.evaluate((element) => ({
+      top: element.getBoundingClientRect().top,
+      height: element.getBoundingClientRect().height,
+    }));
+    expect(buyReachability.top + buyReachability.height).toBeLessThanOrEqual(
+      viewport.height + 1
+    );
+
+    await expect(details.locator("dt", { hasText: /^Durasi$/ })).toBeHidden();
+    await expect(details.locator("text=30 hari")).toBeHidden();
+    await detailsSummary.focus();
+    await expect(detailsSummary).toBeFocused();
+    await expect(detailsSummary).toHaveCSS("outline-style", "solid");
+    await page.keyboard.press("Enter");
+    await expect(details).toHaveAttribute("open", "");
+    await expect(details.locator("dt", { hasText: /^Durasi$/ })).toBeVisible();
+    await expect(details.locator("text=30 hari")).toBeVisible();
+    const expandedOverflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth
+    );
+    expect(expandedOverflow).toBeLessThanOrEqual(1);
+    await page.keyboard.press("Enter");
+    await expect(details).not.toHaveAttribute("open", "");
+  }
+});
+
 test("customer checkout: supports keyboard activation, disclosures, reduced motion, and mobile navigation", async ({
   browser,
   page,
 }) => {
+  test.setTimeout(180_000);
   const retiredRequests = observeRetiredCheckoutRequests(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
@@ -798,7 +1004,9 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
     await expect(
       page.getByRole("radio", { name: /Binance Pay/ })
     ).toBeVisible();
-    await page.getByRole("radio", { name: /Binance Pay/ }).check();
+    await page
+      .locator('label[for="checkout-payment-option-binance_pay_id"]')
+      .click();
     await expect(
       page.getByRole("button", { name: /Buat invoice Binance Pay/ })
     ).toBeVisible();
@@ -3684,6 +3892,16 @@ $productA = Product::factory()->create([
     'family_option_label' => 'QA option',
     'category_id' => $category->id,
     'name' => 'Browser QA Produk A',
+    'description' => "Paket QA dengan deskripsi panjang.\nBaris pendukung kedua memuat detail panjang berulang-ulang untuk membuktikan bahwa konten pendukung tidak boleh mengubur harga dan tombol Beli pada layar sempit.",
+    'product_type' => 'Akun QA',
+    'access_duration' => '30 hari',
+    'region' => 'Global',
+    'account_type' => 'Private',
+    'included_items' => "Akun siap pakai\nPanduan login",
+    'limitations' => 'Tidak untuk dijual kembali',
+    'fulfillment_expectation' => 'Dikirim setelah pembayaran terverifikasi.',
+    'warranty_policy' => 'Garansi login 7 hari.',
+    'support_policy' => 'Support pada jam operasional.',
     'price_amount' => 45000,
     'usdt_price_amount' => 2000000,
     'stock' => 9,

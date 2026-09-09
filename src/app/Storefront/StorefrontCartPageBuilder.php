@@ -170,7 +170,7 @@ final class StorefrontCartPageBuilder
             canSubmit: $canSubmit,
             unavailableNotice: $unavailableNotice,
             returnUrl: $returnUrl,
-            returnLabel: $directProduct === null ? 'Kembali ke keranjang' : 'Kembali ke produk',
+            returnLabel: $this->urls->checkoutReturnLabel($returnUrl),
             metadata: $metadata,
             storefront: $this->storefront,
             brand: $this->storefront->brand(),
