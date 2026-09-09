@@ -85,7 +85,7 @@
                                         Untuk akses token, semua isi setelah <code>email|password|</code> dipertahankan sebagai satu nilai, termasuk bagian yang memakai tanda <code>|</code>.
                                     </p>
                                     <p x-show="stockInputFormat === 'email_password_reader_mail_link'" class="mt-1 text-[10px] font-bold leading-4 text-neo-ink/70">
-                                        Format ini menerima bentuk ringkas <code>email|password|token|link</code> atau bentuk ekspor <code>email|password|email|password|token|UUID|link</code>.
+                                        Format ini menerima bentuk ringkas <code>email|password|token|link</code>, ekspor tujuh field <code>email|password|email|password|token|UUID|link</code>, atau varian ekspor yang menambahkan email mailbox setelah UUID.
                                     </p>
                                     <p x-show="stockInputFormat === 'email_password_access_token' && !structuredStockInputEnabled || stockInputFormat === 'email_password_reader_mail_link' && !structuredStockInputEnabled" class="mt-1.5 text-[10px] font-black text-[#b91c1c]">
                                         Format akses token menunggu pemeriksaan kesiapan identitas.

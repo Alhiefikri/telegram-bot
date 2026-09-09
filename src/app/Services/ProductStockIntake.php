@@ -672,15 +672,24 @@ final class ProductStockIntake
     }
 
     /**
-     * Accept both the compact four-field format and the common exported
-     * seven-field format:
-     * email|password|email|password|token|uuid|reader-link.
+     * Accept the compact four-field format and reader-mail exports used by
+     * common account sources:
+     *
+     * - email|password|token|reader-link
+     * - email|password|email|password|token|uuid|reader-link
+     * - email|password|token|uuid|reader-mailbox|reader-link
+     * - email|password|email|password|token|uuid|reader-mailbox|reader-link
+     *
+     * The UUID and reader-mailbox fields in the six- and eight-field exports
+     * are source metadata. They are validated so malformed exports cannot be
+     * silently accepted, but they are not customer-delivered credential fields.
      *
      * @return array{email:string,password:string,access_token:string,reader_mail_link:string}|null
      */
     private function bulkReaderMailLinkParts(string $secret): ?array
     {
         $parts = explode('|', $secret);
+
         if (count($parts) === 4) {
             [$email, $password, $accessToken, $readerMailLink] = $parts;
         } elseif (count($parts) === 7
@@ -692,6 +701,26 @@ final class ProductStockIntake
                 $parts[1],
                 $parts[4],
                 $parts[6],
+            ];
+        } elseif (count($parts) === 6
+            && Str::isUuid(trim((string) $parts[3]))
+            && filter_var(trim((string) $parts[4]), FILTER_VALIDATE_EMAIL) !== false) {
+            [$email, $password, $accessToken, $readerMailLink] = [
+                $parts[0],
+                $parts[1],
+                $parts[2],
+                $parts[5],
+            ];
+        } elseif (count($parts) === 8
+            && trim((string) $parts[0]) === trim((string) $parts[2])
+            && (string) $parts[1] === (string) $parts[3]
+            && Str::isUuid(trim((string) $parts[5]))
+            && filter_var(trim((string) $parts[6]), FILTER_VALIDATE_EMAIL) !== false) {
+            [$email, $password, $accessToken, $readerMailLink] = [
+                $parts[0],
+                $parts[1],
+                $parts[4],
+                $parts[7],
             ];
         } else {
             return null;

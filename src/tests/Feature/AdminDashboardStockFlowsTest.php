@@ -603,6 +603,42 @@ class AdminDashboardStockFlowsTest extends TestCase
         );
     }
 
+    public function test_admin_can_add_bulk_reader_mail_link_export_rows_with_reader_mailbox_metadata(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        $response = $this->actingAs($admin)
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_format' => ProductStockIntakeSubmission::BULK_FORMAT_READER_MAIL_LINK,
+                'stock_items' => implode("\n", [
+                    'reader-export@example.test|Reader-password|READER-TOKEN!$*|9e5f94bc-e8a4-4e73-b8be-63364c29d753|reader-mailbox@example.test|https://mail.example.test/read_code?uuid=reader-code',
+                    'reader-export-eight@example.test|Reader-password-eight|reader-export-eight@example.test|Reader-password-eight|READER-TOKEN-EIGHT|9e5f94bc-e8a4-4e73-b8be-63364c29d753|reader-mailbox-eight@example.test|https://mail.example.test/read_code?uuid=reader-code-eight',
+                ]),
+            ]);
+
+        $this->assertSame(302, $response->getStatusCode());
+        $this->assertSame(2, ProductStockItem::query()->count(), 'Each supported reader-mail export row must create one stock item.');
+
+        $items = ProductStockItem::query()->orderBy('id')->get();
+        $this->assertSame(2, $product->fresh()->stock);
+        $this->assertSame(
+            ['reader-export@example.test', 'reader-export-eight@example.test'],
+            $items->map(static fn (ProductStockItem $item): string => $item->credential_payload['email'])->all(),
+        );
+        $this->assertSame(
+            ['READER-TOKEN!$*', 'READER-TOKEN-EIGHT'],
+            $items->map(static fn (ProductStockItem $item): string => $item->credential_payload['access_value'])->all(),
+        );
+        $this->assertSame(
+            [
+                'https://mail.example.test/read_code?uuid=reader-code',
+                'https://mail.example.test/read_code?uuid=reader-code-eight',
+            ],
+            $items->map(static fn (ProductStockItem $item): string => $item->credential_payload['reader_mail_link'])->all(),
+        );
+    }
+
     public function test_add_stock_response_does_not_wait_for_slow_telegram_delivery(): void
     {
         Queue::fake([SendProductStockNotifications::class]);
