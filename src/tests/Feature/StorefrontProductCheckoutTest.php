@@ -29,7 +29,7 @@ class StorefrontProductCheckoutTest extends TestCase
         ]);
     }
 
-    public function test_catalog_product_cards_use_lazy_modal_without_checkout_payload(): void
+    public function test_catalog_product_cards_use_page_checkout_without_embedded_checkout_payload(): void
     {
         $product = Product::factory()->create([
             'name' => 'CapCut Pro',
@@ -40,24 +40,25 @@ class StorefrontProductCheckoutTest extends TestCase
         ]);
         Product::factory()->create(['name' => 'ChatGPT Habis', 'stock' => 1, 'reserved_stock' => 1]);
 
-        $this->get('/')
-            ->assertOk()
-            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
-            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
-            ->assertDontSee('data-product=', false)
-            ->assertSee('CapCut Pro')
-            ->assertSee('Akun Private dari dashboard')
-            ->assertSee('Rp60.000')
-            ->assertDontSee('Rp85.000')
-            ->assertDontSee('line-through', false)
-            ->assertSee('Stok: 8')
-            ->assertSee('data-storefront-qris-mark', false)
-            ->assertDontSee('Bayar via QR Manual')
-            ->assertDontSee('Beli lewat Telegram')
-            ->assertDontSee('&amp;quot;', false)
-            ->assertDontSee('POPULER')
-            ->assertDontSee('Best')
-            ->assertSee('Habis');
+        $html = $this->get('/')->assertOk()->getContent();
+
+        $this->assertStringContainsString('href="'.route('storefront.products.show', $product).'?from=', $html);
+        $this->assertStringContainsString('href="'.route('storefront.shop.checkout.product', $product).'?from=', $html);
+        $this->assertStringNotContainsString('data-product=', $html);
+        $this->assertStringContainsString('CapCut Pro', $html);
+        $this->assertStringContainsString('Akun Private dari dashboard', $html);
+        $this->assertStringContainsString('Rp60.000', $html);
+        $this->assertStringNotContainsString('Rp85.000', $html);
+        $this->assertStringNotContainsString('line-through', $html);
+        $this->assertStringContainsString('Stok: 8', $html);
+        $this->assertStringContainsString('Beli sekarang', $html);
+        $this->assertStringContainsString('+ Keranjang', $html);
+        $this->assertStringNotContainsString('Bayar via QR Manual', $html);
+        $this->assertStringNotContainsString('Beli lewat Telegram', $html);
+        $this->assertStringNotContainsString('&amp;quot;', $html);
+        $this->assertStringNotContainsString('POPULER', $html);
+        $this->assertStringNotContainsString('Best', $html);
+        $this->assertStringContainsString('Habis', $html);
     }
 
     public function test_single_catalog_product_is_centered_in_grid(): void
@@ -75,7 +76,7 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertDontSee('sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
     }
 
-    public function test_product_detail_exposes_web_checkout_and_order_access_without_checkout_side_effects(): void
+    public function test_product_detail_exposes_page_checkout_cart_and_order_access_without_checkout_side_effects(): void
     {
         $product = Product::factory()->create([
             'name' => 'CapCut Pro',
@@ -90,64 +91,30 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('CapCut Pro')
             ->assertSee('Rp60.000')
             ->assertSee('Stok: 8')
-            ->assertSee(route('storefront.products.show', ['product' => $product, 'checkout' => 1]), false)
-            ->assertSee('data-checkout-restore=', false)
-            ->assertSee('data-product=', false)
-            ->assertSee('x-on:click.prevent="openProductModal', false)
+            ->assertSee(route('storefront.shop.checkout.product', $product), false)
+            ->assertSee('Beli sekarang')
             ->assertSee('name="product_id" value="'.$product->id.'"', false)
-            ->assertSee('Bayar via QR Manual')
+            ->assertSee('Tambah ke keranjang')
             ->assertSee(route('storefront.order-access.create'), false)
             ->assertSee('Akses Pesanan')
-            ->assertSee('name="terms_accepted"', false)
-            ->assertSee('id="storefront-nojs-terms-accepted"', false)
-            ->assertSee('Subtotal produk (IDR)')
-            ->assertSee('Syarat Penggunaan')
-            ->assertSee('Kebijakan Refund')
+            ->assertDontSee('data-checkout-product=', false)
+            ->assertDontSee('data-product=', false)
             ->assertDontSee('Checkout via Telegram Admin');
 
         $this->assertNoCheckoutSideEffects();
     }
 
-    public function test_crypto_product_detail_exposes_usdt_context_and_payment_disclaimers(): void
+    public function test_retired_product_modal_route_returns_not_found(): void
     {
-        config()->set('services.binance.pay_id', '987654321');
-        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
         $product = Product::factory()->create([
-            'name' => 'Binance Checkout Product',
-            'price_amount' => 45000,
-            'usdt_price_amount' => 2_500_000,
-            'stock' => 3,
-            'reserved_stock' => 0,
-        ]);
-
-        $this->get(route('storefront.products.show', $product))
-            ->assertOk()
-            ->assertSee('usdtAmount', false)
-            ->assertSee('2500000', false)
-            ->assertSee('USDT dasar / estimasi')
-            ->assertSee('Nominal USDT final, termasuk penyesuaian unik bila berlaku, ditetapkan pada invoice setelah checkout.')
-            ->assertSee('Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS.');
-    }
-
-    public function test_product_detail_shows_safe_unavailable_state_without_payment_setting(): void
-    {
-        ManualPaymentSetting::query()->delete();
-        $product = Product::factory()->create([
-            'name' => 'No Provider Product',
             'stock' => 2,
             'reserved_stock' => 0,
         ]);
 
-        $this->get(route('storefront.products.show', $product))
-            ->assertOk()
-            ->assertSee('Checkout belum tersedia')
-            ->assertSee('Checkout pembayaran belum aktif. Hubungi admin atau coba lagi nanti.')
-            ->assertDontSee('Beli via Web QRIS')
-            ->assertDontSee('data-checkout-product=', false)
-            ->assertDontSee('x-on:click.prevent="openProductModal', false);
+        $this->get('/produk/'.$product->id.'/modal')->assertNotFound();
     }
 
-    public function test_landing_defers_checkout_readiness_without_payment_setting(): void
+    public function test_landing_keeps_page_checkout_link_without_payment_setting(): void
     {
         ManualPaymentSetting::query()->delete();
         $product = Product::factory()->create([
@@ -159,10 +126,9 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->get(route('storefront.home'))
             ->assertOk()
             ->assertSee('No Provider Landing Product')
-            ->assertSee('Pilih Checkout')
-            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
+            ->assertSee('Beli sekarang')
+            ->assertSee(route('storefront.shop.checkout.product', $product), false)
             ->assertDontSee('data-product=', false)
-            ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
             ->assertDontSee('Bayar via QR Manual')
             ->assertDontSee('Bayar via KlikQRIS');
     }
@@ -184,7 +150,7 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('QRIS otomatis KlikQRIS sedang belum siap. Coba lagi nanti atau hubungi admin.')
             ->assertDontSee('Bayar QRIS di Website')
             ->assertDontSee('data-checkout-product=', false)
-            ->assertDontSee('x-on:click.prevent="openProductModal', false);
+            ->assertDontSee('data-product=', false);
     }
 
     public function test_product_detail_back_navigation_preserves_catalog_search_context(): void
@@ -198,7 +164,8 @@ class StorefrontProductCheckoutTest extends TestCase
 
         $this->get(route('storefront.home', ['q' => 'search']))
             ->assertOk()
-            ->assertSee('href="'.route('storefront.products.show', ['product' => $product]).'?from='.urlencode($returnUrl).'"', false);
+            ->assertSee(route('storefront.products.show', ['product' => $product]), false)
+            ->assertSee('from=', false);
 
         $this->get(route('storefront.products.show', ['product' => $product, 'from' => $returnUrl]))
             ->assertOk()
@@ -244,8 +211,9 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertOk()
             ->assertSee('Stok habis')
             ->assertSee('Restock segera')
-            ->assertDontSee(route('storefront.products.show', ['product' => $product, 'checkout' => 1]), false)
+            ->assertDontSee(route('storefront.shop.checkout.product', ['product' => $product]), false)
             ->assertDontSee('data-checkout-product=', false)
+            ->assertDontSee('data-product=', false)
             ->assertDontSee('Checkout via Telegram Admin');
     }
 
@@ -327,7 +295,7 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertHeader('Referrer-Policy', 'no-referrer')
             ->assertSee('<meta name="robots" content="noindex, nofollow, noarchive">', false)
             ->assertSee('Canonical Direct Review')
-            ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
+            ->assertSee('action="'.route('storefront.shop.checkout').'?from=', false)
             ->assertSee('name="product_id" value="'.$product->id.'"', false)
             ->assertSee('name="quantity"', false)
             ->assertSee('max="4"', false)

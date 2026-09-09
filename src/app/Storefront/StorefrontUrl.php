@@ -29,49 +29,64 @@ class StorefrontUrl
         return $withFragment ? $url.'#products' : $url;
     }
 
-    public function productUrl(Product $product, ?string $returnUrl = null, bool $checkout = false): string
+    public function productUrl(Product $product, ?string $returnUrl = null): string
     {
-        $parameters = ['product' => $product];
-
-        if ($checkout) {
-            $parameters['checkout'] = 1;
-        }
-
-        if ($returnUrl !== null && $returnUrl !== '') {
-            $parameters['from'] = $returnUrl;
-        }
-
-        return route('storefront.products.show', $parameters);
+        return $this->productUrlForId((int) $product->getKey(), $returnUrl);
     }
 
-    public function productUrlForId(int $productId, ?string $returnUrl = null, bool $checkout = false): string
+    public function productUrlForId(int $productId, ?string $returnUrl = null): string
     {
-        $parameters = ['product' => $productId];
-
-        if ($checkout) {
-            $parameters['checkout'] = 1;
-        }
-
-        if ($returnUrl !== null && $returnUrl !== '') {
-            $parameters['from'] = $returnUrl;
-        }
-
-        return route('storefront.products.show', $parameters);
+        return route('storefront.products.show', ['product' => $productId] + $this->localReturnParameters($returnUrl));
     }
 
-    public function checkoutProductUrl(Product $product): string
+    public function checkoutProductUrl(Product $product, ?string $returnUrl = null): string
     {
-        return route('storefront.shop.checkout.product', ['product' => $product]);
+        return $this->checkoutProductUrlForId((int) $product->getKey(), $returnUrl);
     }
 
-    public function productModalUrlForId(int $productId): string
+    public function checkoutProductUrlForId(int $productId, ?string $returnUrl = null): string
     {
-        return route('storefront.products.modal', ['product' => $productId]);
+        return route('storefront.shop.checkout.product', ['product' => $productId] + $this->localReturnParameters($returnUrl));
+    }
+
+    public function checkoutSubmitUrl(?string $returnUrl = null): string
+    {
+        return route('storefront.shop.checkout', $this->localReturnParameters($returnUrl));
+    }
+
+    public function checkoutReturnUrl(Request $request, Product $product): string
+    {
+        $from = $request->query('from');
+
+        return is_string($from) && $this->isLocalUrl($from)
+            ? $from
+            : $this->productUrl($product);
+    }
+
+    public function checkoutPageSource(?string $returnUrl): string
+    {
+        $path = is_string($returnUrl) && $this->isLocalUrl($returnUrl)
+            ? parse_url($returnUrl, PHP_URL_PATH)
+            : null;
+
+        return is_string($path) && str_starts_with($path, '/produk-keluarga/')
+            ? 'family_direct_checkout_page'
+            : 'direct_checkout_page';
     }
 
     public function waitlistUrlForId(int $productId): string
     {
         return route('storefront.waitlist.store', ['product' => $productId]);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function localReturnParameters(?string $returnUrl): array
+    {
+        return is_string($returnUrl) && $this->isLocalUrl($returnUrl)
+            ? ['from' => $returnUrl]
+            : [];
     }
 
     public function familyUrl(string $slug, ?string $returnUrl = null): string
@@ -94,13 +109,17 @@ class StorefrontUrl
         return $this->familyUrl($slug);
     }
 
-    public function checkoutRecoveryUrl(mixed $productId): string
+    public function checkoutRecoveryUrl(mixed $productId, ?string $returnUrl = null): string
     {
-        if (is_scalar($productId)) {
-            $product = Product::query()->whereKey((int) $productId)->first();
+        $normalizedProductId = is_int($productId)
+            ? $productId
+            : (is_string($productId) && ctype_digit($productId) ? (int) $productId : null);
+
+        if ($normalizedProductId !== null && $normalizedProductId > 0) {
+            $product = Product::query()->whereKey($normalizedProductId)->first();
 
             if ($product?->isPublicVisible()) {
-                return $this->checkoutProductUrl($product);
+                return $this->checkoutProductUrl($product, $returnUrl);
             }
         }
 
@@ -136,6 +155,10 @@ class StorefrontUrl
 
     private function isLocalUrl(string $url): bool
     {
+        if ($url === '' || strlen($url) > 2048) {
+            return false;
+        }
+
         if (str_starts_with($url, '/')) {
             return ! str_starts_with($url, '//');
         }

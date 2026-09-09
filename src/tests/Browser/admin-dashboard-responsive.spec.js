@@ -61,624 +61,28 @@ test.afterAll(async () => {
   }
 });
 
-test("keeps customer checkout modal keyboard accessible and restores failed state", async ({
+test("opens canonical page checkout from the landing catalog", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 
-  const productCard = page
-    .locator("a[data-modal-url]")
-    .filter({ hasText: "Browser QA Produk A" })
+  const checkoutLink = page
+    .locator('a[href*="/shop/checkout/products/"]')
+    .filter({ hasText: "Beli sekarang" })
     .first();
-  await productCard.scrollIntoViewIfNeeded();
-  await productCard.focus();
-  await page.keyboard.press("Enter");
+  await expect(checkoutLink).toBeVisible();
+  await checkoutLink.click();
 
-  let dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
-  await expect(dialog).toBeVisible();
+  await expect(page).toHaveURL(/\/shop\/checkout\/products\/\d+/);
   await expect(
-    dialog.locator('input[type="radio"][name="payment_choice"]').first()
-  ).toBeAttached();
-  await expect(
-    dialog.locator("fieldset").getByText("Bayar via QR Manual", { exact: true })
+    page.getByRole("heading", { name: "Review produk sebelum bayar." })
   ).toBeVisible();
-  await expectTouchTargetAtLeast44px(dialog.getByLabel("Tutup detail produk"));
-  await expectTouchTargetAtLeast44px(dialog.getByLabel("Tambah jumlah"));
-
-  await page.evaluate(() => document.activeElement?.blur());
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(productCard).toBeFocused();
-
-  await page.keyboard.press("Enter");
-  dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.locator("#storefront-buyer-name")).toBeFocused();
-  await dialog.getByLabel("Tambah jumlah").click();
-  await expect(dialog.locator('[aria-live="polite"]')).toHaveText(
-    "Jumlah 2. Total produk Rp90.000."
-  );
-  await dialog.locator("#storefront-buyer-name").fill("Browser Buyer");
-  await expect(dialog.locator("#storefront-buyer-name")).toHaveValue(
-    "Browser Buyer"
-  );
-  await page.waitForTimeout(100);
-  await dialog
-    .locator("#storefront-terms-accepted")
-    .evaluate((input) => input.removeAttribute("required"));
-  await dialog.getByRole("button", { name: /Bayar/i }).click();
-  await page.waitForLoadState("domcontentloaded");
-  dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.locator("#storefront-buyer-name")).toHaveValue(
-    "Browser Buyer"
-  );
-  await expect(dialog.locator("#storefront-buyer-name")).toBeFocused();
-  await expect(dialog.locator("#storefront-checkout-error")).toBeVisible();
-  await expect(
-    dialog.locator("[data-storefront-optional-support]")
-  ).not.toHaveAttribute("open");
-  await expectNoDocumentOverflow(page);
+  await expect(page.locator("#checkout-form")).toBeVisible();
+  await expect(page.locator('input[name="product_id"]')).toBeAttached();
 });
 
-test("keeps customer checkout lazy modal loading cancellable and accessible", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-
-  const productCard = page
-    .locator("a[data-modal-url]")
-    .filter({ hasText: "Browser QA Produk A" })
-    .first();
-  const productId = Number(
-    (await productCard.getAttribute("id")).replace("product-", "")
-  );
-  const productUrl = await productCard.getAttribute("href");
-  const modalUrlPattern = `**/produk/${productId}/modal`;
-  let releaseRequest;
-  let holdNextRequest = true;
-  const requestHeld = new Promise((resolve) => {
-    releaseRequest = resolve;
-  });
-
-  await page.route(modalUrlPattern, async (route) => {
-    if (holdNextRequest) {
-      holdNextRequest = false;
-      await requestHeld;
-    }
-
-    try {
-      await route.continue();
-    } catch {
-      // The browser may abort the held request when the modal closes.
-    }
-  });
-
-  try {
-    await page.evaluate(
-      ({ productId, productUrl }) => {
-        const root = document.querySelector('[x-data="storefrontModal()"]');
-        const modal = root?._x_dataStack?.[0];
-        const opener = document.getElementById(`product-${productId}`);
-
-        if (!modal || !opener) {
-          throw new Error("Storefront modal component is unavailable");
-        }
-
-        window.__lazyModalPromise = modal.openProductModalFromUrl(
-          `/produk/${productId}/modal`,
-          {
-            opener,
-            fallbackUrl: productUrl,
-            quantity: 2,
-            buyerName: "Lazy Buyer",
-            termsAccepted: true,
-            email: "lazy@example.test",
-          }
-        );
-      },
-      { productId, productUrl }
-    );
-
-    const loadingDialog = page.getByRole("dialog", {
-      name: "Memuat detail produk",
-    });
-    await expect(loadingDialog).toBeVisible();
-    await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
-
-    await loadingDialog.getByLabel("Tutup detail produk").click();
-    await expect(loadingDialog).toBeHidden();
-    await expect(productCard).toBeFocused();
-
-    releaseRequest();
-    await page.evaluate(() => window.__lazyModalPromise);
-    await expect(
-      page.getByRole("dialog", { name: "Browser QA Produk A" })
-    ).toHaveCount(0);
-
-    await page.evaluate(
-      ({ productId, productUrl }) => {
-        const root = document.querySelector('[x-data="storefrontModal()"]');
-        const modal = root?._x_dataStack?.[0];
-        const opener = document.getElementById(`product-${productId}`);
-
-        window.__lazyModalPromise = modal.openProductModalFromUrl(
-          `/produk/${productId}/modal`,
-          {
-            opener,
-            fallbackUrl: productUrl,
-            quantity: 2,
-            buyerName: "Lazy Buyer",
-            termsAccepted: true,
-            email: "lazy@example.test",
-          }
-        );
-      },
-      { productId, productUrl }
-    );
-
-    const dialog = page.getByRole("dialog", {
-      name: "Browser QA Produk A",
-    });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.locator("#storefront-buyer-name")).toHaveValue(
-      "Lazy Buyer"
-    );
-    await expect(dialog.locator("#storefront-email")).toHaveValue(
-      "lazy@example.test"
-    );
-    await expect(dialog.locator("#storefront-terms-accepted")).toBeChecked();
-    await expect(dialog.locator("span.min-w-8")).toHaveText("2");
-
-    await page.keyboard.press("Escape");
-    await expect(dialog).toBeHidden();
-    await expect(productCard).toBeFocused();
-  } finally {
-    releaseRequest();
-    await page.unroute(modalUrlPattern);
-  }
-});
-
-test("keeps customer checkout lazy modal failures on the product page", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-
-  const productCard = page
-    .locator("a[data-modal-url]")
-    .filter({ hasText: "Browser QA Produk A" })
-    .first();
-  const productId = Number(
-    (await productCard.getAttribute("id")).replace("product-", "")
-  );
-  const productUrl = await productCard.getAttribute("href");
-  const modalUrlPattern = `**/produk/${productId}/modal`;
-  const productPage = page.waitForURL(
-    (url) => url.pathname === `/produk/${productId}`
-  );
-
-  await page.route(modalUrlPattern, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        status: "fallback",
-        product: null,
-        reason: "checkout_unavailable",
-        fallback_url: productUrl,
-      }),
-    })
-  );
-
-  try {
-    await page.evaluate(
-      ({ productId, productUrl }) => {
-        const root = document.querySelector('[x-data="storefrontModal()"]');
-        const modal = root?._x_dataStack?.[0];
-        const opener = document.getElementById(`product-${productId}`);
-
-        window.__lazyModalPromise = modal.openProductModalFromUrl(
-          `/produk/${productId}/modal`,
-          { opener, fallbackUrl: productUrl }
-        );
-      },
-      { productId, productUrl }
-    );
-    await productPage;
-    await expect(
-      page.getByRole("heading", { name: "Browser QA Produk A" })
-    ).toBeVisible();
-  } finally {
-    await page.unroute(modalUrlPattern);
-  }
-
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-  const networkFailureNavigation = page.waitForURL(
-    (url) => url.pathname === `/produk/${productId}`
-  );
-  await page.route(modalUrlPattern, (route) => route.abort());
-
-  try {
-    await page.evaluate(
-      ({ productId, productUrl }) => {
-        const root = document.querySelector('[x-data="storefrontModal()"]');
-        const modal = root?._x_dataStack?.[0];
-        const opener = document.getElementById(`product-${productId}`);
-
-        window.__lazyModalPromise = modal.openProductModalFromUrl(
-          `/produk/${productId}/modal`,
-          { opener, fallbackUrl: productUrl }
-        );
-      },
-      { productId, productUrl }
-    );
-    await networkFailureNavigation;
-    await expect(
-      page.getByRole("heading", { name: "Browser QA Produk A" })
-    ).toBeVisible();
-  } finally {
-    await page.unroute(modalUrlPattern);
-  }
-});
-
-test("restores customer checkout errors on the shop catalog through lazy modal", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
-
-  const productCard = page
-    .locator("a[data-modal-url]")
-    .filter({ hasText: "Browser QA Produk A" })
-    .first();
-  await expect(productCard).toBeVisible();
-
-  const productId = Number(
-    (await productCard.getAttribute("id")).replace("product-", "")
-  );
-  expect(await productCard.getAttribute("data-product")).toBeNull();
-  const modalResponse = page.waitForResponse(
-    (response) =>
-      response.url() === `${baseUrl}/produk/${productId}/modal` &&
-      response.request().method() === "GET"
-  );
-
-  await page.evaluate((productId) => {
-    const root = document.querySelector('[x-data="storefrontModal()"]');
-    const modal = root?._x_dataStack?.[0];
-
-    if (!modal) {
-      throw new Error("Storefront modal component is unavailable");
-    }
-
-    modal.restoreCheckout = {
-      productId,
-      quantity: 2,
-      buyerName: "Restored Buyer",
-      termsAccepted: true,
-      supportContactChannel: "",
-      supportContactValue: "",
-      email: "restored@example.test",
-      paymentMethod: "qris",
-    };
-    modal.reopenFailedCheckout();
-  }, productId);
-
-  await modalResponse;
-  const dialog = page.getByRole("dialog", {
-    name: "Browser QA Produk A",
-  });
-
-  await expect(dialog).toBeVisible();
-  await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
-  await expect(dialog.locator("#storefront-buyer-name")).toHaveValue(
-    "Restored Buyer"
-  );
-  await expect(dialog.locator("#storefront-email")).toHaveValue(
-    "restored@example.test"
-  );
-  await expect(dialog.locator("#storefront-terms-accepted")).toBeChecked();
-  await expect(dialog.locator("span.min-w-8")).toHaveText("2");
-
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(productCard).toBeFocused();
-  await expectNoDocumentOverflow(page);
-});
-
-test("keeps customer checkout QRIS-first across browser locales", async ({
-  browser,
-}) => {
-  runArtisan([
-    "tinker",
-    "--execute",
-    "App\\Models\\ManualPaymentSetting::query()->updateOrCreate(['id' => 1], ['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'binance_verification_mode' => 'order_id', 'binance_order_id_compatibility_ready_at' => now(), 'is_active' => true]);",
-  ]);
-
-  for (const locale of ["id-ID", "en-US"]) {
-    const context = await browser.newContext({
-      locale,
-      extraHTTPHeaders: { "Accept-Language": locale },
-      viewport: { width: 390, height: 900 },
-    });
-    const page = await context.newPage();
-
-    try {
-      await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-
-      const productCard = page
-        .locator("a[data-modal-url]")
-        .filter({ hasText: "Browser QA Produk A" })
-        .first();
-      await productCard.click();
-
-      const dialog = page.getByRole("dialog", {
-        name: "Browser QA Produk A",
-      });
-      const paymentMethods = dialog.locator(
-        'input[type="radio"][name="payment_choice"]'
-      );
-      const qris = dialog.locator(
-        'input[type="radio"][name="payment_choice"][value="qris"]'
-      );
-      const binance = dialog.locator(
-        'input[type="radio"][name="payment_choice"][value="binance_pay"]'
-      );
-      const scrollRegion = dialog.locator("[data-storefront-checkout-scroll]");
-      const optionalSupport = dialog.locator(
-        "[data-storefront-optional-support]"
-      );
-      const prepurchaseSupport = dialog.locator(
-        "[data-storefront-prepurchase-support]"
-      );
-      const submitButton = dialog.locator("[data-storefront-checkout-submit]");
-
-      await expect(paymentMethods).toHaveCount(2);
-      expect(
-        await paymentMethods.evaluateAll((inputs) =>
-          inputs.map((input) => input.value)
-        )
-      ).toEqual(["qris", "binance_pay"]);
-      await expect(qris).toBeChecked();
-      await expect(binance).not.toBeChecked();
-      await expect(scrollRegion).toHaveCSS("overflow-y", "auto");
-      await expect(scrollRegion).toHaveCSS("overscroll-behavior-y", "contain");
-      await expect(optionalSupport).not.toHaveAttribute("open");
-      await expect(prepurchaseSupport).not.toHaveAttribute("open");
-      await expectElementWithinViewport(page, submitButton);
-      await expect(
-        dialog.getByRole("button", { name: "Bayar via QR Manual" })
-      ).toBeVisible();
-      await expect(
-        dialog.getByText("Bayar dengan USDT", { exact: true })
-      ).toBeVisible();
-      await expect(
-        dialog.getByText(
-          "Total produk di atas belum termasuk biaya QRIS. Biaya dan total QRIS final ditentukan provider setelah QRIS dibuat. Bayar hanya nominal total pada invoice QRIS."
-        )
-      ).toBeVisible();
-
-      await dialog
-        .locator('label[for="storefront-payment-method-binance_pay"]')
-        .click();
-      await expect(binance).toBeChecked();
-      await expect(qris).not.toBeChecked();
-      await expect(
-        dialog.getByRole("button", { name: /Binance Pay/ })
-      ).toBeVisible();
-      await expect(
-        dialog.getByText("Pilih metode pembayaran USDT sebelum melanjutkan.")
-      ).toBeVisible();
-      await expect(
-        dialog
-          .locator('[aria-label="USDT payment rail selector"]')
-          .getByText("Bayar dengan Binance Pay", { exact: true })
-      ).toBeVisible();
-
-      await dialog
-        .locator('label[for="storefront-payment-method-qris"]')
-        .click();
-      await expect(qris).toBeChecked();
-      await expect(
-        dialog.getByRole("button", { name: "Bayar via QR Manual" })
-      ).toBeVisible();
-    } finally {
-      await context.close();
-    }
-  }
-});
-
-test("keeps the customer QRIS submit button stable while hovering", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-
-  await page
-    .locator("a[data-modal-url]")
-    .filter({ hasText: "Browser QA Produk A" })
-    .first()
-    .click();
-
-  const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
-  const submitButton = dialog.locator("[data-storefront-checkout-submit]");
-
-  await expect(submitButton).toBeVisible();
-  await submitButton.hover();
-
-  await expect
-    .poll(() =>
-      submitButton.evaluate(
-        (button) => window.getComputedStyle(button).animationName
-      )
-    )
-    .toBe("none");
-  await expect
-    .poll(() =>
-      submitButton.evaluate(
-        (button) => window.getComputedStyle(button).transform
-      )
-    )
-    .toBe("none");
-
-  const firstBox = await submitButton.boundingBox();
-  await page.waitForTimeout(600);
-  const secondBox = await submitButton.boundingBox();
-
-  expect(firstBox).not.toBeNull();
-  expect(secondBox).not.toBeNull();
-  expect(
-    Math.abs((secondBox?.x ?? 0) - (firstBox?.x ?? 0))
-  ).toBeLessThanOrEqual(1);
-  expect(
-    Math.abs((secondBox?.y ?? 0) - (firstBox?.y ?? 0))
-  ).toBeLessThanOrEqual(1);
-});
-
-test("respects reduced motion in the customer checkout modal", async ({
-  page,
-}) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-
-  await page
-    .locator("a[data-modal-url]")
-    .filter({ hasText: "Browser QA Produk A" })
-    .first()
-    .click();
-
-  const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
-  const motion = await dialog.evaluate((element) => {
-    const duration = getComputedStyle(element).transitionDuration;
-    const durations = duration.split(",").map((value) => value.trim());
-
-    return {
-      prefersReducedMotion: window.matchMedia(
-        "(prefers-reduced-motion: reduce)"
-      ).matches,
-      maxDurationMs: Math.max(
-        ...durations.map((value) =>
-          value.endsWith("ms")
-            ? Number.parseFloat(value)
-            : Number.parseFloat(value) * 1000
-        )
-      ),
-    };
-  });
-
-  expect(motion.prefersReducedMotion).toBe(true);
-  expect(motion.maxDurationMs).toBeLessThanOrEqual(1);
-});
-
-test("restores QRIS for customer checkout when Binance becomes unavailable", async ({
-  page,
-}) => {
-  runArtisan([
-    "tinker",
-    "--execute",
-    "App\\Models\\ManualPaymentSetting::query()->updateOrCreate(['id' => 1], ['payment_mode' => 'manual', 'binance_pay_enabled' => true, 'binance_verification_mode' => 'order_id', 'binance_order_id_compatibility_ready_at' => now(), 'is_active' => true]);",
-  ]);
-
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-
-  const productCard = page
-    .locator("a[data-modal-url]")
-    .filter({ hasText: "Browser QA Produk A" })
-    .first();
-  await productCard.click();
-
-  const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
-  const binance = dialog.locator(
-    'input[type="radio"][name="payment_choice"][value="binance_pay"]'
-  );
-  await expect(binance).toBeVisible();
-  await dialog
-    .locator('label[for="storefront-payment-method-binance_pay"]')
-    .click();
-  await dialog.getByLabel("Nama pembeli").fill("Browser Buyer");
-
-  runArtisan([
-    "tinker",
-    "--execute",
-    "App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => false]);",
-  ]);
-
-  await dialog
-    .locator("#storefront-terms-accepted")
-    .evaluate((input) => input.removeAttribute("required"));
-  await dialog.getByRole("button", { name: /Binance Pay/ }).click();
-  await page.waitForLoadState("domcontentloaded");
-
-  const restoredDialog = page.getByRole("dialog", {
-    name: "Browser QA Produk A",
-  });
-  const qris = restoredDialog.locator(
-    'input[type="radio"][name="payment_choice"][value="qris"]'
-  );
-
-  await expect(restoredDialog).toBeVisible();
-  await expect(qris).toBeChecked();
-  await expect(qris).toBeEnabled();
-  await expect(
-    restoredDialog.getByRole("button", { name: "Bayar via QR Manual" })
-  ).toBeEnabled();
-});
-
-test("opens the selected product checkout from the landing catalog", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-
-  const productCard = page
-    .locator("a[data-modal-url]")
-    .filter({ hasText: "Browser QA Produk A" })
-    .first();
-  await productCard.scrollIntoViewIfNeeded();
-  await productCard.click();
-
-  const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
-  await expect(dialog).toBeVisible();
-  await expect(
-    dialog.locator('form:has(#storefront-buyer-name) input[name="product_id"]')
-  ).toHaveValue(/^\d+$/);
-  await expect(dialog.locator("#storefront-buyer-name")).toBeFocused();
-  await expectNoDocumentOverflow(page);
-});
-
-test("opens the selected product checkout from a direct product URL", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-
-  const productHref = await page
-    .locator("a[data-modal-url]")
-    .filter({ hasText: "Browser QA Produk A" })
-    .first()
-    .getAttribute("href");
-  const productUrl = new URL(productHref, baseUrl);
-  productUrl.searchParams.set("checkout", "1");
-
-  await page.goto(productUrl.toString(), { waitUntil: "domcontentloaded" });
-
-  const dialog = page.getByRole("dialog", { name: "Browser QA Produk A" });
-  await expect(dialog).toBeVisible();
-  await expect(
-    dialog.locator('form:has(#storefront-buyer-name) input[name="product_id"]')
-  ).toHaveValue(/^\d+$/);
-  await expect(
-    page.getByRole("link", { name: "Kembali ke katalog" })
-  ).toHaveAttribute("href", /#product-\d+$/);
-  await expectNoDocumentOverflow(page);
-});
-
-test("keeps the direct product fallback usable without the checkout modal", async ({
+test("keeps canonical checkout usable without JavaScript", async ({
   browser,
 }) => {
   const context = await browser.newContext({
@@ -689,33 +93,69 @@ test("keeps the direct product fallback usable without the checkout modal", asyn
 
   try {
     await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-    const productHref = await page
-      .locator("a[data-modal-url]")
-      .filter({ hasText: "Browser QA Produk A" })
+    const checkoutHref = await page
+      .locator('a[href*="/shop/checkout/products/"]')
+      .filter({ hasText: "Beli sekarang" })
       .first()
       .getAttribute("href");
-    const productUrl = new URL(productHref, baseUrl);
-    productUrl.searchParams.set("checkout", "1");
 
-    await page.goto(productUrl.toString(), { waitUntil: "domcontentloaded" });
+    await page.goto(new URL(checkoutHref, baseUrl).toString(), {
+      waitUntil: "domcontentloaded",
+    });
 
     await expect(
-      page.getByRole("heading", { name: "Browser QA Produk A" })
+      page.getByRole("heading", { name: "Review produk sebelum bayar." })
     ).toBeVisible();
+    await expect(page.locator("#checkout-form")).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Bayar via QR Manual" })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("spinbutton", { name: "Jumlah", exact: true })
-    ).toHaveValue("1");
-    await expect(page.getByLabel("Nama pembeli")).toBeVisible();
-    await expect(
-      page.getByRole("dialog", { name: "Browser QA Produk A" })
-    ).toHaveCount(0);
-    await expectNoDocumentOverflow(page);
+      page.locator('#checkout-form input[name="product_id"]')
+    ).toHaveValue(/^\d+$/);
+    await expect(page.locator("#checkout-form")).toHaveAttribute(
+      "action",
+      /\/shop\/checkout/
+    );
   } finally {
     await context.close();
   }
+});
+
+test("keeps storefront card actions separate and keyboard reachable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+
+  const card = page.locator("article.product-card").filter({
+    hasText: "Browser QA Produk A",
+  });
+  await card.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(700);
+  await expect(card).toBeVisible();
+  await expect(card.locator('a[href*="/produk/"]').first()).toBeVisible();
+  await expect(card.locator('a[href*="/shop/checkout/products/"]')).toHaveCount(
+    1
+  );
+  await expect(card.locator('form[action*="/shop/cart/items"]')).toHaveCount(1);
+
+  const nestedInteractiveElements = await card.evaluate(
+    (element) =>
+      Array.from(element.querySelectorAll("a[href], button")).filter(
+        (child) => child.parentElement?.closest("a[href], button") !== null
+      ).length
+  );
+  expect(nestedInteractiveElements).toBe(0);
+
+  const actionSizes = await card
+    .locator("a[href], button")
+    .evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      })
+    );
+  expect(
+    actionSizes.filter(({ width, height }) => width < 44 || height < 44)
+  ).toEqual([]);
 });
 
 test("announces terminal QRIS status and exposes buyer next steps", async ({
@@ -1094,7 +534,7 @@ test("prioritizes invoice content by state without mobile overflow", async ({
   }
 });
 
-test("uses a compact two-column shop grid and keeps focus on the active filter at mobile width", async ({
+test("uses a compact single-column shop grid at narrow mobile width and keeps filter focus", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 900 });
@@ -1102,15 +542,21 @@ test("uses a compact two-column shop grid and keeps focus on the active filter a
 
   const catalogGrid = page.locator("#storefront-product-grid");
   const productA = catalogGrid
-    .locator("a[data-modal-url]")
+    .locator('a[href*="/produk/"]')
     .filter({ hasText: "Browser QA Produk A" })
     .first();
   const productB = catalogGrid
-    .locator("a[data-modal-url]")
+    .locator('a[href*="/produk/"]')
     .filter({ hasText: "Browser QA Produk B" })
     .first();
   await page.waitForTimeout(700);
-  await expectTwoColumns(productA, productB);
+  await expect(productA).toBeVisible();
+  await expect(productB).toBeVisible();
+  const narrowColumns = await catalogGrid.evaluate(
+    (grid) =>
+      getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length
+  );
+  expect(narrowColumns).toBe(1);
 
   await productB.focus();
   await expect(productB).toBeFocused();
@@ -1129,7 +575,7 @@ test("balances product columns across storefront breakpoints", async ({
   page,
 }) => {
   for (const [width, expectedColumns] of [
-    [320, 2],
+    [320, 1],
     [390, 2],
     [768, 3],
     [1024, 4],
@@ -2673,16 +2119,6 @@ async function expectOneColumn(firstLocator, secondLocator) {
 
   const [top, bottom] = first.y <= second.y ? [first, second] : [second, first];
   expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height - 2);
-}
-
-async function expectTwoColumns(firstLocator, secondLocator) {
-  const first = await firstLocator.boundingBox();
-  const second = await secondLocator.boundingBox();
-
-  expect(first).not.toBeNull();
-  expect(second).not.toBeNull();
-  expect(Math.abs(first.y - second.y)).toBeLessThanOrEqual(2);
-  expect(second.x).toBeGreaterThanOrEqual(first.x + first.width - 2);
 }
 
 async function expectBefore(firstLocator, secondLocator) {

@@ -49,7 +49,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('Shop Search Product');
     }
 
-    public function test_shop_catalog_uses_lazy_modal_urls_without_embedded_checkout_payload(): void
+    public function test_shop_catalog_uses_page_checkout_urls_without_embedded_checkout_payload(): void
     {
         $product = Product::factory()->create([
             'name' => 'Lazy Shop Product',
@@ -66,9 +66,12 @@ class StorefrontShopCatalogTest extends TestCase
             $html,
         );
         $this->assertStringContainsString(
-            'data-modal-url="'.route('storefront.products.modal', ['product' => $product]).'"',
+            'href="'.route('storefront.shop.checkout.product', ['product' => $product]).'?from=',
             $html,
         );
+        $this->assertStringContainsString('Beli sekarang', $html);
+        $this->assertStringContainsString('+ Keranjang', $html);
+        $this->assertStringContainsString('action="'.route('storefront.shop.cart.items.store').'"', $html);
         $this->assertStringNotContainsString('data-product=', $html);
         $this->assertStringNotContainsString('"checkout":', $html);
     }
@@ -606,7 +609,7 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertDontSee('sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
     }
 
-    public function test_available_landing_products_use_lazy_modal_and_retain_checkout_markup(): void
+    public function test_available_landing_products_use_page_checkout_and_separate_cart_action(): void
     {
         $product = Product::factory()->create([
             'name' => 'CapCut Pro Web',
@@ -617,42 +620,27 @@ class StorefrontShopCatalogTest extends TestCase
         ]);
 
         $response = $this->get(route('storefront.home'));
+        $html = $response->assertOk()->getContent();
+        $card = $this->productArticleHtml($html, $product);
 
-        $response
-            ->assertOk()
-            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
-            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
-            ->assertDontSee('data-product=', false)
-            ->assertDontSee('JSON.parse($el.dataset.product)', false)
-            ->assertSee('CapCut Pro Web')
-            ->assertSee('Akun Private dari dashboard')
-            ->assertSee('Rp60.000')
-            ->assertSee('Terjual: 0')
-            ->assertSee('Stok: 8')
-            ->assertSee('Pilih Checkout')
-            ->assertSee('Total produk')
-            ->assertSee('method="POST"', false)
-            ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
-            ->assertSee('name="_token"', false)
-            ->assertSee('name="product_id"', false)
-            ->assertSee("x-bind:value=\"selectedCheckoutChoice()?.productId || selectedProduct?.id || ''\"", false)
-            ->assertSee('name="quantity"', false)
-            ->assertSee('x-bind:value="quantity"', false)
-            ->assertSee('Nama pembeli')
-            ->assertSee('name="buyer_name"', false)
-            ->assertSee('x-model.trim="buyerName"', false)
-            ->assertSee('required', false)
-            ->assertSee('placeholder="Nama pembeli"', false)
-            ->assertSee('Checkout tidak perlu akun. Nama ini hanya dipakai untuk menandai invoice Anda.')
-            ->assertSee('type="submit"', false)
-            ->assertDontSee('Bayar via QR Manual')
-            ->assertDontSee('Beli lewat Telegram')
-            ->assertDontSee('Pakai alur lama lewat bot/admin Telegram. Cocok kalau kamu sudah biasa order dari Telegram.')
-            ->assertSee('Stok kosong')
-            ->assertDontSee('&amp;quot;', false);
+        $this->assertStringContainsString('CapCut Pro Web', $card);
+        $this->assertStringContainsString('Akun Private dari dashboard', $card);
+        $this->assertStringContainsString('Rp60.000', $card);
+        $this->assertStringContainsString('Terjual: 0', $card);
+        $this->assertStringContainsString('Stok: 8', $card);
+        $this->assertStringContainsString('Beli sekarang', $card);
+        $this->assertStringContainsString('href="'.route('storefront.shop.checkout.product', $product).'?from=', $card);
+        $this->assertStringContainsString('+ Keranjang', $card);
+        $this->assertStringContainsString('action="'.route('storefront.shop.cart.items.store').'"', $card);
+        $this->assertStringContainsString('name="product_id"', $card);
+        $this->assertStringContainsString('name="quantity"', $card);
+        $this->assertSame(1, substr_count($card, '<article'));
+        $this->assertStringNotContainsString('data-product=', $card);
+        $this->assertStringNotContainsString('selectedCheckoutChoice', $card);
+        $this->assertStringNotContainsString('Nama pembeli', $card);
     }
 
-    public function test_unavailable_landing_products_render_disabled_card_without_modal_trigger(): void
+    public function test_unavailable_landing_products_render_detail_and_waitlist_actions_without_checkout_trigger(): void
     {
         $category = Category::factory()->create(['name' => 'Unavailable Products', 'is_active' => true]);
         Product::factory()->create([
@@ -676,7 +664,7 @@ class StorefrontShopCatalogTest extends TestCase
         $response
             ->assertOk()
             ->assertSee('Claude Ready Web')
-            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
+            ->assertSee('Beli sekarang')
             ->assertSee('ChatGPT Habis Web');
 
         $this->assertStringContainsString('class="product-card', $unavailableCard);
@@ -685,12 +673,8 @@ class StorefrontShopCatalogTest extends TestCase
         $this->assertStringContainsString('STOK HABIS', $unavailableCard);
         $this->assertStringContainsString('Restock segera', $unavailableCard);
         $this->assertStringContainsString('Stok kosong', $unavailableCard);
-        $this->assertStringNotContainsString('openProductModal', $unavailableCard);
-        $this->assertStringNotContainsString('JSON.parse($el.dataset.product)', $unavailableCard);
-        $this->assertStringNotContainsString('data-product=', $unavailableCard);
-        $this->assertStringNotContainsString('"checkoutUrl"', $unavailableCard);
+        $this->assertStringNotContainsString(route('storefront.shop.checkout.product', $unavailableProduct), $unavailableCard);
         $this->assertStringNotContainsString('method="POST"', $unavailableCard);
-        $this->assertStringNotContainsString(route('storefront.shop.checkout'), $unavailableCard);
     }
 
     public function test_landing_empty_state_uses_catalog_copy(): void
@@ -718,8 +702,8 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('id="faq-answer-0"', false)
             ->assertSee('role="region" aria-labelledby="faq-question-0"', false)
             ->assertSee('Landing Catalog Product')
-            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
-            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
+            ->assertSee('Beli sekarang')
+            ->assertSee(route('storefront.shop.checkout.product', $product), false)
             ->assertDontSee('data-product=', false)
             ->assertSee('Produk digital siap pakai, checkout tanpa ribet.')
             ->assertSee('Belanja produk digital dalam tiga langkah.')
@@ -747,11 +731,14 @@ class StorefrontShopCatalogTest extends TestCase
 
     private function productArticleHtml(string $html, Product $product): string
     {
-        $start = strpos($html, '<article id="product-'.$product->id.'"');
-        $this->assertNotFalse($start, 'Expected unavailable product article for product '.$product->id.' to be rendered.');
+        $idPosition = strpos($html, 'id="product-'.$product->id.'"');
+        $start = $idPosition === false
+            ? false
+            : strrpos(substr($html, 0, $idPosition), '<article');
+        $this->assertNotFalse($start, 'Expected product article for product '.$product->id.' to be rendered.');
 
         $end = strpos($html, '</article>', $start);
-        $this->assertNotFalse($end, 'Expected unavailable product article for product '.$product->id.' to be closed.');
+        $this->assertNotFalse($end, 'Expected product article for product '.$product->id.' to be closed.');
 
         return substr($html, $start, $end + strlen('</article>') - $start);
     }

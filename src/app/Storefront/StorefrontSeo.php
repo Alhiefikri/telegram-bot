@@ -93,7 +93,6 @@ final class StorefrontSeo
         Product $product,
         StorefrontProductPresentation $presentation,
         string $canonicalUrl,
-        bool $checkoutRequested = false,
     ): StorefrontPageMetadata {
         $brand = $this->brand();
         $breadcrumbs = $this->productBreadcrumbs($product->name, $canonicalUrl);
@@ -124,7 +123,7 @@ final class StorefrontSeo
             title: $product->name.' | '.$brand,
             description: $presentation->descriptionSnippet,
             canonicalUrl: $canonicalUrl,
-            robots: $checkoutRequested ? self::NOINDEX_FOLLOW : self::INDEX_FOLLOW,
+            robots: self::INDEX_FOLLOW,
             ogType: 'product',
             imageUrl: $presentation->cover->imageUrl,
             imageAlt: $product->name.' | '.$brand,

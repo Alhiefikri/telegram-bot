@@ -181,7 +181,7 @@
                                     : $paymentCopy($selectedPaymentOption);
                             @endphp
 
-                            <form id="checkout-form" method="POST" action="{{ route('storefront.shop.checkout') }}" class="neo-panel grid min-w-0 gap-4 bg-[var(--sf-surface)] p-4 sm:p-5">
+                            <form id="checkout-form" method="POST" action="{{ $checkoutSubmitUrl }}" class="neo-panel grid min-w-0 gap-4 bg-[var(--sf-surface)] p-4 sm:p-5">
                                 @csrf
                                 @if ($checkoutSource === 'direct' && $checkoutProduct)
                                     <input type="hidden" name="product_id" value="{{ old('product_id', $checkoutProduct->id) }}">

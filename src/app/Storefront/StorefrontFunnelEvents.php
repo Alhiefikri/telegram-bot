@@ -63,6 +63,14 @@ class StorefrontFunnelEvents
         ] + $metadata);
     }
 
+    public function cartCheckoutOpened(int $itemCount): void
+    {
+        $this->log('storefront.checkout_opened', null, [
+            'source' => 'cart_checkout_page',
+            'cart_item_count' => max(0, $itemCount),
+        ]);
+    }
+
     /**
      * @param  array<string, mixed>  $metadata
      */
@@ -232,6 +240,7 @@ class StorefrontFunnelEvents
             'product_id',
             'product_public',
             'source',
+            'cart_item_count',
             'family_snapshots',
 
             'family_id',

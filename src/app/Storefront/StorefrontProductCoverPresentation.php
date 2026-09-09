@@ -18,15 +18,4 @@ final readonly class StorefrontProductCoverPresentation
     {
         return $this->imageUrl !== null;
     }
-
-    /**
-     * @return array{theme: array<string, string>, imageUrl: ?string}
-     */
-    public function toModalPayload(): array
-    {
-        return [
-            'theme' => $this->theme,
-            'imageUrl' => $this->imageUrl,
-        ];
-    }
 }

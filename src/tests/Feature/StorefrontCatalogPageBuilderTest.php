@@ -37,8 +37,8 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->assertSame(route('storefront.shop.index', ['q' => 'chat']), $page->canonicalUrl);
         $this->assertSame(['Chat GPT Plus'], $page->products->map(fn ($entry) => $entry->presentation->name)->all());
         $this->assertSame(
-            route('storefront.products.modal', ['product' => $page->products->first()->presentation->id]),
-            $page->products->first()->presentation->modalUrl,
+            route('storefront.shop.checkout.product', ['product' => $page->products->first()->presentation->id]),
+            $page->products->first()->presentation->checkoutUrl,
         );
     }
 
@@ -293,14 +293,11 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->assertSame('Terjual: 0', $presentation->soldLabel);
         $this->assertTrue($presentation->isAvailable);
         $this->assertSame(
-            route('storefront.products.modal', ['product' => $product->id]),
-            $presentation->modalUrl,
+            route('storefront.shop.checkout.product', ['product' => $product->id]),
+            $presentation->checkoutUrl,
         );
         $this->assertFalse(property_exists($presentation, 'checkoutChoices'));
         $this->assertFalse(property_exists($presentation, 'checkoutReadiness'));
         $this->assertFalse(property_exists($presentation, 'isBuyable'));
-        $this->assertFalse(property_exists($presentation, 'canOpenModal'));
-        $this->assertFalse(property_exists($presentation, 'support'));
-        $this->assertFalse(method_exists($presentation, 'modalPayload'));
     }
 }

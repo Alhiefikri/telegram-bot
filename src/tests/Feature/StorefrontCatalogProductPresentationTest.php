@@ -47,7 +47,7 @@ class StorefrontCatalogProductPresentationTest extends TestCase
         $this->assertSame('CANVA PREMIUM', $presentation->cover->theme['desc']);
         $this->assertSame('Canva 30 Hari', $presentation->familyOptionLabel);
         $this->assertSame(route('storefront.products.show', ['product' => $product->id]), $presentation->productUrl);
-        $this->assertSame(route('storefront.products.modal', ['product' => $product->id]), $presentation->modalUrl);
+        $this->assertSame(route('storefront.shop.checkout.product', ['product' => $product->id]), $presentation->checkoutUrl);
         $this->assertSame(route('storefront.waitlist.store', ['product' => $product->id]), $presentation->waitlistUrl);
         $this->assertFalse($presentation->canJoinWaitlist);
     }
@@ -117,14 +117,19 @@ class StorefrontCatalogProductPresentationTest extends TestCase
     {
         $product = Product::factory()->create();
         $urls = app(StorefrontUrl::class);
+        $returnUrl = '/shop#products';
 
         $this->assertSame(
-            $urls->productUrl($product, '/shop#products', true),
-            $urls->productUrlForId($product->id, '/shop#products', true),
+            $urls->productUrl($product, $returnUrl),
+            $urls->productUrlForId($product->id, $returnUrl),
         );
         $this->assertSame(
-            route('storefront.products.modal', ['product' => $product->id]),
-            $urls->productModalUrlForId($product->id),
+            $urls->checkoutProductUrl($product, $returnUrl),
+            $urls->checkoutProductUrlForId($product->id, $returnUrl),
+        );
+        $this->assertSame(
+            route('storefront.shop.checkout.product', ['product' => $product->id]),
+            $urls->checkoutProductUrlForId($product->id),
         );
         $this->assertSame(
             route('storefront.waitlist.store', ['product' => $product->id]),

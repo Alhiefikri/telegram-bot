@@ -419,7 +419,7 @@ class StorefrontShopCheckoutTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_landing_catalog_renders_lazy_modal_and_empty_stock_state(): void
+    public function test_landing_catalog_renders_page_checkout_and_empty_stock_state(): void
     {
         $this->manualPaymentModeIsActive();
         $ready = $this->availableProduct([
@@ -439,8 +439,12 @@ class StorefrontShopCheckoutTest extends TestCase
         $response
             ->assertOk()
             ->assertSee('Pilih produk digital sesuai kebutuhan.')
-            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
-            ->assertSee('data-modal-url="'.route('storefront.products.modal', $ready).'"', false)
+            ->assertSee('Beli sekarang')
+            ->assertSee(
+                'href="'.route('storefront.shop.checkout.product', ['product' => $ready]).'?from=',
+                false,
+            )
+            ->assertSee('+ Keranjang')
             ->assertDontSee('data-product=', false)
             ->assertDontSee('JSON.parse($el.dataset.product)', false)
             ->assertSee('Claude Pro Ready')
@@ -458,12 +462,16 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertStringContainsString('STOK HABIS', $emptyCard);
         $this->assertStringContainsString('Restock segera', $emptyCard);
         $this->assertStringContainsString('Stok kosong', $emptyCard);
-        $this->assertStringNotContainsString('openProductModal', $emptyCard);
         $this->assertStringNotContainsString('JSON.parse($el.dataset.product)', $emptyCard);
         $this->assertStringNotContainsString('data-product=', $emptyCard);
+        $this->assertStringNotContainsString(
+            route('storefront.shop.checkout.product', $empty),
+            $emptyCard,
+        );
+        $this->assertStringNotContainsString('method="POST"', $emptyCard);
     }
 
-    public function test_landing_modal_keeps_only_the_website_qris_checkout_action(): void
+    public function test_page_checkout_keeps_only_the_website_qris_checkout_action(): void
     {
         $this->manualPaymentModeIsActive();
         $product = $this->availableProduct([
@@ -471,20 +479,18 @@ class StorefrontShopCheckoutTest extends TestCase
             'stock' => 3,
         ]);
 
-        $this->get(route('storefront.home'))
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertOk()
+            ->assertSee('Review produk sebelum bayar.')
             ->assertDontSee('checkoutManual()', false)
-            ->assertDontSee('@click="checkoutManual()"', false)
             ->assertDontSee('Beli lewat Telegram')
-            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
-            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
-            ->assertDontSee('data-product=', false)
-            ->assertSee('action="'.route('storefront.shop.checkout').'"', false)
+            ->assertSee('action="'.route('storefront.shop.checkout').'?from=', false)
             ->assertSee('method="POST"', false)
-            ->assertDontSee('Bayar via QR Manual');
+            ->assertSee('name="payment_method" value="qris"', false)
+            ->assertSee('Buat invoice QR Manual &amp; lanjut bayar', false);
     }
 
-    public function test_landing_modal_renders_accessible_native_checkout_controls(): void
+    public function test_page_checkout_renders_accessible_native_payment_controls(): void
     {
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
@@ -500,20 +506,15 @@ class StorefrontShopCheckoutTest extends TestCase
             'usdt_price_amount' => 2_000_000,
         ]);
 
-        $this->get(route('storefront.home'))
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertOk()
-            ->assertSee('role="dialog"', false)
-            ->assertSee('aria-modal="true"', false)
-            ->assertSee('aria-labelledby="modal-title"', false)
-            ->assertSee('id="modal-title"', false)
-            ->assertSee('x-ref="dialogPanel"', false)
-            ->assertSee('@keydown="handleModalKeydown($event)"', false)
+            ->assertSee('Review produk sebelum bayar.')
             ->assertSee('type="radio"', false)
-            ->assertSee('name="payment_choice"', false)
-            ->assertSee('type="hidden" name="payment_method"', false)
-            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
-            ->assertDontSee('data-product=', false)
-            ->assertDontSee('Bayar via QR Manual');
+            ->assertSee('name="payment_method"', false)
+            ->assertSee('Bayar dengan Binance Pay')
+            ->assertSee('Buat invoice Binance Pay &amp; lanjut bayar', false)
+            ->assertDontSee('role="dialog"', false)
+            ->assertDontSee('data-product=', false);
     }
 
     public function test_failed_checkout_reopens_direct_review_and_preserves_inline_buyer_error(): void
@@ -524,23 +525,27 @@ class StorefrontShopCheckoutTest extends TestCase
             'stock' => 3,
         ]);
 
-        $this->followingRedirects()
-            ->from(route('storefront.home'))
+        $response = $this->from(route('storefront.home'))
             ->post(route('storefront.shop.checkout'), [
                 'product_id' => $product->id,
                 'quantity' => 2,
                 'buyer_name' => 'x',
                 'terms_accepted' => '1',
                 'payment_method' => 'qris',
-            ])
+            ]);
+
+        $response
+            ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertSessionHasErrors(['buyer_name' => 'The buyer name field must be at least 2 characters.']);
+
+        $this->get($response->headers->get('Location'))
             ->assertOk()
             ->assertSee('Review produk sebelum bayar.')
             ->assertSee('Retry Checkout Product')
             ->assertSee('name="product_id"', false)
             ->assertSee('name="quantity"', false)
             ->assertSee('id="checkout-buyer-name"', false)
-            ->assertSee('value="x"', false)
-            ->assertSee('The buyer name field must be at least 2 characters.');
+            ->assertSee('value="x"', false);
     }
 
     public function test_shop_checkout_creates_binance_pay_order_without_creating_a_qris_transaction(): void
@@ -700,11 +705,9 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
         $product = $this->availableProduct(['usdt_price_amount' => 2_000_000, 'stock' => 1]);
 
-        $this->get(route('storefront.home'))
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertOk()
-            ->assertSee('openProductModalFromUrl($el.dataset.modalUrl', false)
-            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
-            ->assertDontSee('data-product=', false);
+            ->assertSee('Bayar dengan Binance Pay');
         $settings->update(['binance_pay_enabled' => false]);
 
         $this->post(route('storefront.shop.checkout'), [
@@ -1175,11 +1178,14 @@ class StorefrontShopCheckoutTest extends TestCase
 
     private function unavailableProductCardHtml(string $html, Product $product): string
     {
-        $start = strpos($html, '<article id="product-'.$product->id.'"');
-        $this->assertNotFalse($start, 'Expected unavailable product card for product '.$product->id.' to be rendered.');
+        $idPosition = strpos($html, 'id="product-'.$product->id.'"');
+        $start = $idPosition === false
+            ? false
+            : strrpos(substr($html, 0, $idPosition), '<article');
+        $this->assertNotFalse($start, 'Expected product card for product '.$product->id.' to be rendered.');
 
         $end = strpos($html, '</article>', $start);
-        $this->assertNotFalse($end, 'Expected unavailable product card for product '.$product->id.' to be closed.');
+        $this->assertNotFalse($end, 'Expected product card for product '.$product->id.' to be closed.');
 
         return substr($html, $start, $end + strlen('</article>') - $start);
     }

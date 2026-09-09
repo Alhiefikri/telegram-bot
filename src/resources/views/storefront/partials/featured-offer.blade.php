@@ -3,7 +3,8 @@
         @php
             $featuredPresentation = $catalogPage->featuredProduct->presentation;
             $featuredReturnUrl = $catalogPage->productReturnUrl($featuredPresentation->id);
-            $featuredCheckoutUrl = $featuredPresentation->productUrl.(str_contains($featuredPresentation->productUrl, '?') ? '&' : '?').'checkout=1&from='.urlencode($featuredReturnUrl);
+            $featuredProductUrl = $storefront->productUrl($featuredPresentation->id, $featuredReturnUrl);
+            $featuredCheckoutUrl = $storefront->checkoutProductUrl($featuredPresentation->id, $featuredReturnUrl);
         @endphp
 
         <div class="neo-panel-pop relative w-full overflow-hidden bg-[var(--sf-surface)] p-6 text-[var(--sf-ink)] sm:p-8">
@@ -16,16 +17,26 @@
                         </svg>
                         <span class="text-xs uppercase tracking-wide text-white">Pilihan admin</span>
                     </div>
-                    @include('storefront.components.product-cover', [
-                        'presentation' => $featuredPresentation,
-                        'context' => 'featured',
-                    ])
+                    <a
+                        href="{{ $featuredProductUrl }}"
+                        class="block rounded-lg focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]"
+                        aria-label="Lihat detail {{ $featuredPresentation->name }}"
+                    >
+                        @include('storefront.components.product-cover', [
+                            'presentation' => $featuredPresentation,
+                            'context' => 'featured',
+                        ])
+                    </a>
                 </div>
 
                 <div class="space-y-6 lg:col-span-7">
                     <div class="flex flex-wrap items-center justify-between gap-4">
-                        <h2 class="max-w-2xl font-display text-3xl font-black leading-tight tracking-tight text-[var(--sf-ink)] sm:text-4xl">{{ $featuredPresentation->name }}</h2>
-                        <span class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-green)] px-3 py-1 text-[10px] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Tersedia</span>
+                        <h2 class="max-w-2xl font-display text-3xl font-black leading-tight tracking-tight text-[var(--sf-ink)] sm:text-4xl">
+                            <a href="{{ $featuredProductUrl }}" class="inline-flex min-h-11 items-center rounded-sm focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">
+                                {{ $featuredPresentation->name }}
+                            </a>
+                        </h2>
+                        <span class="rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-green)] px-3 py-1 text-xs font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Tersedia</span>
                     </div>
 
                     <p class="max-w-2xl text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $featuredPresentation->description }}</p>
@@ -35,7 +46,7 @@
                             <div class="flex flex-wrap items-center gap-4">
                                 <span class="inline-flex -rotate-2 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-1.5 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] shadow-[5px_5px_0_var(--sf-shadow)] sm:text-4xl">{{ $storefront->idr($featuredPresentation->priceAmount) }}</span>
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <span class="inline-flex rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-violet-soft)] px-3 py-1 text-[10px] font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Sisa {{ $featuredPresentation->stockAvailable }}</span>
+                                    <span class="inline-flex rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-violet-soft)] px-3 py-1 text-xs font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">Sisa {{ $featuredPresentation->stockAvailable }}</span>
                                 </div>
                             </div>
                         </div>
@@ -45,11 +56,8 @@
                                 Checkout sedang maintenance
                             </div>
                         @else
-                            <a href="{{ $featuredCheckoutUrl }}"
-                               x-on:click.prevent="openProductModalFromUrl($el.dataset.modalUrl, { opener: $el, fallbackUrl: $el.href })"
-                               data-modal-url="{{ $featuredPresentation->modalUrl }}"
-                               class="neo-button neo-sheen flex min-h-14 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] px-6 py-4 text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)]">
-                                Pilih Checkout
+                            <a href="{{ $featuredCheckoutUrl }}" class="neo-button neo-sheen flex min-h-14 w-full select-none items-center justify-center gap-2 bg-[var(--sf-accent)] px-6 py-4 text-sm font-black text-white transition-colors hover:bg-[var(--sf-accent-deep)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">
+                                Beli sekarang
                             </a>
                         @endif
                     </div>

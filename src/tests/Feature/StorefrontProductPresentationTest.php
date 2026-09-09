@@ -8,7 +8,6 @@ use App\Models\CheckoutMaintenanceSetting;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\ProductStockItem;
 use App\Models\StorefrontSetting;
 use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -33,7 +32,7 @@ class StorefrontProductPresentationTest extends TestCase
         ]);
     }
 
-    public function test_available_product_presentation_is_buyable_and_opens_modal(): void
+    public function test_available_product_presentation_is_buyable_with_page_checkout_state(): void
     {
         $product = $this->availableProduct([
             'name' => 'Claude Pro Ready',
@@ -47,28 +46,14 @@ class StorefrontProductPresentationTest extends TestCase
 
         $this->assertTrue($presentation->isAvailable);
         $this->assertTrue($presentation->isBuyable);
-        $this->assertTrue($presentation->canOpenModal);
         $this->assertSame(7, $presentation->stockAvailable);
         $this->assertSame('Stok: 7', $presentation->stockLabel);
         $this->assertSame(0, $presentation->soldQuantity);
         $this->assertSame('Terjual: 0', $presentation->soldLabel);
         $this->assertSame('Akun private siap pakai.', $presentation->descriptionSnippet);
-        $this->assertSame('Pilih Checkout', $presentation->cardActionLabel);
+        $this->assertSame('Beli sekarang', $presentation->cardActionLabel);
         $this->assertSame(route('storefront.products.show', $product), $presentation->productUrl);
-
-        $modalPayload = $presentation->modalPayload();
-
-        $this->assertIsArray($modalPayload);
-        $this->assertSame($product->id, $modalPayload['id']);
-        $this->assertSame('Claude Pro Ready', $modalPayload['name']);
-        $this->assertSame("Akun private siap pakai.\nGaransi login.", $modalPayload['description']);
-        $this->assertSame(['amount' => 60000], $modalPayload['price']);
-        $this->assertSame(7, $modalPayload['stock']['available']);
-        $this->assertSame('Stok: 7', $modalPayload['stock']['label']);
-        $this->assertSame(['quantity' => 0, 'label' => 'Terjual: 0'], $modalPayload['sold']);
-        $this->assertTrue($modalPayload['availability']['isAvailable']);
-        $this->assertTrue($modalPayload['availability']['canOpenModal']);
-        $this->assertSame('manual', $modalPayload['checkout']['websiteQris']['provider']);
+        $this->assertSame('manual', $presentation->checkoutChoice('website_qris')?->provider);
     }
 
     public function test_in_stock_product_without_active_payment_setting_is_not_checkout_ready(): void
@@ -80,12 +65,10 @@ class StorefrontProductPresentationTest extends TestCase
 
         $this->assertTrue($presentation->isAvailable);
         $this->assertFalse($presentation->isBuyable);
-        $this->assertFalse($presentation->canOpenModal);
         $this->assertFalse($presentation->checkoutReadiness->ready);
         $this->assertNull($presentation->checkoutReadiness->provider);
         $this->assertSame('Checkout belum tersedia', $presentation->statusLabel);
         $this->assertSame([], $presentation->checkoutChoices);
-        $this->assertNull($presentation->modalPayload());
     }
 
     public function test_product_presentation_counts_paid_processable_sales_only(): void
@@ -124,7 +107,6 @@ class StorefrontProductPresentationTest extends TestCase
 
         $this->assertFalse($presentation->isAvailable);
         $this->assertFalse($presentation->isBuyable);
-        $this->assertFalse($presentation->canOpenModal);
         $this->assertSame('Habis', $presentation->availabilityLabel);
         $this->assertSame('Stok kosong', $presentation->stockLabel);
         $this->assertSame('Restock segera', $presentation->statusLabel);
@@ -132,7 +114,6 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertSame([], $presentation->checkoutChoices);
         $this->assertNull($presentation->checkoutChoice('website_qris'));
         $this->assertNull($presentation->checkoutChoice('telegram_admin'));
-        $this->assertNull($presentation->modalPayload());
     }
 
     public function test_unavailable_product_keeps_stock_status_during_maintenance(): void
@@ -167,9 +148,6 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertNotNull($websiteQris);
         $this->assertSame('Bayar via QR Manual', $websiteQris->label);
         $this->assertStringContainsString('bukti pembayaran', $websiteQris->description);
-        $this->assertSame('POST', $websiteQris->method);
-        $this->assertSame(route('storefront.shop.checkout'), $websiteQris->url);
-        $this->assertSame($product->id, $websiteQris->productId);
         $this->assertTrue($websiteQris->enabled);
 
         $this->assertNull($presentation->checkoutChoice('telegram_admin'));
@@ -266,20 +244,22 @@ class StorefrontProductPresentationTest extends TestCase
         ]);
 
         $presentation = app(StorefrontProductPresenter::class)->present($product);
-        $payload = $presentation->modalPayload();
-        $this->assertSame(2_500_000, $payload['price']['usdtAmount']);
 
+        $this->assertSame(2_500_000, $presentation->usdtPriceAmount);
         $this->assertNotNull($presentation->checkoutChoice('website_binance_pay'));
         $this->assertNotNull($presentation->checkoutChoice('website_binance_pay_id'));
         $this->assertNull($presentation->checkoutChoice('website_usdt_bep20'));
         $this->assertSame([
-            'websiteQris',
-            'websiteBinancePay',
-            'websiteBinancePayId',
-        ], array_keys($payload['checkout']));
-        $this->assertSame('Bayar dengan USDT', $payload['checkout']['websiteBinancePay']['label']);
-        $this->assertSame('Bayar dengan Binance Pay', $payload['checkout']['websiteBinancePayId']['label']);
-        $this->assertStringContainsString('Binance Pay ID', $payload['checkout']['websiteBinancePayId']['description']);
+            'website_qris',
+            'website_binance_pay',
+            'website_binance_pay_id',
+        ], array_keys($presentation->checkoutChoices));
+        $this->assertSame('Bayar dengan USDT', $presentation->checkoutChoice('website_binance_pay')->label);
+        $this->assertSame('Bayar dengan Binance Pay', $presentation->checkoutChoice('website_binance_pay_id')->label);
+        $this->assertStringContainsString(
+            'Binance Pay ID',
+            $presentation->checkoutChoice('website_binance_pay_id')->description,
+        );
     }
 
     public function test_stock_description_and_cover_image_state_are_prepared_consistently(): void
@@ -329,113 +309,5 @@ class StorefrontProductPresentationTest extends TestCase
 
         $this->assertSame('/storage/'.$path, $presentation->cover->imageUrl);
         $this->assertTrue($presentation->cover->hasImage());
-    }
-
-    public function test_modal_payload_contains_the_browser_rendering_state(): void
-    {
-        $product = $this->availableProduct([
-            'name' => 'Gemini Web',
-            'description' => '',
-            'price_amount' => 42000,
-            'stock' => 2,
-        ]);
-
-        $payload = app(StorefrontProductPresenter::class)->present($product)->modalPayload();
-
-        $this->assertSame([
-            'id',
-            'name',
-            'description',
-            'descriptionSnippet',
-            'merchandising',
-            'price',
-            'stock',
-            'sold',
-            'availability',
-            'cover',
-            'checkout',
-            'maintenance',
-            'support',
-        ], array_keys($payload));
-        $this->assertFalse($payload['maintenance']['active']);
-        $this->assertSame('', $payload['maintenance']['notice']);
-        $this->assertSame('Deskripsi produk segera dilengkapi.', $payload['descriptionSnippet']);
-        $this->assertFalse($payload['merchandising']['hasDetails']);
-        $this->assertSame('', $payload['description']);
-        $this->assertSame(['amount' => 42000], $payload['price']);
-        $this->assertSame([
-            'available' => 2,
-            'label' => 'Stok: 2',
-            'emptyLabel' => 'Stok kosong',
-        ], $payload['stock']);
-        $this->assertSame(['quantity' => 0, 'label' => 'Terjual: 0'], $payload['sold']);
-        $this->assertSame(route('storefront.shop.checkout'), $payload['checkout']['websiteQris']['url']);
-        $this->assertArrayNotHasKey('telegram', $payload['checkout']);
-        $this->assertSame('Butuh bantuan?', $payload['support']['title']);
-        $this->assertSame('Tanya produk sebelum beli', $payload['support']['categories'][0]['label']);
-    }
-
-    public function test_modal_payload_contains_active_maintenance_notice(): void
-    {
-        CheckoutMaintenanceSetting::query()->firstOrFail()->update([
-            'is_active' => true,
-            'public_note' => 'Admin sedang sinkronisasi.',
-            'version' => 1,
-            'activated_at' => now(),
-        ]);
-        $product = $this->availableProduct(['name' => 'Modal Maintenance Product']);
-
-        $payload = app(StorefrontProductPresenter::class)->present($product)->modalPayload();
-
-        $this->assertTrue($payload['maintenance']['active']);
-        $this->assertStringContainsString('Checkout sedang dalam maintenance', $payload['maintenance']['notice']);
-        $this->assertStringContainsString('Admin sedang sinkronisasi.', $payload['maintenance']['notice']);
-    }
-
-    public function test_merchandising_payload_contains_approved_public_details_only(): void
-    {
-        $product = $this->availableProduct([
-            'name' => 'Public Merchandising Product',
-            'description' => "Akun premium siap pakai.\nBaca batasan sebelum checkout.",
-            'product_type' => 'Akun premium',
-            'access_duration' => '30 hari',
-            'region' => 'Indonesia',
-            'account_type' => 'Private',
-            'device_limit' => '1 perangkat',
-            'included_items' => "Akun siap pakai\nPanduan login\n\nDukungan awal",
-            'limitations' => "Tidak untuk dijual kembali\nSatu perangkat",
-            'fulfillment_expectation' => 'Dikirim setelah pembayaran terverifikasi.',
-            'warranty_policy' => 'Garansi login 7 hari.',
-            'support_policy' => 'Support pada jam operasional.',
-            'delivery_note' => 'PRIVATE DELIVERY NOTE',
-        ]);
-        ProductStockItem::create([
-            'product_id' => $product->id,
-            'secret' => 'credential-secret@example.test|private-password',
-        ]);
-
-        $presentation = app(StorefrontProductPresenter::class)->present($product);
-        $payload = $presentation->modalPayload();
-        $serialized = json_encode($payload, JSON_THROW_ON_ERROR);
-
-        $this->assertSame([
-            'productType' => 'Akun premium',
-            'accessDuration' => '30 hari',
-            'region' => 'Indonesia',
-            'accountType' => 'Private',
-            'deviceLimit' => '1 perangkat',
-            'includedItems' => ['Akun siap pakai', 'Panduan login', 'Dukungan awal'],
-            'limitations' => ['Tidak untuk dijual kembali', 'Satu perangkat'],
-            'fulfillmentExpectation' => 'Dikirim setelah pembayaran terverifikasi.',
-            'warrantyPolicy' => 'Garansi login 7 hari.',
-            'supportPolicy' => 'Support pada jam operasional.',
-            'hasDetails' => true,
-        ], $payload['merchandising']);
-        $this->assertSame("Akun premium siap pakai.\nBaca batasan sebelum checkout.", $payload['description']);
-        $this->assertStringNotContainsString('PRIVATE DELIVERY NOTE', $serialized);
-        $this->assertStringNotContainsString('credential-secret@example.test', $serialized);
-        $this->assertStringNotContainsString('private-password', $serialized);
-        $this->assertArrayNotHasKey('delivery_note', $payload);
-        $this->assertArrayNotHasKey('deliveryNote', $payload);
     }
 }

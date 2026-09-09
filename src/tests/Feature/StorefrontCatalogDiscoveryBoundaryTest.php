@@ -109,7 +109,7 @@ final class StorefrontCatalogDiscoveryBoundaryTest extends TestCase
         $this->assertSame([], array_values(array_unique(array_intersect($resolved, $this->checkoutDependencyClasses()))));
     }
 
-    public function test_product_modal_is_the_first_discovery_boundary_that_resolves_checkout_readiness(): void
+    public function test_direct_checkout_page_is_the_first_discovery_boundary_that_resolves_checkout_readiness(): void
     {
         $rpc = $this->configureBscReadiness();
         $setting = ManualPaymentSetting::current();
@@ -137,14 +137,14 @@ final class StorefrontCatalogDiscoveryBoundaryTest extends TestCase
         $this->assertSame([], array_values(array_unique(array_intersect($resolved, $this->checkoutDependencyClasses()))));
         $this->assertSame(0, $rpc->calls);
 
-        $this->getJson(route('storefront.products.modal', ['product' => $product]))
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertOk()
-            ->assertJsonPath('status', 'ready');
+            ->assertSee('Lazy Boundary SKU');
 
         $this->assertContains(StorefrontProductPresenter::class, $resolved);
         $this->assertContains(BscReadiness::class, $resolved);
         $this->assertContains(KlikQrisCheckoutSelector::class, $resolved);
-        $this->assertGreaterThan(0, $rpc->calls);
+        $this->assertSame(0, $rpc->calls);
     }
 
     /**

@@ -136,6 +136,11 @@ class StorefrontShopCheckoutRequest extends FormRequest
             return route('storefront.shop.checkout.start');
         }
 
-        return app(StorefrontUrl::class)->checkoutRecoveryUrl($this->input('product_id'));
+        $from = $this->query('from');
+
+        return app(StorefrontUrl::class)->checkoutRecoveryUrl(
+            $this->input('product_id'),
+            is_string($from) ? $from : null,
+        );
     }
 }

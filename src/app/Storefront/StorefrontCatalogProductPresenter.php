@@ -38,7 +38,7 @@ final class StorefrontCatalogProductPresenter
                 imageUrl: $this->imageUrl($product),
             ),
             productUrl: $this->urls->productUrlForId($product->id),
-            modalUrl: $this->urls->productModalUrlForId($product->id),
+            checkoutUrl: $this->urls->checkoutProductUrlForId($product->id),
             canJoinWaitlist: ! $isAvailable,
             waitlistUrl: $this->urls->waitlistUrlForId($product->id),
             waitlistCtaLabel: (string) config('storefront.waitlist.cta', 'Beri tahu saya saat tersedia'),

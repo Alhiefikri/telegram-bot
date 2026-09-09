@@ -78,19 +78,25 @@ class StorefrontPresenter
         return $this->urls->catalogUrl($productId, $search);
     }
 
-    public function productUrl(Product $product, ?string $returnUrl = null, bool $checkout = false): string
+    public function productUrl(Product $product, ?string $returnUrl = null): string
     {
-        return $this->urls->productUrl($product, $returnUrl, $checkout);
+        return $this->urls->productUrl($product, $returnUrl);
     }
 
-    public function productPageViewData(Product $product, int $stock, bool $checkoutRequested = false, ?string $returnUrl = null): array
+    public function checkoutProductUrl(Product $product, ?string $returnUrl = null): string
+    {
+        return $this->urls->checkoutProductUrl($product, $returnUrl);
+    }
+
+    public function productPageViewData(Product $product, int $stock, ?string $returnUrl = null): array
     {
         $brand = $this->brand();
         $maintenance = $this->maintenance->current();
         $presentation = $this->products->present($product, $stock, maintenanceState: $maintenance);
         $returnUrl ??= $this->urls->catalogUrl((int) $product->id);
         $canonicalUrl = route('storefront.products.show', $product);
-        $metadata = $this->seo->product($product, $presentation, $canonicalUrl, $checkoutRequested);
+        $metadata = $this->seo->product($product, $presentation, $canonicalUrl);
+        $productUrl = $this->urls->productUrl($product, $returnUrl);
 
         return [
             'storefront' => $this,
@@ -111,9 +117,9 @@ class StorefrontPresenter
             'checkoutMaintenance' => $maintenance,
             'checkoutMaintenanceNotice' => StorefrontCheckoutMaintenanceCopy::notice($maintenance),
             'isAvailable' => $stock > 0,
-            'checkoutRequested' => $checkoutRequested,
             'returnUrl' => $returnUrl,
-            'checkoutUrl' => $this->urls->productUrl($product, $returnUrl, true),
+            'productUrl' => $productUrl,
+            'checkoutUrl' => $this->urls->checkoutProductUrl($product, $productUrl),
         ];
     }
 

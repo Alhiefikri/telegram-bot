@@ -376,7 +376,7 @@ class BinancePaymentRailSelectionTest extends TestCase
         Queue::assertPushed(VerifyBscPayment::class, 1);
     }
 
-    public function test_storefront_product_modal_exposes_two_explicit_binance_rails(): void
+    public function test_storefront_direct_checkout_page_exposes_two_explicit_binance_rails(): void
     {
         config()->set('services.binance.pay_id', '987654321');
         $this->activeReceiver('0xcccccccccccccccccccccccccccccccccccccccc');
@@ -386,15 +386,11 @@ class BinancePaymentRailSelectionTest extends TestCase
             'usdt_price_amount' => 2_500_000,
         ]);
 
-        $this->getJson(route('storefront.products.modal', $product))
+        $this->get(route('storefront.shop.checkout.product', $product))
             ->assertOk()
-            ->assertJsonPath('product.checkout.websiteBinancePayId.key', 'website_binance_pay_id')
-            ->assertJsonPath('product.checkout.websiteUsdtBep20.key', 'website_usdt_bep20')
-            ->assertJsonPath('product.checkout.websiteBinancePayId.enabled', true)
-            ->assertJsonPath('product.checkout.websiteUsdtBep20.enabled', true)
-            ->assertJsonPath('product.checkout.websiteBinancePay.label', 'Bayar dengan USDT')
-            ->assertJsonPath('product.checkout.websiteBinancePayId.label', 'Bayar dengan Binance Pay')
-            ->assertJsonPath('product.checkout.websiteUsdtBep20.label', 'Bayar dengan USDT BSC BEP20');
+            ->assertSee('Bayar dengan Binance Pay')
+            ->assertSee('Bayar dengan USDT BSC BEP20')
+            ->assertSee('name="product_id" value="'.$product->id.'"', false);
     }
 
     private function activeReceiver(string $address): BscPaymentReceiver

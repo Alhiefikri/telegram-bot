@@ -4,22 +4,7 @@
     @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
 <body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)] motion-reduce:animate-none">
-    @php
-        $checkoutRestore = [
-            'productId' => old('product_id'),
-            'quantity' => old('quantity', 1),
-            'buyerName' => old('buyer_name', ''),
-            'supportContactChannel' => old('support_contact_channel', ''),
-            'supportContactValue' => old('support_contact_value', ''),
-            'email' => old('email', ''),
-            'paymentMethod' => old('payment_method'),
-            'termsAccepted' => in_array(old('terms_accepted'), [true, 1, '1', 'on', 'yes', 'true'], true),
-        ];
-    @endphp
-
-    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden"
-         x-data="storefrontModal()"
-         data-checkout-restore='@json($checkoutRestore, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)'>
+    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden">
         @include('storefront.partials.header')
 
         @include('storefront.partials.breadcrumbs', ['metadata' => $metadata])
@@ -32,7 +17,6 @@
         </main>
 
         @include('storefront.partials.footer')
-        @include('storefront.partials.product-modal')
         @include('storefront.partials.verified-purchase-activity')
     </div>
 

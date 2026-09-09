@@ -4,25 +4,7 @@
     @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
 <body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)]">
-    @php
-        $checkoutRestore = [
-            'productId' => old('product_id'),
-            'quantity' => old('quantity', 1),
-            'buyerName' => old('buyer_name', ''),
-            'supportContactChannel' => old('support_contact_channel', ''),
-            'supportContactValue' => old('support_contact_value', ''),
-            'email' => old('email', ''),
-            'paymentMethod' => old('payment_method'),
-            'termsAccepted' => in_array(old('terms_accepted'), [true, 1, '1', 'on', 'yes', 'true'], true),
-        ];
-        $checkoutPayload = $presentation->isBuyable ? $presentation->modalPayload() : null;
-        $checkoutMaintenanceActive = $checkoutMaintenance->active;
-    @endphp
-
-    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden"
-         x-data="storefrontModal()"
-         data-checkout-restore='@json($checkoutRestore, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)'
-         @if ($checkoutRequested && $checkoutPayload) data-checkout-product='@json($checkoutPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)' @endif>
+    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden">
         @include('storefront.partials.header')
 
             @include('storefront.partials.checkout-maintenance', ['maintenance' => $checkoutMaintenance])
@@ -172,16 +154,22 @@
                                         :href="$checkoutUrl"
                                         id="product-checkout-cta"
                                         class="neo-button-stable flex-1"
-                                        x-on:click.prevent="openProductModal(JSON.parse($el.dataset.product), { opener: $el })"
-                                        data-product='{{ json_encode($checkoutPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) }}'
                                     >
-                                        {{ $presentation->primaryCheckoutChoice()?->label ?? $copy['shop']['checkout_cta'] }}
+                                        Beli sekarang
                                     </x-storefront.button>
+                                    <form method="POST" action="{{ route('storefront.shop.cart.items.store') }}" class="flex-1">
+                                        @csrf
+                                        <input type="hidden" name="product_id" value="{{ $product->id }}">
+                                        <input type="hidden" name="quantity" value="1">
+                                        <button type="submit" class="neo-button inline-flex min-h-12 w-full items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] px-4 text-sm font-black text-[var(--sf-ink)] hover:bg-[var(--sf-yellow)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">
+                                            Tambah ke keranjang
+                                        </button>
+                                    </form>
                                 @elseif (! $isAvailable)
                                     <x-storefront.button href="#waitlist" variant="danger" class="flex-1" id="product-waitlist-cta">
                                         {{ $presentation->waitlistCtaLabel }}
                                     </x-storefront.button>
-                                @elseif ($checkoutMaintenanceActive)
+                                @elseif ($checkoutMaintenance->active)
                                     <x-storefront.button variant="warning" class="flex-1 cursor-not-allowed opacity-80" disabled>
                                         Checkout sedang maintenance
                                     </x-storefront.button>
@@ -220,64 +208,6 @@
                                 </section>
                             @endif
 
-                            @if ($presentation->isBuyable)
-                                <noscript>
-                                    <form method="POST" action="{{ route('storefront.shop.cart.items.store') }}" class="mb-3 grid gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4">
-                                        @csrf
-                                        <input type="hidden" name="product_id" value="{{ $product->id }}">
-                                        <label class="grid gap-2 text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">
-                                            Jumlah untuk keranjang
-                                            <input name="quantity" type="number" min="1" max="{{ min($stock, 20) }}" value="{{ old('quantity', 1) }}" class="neo-input h-12 bg-white px-3 text-base font-bold">
-                                        </label>
-                                        <button type="submit" class="neo-button inline-flex h-12 items-center justify-center bg-white px-5 text-sm font-black text-[var(--sf-ink)]">Tambah ke keranjang</button>
-                                    </form>
-                                    <form method="POST" action="{{ route('storefront.shop.checkout') }}" class="mt-6 grid gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4">
-
-                                        @csrf
-                                        <input type="hidden" name="product_id" value="{{ $product->id }}">
-                                        <input type="hidden" name="payment_method" value="qris">
-                                        <label class="grid gap-2 text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">
-                                            Jumlah
-                                            <input name="quantity" type="number" min="1" max="{{ min($stock, 20) }}" value="{{ old('quantity', 1) }}" class="neo-input h-12 bg-white px-3 text-base font-bold">
-                                        </label>
-                                        <label class="grid gap-2 text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">
-                                            {{ $copy['shop']['buyer_name_label'] }}
-                                            <input name="buyer_name" type="text" required value="{{ old('buyer_name') }}" placeholder="Nama pembeli" class="neo-input h-12 bg-white px-3 text-base font-bold">
-                                        </label>
-                                        <p class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['shop']['buyer_name_help'] }}</p>
-                                        <fieldset class="grid gap-2 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3">
-                                            <legend class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['support_contact_label'] }}</legend>
-                                            <select name="support_contact_channel" class="neo-input h-12 bg-white px-3 text-base font-bold">
-                                                <option value="">Tidak perlu</option>
-                                                <option value="telegram" @selected(old('support_contact_channel') === 'telegram')>Telegram</option>
-                                                <option value="whatsapp" @selected(old('support_contact_channel') === 'whatsapp')>WhatsApp</option>
-                                            </select>
-                                            <input name="support_contact_value" type="text" value="{{ old('support_contact_value') }}" placeholder="@username atau nomor WhatsApp" class="neo-input h-12 bg-white px-3 text-base font-bold">
-                                            <p class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['shop']['support_contact_help'] }}</p>
-                                        </fieldset>
-                                        <div class="grid gap-2 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                                            <p class="font-black text-[var(--sf-ink)]">Ringkasan pembayaran</p>
-                                            <p>Subtotal produk (IDR): {{ $storefront->idr($product->price_amount) }} × jumlah.</p>
-                                            <p>Biaya dan total QRIS final ditentukan provider setelah checkout. Bayar hanya nominal total pada invoice QRIS.</p>
-                                        </div>
-                                        <label for="storefront-nojs-terms-accepted" class="flex items-start gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-ink)]">
-                                            <input id="storefront-nojs-terms-accepted"
-                                                   name="terms_accepted"
-                                                   type="checkbox"
-                                                   value="1"
-                                                   required
-                                                   @checked(in_array(old('terms_accepted'), [true, 1, '1', 'on', 'yes', 'true'], true))
-                                                   class="mt-1 h-5 w-5 shrink-0 accent-[var(--sf-accent)]">
-                                            <span>Saya telah membaca dan menyetujui <a href="{{ route('storefront.policies.terms') }}" target="_blank" rel="noopener noreferrer" class="underline">{{ $copy['policies']['terms']['title'] }}</a> dan <a href="{{ route('storefront.policies.refund') }}" target="_blank" rel="noopener noreferrer" class="underline">{{ $copy['policies']['refund']['title'] }}</a>.</span>
-                                        </label>
-                                        <p class="text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['shop']['terms_consent_help'] }}</p>
-                                        @error('terms_accepted')
-                                            <p role="alert" class="text-sm font-black leading-relaxed text-[#9f1d2d]">{{ $message }}</p>
-                                        @enderror
-                                        <button type="submit" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">{{ $presentation->primaryCheckoutChoice()?->label ?? $copy['shop']['checkout_cta'] }}</button>
-                                    </form>
-                                </noscript>
-                            @endif
                         </div>
                     </article>
                 </div>
@@ -285,7 +215,6 @@
         </main>
 
         @include('storefront.partials.footer')
-        @include('storefront.partials.product-modal')
         @include('storefront.partials.verified-purchase-activity')
     </div>
 </body>

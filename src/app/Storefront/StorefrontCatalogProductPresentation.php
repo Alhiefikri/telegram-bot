@@ -22,7 +22,7 @@ final readonly class StorefrontCatalogProductPresentation
         public string $soldLabel,
         public StorefrontProductCoverPresentation $cover,
         public string $productUrl,
-        public string $modalUrl,
+        public string $checkoutUrl,
         public bool $canJoinWaitlist,
         public string $waitlistUrl,
         public string $waitlistCtaLabel,

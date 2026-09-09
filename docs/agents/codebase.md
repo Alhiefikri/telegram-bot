@@ -219,7 +219,7 @@ Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):
 - public catalog: `/`, `/shop`, `/produk-keluarga/{productFamily:slug}`, and `/produk/{product}`;
 - family discovery is built by `StorefrontFamilyPageBuilder` from the shared credential-free `CatalogBrowse` projection. `/produk-keluarga/{slug}` is canonical/indexable discovery; `/produk/{product}` remains the SKU-specific detail and waitlist contract.
 - guest cart: `GET /shop/cart`, `POST /shop/cart/items`, `PATCH /shop/cart/items/{product}`, and `DELETE /shop/cart/items/{product}`;
-- guest checkout review and submit: `GET /shop/checkout` and `POST /shop/checkout`;
+- checkout review and submit: direct product review `GET /shop/checkout/products/{product}`, cart review `GET /shop/checkout`, and `POST /shop/checkout`;
 - signed invoice/order: `/shop/orders/{order}`;
 - signed status refresh/cancel dan Binance Order ID submission;
 - Recovery Key order access: `/akses-pesanan`;
@@ -245,7 +245,7 @@ snapshot detects product, price, visibility, stock, or cart-quantity changes;
 authoritative product locks still revalidate all items before Order creation.
 
 `StorefrontShopCheckout` membuat customer web, cart, Order, Payment, reservation, dan Recovery Key melalui service yang sama dengan domain checkout. Checkout key berbasis session, snapshot cart lengkap, buyer name, dan payment rail memberi idempotency untuk submit ganda. Native QRIS dibuat pada Payment yang sudah ada; kegagalan pembuatan tidak membuat order atau payment kedua.
-Checkout Web Storefront mewajibkan persetujuan eksplisit atas kebijakan syarat/refund yang dikonfigurasi sebelum membuat Customer, Cart, Order, Payment, reservation, atau side effect provider. Versi `storefront.policies.terms.version` dan timestamp persetujuan disnapshot pada Order; modal hanya memaparkan base amount USDT yang aman terpisah dari subtotal IDR.
+Checkout Web Storefront mewajibkan persetujuan eksplisit atas kebijakan syarat/refund yang dikonfigurasi sebelum membuat Customer, Cart, Order, Payment, reservation, atau side effect provider. Versi `storefront.policies.terms.version` dan timestamp persetujuan disnapshot pada Order. Semua tombol beli mengarah ke review checkout halaman; katalog hanya memuat fakta publik tanpa payment atau credential payload.
 
 Invoice web memakai signed URL dan status refresh. `StorefrontShopPaymentStatusRefresh` dapat menjalankan recovery native QRIS, provider status lookup, atau Binance verification, tetapi paid transition tetap melalui `OrderLifecycle`. `StorefrontOrderAccess` hanya mengeluarkan plaintext Recovery Key saat issue awal; database menyimpan hash dan session grant bersifat terbatas waktu.
 

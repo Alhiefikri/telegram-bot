@@ -9,5 +9,6 @@ final readonly class StorefrontDirectCheckoutReviewSource implements StorefrontC
     public function __construct(
         public Product $product,
         public int $quantity,
+        public ?string $returnUrl = null,
     ) {}
 }

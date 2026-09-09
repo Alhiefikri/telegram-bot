@@ -31,7 +31,6 @@ class StorefrontProductPresenter
     private ?bool $bscRailReadinessObservedExternally = null;
 
     public function __construct(
-        private readonly StorefrontSupport $support,
         private readonly CheckoutMaintenance $maintenance,
         private readonly BscReadiness $bscReadiness,
         private readonly KlikQrisCheckoutSelector $klikQrisCheckout,
@@ -73,7 +72,7 @@ class StorefrontProductPresenter
             ? 'Stok kosong'
             : ($maintenanceState->active
                 ? 'Checkout maintenance'
-                : ($isBuyable ? 'Pilih Checkout' : $checkoutReadiness->label));
+                : ($isBuyable ? 'Beli sekarang' : $checkoutReadiness->label));
 
         return new StorefrontProductPresentation(
             id: (int) $product->id,
@@ -87,7 +86,6 @@ class StorefrontProductPresenter
             soldQuantity: $soldQuantity,
             isAvailable: $isAvailable,
             isBuyable: $isBuyable,
-            canOpenModal: $isAvailable && ($isBuyable || $maintenanceState->active),
             availabilityLabel: $isAvailable ? 'Tersedia' : 'Habis',
             stockLabel: $isAvailable ? 'Stok: '.$stockAvailable : 'Stok kosong',
             soldLabel: 'Terjual: '.$soldQuantity,
@@ -100,7 +98,6 @@ class StorefrontProductPresenter
             ),
             checkoutChoices: $checkoutChoices,
             checkoutReadiness: $checkoutReadiness,
-            support: $this->support->prePurchase($product),
             checkoutMaintenanceActive: $maintenanceState->active,
             checkoutMaintenanceNotice: StorefrontCheckoutMaintenanceCopy::notice($maintenanceState),
             usdtPriceAmount: $product->usdt_price_amount !== null ? (int) $product->usdt_price_amount : null,
@@ -152,10 +149,7 @@ class StorefrontProductPresenter
                     $isSakurupiah => 'QRIS otomatis dari Sakurupiah dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
                     default => 'QRIS otomatis dari KlikQRIS dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
                 },
-                url: route('storefront.shop.checkout'),
-                method: 'POST',
                 enabled: true,
-                productId: (int) $product->id,
                 provider: $readiness->provider,
             );
         }
@@ -176,10 +170,7 @@ class StorefrontProductPresenter
                     $binancePayAvailable => 'Checkout dengan Binance Pay.',
                     default => 'Checkout dengan USDT BSC BEP20.',
                 },
-                url: route('storefront.shop.checkout'),
-                method: 'POST',
                 enabled: true,
-                productId: (int) $product->id,
             );
 
             if ($binancePayAvailable) {
@@ -187,10 +178,7 @@ class StorefrontProductPresenter
                     key: 'website_binance_pay_id',
                     label: 'Bayar dengan Binance Pay',
                     description: 'Kirim jumlah USDT persis melalui Binance Pay ID. Ikuti instruksi pembayaran pada invoice.',
-                    url: route('storefront.shop.checkout'),
-                    method: 'POST',
                     enabled: true,
-                    productId: (int) $product->id,
                 );
             }
 
@@ -199,10 +187,7 @@ class StorefrontProductPresenter
                     key: 'website_usdt_bep20',
                     label: 'Bayar dengan USDT BSC BEP20',
                     description: 'Kirim jumlah USDT persis melalui BNB Smart Chain (BEP20). Masukkan TX hash setelah membayar.',
-                    url: route('storefront.shop.checkout'),
-                    method: 'POST',
                     enabled: true,
-                    productId: (int) $product->id,
                 );
             }
         }

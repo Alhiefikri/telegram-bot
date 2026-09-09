@@ -22,14 +22,10 @@ class StorefrontProductController extends Controller
         abort_unless($product->isPublicVisible(), 404);
 
         $this->events->productOpened($product);
-        if ($request->boolean('checkout')) {
-            $this->events->checkoutOpened($product, ['source' => 'product_page_checkout_query']);
-        }
 
         return view('storefront.product', $this->storefront->productPageViewData(
             product: $product,
             stock: $this->storefront->stockAvailable($product),
-            checkoutRequested: $request->boolean('checkout'),
             returnUrl: $this->urls->productReturnUrl($request, $product),
         ));
     }

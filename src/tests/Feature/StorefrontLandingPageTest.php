@@ -283,7 +283,7 @@ class StorefrontLandingPageTest extends TestCase
             ->assertDontSee('Canva Pro Lama');
     }
 
-    public function test_storefront_product_cards_show_public_details_links_and_lazy_modal_urls_without_stock_item_secrets(): void
+    public function test_storefront_product_cards_show_public_details_and_page_checkout_urls_without_stock_item_secrets(): void
     {
         config()->set('services.telegram.admin_contact_url', 'https://t.me/lhiestore');
         $product = Product::factory()->create([
@@ -307,8 +307,9 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('Terjual: 0')
             ->assertSee('Stok: 3')
             ->assertSee(route('storefront.products.show', $product), false)
-            ->assertSee('data-modal-url="'.route('storefront.products.modal', $product).'"', false)
-            ->assertSee('Akses Pesanan')
+            ->assertSee(route('storefront.shop.checkout.product', $product), false)
+            ->assertSee('Beli sekarang')
+            ->assertSee('+ Keranjang')
             ->assertDontSee('data-product=', false)
             ->assertDontSee('Produk Nonaktif Rahasia')
             ->assertDontSee('claude-user@example.test')
@@ -385,12 +386,11 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertStringContainsString('Canva Pro Promo', $featuredHtml);
         $this->assertStringContainsString('Rp99.000', $featuredHtml);
         $this->assertStringContainsString('Sisa 3', $featuredHtml);
-        $this->assertStringContainsString('Pilih Checkout', $featuredHtml);
+        $this->assertStringContainsString('Beli sekarang', $featuredHtml);
         $this->assertStringContainsString(
-            'href="'.route('storefront.products.show', ['product' => $featuredProduct]).'?checkout=1&amp;from=',
+            'href="'.route('storefront.shop.checkout.product', ['product' => $featuredProduct]).'?from=',
             $featuredHtml,
         );
-        $this->assertStringContainsString('data-modal-url="'.route('storefront.products.modal', $featuredProduct).'"', $featuredHtml);
         $this->assertStringNotContainsString('data-product=', $featuredHtml);
         $this->assertStringNotContainsString('fomoTimer', $featuredHtml);
         $this->assertStringNotContainsString('timeDisplay', $featuredHtml);
@@ -475,9 +475,10 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('STOK HABIS')
             ->assertDontSee('Ready (1)')
             ->assertDontSee('Stok 0')
-            ->assertDontSee('Belanja Sekarang')
-            ->assertSee('Pilih Checkout')
-            ->assertDontSee('href="'.route('storefront.products.show', Product::where('name', 'Akun Kosong')->first()).'"', false);
+            ->assertSee('Beli sekarang')
+            ->assertSee('Restock segera')
+            ->assertSee('Beri tahu saya saat tersedia')
+            ->assertSee('href="'.route('storefront.products.show', Product::where('name', 'Akun Kosong')->first()).'?from=', false);
     }
 
     public function test_storefront_avoids_inline_assets_and_mock_only_presentation(): void

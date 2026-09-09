@@ -15,6 +15,7 @@ use App\Storefront\StorefrontGuestCart;
 use App\Storefront\StorefrontOrderAccess;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
+use App\Storefront\StorefrontUrl;
 use Illuminate\Http\RedirectResponse;
 
 class StorefrontShopCheckoutController extends Controller
@@ -25,16 +26,18 @@ class StorefrontShopCheckoutController extends Controller
         StorefrontOrderAccess $orderAccess,
         StorefrontFunnelEvents $events,
         StorefrontGuestCart $guestCart,
+        StorefrontUrl $urls,
     ): RedirectResponse {
+        $isDirectCheckout = $request->filled('product_id');
+        $from = $request->query('from');
+        $eventMetadata = [
+            'source' => $isDirectCheckout
+                ? $urls->checkoutPageSource(is_string($from) ? $from : null)
+                : 'cart_checkout_page',
+            'payment_method' => $request->validated()['payment_method'] ?? null,
+        ];
         $product = Product::query()->find((int) $request->input('product_id'));
-        if ($product !== null) {
-            $events->checkoutOpened($product, [
-                'source' => 'checkout_submit',
-                'payment_method' => $request->validated()['payment_method'] ?? null,
-            ]);
-        }
-        $errorKey = $request->filled('product_id') ? 'product_id' : 'cart';
-
+        $errorKey = $isDirectCheckout ? 'product_id' : 'cart';
         try {
             $session = $request->session();
             $checkoutClientKey = $guestCart->clientKey($session);
@@ -48,10 +51,9 @@ class StorefrontShopCheckoutController extends Controller
             $events->checkoutSubmitted($product, null, [
                 'status_endpoint_result' => 'rejected',
                 'failure_kind' => $exception::class,
-                'payment_method' => $request->validated()['payment_method'] ?? null,
-            ]);
+            ] + $eventMetadata);
 
-            $recoveryUrl = $request->filled('product_id')
+            $recoveryUrl = $isDirectCheckout
                 ? $request->checkoutRecoveryUrl()
                 : route('storefront.shop.checkout.start');
 
@@ -64,11 +66,10 @@ class StorefrontShopCheckoutController extends Controller
             $events->checkoutSubmitted($product, null, [
                 'status_endpoint_result' => 'rejected',
                 'failure_kind' => $exception::class,
-                'payment_method' => $request->validated()['payment_method'] ?? null,
-            ]);
-            $recoveryUrl = $request->filled('product_id')
+            ] + $eventMetadata);
+            $recoveryUrl = $isDirectCheckout
                 ? $request->checkoutRecoveryUrl()
-                : route('storefront.shop.cart');
+                : route('storefront.shop.checkout.start');
 
             return redirect()
                 ->to($recoveryUrl)
@@ -79,9 +80,8 @@ class StorefrontShopCheckoutController extends Controller
             $events->checkoutSubmitted($product, null, [
                 'status_endpoint_result' => 'rejected',
                 'failure_kind' => $exception::class,
-                'payment_method' => $request->validated()['payment_method'] ?? null,
-            ]);
-            $recoveryUrl = $request->filled('product_id')
+            ] + $eventMetadata);
+            $recoveryUrl = $isDirectCheckout
                 ? $request->checkoutRecoveryUrl()
                 : route('storefront.shop.checkout.start');
 
@@ -101,8 +101,7 @@ class StorefrontShopCheckoutController extends Controller
 
         $events->checkoutSubmitted($product, $result->orderId === null ? null : Order::find($result->orderId), [
             'status_endpoint_result' => 'accepted',
-            'payment_method' => $request->validated()['payment_method'] ?? null,
-        ]);
+        ] + $eventMetadata);
 
         return redirect()->to($result->redirectUrl);
     }

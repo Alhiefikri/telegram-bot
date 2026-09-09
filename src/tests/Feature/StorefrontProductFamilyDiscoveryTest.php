@@ -137,7 +137,8 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
 
         $this->get(route('storefront.product-families.show', ['productFamily' => $family->slug]))
             ->assertOk()
-            ->assertSee('<h3 class="mt-2 font-display text-2xl font-black leading-tight">Canonical Family Product</h3>', false)
+            ->assertSee('Canonical Family Product')
+            ->assertSee('href="'.route('storefront.products.show', ['product' => $product]).'?from=', false)
             ->assertSee('name="product_id" value="'.$product->id.'"', false);
     }
 
@@ -160,23 +161,29 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->get($familyUrl)
             ->assertOk()
             ->assertSee('name="product_id" value="'.$product->id.'"', false);
-        $this->get(route('storefront.products.show', [
+        $this->get(route('storefront.shop.checkout.product', [
             'product' => $product,
-            'checkout' => 1,
             'from' => $familyUrl,
         ]))
             ->assertOk()
-            ->assertSee('data-checkout-product=', false)
+            ->assertSee('name="product_id" value="'.$product->id.'"', false)
+            ->assertSee('action="'.route('storefront.shop.checkout').'?from=', false)
             ->assertSee('href="'.$familyUrl.'"', false);
+        $openedEvent = AuditLog::query()->where('action', 'storefront.checkout_opened')->latest('id')->firstOrFail();
+        $this->assertSame('family_direct_checkout_page', $openedEvent->new_values['source']);
+        $this->assertArrayNotHasKey('buyer_name', $openedEvent->new_values);
 
-        $checkoutResponse = $this->post(route('storefront.shop.checkout'), [
+        $this->post(route('storefront.shop.checkout').'?from='.rawurlencode($familyUrl), [
             'product_id' => $product->id,
             'quantity' => 2,
             'buyer_name' => 'Family Direct Buyer',
             'payment_method' => 'qris',
             'terms_accepted' => '1',
-        ]);
-        $checkoutResponse->assertRedirect();
+        ])
+            ->assertRedirect();
+        $submittedEvent = AuditLog::query()->where('action', 'storefront.checkout_submitted')->latest('id')->firstOrFail();
+        $this->assertSame('family_direct_checkout_page', $submittedEvent->new_values['source']);
+        $this->assertArrayNotHasKey('buyer_name', $submittedEvent->new_values);
 
         $order = Order::query()->with('orderItems')->sole();
         $item = $order->orderItems->sole();
@@ -272,7 +279,7 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
                 'payment_method' => 'qris',
                 'terms_accepted' => '1',
             ])
-            ->assertRedirect(route('storefront.shop.cart'));
+            ->assertRedirect(route('storefront.shop.checkout.start'));
 
         $this->assertSame(0, Order::query()->count());
         $this->assertSame(0, InventoryMovement::query()->count());

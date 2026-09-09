@@ -59,16 +59,24 @@
                             if ($optionLabel === '') {
                                 $optionLabel = trim((string) $presentation->name);
                             }
-                            $productUrl = $presentation->productUrl.(str_contains($presentation->productUrl, '?') ? '&' : '?').'from='.urlencode($familyUrl);
-                            $checkoutUrl = $presentation->productUrl.(str_contains($presentation->productUrl, '?') ? '&' : '?').'checkout=1&from='.urlencode($familyUrl);
+                            $productUrl = $storefront->productUrl($presentation->id, $familyUrl);
+                            $checkoutUrl = $storefront->checkoutProductUrl($presentation->id, $familyUrl);
                         @endphp
                         <article id="family-option-{{ $presentation->id }}" data-product-id="{{ $presentation->id }}" class="neo-panel relative overflow-hidden bg-[var(--sf-surface)] p-5 sm:p-6">
                             <div class="flex items-start justify-between gap-4">
                                 <div>
-                                    <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-accent)]">SKU #{{ $presentation->id }}</p>
-                                    <h3 class="mt-2 font-display text-2xl font-black leading-tight">{{ $optionLabel }}</h3>
+                                    <h3 class="mt-2 font-display text-2xl font-black leading-tight">
+                                        <a href="{{ $productUrl }}" class="inline-flex min-h-11 items-center rounded-sm focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">
+                                            {{ $optionLabel }}
+                                        </a>
+                                    </h3>
+                                    <p class="mt-1 text-xs font-bold text-[var(--sf-muted)]">SKU #{{ $presentation->id }}</p>
                                     @if ($optionLabel !== $presentation->name)
-                                        <p class="mt-1 text-xs font-bold text-[var(--sf-muted)]">{{ $presentation->name }}</p>
+                                        <p class="mt-1 text-xs font-bold text-[var(--sf-muted)]">
+                                            <a href="{{ $productUrl }}" class="inline-flex min-h-11 items-center rounded-sm focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">
+                                                {{ $presentation->name }}
+                                            </a>
+                                        </p>
                                     @endif
                                 </div>
                                 <span class="rounded-full border-2 border-[var(--sf-border)] px-3 py-1 text-xs font-black {{ $presentation->isAvailable ? 'bg-[var(--sf-yellow)]' : 'bg-[#ffd7d7] text-[#9f1d2d]' }}">
@@ -131,18 +139,18 @@
                             </div>
 
                             <div class="mt-5 flex flex-col gap-3 sm:flex-row">
-                                <a href="{{ $presentation->isAvailable ? $checkoutUrl : $productUrl }}" class="neo-button inline-flex min-h-12 flex-1 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white hover:bg-[var(--sf-accent-deep)]">
-                                    {{ $presentation->isAvailable ? 'Pilih opsi & checkout' : 'Lihat detail opsi' }}
+                                <a href="{{ $presentation->isAvailable ? $checkoutUrl : $productUrl }}" class="neo-button inline-flex min-h-12 flex-1 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white hover:bg-[var(--sf-accent-deep)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">
+                                    {{ $presentation->isAvailable ? 'Beli' : 'Lihat detail opsi' }}
                                 </a>
                                 @if ($presentation->isAvailable)
                                     <form method="POST" action="{{ route('storefront.shop.cart.items.store') }}" class="flex-1">
                                         @csrf
                                         <input type="hidden" name="product_id" value="{{ $presentation->id }}">
                                         <input type="hidden" name="quantity" value="1">
-                                        <button type="submit" class="inline-flex min-h-12 w-full items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] hover:bg-[var(--sf-yellow)]">Tambah ke keranjang</button>
+                                        <button type="submit" class="inline-flex min-h-12 w-full items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] hover:bg-[var(--sf-yellow)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">Tambah ke keranjang</button>
                                     </form>
                                 @else
-                                    <a href="{{ $productUrl }}#waitlist" class="inline-flex min-h-12 flex-1 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 text-sm font-black hover:bg-white">Beri tahu saat tersedia</a>
+                                    <a href="{{ $productUrl }}#waitlist" class="inline-flex min-h-12 flex-1 items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 text-sm font-black hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">Beri tahu saat tersedia</a>
                                 @endif
                             </div>
                         </article>

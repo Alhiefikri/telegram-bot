@@ -43,6 +43,7 @@ final readonly class StorefrontCheckoutReviewPresentation
         public array $supportContext,
         public string $cartUrl,
         public string $checkoutUrl,
+        public string $checkoutSubmitUrl,
     ) {}
 
     public function isDirect(): bool
@@ -95,12 +96,13 @@ final readonly class StorefrontCheckoutReviewPresentation
             'supportHref' => $this->supportHref,
             'supportDestination' => $this->supportDestination,
             'supportContext' => $this->supportContext,
+            'metadata' => $this->metadata,
             'pageTitle' => $this->metadata->title,
             'pageDescription' => $this->metadata->description,
             'canonicalUrl' => $this->metadata->canonicalUrl,
-            'metadata' => $this->metadata,
             'cartUrl' => $this->cartUrl,
             'checkoutUrl' => $this->checkoutUrl,
+            'checkoutSubmitUrl' => $this->checkoutSubmitUrl,
         ];
     }
 }

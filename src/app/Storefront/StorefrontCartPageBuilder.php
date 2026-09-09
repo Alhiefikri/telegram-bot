@@ -85,11 +85,15 @@ final class StorefrontCartPageBuilder
         ));
     }
 
-    public function directCheckoutReview(Product $product, mixed $requestedQuantity = null): StorefrontCheckoutReviewPresentation
-    {
+    public function directCheckoutReview(
+        Product $product,
+        mixed $requestedQuantity = null,
+        ?string $returnUrl = null,
+    ): StorefrontCheckoutReviewPresentation {
         return $this->buildReview(new StorefrontDirectCheckoutReviewSource(
             product: $product,
             quantity: $this->normalizeQuantity($requestedQuantity, $product->availableStock()),
+            returnUrl: $returnUrl,
         ));
     }
 
@@ -134,10 +138,11 @@ final class StorefrontCartPageBuilder
         );
         $returnUrl = $directProduct === null
             ? route('storefront.shop.cart')
-            : $this->urls->productUrl($directProduct);
+            : $source->returnUrl ?? $this->urls->productUrl($directProduct);
         $checkoutUrl = $directProduct === null
             ? route('storefront.shop.checkout.start')
-            : route('storefront.shop.checkout.product', ['product' => $directProduct]);
+            : $this->urls->checkoutProductUrl($directProduct, $returnUrl);
+        $checkoutSubmitUrl = $this->urls->checkoutSubmitUrl($directProduct === null ? null : $returnUrl);
         $supportContext = $directProduct === null
             ? $this->storefront->support()->general()
             : $this->storefront->support()->prePurchase($directProduct);
@@ -177,6 +182,7 @@ final class StorefrontCartPageBuilder
             supportContext: $supportContext,
             cartUrl: route('storefront.shop.cart'),
             checkoutUrl: $checkoutUrl,
+            checkoutSubmitUrl: $checkoutSubmitUrl,
         );
     }
 
