@@ -217,37 +217,47 @@ remain independent.
 Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):
 
 - public catalog: `/`, `/shop`, `/produk-keluarga/{productFamily:slug}`, and `/produk/{product}`;
-- family discovery is built by `StorefrontFamilyPageBuilder` from the shared credential-free `CatalogBrowse` projection. `/produk-keluarga/{slug}` is canonical/indexable discovery; `/produk/{product}` remains the SKU-specific detail and waitlist contract.
+- family discovery is built by `StorefrontFamilyPageBuilder` from the shared credential-free `CatalogBrowse` projection. `/produk-keluarga/{slug}` is canonical/indexable discovery; `/produk/{product}` remains the SKU-specific detail and waitlist contract;
 - guest cart: `GET /shop/cart`, `POST /shop/cart/items`, `PATCH /shop/cart/items/{product}`, and `DELETE /shop/cart/items/{product}`;
-- checkout review and submit: direct product review `GET /shop/checkout/products/{product}`, cart review `GET /shop/checkout`, and `POST /shop/checkout`;
+- canonical direct Product checkout review: `GET /shop/checkout/products/{product}` (`storefront.shop.checkout.product`), with bounded `quantity` and safe same-origin return context;
+- shared Cart checkout review: `GET /shop/checkout` (`storefront.shop.checkout.start`);
+- one checkout transaction: `POST /shop/checkout` (`storefront.shop.checkout`) accepts exactly one direct Product source or Cart snapshot;
 - signed invoice/order: `/shop/orders/{order}`;
-- signed status refresh/cancel dan Binance Order ID submission;
+- signed status refresh/cancel and Binance Order ID submission;
 - Recovery Key order access: `/akses-pesanan`;
 - customer account/login link: `/akun/*`;
-- admin: `/admin/*` di balik `admin.access`.
-`GET /shop` renders the canonical full catalog. Its bounded query state is
-`q`, `category` (public slug or id), `sort` (`recommended`, `newest`,
-`price_asc`, or `price_desc`), and `page`; the shared `CatalogBrowse` projection
-collapses Product Family members into one card while retaining standalone
-Products. Pagination and category links carry only normalized state. The
-homepage remains the curated, cached entry point.
+- admin: `/admin/*` behind `admin.access`.
 
-`StorefrontGuestCart` binds the active guest Cart to the server-side
-storefront session key and creates a fresh web Customer when the previous Cart
-is checked out or expired. Cart mutations remain owned by `CartService`; the
-cart and checkout review presenters show current product values without
-accepting browser prices or names as order data.
+`StorefrontShopCheckoutReviewController` and `StorefrontCartPageBuilder` own the page-based checkout review module. The Blade page
+[`storefront/shop-checkout.blade.php`](../../src/resources/views/storefront/shop-checkout.blade.php)
+renders direct Product and guest Cart sources through one hierarchy: source-aware return link,
+summary, quantity or read-only Cart items, buyer name, selected payment method, optional
+disclosures, consent, and one in-flow submit action. It has one document scroll, no checkout
+dialog, no nested checkout scroll container, and no modal transport/runtime state.
 
-`StorefrontShopCheckout` composes direct-buy and cart review submissions through
-the same Cart and `OrderCheckoutService` transaction. Cart checkout keys include
-the complete ordered item snapshot and selected payment rail. The signed review
-snapshot detects product, price, visibility, stock, or cart-quantity changes;
-authoritative product locks still revalidate all items before Order creation.
+Every public purchase entry point uses this contract: homepage and `/shop` Product cards
+link `Beli sekarang` to the canonical direct review; Product detail uses
+`#product-checkout-cta`; Product Family options use `Beli` directly to the same review; Cart
+uses `Lanjut checkout` to the shared Cart review. No entry point uses
+`/produk/{product}?checkout=1`, `data-modal-url`, or the retired Product modal endpoint.
 
-`StorefrontShopCheckout` membuat customer web, cart, Order, Payment, reservation, dan Recovery Key melalui service yang sama dengan domain checkout. Checkout key berbasis session, snapshot cart lengkap, buyer name, dan payment rail memberi idempotency untuk submit ganda. Native QRIS dibuat pada Payment yang sudah ada; kegagalan pembuatan tidak membuat order atau payment kedua.
-Checkout Web Storefront mewajibkan persetujuan eksplisit atas kebijakan syarat/refund yang dikonfigurasi sebelum membuat Customer, Cart, Order, Payment, reservation, atau side effect provider. Versi `storefront.policies.terms.version` dan timestamp persetujuan disnapshot pada Order. Semua tombol beli mengarah ke review checkout halaman; katalog hanya memuat fakta publik tanpa payment atau credential payload.
+`StorefrontShopCheckout` composes direct-buy and Cart review submissions through the same Cart and
+`OrderCheckoutService` transaction. Cart checkout keys include the complete ordered item snapshot
+and selected payment rail. The signed review snapshot detects Product, price, visibility, stock,
+or Cart-quantity changes; authoritative Product locks still revalidate all items before Order
+creation.
 
-Invoice web memakai signed URL dan status refresh. `StorefrontShopPaymentStatusRefresh` dapat menjalankan recovery native QRIS, provider status lookup, atau Binance verification, tetapi paid transition tetap melalui `OrderLifecycle`. `StorefrontOrderAccess` hanya mengeluarkan plaintext Recovery Key saat issue awal; database menyimpan hash dan session grant bersifat terbatas waktu.
+Validation, provider readiness, maintenance, stale state, or stock failure redirects back to the
+same canonical direct or Cart review URL with safe `old()` values, an error summary, and the
+first-invalid focus target. GET review performs no Customer, Cart, Order, Payment, reservation,
+provider, queue, or outbound side effect. Checkout Web Storefront requires explicit terms/refund
+consent before any checkout side effect; the accepted policy version and timestamp are snapshotted
+on the Order.
+
+Invoice web uses signed URLs and status refresh. `StorefrontShopPaymentStatusRefresh` may recover
+native QRIS, perform provider status lookup, or verify Binance, but paid transition remains owned
+by `OrderLifecycle`. `StorefrontOrderAccess` only emits plaintext Recovery Key at issue time;
+the database stores its hash and session grants are time-limited.
 
 ### 4.3 Admin dashboard
 
@@ -270,7 +280,7 @@ Untuk stok, `AdminProductAccountStockController` menerima JSON Account Input (1�
 
 Adapter presentation tidak memiliki aturan cutoff sendiri. `StorefrontShopCheckout` hanya melakukan preflight non-authoritative sebelum membuat Customer/cart; guard service tetap wajib. `StorefrontResponseCache` memasukkan maintenance `version` ke cache identity sehingga request pertama setelah perubahan nyata tidak memakai HTML lama, sedangkan no-op mempertahankan identity. `StorefrontCatalogPageBuilder`/presenter dan view partial menampilkan notice serta mengganti CTA; `TelegramMenuIntents`, `TelegramCatalogIntents`, `TelegramCartIntents`, dan callback handlers mempertahankan browsing/stock/cart, sementara `TelegramCheckoutMaintenanceCallbackHandler` menyediakan Cek Status. Status callback terdaftar sekali setelah privacy/community gate dan tidak mengirim broadcast.
 
-Entry point test terfokus adalah `tests/Feature/StorefrontShopCartTest.php` (guest cart session isolation, expiry, stale snapshot, multi-item checkout, duplicate submit, maintenance rejection, and mixed fulfillment), `tests/Feature/StorefrontShopCheckoutTest.php` (direct checkout and payment rails), `tests/Feature/CheckoutMaintenanceTest.php` (mutation, zero-side-effect rejection, existing native QRIS/status refresh, lifecycle continuation), `tests/Feature/PakasirWebhookTest.php` (authoritative callback, reconciliation, receipt/Sales Proof Post), `tests/Feature/Telegram/CheckoutMaintenanceTest.php`, dan `tests/Feature/CheckoutMaintenancePostgresConcurrencyTest.php`. Lane PostgreSQL dijalankan oleh `composer test:concurrency-gate`; race test mencakup kedua commit-order outcome, duplicate version/audit prevention, and lock-order completion.
+Entry point test terfokus adalah `tests/Feature/StorefrontShopCartTest.php` (guest Cart session isolation, expiry, stale snapshot, multi-item checkout, duplicate submit, maintenance rejection, and mixed fulfillment), `tests/Feature/StorefrontShopCheckoutTest.php` (direct checkout and payment rails), `tests/Feature/StorefrontProductCheckoutTest.php` (canonical Product review, page cutover, unavailable state, and recovery), `tests/Feature/CheckoutMaintenanceTest.php` (mutation, zero-side-effect rejection, existing native QRIS/status refresh, lifecycle continuation), `tests/Feature/PakasirWebhookTest.php` (authoritative callback, reconciliation, receipt/Sales Proof Post), `tests/Feature/Telegram/CheckoutMaintenanceTest.php`, and `tests/Feature/CheckoutMaintenancePostgresConcurrencyTest.php`. Browser customer evidence is in `tests/Browser/admin-dashboard-responsive.spec.js`; `npm run test:browser:customer` selects the `customer checkout:` cases covering home/shop/Product detail/Product Family, Cart, signed manual invoice, JavaScript-disabled form submission, failure recovery, browser back, keyboard/disclosures, reduced motion, zoom/reflow, and the 320×568, 390×844, 768×900, 1280×900, 1440×900, and 1920×1080 viewport matrix. Lane PostgreSQL dijalankan oleh `composer test:concurrency-gate`; race test mencakup kedua checkout locks/reservation hanya bila perubahan menyentuh boundary tersebut.
 
 ### 4.4 Buyer history dan KlikQRIS reporting
 
@@ -562,7 +572,7 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/AdminDashboardReportingTest.php` — active-tab isolation, role policy, local matching, filters, safe errors, pagination, and proof URL safety.
 - `tests/Feature/CustomerAccountTest.php` — customer ownership, all Order filters/statuses, pagination, non-paid privacy, and paid credential continuity.
 - `tests/Unit/Services/` — pure parser/policy/outcome/verification behavior.
-- `tests/Browser/admin-dashboard-responsive.spec.js` — customer/admin browser behavior, reporting navigation, and responsive checks.
+- `tests/Browser/admin-dashboard-responsive.spec.js` — customer checkout/page-flow evidence, admin behavior, reporting navigation, and responsive checks. The `customer checkout:` cases are the focused Storefront lane; they assert geometry and interaction behavior rather than screenshot-only output.
 - `tests/Browser/` — real browser responsive/admin/Docker smoke.
 
 Perintah umum:
@@ -573,6 +583,7 @@ composer test
 composer test:foundation
 composer test:concurrency-gate
 npm run build
+npm run test:browser:customer
 ```
 
 `composer test:concurrency-gate` memerlukan PostgreSQL disposable dan dipakai ketika perubahan menyentuh lock/stock/checkout/payment. `npm run build` diperlukan bila perubahan menyentuh Blade asset, Vite entry, CSS, atau JavaScript.

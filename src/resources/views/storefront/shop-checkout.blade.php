@@ -7,7 +7,7 @@
     <div class="storefront-shell relative z-10 flex min-h-screen flex-col justify-between overflow-x-hidden">
         @include('storefront.partials.header')
 
-        <main class="flex-grow pb-16 pt-8 sm:pt-12">
+        <main class="flex-grow pb-16 pt-4 sm:pt-12">
             <section class="mx-auto max-w-5xl px-4 sm:px-6">
                 @php
                     $checkoutValidationMessages = $errors->getMessages();
@@ -36,7 +36,7 @@
                     <span aria-hidden="true">&larr;</span> {{ $checkoutReturnLabel }}
                 </a>
 
-                <div class="mt-5 max-w-3xl">
+                <div class="mt-4 max-w-3xl">
                     <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Checkout web</p>
                     <h1 class="mt-2 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">{{ $checkoutSource === 'direct' ? 'Review produk sebelum bayar.' : 'Review pesanan sebelum bayar.' }}</h1>
                     <p class="mt-2 max-w-2xl text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $checkoutSource === 'direct' ? 'Pastikan produk, jumlah, dan metode pembayaran sudah benar. Stok baru dicadangkan setelah checkout berhasil.' : 'Pastikan item, jumlah, dan metode pembayaran sudah benar. Stok baru dicadangkan setelah checkout berhasil.' }}</p>
@@ -58,7 +58,7 @@
                     </section>
                 @endif
 
-                <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
+                <div class="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
                     <div class="grid min-w-0 gap-5">
                         <section class="neo-panel bg-[var(--sf-surface)] p-4 sm:p-5" aria-labelledby="checkout-summary-title">
                             <div class="flex flex-wrap items-start justify-between gap-3 border-b-[3px] border-dashed border-[var(--sf-border)] pb-4">

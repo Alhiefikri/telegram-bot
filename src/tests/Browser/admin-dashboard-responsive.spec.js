@@ -16,6 +16,15 @@ let serverProcess;
 
 test.describe.configure({ mode: "serial" });
 
+const customerCheckoutViewports = [
+  { width: 320, height: 568 },
+  { width: 390, height: 844 },
+  { width: 768, height: 900 },
+  { width: 1280, height: 900 },
+  { width: 1440, height: 900 },
+  { width: 1920, height: 1080 },
+];
+
 test.beforeAll(async () => {
   const tempDir = mkdtempSync(
     path.join(tmpdir(), "telegram-bot-admin-responsive-")
@@ -61,7 +70,7 @@ test.afterAll(async () => {
   }
 });
 
-test("opens canonical page checkout from the landing catalog", async ({
+test("customer checkout: opens canonical page checkout from the landing catalog", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 900 });
@@ -82,7 +91,7 @@ test("opens canonical page checkout from the landing catalog", async ({
   await expect(page.locator('input[name="product_id"]')).toBeAttached();
 });
 
-test("keeps canonical checkout usable without JavaScript", async ({
+test("customer checkout: keeps canonical checkout usable without JavaScript", async ({
   browser,
 }) => {
   const context = await browser.newContext({
@@ -114,12 +123,34 @@ test("keeps canonical checkout usable without JavaScript", async ({
       "action",
       /\/shop\/checkout/
     );
+
+    await page
+      .getByRole("textbox", { name: "Nama pembeli" })
+      .fill("No JavaScript Buyer");
+    const terms = page.locator("#checkout-terms-accepted");
+    await terms.focus();
+    await page.keyboard.press("Space");
+    await expect(terms).toBeChecked();
+    const submit = page.getByRole("button", { name: /Buat invoice/ });
+    await submit.focus();
+    await expect(submit).toBeFocused();
+    await Promise.all([
+      page.waitForURL(/\/shop\/orders\/\d+/, { waitUntil: "domcontentloaded" }),
+      page.keyboard.press("Enter"),
+    ]);
+    await expect(page).toHaveURL(/\/shop\/orders\/\d+/);
+    await expect(
+      page.getByRole("heading", { name: "Order pembayaran manual dibuat" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Invoice QR manual" })
+    ).toBeVisible();
   } finally {
     await context.close();
   }
 });
 
-test("keeps storefront card actions separate and keyboard reachable", async ({
+test("customer checkout: keeps storefront card actions separate and keyboard reachable", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 900 });
@@ -128,9 +159,16 @@ test("keeps storefront card actions separate and keyboard reachable", async ({
   const card = page.locator("article.product-card").filter({
     hasText: "Browser QA Produk A",
   });
-  await card.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(700);
+  await card.evaluate((element) =>
+    element.scrollIntoView({
+      block: "center",
+      inline: "nearest",
+      behavior: "instant",
+    })
+  );
   await expect(card).toBeVisible();
+  await expect(card).toHaveCSS("transform", "none");
+  await expect(card).toHaveCSS("opacity", "1");
   await expect(card.locator('a[href*="/produk/"]').first()).toBeVisible();
   await expect(card.locator('a[href*="/shop/checkout/products/"]')).toHaveCount(
     1
@@ -154,8 +192,524 @@ test("keeps storefront card actions separate and keyboard reachable", async ({
       })
     );
   expect(
-    actionSizes.filter(({ width, height }) => width < 44 || height < 44)
+    actionSizes.filter(
+      ({ width, height }) => Math.round(width) < 44 || Math.round(height) < 44
+    )
   ).toEqual([]);
+});
+
+test("customer checkout: completes direct purchases from home, shop, Family, and Product detail", async ({
+  page,
+}) => {
+  const retiredRequests = observeRetiredCheckoutRequests(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await navigateToCheckoutFromProductCard(page, "Browser QA Produk A");
+  await completeManualCheckout(page, "Home Direct Buyer");
+
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  await navigateToCheckoutFromProductCard(page, "Browser QA Produk B");
+  await completeManualCheckout(page, "Shop Direct Buyer");
+
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  const familyCard = page
+    .locator("a.family-card")
+    .filter({ hasText: "Browser QA Product Family" });
+  await expect(familyCard).toBeVisible();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    familyCard.click(),
+  ]);
+  await expect(page).toHaveURL(/\/produk-keluarga\/browser-responsive-family/);
+  await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+
+  const familyOption = page
+    .locator("#family-options article")
+    .filter({ hasText: "QA option" });
+  await expect(familyOption).toBeVisible();
+  const familyCheckoutLink = familyOption.locator(
+    'a[href*="/shop/checkout/products/"]'
+  );
+  await expect(familyCheckoutLink).toHaveCount(1);
+  await Promise.all([
+    page.waitForURL(/\/shop\/checkout\/products\/\d+/, {
+      waitUntil: "domcontentloaded",
+    }),
+    familyCheckoutLink.click(),
+  ]);
+
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  const productCard = page
+    .locator("article.product-card")
+    .filter({ hasText: "Browser QA Produk B" })
+    .first();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    productCard.getByRole("link", { name: "Detail", exact: true }).click(),
+  ]);
+  await expect(page).toHaveURL(/\/produk\/\d+/);
+  await expect(
+    page.getByRole("heading", { name: "Browser QA Produk B" })
+  ).toBeVisible();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    page.locator("#product-checkout-cta").click(),
+  ]);
+  await expectStorefrontPageCheckout(page);
+  await completeManualCheckout(page, "Product Detail Buyer");
+
+  expect(retiredRequests).toEqual([]);
+});
+
+test("customer checkout: completes a multi-item Cart purchase through shared review", async ({
+  page,
+}) => {
+  const retiredRequests = observeRetiredCheckoutRequests(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  await addProductCardToCart(page, "Browser QA Produk A");
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  await addProductCardToCart(page, "Browser QA Produk B");
+
+  await expect(
+    page.locator("[data-cart-item]").filter({ hasText: "Browser QA Produk A" })
+  ).toBeVisible();
+  await expect(
+    page.locator("[data-cart-item]").filter({ hasText: "Browser QA Produk B" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Lanjut checkout", exact: true })
+  ).toBeVisible();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    page.getByRole("link", { name: "Lanjut checkout", exact: true }).click(),
+  ]);
+  await expect(page).toHaveURL(/\/shop\/checkout(?:\?|$)/);
+  await expect(
+    page.getByRole("heading", { name: "Review pesanan sebelum bayar." })
+  ).toBeVisible();
+  await expectStorefrontPageCheckout(page);
+  await completeManualCheckout(page, "Cart Direct Buyer");
+
+  expect(retiredRequests).toEqual([]);
+});
+
+test("customer checkout: restores direct and Cart validation failures on canonical pages", async ({
+  page,
+}) => {
+  const retiredRequests = observeRetiredCheckoutRequests(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await navigateToCheckoutFromProductCard(page, "Browser QA Produk A");
+  const directCheckoutUrl = page.url();
+  await page.getByRole("textbox", { name: "Nama pembeli" }).fill("x");
+  await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    page.getByRole("button", { name: /Buat invoice/ }).click(),
+  ]);
+  await expect(page).toHaveURL(directCheckoutUrl);
+  await expect(page.locator("#checkout-error-summary")).toBeFocused();
+  await expect(page.getByRole("textbox", { name: "Nama pembeli" })).toHaveValue(
+    "x"
+  );
+  await expect(
+    page.getByRole("checkbox", { name: /Saya menyetujui/ })
+  ).toBeChecked();
+  await expectStorefrontPageCheckout(page);
+
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  await addProductCardToCart(page, "Browser QA Produk A");
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  await addProductCardToCart(page, "Browser QA Produk B");
+  await page
+    .getByRole("link", { name: "Lanjut checkout", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/shop\/checkout(?:\?|$)/);
+  const cartCheckoutUrl = page.url();
+  await page.getByRole("textbox", { name: "Nama pembeli" }).fill("x");
+  await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    page.getByRole("button", { name: /Buat invoice/ }).click(),
+  ]);
+  await expect(page).toHaveURL(cartCheckoutUrl);
+  await expect(page.locator("#checkout-error-summary")).toBeFocused();
+  await expect(page.getByRole("textbox", { name: "Nama pembeli" })).toHaveValue(
+    "x"
+  );
+  await expect(page.locator('input[name="cart_snapshot"]')).toHaveValue(/.+/);
+  await expect(
+    page
+      .locator("[data-checkout-item]")
+      .filter({ hasText: "Browser QA Produk A" })
+  ).toBeVisible();
+  await expectStorefrontPageCheckout(page);
+
+  expect(retiredRequests).toEqual([]);
+});
+
+test("customer checkout: restores provider and stock failures on canonical pages", async ({
+  page,
+}) => {
+  const retiredRequests = observeRetiredCheckoutRequests(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
+    waitUntil: "domcontentloaded",
+  });
+  const stockFailureUrl = page.url();
+  const longProductId = new URL(stockFailureUrl).pathname.split("/").pop();
+  await page
+    .getByRole("textbox", { name: "Nama pembeli" })
+    .fill("Stock Failure Buyer");
+  await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
+  await runArtisan([
+    "tinker",
+    "--execute",
+    `App\\Models\\Product::query()->findOrFail(${longProductId})->forceFill(['reserved_stock' => 4])->save();`,
+  ]);
+
+  try {
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      page.getByRole("button", { name: /Buat invoice/ }).click(),
+    ]);
+    await expect(page).toHaveURL(/\/shop\/checkout\/products\/\d+(?:\?|$)/);
+    expect(new URL(page.url()).pathname).toBe(
+      new URL(stockFailureUrl).pathname
+    );
+    await expect(page.locator("#checkout-error-summary")).toBeFocused();
+    await expect(page.locator("#checkout-error-summary")).toContainText(
+      /stok|berubah|tersedia/i
+    );
+    await expectStorefrontCheckoutRecovery(page);
+  } finally {
+    await runArtisan([
+      "tinker",
+      "--execute",
+      `App\\Models\\Product::query()->findOrFail(${longProductId})->forceFill(['stock' => 4, 'reserved_stock' => 0])->save();`,
+    ]);
+  }
+
+  await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
+    waitUntil: "domcontentloaded",
+  });
+  const providerFailureUrl = page.url();
+  await page
+    .getByRole("textbox", { name: "Nama pembeli" })
+    .fill("Provider Failure Buyer");
+  await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
+  await runArtisan([
+    "tinker",
+    "--execute",
+    `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['is_active' => false]);`,
+  ]);
+
+  try {
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      page.getByRole("button", { name: /Buat invoice/ }).click(),
+    ]);
+    await expect(page).toHaveURL(/\/shop\/checkout\/products\/\d+(?:\?|$)/);
+    expect(new URL(page.url()).pathname).toBe(
+      new URL(providerFailureUrl).pathname
+    );
+    await expect(page.locator("#checkout-error-summary")).toBeFocused();
+    await expect(page.locator("#checkout-error-summary")).toContainText(
+      /provider|aktif|hubungi admin|checkout/i
+    );
+    await expectStorefrontCheckoutRecovery(page);
+  } finally {
+    await runArtisan([
+      "tinker",
+      "--execute",
+      `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['is_active' => true, 'payment_mode' => 'manual', 'binance_pay_enabled' => false]);`,
+    ]);
+  }
+
+  expect(retiredRequests).toEqual([]);
+});
+
+test("customer checkout: restores Product and Family context through browser back", async ({
+  page,
+}) => {
+  const retiredRequests = observeRetiredCheckoutRequests(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  const productCard = page
+    .locator("article.product-card")
+    .filter({ hasText: "Browser QA Produk B" })
+    .first();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    productCard.getByRole("link", { name: "Detail", exact: true }).click(),
+  ]);
+  const productUrl = page.url();
+  await page.locator("#product-checkout-cta").click();
+  await expectStorefrontPageCheckout(page);
+  await page.goBack({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(productUrl);
+  await expect(
+    page.getByRole("heading", { name: "Browser QA Produk B" })
+  ).toBeVisible();
+  await expect(page.locator("#product-checkout-cta")).toBeVisible();
+
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  const familyCard = page
+    .locator("a.family-card")
+    .filter({ hasText: "Browser QA Product Family" });
+  await familyCard.click();
+  await expect(page).toHaveURL(/\/produk-keluarga\/browser-responsive-family/);
+  const familyUrl = page.url();
+  const familyCheckoutLink = page
+    .locator("#family-options article")
+    .filter({ hasText: "QA option" })
+    .locator('a[href*="/shop/checkout/products/"]');
+  await expect(familyCheckoutLink).toHaveCount(1);
+  await Promise.all([
+    page.waitForURL(/\/shop\/checkout\/products\/\d+/, {
+      waitUntil: "domcontentloaded",
+    }),
+    familyCheckoutLink.click(),
+  ]);
+  await expectStorefrontPageCheckout(page);
+  await page.goBack({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(familyUrl);
+  await expect(
+    page.getByRole("heading", { name: "Pilihan yang tersedia" })
+  ).toBeVisible();
+  await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+
+  expect(retiredRequests).toEqual([]);
+});
+
+test("customer checkout: proves direct and Family review geometry across required viewports", async ({
+  page,
+}) => {
+  const retiredRequests = observeRetiredCheckoutRequests(page);
+
+  for (const viewport of customerCheckoutViewports) {
+    await page.setViewportSize(viewport);
+    await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+    await navigateToCheckoutFromProductCard(page, "Browser QA Produk A");
+    await expectStorefrontCheckoutResponsiveContract(page, viewport);
+
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    const familyCard = page
+      .locator("a.family-card")
+      .filter({ hasText: "Browser QA Product Family" });
+    await expect(familyCard).toHaveCount(1);
+    await expect(familyCard).toBeVisible();
+    await familyCard.click({ force: true, noWaitAfter: true });
+    await page.waitForLoadState("domcontentloaded");
+    await expect(page).toHaveURL(
+      /\/produk-keluarga\/browser-responsive-family/
+    );
+    const familyOption = page
+      .locator("#family-options article")
+      .filter({ hasText: "QA option" });
+    const familyCheckoutLink = familyOption.locator(
+      'a[href*="/shop/checkout/products/"]'
+    );
+    await expect(familyCheckoutLink).toHaveCount(1);
+    await expect(familyOption).toHaveCSS("transform", "none");
+    await expect(familyOption).toHaveCSS("opacity", "1");
+    await familyCheckoutLink.click({ force: true, noWaitAfter: true });
+    await expectStorefrontPageCheckout(page);
+    await expectStorefrontCheckoutResponsiveContract(page, viewport);
+  }
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
+    waitUntil: "domcontentloaded",
+  });
+  const longProductMetrics = await page
+    .locator("[data-checkout-item] h3")
+    .evaluate((heading) => ({
+      clientWidth: heading.clientWidth,
+      scrollWidth: heading.scrollWidth,
+      text: heading.textContent,
+    }));
+  expect(longProductMetrics.text).toContain("Browser QA Produk");
+  expect(longProductMetrics.scrollWidth).toBeLessThanOrEqual(
+    longProductMetrics.clientWidth + 1
+  );
+  await expectStorefrontCheckoutResponsiveContract(page, {
+    width: 320,
+    height: 568,
+  });
+
+  expect(retiredRequests).toEqual([]);
+});
+
+test("customer checkout: proves Cart review geometry across required viewports", async ({
+  page,
+}) => {
+  const retiredRequests = observeRetiredCheckoutRequests(page);
+
+  for (const viewport of customerCheckoutViewports) {
+    await page.context().clearCookies();
+    await page.setViewportSize(viewport);
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    await addProductCardToCart(page, "Browser QA Produk A");
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    await addProductCardToCart(page, "Browser QA Produk B");
+    await page
+      .getByRole("link", { name: "Lanjut checkout", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/shop\/checkout(?:\?|$)/);
+    await expectStorefrontPageCheckout(page);
+    await expectStorefrontCheckoutResponsiveContract(page, viewport);
+  }
+
+  expect(retiredRequests).toEqual([]);
+});
+
+test("customer checkout: supports keyboard activation, disclosures, reduced motion, and mobile navigation", async ({
+  browser,
+  page,
+}) => {
+  const retiredRequests = observeRetiredCheckoutRequests(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+
+  const keyboardCheckoutLink = page
+    .locator('a[href*="/shop/checkout/products/"]')
+    .filter({ hasText: "Beli sekarang" })
+    .first();
+  await keyboardCheckoutLink.focus();
+  await expect(keyboardCheckoutLink).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expectStorefrontPageCheckout(page);
+
+  const buyerName = page.getByRole("textbox", { name: "Nama pembeli" });
+  const terms = page.getByRole("checkbox", { name: /Saya menyetujui/ });
+  const submit = page.getByRole("button", { name: /Buat invoice/ });
+  await buyerName.focus();
+  await page.keyboard.type("Keyboard Buyer");
+  await terms.focus();
+  await page.keyboard.press("Space");
+  await expect(terms).toBeChecked();
+  await submit.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/shop\/orders\/\d+/);
+  await expect(
+    page.getByRole("heading", { name: "Invoice QR manual" })
+  ).toBeVisible();
+
+  await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
+    waitUntil: "domcontentloaded",
+  });
+  await expectStorefrontPageCheckout(page);
+  await runArtisan([
+    "tinker",
+    "--execute",
+    `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => true]);`,
+  ]);
+
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const paymentDisclosure = page.locator("#checkout-payment-disclosure");
+    const contactDisclosure = page.locator("#checkout-contact-details");
+    await expect(paymentDisclosure).not.toHaveAttribute("open", "");
+    await expect(contactDisclosure).not.toHaveAttribute("open", "");
+    await page.getByText("Ubah metode pembayaran", { exact: true }).click();
+    await expect(paymentDisclosure).toHaveAttribute("open", "");
+    await expect(
+      page.getByRole("radio", { name: /Binance Pay/ })
+    ).toBeVisible();
+    await page.getByRole("radio", { name: /Binance Pay/ }).check();
+    await expect(
+      page.getByRole("button", { name: /Buat invoice Binance Pay/ })
+    ).toBeVisible();
+    await page
+      .getByText("Tambahkan email atau kontak bantuan", { exact: true })
+      .click();
+    await expect(contactDisclosure).toHaveAttribute("open", "");
+    await expect(page.getByRole("textbox", { name: "Email" })).toBeVisible();
+  } finally {
+    await runArtisan([
+      "tinker",
+      "--execute",
+      `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => false]);`,
+    ]);
+  }
+
+  await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
+    waitUntil: "domcontentloaded",
+  });
+  const menuButton = page.getByRole("button", { name: "Buka menu navigasi" });
+  await menuButton.click();
+  const menu = page.getByLabel("Menu navigasi Lhie Store");
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(menuButton).toBeFocused();
+  await expectStorefrontCheckoutResponsiveContract(page, {
+    width: 390,
+    height: 844,
+  });
+
+  const reducedContext = await browser.newContext({
+    reducedMotion: "reduce",
+    viewport: { width: 390, height: 844 },
+  });
+  const reducedPage = await reducedContext.newPage();
+  try {
+    await reducedPage.goto(
+      `${baseUrl}${invoiceFixtures.longProductCheckoutPath}`,
+      {
+        waitUntil: "domcontentloaded",
+      }
+    );
+    const reducedMotion = await reducedPage.evaluate(() => ({
+      matches: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
+    }));
+    expect(reducedMotion.matches).toBe(true);
+    expect(reducedMotion.scrollBehavior).toBe("auto");
+  } finally {
+    await reducedContext.close();
+  }
+
+  const zoomContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+  });
+  const zoomPage = await zoomContext.newPage();
+  try {
+    await zoomPage.goto(
+      `${baseUrl}${invoiceFixtures.longProductCheckoutPath}`,
+      {
+        waitUntil: "domcontentloaded",
+      }
+    );
+    const cdp = await zoomContext.newCDPSession(zoomPage);
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: 195,
+      height: 422,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await expectStorefrontPageCheckout(zoomPage);
+    const reflowViewport = await zoomPage.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+    await expectStorefrontCheckoutResponsiveContract(zoomPage, {
+      width: reflowViewport.width,
+      height: reflowViewport.height,
+    });
+    await cdp.send("Emulation.clearDeviceMetricsOverride");
+  } finally {
+    await zoomContext.close();
+  }
+
+  expect(retiredRequests).toEqual([]);
 });
 
 test("announces terminal QRIS status and exposes buyer next steps", async ({
@@ -2229,6 +2783,285 @@ async function expectElementWithinViewport(page, locator) {
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
 }
 
+function observeRetiredCheckoutRequests(page) {
+  const retiredRequests = [];
+
+  page.on("request", (request) => {
+    const url = request.url();
+
+    if (url.includes("/modal") || /[?&]checkout=1(?:&|$)/.test(url)) {
+      retiredRequests.push(url);
+    }
+  });
+
+  return retiredRequests;
+}
+
+async function navigateToCheckoutFromProductCard(page, productName) {
+  const card = page
+    .locator("article.product-card")
+    .filter({ hasText: productName })
+    .first();
+  const checkoutLink = card
+    .locator('a[href*="/shop/checkout/products/"]')
+    .filter({ hasText: "Beli sekarang" });
+
+  await expect(card).toBeVisible();
+  await expect(checkoutLink).toHaveCount(1);
+  await card.evaluate((element) =>
+    element.scrollIntoView({
+      block: "center",
+      inline: "nearest",
+      behavior: "instant",
+    })
+  );
+  await expect(card).toHaveCSS("transform", "none");
+  await expect(card).toHaveCSS("opacity", "1");
+  await checkoutLink.click({ force: true, noWaitAfter: true });
+  await page.waitForLoadState("domcontentloaded");
+  await expectStorefrontPageCheckout(page);
+}
+
+async function addProductCardToCart(page, productName) {
+  const card = page
+    .locator("article.product-card")
+    .filter({ hasText: productName })
+    .first();
+
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "+ Keranjang", exact: true }).click();
+  await expect(page).toHaveURL(/\/shop\/cart(?:\?|$)/);
+}
+
+async function completeManualCheckout(page, buyerName) {
+  await expectStorefrontPageCheckout(page);
+  await page.getByRole("textbox", { name: "Nama pembeli" }).fill(buyerName);
+  await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
+  await page.getByRole("button", { name: /Buat invoice/ }).click();
+  await expect(page).toHaveURL(/\/shop\/orders\/\d+/);
+  await expect(
+    page.getByRole("heading", { name: "Order pembayaran manual dibuat" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Invoice QR manual" })
+  ).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("signature")).not.toBeNull();
+}
+
+async function expectStorefrontPageCheckout(page) {
+  await page.waitForLoadState("domcontentloaded");
+  await expect(page).toHaveURL(/\/shop\/checkout(?:\/products\/\d+)?(?:\?|$)/);
+  await expect(
+    page.getByRole("heading", {
+      name: /Review (produk|pesanan) sebelum bayar\./,
+    })
+  ).toBeVisible();
+  await expect(page.locator("#checkout-form")).toBeVisible();
+  await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+  expect(page.url()).not.toContain("checkout=1");
+}
+async function expectStorefrontCheckoutRecovery(page) {
+  await page.waitForLoadState("domcontentloaded");
+  await expect(page).toHaveURL(/\/shop\/checkout(?:\/products\/\d+)?(?:\?|$)/);
+  await expect(
+    page.getByRole("heading", {
+      name: /Review (produk|pesanan) sebelum bayar\./,
+    })
+  ).toBeVisible();
+  await expect(page.locator("#checkout-error-summary")).toBeVisible();
+  await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+  expect(page.url()).not.toContain("checkout=1");
+}
+
+async function expectStorefrontCheckoutResponsiveContract(page, viewport) {
+  const metrics = await page.evaluate(() => {
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.opacity !== "0" &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    };
+    const isInViewport = (rect) =>
+      rect.right > 0 &&
+      rect.bottom > 0 &&
+      rect.left < window.innerWidth &&
+      rect.top < window.innerHeight;
+    const overlaps = (first, second) =>
+      Math.min(first.right, second.right) - Math.max(first.left, second.left) >
+        1 &&
+      Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top) >
+        1;
+    const rectFor = (element) => {
+      const rect = element.getBoundingClientRect();
+
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
+    const checkoutControls = Array.from(
+      document.querySelectorAll(
+        [
+          "#checkout-form button",
+          "#checkout-form summary",
+          "#checkout-form select",
+          '#checkout-form input[type="text"]',
+          '#checkout-form input[type="number"]',
+          '#checkout-form input[type="email"]',
+          '#checkout-form label[for="checkout-terms-accepted"]',
+        ].join(", ")
+      )
+    ).filter(isVisible);
+    const checkoutTargets = Array.from(
+      document.querySelectorAll(
+        [
+          "#checkout-error-summary",
+          "#checkout-form button",
+          "#checkout-form summary",
+          "#checkout-form select",
+          '#checkout-form input:not([type="hidden"])',
+          '#checkout-form label[for="checkout-terms-accepted"]',
+        ].join(", ")
+      )
+    ).filter(isVisible);
+    const visibleTargetRects = checkoutTargets
+      .map(rectFor)
+      .filter(isInViewport);
+    const fixedSurfaceRects = Array.from(document.querySelectorAll("*"))
+      .filter((element) => {
+        if (!isVisible(element)) {
+          return false;
+        }
+
+        const position = window.getComputedStyle(element).position;
+        return position === "fixed" || position === "sticky";
+      })
+      .map(rectFor)
+      .filter(isInViewport);
+    const nestedScrollable = Array.from(document.querySelectorAll("main *"))
+      .filter((element) => {
+        const style = window.getComputedStyle(element);
+
+        return (
+          isVisible(element) &&
+          (style.overflowY === "auto" || style.overflowY === "scroll") &&
+          element.scrollHeight > element.clientHeight + 1
+        );
+      })
+      .map((element) => element.id || element.className || element.tagName);
+    const visibleDialogs = Array.from(
+      document.querySelectorAll('[role="dialog"]')
+    ).filter(isVisible);
+    const normalTextSizes = [
+      ...document.querySelectorAll(
+        "#checkout-form > div > label, [data-checkout-item] p.text-sm, [data-checkout-payment-amount-help]"
+      ),
+    ]
+      .filter(isVisible)
+      .map((element) =>
+        Number.parseFloat(window.getComputedStyle(element).fontSize)
+      );
+    const metadataTextSizes = [
+      ...document.querySelectorAll(
+        "[data-checkout-item] p, [data-checkout-item] span"
+      ),
+    ]
+      .filter(isVisible)
+      .map((element) =>
+        Number.parseFloat(window.getComputedStyle(element).fontSize)
+      );
+
+    return {
+      documentScrollWidth: document.documentElement.scrollWidth,
+      bodyScrollWidth: document.body.scrollWidth,
+      viewportWidth: window.innerWidth,
+      controls: checkoutControls.map((element) => {
+        const rect = rectFor(element);
+
+        return {
+          label: (
+            element.textContent ||
+            element.getAttribute("aria-label") ||
+            element.id
+          ).trim(),
+          width: rect.width,
+          height: rect.height,
+        };
+      }),
+      fixedOverlaps: fixedSurfaceRects.flatMap((surface) =>
+        visibleTargetRects.filter((target) => overlaps(surface, target))
+      ),
+      nestedScrollable,
+      visibleDialogs: visibleDialogs.length,
+      normalTextSizes,
+      metadataTextSizes,
+    };
+  });
+
+  expect(metrics.documentScrollWidth).toBeLessThanOrEqual(viewport.width + 1);
+  expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(viewport.width + 1);
+  expect(
+    metrics.controls.filter(
+      ({ width, height }) => Math.round(width) < 44 || Math.round(height) < 44
+    )
+  ).toEqual([]);
+  expect(metrics.fixedOverlaps).toEqual([]);
+  expect(metrics.nestedScrollable).toEqual([]);
+  expect(metrics.visibleDialogs).toBe(0);
+  expect(metrics.normalTextSizes.every((size) => size >= 14)).toBe(true);
+  expect(metrics.metadataTextSizes.every((size) => size >= 12)).toBe(true);
+
+  if (viewport.width === 390) {
+    const flowBudget = await page.evaluate(() => {
+      window.scrollTo(0, 0);
+      const submit = document.querySelector("[data-checkout-submit]");
+      const rect = submit.getBoundingClientRect();
+
+      return {
+        submitTop: rect.top + window.scrollY,
+        viewportHeight: window.innerHeight,
+        contactOpen: document.querySelector("#checkout-contact-details")?.open,
+        paymentOpen:
+          document.querySelector("#checkout-payment-disclosure")?.open ?? false,
+      };
+    });
+
+    expect(flowBudget.submitTop).toBeLessThanOrEqual(
+      flowBudget.viewportHeight * 2 + 1
+    );
+    expect(flowBudget.contactOpen).toBe(false);
+    expect(flowBudget.paymentOpen).toBe(false);
+  }
+
+  const submit = page.locator("[data-checkout-submit]");
+  await submit.evaluate((element) =>
+    element.scrollIntoView({
+      block: "center",
+      inline: "nearest",
+      behavior: "instant",
+    })
+  );
+  await submit.focus();
+  await expect(submit).toBeFocused();
+  const submitBox = await submit.boundingBox();
+  expect(submitBox).not.toBeNull();
+  expect(submitBox.x).toBeGreaterThanOrEqual(0);
+  expect(submitBox.y).toBeGreaterThanOrEqual(0);
+  expect(submitBox.x + submitBox.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(submitBox.y + submitBox.height).toBeLessThanOrEqual(
+    viewport.height + 1
+  );
+}
 function runArtisan(args) {
   const result = spawnSync("php", ["artisan", ...args], {
     cwd: appDir,
@@ -2379,12 +3212,18 @@ $productA = Product::factory()->create([
     'name' => 'Browser QA Produk A',
     'price_amount' => 45000,
     'usdt_price_amount' => 2000000,
-    'stock' => 0,
+    'stock' => 9,
     'reserved_stock' => 0,
     'is_active' => true,
 ]);
 ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-stock-a@example.test|pass']);
 ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-stock-b@example.test|pass']);
+foreach (range(3, 9) as $stockIndex) {
+    ProductStockItem::create([
+        'product_id' => $productA->id,
+        'secret' => "browser-stock-{$stockIndex}@example.test|pass",
+    ]);
+}
 Product::factory()->create([
     'category_id' => $category->id,
     'name' => 'Browser QA Produk A',
@@ -2400,6 +3239,17 @@ Product::factory()->create([
     'price_amount' => 75000,
     'stock' => 6,
     'reserved_stock' => 1,
+    'is_active' => true,
+]);
+
+$longCheckoutProduct = Product::factory()->create([
+    'category_id' => $otherCategory->id,
+    'name' => 'Browser QA Produk Dengan Nama Sangat Panjang Yang Harus Tetap Membungkus Tanpa Overflow',
+    'description' => 'Long checkout fixture for responsive wrapping and reflow evidence.',
+    'price_amount' => 88000,
+    'usdt_price_amount' => 2_500_000,
+    'stock' => 4,
+    'reserved_stock' => 0,
     'is_active' => true,
 ]);
 
@@ -2609,6 +3459,7 @@ OrderItem::factory()->create([
     'unit_price' => 56000,
     'subtotal' => 56000,
 ]);
+
 Payment::factory()->create([
     'order_id' => $cancelledInvoiceOrder->id,
     'provider' => 'pakasir',
@@ -2619,6 +3470,7 @@ Payment::factory()->create([
 ]);
 
 echo json_encode([
+    'longProductCheckoutPath' => route('storefront.shop.checkout.product', ['product' => $longCheckoutProduct], false),
     'pendingWithNativeQris' => [
         'orderId' => $qrisOrder->id,
         'showUrl' => URL::signedRoute('storefront.shop.orders.show', ['order' => $qrisOrder, 'key' => 'browser-recovery-key'], null, false),
