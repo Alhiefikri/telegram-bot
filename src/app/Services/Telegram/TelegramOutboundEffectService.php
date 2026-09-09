@@ -501,7 +501,10 @@ class TelegramOutboundEffectService
             'target_type' => trim((string) $recipient->recipient_type) ?: 'customer',
             'telegram_chat_id' => (string) $recipient->telegram_id,
             'queue' => 'telegram-broadcast',
-            'telegram_method' => 'sendMessage',
+            'telegram_method' => $recipient->photo_path !== null
+                && mb_strlen((string) $recipient->text, 'UTF-8') <= 1024
+                ? 'sendPhoto'
+                : 'sendMessage',
             'locale' => $recipient->locale,
             'template_version' => self::TEMPLATE_STOCK_NOTIFICATION,
             'state' => $state,

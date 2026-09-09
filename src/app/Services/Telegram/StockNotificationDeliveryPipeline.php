@@ -10,6 +10,7 @@ use App\Models\InventoryMovement;
 use App\Models\StockNotificationEvent;
 use App\Models\StockNotificationRecipient;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Admin\ProductImageOptimizer;
 use App\Support\DogfoodTiming;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Client\RequestException;
@@ -28,6 +29,7 @@ class StockNotificationDeliveryPipeline
     public function __construct(
         private TelegramProductNotificationService $notifications,
         private TelegramBotClient $bot,
+        private ProductImageOptimizer $images,
         private ?TelegramOutboundEffectService $outboundEffects = null,
         private ?TelegramOutboundEffectLedgerProtocol $ledger = null,
         private ?TelegramOutboundResponseValidator $responseValidator = null,
@@ -211,6 +213,7 @@ class StockNotificationDeliveryPipeline
                     'locale' => $delivery['locale'],
                     'text' => $delivery['text'],
                     'reply_markup' => $delivery['reply_markup'] === [] ? null : json_encode($delivery['reply_markup'], JSON_THROW_ON_ERROR),
+                    'photo_path' => $delivery['photo_path'] ?? null,
                     'created_at' => $now,
                     'updated_at' => $now,
                 ], $deliveries);
@@ -326,11 +329,22 @@ class StockNotificationDeliveryPipeline
                 throw new \RuntimeException('stock_notification_recipient_missing');
             }
 
-            $response = $this->bot->sendMessage(
-                $claimed->telegram_chat_id,
-                (string) $recipient->text,
-                $recipient->reply_markup ?? [],
-            );
+            $photo = mb_strlen((string) $recipient->text, 'UTF-8') <= 1024
+                ? $this->images->telegramPhoto($recipient->photo_path)
+                : null;
+            $response = $photo !== null
+                ? $this->bot->sendPhoto(
+                    $claimed->telegram_chat_id,
+                    $photo['contents'],
+                    $photo['filename'],
+                    (string) $recipient->text,
+                    $recipient->reply_markup ?? [],
+                )
+                : $this->bot->sendMessage(
+                    $claimed->telegram_chat_id,
+                    (string) $recipient->text,
+                    $recipient->reply_markup ?? [],
+                );
             $messageId = $this->responseValidator()->messageIdFromResponse($response, 'Telegram stock notification');
             $finalized = $this->ledger()->finalizeSent(
                 (string) $claimed->getKey(),

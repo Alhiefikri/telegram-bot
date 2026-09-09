@@ -83,7 +83,7 @@ class TelegramProductNotificationService
             : $this->skippedResult();
     }
 
-    /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array}> */
+    /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array,photo_path:?string}> */
     public function stockAddedDeliveries(
         Product $product,
         int $addedQuantity,
@@ -108,6 +108,7 @@ class TelegramProductNotificationService
                 'locale' => null,
                 'text' => $this->storeChannelRestockMessage($product, $addedQuantity, $availableStock),
                 'reply_markup' => $this->storeChannelProductReplyMarkup($product),
+                'photo_path' => $this->telegramImagePath($product),
             ];
         }
 
@@ -118,7 +119,7 @@ class TelegramProductNotificationService
         return $deliveries;
     }
 
-    /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array}> */
+    /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array,photo_path:?string}> */
     public function productSoldOutDeliveries(Product $product): array
     {
         $product = $product->fresh();
@@ -127,16 +128,16 @@ class TelegramProductNotificationService
         }
         $deliveries = [];
         if ($channelChatId = $this->storeChannelChatId()) {
-            $deliveries[] = ['customer_id' => null, 'recipient_type' => 'store_channel', 'telegram_id' => $channelChatId, 'locale' => null, 'text' => $this->storeChannelSoldOutMessage($product), 'reply_markup' => []];
+            $deliveries[] = ['customer_id' => null, 'recipient_type' => 'store_channel', 'telegram_id' => $channelChatId, 'locale' => null, 'text' => $this->storeChannelSoldOutMessage($product), 'reply_markup' => [], 'photo_path' => null];
         }
         if (! blank(config('services.telegram.token')) && ($adminChatId = $this->adminAccess->adminChatId())) {
-            $deliveries[] = ['customer_id' => null, 'recipient_type' => 'admin', 'telegram_id' => (string) $adminChatId, 'locale' => null, 'text' => implode("\n", ['⚠️ Stok habis', '━━━━━━━━━━━━━━', '📦 '.$product->name, '', 'Stok yang tersedia untuk dibeli sekarang 0.', '', 'Tambahkan stok dari dashboard agar produk bisa tampil dan dibeli lagi di katalog.']), 'reply_markup' => []];
+            $deliveries[] = ['customer_id' => null, 'recipient_type' => 'admin', 'telegram_id' => (string) $adminChatId, 'locale' => null, 'text' => implode("\n", ['⚠️ Stok habis', '━━━━━━━━━━━━━━', '📦 '.$product->name, '', 'Stok yang tersedia untuk dibeli sekarang 0.', '', 'Tambahkan stok dari dashboard agar produk bisa tampil dan dibeli lagi di katalog.']), 'reply_markup' => [], 'photo_path' => null];
         }
 
         return $deliveries;
     }
 
-    /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:string,text:string,reply_markup:array}> */
+    /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:string,text:string,reply_markup:array,photo_path:?string}> */
     private function customerDeliveries(Product $product, int $availableStock, bool $created): array
     {
         $seen = [];
@@ -177,6 +178,7 @@ class TelegramProductNotificationService
                     'locale' => $locale,
                     'text' => $text,
                     'reply_markup' => $this->productReplyMarkup($product, $availableStock, $locale),
+                    'photo_path' => null,
                 ];
             })->values()->all();
     }
@@ -188,6 +190,14 @@ class TelegramProductNotificationService
         return trim($description) !== ''
             ? $description
             : $this->locale->translateLocale($locale, 'notification.product.description_missing');
+    }
+
+    private function telegramImagePath(Product $product): ?string
+    {
+        return $product->telegram_image_path
+            ?? $product->family?->telegram_image_path
+            ?? $product->image_path
+            ?? $product->family?->image_path;
     }
 
     private function productReplyMarkup(Product $product, int $availableStock, string $locale): array

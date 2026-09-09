@@ -34,6 +34,7 @@ use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\TelegramBotTestSupport;
@@ -627,6 +628,98 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
                 && (string) ($request[0]['chat_id'] ?? '') === '399007');
         $this->assertCount(1, $customerMessages);
         $this->assertSame(2, StockNotificationEvent::query()->count());
+    }
+
+    public function test_restock_channel_notification_uses_the_configured_telegram_image_with_current_prices(): void
+    {
+        $this->fakeTelegramHttp();
+        Storage::fake('public');
+        Storage::disk('public')->put('telegram-products/netflix.webp', 'telegram-poster');
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'last_test_success' => true,
+        ]);
+        Customer::factory()->create(['telegram_id' => 399008, 'locale' => 'id']);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $product->forceFill([
+            'name' => 'Netflix Premium 4K UHD Full Admin Account (1 Month)',
+            'price_amount' => 13000,
+            'usdt_price_amount' => 1_000_000,
+            'telegram_image_path' => 'telegram-products/netflix.webp',
+        ])->save();
+        $admin = User::factory()->create();
+        $adjustment = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product->fresh(),
+            5,
+            'restock image notification',
+            $admin,
+            '127.0.0.1',
+            ['image-restock-1', 'image-restock-2', 'image-restock-3', 'image-restock-4', 'image-restock-5'],
+        );
+
+        (new SendProductStockNotifications($adjustment['movement_id']))->handle(app(TelegramProductNotificationService::class));
+
+        $channelPhotos = collect(Http::recorded())
+            ->filter(fn (array $request): bool => str_ends_with($request[0]->url(), '/sendPhoto')
+                && (string) $this->telegramRequestField($request[0], 'chat_id') === '-100123');
+        $this->assertCount(1, $channelPhotos);
+        $photoRequest = $channelPhotos->first()[0];
+        $photo = collect($photoRequest->data())->first(
+            fn ($part): bool => is_array($part) && ($part['name'] ?? null) === 'photo',
+        );
+
+        $this->assertSame('netflix.webp', $photo['filename'] ?? null);
+        $this->assertSame('telegram-poster', $photo['contents'] ?? null);
+        $caption = (string) $this->telegramRequestField($photoRequest, 'caption');
+        $this->assertStringContainsString('➕ Added: 5', $caption);
+        $this->assertStringContainsString('📦 Current stock: 5', $caption);
+        $this->assertStringContainsString('💵 Unit price: Rp. 13.000 / $1', $caption);
+        $channelRecipient = StockNotificationRecipient::query()
+            ->where('recipient_type', 'store_channel')
+            ->sole();
+        $this->assertSame('telegram-products/netflix.webp', $channelRecipient->photo_path);
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
+            ->where('source_id', (string) $channelRecipient->id)
+            ->sole();
+        $this->assertSame('sendPhoto', $effect->telegram_method);
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '-100123');
+    }
+
+    public function test_restock_channel_notification_falls_back_to_text_when_photo_file_is_missing(): void
+    {
+        $this->fakeTelegramHttp();
+        Storage::fake('public');
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'telegram_chat_id' => '-100123',
+            'last_test_success' => true,
+        ]);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $product->forceFill([
+            'name' => 'Missing Restock Poster',
+            'telegram_image_path' => 'telegram-products/missing.webp',
+        ])->save();
+        $admin = User::factory()->create();
+        $adjustment = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product->fresh(),
+            1,
+            'missing restock image',
+            $admin,
+            '127.0.0.1',
+            ['missing-poster-stock'],
+        );
+
+        (new SendProductStockNotifications($adjustment['movement_id']))->handle(app(TelegramProductNotificationService::class));
+
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '-100123'
+            && str_contains((string) ($request['text'] ?? ''), '➕ Added: 1')
+            && str_contains((string) ($request['text'] ?? ''), '📦 Current stock: 1'));
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && (string) $this->telegramRequestField($request, 'chat_id') === '-100123');
     }
 
     public function test_managed_product_availability_uses_lower_numeric_stock_or_unclaimed_credentials(): void
