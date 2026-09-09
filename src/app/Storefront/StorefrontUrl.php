@@ -115,9 +115,11 @@ class StorefrontUrl
     {
         $url = route('storefront.product-families.show', ['productFamily' => $slug]);
 
-        return $returnUrl === null || $returnUrl === ''
-            ? $url
-            : $url.'?from='.rawurlencode($returnUrl);
+        if ($returnUrl === null || $returnUrl === '' || ! $this->isLocalUrl($returnUrl)) {
+            return $url;
+        }
+
+        return $url.'?from='.rawurlencode($returnUrl);
     }
 
     public function familyReturnUrl(Request $request, string $slug): string
@@ -182,12 +184,41 @@ class StorefrontUrl
         }
 
         if (str_starts_with($url, '/')) {
-            return ! str_starts_with($url, '//');
+            // Browsers normalize a backslash right after the slash into another
+            // slash, so "/\host/path" would resolve as a protocol-relative URL.
+            return ! str_starts_with($url, '//') && ! str_starts_with($url, '/\\');
         }
 
-        $appHost = parse_url(url('/'), PHP_URL_HOST);
-        $urlHost = parse_url($url, PHP_URL_HOST);
+        $parts = parse_url($url);
+        $app = parse_url(url('/'));
 
-        return is_string($appHost) && $appHost !== '' && $urlHost === $appHost;
+        if (! is_array($parts) || ! is_array($app)) {
+            return false;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower((string) ($parts['host'] ?? ''));
+
+        return $scheme !== ''
+            && $host !== ''
+            && $scheme === strtolower((string) ($app['scheme'] ?? ''))
+            && $host === strtolower((string) ($app['host'] ?? ''))
+            && $this->effectivePort($parts) === $this->effectivePort($app);
+    }
+
+    /**
+     * Explicit port when present, otherwise the scheme's default port.
+     *
+     * @param  array<string, int|string>  $parts
+     */
+    private function effectivePort(array $parts): ?int
+    {
+        return isset($parts['port'])
+            ? (int) $parts['port']
+            : match (strtolower((string) ($parts['scheme'] ?? ''))) {
+                'http' => 80,
+                'https' => 443,
+                default => null,
+            };
     }
 }
