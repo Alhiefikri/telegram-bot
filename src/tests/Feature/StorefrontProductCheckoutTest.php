@@ -406,6 +406,94 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('value="1"', false);
     }
 
+    public function test_direct_checkout_review_uses_compact_document_flow_and_single_payment_summary(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Compact Direct Review',
+            'description' => 'LONG MERCHANDISING DESCRIPTION SHOULD STAY OUT OF REVIEW',
+            'price_amount' => 60000,
+            'stock' => 4,
+            'reserved_stock' => 0,
+        ]);
+
+        $html = $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringNotContainsString('role="dialog"', $html);
+        $this->assertStringNotContainsString('data-storefront-checkout-scroll', $html);
+        $this->assertStringContainsString('Tambahkan email atau kontak bantuan', $html);
+        $this->assertStringContainsString('data-checkout-quantity-announcement', $html);
+        $this->assertStringContainsString('aria-live="polite"', $html);
+        $this->assertSame(
+            0,
+            preg_match('/<details id="checkout-contact-details"[^>]*\bopen\b/', $html),
+        );
+        $this->assertStringContainsString('type="hidden" name="payment_method" value="qris"', $html);
+        $this->assertStringNotContainsString('type="radio" name="payment_method"', $html);
+        $this->assertStringNotContainsString('LONG MERCHANDISING DESCRIPTION SHOULD STAY OUT OF REVIEW', $html);
+
+        $this->assertTrue(
+            strpos($html, 'Produk yang dipilih') < strpos($html, 'Nama pembeli')
+                && strpos($html, 'Nama pembeli') < strpos($html, 'Metode pembayaran dipilih')
+                && strpos($html, 'Metode pembayaran dipilih') < strpos($html, 'Tambahkan email atau kontak bantuan'),
+        );
+    }
+
+    public function test_multiple_payment_choices_are_explicit_inside_a_closed_disclosure(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::current()->update([
+            'binance_pay_enabled' => true,
+        ]);
+        $product = Product::factory()->create([
+            'name' => 'Multiple Payment Review',
+            'price_amount' => 60000,
+            'usdt_price_amount' => 3_500_000,
+            'stock' => 4,
+            'reserved_stock' => 0,
+        ]);
+
+        $html = $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('Ubah metode pembayaran', $html);
+        $this->assertStringContainsString('type="radio" name="payment_method"', $html);
+        $this->assertStringContainsString('Bayar dengan Binance Pay', $html);
+        $this->assertStringContainsString('Total dasar USDT / estimasi', $html);
+        $this->assertSame(0, preg_match('/<details id="checkout-payment-disclosure"[^>]*\\bopen\\b/', $html));
+    }
+
+    public function test_checkout_error_reopens_contact_disclosure_and_focuses_error_summary(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Contact Recovery Review',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+
+        $html = $this->followingRedirects()
+            ->from(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->post(route('storefront.shop.checkout'), [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'buyer_name' => 'Valid Buyer',
+                'email' => 'invalid-email',
+                'payment_method' => 'qris',
+                'terms_accepted' => '1',
+            ])
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('id="checkout-error-summary"', $html);
+        $this->assertStringContainsString('autofocus', $html);
+        $this->assertStringContainsString('data-focus-target="checkout-email"', $html);
+        $this->assertStringContainsString('<details id="checkout-contact-details"', $html);
+        $this->assertStringContainsString('id="checkout-contact-details" data-checkout-contact-details', $html);
+        $this->assertStringContainsString('value="invalid-email"', $html);
+    }
+
     private function assertNoCheckoutSideEffects(): void
     {
         $this->assertSame(0, Order::count());

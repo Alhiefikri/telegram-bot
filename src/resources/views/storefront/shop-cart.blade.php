@@ -3,11 +3,11 @@
 <head>
     @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
-<body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)]">
+<body class="relative overflow-x-hidden text-[var(--sf-ink)] antialiased selection:bg-[var(--sf-ink)] selection:text-white motion-reduce:animate-none">
     <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden">
         @include('storefront.partials.header')
 
-        <main class="flex-grow pb-24 pt-12">
+        <main class="flex-grow pb-16 pt-8 sm:pt-12">
             <section class="mx-auto max-w-5xl px-5 sm:px-6">
                 <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>
@@ -80,7 +80,7 @@
                                                 @method('PATCH')
                                                 <label for="cart-quantity-{{ $item->productId }}" class="sr-only">Jumlah {{ $item->name }}</label>
                                                 <input id="cart-quantity-{{ $item->productId }}" name="quantity" type="number" min="0" max="20" value="{{ $item->quantity }}" class="neo-input h-11 w-20 bg-white px-2 text-center text-base font-black text-[var(--sf-ink)]">
-                                                <button type="submit" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-yellow)] px-3 text-xs font-black text-[var(--sf-ink)]">Perbarui</button>
+                                                <button type="submit" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-yellow)] px-3 text-sm font-black text-[var(--sf-ink)]">Perbarui</button>
                                             </form>
                                             <p class="text-right text-sm font-black text-[var(--sf-ink)]">
                                                 Subtotal: {{ $item->subtotal === null ? '—' : $storefront->idr($item->subtotal) }}
@@ -88,7 +88,7 @@
                                             <form method="POST" action="{{ route('storefront.shop.cart.items.destroy', ['product' => $item->productId]) }}">
                                                 @csrf
                                                 @method('DELETE')
-                                                <button type="submit" class="text-xs font-black text-[var(--sf-accent)] underline">Hapus dari keranjang</button>
+                                                <button type="submit" class="inline-flex min-h-11 items-center justify-center px-2 text-sm font-black text-[var(--sf-accent)] underline underline-offset-2">Hapus dari keranjang</button>
                                             </form>
                                         </div>
                                     </div>
@@ -96,8 +96,8 @@
                             @endforeach
                         </div>
 
-                        <aside class="neo-panel sticky top-24 bg-[var(--sf-surface)] p-5">
-                            <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-accent)]">Ringkasan</p>
+                        <aside class="neo-panel bg-[var(--sf-surface)] p-5" aria-labelledby="cart-summary-title">
+                            <p id="cart-summary-title" class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Ringkasan keranjang</p>
                             <dl class="mt-4 grid gap-3 text-sm">
                                 <div class="flex items-center justify-between gap-3 font-bold text-[var(--sf-muted)]">
                                     <dt>Item</dt>
@@ -112,7 +112,7 @@
                                 <p role="alert" class="mt-4 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-sm font-black leading-6 text-[var(--sf-ink)]">Periksa item yang berubah sebelum checkout. Stok tidak disimpan hanya karena item berada di keranjang.</p>
                                 <span class="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-4 text-center text-sm font-black text-[var(--sf-muted)]">Checkout belum siap</span>
                             @else
-                                <a href="{{ $checkoutUrl }}" class="neo-button mt-5 inline-flex min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-4 text-center text-sm font-black text-white">Lanjut ke review checkout</a>
+                                <a href="{{ $checkoutUrl }}" class="neo-button neo-button-stable mt-5 inline-flex min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-4 text-center text-sm font-black text-white">Lanjut checkout</a>
                             @endif
                             <p class="mt-4 text-xs font-bold leading-5 text-[var(--sf-muted)]">Harga dan ketersediaan akan dibaca ulang saat order dibuat.</p>
                         </aside>

@@ -377,6 +377,32 @@ class StorefrontShopCartTest extends TestCase
         $this->assertSame(0, InventoryMovement::query()->count());
     }
 
+    public function test_cart_checkout_review_keeps_quantities_read_only_and_links_back_to_cart(): void
+    {
+        $this->manualPaymentModeIsActive();
+        $product = $this->availableProduct([
+            'name' => 'Read Only Cart Review',
+            'price_amount' => 25000,
+            'stock' => 3,
+        ]);
+        $sessionKey = 'read-only-cart-review-session';
+
+        $this->addToCart($product, quantity: 2, sessionKey: $sessionKey);
+
+        $html = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->get(route('storefront.shop.checkout.start'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('Read Only Cart Review', $html);
+        $this->assertStringContainsString('Jumlah 2', $html);
+        $this->assertStringContainsString('Ubah jumlah di keranjang', $html);
+        $this->assertStringContainsString('name="cart_snapshot"', $html);
+        $this->assertStringNotContainsString('id="checkout-quantity"', $html);
+        $this->assertStringNotContainsString('name="quantity"', $html);
+        $this->assertStringNotContainsString('role="dialog"', $html);
+    }
+
     private function checkoutSnapshot(string $sessionKey): string
     {
         $response = $this->withSession(['storefront.checkout_client_key' => $sessionKey])

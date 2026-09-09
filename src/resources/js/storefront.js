@@ -1730,6 +1730,217 @@ function initCatalogFilterFocus() {
     activeFilter.focus({ preventScroll: true })
   );
 }
+function formatCheckoutIdr(amount) {
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatCheckoutUsdt(microAmount) {
+  const amount = Number(microAmount);
+
+  if (!Number.isFinite(amount)) {
+    return "—";
+  }
+
+  return `${(amount / 1_000_000).toFixed(6).replace(/\.?0+$/, "")} USDT`;
+}
+
+function initCheckoutReview() {
+  const errorSummary = document.querySelector("[data-checkout-error-summary]");
+
+  if (errorSummary) {
+    window.requestAnimationFrame(() =>
+      errorSummary.focus({ preventScroll: true })
+    );
+  }
+
+  const quantityInput = document.querySelector("[data-checkout-quantity]");
+  const paymentRoot = document.querySelector("[data-checkout-payment]");
+  const contactDetails = document.querySelector(
+    "[data-checkout-contact-details]"
+  );
+  const contactRequirement = document.querySelector(
+    "[data-checkout-contact-requirement]"
+  );
+  const contactHelp = document.querySelector("[data-checkout-contact-help]");
+  const selectedPaymentLabel = document.querySelector(
+    "[data-checkout-selected-payment-label]"
+  );
+  const selectedPaymentDescription = document.querySelector(
+    "[data-checkout-selected-payment-description]"
+  );
+  const paymentAmountLabel = document.querySelector(
+    "[data-checkout-payment-amount-label]"
+  );
+  const paymentAmountValue = document.querySelector(
+    "[data-checkout-payment-amount-value]"
+  );
+  const paymentAmountHelp = document.querySelector(
+    "[data-checkout-payment-amount-help]"
+  );
+  const submitButton = document.querySelector("[data-checkout-submit]");
+  const quantityAnnouncement = document.querySelector(
+    "[data-checkout-quantity-announcement]"
+  );
+
+  const refreshPayment = () => {
+    if (!paymentRoot) {
+      return;
+    }
+
+    const options = Array.from(
+      paymentRoot.querySelectorAll("[data-checkout-payment-option]")
+    );
+    const selectedInput = paymentRoot.querySelector(
+      'input[name="payment_method"]:checked'
+    );
+    const selectedValue =
+      selectedInput?.value ||
+      paymentRoot
+        .querySelector("[data-checkout-selected-option]")
+        ?.getAttribute("data-payment-value");
+    const option =
+      options.find(
+        (candidate) =>
+          candidate.getAttribute("data-payment-value") === selectedValue &&
+          candidate.querySelector('input[name="payment_method"]')
+      ) ||
+      options.find(
+        (candidate) =>
+          candidate.getAttribute("data-payment-value") === selectedValue
+      );
+
+    if (!option) {
+      return;
+    }
+
+    const provider = option.getAttribute("data-payment-provider");
+    const amountKind = option.getAttribute("data-payment-amount-kind");
+
+    selectedPaymentLabel?.replaceChildren(
+      document.createTextNode(option.getAttribute("data-payment-label") || "")
+    );
+    selectedPaymentDescription?.replaceChildren(
+      document.createTextNode(
+        option.getAttribute("data-payment-description") || ""
+      )
+    );
+    paymentAmountLabel?.replaceChildren(
+      document.createTextNode(
+        option.getAttribute("data-payment-amount-label") || ""
+      )
+    );
+    paymentAmountHelp?.replaceChildren(
+      document.createTextNode(
+        option.getAttribute("data-payment-amount-help") || ""
+      )
+    );
+    if (submitButton) {
+      submitButton.textContent =
+        option.getAttribute("data-payment-submit-label") ||
+        "Buat invoice & lanjut bayar";
+    }
+
+    if (paymentAmountValue) {
+      const usdtTotal = document.querySelector(
+        "[data-checkout-order-usdt-subtotal]"
+      );
+      const idrTotal = document.querySelector("[data-checkout-order-subtotal]");
+
+      paymentAmountValue.textContent =
+        amountKind === "usdt"
+          ? usdtTotal?.textContent || "—"
+          : idrTotal?.textContent || "—";
+    }
+
+    if (contactRequirement) {
+      contactRequirement.textContent =
+        provider === "sakurupiah"
+          ? "WhatsApp wajib untuk Sakurupiah"
+          : "Opsional";
+    }
+    if (contactHelp) {
+      contactHelp.textContent =
+        provider === "sakurupiah"
+          ? "Nomor WhatsApp diperlukan untuk checkout Sakurupiah. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan."
+          : contactHelp.dataset.defaultContactHelp || "";
+    }
+
+    if (provider === "sakurupiah" && contactDetails) {
+      contactDetails.open = true;
+    }
+  };
+
+  const refreshQuantity = (announce = false) => {
+    if (!quantityInput) {
+      return;
+    }
+
+    const quantity = Number.parseInt(quantityInput.value, 10);
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return;
+    }
+
+    const unitPrice = Number.parseInt(quantityInput.dataset.unitPrice, 10);
+    const unitUsdtPrice = Number.parseInt(
+      quantityInput.dataset.unitUsdtPrice,
+      10
+    );
+    const subtotal = Number.isInteger(unitPrice) ? unitPrice * quantity : null;
+    const usdtSubtotal =
+      Number.isInteger(unitUsdtPrice) && unitUsdtPrice > 0
+        ? unitUsdtPrice * quantity
+        : null;
+
+    document
+      .querySelectorAll("[data-checkout-item-quantity]")
+      .forEach((target) => {
+        target.textContent = `Jumlah ${quantity}`;
+      });
+    document
+      .querySelectorAll("[data-checkout-item-subtotal]")
+      .forEach((target) => {
+        target.textContent =
+          subtotal === null ? "—" : formatCheckoutIdr(subtotal);
+      });
+    document
+      .querySelectorAll("[data-checkout-order-subtotal]")
+      .forEach((target) => {
+        target.textContent =
+          subtotal === null ? "—" : formatCheckoutIdr(subtotal);
+      });
+    document
+      .querySelectorAll("[data-checkout-order-usdt-subtotal]")
+      .forEach((target) => {
+        target.textContent =
+          usdtSubtotal === null ? "—" : formatCheckoutUsdt(usdtSubtotal);
+      });
+
+    if (announce && quantityAnnouncement) {
+      const subtotalMessage =
+        subtotal === null
+          ? "subtotal review belum tersedia"
+          : `subtotal review ${formatCheckoutIdr(subtotal)}`;
+      quantityAnnouncement.textContent = `Jumlah ${quantity} unit; ${subtotalMessage}.`;
+    }
+
+    refreshPayment();
+  };
+
+  paymentRoot
+    ?.querySelectorAll('input[name="payment_method"]')
+    .forEach((input) => {
+      input.addEventListener("change", refreshPayment);
+    });
+  quantityInput?.addEventListener("change", () => refreshQuantity(true));
+
+  refreshQuantity(false);
+  refreshPayment();
+}
 
 export function registerStorefrontAlpine(Alpine) {
   Alpine.data("storefrontModal", storefrontModal);
@@ -1741,6 +1952,7 @@ export default function initStorefront() {
 
     initMobileMenu();
     initCatalogFilterFocus();
+    initCheckoutReview();
     initCounters();
     initScrollProgress();
     initVerifiedPurchaseActivity();
