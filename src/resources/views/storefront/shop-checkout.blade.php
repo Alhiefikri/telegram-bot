@@ -252,8 +252,8 @@
                                                 <p class="mt-1 break-words text-sm font-semibold leading-6 text-[var(--sf-muted)]" data-checkout-selected-payment-description>{{ $option['description'] }}</p>
                                             </div>
                                             <div data-checkout-payment-copy class="min-w-0 rounded-lg border-2 border-dashed border-[var(--sf-border)] bg-white p-2.5 text-sm font-bold leading-6 text-[var(--sf-muted)]">
-                                                <div class="flex items-center justify-between gap-3">
-                                                    <span data-checkout-payment-amount-label>{{ $optionCopy['amount_label'] }}</span>
+                                                <div class="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                                                    <span class="min-w-0 break-words" data-checkout-payment-amount-label>{{ $optionCopy['amount_label'] }}</span>
                                                     <strong class="shrink-0 text-[var(--sf-ink)]" data-checkout-payment-amount-value>{{ $optionCopy['amount_kind'] === 'usdt' ? ($cartUsdtSubtotal === null ? '—' : $storefront->usdt($cartUsdtSubtotal)) : $storefront->idr($cartSubtotal) }}</strong>
                                                 </div>
                                                 <p class="mt-1 text-sm font-semibold leading-5" data-checkout-payment-amount-help>{{ $optionCopy['amount_help'] }}</p>
@@ -279,8 +279,8 @@
                                             </label>
                                             <div class="hidden peer-checked:grid min-w-0 gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3">
                                                 <div data-checkout-payment-copy class="min-w-0 rounded-lg border-2 border-dashed border-[var(--sf-border)] bg-white p-2.5 text-sm font-bold leading-6 text-[var(--sf-muted)]">
-                                                    <div class="flex items-center justify-between gap-3">
-                                                        <span data-checkout-payment-amount-label>{{ $selectedOptionCopy['amount_label'] }}</span>
+                                                    <div class="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                                                        <span class="min-w-0 break-words" data-checkout-payment-amount-label>{{ $selectedOptionCopy['amount_label'] }}</span>
                                                         <strong class="shrink-0 text-[var(--sf-ink)]" data-checkout-payment-amount-value>{{ $selectedOptionCopy['amount_kind'] === 'usdt' ? ($cartUsdtSubtotal === null ? '—' : $storefront->usdt($cartUsdtSubtotal)) : $storefront->idr($cartSubtotal) }}</strong>
                                                     </div>
                                                     <p class="mt-1 text-sm font-semibold leading-5" data-checkout-payment-amount-help>{{ $selectedOptionCopy['amount_help'] }}</p>
@@ -314,8 +314,8 @@
                                                                 </span>
                                                             </label>
                                                             <div data-checkout-payment-copy class="hidden min-w-0 rounded-lg border-2 border-dashed border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-2.5 text-sm font-bold leading-6 text-[var(--sf-muted)] peer-checked:block">
-                                                                <div class="flex items-center justify-between gap-3">
-                                                                    <span data-checkout-payment-amount-label>{{ $optionCopy['amount_label'] }}</span>
+                                                                <div class="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                                                                    <span class="min-w-0 break-words" data-checkout-payment-amount-label>{{ $optionCopy['amount_label'] }}</span>
                                                                     <strong class="shrink-0 text-[var(--sf-ink)]" data-checkout-payment-amount-value>{{ $optionCopy['amount_kind'] === 'usdt' ? ($cartUsdtSubtotal === null ? '—' : $storefront->usdt($cartUsdtSubtotal)) : $storefront->idr($cartSubtotal) }}</strong>
                                                                 </div>
                                                                 <p class="mt-1 text-sm font-semibold leading-5" data-checkout-payment-amount-help>{{ $optionCopy['amount_help'] }}</p>
