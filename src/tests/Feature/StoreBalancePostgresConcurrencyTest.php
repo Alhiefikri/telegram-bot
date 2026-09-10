@@ -5,6 +5,9 @@ namespace Tests\Feature;
 use App\Enums\CartStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
+use App\Enums\StoreBalanceFundingIntentStatus;
+use App\Enums\TelegramNavigationMediaKind;
+use App\Enums\TelegramNavigationScreen;
 use App\Enums\UserRole;
 use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\StoreBalanceFundingPolicyConflict;
@@ -17,14 +20,17 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\StoreBalanceEntry;
+use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceFundingPolicy;
+use App\Models\TelegramNavigationRoot;
 use App\Models\User;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\StoreBalance\StoreBalanceFundingIntentInput;
+use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
-use App\Services\StoreBalance\StoreBalanceReconciliation;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -101,6 +107,81 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         $this->assertSame(1, $policy->policyVersion());
         $this->assertContains($policy->presetAmounts(), [[5000, 10000], [5000, 25000]]);
         $this->assertSame(1, AuditLog::query()->where('action', 'store_balance.funding_policy.updated')->count());
+    }
+
+    public function test_postgres_competing_deposit_submissions_reuse_one_pending_intent(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $customer = $this->createCustomer(45470);
+        $root = $this->createFundingRoot($customer, 7700);
+
+        $results = $this->runConcurrentWorkers(2, function () use ($customer, $root): string {
+            $opening = app(StoreBalanceFundingIntentService::class)->open(
+                Customer::query()->findOrFail($customer->id),
+                (string) $customer->telegram_id,
+                $root->id,
+                $root->message_id,
+                StoreBalanceFundingIntentInput::custom('25000'),
+            );
+
+            return $opening->intent?->nonce ?? (string) $opening->rejection;
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame(
+            $results[0]['value'] ?? null,
+            $results[1]['value'] ?? null,
+        );
+        $this->assertSame(1, StoreBalanceFundingIntent::query()->count());
+        $this->assertSame(StoreBalanceFundingIntentStatus::Pending, StoreBalanceFundingIntent::query()->sole()->status);
+    }
+
+    public function test_postgres_competing_confirmation_claims_have_one_winner_and_one_replay(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $customer = $this->createCustomer(45471);
+        $root = $this->createFundingRoot($customer, 7701);
+        $opening = app(StoreBalanceFundingIntentService::class)->open(
+            $customer,
+            (string) $customer->telegram_id,
+            $root->id,
+            $root->message_id,
+            StoreBalanceFundingIntentInput::custom('25000'),
+        );
+        $this->assertTrue($opening->accepted());
+        $nonce = $opening->intent->nonce;
+
+        $results = $this->runConcurrentWorkers(2, function () use ($customer, $root, $nonce): string {
+            return app(StoreBalanceFundingIntentService::class)->claim(
+                Customer::query()->findOrFail($customer->id),
+                (string) $customer->telegram_id,
+                $root->id,
+                $root->message_id,
+                $nonce,
+                'confirm',
+            )->outcome->value;
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $outcomes = array_map(static fn (array $result): string => (string) ($result['value'] ?? ''), $results);
+        sort($outcomes);
+        $this->assertSame(['already_confirmed', 'confirmed'], $outcomes);
+        $this->assertSame(StoreBalanceFundingIntentStatus::Confirmed, StoreBalanceFundingIntent::query()->sole()->status);
+    }
+
+    private function createFundingRoot(Customer $customer, int $messageId): TelegramNavigationRoot
+    {
+        return TelegramNavigationRoot::query()->create([
+            'customer_id' => $customer->id,
+            'chat_id' => (string) $customer->telegram_id,
+            'message_id' => $messageId,
+            'media_kind' => TelegramNavigationMediaKind::Photo,
+            'screen' => TelegramNavigationScreen::AddBalance,
+            'locale' => $customer->locale,
+            'generation' => 1,
+        ]);
     }
 
     public function test_postgres_workers_settle_one_idempotency_claim_exactly_once(): void

@@ -5,8 +5,10 @@ namespace App\Services\Telegram;
 use App\Enums\TelegramNavigationRenderOutcome;
 use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
+use App\Models\StoreBalanceFundingIntent;
 use App\Models\TelegramNavigationRoot;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
@@ -148,8 +150,11 @@ class TelegramMenuIntents
         );
     }
 
-    public function addBalanceSurface(Customer $customer): TelegramNavigationSurface
-    {
+    public function addBalanceSurface(
+        Customer $customer,
+        ?string $noticeKey = null,
+        array $noticeReplacements = [],
+    ): TelegramNavigationSurface {
         $policy = $this->fundingPolicies->current();
         $lines = [
             $this->locale->translate($customer, 'balance.add.title'),
@@ -161,6 +166,10 @@ class TelegramMenuIntents
             '',
             $this->locale->translate($customer, 'balance.add.command_hint'),
         ];
+        if ($noticeKey !== null) {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, $noticeKey, $noticeReplacements);
+        }
         $keyboard = [];
 
         foreach ($policy->presetAmounts as $index => $amount) {
@@ -177,6 +186,64 @@ class TelegramMenuIntents
             $this->locale->code($customer),
             $this->captions->html(implode("\n", $lines)),
             ['inline_keyboard' => $keyboard],
+        );
+    }
+
+    public function fundingConfirmationSurface(
+        Customer $customer,
+        StoreBalanceFundingIntent $intent,
+    ): TelegramNavigationSurface {
+        $lines = [
+            $this->locale->translate($customer, 'balance.confirmation.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'balance.confirmation.credit', [
+                'amount' => $this->locale->idr($intent->amount),
+            ]),
+            $this->locale->translate($customer, 'balance.confirmation.provider_note'),
+            $this->locale->translate($customer, 'balance.confirmation.no_invoice'),
+            $this->locale->translate($customer, 'balance.confirmation.expires', [
+                'expires' => $this->locale->formatDate($customer, $intent->expires_at),
+            ]),
+        ];
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::AddBalance,
+            $this->locale->code($customer),
+            $this->captions->html(implode("\n", $lines)),
+            ['inline_keyboard' => [
+                [[
+                    'text' => $this->locale->translate($customer, 'balance.confirmation.confirm'),
+                    'callback_data' => StoreBalanceFundingIntentService::actionCallback('confirm', $intent->nonce),
+                ]],
+                [
+                    [
+                        'text' => $this->locale->translate($customer, 'balance.confirmation.cancel'),
+                        'callback_data' => StoreBalanceFundingIntentService::actionCallback('cancel', $intent->nonce),
+                    ],
+                    [
+                        'text' => $this->locale->translate($customer, 'balance.confirmation.back'),
+                        'callback_data' => StoreBalanceFundingIntentService::actionCallback('back', $intent->nonce),
+                    ],
+                ],
+            ]],
+        );
+    }
+
+    public function fundingConfirmationAcceptedSurface(
+        Customer $customer,
+        StoreBalanceFundingIntent $intent,
+    ): TelegramNavigationSurface {
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::AddBalance,
+            $this->locale->code($customer),
+            $this->captions->html(implode("\n", [
+                $this->locale->translate($customer, 'balance.confirmation.accepted'),
+                $this->locale->translate($customer, 'balance.confirmation.credit', [
+                    'amount' => $this->locale->idr($intent->amount),
+                ]),
+                $this->locale->translate($customer, 'balance.confirmation.no_invoice'),
+            ])),
+            ['inline_keyboard' => [$this->navigationRow($customer)]],
         );
     }
 

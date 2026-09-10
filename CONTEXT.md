@@ -158,6 +158,10 @@ _Avoid_: Wallet, deposit balance, credits, loyalty points
 The versioned, Admin-managed minimum and ordered preset amounts used to present and validate provider-backed top-ups. It is configuration only: changing it never creates a Store Balance Entry or changes a Customer projection.
 _Avoid_: balance credit, ledger entry, provider quote
 
+**Store Balance Funding Intent**:
+A Customer-owned, expiring confirmation record that binds one normalized credit amount to the current funding-policy version, private chat, canonical navigation root, and opaque callback nonce. It is a pre-provider confirmation only: it is not a Payment, invoice, provider transaction, Store Balance Entry, or balance credit.
+_Avoid_: invoice, deposit balance, provider quote
+
 **Store Balance Entry**:
 One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.
 _Avoid_: Transaction, balance mutation, adjustment row

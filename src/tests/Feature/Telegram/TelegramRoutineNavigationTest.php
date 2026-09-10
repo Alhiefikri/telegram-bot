@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
+use App\Enums\StoreBalanceFundingIntentStatus;
 use App\Enums\TelegramNavigationMediaKind;
 use App\Enums\TelegramNavigationScreen;
 use App\Models\Category;
@@ -14,6 +15,7 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\StoreBalanceEntry;
+use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceFundingPolicy;
 use App\Models\TelegramNavigationRoot;
 use App\Services\StoreBalance\StoreBalanceLedger;
@@ -136,15 +138,31 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
             && ($request['callback_query_id'] ?? null) === 'balance-add');
 
         $this->postTelegramWebhook($this->callbackUpdate(45414, 'balance-preset', $presetRows[0][0]['callback_data'], [], 45411, 'private', $root->message_id))->assertOk();
-        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
-            && ($request['callback_query_id'] ?? null) === 'balance-preset'
-            && ($request['text'] ?? null) === 'Pilihan top-up belum bisa diproses. Coba lagi nanti.');
-        $this->assertSame(2, $this->editCount(45411), 'Add Balance must edit the canonical message.');
-        $this->assertSame(1, $this->routineMessageCount(45411), 'Add Balance must not send a second message.');
-        $this->postTelegramWebhook($this->callbackUpdate(45415, 'balance-back', 'menu:back', [], 45411, 'private', $root->message_id))->assertOk();
+        $confirmation = $this->lastCanonicalEdit(45411);
+        $this->assertStringContainsString('Saldo yang dikreditkan: Rp 5.000', $this->editCopy($confirmation));
+        $this->assertStringContainsString('Biaya provider dan total pembayaran akhir dari KlikQRIS', $this->editCopy($confirmation));
+        $this->assertStringContainsString('Belum ada invoice pembayaran.', $this->editCopy($confirmation));
+        $confirmationKeyboard = $confirmation['reply_markup']['inline_keyboard'];
+        $this->assertMatchesRegularExpression('/\Abalance:confirm:[a-f0-9]{32}\z/', $confirmationKeyboard[0][0]['callback_data']);
+        $this->assertSame(['balance:cancel', 'balance:back'], [
+            substr($confirmationKeyboard[1][0]['callback_data'], 0, strlen('balance:cancel')),
+            substr($confirmationKeyboard[1][1]['callback_data'], 0, strlen('balance:back')),
+        ]);
+        $this->assertSame(1, StoreBalanceFundingIntent::query()->count());
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::TopUpCredit)->count());
+        $this->assertSame(3, $this->editCount(45411), 'Preset selection must edit the canonical message.');
+        $this->assertSame(1, $this->routineMessageCount(45411), 'Preset selection must not send a second message.');
+        $nonce = StoreBalanceFundingIntent::query()->sole()->nonce;
+        $this->postTelegramWebhook($this->callbackUpdate(45415, 'balance-preset-replay', $presetRows[0][0]['callback_data'], [], 45411, 'private', $root->message_id))->assertOk();
+        $this->assertSame(1, StoreBalanceFundingIntent::query()->count());
+        $this->assertSame($nonce, StoreBalanceFundingIntent::query()->sole()->nonce);
+        $this->assertSame(4, $this->editCount(45411), 'Repeated preset selection must reuse the canonical confirmation.');
+        $this->assertSame(1, $this->routineMessageCount(45411));
+
+        $this->postTelegramWebhook($this->callbackUpdate(45416, 'balance-back', 'menu:back', [], 45411, 'private', $root->message_id))->assertOk();
         $this->assertSame($root->message_id, (int) $this->lastCanonicalEdit(45411)['message_id']);
         $this->assertSame(TelegramNavigationScreen::Home, $root->fresh()->screen);
-        $this->assertSame(3, $this->editCount(45411), 'Back must reuse the canonical message.');
+        $this->assertSame(5, $this->editCount(45411), 'Back must reuse the canonical message.');
         $this->assertSame(1, $this->routineMessageCount(45411));
     }
 
@@ -535,6 +553,295 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->assertStringContainsString('INV-BOUND-45511-5', $caption);
         $this->assertSame(5, substr_count($caption, 'INV-BOUND-'));
         $this->assertSame(1, $this->routineMessageCount(45511));
+    }
+
+    public function test_custom_deposit_reuses_one_confirmation_intent_without_provider_side_effects(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45431, 'locale' => 'en']);
+        $root = $this->openFundingChooser($customer, 45431);
+
+        $this->postTelegramWebhook($this->messageUpdate(45433, '/deposit 25000', [], 45431))->assertOk();
+
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $this->assertSame(StoreBalanceFundingIntentStatus::Pending, $intent->status);
+        $this->assertSame(25_000, $intent->amount);
+        $this->assertSame((int) $root->id, $intent->telegram_navigation_root_id);
+        $this->assertSame((int) $root->message_id, $intent->canonical_message_id);
+        $this->assertTrue($intent->expires_at->isFuture());
+
+        $confirmation = $this->lastCanonicalEdit(45431);
+        $caption = $this->editCopy($confirmation);
+        $this->assertStringContainsString('Confirm Store Balance top-up', $caption);
+        $this->assertStringContainsString('Store Balance credit: Rp 25.000', $caption);
+        $this->assertStringContainsString('provider fee and final payable total', $caption);
+        $this->assertStringContainsString('No payment invoice exists yet.', $caption);
+        $keyboard = $confirmation['reply_markup']['inline_keyboard'];
+        $this->assertMatchesRegularExpression('/\Abalance:confirm:[a-f0-9]{32}\z/', $keyboard[0][0]['callback_data']);
+        $this->assertMatchesRegularExpression('/\Abalance:cancel:[a-f0-9]{32}\z/', $keyboard[1][0]['callback_data']);
+        $this->assertMatchesRegularExpression('/\Abalance:back:[a-f0-9]{32}\z/', $keyboard[1][1]['callback_data']);
+        foreach ($keyboard as $row) {
+            foreach ($row as $button) {
+                $this->assertStringNotContainsString('25000', $button['callback_data'] ?? '');
+            }
+        }
+
+        $nonce = $intent->nonce;
+        $this->postTelegramWebhook($this->messageUpdate(45434, '/deposit 25000', [], 45431))->assertOk();
+        $this->assertSame(1, StoreBalanceFundingIntent::query()->count());
+        $this->assertSame($nonce, StoreBalanceFundingIntent::query()->sole()->nonce);
+        $this->assertSame(1, $this->routineMessageCount(45431));
+        $this->assertSame(0, Payment::query()->count());
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+        $this->assertSame(0, Http::recorded(
+            fn (Request $request): bool => str_contains($request->url(), 'klikqris'),
+        )->count());
+    }
+
+    public function test_custom_deposit_without_existing_root_establishes_one_canonical_message(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45435, 'locale' => 'en']);
+
+        $this->postTelegramWebhook($this->messageUpdate(45436, '/deposit 25000', [], 45435))->assertOk();
+
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $this->assertSame(1, $this->routineMessageCount(45435));
+        $this->assertSame(1, $this->editCount(45435));
+        $this->assertSame(
+            TelegramNavigationScreen::AddBalance,
+            TelegramNavigationRoot::query()->sole()->screen,
+        );
+        $this->assertStringContainsString(
+            'Store Balance credit: Rp 25.000',
+            $this->editCopy($this->lastCanonicalEdit(45435)),
+        );
+        $this->assertSame(TelegramNavigationRoot::query()->sole()->id, $intent->telegram_navigation_root_id);
+    }
+
+    #[DataProvider('confirmationLocales')]
+    public function test_confirmation_surface_is_localized_for_supported_customer_locales(
+        string $locale,
+        string $expectedTitle,
+        string $expectedNoInvoice,
+    ): void {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45437, 'locale' => $locale]);
+        $this->openFundingChooser($customer, 45437);
+        $this->postTelegramWebhook($this->messageUpdate(45439, '/deposit 25000', [], 45437))->assertOk();
+
+        $caption = $this->editCopy($this->lastCanonicalEdit(45437));
+        $this->assertStringContainsString($expectedTitle, $caption);
+        $this->assertStringContainsString('Rp 25.000', $caption);
+        $this->assertStringContainsString($expectedNoInvoice, $caption);
+    }
+
+    public static function confirmationLocales(): array
+    {
+        return [
+            'english' => ['en', 'Confirm Store Balance top-up', 'No payment invoice exists yet.'],
+            'indonesian' => ['id', 'Konfirmasi tambah saldo', 'Belum ada invoice pembayaran.'],
+            'malay' => ['ms', 'Sahkan tambah baki', 'Belum ada invois bayaran.'],
+        ];
+    }
+
+    #[DataProvider('invalidDepositAmounts')]
+    public function test_invalid_custom_deposit_reopens_current_chooser_without_side_effects(
+        string $text,
+        string $expectedCopy,
+    ): void {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45440, 'locale' => 'en']);
+        $this->openFundingChooser($customer, 45440);
+
+        $this->postTelegramWebhook($this->messageUpdate(45442, $text, [], 45440))->assertOk();
+
+        $this->assertSame(0, StoreBalanceFundingIntent::query()->count());
+        $this->assertStringContainsString($expectedCopy, $this->editCopy($this->lastCanonicalEdit(45440)));
+        $this->assertSame(1, $this->routineMessageCount(45440));
+        $this->assertSame(0, Payment::query()->count());
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+    }
+
+    public static function invalidDepositAmounts(): array
+    {
+        return [
+            'leading zero' => ['/deposit 025000', 'Enter one whole-IDR amount'],
+            'missing amount' => ['/deposit', 'Enter one whole-IDR amount'],
+            'grouped digits' => ['/deposit 25,000', 'Enter one whole-IDR amount'],
+            'decimal' => ['/deposit 25000.00', 'Enter one whole-IDR amount'],
+            'signed' => ['/deposit +25000', 'Enter one whole-IDR amount'],
+            'exponent' => ['/deposit 2e4', 'Enter one whole-IDR amount'],
+            'trailing text' => ['/deposit 25000 extra', 'Enter one whole-IDR amount'],
+            'overflow' => ['/deposit 999999999999999999999999999999', 'Enter one whole-IDR amount'],
+            'below minimum' => ['/deposit 4999', 'The minimum top-up is Rp 5.000'],
+        ];
+    }
+
+    public function test_confirmation_claims_are_replay_safe_and_do_not_create_payment_work(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45451, 'locale' => 'en']);
+        $root = $this->openFundingChooser($customer, 45451);
+        $preset = $this->lastCanonicalEdit(45451)['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(45454, 'funding-preset-real', $preset, [], 45451, 'private', $root->message_id))->assertOk();
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $confirm = 'balance:confirm:'.$intent->nonce;
+
+        $this->postTelegramWebhook($this->callbackUpdate(45455, 'funding-confirm', $confirm, [], 45451, 'private', $root->message_id))->assertOk();
+        $this->assertSame(StoreBalanceFundingIntentStatus::Confirmed, $intent->fresh()->status);
+        $accepted = $this->editCopy($this->lastCanonicalEdit(45451));
+        $this->assertStringContainsString('Confirmation received.', $accepted);
+        $this->assertStringContainsString('Store Balance credit: Rp 5.000', $accepted);
+
+        $this->postTelegramWebhook($this->callbackUpdate(45456, 'funding-confirm-replay', $confirm, [], 45451, 'private', $root->message_id))->assertOk();
+        $this->assertSame(StoreBalanceFundingIntentStatus::Confirmed, $intent->fresh()->status);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'funding-confirm-replay'
+            && ($request['text'] ?? null) === 'This confirmation was already accepted.');
+        $this->assertStringContainsString(
+            'This confirmation was already accepted.',
+            $this->editCopy($this->lastCanonicalEdit(45451)),
+        );
+
+        $this->postTelegramWebhook($this->messageUpdate(45457, '/deposit 10000', [], 45451))->assertOk();
+        $cancelledIntent = StoreBalanceFundingIntent::query()->where('status', StoreBalanceFundingIntentStatus::Pending)->sole();
+        $cancel = 'balance:cancel:'.$cancelledIntent->nonce;
+        $this->postTelegramWebhook($this->callbackUpdate(45458, 'funding-cancel', $cancel, [], 45451, 'private', $root->message_id))->assertOk();
+        $this->assertSame(StoreBalanceFundingIntentStatus::Cancelled, $cancelledIntent->fresh()->status);
+        $this->assertStringContainsString('Top-up confirmation cancelled.', $this->editCopy($this->lastCanonicalEdit(45451)));
+
+        $this->postTelegramWebhook($this->callbackUpdate(45459, 'funding-cancel-replay', $cancel, [], 45451, 'private', $root->message_id))->assertOk();
+        $this->assertSame(StoreBalanceFundingIntentStatus::Cancelled, $cancelledIntent->fresh()->status);
+        $this->assertSame(0, Payment::query()->count());
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+        $this->assertSame(0, Http::recorded(
+            fn (Request $request): bool => str_contains($request->url(), 'klikqris'),
+        )->count());
+    }
+
+    public function test_expired_confirmation_recovers_to_current_chooser(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45461, 'locale' => 'en']);
+        $root = $this->openFundingChooser($customer, 45461);
+        $this->postTelegramWebhook($this->messageUpdate(45463, '/deposit 25000', [], 45461))->assertOk();
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $intent->forceFill(['expires_at' => now()->subMinute()])->save();
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            45464,
+            'funding-expired',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            45461,
+            'private',
+            $root->message_id,
+        ))->assertOk();
+
+        $this->assertSame(StoreBalanceFundingIntentStatus::Expired, $intent->fresh()->status);
+        $this->assertStringContainsString(
+            'This top-up confirmation expired.',
+            $this->editCopy($this->lastCanonicalEdit(45461)),
+        );
+        $this->assertSame(0, Payment::query()->count());
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+    }
+
+    public function test_policy_change_invalidates_pending_confirmation_without_provider_work(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45471, 'locale' => 'en']);
+        $root = $this->openFundingChooser($customer, 45471);
+        $this->postTelegramWebhook($this->messageUpdate(45473, '/deposit 25000', [], 45471))->assertOk();
+        $intent = StoreBalanceFundingIntent::query()->sole();
+
+        StoreBalanceFundingPolicy::query()->firstOrFail()->forceFill([
+            'minimum_amount' => 5_000,
+            'preset_amounts' => [5_000, 15_000],
+            'version' => 1,
+        ])->save();
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            45474,
+            'funding-policy-stale',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            45471,
+            'private',
+            $root->message_id,
+        ))->assertOk();
+
+        $this->assertSame(StoreBalanceFundingIntentStatus::Superseded, $intent->fresh()->status);
+        $this->assertStringContainsString(
+            'This top-up confirmation is no longer current.',
+            $this->editCopy($this->lastCanonicalEdit(45471)),
+        );
+        $this->assertSame(0, Payment::query()->count());
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+    }
+
+    public function test_foreign_confirmation_message_recovers_on_current_canonical_root(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45475, 'locale' => 'en']);
+        $root = $this->openFundingChooser($customer, 45475);
+        $this->postTelegramWebhook($this->messageUpdate(45477, '/deposit 25000', [], 45475))->assertOk();
+        $intent = StoreBalanceFundingIntent::query()->sole();
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            45478,
+            'funding-foreign-message',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            45475,
+            'private',
+            $root->message_id + 999,
+        ))->assertOk();
+
+        $this->assertSame(StoreBalanceFundingIntentStatus::Pending, $intent->fresh()->status);
+        $this->assertStringContainsString(
+            'This top-up confirmation is no longer current.',
+            $this->editCopy($this->lastCanonicalEdit(45475)),
+        );
+        $this->assertSame(3, $this->editCount(45475));
+        $this->assertSame(1, $this->routineMessageCount(45475));
+    }
+
+    public function test_custom_deposit_is_private_only_and_does_not_create_intent_in_group(): void
+    {
+        $this->fakeCanonicalTelegram();
+        Customer::factory()->create(['telegram_id' => 45481, 'locale' => 'en']);
+
+        $this->postTelegramWebhook($this->messageUpdate(
+            45482,
+            '/deposit 25000',
+            ['id' => 45481],
+            -10045481,
+            'group',
+        ))->assertOk();
+
+        $this->assertSame(0, StoreBalanceFundingIntent::query()->count());
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+        $this->assertSame(0, Payment::query()->count());
+    }
+
+    private function openFundingChooser(Customer $customer, int $updateId): TelegramNavigationRoot
+    {
+        $chatId = (int) $customer->telegram_id;
+        $this->postTelegramWebhook($this->messageUpdate($updateId, '/start', [], $chatId))->assertOk();
+        $root = TelegramNavigationRoot::query()->sole();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            $updateId + 1,
+            'funding-open-'.$chatId,
+            'balance:add',
+            [],
+            $chatId,
+            'private',
+            $root->message_id,
+        ))->assertOk();
+
+        return $root->fresh();
     }
 
     private function paidOrder(Customer $customer, string $invoice): Order

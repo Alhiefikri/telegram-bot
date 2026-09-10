@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\CartStatus;
 use App\Models\Customer;
+use App\Services\Telegram\Callbacks\TelegramBalanceFundingCallbackHandler;
 use Illuminate\Support\Arr;
 
 class TelegramMessageRouter
@@ -34,6 +35,7 @@ class TelegramMessageRouter
         private TelegramNavigationPresenter $navigation,
         private TelegramBinanceVerifyIntents $binanceVerify,
         private TelegramBscVerifyIntents $bscVerify,
+        private TelegramBalanceFundingCallbackHandler $balanceFunding,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
@@ -88,6 +90,14 @@ class TelegramMessageRouter
 
         if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
             $this->session->forgetWithLock($customer);
+
+            return;
+        }
+
+        if ($this->balanceFunding->isDepositCommand($text)) {
+            $this->session->forgetWithLock($customer);
+            $this->catalogQueries->forget($customer);
+            $this->balanceFunding->handleDepositCommand($customer, $chatId, $text);
 
             return;
         }
@@ -310,6 +320,7 @@ class TelegramMessageRouter
             '📦 Cek Stok',
             '/stok',
         ], true)
+            || $this->balanceFunding->isDepositCommand($text)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
             || $this->isBroadcastCommand($text);
