@@ -46,16 +46,18 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
 
     public function test_main_menu_includes_compact_maintenance_notice(): void
     {
+        config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         CheckoutMaintenanceSetting::query()->firstOrFail()->update(['is_active' => true, 'version' => 1, 'activated_at' => now()]);
 
         $this->postTelegramWebhook($this->messageUpdate(30, '/menu'))->assertOk();
 
-        $menuMessage = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'Menu utama'))
-            ->last()[0];
-        $this->assertStringContainsString('Checkout sedang maintenance', (string) $menuMessage['text']);
+        $home = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto'))->sole()[0];
+        $this->assertStringContainsString(
+            'Checkout sedang maintenance',
+            (string) $this->telegramRequestField($home, 'caption'),
+        );
     }
 
     public function test_checkout_maintenance_status_returns_active_notice_then_reopened_navigation(): void

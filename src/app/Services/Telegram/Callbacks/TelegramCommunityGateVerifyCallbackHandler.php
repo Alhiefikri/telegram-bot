@@ -12,7 +12,6 @@ use App\Services\Telegram\TelegramCommunityGate;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMenuIntents;
-use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramStartIntentSession;
 
 class TelegramCommunityGateVerifyCallbackHandler implements TelegramCallbackHandler
@@ -25,7 +24,6 @@ class TelegramCommunityGateVerifyCallbackHandler implements TelegramCallbackHand
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
         private TelegramMenuIntents $menu,
-        private TelegramNavigationRootService $roots,
         private TelegramStartIntentSession $startIntents,
     ) {}
 
@@ -57,14 +55,7 @@ class TelegramCommunityGateVerifyCallbackHandler implements TelegramCallbackHand
                 return;
             }
 
-            $root = $this->roots->current($context->customer);
-            if ($root !== null && $root->chat_id === $context->chatId) {
-                $this->menu->renderHome($root, $context->customer, $context->chatId);
-
-                return;
-            }
-
-            $this->menu->sendWelcome($context->customer, $context->chatId, true);
+            $this->menu->presentHome($context->customer, $context->chatId);
         };
         if ($this->communityGate->verify(
             $context->customer,

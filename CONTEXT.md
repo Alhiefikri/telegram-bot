@@ -161,3 +161,7 @@ _Avoid_: Transaction, balance mutation, adjustment row
 **Store Activity**:
 The public-safe Telegram home summary of the Telegram Customer count and canonical successful Orders. It never discloses revenue, sold units, GMV, or earnings.
 _Avoid_: Sales report, revenue dashboard, store statistics
+
+**Canonical Navigation Message**:
+The single bot-owned Telegram message per private Customer chat on which the localized home is shown and where routine navigation (Browse Products, Balance, Orders, Language, Support, Back, Home) is edited in place. Durable transactional artifacts such as QRIS instructions, receipts, delivered credentials, and operational alerts are never used as that message.
+_Avoid_: Menu message, home message, reply keyboard menu, pinned message

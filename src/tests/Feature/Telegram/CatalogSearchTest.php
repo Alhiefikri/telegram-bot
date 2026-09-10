@@ -302,18 +302,24 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($request['text'], 'admin'));
     }
 
-    public function test_menu_command_routes_through_webhook_and_sends_main_menu_keyboard(): void
+    public function test_menu_command_opens_the_canonical_home_without_a_reply_keyboard(): void
     {
+        config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
         $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
 
         $this->postTelegramWebhook($this->messageUpdate(119, '/menu'))->assertOk();
 
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Main menu')
-            && ! str_contains($r['text'], '🚀')
-            && ($r['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products'
-            && ! str_contains(json_encode($r->data()), '☰ Menu')
-            && ! str_contains(json_encode($r->data()), 'Akun Saya'));
+        Http::assertSent(function ($r): bool {
+            $caption = (string) $this->telegramRequestField($r, 'caption');
+            $markup = $r->data()['reply_markup'] ?? [];
+
+            return str_ends_with($r->url(), '/sendPhoto')
+                && str_contains($caption, 'Welcome to LHIE STORE')
+                && ($markup['inline_keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products'
+                && ! array_key_exists('keyboard', $markup)
+                && ! array_key_exists('is_persistent', $markup);
+        });
     }
 
     public function test_lihat_produk_command_alias_opens_product_catalog(): void

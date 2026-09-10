@@ -169,7 +169,7 @@ POST /api/webhook/telegram
 
 Handler callback didaftarkan terpusat di [`AppServiceProvider`](../../src/app/Providers/AppServiceProvider.php). Tambah handler baru ke pipeline dan tentukan stage-nya; jangan membuat router kedua.
 
-Private `/start` milik customer Telegram memakai **canonical navigation root** `TelegramNavigationRoot`: satu pesan banner yang dimiliki Customer/chat, dikelola [`TelegramNavigationRootService`](../../src/app/Services/Telegram/TelegramNavigationRootService.php). Locale picker, home, dan navigasi routine berikutnya mengedit pesan itu (caption/media kind disimpan), sedangkan artifact durable seperti instruksi QRIS, receipt, credential, dan alert tidak pernah dipilih sebagai root. Caption disusun [`TelegramMenuIntents`](../../src/app/Services/Telegram/TelegramMenuIntents.php) dalam urutan greeting → Profile (Telegram ID, username atau missing value lokal, Store Balance fresh) → Store Activity (jumlah Customer Telegram dan canonical successful Order) → action prompt, di-escape [`TelegramHtmlCaption`](../../src/app/Services/Telegram/TelegramHtmlCaption.php) dan dibatasi 1024 karakter. Group `/start` tetap public-safe: tanpa identitas, Store Balance, atau callback Balance/deposit.
+Private `/start` milik customer Telegram memakai **canonical navigation root** `TelegramNavigationRoot`: satu pesan banner yang dimiliki Customer/chat, dikelola [`TelegramNavigationRootService`](../../src/app/Services/Telegram/TelegramNavigationRootService.php). Service me-lease `generation` sebelum menyentuh Telegram dan baru menulis `screen`/`locale` setelah edit terbukti berhasil, sehingga lease yang kalah, hasil ambigu, dan `message is not modified` tidak pernah memajukan state secara optimistis; kegagalan edit definitif dan layar yang melebihi caption media 1024 karakter mengganti root tepat sekali (banner reference tetap disimpan untuk `/start` berikutnya), sedangkan hasil ambigu tidak pernah memicu penggantian buta. [`TelegramNavigationPresenter`](../../src/app/Services/Telegram/TelegramNavigationPresenter.php) adalah seam presentasi: callback hanya boleh commit ke root yang benar-benar menjadi targetnya (selain itu stale → recovery lokal tanpa side effect), sedangkan command seperti `/menu`, `/produk`, `/riwayat`, `/support`, dan `/language` mengedit root aktif dan hanya memakai jalur kirim lama bila chat belum punya root. Caption disusun [`TelegramMenuIntents`](../../src/app/Services/Telegram/TelegramMenuIntents.php) dalam urutan greeting → Profile (Telegram ID, username atau missing value lokal, Store Balance fresh) → Store Activity (jumlah Customer Telegram dan canonical successful Order) → action prompt, di-escape [`TelegramHtmlCaption`](../../src/app/Services/Telegram/TelegramHtmlCaption.php) dan dibatasi 1024 karakter. Layar routine lain adalah Balance (saldo fresh + Add Balance), Orders (`TelegramOrderIntents::orderHistorySurface()`), Support, dan Language picker; semuanya memakai tombol Back/Home yang kembali ke home terbaru. Reply keyboard persisten dan path menu lamanya sudah dihapus, bukan dipertahankan sebagai alias. Group `/start` tetap public-safe: tanpa identitas, Store Balance, atau callback Balance/deposit, dan hanya mengekspos tombol katalog.
 
 `TelegramCatalogIntents` consumes `CatalogBrowse::browsePublic()` for the Product Family and standalone Product discovery list, while optional category
 filtering and search retain their existing Product projection. The list shows
@@ -177,12 +177,15 @@ up to ten entries per page; family option callbacks use the signed compact
 `TelegramFamilyCallbackToken` and resolve the existing Product ID only after
 the current public family projection and page are revalidated. Product Detail,
 quantity, payment, Cart, Order, and outbound-effect ownership remains unchanged.
-For inline family navigation, the callback `message_id` is threaded through the
-catalog presenter so `editMessageText` replaces the original catalog message.
-Product quote cards use Telegram HTML `<blockquote>` formatting; command/deep-link
-entry points without an originating message use the send path, while
-deterministic edit rejection may use a safe new-message fallback and transport
-ambiguity never triggers one.
+Routine catalog navigation renders onto the canonical message (`editMessageCaption`
+for a photo root, `editMessageText` for a text root) through the same
+`sendCatalogMessage` seam; `editMessageTextOrSend` remains only for group chats
+and entry points without a root. A screen that cannot fit a media caption
+replaces the photo root once with a text root instead of truncating content or
+uploading media again. Product quote cards use Telegram HTML `<blockquote>`
+formatting; command/deep-link entry points without an originating message use
+the send path, while deterministic edit rejection may use a safe new-message
+fallback and transport ambiguity never triggers one.
 
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
 
@@ -587,6 +590,8 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/StoreBalanceReconciliationTest.php` — projection/ledger mismatch detection via `store-balance:check` without changing money, customer scoping, limit, and sanitized JSON output.
 - `tests/Feature/StoreBalancePostgresConcurrencyTest.php` — process races for one idempotency claim, competing debits, parallel credits, duplicate source identity, and PostgreSQL non-negative/positive/unique constraints; runs only through the PostgreSQL gate.
 - `tests/Feature/Telegram/StoreBalanceHomeTest.php` — private home greeting → Profile → Store Activity → prompt ordering, fresh Store Balance independent of the global metrics cache, fail-safe unavailable projection, localized missing value, and public-safe group home.
+- `tests/Feature/Telegram/TelegramRoutineNavigationTest.php` — webhook-level single-message navigation evidence: Home → Balance → Home → Language → Home → Orders → Support on one canonical message, Balance screen + Add Balance, stale/ambiguous/missing-root recovery, catalog navigation on the root, long-screen text-root replacement, group public-safe surface, and id/en/ms screen copy.
+- `tests/Feature/Telegram/TelegramNavigationRootTest.php` dan `TelegramNavigationRootPostgresConcurrencyTest.php` — root establishment/replacement/lease semantics dan race PostgreSQL-nya.
 - `tests/Feature/Telegram/StartMetricsTest.php` — canonical successful Order and Telegram Customer metrics with bounded staleness cache.
 - `tests/Unit/Services/` — pure parser/policy/outcome/verification behavior.
 - `tests/Browser/admin-dashboard-responsive.spec.js` — customer checkout/page-flow evidence, admin behavior, reporting navigation, and responsive checks. The `customer checkout:` cases are the focused Storefront lane; they assert geometry and interaction behavior rather than screenshot-only output.

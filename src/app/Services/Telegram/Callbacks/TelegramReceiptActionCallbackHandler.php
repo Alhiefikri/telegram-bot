@@ -94,7 +94,9 @@ final class TelegramReceiptActionCallbackHandler implements TelegramCallbackHand
 
         $this->bot->answerCallbackQuery($context->callbackQueryId);
         $this->clearInteractionState($context);
-        $this->menu->sendMainMenu($context->customer, $context->chatId, $context->isPrivate());
+        // The receipt stays untouched: routine navigation belongs to the
+        // canonical message only.
+        $this->menu->presentHome($context->customer, $context->chatId);
     }
 
     private function clearInteractionState(TelegramCallbackContext $context): void

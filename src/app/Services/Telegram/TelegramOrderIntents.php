@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
@@ -42,6 +43,7 @@ class TelegramOrderIntents
         private SakurupiahInvoiceLifecycleService $sakurupiahLifecycle,
         private SakurupiahProviderReadiness $sakurupiahReadiness,
         private TelegramLocale $locale,
+        private TelegramMenuIntents $menu,
         private CredentialDeliveryFormatter $credentialFormatter,
         private CredentialDeliveryPresentation $credentialPresentation,
         private TelegramCredentialDeliveryRenderer $credentialRenderer,
@@ -64,20 +66,27 @@ class TelegramOrderIntents
         ]));
     }
 
-    public function sendOrderHistory(Customer $customer, string $chatId): void
+    /**
+     * Canonical Orders screen. The presentation seam renders it on the
+     * customer-owned message; the callback and menu adapters never re-run the
+     * order query themselves.
+     */
+    public function orderHistorySurface(Customer $customer): TelegramNavigationSurface
     {
         $orders = $customer->orders()->latest()->limit(5)->get();
         if ($orders->isEmpty()) {
-            $this->bot->sendMessage(
-                $chatId,
+            return new TelegramNavigationSurface(
+                TelegramNavigationScreen::Orders,
+                $this->locale->code($customer),
                 $this->locale->translate($customer, 'order.history.empty'),
-                ['inline_keyboard' => [[[
-                    'text' => $this->locale->translate($customer, 'order.history.browse_button'),
-                    'callback_data' => 'katalog',
-                ]]]],
+                ['inline_keyboard' => [
+                    [[
+                        'text' => $this->locale->translate($customer, 'order.history.browse_button'),
+                        'callback_data' => 'katalog',
+                    ]],
+                    $this->menu->navigationRow($customer),
+                ]],
             );
-
-            return;
         }
 
         $lines = [
@@ -97,8 +106,14 @@ class TelegramOrderIntents
                 'callback_data' => 'order:'.$order->invoice_number,
             ]];
         }
+        $keyboard[] = $this->menu->navigationRow($customer);
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::Orders,
+            $this->locale->code($customer),
+            implode("\n", $lines),
+            ['inline_keyboard' => $keyboard],
+        );
     }
 
     public function sendOrderDetail(Customer $customer, string $chatId, string $invoice): void

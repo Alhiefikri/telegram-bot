@@ -152,8 +152,10 @@ final class TelegramNavigationRootTest extends TelegramBotTestSupport
 
         $stored = $root->fresh();
         $this->assertSame($messageId, $stored->message_id);
-        $this->assertSame(TelegramNavigationScreen::Home, $stored->screen);
-        $this->assertSame('en', $stored->locale);
+        // An unproven edit never advances the stored screen; the customer's
+        // own locale choice is not part of that projection.
+        $this->assertSame(TelegramNavigationScreen::Picker, $stored->screen);
+        $this->assertNull($stored->locale);
         $this->assertSame(1, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->count());
         $this->assertSame(1, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageCaption'))->count());
     }

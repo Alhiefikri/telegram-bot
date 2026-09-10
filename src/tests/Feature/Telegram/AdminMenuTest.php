@@ -11,6 +11,7 @@ use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramBroadcastDrafts;
 use App\Services\Telegram\TelegramBroadcastIntents;
 use App\Services\Telegram\TelegramBroadcastService;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -26,54 +27,57 @@ class AdminMenuTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.mini_app_url', 'https://store.example/admin');
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
-        $this->postTelegramWebhook($this->messageUpdate(301, '/menu', ['id' => 999], 12345))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(301, '/start', ['id' => 999], 12345))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'Menu utama')
-            && ($request['reply_markup']['keyboard'][2][0]['text'] ?? null) === '🛠️ Admin Dashboard'
-            && ($request['reply_markup']['keyboard'][3][0]['text'] ?? null) === '📊 Statistik'
-            && ! str_contains(json_encode($request['reply_markup']), '📊 Statistik Harian')
-            && ! array_key_exists('callback_data', $request['reply_markup']['keyboard'][3][0] ?? [])
-            && ($request['reply_markup']['keyboard'][3][1]['text'] ?? null) === '📦 Cek Stok'
-            && str_starts_with((string) ($request['reply_markup']['keyboard'][2][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v=')
-            && ! str_contains(json_encode($request['reply_markup']), '☰ Menu')
-            && ! str_contains(json_encode($request['reply_markup']), 'Akun Saya'));
+        $home = $this->homeRequest(12345);
+        $keyboard = $home->data()['reply_markup']['inline_keyboard'];
+        $this->assertSame('🛠️ Admin Dashboard', $keyboard[3][0]['text'] ?? null);
+        $this->assertStringStartsWith('https://store.example/admin?v=', (string) ($keyboard[3][0]['web_app']['url'] ?? ''));
+        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('📊 Statistik', $encoded);
+        $this->assertStringNotContainsString('☰ Menu', $encoded);
+        $this->assertStringNotContainsString('Akun Saya', $encoded);
+        $this->assertArrayNotHasKey('keyboard', $home->data()['reply_markup']);
     }
 
     public function test_configured_admin_direct_chat_receives_admin_dashboard_button(): void
     {
         config()->set('services.telegram.admin_telegram_chat_id', '999');
         config()->set('services.telegram.mini_app_url', 'https://store.example/admin?source=telegram');
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
-        $this->postTelegramWebhook($this->messageUpdate(302, '/menu', ['id' => 999], 999))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(302, '/start', ['id' => 999], 999))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'Menu utama')
-            && ($request['reply_markup']['keyboard'][2][0]['text'] ?? null) === '🛠️ Admin Dashboard'
-            && str_starts_with((string) ($request['reply_markup']['keyboard'][2][0]['web_app']['url'] ?? ''), 'https://store.example/admin?source=telegram&v=')
-            && ! str_contains(json_encode($request['reply_markup']), '☰ Menu')
-            && ! str_contains(json_encode($request['reply_markup']), 'Akun Saya'));
+        $home = $this->homeRequest(999);
+        $keyboard = $home->data()['reply_markup']['inline_keyboard'];
+        $this->assertSame('🛠️ Admin Dashboard', $keyboard[3][0]['text'] ?? null);
+        $this->assertStringStartsWith('https://store.example/admin?source=telegram&v=', (string) ($keyboard[3][0]['web_app']['url'] ?? ''));
+        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('☰ Menu', $encoded);
+        $this->assertStringNotContainsString('Akun Saya', $encoded);
     }
 
-    public function test_ngrok_admin_dashboard_menu_uses_text_button_and_sends_url_link(): void
+    public function test_ngrok_admin_dashboard_button_is_an_inline_url_and_typed_label_sends_url_link(): void
     {
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.mini_app_url', 'https://substandard-miguelina-soberingly.ngrok-free.dev/admin');
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
-        $this->postTelegramWebhook($this->messageUpdate(308, '/menu', ['id' => 999], 12345))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(308, '/start', ['id' => 999], 12345))->assertOk();
         $this->postTelegramWebhook($this->messageUpdate(309, '🛠️ Admin Dashboard', ['id' => 999], 12345))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'Menu utama')
-            && ($request['reply_markup']['keyboard'][2][0]['text'] ?? null) === '🛠️ Admin Dashboard'
-            && ! array_key_exists('web_app', $request['reply_markup']['keyboard'][2][0] ?? []));
+        $button = $this->homeRequest(12345)->data()['reply_markup']['inline_keyboard'][3][0] ?? [];
+        $this->assertSame('🛠️ Admin Dashboard', $button['text'] ?? null);
+        $this->assertStringStartsWith('https://substandard-miguelina-soberingly.ngrok-free.dev/admin?v=', (string) ($button['url'] ?? ''));
+        $this->assertArrayNotHasKey('web_app', $button);
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && $request['text'] === 'Buka dashboard admin:'
@@ -86,19 +90,17 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('app.url', 'http://localhost');
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.mini_app_url', 'http://localhost/admin');
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
-        $this->postTelegramWebhook($this->messageUpdate(306, '/menu', ['id' => 999], 12345))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(306, '/start', ['id' => 999], 12345))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'Menu utama')
-            && str_contains(json_encode($request['reply_markup']), 'Broadcast Info')
-            && ! str_contains(json_encode($request['reply_markup']), '☰ Menu')
-            && ! str_contains(json_encode($request['reply_markup']), 'Akun Saya')
-            && ! str_contains(json_encode($request['reply_markup']), 'Admin Dashboard')
-            && ! str_contains(json_encode($request['reply_markup']), 'web_app')
-            && ! str_contains(json_encode($request['reply_markup']), 'localhost'));
+        $encoded = json_encode($this->homeRequest(12345)->data()['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('Lihat Produk', $encoded);
+        $this->assertStringNotContainsString('Admin Dashboard', $encoded);
+        $this->assertStringNotContainsString('web_app', $encoded);
+        $this->assertStringNotContainsString('localhost', $encoded);
     }
 
     public function test_loopback_app_url_does_not_send_invalid_web_app_payload(): void
@@ -106,19 +108,19 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('app.url', 'http://127.0.0.1');
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.mini_app_url', null);
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         URL::forceRootUrl('http://127.0.0.1');
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
 
         try {
-            $this->postTelegramWebhook($this->messageUpdate(307, '/menu', ['id' => 999], 12345))->assertOk();
+            $this->postTelegramWebhook($this->messageUpdate(307, '/start', ['id' => 999], 12345))->assertOk();
 
-            Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-                && str_contains($request['text'], 'Menu utama')
-                && ! str_contains(json_encode($request['reply_markup']), 'web_app')
-                && ! str_contains(json_encode($request['reply_markup']), '☰ Menu')
-                && ! str_contains(json_encode($request['reply_markup']), 'Akun Saya')
-                && ! str_contains(json_encode($request['reply_markup']), '127.0.0.1'));
+            $encoded = json_encode($this->homeRequest(12345)->data()['reply_markup'], JSON_THROW_ON_ERROR);
+            $this->assertStringNotContainsString('web_app', $encoded);
+            $this->assertStringNotContainsString('☰ Menu', $encoded);
+            $this->assertStringNotContainsString('Akun Saya', $encoded);
+            $this->assertStringNotContainsString('127.0.0.1', $encoded);
         } finally {
             URL::forceRootUrl(null);
         }
@@ -128,18 +130,30 @@ class AdminMenuTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.admin_telegram_chat_id', '999');
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 111, 'locale' => 'id']);
 
-        $this->postTelegramWebhook($this->messageUpdate(303, '/menu', ['id' => 111], 12345))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(303, '/start', ['id' => 111], 12345))->assertOk();
 
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request['text'], 'Menu utama')
-            && ($request['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Lihat Produk'
-            && ($request['reply_markup']['keyboard'][0][1]['text'] ?? null) === '📦 Pesanan'
-            && ! str_contains(json_encode($request['reply_markup']), '☰ Menu')
-            && ! str_contains(json_encode($request['reply_markup']), 'Akun Saya')
-            && ! str_contains(json_encode($request['reply_markup']), 'Admin Dashboard'));
+        $home = $this->homeRequest(12345);
+        $keyboard = $home->data()['reply_markup']['inline_keyboard'];
+        $this->assertSame('🛍️ Lihat Produk', $keyboard[0][0]['text'] ?? null);
+        $this->assertSame('💰 Saldo', $keyboard[1][0]['text'] ?? null);
+        $this->assertSame('📦 Pesanan', $keyboard[1][1]['text'] ?? null);
+        $this->assertCount(3, $keyboard);
+        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('Admin Dashboard', $encoded);
+        $this->assertStringNotContainsString('☰ Menu', $encoded);
+        $this->assertStringNotContainsString('Akun Saya', $encoded);
+    }
+
+    private function homeRequest(int $chatId): Request
+    {
+        $requests = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === (string) $chatId);
+
+        return $requests->sole()[0];
     }
 
     public function test_non_admin_cannot_create_a_broadcast_draft(): void

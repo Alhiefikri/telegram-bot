@@ -31,6 +31,7 @@ class TelegramMessageRouter
         private TelegramCommunityGate $communityGate,
         private TelegramChatPrivacyGuard $chatPrivacy,
         private TelegramLocale $locale,
+        private TelegramNavigationPresenter $navigation,
         private TelegramBinanceVerifyIntents $binanceVerify,
         private TelegramBscVerifyIntents $bscVerify,
     ) {}
@@ -136,17 +137,30 @@ class TelegramMessageRouter
 
             return;
         }
-        if (in_array($text, ['/menu', '☰ Menu'], true)) {
+        if (in_array($text, ['/menu'], true)) {
             $this->catalogQueries->forget($customer);
             $this->session->forgetWithLock($customer);
-            $this->menu->sendMainMenu($customer, $chatId, $isPrivateChat);
+
+            if (! $isPrivateChat) {
+                $this->menu->sendWelcome($customer, $chatId, false);
+
+                return;
+            }
+
+            if ($customer->locale === null) {
+                $this->menu->sendLanguagePicker($chatId, $customer);
+
+                return;
+            }
+
+            $this->menu->presentHome($customer, $chatId);
 
             return;
         }
 
         if (in_array($text, self::SUPPORT_COMMANDS, true)) {
             $this->session->forgetWithLock($customer);
-            $this->menu->sendSupport($customer, $chatId);
+            $this->navigation->presentOrSend($customer, $chatId, $this->menu->supportSurface($customer), $isPrivateChat);
 
             return;
         }
@@ -230,7 +244,7 @@ class TelegramMessageRouter
 
         if (in_array($text, self::ORDER_HISTORY_COMMANDS, true)) {
             $this->session->forgetWithLock($customer);
-            $this->orders->sendOrderHistory($customer, $chatId);
+            $this->navigation->presentOrSend($customer, $chatId, $this->orders->orderHistorySurface($customer), $isPrivateChat);
 
             return;
         }

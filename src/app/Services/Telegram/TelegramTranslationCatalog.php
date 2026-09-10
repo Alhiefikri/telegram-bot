@@ -44,7 +44,7 @@ final class TelegramTranslationCatalog
         'Stok terakhir',
     ];
 
-    private const CATALOG_KEY_PATTERN = '/^(?:translation|router|language|welcome|menu|maintenance|support|account|status|community_gate|privacy|callback|catalog|search|cart|checkout|payment|date|order|receipt|notification)\.[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/';
+    private const CATALOG_KEY_PATTERN = '/^(?:translation|router|language|welcome|menu|balance|maintenance|support|account|status|community_gate|privacy|callback|catalog|search|cart|checkout|payment|date|order|receipt|notification)\.[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/';
 
     public function __construct(private Translator $translator) {}
 

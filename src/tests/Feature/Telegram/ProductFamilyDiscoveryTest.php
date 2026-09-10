@@ -559,12 +559,15 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(41050, '/start product_'.$product->id, [], 41006))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(41051, 'choose-id', 'locale:id', [], 41006, 'private', 123456))->assertOk();
-        $this->assertNotEmpty(Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage') && str_contains((string) ($request['text'] ?? ''), 'Deep Linked Product')));
+        $deepLink = $this->lastMessageContaining('Deep Linked Product');
+        $this->assertSame(123456, (int) ($deepLink['message_id'] ?? 0), 'Deep link navigation must stay on the canonical message.');
+        $this->assertStringContainsString('Detail produk', (string) $deepLink['text']);
 
         $this->postTelegramWebhook($this->messageUpdate(41052, '/start family_'.$family->id, [], 41007))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(41053, 'choose-en', 'locale:en', [], 41007, 'private', 123456))->assertOk();
         $familyOptions = $this->lastMessageContaining('Choose an option for Deep Linked Family');
         $this->assertStringContainsString('Option A', (string) $familyOptions['text']);
+        $this->assertSame(123456, (int) ($familyOptions['message_id'] ?? 0), 'Deep link navigation must stay on the canonical message.');
     }
 
     public function test_family_start_target_survives_community_gate_verification(): void
@@ -935,10 +938,17 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 
     private function lastMessageContaining(string $needle): array
     {
-        $matches = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), $needle));
+        $matches = Http::recorded(fn (Request $request): bool => str_contains($request->body(), $needle)
+            && (str_ends_with($request->url(), '/sendMessage')
+                || str_ends_with($request->url(), '/editMessageText')
+                || str_ends_with($request->url(), '/editMessageCaption')));
         $this->assertNotEmpty($matches, 'Expected a Telegram message containing: '.$needle);
 
-        return $matches->last()[0]->data();
+        $payload = $matches->last()[0]->data();
+        if (! isset($payload['text']) && isset($payload['caption'])) {
+            $payload['text'] = $payload['caption'];
+        }
+
+        return $payload;
     }
 }

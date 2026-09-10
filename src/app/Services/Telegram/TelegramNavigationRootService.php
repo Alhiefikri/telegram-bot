@@ -16,6 +16,11 @@ use Throwable;
 /**
  * Owns the one recoverable, bot-owned navigation message per private customer
  * chat. Durable transactional artifacts are never tracked here.
+ *
+ * Rendering leases the stored generation, edits the customer-owned message, and
+ * only then commits the new screen projection. A lost lease, an ambiguous
+ * Telegram result, or a definitively uneditable root can therefore never
+ * advance the stored screen optimistically.
  */
 class TelegramNavigationRootService
 {
@@ -24,13 +29,32 @@ class TelegramNavigationRootService
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramWelcomeBanner $banner,
+        private TelegramHtmlCaption $captions,
     ) {}
 
-    public function current(Customer $customer): ?TelegramNavigationRoot
+    private function current(Customer $customer): ?TelegramNavigationRoot
     {
         return TelegramNavigationRoot::query()
             ->where('customer_id', $customer->id)
             ->first();
+    }
+
+    /**
+     * Resolve the current root only when it belongs to this chat.
+     */
+    public function currentForChat(Customer $customer, string $chatId): ?TelegramNavigationRoot
+    {
+        $chatId = trim($chatId);
+        if ($chatId === '') {
+            return null;
+        }
+
+        $root = $this->current($customer);
+        if ($root === null || $root->chat_id !== $chatId) {
+            return null;
+        }
+
+        return $root;
     }
 
     /**
@@ -46,8 +70,8 @@ class TelegramNavigationRootService
             return null;
         }
 
-        $root = $this->current($customer);
-        if ($root === null || $root->chat_id !== $chatId || $root->message_id !== $messageId) {
+        $root = $this->currentForChat($customer, $chatId);
+        if ($root === null || $root->message_id !== $messageId) {
             return null;
         }
 
@@ -72,22 +96,30 @@ class TelegramNavigationRootService
     public function render(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRenderOutcome
     {
         $chatId = trim($chatId);
-        $claimed = $this->claim($root, $chatId, $surface);
+        $claimed = $this->claim($root, $chatId);
         if ($claimed === null) {
             return TelegramNavigationRenderOutcome::Superseded;
+        }
+
+        // A photo message can only carry a 1024-character caption. Longer
+        // screens replace the root once with an equivalent text message instead
+        // of degrading the content or leaking a routine second message.
+        if ($claimed->media_kind === TelegramNavigationMediaKind::Photo
+            && ! $this->captions->fitsMediaCaption($surface->caption, $surface->options)) {
+            return $this->replaceRoot($claimed, $chatId, $surface);
         }
 
         try {
             $this->editRootMessage($claimed, $chatId, $surface);
         } catch (TelegramApiException $exception) {
             if ($exception->isMessageNotModified()) {
-                return $this->finishClaim($claimed)
+                return $this->finishClaim($claimed, $surface)
                     ? TelegramNavigationRenderOutcome::Unchanged
                     : TelegramNavigationRenderOutcome::Superseded;
             }
 
             if ($exception->isDefiniteEditFailure()) {
-                return $this->replaceDefiniteFailure($claimed, $chatId, $surface);
+                return $this->replaceRoot($claimed, $chatId, $surface);
             }
 
             $this->releaseClaim($claimed);
@@ -101,7 +133,7 @@ class TelegramNavigationRootService
             return TelegramNavigationRenderOutcome::Ambiguous;
         }
 
-        return $this->finishClaim($claimed)
+        return $this->finishClaim($claimed, $surface)
             ? TelegramNavigationRenderOutcome::Applied
             : TelegramNavigationRenderOutcome::Superseded;
     }
@@ -155,7 +187,7 @@ class TelegramNavigationRootService
         });
     }
 
-    private function claim(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): ?TelegramNavigationRoot
+    private function claim(TelegramNavigationRoot $root, string $chatId): ?TelegramNavigationRoot
     {
         $now = now();
         $token = (string) Str::uuid();
@@ -174,8 +206,6 @@ class TelegramNavigationRootService
                     ->orWhere('render_started_at', '<=', $staleAt);
             })
             ->update([
-                'screen' => $surface->screen,
-                'locale' => $surface->locale,
                 'generation' => $root->generation + 1,
                 'render_token' => $token,
                 'render_started_at' => $now,
@@ -187,13 +217,15 @@ class TelegramNavigationRootService
             : null;
     }
 
-    private function finishClaim(TelegramNavigationRoot $root): bool
+    private function finishClaim(TelegramNavigationRoot $root, TelegramNavigationSurface $surface): bool
     {
         return TelegramNavigationRoot::query()
             ->whereKey($root->id)
             ->where('generation', $root->generation)
             ->where('render_token', $root->render_token)
             ->update([
+                'screen' => $surface->screen,
+                'locale' => $surface->locale,
                 'render_token' => null,
                 'render_started_at' => null,
                 'rendered_at' => now(),
@@ -214,10 +246,15 @@ class TelegramNavigationRootService
             ]);
     }
 
-    private function replaceDefiniteFailure(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRenderOutcome
+    /**
+     * Replace an uneditable root exactly once. The banner service decides
+     * whether the replacement can stay a photo (caption within the media
+     * limit) or must be sent as text.
+     */
+    private function replaceRoot(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRenderOutcome
     {
         try {
-            $sent = $this->banner->send($chatId, $surface->caption, $surface->keyboard, $root->banner_reference);
+            $sent = $this->banner->send($chatId, $surface->caption, $surface->keyboard, $root->banner_reference, $surface->options);
         } catch (Throwable $exception) {
             $this->releaseClaim($root);
             $this->logAmbiguous($root, $exception);
@@ -233,7 +270,7 @@ class TelegramNavigationRootService
                 'chat_id' => $chatId,
                 'message_id' => $sent->messageId,
                 'media_kind' => $sent->mediaKind,
-                'banner_reference' => $sent->reference,
+                'banner_reference' => $sent->reference ?? $root->banner_reference,
                 'screen' => $surface->screen,
                 'locale' => $surface->locale,
                 'generation' => $root->generation + 1,
@@ -257,15 +294,13 @@ class TelegramNavigationRootService
 
     private function editRootMessage(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): void
     {
-        $options = ['parse_mode' => 'HTML'];
-
         if ($root->media_kind === TelegramNavigationMediaKind::Photo) {
-            $this->bot->editMessageCaption($chatId, $root->message_id, $surface->caption, $surface->keyboard, $options);
+            $this->bot->editMessageCaption($chatId, $root->message_id, $surface->caption, $surface->keyboard, $surface->options);
 
             return;
         }
 
-        $this->bot->editMessageText($chatId, $root->message_id, $surface->caption, $surface->keyboard, $options);
+        $this->bot->editMessageText($chatId, $root->message_id, $surface->caption, $surface->keyboard, $surface->options);
     }
 
     private function logAmbiguous(TelegramNavigationRoot $root, Throwable $exception): void

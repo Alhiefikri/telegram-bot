@@ -22,6 +22,7 @@ class TelegramMenuIntents
         private CheckoutMaintenance $maintenance,
         private TelegramStoreStatsReport $statsReport,
         private TelegramNavigationRootService $roots,
+        private TelegramNavigationPresenter $navigation,
         private TelegramWelcomeBanner $banner,
         private TelegramHtmlCaption $captions,
         private StoreBalanceLedger $balances,
@@ -29,35 +30,49 @@ class TelegramMenuIntents
 
     public function sendLanguagePicker(string $chatId, ?Customer $customer = null, bool $isPrivateChat = true): void
     {
-        $caption = $this->captions->html($this->locale->translate($customer, 'language.picker.prompt'));
-
         if ($customer === null || ! $isPrivateChat) {
-            $this->bot->sendMessage($chatId, $caption, $this->locale->languageKeyboard(), ['parse_mode' => 'HTML']);
-
-            return;
-        }
-
-        $this->presentRoot($customer, $chatId, new TelegramNavigationSurface(
-            TelegramNavigationScreen::Picker,
-            $customer->locale === null ? null : $this->locale->code($customer),
-            $caption,
-            $this->locale->languageKeyboard(),
-        ));
-    }
-
-    public function sendWelcome(Customer $customer, string $chatId, bool $isPrivateChat = true): void
-    {
-        if (! $isPrivateChat) {
-            $this->banner->send(
+            $this->bot->sendMessage(
                 $chatId,
-                $this->captions->html($this->groupCaption($customer)),
-                $this->mainMenuKeyboard($customer, $chatId, false),
+                $this->captions->html($this->locale->translate($customer, 'language.picker.prompt')),
+                $this->locale->languageKeyboard(),
+                ['parse_mode' => 'HTML'],
             );
 
             return;
         }
 
+        $surface = $this->languageSurface($customer);
+        if ($this->navigation->presentOnCurrentRoot($customer, $chatId, $surface) === null) {
+            $this->roots->establish($customer, $chatId, $surface);
+        }
+    }
+
+    public function sendWelcome(Customer $customer, string $chatId, bool $isPrivateChat = true): void
+    {
+        if (! $isPrivateChat) {
+            $surface = $this->groupSurface($customer);
+            $this->banner->send($chatId, $surface->caption, $surface->keyboard, null, $surface->options);
+
+            return;
+        }
+
+        // A returning /start deliberately supersedes the pointer with a fresh
+        // root instead of editing the previous one.
         $this->roots->establish($customer, $chatId, $this->homeSurface($customer, $chatId));
+    }
+
+    /**
+     * Return to the canonical home, reusing the current root when this chat has
+     * one and establishing it otherwise.
+     */
+    public function presentHome(Customer $customer, string $chatId): void
+    {
+        $surface = $this->homeSurface($customer, $chatId);
+        if ($this->navigation->presentOnCurrentRoot($customer, $chatId, $surface) !== null) {
+            return;
+        }
+
+        $this->roots->establish($customer, $chatId, $surface);
     }
 
     public function renderHome(TelegramNavigationRoot $root, Customer $customer, string $chatId): TelegramNavigationRenderOutcome
@@ -65,19 +80,7 @@ class TelegramMenuIntents
         return $this->roots->render($root, $chatId, $this->homeSurface($customer, $chatId));
     }
 
-    private function presentRoot(Customer $customer, string $chatId, TelegramNavigationSurface $surface): void
-    {
-        $root = $this->roots->current($customer);
-        if ($root === null || $root->chat_id !== $chatId) {
-            $this->roots->establish($customer, $chatId, $surface);
-
-            return;
-        }
-
-        $this->roots->render($root, $chatId, $surface);
-    }
-
-    private function homeSurface(Customer $customer, string $chatId): TelegramNavigationSurface
+    public function homeSurface(Customer $customer, string $chatId): TelegramNavigationSurface
     {
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::Home,
@@ -87,6 +90,104 @@ class TelegramMenuIntents
         );
     }
 
+    /**
+     * Public-safe group surface: no identity, Store Balance, or financial
+     * action is ever rendered or offered in a group chat.
+     */
+    public function groupSurface(Customer $customer): TelegramNavigationSurface
+    {
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::Home,
+            $this->locale->code($customer),
+            $this->captions->html($this->groupCaption($customer)),
+            $this->groupKeyboard($customer),
+        );
+    }
+
+    public function languageSurface(Customer $customer): TelegramNavigationSurface
+    {
+        $keyboard = $this->locale->languageKeyboard();
+        if ($customer->locale !== null) {
+            $keyboard['inline_keyboard'][] = $this->navigationRow($customer);
+        }
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::Picker,
+            $customer->locale === null ? null : $this->locale->code($customer),
+            $this->captions->html($this->locale->translate($customer, 'language.picker.prompt')),
+            $keyboard,
+        );
+    }
+
+    public function balanceSurface(Customer $customer): TelegramNavigationSurface
+    {
+        $balance = $this->balances->snapshot($customer);
+        $lines = [
+            $this->locale->translate($customer, 'balance.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'balance.available', [
+                'balance' => $balance->isAvailable()
+                    ? $this->locale->idr($balance->balance())
+                    : $this->locale->translate($customer, 'welcome.balance_unavailable'),
+            ]),
+        ];
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::Balance,
+            $this->locale->code($customer),
+            $this->captions->html(implode("\n", $lines)),
+            ['inline_keyboard' => [
+                [[
+                    'text' => $this->locale->translate($customer, 'balance.add'),
+                    'callback_data' => 'balance:add',
+                ]],
+                $this->navigationRow($customer),
+            ]],
+        );
+    }
+
+    public function supportSurface(Customer $customer): TelegramNavigationSurface
+    {
+        $adminContactUrl = $this->supportContact->resolve()['url'];
+        $keyboard = [];
+        if ($adminContactUrl) {
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'support.contact'),
+                'url' => $adminContactUrl,
+            ]];
+        }
+        $keyboard[] = $this->navigationRow($customer);
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::Support,
+            $this->locale->code($customer),
+            $this->captions->html($this->locale->translate($customer, 'support.message')),
+            ['inline_keyboard' => $keyboard],
+        );
+    }
+
+    /**
+     * Localized Back/Home chrome for routine navigation screens.
+     *
+     * @return list<array<string, string>>
+     */
+    public function navigationRow(?Customer $customer): array
+    {
+        return [
+            [
+                'text' => $this->locale->translate($customer, 'menu.back'),
+                'callback_data' => 'menu:back',
+            ],
+            [
+                'text' => $this->locale->translate($customer, 'menu.home'),
+                'callback_data' => 'menu:home',
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     private function homeKeyboard(Customer $customer, string $chatId): array
     {
         $keyboard = ['inline_keyboard' => [
@@ -111,6 +212,18 @@ class TelegramMenuIntents
         }
 
         return $keyboard;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function groupKeyboard(Customer $customer): array
+    {
+        return ['inline_keyboard' => [
+            [
+                ['text' => $this->locale->translate($customer, 'menu.products'), 'callback_data' => 'katalog'],
+            ],
+        ]];
     }
 
     private function privateCaption(Customer $customer): string
@@ -154,44 +267,23 @@ class TelegramMenuIntents
         ];
     }
 
-    public function sendMainMenu(Customer $customer, string $chatId, bool $isPrivateChat = true): void
+    public function sendAccountSummary(Customer $customer, string $chatId): void
     {
-        $message = $this->locale->translate($customer, 'menu.title');
-        $message .= $this->maintenanceNotice($customer);
-
-        $this->bot->sendMessage($chatId, $message, $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat));
-    }
-
-    public function mainMenuKeyboard(?Customer $customer = null, ?string $chatId = null, bool $isPrivateChat = true): array
-    {
-        $keyboard = [
-            [
-                ['text' => $this->locale->translate($customer, 'menu.products')],
-                ['text' => $this->locale->translate($customer, 'menu.orders')],
-            ],
-            [
-                ['text' => $this->locale->translate($customer, 'menu.support')],
-                ['text' => $this->locale->translate($customer, 'menu.language')],
-            ],
+        $ordersCount = $customer->orders()->count();
+        $latestOrder = $customer->orders()->latest()->first();
+        $lines = [
+            $this->locale->translate($customer, 'account.title'),
+            $this->locale->translate($customer, 'account.name').($customer->first_name ?: '-'),
+            $this->locale->translate($customer, 'account.username').'@'.($customer->username ?: '-'),
+            $this->locale->translate($customer, 'account.total_orders').$ordersCount,
         ];
-
-        if ($isPrivateChat && $customer && $chatId && $this->adminAccess->isAdmin($customer, $chatId)) {
-            $adminDashboardButton = $this->adminDashboardWebAppButton('🛠️ Admin Dashboard');
-            if ($adminDashboardButton !== null) {
-                $keyboard[] = [$adminDashboardButton];
-            } elseif ($this->adminDashboardInlineButton('🛠️ Admin Dashboard') !== null) {
-                $keyboard[] = [['text' => '🛠️ Admin Dashboard']];
-            }
-            $keyboard[] = [['text' => '📊 Statistik'], ['text' => '📦 Cek Stok']];
-            $keyboard[] = [['text' => '📣 Broadcast Info']];
+        if ($latestOrder) {
+            $lines[] = $this->locale->translate($customer, 'account.latest_order').$latestOrder->invoice_number.' · '.$this->locale->accountPaymentStatus($customer, $latestOrder->payment_status);
         }
+        $lines[] = '';
+        $lines[] = $this->locale->translate($customer, 'account.follow_up');
 
-        return [
-            'keyboard' => $keyboard,
-            'resize_keyboard' => true,
-            'is_persistent' => true,
-            'input_field_placeholder' => $this->locale->translate($customer, 'menu.placeholder'),
-        ];
+        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => [[['text' => $this->locale->translate($customer, 'account.orders_button'), 'callback_data' => 'status']]]]);
     }
 
     /**
@@ -243,35 +335,5 @@ class TelegramMenuIntents
         $username = trim((string) $customer->username);
 
         return $username !== '' ? '@'.ltrim($username, '@') : $this->locale->translate($customer, 'welcome.missing_value');
-    }
-
-    public function sendSupport(Customer $customer, string $chatId): void
-    {
-        $adminContactUrl = $this->supportContact->resolve()['url'];
-        $replyMarkup = [];
-        if ($adminContactUrl) {
-            $replyMarkup = ['inline_keyboard' => [[['text' => $this->locale->translate($customer, 'support.contact'), 'url' => $adminContactUrl]]]];
-        }
-
-        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'support.message'), $replyMarkup);
-    }
-
-    public function sendAccountSummary(Customer $customer, string $chatId): void
-    {
-        $ordersCount = $customer->orders()->count();
-        $latestOrder = $customer->orders()->latest()->first();
-        $lines = [
-            $this->locale->translate($customer, 'account.title'),
-            $this->locale->translate($customer, 'account.name').($customer->first_name ?: '-'),
-            $this->locale->translate($customer, 'account.username').'@'.($customer->username ?: '-'),
-            $this->locale->translate($customer, 'account.total_orders').$ordersCount,
-        ];
-        if ($latestOrder) {
-            $lines[] = $this->locale->translate($customer, 'account.latest_order').$latestOrder->invoice_number.' · '.$this->locale->accountPaymentStatus($customer, $latestOrder->payment_status);
-        }
-        $lines[] = '';
-        $lines[] = $this->locale->translate($customer, 'account.follow_up');
-
-        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => [[['text' => $this->locale->translate($customer, 'account.orders_button'), 'callback_data' => 'status']]]]);
     }
 }

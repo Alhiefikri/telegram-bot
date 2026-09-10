@@ -1,0 +1,529 @@
+<?php
+
+namespace Tests\Feature\Telegram;
+
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Enums\StoreBalanceEntryKind;
+use App\Enums\TelegramNavigationMediaKind;
+use App\Enums\TelegramNavigationScreen;
+use App\Models\Category;
+use App\Models\Customer;
+use App\Models\Order;
+use App\Models\Payment;
+use App\Models\Product;
+use App\Models\ProductFamily;
+use App\Models\TelegramNavigationRoot;
+use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\Telegram\TelegramLocale;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\TelegramBotTestSupport;
+
+final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
+{
+    public function test_home_balance_home_language_home_orders_support_change_one_message(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create([
+            'telegram_id' => 45401,
+            'locale' => 'en',
+            'first_name' => 'Ayu',
+            'username' => 'ayu_store',
+        ]);
+        $this->paidOrder($customer, 'INV-NAV-45401');
+
+        $this->postTelegramWebhook($this->messageUpdate(45401, '/start', [
+            'id' => 45401,
+            'first_name' => 'Ayu',
+            'username' => 'ayu_store',
+        ], 45401))->assertOk();
+
+        $root = TelegramNavigationRoot::query()->sole();
+        $messageId = $root->message_id;
+        $this->assertSame(1, $this->routineMessageCount(45401), 'The welcome banner is the only routine message.');
+
+        $steps = [
+            ['balance', '💰 My Balance', '➕ Add Balance'],
+            ['menu:home', '👤 My Profile', '🛍️ Browse Products'],
+            ['menu:language', '🌐 Choose your language', 'locale:en'],
+            ['locale:en', '👤 My Profile', '🛍️ Browse Products'],
+            ['menu:orders', '📦 Recent Order History', 'INV-NAV-45401'],
+            ['menu:support', '💬 Support', '⬅️ Back'],
+        ];
+
+        foreach ($steps as $index => [$data, $captionNeedle, $markupNeedle]) {
+            $this->postTelegramWebhook($this->callbackUpdate(
+                45410 + $index,
+                'nav-'.$index,
+                $data,
+                ['id' => 45401],
+                45401,
+                'private',
+                $messageId,
+            ))->assertOk();
+
+            $edit = $this->lastCanonicalEdit(45401);
+            $this->assertSame($messageId, (int) $edit['message_id'], 'Routine navigation must edit the canonical message.');
+            $this->assertStringContainsString($captionNeedle, $this->editCopy($edit));
+            $this->assertStringContainsString(
+                $markupNeedle,
+                json_encode($edit['reply_markup'] ?? [], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+            );
+            $this->assertSame($index + 1, $this->editCount(45401), 'Each action renders exactly one canonical edit.');
+        }
+
+        $this->assertSame(1, $this->routineMessageCount(45401), 'Routine navigation must not send a second message.');
+        $stored = TelegramNavigationRoot::query()->sole();
+        $this->assertSame($messageId, $stored->message_id);
+        $this->assertSame('en', $stored->locale);
+        $this->assertSame(TelegramNavigationScreen::Support, $stored->screen);
+    }
+
+    public function test_balance_screen_shows_fresh_store_balance_and_add_balance_action(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45411, 'locale' => 'id']);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            25000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '1',
+            'balance_top_up:1:credit',
+        );
+
+        $this->postTelegramWebhook($this->messageUpdate(45411, '/start', [], 45411))->assertOk();
+        $root = TelegramNavigationRoot::query()->sole();
+
+        $this->postTelegramWebhook($this->callbackUpdate(45412, 'balance-open', 'balance', [], 45411, 'private', $root->message_id))->assertOk();
+
+        $edit = $this->lastCanonicalEdit(45411);
+        $this->assertSame($root->message_id, (int) $edit['message_id']);
+        $this->assertStringContainsString('💰 Saldo Saya', $this->editCopy($edit));
+        $this->assertStringContainsString('Saldo tersedia: Rp 25.000', $this->editCopy($edit));
+        $keyboard = $edit['reply_markup']['inline_keyboard'];
+        $this->assertSame('balance:add', $keyboard[0][0]['callback_data']);
+        $this->assertSame(['menu:back', 'menu:home'], array_column($keyboard[1], 'callback_data'));
+
+        $this->postTelegramWebhook($this->callbackUpdate(45413, 'balance-add', 'balance:add', [], 45411, 'private', $root->message_id))->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'balance-add'
+            && ($request['text'] ?? null) === 'Tambah Saldo belum tersedia.');
+        $this->assertSame(1, $this->editCount(45411), 'Add Balance must not re-render or duplicate the canonical message.');
+        $this->assertSame(1, $this->routineMessageCount(45411));
+    }
+
+    public function test_stale_navigation_callback_recovers_locally_without_sending(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45421, 'locale' => 'en']);
+        $this->paidOrder($customer, 'INV-NAV-45421');
+
+        $this->postTelegramWebhook($this->messageUpdate(45421, '/start', [], 45421))->assertOk();
+        $staleMessageId = TelegramNavigationRoot::query()->sole()->message_id;
+
+        // A returning /start deliberately supersedes the pointer with a new root.
+        $this->postTelegramWebhook($this->messageUpdate(45422, '/start', [], 45421))->assertOk();
+        $current = TelegramNavigationRoot::query()->sole();
+        $currentMessageId = $current->message_id;
+        $this->assertNotSame($staleMessageId, $currentMessageId);
+
+        $editsBefore = $this->editCount(45421);
+        $sendsBefore = $this->routineMessageCount(45421);
+
+        $this->postTelegramWebhook($this->callbackUpdate(45423, 'stale-nav', 'menu:orders', [], 45421, 'private', $staleMessageId))->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'stale-nav'
+            && ($request['text'] ?? null) === app(TelegramLocale::class)->translate($customer, 'callback.navigation_stale'));
+        $this->assertSame($editsBefore, $this->editCount(45421), 'A stale callback must not edit any message.');
+        $this->assertSame($sendsBefore, $this->routineMessageCount(45421), 'A stale callback must not send a message.');
+        $this->assertSame($currentMessageId, $current->fresh()->message_id);
+    }
+
+    public function test_definitively_missing_root_is_replaced_once_for_navigation(): void
+    {
+        $this->fakeCanonicalTelegram(Http::response([
+            'ok' => false,
+            'description' => 'Bad Request: message to edit not found',
+        ], 400));
+        $customer = Customer::factory()->create(['telegram_id' => 45431, 'locale' => 'en']);
+        $this->paidOrder($customer, 'INV-NAV-45431');
+
+        $this->postTelegramWebhook($this->messageUpdate(45431, '/start', [], 45431))->assertOk();
+        $original = TelegramNavigationRoot::query()->sole();
+
+        $this->postTelegramWebhook($this->callbackUpdate(45432, 'missing-root', 'menu:orders', [], 45431, 'private', $original->message_id))->assertOk();
+
+        $stored = TelegramNavigationRoot::query()->sole();
+        $this->assertNotSame($original->message_id, $stored->message_id);
+        $this->assertSame(TelegramNavigationScreen::Orders, $stored->screen);
+        $this->assertSame(TelegramNavigationMediaKind::Photo, $stored->media_kind);
+        $this->assertSame(2, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->count());
+        $this->assertSame(0, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->count());
+        $replacement = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->last()[0];
+        $this->assertStringContainsString('INV-NAV-45431', (string) $this->telegramRequestField($replacement, 'caption'));
+    }
+
+    public function test_ambiguous_edit_keeps_the_previous_screen_and_sends_nothing(): void
+    {
+        $this->fakeCanonicalTelegram(Http::response([
+            'ok' => false,
+            'description' => 'temporary Telegram failure',
+        ], 500));
+        $customer = Customer::factory()->create(['telegram_id' => 45441, 'locale' => 'en']);
+
+        $this->postTelegramWebhook($this->messageUpdate(45441, '/start', [], 45441))->assertOk();
+        $root = TelegramNavigationRoot::query()->sole();
+
+        $this->postTelegramWebhook($this->callbackUpdate(45442, 'ambiguous-nav', 'balance', [], 45441, 'private', $root->message_id))->assertOk();
+
+        $stored = $root->fresh();
+        $this->assertSame(TelegramNavigationScreen::Home, $stored->screen, 'An unproven edit must not advance the stored screen.');
+        $this->assertSame($root->message_id, $stored->message_id);
+        $this->assertSame(1, $this->routineMessageCount(45441));
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'ambiguous-nav'
+            && ($request['text'] ?? null) === app(TelegramLocale::class)->translate($customer, 'callback.navigation_recovery'));
+    }
+
+    public function test_catalog_navigation_edits_the_canonical_message_and_returns_home(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45451, 'locale' => 'id']);
+        $category = Category::factory()->create(['name' => 'Streaming']);
+        Category::factory()->create(['name' => 'Design']);
+        $product = Product::factory()->create([
+            'name' => 'Netflix Premium',
+            'description' => 'Akun streaming.',
+            'category_id' => $category->id,
+            'price_amount' => 25000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(45451, '/start', [], 45451))->assertOk();
+        $messageId = TelegramNavigationRoot::query()->sole()->message_id;
+
+        $this->postTelegramWebhook($this->callbackUpdate(45452, 'catalog-open', 'katalog', [], 45451, 'private', $messageId))->assertOk();
+        $this->assertStringContainsString('Netflix Premium', $this->editCopy($this->lastCanonicalEdit(45451)));
+
+        $this->postTelegramWebhook($this->callbackUpdate(45453, 'catalog-category', 'category:'.$category->id, [], 45451, 'private', $messageId))->assertOk();
+        $this->assertStringContainsString('Kategori: Streaming', $this->editCopy($this->lastCanonicalEdit(45451)));
+
+        $this->postTelegramWebhook($this->callbackUpdate(45454, 'catalog-product', 'product:'.$product->id, [], 45451, 'private', $messageId))->assertOk();
+        $productDetail = $this->lastCanonicalEdit(45451);
+        $this->assertStringContainsString('Netflix Premium', $this->editCopy($productDetail));
+        $this->assertSame($messageId, (int) $productDetail['message_id']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(45455, 'catalog-back-home', 'family:back:menu', [], 45451, 'private', $messageId))->assertOk();
+        $home = $this->lastCanonicalEdit(45451);
+        $this->assertStringContainsString('👤 Profil Saya', $this->editCopy($home));
+        $this->assertSame($messageId, (int) $home['message_id']);
+
+        $this->assertSame(4, $this->editCount(45451), 'Catalog navigation must edit the canonical message.');
+        $this->assertSame(1, $this->routineMessageCount(45451), 'Catalog navigation must not send a second message.');
+        $this->assertSame($messageId, (int) TelegramNavigationRoot::query()->sole()->message_id);
+    }
+
+    public function test_long_catalog_screen_replaces_the_photo_root_once_and_keeps_editing(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45461, 'locale' => 'en']);
+        $family = ProductFamily::factory()->create(['name' => 'Collector Family', 'slug' => 'collector-family']);
+        foreach (range(1, 10) as $number) {
+            Product::factory()->create([
+                'name' => 'Collector Bundle '.$number,
+                'product_family_id' => $family->id,
+                'family_option_label' => 'Premium Collector Edition Package '.$number.' with extended warranty and priority delivery',
+                'stock' => 1,
+                'reserved_stock' => 0,
+                'is_active' => true,
+            ]);
+        }
+
+        $this->postTelegramWebhook($this->messageUpdate(45461, '/start', [], 45461))->assertOk();
+        $photoRoot = TelegramNavigationRoot::query()->sole();
+        $this->assertSame(TelegramNavigationMediaKind::Photo, $photoRoot->media_kind);
+
+        $this->postTelegramWebhook($this->callbackUpdate(45462, 'long-catalog', 'katalog', [], 45461, 'private', $photoRoot->message_id))->assertOk();
+        $list = $this->lastCanonicalEdit(45461);
+        $this->assertSame($photoRoot->message_id, (int) $list['message_id']);
+        $this->assertStringContainsString('Collector Family', $this->editCopy($list));
+
+        $options = null;
+        foreach ($list['reply_markup']['inline_keyboard'] as $row) {
+            foreach ($row as $button) {
+                if (str_starts_with((string) ($button['callback_data'] ?? ''), 'family:options:v')) {
+                    $options = $button['callback_data'];
+                }
+            }
+        }
+        $this->assertNotNull($options);
+
+        $this->postTelegramWebhook($this->callbackUpdate(45463, 'long-options', $options, [], 45461, 'private', $photoRoot->message_id))->assertOk();
+
+        $stored = TelegramNavigationRoot::query()->sole();
+        $this->assertSame(TelegramNavigationMediaKind::Text, $stored->media_kind, 'Oversized catalog screens become one text root.');
+        $this->assertSame(TelegramNavigationScreen::Catalog, $stored->screen);
+        $this->assertNotSame($photoRoot->message_id, $stored->message_id);
+        $this->assertSame(1, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->count());
+        $replacement = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->sole()[0];
+        $this->assertStringContainsString('Collector Family', (string) ($replacement['text'] ?? ''));
+        $this->assertSame('banner-'.$photoRoot->message_id, $stored->banner_reference);
+
+        $this->postTelegramWebhook($this->callbackUpdate(45464, 'long-back-home', 'family:back:menu', [], 45461, 'private', $stored->message_id))->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
+            && (string) ($request['message_id'] ?? '') === (string) $stored->message_id
+            && str_contains((string) ($request['text'] ?? ''), '👤 My Profile'));
+        $this->assertSame(1, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->count());
+        $this->assertSame(1, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->count());
+    }
+
+    public function test_group_chats_expose_only_public_safe_navigation(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create([
+            'telegram_id' => 45471,
+            'locale' => 'id',
+            'first_name' => 'Group User',
+            'username' => 'group_user',
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(45471, '/start', [
+            'id' => 45471,
+            'first_name' => 'Group User',
+            'username' => 'group_user',
+        ], -10045471, 'group'))->assertOk();
+
+        $banner = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->sole()[0];
+        $markup = $banner->data()['reply_markup'];
+        $this->assertArrayNotHasKey('keyboard', $markup);
+        $this->assertCount(1, $markup['inline_keyboard']);
+        $this->assertSame(['katalog'], array_column($markup['inline_keyboard'][0], 'callback_data'));
+        $this->assertStringNotContainsString('balance', json_encode($markup, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+        $this->assertStringNotContainsString('45471', (string) $this->telegramRequestField($banner, 'caption'));
+        $this->assertSame(0, TelegramNavigationRoot::query()->count());
+
+        $denied = ['balance' => 'no-balance', 'menu:orders' => 'no-orders', 'menu:home' => 'no-home'];
+        $updateId = 45480;
+        foreach ($denied as $data => $callbackId) {
+            $this->postTelegramWebhook($this->callbackUpdate($updateId++, $callbackId, $data, ['id' => 45471], -10045471, 'group', 9001))->assertOk();
+            Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+                && ($request['callback_query_id'] ?? null) === $callbackId
+                && ($request['text'] ?? null) === 'Demi keamanan, lanjutkan di chat pribadi dengan bot.');
+        }
+        $this->assertSame(0, $this->editCount(-10045471));
+
+        $this->postTelegramWebhook($this->callbackUpdate(45490, 'group-catalog', 'katalog', ['id' => 45471], -10045471, 'group', 9001))->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
+            && (string) ($request['message_id'] ?? '') === '9001');
+        $this->assertSame(0, TelegramNavigationRoot::query()->count());
+    }
+
+    /**
+     * @param  list<string>  $expected
+     */
+    #[DataProvider('navigationScreensByLocale')]
+    public function test_navigation_screens_are_localized_for_every_customer_locale(string $locale, array $expected): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45481, 'locale' => $locale]);
+        $this->paidOrder($customer, 'INV-LOCALE-45481');
+
+        $this->postTelegramWebhook($this->messageUpdate(45481, '/start', [], 45481))->assertOk();
+        $messageId = TelegramNavigationRoot::query()->sole()->message_id;
+
+        $this->postTelegramWebhook($this->callbackUpdate(45482, 'locale-balance', 'balance', [], 45481, 'private', $messageId))->assertOk();
+        $balance = $this->editCopy($this->lastCanonicalEdit(45481));
+        $this->assertStringContainsString($expected[0], $balance);
+        $this->assertStringContainsString($expected[1], $balance);
+        $this->assertStringContainsString($expected[4], json_encode($this->lastCanonicalEdit(45481)['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+        $this->assertStringContainsString($expected[5], json_encode($this->lastCanonicalEdit(45481)['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+
+        $this->postTelegramWebhook($this->callbackUpdate(45483, 'locale-orders', 'menu:orders', [], 45481, 'private', $messageId))->assertOk();
+        $this->assertStringContainsString($expected[2], $this->editCopy($this->lastCanonicalEdit(45481)));
+
+        $this->postTelegramWebhook($this->callbackUpdate(45484, 'locale-support', 'menu:support', [], 45481, 'private', $messageId))->assertOk();
+        $this->assertStringContainsString($expected[3], $this->editCopy($this->lastCanonicalEdit(45481)));
+
+        $this->assertSame(3, $this->editCount(45481));
+        $this->assertSame(1, $this->routineMessageCount(45481));
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: list<string>}>
+     */
+    public static function navigationScreensByLocale(): array
+    {
+        return [
+            'indonesian' => ['id', [
+                '💰 Saldo Saya',
+                'Saldo tersedia: Rp 0',
+                '📦 Riwayat Pesanan Terakhir',
+                'Ada kendala order, pembayaran, atau login akun?',
+                '⬅️ Kembali',
+                '🏠 Beranda',
+            ]],
+            'english' => ['en', [
+                '💰 My Balance',
+                'Available balance: Rp 0',
+                '📦 Recent Order History',
+                'Need help with an order, payment, or account login?',
+                '⬅️ Back',
+                '🏠 Home',
+            ]],
+            'malay' => ['ms', [
+                '💰 Baki Saya',
+                'Baki tersedia: Rp 0',
+                '📦 Sejarah Pesanan Terkini',
+                'Ada masalah dengan pesanan, bayaran atau log masuk akaun?',
+                '⬅️ Kembali',
+                '🏠 Utama',
+            ]],
+        ];
+    }
+
+    public function test_repeated_home_callbacks_converge_without_a_second_message(): void
+    {
+        $edits = 0;
+        $this->fakeCanonicalTelegram(function () use (&$edits) {
+            $edits++;
+
+            return $edits > 1
+                ? Http::response(['ok' => false, 'description' => 'Bad Request: message is not modified'], 400)
+                : Http::response(['ok' => true]);
+        });
+        $customer = Customer::factory()->create(['telegram_id' => 45501, 'locale' => 'en']);
+
+        $this->postTelegramWebhook($this->messageUpdate(45501, '/start', [], 45501))->assertOk();
+        $root = TelegramNavigationRoot::query()->sole();
+
+        $this->postTelegramWebhook($this->callbackUpdate(45502, 'home-first', 'menu:home', [], 45501, 'private', $root->message_id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(45503, 'home-repeat', 'menu:home', [], 45501, 'private', $root->message_id))->assertOk();
+
+        $stored = $root->fresh();
+        $this->assertSame($root->message_id, $stored->message_id);
+        $this->assertSame(TelegramNavigationScreen::Home, $stored->screen);
+        $this->assertSame('en', $stored->locale);
+        $this->assertNull($stored->render_token);
+        $this->assertNull($stored->render_started_at);
+        $this->assertSame(2, $this->editCount(45501));
+        $this->assertSame(1, $this->routineMessageCount(45501), 'A not-modified render is a successful no-op.');
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'home-repeat'
+            && ! isset($request['text']));
+    }
+
+    public function test_orders_screen_reads_history_with_one_bounded_query(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45511, 'locale' => 'en']);
+        foreach (range(1, 5) as $index) {
+            $this->paidOrder($customer, 'INV-BOUND-45511-'.$index);
+        }
+
+        $this->postTelegramWebhook($this->messageUpdate(45511, '/start', [], 45511))->assertOk();
+        $messageId = TelegramNavigationRoot::query()->sole()->message_id;
+
+        $orderQueries = [];
+        DB::listen(function (QueryExecuted $query) use (&$orderQueries): void {
+            if (preg_match('/from ["`]?orders["`]?/i', $query->sql) === 1) {
+                $orderQueries[] = $query->sql;
+            }
+        });
+
+        $this->postTelegramWebhook($this->callbackUpdate(45512, 'orders-bounded', 'menu:orders', [], 45511, 'private', $messageId))->assertOk();
+
+        $this->assertCount(1, $orderQueries, 'The Orders screen must read its history with one bounded query.');
+        $caption = $this->editCopy($this->lastCanonicalEdit(45511));
+        $this->assertStringContainsString('INV-BOUND-45511-5', $caption);
+        $this->assertSame(5, substr_count($caption, 'INV-BOUND-'));
+        $this->assertSame(1, $this->routineMessageCount(45511));
+    }
+
+    private function paidOrder(Customer $customer, string $invoice): Order
+    {
+        $order = Order::factory()->for($customer)->create([
+            'invoice_number' => $invoice,
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        Payment::factory()->for($order)->create([
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+
+        return $order;
+    }
+
+    private function fakeCanonicalTelegram(mixed $editResponse = null): void
+    {
+        $nextMessageId = 700;
+        config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
+        $editResolver = $editResponse instanceof \Closure
+            ? $editResponse
+            : fn (Request $request) => $editResponse ?? Http::response(['ok' => true]);
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.telegram.org/*/sendPhoto' => function () use (&$nextMessageId) {
+                $nextMessageId++;
+
+                return Http::response([
+                    'ok' => true,
+                    'result' => ['message_id' => $nextMessageId, 'photo' => [['file_id' => 'banner-'.$nextMessageId]]],
+                ]);
+            },
+            'https://api.telegram.org/*/sendMessage' => function () use (&$nextMessageId) {
+                $nextMessageId++;
+
+                return Http::response(['ok' => true, 'result' => ['message_id' => $nextMessageId]]);
+            },
+            'https://api.telegram.org/*/editMessageCaption' => fn (Request $request) => $editResolver($request),
+            'https://api.telegram.org/*/editMessageText' => fn (Request $request) => $editResolver($request),
+            'https://api.telegram.org/*' => Http::response(['ok' => true]),
+        ]);
+    }
+
+    private function lastCanonicalEdit(int $chatId): array
+    {
+        $edits = Http::recorded(fn (Request $request): bool => $this->isEditRequest($request)
+            && (string) ($request['chat_id'] ?? '') === (string) $chatId);
+        $this->assertNotEmpty($edits, "Expected a canonical edit for chat {$chatId}.");
+
+        return $edits->last()[0]->data();
+    }
+
+    private function editCount(int $chatId): int
+    {
+        return Http::recorded(fn (Request $request): bool => $this->isEditRequest($request)
+            && (string) ($request['chat_id'] ?? '') === (string) $chatId)->count();
+    }
+
+    private function routineMessageCount(int $chatId): int
+    {
+        return Http::recorded(fn (Request $request): bool => (str_ends_with($request->url(), '/sendMessage')
+                || str_ends_with($request->url(), '/sendPhoto'))
+            && (string) ($request['chat_id'] ?? '') === (string) $chatId)->count();
+    }
+
+    private function isEditRequest(Request $request): bool
+    {
+        return str_ends_with($request->url(), '/editMessageCaption')
+            || str_ends_with($request->url(), '/editMessageText');
+    }
+
+    private function editCopy(array $edit): string
+    {
+        return (string) ($edit['caption'] ?? $edit['text'] ?? '');
+    }
+}

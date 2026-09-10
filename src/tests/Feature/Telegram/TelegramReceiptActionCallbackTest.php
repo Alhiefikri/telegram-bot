@@ -60,8 +60,9 @@ final class TelegramReceiptActionCallbackTest extends TelegramBotTestSupport
             && ! isset($request['text']));
     }
 
-    public function test_main_menu_delegates_to_the_existing_locale_aware_menu(): void
+    public function test_main_menu_delegates_to_the_canonical_home_without_touching_the_receipt(): void
     {
+        config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
         $this->fakeTelegramHttp();
         [$customer, $order] = $this->paidOrder('ms', 425002);
         app(TelegramIntentSession::class)->start($customer, 1, 1, 'ms');
@@ -73,13 +74,15 @@ final class TelegramReceiptActionCallbackTest extends TelegramBotTestSupport
             chatId: 425002,
         ))->assertOk();
 
-        $message = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->sole()[0];
-        $this->assertSame(
-            "☰ Menu utama\nApa yang anda mahu lakukan? Pilih butang di bawah.",
-            (string) ($message['text'] ?? ''),
-        );
-        $this->assertSame('keyboard', array_key_first((array) ($message['reply_markup'] ?? [])));
+        $banner = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto'))->sole()[0];
+        $caption = (string) $this->telegramRequestField($banner, 'caption');
+        $this->assertStringContainsString('selamat datang ke LHIE STORE', $caption);
+        $this->assertStringContainsString('💰 Baki Saya: Rp 0', $caption);
+        $this->assertArrayHasKey('inline_keyboard', $banner->data()['reply_markup']);
+        $this->assertArrayNotHasKey('keyboard', $banner->data()['reply_markup']);
         $this->assertNull(app(TelegramIntentSession::class)->get($customer));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/editMessageCaption')
+            || str_ends_with($request->url(), '/editMessageText'));
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
             && ($request['callback_query_id'] ?? null) === 'cb-receipt-main-menu'
             && ! isset($request['text']));

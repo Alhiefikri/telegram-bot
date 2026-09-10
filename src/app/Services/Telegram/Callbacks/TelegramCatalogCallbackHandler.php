@@ -14,6 +14,7 @@ use App\Services\Telegram\TelegramFamilyCallbackToken;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMenuIntents;
+use App\Services\Telegram\TelegramNavigationPresenter;
 
 class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
 {
@@ -25,6 +26,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
         private TelegramMenuIntents $menu,
+        private TelegramNavigationPresenter $navigation,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -39,7 +41,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
 
     public function supports(TelegramCallbackContext $context): bool
     {
-        return in_array($context->data, ['katalog', 'back:categories', 'catalog:categories', 'family:back:menu', 'balance'], true)
+        return in_array($context->data, ['katalog', 'back:categories', 'catalog:categories', 'family:back:menu'], true)
             || preg_match('/^category:([1-9][0-9]*|uncategorized)(?::page:[1-9][0-9]*)?$/', $context->data) === 1
             || preg_match('/^family:list:[1-9][0-9]{0,18}(?::o[a-f0-9]{16})?$/', $context->data) === 1
             || preg_match('/^family:search:[a-f0-9]{16}:[1-9][0-9]{0,18}$/', $context->data) === 1
@@ -51,10 +53,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
     public function handle(TelegramCallbackContext $context): bool
     {
         if ($context->data === 'family:back:menu') {
-            $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->session->forgetWithLock($context->customer);
-            $this->catalogQueries->forget($context->customer);
-            $this->menu->sendMainMenu($context->customer, $context->chatId, $context->chatType === 'private');
+            $this->handleBackToMenu($context);
 
             return true;
         }
@@ -192,12 +191,6 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
-        if ($context->data === 'balance') {
-            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.balance_soon'));
-
-            return true;
-        }
-
         if (preg_match('/^product:([1-9][0-9]*)$/', $context->data, $matches)) {
             $product = Product::query()->withAvailability()->publicVisible()->whereKey((int) $matches[1])->first();
             if (! $product) {
@@ -215,6 +208,38 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
         }
 
         return false;
+    }
+
+    /**
+     * Catalog screens keep their "back to menu" affordance, but the menu is
+     * now the canonical home of this chat. Groups only get the public-safe
+     * surface and never a private root.
+     */
+    private function handleBackToMenu(TelegramCallbackContext $context): void
+    {
+        $this->session->forgetWithLock($context->customer);
+        $this->catalogQueries->forget($context->customer);
+
+        if (! $context->isPrivate()) {
+            $surface = $this->menu->groupSurface($context->customer);
+            $this->bot->editMessageTextOrSend(
+                $context->chatId,
+                $surface->caption,
+                $surface->keyboard,
+                $context->messageId,
+                $surface->options,
+            );
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+            return;
+        }
+
+        $outcome = $this->navigation->presentFromCallback(
+            $context->customer,
+            $context,
+            $this->menu->homeSurface($context->customer, $context->chatId),
+        );
+        $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
     }
 
     /** @param array{familyId:int,page:int,returnPage:int,originToken?:string,stateToken?:string} $payload */

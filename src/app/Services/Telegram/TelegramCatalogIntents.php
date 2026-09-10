@@ -8,6 +8,7 @@ use App\Catalog\CatalogBrowseResult;
 use App\Catalog\CatalogCategoryReadModel;
 use App\Catalog\CatalogFamilyReadModel;
 use App\Catalog\CatalogProductReadModel;
+use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Services\Admin\ProductImageOptimizer;
@@ -32,6 +33,7 @@ class TelegramCatalogIntents
         private ProductBrandIconResolver $icons,
         private TelegramCatalogQuerySession $catalogQueries,
         private TelegramFamilyCallbackToken $familyTokens,
+        private TelegramNavigationRootService $roots,
         private ProductImageOptimizer $images,
     ) {}
 
@@ -88,7 +90,7 @@ class TelegramCatalogIntents
         $message = $options->categories === [] && ! $options->hasUncategorized
             ? $this->locale->translate($customer, 'catalog.empty')
             : $this->locale->translate($customer, 'catalog.category_filter');
-        $this->bot->editMessageTextOrSend($chatId, $message, ['inline_keyboard' => $keyboard], $messageId);
+        $this->sendCatalogMessage($customer, $chatId, $message, ['inline_keyboard' => $keyboard], $messageId);
     }
 
     public function sendFamilyOptions(Customer $customer, string $chatId, int $familyId, int $page = 1, int $returnPage = 1, ?string $originToken = null, ?int $messageId = null): void
@@ -96,7 +98,7 @@ class TelegramCatalogIntents
         try {
             $family = $this->browse->showPublicFamily($familyId);
         } catch (ModelNotFoundException) {
-            $this->sendCatalogMessage($chatId, $this->locale->translate($customer, 'catalog.family.unavailable'), [
+            $this->sendCatalogMessage($customer, $chatId, $this->locale->translate($customer, 'catalog.family.unavailable'), [
                 'inline_keyboard' => [[[
                     'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
                     'callback_data' => 'family:back:menu',
@@ -186,7 +188,7 @@ class TelegramCatalogIntents
                 : 'family:list:'.$returnPage.':o'.$originToken,
         ]];
 
-        $this->sendCatalogMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard], $messageId, ['parse_mode' => 'HTML']);
+        $this->sendCatalogMessage($customer, $chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard], $messageId, ['parse_mode' => 'HTML']);
     }
 
     public function openFamilyOptions(
@@ -519,9 +521,13 @@ class TelegramCatalogIntents
             ?? $product->family?->image_path;
         $telegramPhoto = $this->images->telegramPhoto($telegramImagePath);
 
+        // Product photography stays an explicit new-message entry point only
+        // when this chat has no canonical message to edit; on the canonical
+        // message routine navigation must never re-upload media.
         if ($messageId === null
-            && mb_strlen($text, 'UTF-8') <= 1024
-            && $telegramPhoto !== null) {
+            && mb_strlen($text, 'UTF-8') <= TelegramHtmlCaption::LIMIT
+            && $telegramPhoto !== null
+            && $this->roots->currentForChat($customer, $chatId) === null) {
             $this->bot->sendPhoto(
                 $chatId,
                 $telegramPhoto['contents'],
@@ -533,12 +539,7 @@ class TelegramCatalogIntents
             return;
         }
 
-        $this->bot->editMessageTextOrSend(
-            $chatId,
-            $text,
-            ['inline_keyboard' => $keyboard],
-            $messageId,
-        );
+        $this->sendCatalogMessage($customer, $chatId, $text, ['inline_keyboard' => $keyboard], $messageId);
     }
 
     /**
@@ -561,7 +562,7 @@ class TelegramCatalogIntents
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.custom_instruction', ['example' => 5]);
 
         $productId = (int) $product->getKey();
-        $this->bot->sendMessage($chatId, implode("\n", $lines), [
+        $this->sendCatalogMessage($customer, $chatId, implode("\n", $lines), [
             'inline_keyboard' => [[[
                 'text' => $this->locale->translate($customer, 'catalog.quantity.cancel'),
                 'callback_data' => 'detail:qty:cancel:'.$productId.':'.$selection['interactionToken'],
@@ -663,7 +664,7 @@ class TelegramCatalogIntents
             ? null
             : $this->browse->findPublicCategory($categoryId);
         if ($categoryId !== 'uncategorized' && $category === null) {
-            $this->sendCatalogMessage($chatId, $this->locale->translate($customer, 'catalog.category.unavailable'), [
+            $this->sendCatalogMessage($customer, $chatId, $this->locale->translate($customer, 'catalog.category.unavailable'), [
                 'inline_keyboard' => [[[
                     'text' => $this->locale->translate($customer, 'catalog.back_categories'),
                     'callback_data' => 'catalog:categories',
@@ -711,7 +712,7 @@ class TelegramCatalogIntents
     {
         $search = CatalogBrowseQuery::normalizeSearch($keyword);
         if ($search === '') {
-            $this->sendCatalogMessage($chatId, $this->locale->translate($customer, 'search.prompt'), [], $messageId);
+            $this->sendCatalogMessage($customer, $chatId, $this->locale->translate($customer, 'search.prompt'), [], $messageId);
 
             return;
         }
@@ -787,7 +788,7 @@ class TelegramCatalogIntents
             if ($maintenance->active) {
                 $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
             }
-            $this->sendCatalogMessage($chatId, $message, ['inline_keyboard' => $this->browseNavigationKeyboard($customer, $mode)], $messageId);
+            $this->sendCatalogMessage($customer, $chatId, $message, ['inline_keyboard' => $this->browseNavigationKeyboard($customer, $mode)], $messageId);
 
             return;
         }
@@ -831,21 +832,38 @@ class TelegramCatalogIntents
         }
         $keyboard = [...$keyboard, ...$this->browseNavigationKeyboard($customer, $mode, includeEmptyFallback: false)];
 
-        $this->sendCatalogMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard], $messageId);
+        $this->sendCatalogMessage($customer, $chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard], $messageId);
     }
 
     /**
-     * A callback always carries the originating bot message ID. Editing is
-     * preferred; sending is a fallback only when there is no message to edit
-     * or Telegram definitively rejects that edit.
+     * Routine catalog navigation edits the canonical message whenever this
+     * customer/chat owns one; the legacy edit-or-send seam remains only for
+     * chats without a root (groups and pre-/start entry points).
      */
     private function sendCatalogMessage(
+        Customer $customer,
         string $chatId,
         string $text,
         array $replyMarkup = [],
         ?int $messageId = null,
         array $options = [],
     ): void {
+        $root = $messageId === null
+            ? $this->roots->currentForChat($customer, $chatId)
+            : $this->roots->match($customer, $chatId, $messageId);
+
+        if ($root !== null) {
+            $this->roots->render($root, $chatId, new TelegramNavigationSurface(
+                TelegramNavigationScreen::Catalog,
+                $this->locale->code($customer),
+                $text,
+                $replyMarkup,
+                $options,
+            ));
+
+            return;
+        }
+
         $this->bot->editMessageTextOrSend($chatId, $text, $replyMarkup, $messageId, $options);
     }
 
@@ -1053,7 +1071,7 @@ class TelegramCatalogIntents
 
     private function sendStaleCatalog(Customer $customer, string $chatId, ?int $messageId = null): void
     {
-        $this->sendCatalogMessage($chatId, $this->locale->translate($customer, 'catalog.family.stale'), [
+        $this->sendCatalogMessage($customer, $chatId, $this->locale->translate($customer, 'catalog.family.stale'), [
             'inline_keyboard' => [[[
                 'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
                 'callback_data' => 'family:back:menu',

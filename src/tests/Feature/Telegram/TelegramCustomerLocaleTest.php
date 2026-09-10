@@ -109,15 +109,16 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 
     public function test_unknown_customer_locale_uses_english_catalog_fallback(): void
     {
+        config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 41121, 'locale' => 'xx']);
 
         $this->postTelegramWebhook($this->messageUpdate(41121, '/menu', ['id' => 41121], 41121))->assertOk();
 
-        $copy = $this->visibleCopy($this->customerPayload('/sendMessage', 41121));
-        $this->assertStringContainsString('Main menu', $copy);
+        $copy = $this->visibleCopy($this->homePayload(41121));
+        $this->assertStringContainsString('My Profile', $copy);
         $this->assertStringContainsString('Browse Products', $copy);
-        $this->assertStringNotContainsString('Menu utama', $copy);
+        $this->assertStringNotContainsString('Profil Saya', $copy);
         $this->assertStringNotContainsString('Lihat Produk', $copy);
     }
 
@@ -160,8 +161,9 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('Menunggu pembayaran', $copy);
     }
 
-    public function test_main_menu_copy_and_keyboard_follow_customer_locale(): void
+    public function test_menu_command_opens_the_localized_canonical_home(): void
     {
+        config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 41001, 'locale' => 'id']);
         Customer::factory()->create(['telegram_id' => 41002, 'locale' => 'en']);
@@ -169,21 +171,26 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(41001, '/menu', ['id' => 41001], 41001))->assertOk();
         $this->postTelegramWebhook($this->messageUpdate(41002, '/menu', ['id' => 41002], 41002))->assertOk();
 
-        $idPayload = $this->customerPayload('/sendMessage', 41001);
-        $enPayload = $this->customerPayload('/sendMessage', 41002);
-        $this->assertStringNotContainsString('\\n', (string) ($idPayload['text'] ?? ''));
-        $this->assertStringNotContainsString('\\n', (string) ($enPayload['text'] ?? ''));
+        $idPayload = $this->homePayload(41001);
+        $enPayload = $this->homePayload(41002);
+        $this->assertStringNotContainsString('\\n', (string) ($idPayload['caption'] ?? ''));
+        $this->assertStringNotContainsString('\\n', (string) ($enPayload['caption'] ?? ''));
 
         $this->assertLocalizedCopy(
             $idPayload,
-            ['Menu utama', 'Lihat Produk', 'Pilih tombol atau ketik /produk'],
-            ['Main menu', 'Browse Products', 'Choose a button or type /products', '🚀'],
+            ['Profil Saya', 'Lihat Produk', '💰 Saldo Saya: Rp 0'],
+            ['My Profile', 'Browse Products', 'My Balance'],
         );
         $this->assertLocalizedCopy(
             $enPayload,
-            ['Main menu', 'Browse Products', 'Choose a button or type /products'],
-            ['Menu utama', 'Lihat Produk', 'Pilih tombol atau ketik /produk', '🚀'],
+            ['My Profile', 'Browse Products', '💰 My Balance: Rp 0'],
+            ['Profil Saya', 'Lihat Produk', 'Saldo Saya'],
         );
+
+        $this->assertArrayNotHasKey('keyboard', $idPayload['reply_markup']);
+        $this->assertSame(['katalog'], array_column($idPayload['reply_markup']['inline_keyboard'][0], 'callback_data'));
+        $this->assertSame(['balance', 'menu:orders'], array_column($idPayload['reply_markup']['inline_keyboard'][1], 'callback_data'));
+        $this->assertSame(['menu:language', 'menu:support'], array_column($idPayload['reply_markup']['inline_keyboard'][2], 'callback_data'));
     }
 
     public function test_support_copy_and_contact_button_follow_customer_locale(): void
@@ -535,6 +542,15 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         foreach ($oppositeLocale as $fragment) {
             $this->assertStringNotContainsString($fragment, $copy);
         }
+    }
+
+    private function homePayload(int $chatId): array
+    {
+        $requests = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            && (string) ($request['chat_id'] ?? '') === (string) $chatId);
+        $this->assertCount(1, $requests, "Expected one /sendPhoto request for customer chat {$chatId}.");
+
+        return $requests->first()[0]->data();
     }
 
     private function customerPayload(string $endpoint, int $chatId): array

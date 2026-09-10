@@ -4,20 +4,6 @@ namespace App\Services\Telegram\Concerns;
 
 trait HasAdminWebAppButton
 {
-    protected function adminDashboardWebAppButton(string $text): ?array
-    {
-        $url = $this->adminDashboardWebAppUrl();
-
-        if (! $this->isTelegramWebAppUrl($url)) {
-            return null;
-        }
-
-        return [
-            'text' => $text,
-            'web_app' => ['url' => $url],
-        ];
-    }
-
     protected function adminDashboardInlineButton(string $text): ?array
     {
         $url = $this->adminDashboardWebAppUrl();

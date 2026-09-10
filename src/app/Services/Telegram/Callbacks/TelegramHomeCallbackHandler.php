@@ -6,21 +6,38 @@ use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
+use App\Services\Telegram\TelegramCatalogQuerySession;
+use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMenuIntents;
-use App\Services\Telegram\TelegramNavigationRootService;
+use App\Services\Telegram\TelegramNavigationPresenter;
+use App\Services\Telegram\TelegramNavigationSurface;
 use App\Services\Telegram\TelegramOrderIntents;
 
+/**
+ * Presents every routine customer menu screen on the canonical message. The
+ * handler only selects a surface; every screen keeps its owning service.
+ */
 class TelegramHomeCallbackHandler implements TelegramCallbackHandler
 {
-    private const ACTIONS = ['menu:orders', 'menu:support', 'menu:language'];
+    private const ACTIONS = [
+        'menu:home',
+        'menu:back',
+        'menu:orders',
+        'menu:support',
+        'menu:language',
+        'balance',
+        'balance:add',
+    ];
 
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramMenuIntents $menu,
         private TelegramOrderIntents $orders,
         private TelegramLocale $locale,
-        private TelegramNavigationRootService $roots,
+        private TelegramIntentSession $session,
+        private TelegramCatalogQuerySession $catalogQueries,
+        private TelegramNavigationPresenter $navigation,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -44,7 +61,10 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
             return false;
         }
 
-        if ($this->roots->match($context->customer, $context->chatId, $context->messageId) === null) {
+        // Every action first proves it targets the current canonical message;
+        // a stale tap only receives localized recovery and changes nothing.
+        $root = $this->navigation->matchRoot($context->customer, $context);
+        if ($root === null) {
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,
                 $this->locale->translate($context->customer, 'callback.navigation_stale'),
@@ -53,16 +73,33 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
-        $this->bot->answerCallbackQuery($context->callbackQueryId);
+        if ($context->data === 'balance:add') {
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $this->locale->translate($context->customer, 'balance.add_unavailable'),
+            );
 
-        if ($context->data === 'menu:orders') {
-            $this->orders->sendOrderHistory($context->customer, $context->chatId);
-        } elseif ($context->data === 'menu:support') {
-            $this->menu->sendSupport($context->customer, $context->chatId);
-        } else {
-            $this->menu->sendLanguagePicker($context->chatId, $context->customer);
+            return true;
         }
 
+        $this->session->forgetWithLock($context->customer);
+        $this->catalogQueries->forget($context->customer);
+
+        $outcome = $this->navigation->presentOnRoot($root, $context->chatId, $this->surfaceFor($context));
+
+        $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
+
         return true;
+    }
+
+    private function surfaceFor(TelegramCallbackContext $context): TelegramNavigationSurface
+    {
+        return match ($context->data) {
+            'menu:orders' => $this->orders->orderHistorySurface($context->customer),
+            'menu:support' => $this->menu->supportSurface($context->customer),
+            'menu:language' => $this->menu->languageSurface($context->customer),
+            'balance' => $this->menu->balanceSurface($context->customer),
+            default => $this->menu->homeSurface($context->customer, $context->chatId),
+        };
     }
 }

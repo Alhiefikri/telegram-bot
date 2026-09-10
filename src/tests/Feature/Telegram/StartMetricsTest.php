@@ -97,8 +97,12 @@ class StartMetricsTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('@group_user', $caption);
         $this->assertStringNotContainsString('Rp', $caption);
         $this->assertStringNotContainsString('My Balance', $caption);
-        $this->assertArrayNotHasKey('web_app', $request->data()['reply_markup']['keyboard'][2][0] ?? []);
-        $this->assertStringNotContainsString('balance', json_encode($request->data()['reply_markup'], JSON_THROW_ON_ERROR));
+        $markup = $request->data()['reply_markup'];
+        $this->assertArrayNotHasKey('keyboard', $markup);
+        $this->assertArrayNotHasKey('is_persistent', $markup);
+        $this->assertSame(['katalog'], array_column($markup['inline_keyboard'][0], 'callback_data'));
+        $this->assertCount(1, $markup['inline_keyboard']);
+        $this->assertStringNotContainsString('balance', json_encode($markup, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
     }
 
     public function test_group_language_selection_keeps_the_welcome_caption_public(): void

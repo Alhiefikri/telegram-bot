@@ -11,17 +11,26 @@ class TelegramWelcomeBanner
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramOutboundResponseValidator $responseValidator,
+        private TelegramHtmlCaption $captions,
     ) {}
 
     /**
      * @param  array<string, mixed>  $keyboard
+     * @param  array<string, mixed>  $options
      */
-    public function send(string $chatId, string $caption, array $keyboard, ?string $preferredReference = null): TelegramWelcomeBannerSend
+    public function send(string $chatId, string $caption, array $keyboard, ?string $preferredReference = null, array $options = self::OPTIONS): TelegramWelcomeBannerSend
     {
+        // Telegram only allows 1024 parsed characters on a media caption.
+        // Longer navigation screens are delivered as a text message so the
+        // canonical message never truncates customer-relevant content.
+        if (! $this->captions->fitsMediaCaption($caption, $options)) {
+            return $this->textResult($this->bot->sendMessage($chatId, $caption, $keyboard, $options));
+        }
+
         $reference = $this->bannerReference($preferredReference);
         if ($reference !== null) {
             return $this->photoResult(
-                $this->bot->sendPhotoReference($chatId, $reference, $caption, $keyboard, self::OPTIONS),
+                $this->bot->sendPhotoReference($chatId, $reference, $caption, $keyboard, $options),
                 $reference,
             );
         }
@@ -31,19 +40,13 @@ class TelegramWelcomeBanner
             $contents = file_get_contents($bannerPath);
             if ($contents !== false) {
                 return $this->photoResult(
-                    $this->bot->sendPhoto($chatId, $contents, 'banner-welcome.png', $caption, $keyboard, self::OPTIONS),
+                    $this->bot->sendPhoto($chatId, $contents, 'banner-welcome.png', $caption, $keyboard, $options),
                     null,
                 );
             }
         }
 
-        $response = $this->bot->sendMessage($chatId, $caption, $keyboard, self::OPTIONS);
-
-        return new TelegramWelcomeBannerSend(
-            (int) $this->responseValidator->messageIdFromResponse($response, 'Telegram welcome banner'),
-            TelegramNavigationMediaKind::Text,
-            null,
-        );
+        return $this->textResult($this->bot->sendMessage($chatId, $caption, $keyboard, $options));
     }
 
     private function bannerReference(?string $preferred): ?string
@@ -55,6 +58,18 @@ class TelegramWelcomeBanner
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $response
+     */
+    private function textResult(array $response): TelegramWelcomeBannerSend
+    {
+        return new TelegramWelcomeBannerSend(
+            (int) $this->responseValidator->messageIdFromResponse($response, 'Telegram welcome banner'),
+            TelegramNavigationMediaKind::Text,
+            null,
+        );
     }
 
     /**

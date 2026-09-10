@@ -289,7 +289,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains((string) ($r['text'] ?? ''), 'selamat datang di LHIE STORE'));
         Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains((string) ($r['text'] ?? ''), 'Menu utama'));
+            && array_key_exists('keyboard', (array) ($r['reply_markup'] ?? [])));
     }
 
     public function test_existing_customer_start_keeps_welcome_flow_when_already_a_member(): void
@@ -309,7 +309,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         Http::assertSent(fn (Request $r) => (str_ends_with($r->url(), '/sendMessage') || str_ends_with($r->url(), '/sendPhoto'))
             && str_contains((string) ($this->telegramRequestField($r, 'text') ?? $this->telegramRequestField($r, 'caption')), 'selamat datang di LHIE STORE'));
         Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains((string) ($r['text'] ?? ''), 'Menu utama'));
+            && array_key_exists('keyboard', (array) ($r['reply_markup'] ?? [])));
     }
 
     public function test_existing_non_member_product_deep_link_is_blocked_before_product_content(): void
@@ -477,7 +477,7 @@ class CommunityGateTest extends TelegramBotTestSupport
             && str_contains((string) ($this->telegramRequestField($r, 'text') ?? $this->telegramRequestField($r, 'caption')), 'Ayu')
             && str_contains((string) ($this->telegramRequestField($r, 'text') ?? $this->telegramRequestField($r, 'caption')), 'selamat datang di LHIE STORE'));
         Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'] ?? '', 'Menu utama'));
+            && array_key_exists('keyboard', (array) ($r['reply_markup'] ?? [])));
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/answerCallbackQuery')
             && $r['callback_query_id'] === 'verify');
     }
