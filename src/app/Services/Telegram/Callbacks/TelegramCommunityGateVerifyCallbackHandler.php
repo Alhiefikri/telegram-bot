@@ -12,6 +12,7 @@ use App\Services\Telegram\TelegramCommunityGate;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMenuIntents;
+use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramStartIntentSession;
 
 class TelegramCommunityGateVerifyCallbackHandler implements TelegramCallbackHandler
@@ -24,6 +25,7 @@ class TelegramCommunityGateVerifyCallbackHandler implements TelegramCallbackHand
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
         private TelegramMenuIntents $menu,
+        private TelegramNavigationRootService $roots,
         private TelegramStartIntentSession $startIntents,
     ) {}
 
@@ -44,21 +46,26 @@ class TelegramCommunityGateVerifyCallbackHandler implements TelegramCallbackHand
 
     public function handle(TelegramCallbackContext $context): bool
     {
-        $this->session->forgetWithLock($context->customer);
-        $pendingIntent = $this->startIntents->get($context->customer);
-        $afterAllowed = $pendingIntent === null
-            ? null
-            : function () use ($context): void {
-                $intent = $this->startIntents->pull($context->customer);
-                if ($intent === null) {
-                    return;
-                }
-                if ($this->catalog->openStartIntent($context->customer, $context->chatId, $intent)) {
-                    return;
-                }
+        if (! $context->isPrivate()) {
+            return false;
+        }
 
-                $this->menu->sendWelcome($context->customer, $context->chatId, $this->chatPrivacy->isPrivate($context->chatType));
-            };
+        $this->session->forgetWithLock($context->customer);
+        $afterAllowed = function () use ($context): void {
+            $intent = $this->startIntents->pull($context->customer);
+            if ($intent !== null && $this->catalog->openStartIntent($context->customer, $context->chatId, $intent)) {
+                return;
+            }
+
+            $root = $this->roots->current($context->customer);
+            if ($root !== null && $root->chat_id === $context->chatId) {
+                $this->menu->renderHome($root, $context->customer, $context->chatId);
+
+                return;
+            }
+
+            $this->menu->sendWelcome($context->customer, $context->chatId, true);
+        };
         if ($this->communityGate->verify(
             $context->customer,
             $context->chatId,

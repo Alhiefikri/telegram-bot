@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramCommunityGatePrompt;
+use App\Models\TelegramNavigationRoot;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -80,7 +81,7 @@ class CommunityGateTest extends TelegramBotTestSupport
         $this->fakeGateHttp('left');
 
         $this->postTelegramWebhook($this->messageUpdate(500, '/start'))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(501, 'locale-en', 'locale:en'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(501, 'locale-en', 'locale:en', [], 12345, 'private', 77))->assertOk();
 
         $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'locale' => 'en']);
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/sendMessage')
@@ -96,10 +97,12 @@ class CommunityGateTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
 
         $this->postTelegramWebhook($this->messageUpdate(502, '/language'))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(503, 'locale-en-again', 'locale:en'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(503, 'locale-en-again', 'locale:en', [], 12345, 'private', 123456))->assertOk();
 
         $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'locale' => 'en']);
-        Http::assertSent(fn (Request $r) => (str_ends_with($r->url(), '/sendMessage') || str_ends_with($r->url(), '/sendPhoto'))
+        Http::assertSent(fn (Request $r) => (str_ends_with($r->url(), '/sendMessage')
+                || str_ends_with($r->url(), '/sendPhoto')
+                || str_ends_with($r->url(), '/editMessageCaption'))
             && str_contains((string) ($this->telegramRequestField($r, 'text') ?? $this->telegramRequestField($r, 'caption')), 'Welcome to LHIE STORE'));
     }
 
@@ -119,7 +122,8 @@ class CommunityGateTest extends TelegramBotTestSupport
             if (str_ends_with($request->url(), '/getChatMember')) {
                 return Http::response(['ok' => true, 'result' => ['status' => 'left']]);
             }
-            if (str_ends_with($request->url(), '/sendMessage')) {
+            if (str_ends_with($request->url(), '/sendPhoto')
+                || str_ends_with($request->url(), '/sendMessage')) {
                 return Http::response(['ok' => true, 'result' => ['message_id' => ++$nextMessageId]]);
             }
 
@@ -132,9 +136,17 @@ class CommunityGateTest extends TelegramBotTestSupport
             && str_contains((string) ($r['text'] ?? ''), 'Gabung kanal dulu')
             && str_contains(json_encode($r->data()), 'Gabung kanal')
             && str_contains(json_encode($r->data()), 'Saya sudah bergabung'));
-
         $this->postTelegramWebhook($this->messageUpdate(505, '/language'))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(506, 'locale-en-active-gate', 'locale:en'))->assertOk();
+        $pickerRoot = TelegramNavigationRoot::query()->sole();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            506,
+            'locale-en-active-gate',
+            'locale:en',
+            [],
+            12345,
+            'private',
+            $pickerRoot->message_id,
+        ))->assertOk();
 
         $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'locale' => 'en']);
         $this->assertNotSame(

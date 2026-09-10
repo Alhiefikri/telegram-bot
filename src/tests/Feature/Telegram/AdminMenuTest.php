@@ -527,8 +527,8 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && str_contains((string) $this->telegramRequestField($request, 'caption'), 'selamat datang di LHIE STORE')
-            && ($request->data()['reply_markup']['keyboard'][2][0]['text'] ?? null) === '🛠️ Admin Dashboard'
-            && str_starts_with((string) ($request->data()['reply_markup']['keyboard'][2][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v=')
+            && ($request->data()['reply_markup']['inline_keyboard'][3][0]['text'] ?? null) === '🛠️ Admin Dashboard'
+            && str_starts_with((string) ($request->data()['reply_markup']['inline_keyboard'][3][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v=')
             && ! str_contains(json_encode($request->data()['reply_markup']), '📊 Statistik Harian'));
     }
 

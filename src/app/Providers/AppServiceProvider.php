@@ -50,6 +50,7 @@ use App\Services\Telegram\Callbacks\TelegramCatalogCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCheckoutCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCheckoutMaintenanceCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCommunityGateVerifyCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramHomeCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramLocaleCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramOrderCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramOrderTxtCallbackHandler;
@@ -106,6 +107,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(TelegramCheckoutPaymentIntentSelector::class, TelegramConfiguredCheckoutPaymentIntentSelector::class);
         $this->app->singleton(TelegramCallbackHandlerPipeline::class, fn ($app) => new TelegramCallbackHandlerPipeline([
             $app->make(TelegramLocaleCallbackHandler::class),
+            $app->make(TelegramHomeCallbackHandler::class),
             $app->make(TelegramCommunityGateVerifyCallbackHandler::class),
             $app->make(TelegramCheckoutMaintenanceCallbackHandler::class),
             $app->make(TelegramAdminPaymentCallbackHandler::class),

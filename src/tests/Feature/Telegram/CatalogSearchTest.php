@@ -30,16 +30,24 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(11, '/start', ['first_name' => 'Ali', 'username' => 'ali']))->assertOk();
 
         $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'first_name' => 'Ali', 'username' => 'ali']);
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Choose your language')
-            && count($r['reply_markup']['inline_keyboard'] ?? []) === 1
-            && count($r['reply_markup']['inline_keyboard'][0] ?? []) === 3
-            && ($r['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🇮🇩 Bahasa Indonesia'
-            && ($r['reply_markup']['inline_keyboard'][0][1]['text'] ?? null) === '🇬🇧 English'
-            && ($r['reply_markup']['inline_keyboard'][0][2]['text'] ?? null) === '🇲🇾 Bahasa Melayu'
-            && ($r['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'locale:id'
-            && ($r['reply_markup']['inline_keyboard'][0][1]['callback_data'] ?? null) === 'locale:en'
-            && ($r['reply_markup']['inline_keyboard'][0][2]['callback_data'] ?? null) === 'locale:ms');
+        Http::assertSent(function ($r): bool {
+            $replyMarkup = $this->telegramRequestField($r, 'reply_markup');
+            if (is_string($replyMarkup)) {
+                $replyMarkup = json_decode($replyMarkup, true);
+            }
+
+            return str_ends_with($r->url(), '/sendPhoto')
+                && str_contains((string) $this->telegramRequestField($r, 'caption'), 'Choose your language')
+                && is_array($replyMarkup)
+                && count($replyMarkup['inline_keyboard'] ?? []) === 1
+                && count($replyMarkup['inline_keyboard'][0] ?? []) === 3
+                && ($replyMarkup['inline_keyboard'][0][0]['text'] ?? null) === '🇮🇩 Bahasa Indonesia'
+                && ($replyMarkup['inline_keyboard'][0][1]['text'] ?? null) === '🇬🇧 English'
+                && ($replyMarkup['inline_keyboard'][0][2]['text'] ?? null) === '🇲🇾 Bahasa Melayu'
+                && ($replyMarkup['inline_keyboard'][0][0]['callback_data'] ?? null) === 'locale:id'
+                && ($replyMarkup['inline_keyboard'][0][1]['callback_data'] ?? null) === 'locale:en'
+                && ($replyMarkup['inline_keyboard'][0][2]['callback_data'] ?? null) === 'locale:ms';
+        });
     }
 
     public function test_start_with_sales_proof_deep_link_shows_welcome_instead_of_command_fallback(): void
@@ -206,8 +214,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && $request['photo'] === 'banner-file-id'
             && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Browse products')
-            && ($request->data()['reply_markup']['keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products'
-            && ($request->data()['reply_markup']['is_persistent'] ?? false) === true);
+            && ($request->data()['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products'
+            && ! array_key_exists('is_persistent', $request->data()['reply_markup'])
+            && ! array_key_exists('keyboard', $request->data()['reply_markup']));
     }
 
     public function test_english_catalog_product_and_quantity_choices_use_english_customer_copy(): void

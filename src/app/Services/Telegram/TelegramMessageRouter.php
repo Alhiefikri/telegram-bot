@@ -53,6 +53,14 @@ class TelegramMessageRouter
             if ($startIntent !== null) {
                 $this->startIntents->put($customer, $startIntent);
             }
+            if (! $isPrivateChat) {
+                if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
+                    return;
+                }
+                $this->menu->sendWelcome($customer, $chatId, false);
+
+                return;
+            }
             if ($customer->locale === null) {
                 $this->menu->sendLanguagePicker($chatId, $customer);
 
@@ -72,7 +80,7 @@ class TelegramMessageRouter
 
         if (in_array($text, ['/language', '/bahasa', '🌐 Language', '🌐 Bahasa'], true)) {
             $this->catalogQueries->forget($customer);
-            $this->menu->sendLanguagePicker($chatId, $customer);
+            $this->menu->sendLanguagePicker($chatId, $customer, $isPrivateChat);
 
             return;
         }

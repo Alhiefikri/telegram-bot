@@ -558,11 +558,11 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         ]);
 
         $this->postTelegramWebhook($this->messageUpdate(41050, '/start product_'.$product->id, [], 41006))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(41051, 'choose-id', 'locale:id', [], 41006))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41051, 'choose-id', 'locale:id', [], 41006, 'private', 123456))->assertOk();
         $this->assertNotEmpty(Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage') && str_contains((string) ($request['text'] ?? ''), 'Deep Linked Product')));
 
         $this->postTelegramWebhook($this->messageUpdate(41052, '/start family_'.$family->id, [], 41007))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(41053, 'choose-en', 'locale:en', [], 41007))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41053, 'choose-en', 'locale:en', [], 41007, 'private', 123456))->assertOk();
         $familyOptions = $this->lastMessageContaining('Choose an option for Deep Linked Family');
         $this->assertStringContainsString('Option A', (string) $familyOptions['text']);
     }
@@ -590,8 +590,11 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             if (str_ends_with($request->url(), '/getChatMember')) {
                 return Http::response(['ok' => true, 'result' => ['status' => array_shift($statuses) ?? 'member']]);
             }
+            if (str_ends_with($request->url(), '/sendPhoto')) {
+                return Http::response(['ok' => true, 'result' => ['message_id' => 701, 'photo' => [['file_id' => 'gated-photo']]]]);
+            }
             if (str_ends_with($request->url(), '/sendMessage')) {
-                return Http::response(['ok' => true, 'result' => ['message_id' => random_int(700, 900)]]);
+                return Http::response(['ok' => true, 'result' => ['message_id' => random_int(702, 900)]]);
             }
             if (str_ends_with($request->url(), '/deleteMessage')) {
                 return Http::response(['ok' => true]);
@@ -599,9 +602,8 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 
             return Http::response(['ok' => true]);
         }]);
-
         $this->postTelegramWebhook($this->messageUpdate(41060, '/start family_'.$family->id, [], 41008))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(41061, 'gated-locale', 'locale:id', [], 41008))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41061, 'gated-locale', 'locale:id', [], 41008, 'private', 701))->assertOk();
         $this->assertSame(1, TelegramCommunityGatePrompt::count());
         $this->postTelegramWebhook($this->callbackUpdate(41062, 'gated-verify', 'community_gate:verify', [], 41008))->assertOk();
 

@@ -2,7 +2,10 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\TelegramNavigationRenderOutcome;
+use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
+use App\Models\TelegramNavigationRoot;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 
@@ -17,53 +20,129 @@ class TelegramMenuIntents
         private TelegramSupportContact $supportContact,
         private CheckoutMaintenance $maintenance,
         private TelegramStoreStatsReport $statsReport,
+        private TelegramNavigationRootService $roots,
+        private TelegramWelcomeBanner $banner,
+        private TelegramHtmlCaption $captions,
     ) {}
 
-    public function sendLanguagePicker(string $chatId, ?Customer $customer = null): void
+    public function sendLanguagePicker(string $chatId, ?Customer $customer = null, bool $isPrivateChat = true): void
     {
-        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'language.picker.prompt'), $this->locale->languageKeyboard());
-    }
+        $caption = $this->captions->html($this->locale->translate($customer, 'language.picker.prompt'));
 
-    public function sendWelcome(Customer $customer, string $chatId, bool $isPrivateChat = true): void
-    {
-        [$greetingIcon, $greetingText] = $this->timeAwareGreeting($customer);
-        $metrics = $this->statsReport->startMetrics();
-        $greeting = $greetingIcon.' '.$greetingText;
-        $caption = $isPrivateChat
-            ? $this->locale->translate($customer, 'welcome.caption', [
-                'greeting' => $greeting,
-                'first_name' => $this->welcomeName($customer),
-                'sold_units' => $metrics['sold_units'],
-                'bot_users' => $metrics['bot_users'],
-                'name' => $this->displayName($customer),
-                'username' => $this->displayUsername($customer),
-            ])
-            : $this->locale->translate($customer, 'welcome.group_caption', [
-                'greeting' => $greeting,
-                'sold_units' => $metrics['sold_units'],
-                'bot_users' => $metrics['bot_users'],
-            ]);
-        $caption .= $this->maintenanceNotice($customer);
-        $replyMarkup = $this->mainMenuKeyboard($customer, $chatId, $isPrivateChat);
-        $bannerReference = config('services.telegram.welcome_banner_url');
-
-        if (is_string($bannerReference) && trim($bannerReference) !== '') {
-            $this->bot->sendPhotoReference($chatId, trim($bannerReference), $caption, $replyMarkup);
+        if ($customer === null || ! $isPrivateChat) {
+            $this->bot->sendMessage($chatId, $caption, $this->locale->languageKeyboard(), ['parse_mode' => 'HTML']);
 
             return;
         }
 
-        $bannerPath = resource_path('images/banner-welcome.png');
-        if (is_file($bannerPath) && is_readable($bannerPath)) {
-            $contents = file_get_contents($bannerPath);
-            if ($contents !== false) {
-                $this->bot->sendPhoto($chatId, $contents, 'banner-welcome.png', $caption, $replyMarkup);
+        $this->presentRoot($customer, $chatId, new TelegramNavigationSurface(
+            TelegramNavigationScreen::Picker,
+            $customer->locale === null ? null : $this->locale->code($customer),
+            $caption,
+            $this->locale->languageKeyboard(),
+        ));
+    }
 
-                return;
+    public function sendWelcome(Customer $customer, string $chatId, bool $isPrivateChat = true): void
+    {
+        if (! $isPrivateChat) {
+            $this->banner->send(
+                $chatId,
+                $this->captions->html($this->groupCaption($customer)),
+                $this->mainMenuKeyboard($customer, $chatId, false),
+            );
+
+            return;
+        }
+
+        $this->roots->establish($customer, $chatId, $this->homeSurface($customer, $chatId));
+    }
+
+    public function renderHome(TelegramNavigationRoot $root, Customer $customer, string $chatId): TelegramNavigationRenderOutcome
+    {
+        return $this->roots->render($root, $chatId, $this->homeSurface($customer, $chatId));
+    }
+
+    private function presentRoot(Customer $customer, string $chatId, TelegramNavigationSurface $surface): void
+    {
+        $root = $this->roots->current($customer);
+        if ($root === null || $root->chat_id !== $chatId) {
+            $this->roots->establish($customer, $chatId, $surface);
+
+            return;
+        }
+
+        $this->roots->render($root, $chatId, $surface);
+    }
+
+    private function homeSurface(Customer $customer, string $chatId): TelegramNavigationSurface
+    {
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::Home,
+            $this->locale->code($customer),
+            $this->captions->html($this->privateCaption($customer)),
+            $this->homeKeyboard($customer, $chatId),
+        );
+    }
+
+    private function homeKeyboard(Customer $customer, string $chatId): array
+    {
+        $keyboard = ['inline_keyboard' => [
+            [
+                ['text' => $this->locale->translate($customer, 'menu.products'), 'callback_data' => 'katalog'],
+            ],
+            [
+                ['text' => $this->locale->translate($customer, 'menu.balance'), 'callback_data' => 'balance'],
+                ['text' => $this->locale->translate($customer, 'menu.orders'), 'callback_data' => 'menu:orders'],
+            ],
+            [
+                ['text' => $this->locale->translate($customer, 'menu.language'), 'callback_data' => 'menu:language'],
+                ['text' => $this->locale->translate($customer, 'menu.support'), 'callback_data' => 'menu:support'],
+            ],
+        ]];
+
+        if ($this->adminAccess->isAdmin($customer, $chatId)) {
+            $adminButton = $this->adminDashboardInlineButton('🛠️ Admin Dashboard');
+            if ($adminButton !== null) {
+                $keyboard['inline_keyboard'][] = [$adminButton];
             }
         }
 
-        $this->bot->sendMessage($chatId, $caption, $replyMarkup);
+        return $keyboard;
+    }
+
+    private function privateCaption(Customer $customer): string
+    {
+        return $this->locale->translate($customer, 'welcome.caption', $this->welcomeReplacements($customer))
+            .$this->maintenanceNotice($customer);
+    }
+
+    private function groupCaption(Customer $customer): string
+    {
+        $metrics = $this->statsReport->startMetrics();
+
+        return $this->locale->translate($customer, 'welcome.group_caption', [
+            'greeting' => implode(' ', $this->timeAwareGreeting($customer)),
+            'sold_units' => $metrics['sold_units'],
+            'bot_users' => $metrics['bot_users'],
+        ]).$this->maintenanceNotice($customer);
+    }
+
+    /**
+     * @return array<string, string|int>
+     */
+    private function welcomeReplacements(Customer $customer): array
+    {
+        $metrics = $this->statsReport->startMetrics();
+
+        return [
+            'greeting' => implode(' ', $this->timeAwareGreeting($customer)),
+            'first_name' => $this->welcomeName($customer),
+            'sold_units' => $metrics['sold_units'],
+            'bot_users' => $metrics['bot_users'],
+            'name' => $this->displayName($customer),
+            'username' => $this->displayUsername($customer),
+        ];
     }
 
     public function sendMainMenu(Customer $customer, string $chatId, bool $isPrivateChat = true): void

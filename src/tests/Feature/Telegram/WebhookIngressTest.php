@@ -386,6 +386,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
     public function test_failed_telegram_update_recovery_can_prune_unrecoverable_jobs_after_retry_failure(): void
     {
         $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => false, 'description' => 'temporary Telegram failure'], 500),
             'https://api.telegram.org/*' => Http::response(['ok' => false, 'description' => 'temporary Telegram failure'], 500),
         ]);
 
@@ -510,7 +511,7 @@ class WebhookIngressTest extends TelegramBotTestSupport
             && array_key_exists('memory_after_bytes', $context)
         );
         $this->assertLog($logs, 'dogfood.outbound_http', fn (array $context) => $context['provider'] === 'telegram'
-            && $context['operation'] === 'sendMessage'
+            && in_array($context['operation'], ['sendMessage', 'sendPhoto', 'sendPhotoReference'], true)
             && array_key_exists('status', $context)
             && array_key_exists('duration_ms', $context)
         );

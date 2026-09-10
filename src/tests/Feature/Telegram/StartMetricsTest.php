@@ -31,7 +31,7 @@ class StartMetricsTest extends TelegramBotTestSupport
     }
 
     #[DataProvider('locales')]
-    public function test_start_sends_one_localized_banner_with_metrics_and_persistent_menu(
+    public function test_start_sends_one_localized_banner_with_metrics_and_inline_menu(
         string $locale,
         string $soldLine,
         string $usersLine,
@@ -61,9 +61,8 @@ class StartMetricsTest extends TelegramBotTestSupport
         $this->assertStringContainsString($usersLine, $caption);
         $this->assertStringContainsString($nameLine, $caption);
         $this->assertStringContainsString($usernameLine, $caption);
-        $this->assertTrue($request->data()['reply_markup']['is_persistent'] ?? false);
-        $this->assertArrayHasKey('keyboard', $request->data()['reply_markup']);
-        $this->assertArrayNotHasKey('inline_keyboard', $request->data()['reply_markup']);
+        $this->assertArrayHasKey('inline_keyboard', $request->data()['reply_markup']);
+        $this->assertArrayNotHasKey('keyboard', $request->data()['reply_markup']);
         $this->assertStringNotContainsString('Rp', $caption);
         $this->assertStringNotContainsString('rupiah', strtolower($caption));
         $this->assertStringNotContainsString('revenue', strtolower($caption));
