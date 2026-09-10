@@ -425,11 +425,18 @@ final readonly class KlikQrisTransaction
             throw new UnexpectedValueException('KlikQRIS top-up total_amount mismatch.');
         }
 
+        if ($topUp->provider_reference !== null
+            && $this->providerReference !== null
+            && trim((string) $topUp->provider_reference) !== trim($this->providerReference)) {
+            throw new UnexpectedValueException('KlikQRIS top-up provider reference mismatch.');
+        }
+
         if ($topUp->provider_fee !== null
             && $this->providerFee !== null
             && (int) $topUp->provider_fee !== $this->providerFee) {
             throw new UnexpectedValueException('KlikQRIS top-up fee mismatch.');
         }
+
     }
 
     /**

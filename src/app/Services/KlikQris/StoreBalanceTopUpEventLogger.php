@@ -59,13 +59,29 @@ final class StoreBalanceTopUpEventLogger
 
     public function logCallback(KlikQrisCallback $callback, StoreBalanceTopUp $topUp): StoreBalanceTopUpEvent
     {
+        $merchantRef = $callback->isSupportedStatus()
+            ? $callback->orderId()
+            : hash('sha256', $callback->orderId());
+
         return $this->logCanonical(
             'callback',
-            $callback->orderId(),
+            $merchantRef,
             $callback->status(),
             $callback->sanitizedPayload(),
             $topUp,
+            $callback->providerReference(),
         );
+    }
+
+    public function findCallback(KlikQrisCallback $callback): ?StoreBalanceTopUpEvent
+    {
+        $payload = $this->canonicalize($this->withoutQrisUrlKeys($callback->sanitizedPayload()));
+
+        return StoreBalanceTopUpEvent::query()
+            ->where('provider', PaymentProvider::KLIKQRIS)
+            ->where('event_type', 'callback')
+            ->where('idempotency_key', $this->idempotencyKey('callback', $payload))
+            ->first();
     }
 
     public function logReconciliation(KlikQrisTransaction $transaction, StoreBalanceTopUp $topUp): StoreBalanceTopUpEvent
@@ -76,6 +92,7 @@ final class StoreBalanceTopUpEventLogger
             $transaction->status(),
             $transaction->sanitizedPayload(),
             $topUp,
+            $transaction->providerReference(),
         );
     }
 
@@ -86,13 +103,14 @@ final class StoreBalanceTopUpEventLogger
         string $status,
         array $sanitizedPayload,
         StoreBalanceTopUp $topUp,
+        ?string $providerReference = null,
     ): StoreBalanceTopUpEvent {
         $receivedAt = now();
         $canonicalPayload = $this->canonicalize($this->withoutQrisUrlKeys($sanitizedPayload));
         $idempotencyKey = $this->idempotencyKey($eventType, $canonicalPayload);
 
         try {
-            return DB::transaction(function () use ($eventType, $merchantRef, $status, $canonicalPayload, $topUp, $receivedAt, $idempotencyKey): StoreBalanceTopUpEvent {
+            return DB::transaction(function () use ($eventType, $merchantRef, $status, $canonicalPayload, $topUp, $providerReference, $receivedAt, $idempotencyKey): StoreBalanceTopUpEvent {
                 $event = StoreBalanceTopUpEvent::query()
                     ->where('provider', PaymentProvider::KLIKQRIS)
                     ->where('event_type', $eventType)
@@ -106,7 +124,7 @@ final class StoreBalanceTopUpEventLogger
                         'provider' => PaymentProvider::KLIKQRIS,
                         'event_type' => $eventType,
                         'merchant_ref' => $merchantRef,
-                        'provider_reference' => null,
+                        'provider_reference' => $providerReference,
                         'provider_status' => $status,
                         'raw_payload' => $canonicalPayload,
                         'idempotency_key' => $idempotencyKey,

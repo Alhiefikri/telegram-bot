@@ -76,6 +76,28 @@ final class StoreBalanceLedger
         return $this->apply($customer, $kind, $amount, $sourceType, $sourceId, $idempotencyKey);
     }
 
+    /**
+     * Apply a top-up credit without scanning ledger history. The locked
+     * projection cursor still prevents mutation on an account/projection
+     * mismatch; full historical reconciliation remains an operator check.
+     */
+    public function creditTopUp(
+        Customer $customer,
+        int $amount,
+        string $sourceId,
+        string $idempotencyKey,
+    ): StoreBalanceMutationResult {
+        return $this->apply(
+            $customer,
+            StoreBalanceEntryKind::TopUpCredit,
+            $amount,
+            'balance_top_up',
+            $sourceId,
+            $idempotencyKey,
+            validateProjectionHistory: false,
+        );
+    }
+
     public function debit(
         Customer $customer,
         int $amount,
@@ -116,6 +138,7 @@ final class StoreBalanceLedger
         string $sourceId,
         string $idempotencyKey,
         bool $requiresPurchaseDebit = false,
+        bool $validateProjectionHistory = true,
     ): StoreBalanceMutationResult {
         $this->assertPositiveAmount($amount);
         $this->assertIdentity('source type', $sourceType, 64);
@@ -123,9 +146,13 @@ final class StoreBalanceLedger
         $this->assertIdentity('idempotency key', $idempotencyKey, 191);
 
         try {
-            return DB::transaction(function () use ($customer, $kind, $amount, $sourceType, $sourceId, $idempotencyKey, $requiresPurchaseDebit): StoreBalanceMutationResult {
+            return DB::transaction(function () use ($customer, $kind, $amount, $sourceType, $sourceId, $idempotencyKey, $requiresPurchaseDebit, $validateProjectionHistory): StoreBalanceMutationResult {
                 $account = $this->lockAccount($customer);
-                $this->assertProjectionIsConsistent($account, $customer);
+                if ($validateProjectionHistory) {
+                    $this->assertProjectionIsConsistent($account, $customer);
+                } else {
+                    $this->assertProjectionCursorIsConsistent($account, $customer);
+                }
                 $existing = $this->findEntry($account, $kind, $amount, $sourceType, $sourceId, $idempotencyKey);
                 if ($existing !== null) {
                     return StoreBalanceMutationResult::replayed($existing);
@@ -233,6 +260,23 @@ final class StoreBalanceLedger
         }
 
         return $byIdempotency ?? $bySource;
+    }
+
+    private function assertProjectionCursorIsConsistent(CustomerBalanceAccount $account, Customer $customer): void
+    {
+        $latestBalance = StoreBalanceEntry::query()
+            ->where('customer_balance_account_id', $account->id)
+            ->latest('id')
+            ->value('balance_after');
+        $ledgerBalance = $latestBalance === null ? 0 : (int) $latestBalance;
+
+        if ((int) $account->balance !== $ledgerBalance) {
+            throw new StoreBalanceProjectionMismatchException(
+                customerId: (int) $customer->getKey(),
+                projectedBalance: (int) $account->balance,
+                ledgerBalance: $ledgerBalance,
+            );
+        }
     }
 
     private function assertProjectionIsConsistent(CustomerBalanceAccount $account, Customer $customer): void

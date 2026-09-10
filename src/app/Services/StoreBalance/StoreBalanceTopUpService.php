@@ -2,8 +2,6 @@
 
 namespace App\Services\StoreBalance;
 
-use App\Enums\KlikQrisEnvironment;
-use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceFundingIntentStatus;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\Customer;
@@ -11,12 +9,17 @@ use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
 use App\Models\StoreBalanceTopUpEvent;
 use App\Models\TelegramNavigationRoot;
+use App\Services\AuditLogger;
+use App\Services\KlikQris\KlikQrisCallback;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
+use Closure;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -30,6 +33,9 @@ final class StoreBalanceTopUpService
         private readonly StoreBalanceLedger $ledger,
         private readonly StoreBalanceTopUpEventLogger $events,
         private readonly KlikQrisNativeQrisService $nativeQris,
+        private readonly ?AuditLogger $audit = null,
+        private readonly ?TelegramOutboundEffectService $outboundEffects = null,
+        private readonly ?TelegramOutboundEffectDispatcher $outboundDispatcher = null,
     ) {}
 
     public static function actionCallback(string $action, int|string $topUpId): string
@@ -142,8 +148,11 @@ final class StoreBalanceTopUpService
         $result = $this->nativeQris->reconcileTopUp(
             $topUp,
             function (StoreBalanceTopUp $current, KlikQrisTransaction $transaction): void {
-                $event = $this->events->logReconciliation($transaction, $current);
-                $this->applyAuthoritativeTransaction($current, $transaction, $event);
+                $this->settleAuthoritativeTransaction(
+                    $current,
+                    $transaction,
+                    fn (StoreBalanceTopUp $lockedTopUp): StoreBalanceTopUpEvent => $this->events->logReconciliation($transaction, $lockedTopUp),
+                );
             },
         );
 
@@ -165,15 +174,59 @@ final class StoreBalanceTopUpService
             return $event->fresh();
         }
 
-        if (! $transaction->isSuccess()
-            || $transaction->totalAmount() < (int) $topUp->amount
-            || $topUp->provider_fee === null
-            || $topUp->provider_total_payment === null
-            || (int) $topUp->provider_total_payment < (int) $topUp->amount) {
-            return $event->fresh();
-        }
+        return $this->settleAuthoritativeTransaction(
+            $topUp,
+            $transaction,
+            fn (StoreBalanceTopUp $lockedTopUp): StoreBalanceTopUpEvent => StoreBalanceTopUpEvent::query()
+                ->whereKey($event->getKey())
+                ->where('store_balance_top_up_id', $lockedTopUp->getKey())
+                ->lockForUpdate()
+                ->firstOrFail(),
+        );
+    }
 
-        return DB::transaction(function () use ($topUp, $transaction, $event): StoreBalanceTopUpEvent {
+    public function recordSettledCallback(
+        StoreBalanceTopUp $topUp,
+        KlikQrisCallback $callback,
+    ): StoreBalanceTopUpEvent {
+        return DB::transaction(function () use ($topUp, $callback): StoreBalanceTopUpEvent {
+            $lockedTopUp = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->where('customer_id', $topUp->customer_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $event = $this->events->logCallback($callback, $lockedTopUp);
+            if ((int) $event->store_balance_top_up_id !== (int) $lockedTopUp->getKey()) {
+                throw new RuntimeException('Store Balance top-up event ownership mismatch.');
+            }
+
+            $lockedEvent = StoreBalanceTopUpEvent::query()
+                ->whereKey($event->getKey())
+                ->where('store_balance_top_up_id', $lockedTopUp->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            if ($lockedEvent->processed_at !== null) {
+                return $lockedEvent->fresh();
+            }
+
+            if ($this->matchesSettledCallback($lockedTopUp, $callback)) {
+                $lockedEvent->forceFill(['processed_at' => now()])->save();
+                $this->materializePaidReceipt($lockedTopUp);
+            }
+
+            return $lockedEvent->fresh();
+        }, attempts: 5);
+    }
+
+    /**
+     * @param  Closure(StoreBalanceTopUp): StoreBalanceTopUpEvent  $eventFactory
+     */
+    public function settleAuthoritativeTransaction(
+        StoreBalanceTopUp $topUp,
+        KlikQrisTransaction $transaction,
+        Closure $eventFactory,
+    ): StoreBalanceTopUpEvent {
+        return DB::transaction(function () use ($topUp, $transaction, $eventFactory): StoreBalanceTopUpEvent {
             $customer = Customer::query()
                 ->whereKey($topUp->customer_id)
                 ->lockForUpdate()
@@ -182,39 +235,62 @@ final class StoreBalanceTopUpService
 
             $lockedTopUp = StoreBalanceTopUp::query()
                 ->whereKey($topUp->getKey())
+                ->where('customer_id', $customer->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
+
+            $event = $eventFactory($lockedTopUp);
+            if ((int) $event->store_balance_top_up_id !== (int) $lockedTopUp->getKey()) {
+                throw new RuntimeException('Store Balance top-up event ownership mismatch.');
+            }
+
             $lockedEvent = StoreBalanceTopUpEvent::query()
                 ->whereKey($event->getKey())
+                ->where('store_balance_top_up_id', $lockedTopUp->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
 
             if ($lockedEvent->processed_at !== null) {
+                if ($lockedTopUp->status === StoreBalanceTopUpStatus::Paid) {
+                    $this->materializePaidReceipt($lockedTopUp);
+                }
+
+                return $lockedEvent->fresh();
+            }
+
+            try {
+                $transaction->assertMatchesTopUp($lockedTopUp);
+            } catch (Throwable) {
+                return $lockedEvent->fresh();
+            }
+
+            if (! $this->hasTrustedSettlementSignature($lockedTopUp, $transaction)) {
                 return $lockedEvent->fresh();
             }
 
             if ($lockedTopUp->status === StoreBalanceTopUpStatus::Paid) {
+                if (! $this->matchesSettledEvidence($lockedTopUp, $transaction)) {
+                    return $lockedEvent->fresh();
+                }
+
                 $lockedEvent->forceFill(['processed_at' => now()])->save();
+                $this->materializePaidReceipt($lockedTopUp);
 
                 return $lockedEvent->fresh();
             }
 
-            if ($transaction->totalAmount() < (int) $lockedTopUp->amount
-                || $lockedTopUp->provider_fee === null
-                || $lockedTopUp->provider_total_payment === null
-                || (int) $lockedTopUp->provider_total_payment !== $transaction->totalAmount()) {
+            if (! $this->isEligibleForSettlement($lockedTopUp, $transaction)) {
                 return $lockedEvent->fresh();
             }
 
-            $this->ledger->credit(
+            $mutation = $this->ledger->creditTopUp(
                 $customer,
                 (int) $lockedTopUp->amount,
-                StoreBalanceEntryKind::TopUpCredit,
-                'balance_top_up',
                 (string) $lockedTopUp->getKey(),
                 self::creditIdempotencyKey((string) $lockedTopUp->getKey()),
             );
 
+            $previousStatus = $lockedTopUp->status->value;
             $lockedTopUp->forceFill([
                 'status' => StoreBalanceTopUpStatus::Paid,
                 'provider_create_state' => 'provider_SUCCESS',
@@ -223,8 +299,27 @@ final class StoreBalanceTopUpService
             ])->save();
             $lockedEvent->forceFill(['processed_at' => now()])->save();
 
+            if ($mutation->applied) {
+                ($this->audit ?? app(AuditLogger::class))->logWithResolvedContext(
+                    'store_balance.top_up.settled',
+                    $lockedTopUp,
+                    old: ['status' => $previousStatus],
+                    new: [
+                        'status' => StoreBalanceTopUpStatus::Paid->value,
+                        'amount' => (int) $lockedTopUp->amount,
+                        'provider_total_payment' => (int) $lockedTopUp->provider_total_payment,
+                        'provider_reference_hash' => $this->referenceHash($lockedTopUp->provider_reference),
+                        'provider_event_id' => (int) $lockedEvent->getKey(),
+                        'credit_entry_id' => $mutation->entryId,
+                        'balance_after' => $mutation->balanceAfter,
+                    ],
+                );
+            }
+
+            $this->materializePaidReceipt($lockedTopUp);
+
             return $lockedEvent->fresh();
-        }, 5);
+        }, attempts: 5);
     }
 
     public static function merchantReference(StoreBalanceFundingIntent $intent): string
@@ -247,13 +342,79 @@ final class StoreBalanceTopUpService
         KlikQrisTransaction $transaction,
     ): bool {
         $stored = $topUp->providerSignature();
-        if ($stored === null) {
-            return $transaction->environment() !== KlikQrisEnvironment::Production;
-        }
-
         $received = $transaction->signature();
 
-        return $received === null || hash_equals($stored, $received);
+        return $stored !== null
+            && $received !== null
+            && hash_equals($stored, $received);
+    }
+
+    private function isEligibleForSettlement(
+        StoreBalanceTopUp $topUp,
+        KlikQrisTransaction $transaction,
+    ): bool {
+        return in_array($topUp->status, [StoreBalanceTopUpStatus::Pending, StoreBalanceTopUpStatus::Payable], true)
+            && strtolower(trim((string) $topUp->provider)) === PaymentProvider::KLIKQRIS
+            && strtoupper(trim((string) $topUp->currency)) === 'IDR'
+            && strtolower(trim((string) $topUp->provider_payment_method)) === 'qris'
+            && $topUp->expires_at?->isFuture() === true
+            && $topUp->provider_expires_at?->isFuture() === true
+            && $topUp->provider_fee !== null
+            && $topUp->provider_total_payment !== null
+            && (int) $topUp->provider_total_payment >= (int) $topUp->amount
+            && $transaction->isSuccess()
+            && $transaction->amount()->rupiah() === (int) $topUp->amount
+            && $transaction->totalAmount() === (int) $topUp->provider_total_payment;
+    }
+
+    private function matchesSettledEvidence(
+        StoreBalanceTopUp $topUp,
+        KlikQrisTransaction $transaction,
+    ): bool {
+        $providerReference = $transaction->providerReference();
+
+        return $transaction->isSuccess()
+            && $transaction->amount()->rupiah() === (int) $topUp->amount
+            && $topUp->provider_total_payment !== null
+            && $transaction->totalAmount() === (int) $topUp->provider_total_payment
+            && ($providerReference === null
+                || $topUp->provider_reference === null
+                || $providerReference === (string) $topUp->provider_reference);
+    }
+
+    private function matchesSettledCallback(
+        StoreBalanceTopUp $topUp,
+        KlikQrisCallback $callback,
+    ): bool {
+        $providerReference = $callback->providerReference();
+
+        return $topUp->status === StoreBalanceTopUpStatus::Paid
+            && $topUp->settled_at !== null
+            && $callback->isPaidTrigger()
+            && strtolower(trim((string) $topUp->provider)) === PaymentProvider::KLIKQRIS
+            && trim((string) $topUp->merchant_ref) === $callback->orderId()
+            && (int) $topUp->amount === $callback->amount()->rupiah()
+            && $topUp->provider_total_payment !== null
+            && (int) $topUp->provider_total_payment === $callback->totalAmount()
+            && ($providerReference === null
+                || $topUp->provider_reference === null
+                || $providerReference === (string) $topUp->provider_reference);
+    }
+
+    private function materializePaidReceipt(StoreBalanceTopUp $topUp): void
+    {
+        $effects = $this->outboundEffects ?? app(TelegramOutboundEffectService::class);
+        $effect = $effects->recordBalanceTopUpReceipt($topUp->fresh(['customer']));
+        if ($effect !== null) {
+            ($this->outboundDispatcher ?? app(TelegramOutboundEffectDispatcher::class))->dispatch($effect);
+        }
+    }
+
+    private function referenceHash(?string $reference): ?string
+    {
+        $reference = trim((string) $reference);
+
+        return $reference === '' ? null : hash('sha256', $reference);
     }
 
     private function isIntentUniqueConflict(QueryException $exception): bool

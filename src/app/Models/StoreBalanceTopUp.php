@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Support\PaymentProvider;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -82,6 +83,18 @@ class StoreBalanceTopUp extends Model
     public function events()
     {
         return $this->hasMany(StoreBalanceTopUpEvent::class);
+    }
+
+    public function creditEntry()
+    {
+        return $this->hasOne(StoreBalanceEntry::class, 'source_id', 'id')
+            ->where('source_type', 'balance_top_up')
+            ->where('kind', StoreBalanceEntryKind::TopUpCredit->value);
+    }
+
+    public function outboundEffects()
+    {
+        return $this->morphMany(TelegramOutboundEffect::class, 'source');
     }
 
     public function isPayable(): bool

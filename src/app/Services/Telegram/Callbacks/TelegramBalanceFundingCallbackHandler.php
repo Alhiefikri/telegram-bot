@@ -109,7 +109,31 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         if ($topUpAction !== null) {
             return $this->handleTopUpAction($context, $topUpAction['action'], $topUpAction['topUpId']);
         }
+
         $root = $this->navigation->matchRoot($context->customer, $context);
+        if ($root === null
+            && $context->data === 'balance'
+            && $context->messageId !== null
+            && $this->outboundEffects->sentBalanceTopUpReceiptFor(
+                $context->customer,
+                $context->chatId,
+                $context->messageId,
+            ) !== null) {
+            $currentRoot = $this->roots->currentForChat($context->customer, $context->chatId);
+            if ($currentRoot !== null) {
+                $this->session->forgetWithLock($context->customer);
+                $this->catalogQueries->forget($context->customer);
+                $outcome = $this->navigation->presentOnRoot(
+                    $currentRoot,
+                    $context->chatId,
+                    $this->menu->balanceSurface($context->customer),
+                );
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
+
+                return true;
+            }
+        }
+
         if ($root === null) {
             $currentRoot = $this->roots->currentForChat($context->customer, $context->chatId);
             $notice = $this->recoveryNotice($context->data);

@@ -13,6 +13,7 @@ use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramNavigationSurface;
 use App\Services\Telegram\TelegramOrderIntents;
+use App\Services\Telegram\TelegramOutboundEffectService;
 
 /**
  * Presents every routine customer menu screen on the canonical message. The
@@ -37,6 +38,7 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
         private TelegramIntentSession $session,
         private TelegramCatalogQuerySession $catalogQueries,
         private TelegramNavigationPresenter $navigation,
+        private TelegramOutboundEffectService $outboundEffects,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -60,9 +62,29 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
             return false;
         }
 
-        // Every action first proves it targets the current canonical message;
-        // a stale tap only receives localized recovery and changes nothing.
         $root = $this->navigation->matchRoot($context->customer, $context);
+        if ($root === null
+            && in_array($context->data, ['balance', 'menu:home', 'menu:support'], true)
+            && $context->messageId !== null
+            && $this->outboundEffects->sentBalanceTopUpReceiptFor(
+                $context->customer,
+                $context->chatId,
+                $context->messageId,
+            ) !== null) {
+            $this->session->forgetWithLock($context->customer);
+            $this->catalogQueries->forget($context->customer);
+            $outcome = $this->navigation->presentOnCurrentRoot(
+                $context->customer,
+                $context->chatId,
+                $this->surfaceFor($context),
+            );
+            if ($outcome !== null) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
+
+                return true;
+            }
+        }
+
         if ($root === null) {
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,

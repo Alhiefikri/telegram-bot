@@ -46,7 +46,8 @@ final class TelegramOutboundEffectPolicy
         'balance_top_up_missing',
         'balance_top_up_not_payable',
         'balance_top_up_expired',
-        'receipt_txt_not_eligible',
+        'balance_top_up_receipt_missing',
+        'balance_top_up_not_paid',
         'receipt_txt_credentials_missing',
         'receipt_txt_render_failed',
         'receipt_actions_not_eligible',
@@ -82,6 +83,7 @@ final class TelegramOutboundEffectPolicy
         TelegramOutboundEffectType::PriceChangeNotificationRecipient->value => self::PRICE_CHANGE_MAX_ATTEMPTS,
         TelegramOutboundEffectType::PriceChangeStoreChannel->value => self::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS,
         TelegramOutboundEffectType::BalanceTopUpInstructions->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
+        TelegramOutboundEffectType::BalanceTopUpReceipt->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
     ];
 
     /** @var array<string, string> */
@@ -94,6 +96,7 @@ final class TelegramOutboundEffectPolicy
         TelegramOutboundEffectType::PriceChangeNotificationRecipient->value => 'price_change_recipient_attempts_exhausted',
         TelegramOutboundEffectType::PriceChangeStoreChannel->value => 'price_change_store_channel_attempts_exhausted',
         TelegramOutboundEffectType::BalanceTopUpInstructions->value => 'balance_top_up_attempts_exhausted',
+        TelegramOutboundEffectType::BalanceTopUpReceipt->value => 'balance_top_up_receipt_attempts_exhausted',
     ];
 
     /** @return Builder<TelegramOutboundEffect> */

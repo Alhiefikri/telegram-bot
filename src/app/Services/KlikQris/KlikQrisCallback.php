@@ -66,6 +66,28 @@ final readonly class KlikQrisCallback
         return $this->signature;
     }
 
+    public function providerReference(): ?string
+    {
+        $data = $this->sanitizedPayload['data'] ?? $this->sanitizedPayload;
+        if (! is_array($data)) {
+            return null;
+        }
+
+        foreach (['provider_reference', 'transaction_id', 'transaction_ref', 'reference'] as $key) {
+            $value = $data[$key] ?? null;
+            if (! is_scalar($value)) {
+                continue;
+            }
+
+            $reference = trim((string) $value);
+            if ($reference !== '') {
+                return $reference;
+            }
+        }
+
+        return null;
+    }
+
     public function isSupportedStatus(): bool
     {
         return in_array($this->status, self::SUPPORTED_STATUSES, true);

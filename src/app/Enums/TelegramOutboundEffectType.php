@@ -11,6 +11,7 @@ enum TelegramOutboundEffectType: string
     case BinanceCheckoutInstructions = 'checkout.binance_payment_instructions';
     case BscCheckoutInstructions = 'checkout.bsc_payment_instructions';
     case BalanceTopUpInstructions = 'balance.top_up_instructions';
+    case BalanceTopUpReceipt = 'balance.top_up_receipt';
     case ReceiptCredentials = 'receipt.credentials';
     case AdminOrderPendingNotification = 'admin.order_pending_notification';
     case AdminOrderPaidNotification = 'admin.order_paid_notification';

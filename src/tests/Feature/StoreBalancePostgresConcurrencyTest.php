@@ -3,9 +3,11 @@
 namespace Tests\Feature;
 
 use App\Enums\CartStatus;
+use App\Enums\KlikQrisEnvironment;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceFundingIntentStatus;
+use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramNavigationMediaKind;
 use App\Enums\TelegramNavigationScreen;
 use App\Enums\UserRole;
@@ -22,15 +24,22 @@ use App\Models\Product;
 use App\Models\StoreBalanceEntry;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceFundingPolicy;
+use App\Models\StoreBalanceTopUp;
+use App\Models\StoreBalanceTopUpEvent;
 use App\Models\TelegramNavigationRoot;
 use App\Models\User;
 use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\KlikQris\KlikQrisCallback;
+use App\Services\KlikQris\KlikQrisTransaction;
+use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\StoreBalance\StoreBalanceFundingIntentInput;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Support\PaymentProvider;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -211,6 +220,78 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         $this->assertSame(1, StoreBalanceEntry::query()->count());
         $this->assertSame(25000, $this->balanceOf($customer));
         $this->assertProjectionMatchesLedger($customer, 25000);
+    }
+
+    public function test_postgres_duplicate_top_up_callbacks_credit_once_and_replay_the_event(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $topUp = $this->createSettlementTopUp(45430, 'callback-race');
+        $callbackPayload = $this->topUpCallbackPayload($topUp);
+        $statusPayload = $this->topUpStatusPayload($topUp);
+
+        $results = $this->runConcurrentWorkers(2, function () use ($topUp, $callbackPayload, $statusPayload): string {
+            $callback = KlikQrisCallback::fromPayload($callbackPayload);
+            $transaction = KlikQrisTransaction::fromStatusPayload($statusPayload, KlikQrisEnvironment::Sandbox);
+            $event = app(StoreBalanceTopUpService::class)->settleAuthoritativeTransaction(
+                StoreBalanceTopUp::query()->findOrFail($topUp->id),
+                $transaction,
+                fn (StoreBalanceTopUp $lockedTopUp): StoreBalanceTopUpEvent => app(StoreBalanceTopUpEventLogger::class)->logCallback($callback, $lockedTopUp),
+            );
+
+            return $event->processed_at === null ? 'unprocessed' : 'processed';
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame(['processed', 'processed'], array_values(array_map(
+            static fn (array $result): string => (string) ($result['value'] ?? ''),
+            $results,
+        )));
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(1, StoreBalanceTopUpEvent::query()->where('event_type', 'callback')->count());
+        $this->assertSame(2, (int) StoreBalanceTopUpEvent::query()->where('event_type', 'callback')->value('received_count'));
+        $this->assertSame(8000, StoreBalanceEntry::query()->sole()->amount);
+        $this->assertProjectionMatchesLedger($topUp->customer, 8000);
+    }
+
+    public function test_postgres_callback_and_reconciliation_race_share_one_credit_projection(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $topUp = $this->createSettlementTopUp(45431, 'callback-reconciliation-race');
+        $callbackPayload = $this->topUpCallbackPayload($topUp);
+        $statusPayload = $this->topUpStatusPayload($topUp);
+
+        $results = $this->runConcurrentWorkers(2, function (int $index) use ($topUp, $callbackPayload, $statusPayload): string {
+            $callback = KlikQrisCallback::fromPayload($callbackPayload);
+            $transaction = KlikQrisTransaction::fromStatusPayload($statusPayload, KlikQrisEnvironment::Sandbox);
+            $event = app(StoreBalanceTopUpService::class)->settleAuthoritativeTransaction(
+                StoreBalanceTopUp::query()->findOrFail($topUp->id),
+                $transaction,
+                function (StoreBalanceTopUp $lockedTopUp) use ($callback, $transaction, $index): StoreBalanceTopUpEvent {
+                    $logger = app(StoreBalanceTopUpEventLogger::class);
+
+                    return $index === 0
+                        ? $logger->logCallback($callback, $lockedTopUp)
+                        : $logger->logReconciliation($transaction, $lockedTopUp);
+                },
+            );
+
+            return $event->processed_at === null ? 'unprocessed' : 'processed';
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame(['processed', 'processed'], array_values(array_map(
+            static fn (array $result): string => (string) ($result['value'] ?? ''),
+            $results,
+        )));
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(1, StoreBalanceTopUpEvent::query()->where('event_type', 'callback')->count());
+        $this->assertSame(1, StoreBalanceTopUpEvent::query()->where('event_type', 'reconciliation')->count());
+        $this->assertSame(8000, StoreBalanceEntry::query()->sole()->amount);
+        $this->assertProjectionMatchesLedger($topUp->customer, 8000);
     }
 
     public function test_postgres_competing_debits_never_commit_a_negative_balance(): void
@@ -682,6 +763,82 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         $this->assertSame(0, $reader['divergences']);
         $this->assertSame(15000, $this->balanceOf($customer));
         $this->assertProjectionMatchesLedger($customer, 15000);
+    }
+
+    private function createSettlementTopUp(int $telegramId, string $suffix): StoreBalanceTopUp
+    {
+        $customer = $this->createCustomer($telegramId);
+        $root = $this->createFundingRoot($customer, 9700 + $customer->id);
+        $expiresAt = now()->addMinutes(15);
+        $intent = StoreBalanceFundingIntent::query()->create([
+            'customer_id' => $customer->id,
+            'telegram_navigation_root_id' => $root->id,
+            'chat_id' => (string) $customer->telegram_id,
+            'canonical_message_id' => $root->message_id,
+            'policy_version' => 1,
+            'amount' => 8000,
+            'nonce' => 'concurrency-'.$suffix.'-'.bin2hex(random_bytes(8)),
+            'status' => StoreBalanceFundingIntentStatus::Confirmed,
+            'expires_at' => $expiresAt,
+            'claimed_at' => now(),
+        ]);
+        $merchantRef = 'BAL-CONC-'.$suffix;
+
+        return StoreBalanceTopUp::query()->create([
+            'customer_id' => $customer->id,
+            'store_balance_funding_intent_id' => $intent->id,
+            'telegram_navigation_root_id' => $root->id,
+            'chat_id' => 'untrusted-'.$telegramId,
+            'canonical_message_id' => $root->message_id,
+            'locale' => 'en',
+            'provider' => PaymentProvider::KLIKQRIS,
+            'merchant_ref' => $merchantRef,
+            'idempotency_key' => 'balance-top-up:concurrency:'.$suffix,
+            'currency' => 'IDR',
+            'amount' => 8000,
+            'status' => StoreBalanceTopUpStatus::Payable,
+            'provider_reference' => 'provider-reference-'.$suffix,
+            'provider_payload' => ['data' => [
+                'order_id' => $merchantRef,
+                'amount' => 8000,
+                'total_amount' => 8016,
+                'status' => 'PENDING',
+                'expired_at' => $expiresAt->toISOString(),
+            ]],
+            'provider_qris_url' => 'https://klikqris.com/storage/sandbox/sandbox_sample.png',
+            'provider_fee' => 16,
+            'provider_total_payment' => 8016,
+            'provider_payment_method' => 'qris',
+            'provider_created_at' => now(),
+            'provider_expires_at' => $expiresAt,
+            'expires_at' => $expiresAt,
+            'provider_signature' => 'settlement-signature',
+            'provider_create_state' => 'provider_SUCCESS',
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    private function topUpCallbackPayload(StoreBalanceTopUp $topUp): array
+    {
+        return [
+            'order_id' => $topUp->merchant_ref,
+            'amount' => (int) $topUp->amount,
+            'total_amount' => (int) $topUp->provider_total_payment,
+            'status' => 'SUCCESS',
+            'signature' => 'settlement-signature',
+            'provider_reference' => $topUp->provider_reference,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function topUpStatusPayload(StoreBalanceTopUp $topUp): array
+    {
+        return [
+            ...$this->topUpCallbackPayload($topUp),
+            'fee' => (int) $topUp->provider_fee,
+            'paid_at' => now()->toISOString(),
+            'expired_at' => $topUp->provider_expires_at->toISOString(),
+        ];
     }
 
     private function createCustomer(int $telegramId): Customer

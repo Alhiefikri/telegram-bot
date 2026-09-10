@@ -7,7 +7,9 @@ use App\Enums\StoreBalanceFundingIntentStatus;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendStoreBalanceTopUpInstructions;
+use App\Jobs\SendStoreBalanceTopUpReceipt;
 use App\Models\Customer;
+use App\Models\CustomerBalanceAccount;
 use App\Models\Order;
 use App\Models\StoreBalanceEntry;
 use App\Models\StoreBalanceFundingIntent;
@@ -17,6 +19,7 @@ use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUpdate;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Http\Client\Request;
@@ -103,8 +106,88 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         $this->assertSame(1, StoreBalanceEntry::query()->count());
         $this->assertSame(5000, StoreBalanceEntry::query()->sole()->amount);
         $this->assertSame(StoreBalanceEntryKind::TopUpCredit, StoreBalanceEntry::query()->sole()->kind);
+        $this->assertSame(1, $topUp->fresh()->creditEntry()->count());
+        $callbackEvent = StoreBalanceTopUpEvent::query()->where('event_type', 'callback')->sole();
+        $this->assertNotNull($callbackEvent->processed_at);
+        $this->assertSame(2, StoreBalanceTopUpEvent::query()->count());
+        $this->postJson('/api/webhook/klikqris/sandbox', [
+            'order_id' => $topUp->merchant_ref,
+            'amount' => 5000,
+            'total_amount' => 5016,
+            'status' => 'SUCCESS',
+            'signature' => 'top-up-signature',
+        ])->assertOk();
+        $this->assertSame(1, $statusCalls);
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(1, StoreBalanceTopUpEvent::query()->where('event_type', 'callback')->sole()->received_count);
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->count());
+
+        $receiptEffect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->sole();
+        $this->assertSame('pending', $receiptEffect->state->value);
+        (new SendStoreBalanceTopUpReceipt((string) $topUp->id, effectId: (string) $receiptEffect->getKey()))->handle();
+        $receiptEffect->refresh();
+        $this->assertSame('sent', $receiptEffect->state->value);
+        $receiptMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertNotEmpty($receiptMessages);
+        $receiptMessage = $receiptMessages->last()[0];
+        $receiptText = (string) $this->telegramRequestField($receiptMessage, 'text');
+        $this->assertStringContainsString('Store Balance top-up paid', $receiptText);
+        $this->assertStringContainsString('Credited to Store Balance: Rp 5.000', $receiptText);
+        $this->assertStringContainsString('KlikQRIS total paid: Rp 5.016', $receiptText);
+        $this->assertStringContainsString($topUp->merchant_ref, $receiptText);
+        $this->assertStringNotContainsString(self::QRIS_URL, $receiptText);
+        $this->assertNotNull(app(TelegramNavigationRootService::class)->currentForChat($customer, (string) $customer->telegram_id));
+        $this->assertNotNull(app(TelegramOutboundEffectService::class)->sentBalanceTopUpReceiptFor(
+            $customer,
+            (string) $customer->telegram_id,
+            (int) $receiptEffect->telegram_message_id,
+        ));
+
         $this->postTelegramUpdate($this->callbackUpdate(
             46205,
+            'top-up-receipt-balance',
+            'balance',
+            [],
+            46201,
+            'private',
+            $receiptEffect->telegram_message_id,
+        ));
+        $rootEdits = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
+            || str_ends_with($request->url(), '/editMessageCaption'));
+        $this->assertNotEmpty($rootEdits);
+        $rootEdit = $rootEdits->last()[0];
+        $this->assertSame((string) $root->message_id, (string) $this->telegramRequestField($rootEdit, 'message_id'));
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46207,
+            'top-up-receipt-home',
+            'menu:home',
+            [],
+            46201,
+            'private',
+            $receiptEffect->telegram_message_id,
+        ));
+        $homeEdits = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
+            || str_ends_with($request->url(), '/editMessageCaption'));
+        $this->assertSame((string) $root->message_id, (string) $homeEdits->last()[0]->data()['message_id']);
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46208,
+            'top-up-receipt-support',
+            'menu:support',
+            [],
+            46201,
+            'private',
+            $receiptEffect->telegram_message_id,
+        ));
+        $supportEdits = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
+            || str_ends_with($request->url(), '/editMessageCaption'));
+        $this->assertSame((string) $root->message_id, (string) $supportEdits->last()[0]->data()['message_id']);
+
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46206,
             'top-up-check',
             StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),
             [],
@@ -113,6 +196,141 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
             $effect->telegram_message_id,
         ));
         $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+    }
+
+    public function test_paid_callback_after_reconciliation_is_processed_without_recrediting(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $createCalls = 0;
+        $statusCalls = 0;
+        $this->fakeProvider($createCalls, $statusCalls);
+
+        Customer::factory()->create(['telegram_id' => 46241, 'locale' => 'en']);
+        $root = $this->openFundingChooser(46241, 46241);
+        $this->postTelegramUpdate($this->messageUpdate(46243, '/deposit 5000', [], 46241));
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46244,
+            'top-up-confirm-reconciliation',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            46241,
+            'private',
+            $root->message_id,
+        ));
+        $topUp = StoreBalanceTopUp::query()->sole();
+
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+        $this->assertSame(1, $statusCalls);
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+
+        $this->postJson('/api/webhook/klikqris/sandbox', [
+            'order_id' => $topUp->merchant_ref,
+            'amount' => 5000,
+            'total_amount' => 5016,
+            'status' => 'SUCCESS',
+            'signature' => 'top-up-signature',
+        ])->assertOk();
+
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+        $this->assertSame(1, $statusCalls);
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $callbackEvent = StoreBalanceTopUpEvent::query()->where('event_type', 'callback')->sole();
+        $this->assertNotNull($callbackEvent->processed_at);
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->count());
+    }
+
+    public function test_unauthenticated_paid_callback_is_recorded_without_crediting_balance(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $createCalls = 0;
+        $statusCalls = 0;
+        $this->fakeProvider($createCalls, $statusCalls);
+
+        Customer::factory()->create(['telegram_id' => 46221, 'locale' => 'en']);
+        $root = $this->openFundingChooser(46221, 46221);
+        $this->postTelegramUpdate($this->messageUpdate(46223, '/deposit 5000', [], 46221));
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46224,
+            'top-up-confirm-auth',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            46221,
+            'private',
+            $root->message_id,
+        ));
+        $topUp = StoreBalanceTopUp::query()->sole();
+
+        $this->postJson('/api/webhook/klikqris/sandbox', [
+            'order_id' => $topUp->merchant_ref,
+            'amount' => 5000,
+            'total_amount' => 5016,
+            'status' => 'SUCCESS',
+            'signature' => 'wrong-signature',
+        ])->assertOk();
+
+        $this->assertSame(StoreBalanceTopUpStatus::Payable, $topUp->fresh()->status);
+        $this->assertSame(0, $statusCalls);
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+        $event = StoreBalanceTopUpEvent::query()->where('event_type', 'callback')->sole();
+        $this->assertNull($event->processed_at);
+        $this->assertSame(0, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->count());
+    }
+
+    public function test_failed_credit_rolls_back_callback_event_top_up_and_ledger_mutation(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $createCalls = 0;
+        $statusCalls = 0;
+        $this->fakeProvider($createCalls, $statusCalls);
+
+        $customer = Customer::factory()->create(['telegram_id' => 46231, 'locale' => 'en']);
+        $root = $this->openFundingChooser(46231, 46231);
+        $this->postTelegramUpdate($this->messageUpdate(46233, '/deposit 5000', [], 46231));
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46234,
+            'top-up-confirm-rollback',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            46231,
+            'private',
+            $root->message_id,
+        ));
+        $topUp = StoreBalanceTopUp::query()->sole();
+        $account = CustomerBalanceAccount::query()->create(['customer_id' => $customer->id]);
+        $account->forceFill(['balance' => 1])->save();
+
+        $exception = null;
+        try {
+            $this->withoutExceptionHandling()->postJson('/api/webhook/klikqris/sandbox', [
+                'order_id' => $topUp->merchant_ref,
+                'amount' => 5000,
+                'total_amount' => 5016,
+                'status' => 'SUCCESS',
+                'signature' => 'top-up-signature',
+            ]);
+        } catch (\Throwable $caught) {
+            $exception = $caught;
+        }
+
+        $this->assertInstanceOf(\RuntimeException::class, $exception);
+        $this->assertSame(StoreBalanceTopUpStatus::RecoveryPending, $topUp->fresh()->status);
+        $this->assertSame(1, (int) CustomerBalanceAccount::query()->whereKey($account->id)->value('balance'));
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+        $this->assertSame(0, StoreBalanceTopUpEvent::query()->where('event_type', 'callback')->count());
+        $this->assertSame(0, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->count());
     }
 
     public function test_replayed_confirmation_reuses_the_same_top_up_reference_and_instruction_effect(): void

@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\Customer;
@@ -50,6 +51,8 @@ class TelegramOutboundEffectService
     public const TYPE_BSC_CHECKOUT = TelegramOutboundEffectType::BscCheckoutInstructions->value;
 
     public const TYPE_BALANCE_TOP_UP = TelegramOutboundEffectType::BalanceTopUpInstructions->value;
+
+    public const TYPE_BALANCE_TOP_UP_RECEIPT = TelegramOutboundEffectType::BalanceTopUpReceipt->value;
 
     public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
 
@@ -112,6 +115,8 @@ class TelegramOutboundEffectService
     public const TEMPLATE_BSC_CHECKOUT = 'bsc-payment-v1';
 
     public const TEMPLATE_BALANCE_TOP_UP = 'balance-top-up-klikqris-v1';
+
+    public const TEMPLATE_BALANCE_TOP_UP_RECEIPT = 'balance-top-up-receipt-v1';
 
     public const TEMPLATE_RECEIPT_CREDENTIALS = 'receipt-credentials-v1';
 
@@ -322,6 +327,51 @@ class TelegramOutboundEffectService
                     'delivery_context' => 'balance_top_up',
                     'attachment_type' => 'qris_png',
                     'payment_method' => 'klikqris',
+                ],
+            ],
+        );
+    }
+
+    public function recordBalanceTopUpReceipt(
+        StoreBalanceTopUp $topUp,
+        ?Customer $customer = null,
+    ): ?TelegramOutboundEffect {
+        $customer ??= $topUp->customer;
+        $chatId = trim((string) $topUp->chat_id);
+        if ($customer === null
+            || $customer->telegram_id === null
+            || $chatId === ''
+            || (string) $customer->telegram_id !== $chatId
+            || (int) $customer->getKey() !== (int) $topUp->customer_id
+            || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::KLIKQRIS
+            || $topUp->status !== StoreBalanceTopUpStatus::Paid
+            || $topUp->settled_at === null
+            || $topUp->provider_total_payment === null) {
+            return null;
+        }
+
+        $effectKey = self::balanceTopUpReceiptEffectKey((string) $topUp->getKey());
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => self::TYPE_BALANCE_TOP_UP_RECEIPT,
+                'source_type' => StoreBalanceTopUp::class,
+                'source_id' => (string) $topUp->getKey(),
+                'target_type' => 'customer',
+                'telegram_chat_id' => $chatId,
+                'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE,
+                'telegram_method' => 'sendMessage',
+                'locale' => $topUp->locale ?: $customer->locale,
+                'template_version' => self::TEMPLATE_BALANCE_TOP_UP_RECEIPT,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+                'outcome_metadata' => [
+                    'delivery_context' => 'balance_top_up_receipt',
+                    'delivery_method' => 'sendMessage',
                 ],
             ],
         );
@@ -1408,6 +1458,16 @@ class TelegramOutboundEffectService
         return 'balance-top-up:'.$topUpId.':klikqris-instructions:v1';
     }
 
+    public static function balanceTopUpReceiptEffectKey(string $topUpId): string
+    {
+        $topUpId = trim($topUpId);
+        if (preg_match('/\A[1-9][0-9]{0,18}\z/D', $topUpId) !== 1) {
+            throw new InvalidArgumentException('Store Balance top-up receipt reference is invalid.');
+        }
+
+        return 'balance-top-up:'.$topUpId.':klikqris-receipt:v1';
+    }
+
     public function forOrder(string $orderId, ?string $effectType = null): ?TelegramOutboundEffect
     {
         $query = TelegramOutboundEffect::query()
@@ -1442,6 +1502,47 @@ class TelegramOutboundEffectService
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->first();
+    }
+
+    public function forBalanceTopUpReceipt(string $topUpId): ?TelegramOutboundEffect
+    {
+        return TelegramOutboundEffect::query()
+            ->where('source_type', StoreBalanceTopUp::class)
+            ->where('source_id', $topUpId)
+            ->where('effect_type', self::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    public function sentBalanceTopUpReceiptFor(
+        Customer $customer,
+        string $chatId,
+        int|string $messageId,
+    ): ?TelegramOutboundEffect {
+        $chatId = trim($chatId);
+        $messageId = (string) $messageId;
+        if ($chatId === '' || preg_match('/\A[1-9][0-9]{0,18}\z/D', $messageId) !== 1) {
+            return null;
+        }
+
+        $effect = TelegramOutboundEffect::query()
+            ->where('source_type', StoreBalanceTopUp::class)
+            ->where('effect_type', self::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->where('telegram_chat_id', $chatId)
+            ->where('telegram_message_id', $messageId)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->first();
+        if ($effect === null) {
+            return null;
+        }
+
+        return StoreBalanceTopUp::query()
+            ->whereKey($effect->source_id)
+            ->where('customer_id', $customer->getKey())
+            ->exists()
+            ? $effect
+            : null;
     }
 
     /** @return Builder<TelegramOutboundEffect> */
@@ -2463,6 +2564,7 @@ class TelegramOutboundEffectService
             self::TYPE_BINANCE_CHECKOUT => self::TEMPLATE_BINANCE_CHECKOUT,
             self::TYPE_BSC_CHECKOUT => self::TEMPLATE_BSC_CHECKOUT,
             self::TYPE_BALANCE_TOP_UP => self::TEMPLATE_BALANCE_TOP_UP,
+            self::TYPE_BALANCE_TOP_UP_RECEIPT => self::TEMPLATE_BALANCE_TOP_UP_RECEIPT,
             self::TYPE_RECEIPT_CREDENTIALS => self::TEMPLATE_RECEIPT_CREDENTIALS,
             self::TYPE_RECEIPT_TXT_DOWNLOAD => self::TEMPLATE_RECEIPT_TXT_DOWNLOAD,
             self::TYPE_RECEIPT_ORDER_ACTIONS => self::TEMPLATE_RECEIPT_ORDER_ACTIONS,

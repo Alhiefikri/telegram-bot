@@ -115,28 +115,40 @@ class KlikQrisCallbackProcessor
 
     private function processTopUpCallback(KlikQrisCallback $callback, StoreBalanceTopUp $topUp): StoreBalanceTopUpEvent
     {
-        $event = $this->topUpEvents->logCallback($callback, $topUp);
-        if ($event->processed_at !== null) {
+        $event = $this->topUpEvents->findCallback($callback);
+        if ($event?->processed_at !== null) {
             return $event->fresh();
         }
 
         if (! $callback->isSupportedStatus()) {
+            $event ??= $this->topUpEvents->logCallback($callback, $topUp);
             $event->update(['processed_at' => now()]);
 
             return $event->fresh();
         }
 
+        if (! $this->authenticatesTopUpCallback($callback, $topUp)) {
+            return ($event ?? $this->topUpEvents->logCallback($callback, $topUp))->fresh();
+        }
+
+        if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
+            return $this->topUps->recordSettledCallback($topUp, $callback);
+        }
+
         if (! $this->canVerifyTopUpCallback($callback, $topUp)) {
-            return $event;
+            return ($event ?? $this->topUpEvents->logCallback($callback, $topUp))->fresh();
         }
 
         $processedEvent = null;
         try {
             $this->nativeQris->reconcileTopUp(
                 $topUp,
-                function (StoreBalanceTopUp $current, KlikQrisTransaction $transaction) use ($event, &$processedEvent): void {
-                    $this->topUpEvents->logReconciliation($transaction, $current);
-                    $processedEvent = $this->topUps->applyAuthoritativeTransaction($current, $transaction, $event);
+                function (StoreBalanceTopUp $current, KlikQrisTransaction $transaction) use ($callback, &$processedEvent): void {
+                    $processedEvent = $this->topUps->settleAuthoritativeTransaction(
+                        $current,
+                        $transaction,
+                        fn (StoreBalanceTopUp $lockedTopUp): StoreBalanceTopUpEvent => $this->topUpEvents->logCallback($callback, $lockedTopUp),
+                    );
                 },
             );
         } catch (RuntimeException $exception) {
@@ -146,19 +158,33 @@ class KlikQrisCallbackProcessor
 
             report($exception);
 
-            return $event->fresh();
+            return ($event ?? $this->topUpEvents->logCallback($callback, $topUp))->fresh();
         }
 
-        return $processedEvent instanceof StoreBalanceTopUpEvent
-            ? $processedEvent
-            : $event->fresh();
+        if ($processedEvent instanceof StoreBalanceTopUpEvent) {
+            return $processedEvent;
+        }
+
+        $event ??= $this->topUpEvents->findCallback($callback)
+            ?? $this->topUpEvents->logCallback($callback, $topUp);
+
+        return $event->fresh();
+    }
+
+    private function authenticatesTopUpCallback(KlikQrisCallback $callback, StoreBalanceTopUp $topUp): bool
+    {
+        $stored = $topUp->providerSignature();
+
+        return $stored !== null && hash_equals($stored, $callback->signature());
     }
 
     private function canVerifyTopUpCallback(KlikQrisCallback $callback, StoreBalanceTopUp $topUp): bool
     {
         if (! $callback->isPaidTrigger()
             || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::KLIKQRIS
-            || $topUp->status === StoreBalanceTopUpStatus::Paid) {
+            || ! in_array($topUp->status, [StoreBalanceTopUpStatus::Pending, StoreBalanceTopUpStatus::Payable], true)
+            || ($topUp->expires_at !== null && ! $topUp->expires_at->isFuture())
+            || ($topUp->provider_expires_at !== null && ! $topUp->provider_expires_at->isFuture())) {
             return false;
         }
 
@@ -178,11 +204,16 @@ class KlikQrisCallbackProcessor
         $transaction->assertMatchesTopUp($topUp);
         $signaturePersisted = $this->nativeQris->persistAuthoritativeTopUp($topUp, $transaction);
         $topUp->refresh();
-        $event = $this->topUpEvents->logReconciliation($transaction, $topUp);
 
-        return $signaturePersisted
-            ? $this->topUps->applyAuthoritativeTransaction($topUp, $transaction, $event)
-            : $event->fresh();
+        if (! $signaturePersisted) {
+            return $this->topUpEvents->logReconciliation($transaction, $topUp)->fresh();
+        }
+
+        return $this->topUps->settleAuthoritativeTransaction(
+            $topUp,
+            $transaction,
+            fn (StoreBalanceTopUp $lockedTopUp): StoreBalanceTopUpEvent => $this->topUpEvents->logReconciliation($transaction, $lockedTopUp),
+        );
     }
 
     public function processReconciliationForPayment(Payment $payment, KlikQrisTransaction $transaction): PaymentEvent
