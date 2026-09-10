@@ -33,6 +33,7 @@ use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\KlikQris\KlikQrisClient;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
+use App\Services\KlikQris\KlikQrisTopUpProviderAdapter;
 use App\Services\OrderLifecycle;
 use App\Services\OrderStateMachine;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
@@ -90,8 +91,16 @@ class AppServiceProvider extends ServiceProvider
                 : new BscVerificationRpcClientAdapter($client);
         });
         $this->app->bind(BscWalletOwnershipVerifierInterface::class, BscWalletOwnershipVerifier::class);
-        $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
+        $this->app->bind(KlikQrisTopUpProviderAdapter::class, function ($app): KlikQrisTopUpProviderAdapter {
+            $provider = $app->make(KlikQrisProviderAdapter::class);
+            if (! $provider instanceof KlikQrisTopUpProviderAdapter) {
+                throw new \RuntimeException('The configured KlikQRIS provider does not support Store Balance top-ups.');
+            }
+
+            return $provider;
+        });
+        $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(SakurupiahProviderAdapter::class, SakurupiahClient::class);
         $this->app->singleton(SakurupiahProviderReadiness::class);
         $this->app->singleton(CheckoutPaymentPreparationResolver::class, function ($app) {

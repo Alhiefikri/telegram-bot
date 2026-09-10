@@ -2,15 +2,20 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramNavigationRenderOutcome;
 use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\StoreBalanceFundingIntent;
+use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramNavigationRoot;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
+use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 
 class TelegramMenuIntents
@@ -244,6 +249,98 @@ class TelegramMenuIntents
                 $this->locale->translate($customer, 'balance.confirmation.no_invoice'),
             ])),
             ['inline_keyboard' => [$this->navigationRow($customer)]],
+        );
+    }
+
+    public function fundingTopUpSurface(
+        Customer $customer,
+        StoreBalanceTopUp $topUp,
+        KlikQrisTopUpLifecycleResult $result,
+        bool $instructionsSent = false,
+        bool $confirmationReceived = false,
+        ?string $confirmationNoticeKey = null,
+    ): TelegramNavigationSurface {
+        $confirmationLines = $confirmationReceived ? [
+            $this->locale->translate(
+                $customer,
+                $confirmationNoticeKey ?? 'balance.confirmation.accepted',
+            ),
+            $this->locale->translate($customer, 'balance.confirmation.credit', [
+                'amount' => $this->locale->idr((int) $topUp->amount),
+            ]),
+            $this->locale->translate($customer, 'balance.confirmation.no_invoice'),
+        ] : [];
+        if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
+            $lines = array_merge($confirmationLines, [
+                $this->locale->translate($customer, 'balance.topup.paid', [
+                    'amount' => $this->locale->idr((int) $topUp->amount),
+                ]),
+            ]);
+            $keyboard = [$this->navigationRow($customer)];
+        } elseif ($result->isPayable() && $result->payable() !== null) {
+            $payable = $result->payable();
+            $lines = array_merge($confirmationLines, [
+                $this->locale->translate($customer, 'balance.topup.instruction.title'),
+                '━━━━━━━━━━━━━━',
+                $this->locale->translate($customer, 'balance.topup.credit', [
+                    'amount' => $this->locale->idr($payable->creditAmount()),
+                ]),
+                $this->locale->translate($customer, 'balance.topup.fee', [
+                    'amount' => $this->locale->idr($payable->providerFee()),
+                ]),
+                $this->locale->translate($customer, 'balance.topup.total', [
+                    'amount' => $this->locale->idr($payable->totalAmount()),
+                ]),
+                $this->locale->translate($customer, 'balance.topup.deadline', [
+                    'expires' => $this->locale->formatDate($customer, $payable->effectiveExpiresAt()),
+                ]),
+                $this->locale->translate($customer, 'balance.topup.unpaid'),
+                $this->locale->translate(
+                    $customer,
+                    $instructionsSent ? 'balance.topup.instructions_sent' : 'balance.topup.instructions_queued',
+                ),
+            ]);
+            $keyboard = [[
+                [
+                    'text' => $this->locale->translate($customer, 'balance.topup.check'),
+                    'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),
+                ],
+            ], $this->navigationRow($customer)];
+        } else {
+            $noticeKey = $topUp->canRetryCreate()
+                ? 'balance.topup.retryable'
+                : match ($result->outcome()) {
+                    KlikQrisNativeQrisOutcome::RecoveryPending => 'balance.topup.uncertain',
+                    KlikQrisNativeQrisOutcome::ProviderTotalPending => 'balance.topup.retryable',
+                    KlikQrisNativeQrisOutcome::InvalidProviderResult => 'balance.topup.invalid',
+                    KlikQrisNativeQrisOutcome::Expired => 'balance.topup.expired',
+                    default => 'balance.topup.preparing',
+                };
+            $lines = array_merge($confirmationLines, [
+                $this->locale->translate($customer, $noticeKey),
+                $this->locale->translate($customer, 'balance.topup.help'),
+            ]);
+            $keyboard = [];
+            if ($topUp->canRetryCreate()) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'balance.topup.retry'),
+                    'callback_data' => StoreBalanceTopUpService::actionCallback('retry', $topUp->getKey()),
+                ]];
+            }
+            if ($result->outcome() !== KlikQrisNativeQrisOutcome::Expired) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'balance.topup.check'),
+                    'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),
+                ]];
+            }
+            $keyboard[] = $this->navigationRow($customer);
+        }
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::AddBalance,
+            $this->locale->code($customer),
+            $this->captions->html(implode("\n", $lines)),
+            ['inline_keyboard' => $keyboard],
         );
     }
 

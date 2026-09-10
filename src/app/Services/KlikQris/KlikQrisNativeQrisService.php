@@ -5,8 +5,10 @@ namespace App\Services\KlikQris;
 use App\Enums\KlikQrisEnvironment;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
+use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\StoreBalanceTopUp;
 use App\Services\PaymentLifecycleCoordinator;
 use App\Services\PaymentLifecycleRollout;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
@@ -14,16 +16,17 @@ use App\Support\PaymentProvider;
 use Closure;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Throwable;
 
 /**
  * Central KlikQRIS Native QRIS lifecycle.
  *
- * One Payment lifecycle owns dynamic QR create, recovery, persistence, expiry
- * tightening, payability evaluation, and safe outcome classification. Callers
- * only ever receive KlikQrisNativeQrisLifecycleResult outcomes; raw provider
- * payloads and persistence-state strings stay internal.
+ * One Payment and Store Balance top-up lifecycle owns dynamic QR create,
+ * recovery, persistence, expiry tightening, payability evaluation, and safe
+ * outcome classification. Callers only ever receive lifecycle outcomes; raw
+ * provider payloads and persistence-state strings stay internal.
  */
 class KlikQrisNativeQrisService
 {
@@ -36,6 +39,7 @@ class KlikQrisNativeQrisService
         private readonly KlikQrisPaymentEventLogger $events,
         private readonly PaymentLifecycleCoordinator $lifecycleCoordinator,
         private readonly PaymentLifecycleRollout $rollout,
+        private readonly ?StoreBalanceTopUpEventLogger $topUpEvents = null,
     ) {}
 
     /**
@@ -341,6 +345,148 @@ class KlikQrisNativeQrisService
         // Keep the established key so callback/reconciliation workers already
         // holding the old status lock continue to serialize with this module.
         return 'klikqris:callback-status:'.$payment->getKey();
+    }
+
+    public function classifyTopUp(StoreBalanceTopUp $topUp): KlikQrisTopUpLifecycleResult
+    {
+        $topUp->refresh();
+
+        if ($topUp->isPayable()) {
+            try {
+                return KlikQrisTopUpLifecycleResult::payableResult(
+                    KlikQrisPayableBalanceTopUp::fromTopUp($topUp),
+                );
+            } catch (RuntimeException) {
+                // Fall through to the persisted state classification.
+            }
+        }
+
+        if ($topUp->status === StoreBalanceTopUpStatus::Expired
+            || ($topUp->provider_expires_at !== null && ! $topUp->provider_expires_at->isFuture())
+            || ($topUp->expires_at !== null && ! $topUp->expires_at->isFuture())) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired);
+        }
+
+        if ($topUp->status === StoreBalanceTopUpStatus::Payable) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult);
+        }
+
+        if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult);
+        }
+
+        if ($topUp->isRecoveryPending()) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending);
+        }
+
+        return match ($topUp->provider_create_state) {
+            'provider_total_pending', 'provider_fee_missing' => KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::ProviderTotalPending),
+            'provider_total_invalid', 'provider_qris_unusable', 'provider_not_payable',
+            'provider_SUCCESS', 'provider_signature_missing' => KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult),
+            'provider_expired', 'provider_EXPIRED' => KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired),
+            default => KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Creating),
+        };
+    }
+
+    public function lifecycleForTopUp(StoreBalanceTopUp $topUp): KlikQrisTopUpLifecycleResult
+    {
+        $topUp->refresh();
+        $result = $this->classifyTopUp($topUp);
+        if ($result->isPayable()
+            || in_array($topUp->status, [
+                StoreBalanceTopUpStatus::Expired,
+                StoreBalanceTopUpStatus::InvalidProviderResult,
+                StoreBalanceTopUpStatus::Paid,
+            ], true)
+            || $result->outcome() === KlikQrisNativeQrisOutcome::Expired) {
+            return $result;
+        }
+
+        if ($topUp->isRecoveryPending()) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending);
+        }
+
+        if ($topUp->provider_create_state === 'create_failed') {
+            $this->resetTopUpPreRequestFailure($topUp);
+            $topUp->refresh();
+        }
+
+        try {
+            return Cache::lock($this->topUpLockKey($topUp), $this->topUpLockLeaseSeconds())
+                ->block(self::PAYMENT_LOCK_WAIT_SECONDS, fn (): KlikQrisTopUpLifecycleResult => $this->createTopUp($topUp));
+        } catch (LockTimeoutException) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Creating);
+        }
+    }
+
+    /**
+     * Recover a top-up through the authoritative status endpoint. A create
+     * request is never inferred from this method, so an unknown outcome keeps
+     * one merchant reference and one idempotency identity.
+     *
+     * @param  Closure(StoreBalanceTopUp, KlikQrisTransaction): mixed  $onAuthoritativeStatus
+     */
+    public function reconcileTopUp(StoreBalanceTopUp $topUp, Closure $onAuthoritativeStatus): ?KlikQrisTopUpLifecycleResult
+    {
+        $lock = Cache::lock($this->topUpLockKey($topUp), $this->topUpLockLeaseSeconds());
+        if (! $lock->get()) {
+            return null;
+        }
+
+        try {
+            $topUp->refresh();
+            if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
+                return $this->classifyTopUp($topUp);
+            }
+
+            if ($topUp->provider_create_state === null && ! is_array($topUp->provider_payload)) {
+                return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Creating);
+            }
+
+            if ($topUp->provider_create_state === 'create_failed') {
+                return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Creating);
+            }
+
+            $transaction = $this->topUpProvider()->topUpTransactionStatus($topUp);
+            $transaction->assertMatchesTopUp($topUp);
+            $signaturePersisted = $this->persistAuthoritativeTopUp($topUp, $transaction);
+            $current = $topUp->fresh();
+            if ($signaturePersisted) {
+                $onAuthoritativeStatus($current, $transaction);
+            }
+
+            return $this->classifyTopUp($current);
+        } catch (Throwable $exception) {
+            $this->markTopUpRecoveryUnconfirmed($topUp, $exception);
+
+            throw $exception;
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function persistAuthoritativeTopUp(StoreBalanceTopUp $topUp, KlikQrisTransaction $transaction): bool
+    {
+        return $this->persistTopUpTransaction($topUp, $transaction, false);
+    }
+
+    public function tryWithTopUpLock(StoreBalanceTopUp $topUp, Closure $callback): mixed
+    {
+        $lock = Cache::lock($this->topUpLockKey($topUp), $this->topUpLockLeaseSeconds());
+        if (! $lock->get()) {
+            return null;
+        }
+
+        try {
+            return $callback();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function topUpLockKey(StoreBalanceTopUp $topUp): string
+    {
+        return 'klikqris:balance-top-up:'.$topUp->getKey();
     }
 
     private function usesHardenedPath(Payment $payment): bool
@@ -854,21 +1000,23 @@ class KlikQrisNativeQrisService
             && $transaction->expiresAt()?->isFuture() === true;
     }
 
-    /**
-     * @param  array<mixed>  $payload
-     * @return array<mixed>
-     */
+    /** @param array<mixed> $payload */
     private function withoutQrisUrlKeys(array $payload): array
     {
-        foreach ($payload as $key => $value) {
-            if ($key === 'qris_url') {
+        foreach (array_keys($payload) as $key) {
+            $normalized = is_string($key)
+                ? (preg_replace('/[^a-z0-9]/', '', strtolower($key)) ?? strtolower($key))
+                : '';
+            if ($normalized !== ''
+                && str_ends_with($normalized, 'url')
+                && (str_contains($normalized, 'qris') || str_contains($normalized, 'qr'))) {
                 unset($payload[$key]);
 
                 continue;
             }
 
-            if (is_array($value)) {
-                $payload[$key] = $this->withoutQrisUrlKeys($value);
+            if (is_array($payload[$key])) {
+                $payload[$key] = $this->withoutQrisUrlKeys($payload[$key]);
             }
         }
 
@@ -881,5 +1029,381 @@ class KlikQrisNativeQrisService
             ->where('provider', PaymentProvider::KLIKQRIS)
             ->where('event_type', PaymentEventType::ProviderCreate->value)
             ->exists();
+    }
+
+    private function createTopUp(StoreBalanceTopUp $topUp): KlikQrisTopUpLifecycleResult
+    {
+        $topUp->refresh();
+        $classified = $this->classifyTopUp($topUp);
+        if ($classified->isPayable()
+            || in_array($topUp->status, [
+                StoreBalanceTopUpStatus::Expired,
+                StoreBalanceTopUpStatus::InvalidProviderResult,
+                StoreBalanceTopUpStatus::Paid,
+            ], true)
+            || $classified->outcome() === KlikQrisNativeQrisOutcome::Expired) {
+            return $classified;
+        }
+
+        if ($topUp->isRecoveryPending()) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending);
+        }
+
+        if (! $this->markTopUpCreationAttempted($topUp)) {
+            return $this->classifyTopUp($topUp);
+        }
+
+        try {
+            $transaction = $this->topUpProvider()->createTopUpTransaction($topUp);
+            $transaction->assertMatchesTopUp($topUp);
+        } catch (KlikQrisCreatePreRequestException $exception) {
+            $this->markTopUpCreationDefinitivelyFailed($topUp, $exception);
+
+            throw $exception;
+        } catch (Throwable $exception) {
+            $this->markTopUpCreationOutcomeUnknown($topUp, $exception);
+
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending);
+        }
+
+        if (! $this->persistCreatedTopUp($topUp, $transaction)) {
+            $this->markTopUpCreationOutcomeUnknown($topUp, new RuntimeException('Store Balance top-up is no longer active.'));
+
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired);
+        }
+
+        return $this->classifyTopUp($topUp);
+    }
+
+    private function persistCreatedTopUp(StoreBalanceTopUp $topUp, KlikQrisTransaction $transaction): bool
+    {
+        return $this->persistTopUpTransaction($topUp, $transaction, true);
+    }
+
+    private function persistTopUpTransaction(
+        StoreBalanceTopUp $topUp,
+        KlikQrisTransaction $transaction,
+        bool $fromCreate,
+    ): bool {
+        return DB::transaction(function () use ($topUp, $transaction, $fromCreate): bool {
+            $lockedTopUp = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedTopUp->status === StoreBalanceTopUpStatus::Paid) {
+                return true;
+            }
+
+            $providerExpiresAt = $transaction->expiresAt()?->setTimezone((string) config('app.timezone'))
+                ?? $lockedTopUp->provider_expires_at;
+            $existingQrisUrl = filled($lockedTopUp->provider_qris_url)
+                && KlikQrisTransaction::isAllowedQrisUrl(
+                    (string) $lockedTopUp->provider_qris_url,
+                    environment: $transaction->environment(),
+                )
+                ? (string) $lockedTopUp->provider_qris_url
+                : null;
+            $providerQrisUrl = filled($transaction->qrisUrl())
+                && KlikQrisTransaction::isAllowedQrisUrl(
+                    $transaction->qrisUrl(),
+                    environment: $transaction->environment(),
+                )
+                ? $transaction->qrisUrl()
+                : $existingQrisUrl;
+            $providerFee = $transaction->providerFee() ?? $lockedTopUp->provider_fee;
+            $providerTotal = $transaction->totalAmount();
+            $topUpExpiresAt = $lockedTopUp->expires_at;
+            if ($providerExpiresAt !== null
+                && ($topUpExpiresAt === null || $providerExpiresAt->lt($topUpExpiresAt))) {
+                $topUpExpiresAt = $providerExpiresAt;
+            }
+            $signaturePersisted = $this->persistTopUpTransactionSignature($lockedTopUp, $transaction);
+            $isPayable = $transaction->isPending()
+                && $providerFee !== null
+                && $providerFee >= 0
+                && $providerTotal >= (int) $lockedTopUp->amount
+                && $providerQrisUrl !== null
+                && $providerExpiresAt !== null
+                && $providerExpiresAt->isFuture()
+                && $topUpExpiresAt !== null
+                && $topUpExpiresAt->isFuture()
+                && $signaturePersisted;
+            $state = $this->topUpProviderState(
+                $transaction,
+                $lockedTopUp,
+                $providerQrisUrl,
+                $providerFee,
+                $providerExpiresAt,
+                $signaturePersisted,
+                $isPayable,
+            );
+
+            $status = match (true) {
+                $transaction->isSuccess() => StoreBalanceTopUpStatus::Pending,
+                $transaction->status() === 'EXPIRED'
+                    || ($topUpExpiresAt !== null && ! $topUpExpiresAt->isFuture()) => StoreBalanceTopUpStatus::Expired,
+                $isPayable => StoreBalanceTopUpStatus::Payable,
+                default => StoreBalanceTopUpStatus::Pending,
+            };
+
+            $providerPayload = $this->withoutQrisUrlKeys($transaction->sanitizedPayload());
+            $updates = [
+                'provider_reference' => $transaction->providerReference() ?? $lockedTopUp->provider_reference,
+                'provider_payload' => $providerPayload,
+                'provider_qris_url' => $providerQrisUrl,
+                'provider_fee' => $providerFee,
+                'provider_total_payment' => $providerTotal,
+                'provider_payment_method' => 'qris',
+                'provider_expires_at' => $providerExpiresAt,
+                'expires_at' => $topUpExpiresAt ?? $lockedTopUp->expires_at,
+                'status' => $status,
+                'provider_create_state' => $isPayable ? 'created' : $state,
+                'provider_create_last_error' => $isPayable ? null : $state,
+                'paid_at' => $transaction->isSuccess()
+                    ? ($transaction->paidAt() ?? $lockedTopUp->paid_at ?? now())
+                    : $lockedTopUp->paid_at,
+            ];
+            if ($fromCreate) {
+                $updates['provider_created_at'] = now();
+            }
+
+            $lockedTopUp->forceFill($updates)->save();
+            if ($fromCreate
+                && $isPayable
+                && ! $this->hasTopUpProviderCreateEvent($lockedTopUp)) {
+                $this->topUpEventLogger()->logProviderCreate($lockedTopUp, $transaction);
+            }
+
+            return $signaturePersisted;
+        }, 5);
+    }
+
+    private function topUpProviderState(
+        KlikQrisTransaction $transaction,
+        StoreBalanceTopUp $topUp,
+        ?string $providerQrisUrl,
+        ?int $providerFee,
+        mixed $providerExpiresAt,
+        bool $signaturePersisted,
+        bool $isPayable,
+    ): string {
+        if ($isPayable) {
+            return 'created';
+        }
+
+        if ($transaction->isSuccess()) {
+            return 'provider_SUCCESS';
+        }
+
+        if ($transaction->status() === 'EXPIRED') {
+            return 'provider_EXPIRED';
+        }
+
+        if ($topUp->expires_at !== null && ! $topUp->expires_at->isFuture()) {
+            return 'provider_expired';
+        }
+
+        if (! $signaturePersisted) {
+            return 'provider_signature_missing';
+        }
+
+        if ($providerFee === null) {
+            return 'provider_fee_missing';
+        }
+
+        if ($transaction->totalAmount() < (int) $topUp->amount) {
+            return 'provider_total_invalid';
+        }
+
+        if ($providerQrisUrl === null) {
+            return 'provider_qris_unusable';
+        }
+
+        if ($providerExpiresAt === null || ! $providerExpiresAt->isFuture()) {
+            return 'provider_expired';
+        }
+
+        return 'provider_not_payable';
+    }
+
+    private function persistTopUpTransactionSignature(StoreBalanceTopUp $topUp, KlikQrisTransaction $transaction): bool
+    {
+        $signature = $transaction->signature();
+        $existing = $topUp->providerSignature();
+        if (blank($signature)) {
+            return $existing !== null || $transaction->environment() !== KlikQrisEnvironment::Production;
+        }
+
+        if ($existing === null) {
+            $topUp->forceFill(['provider_signature' => $signature])->save();
+
+            return true;
+        }
+
+        if (hash_equals($existing, $signature)) {
+            return true;
+        }
+
+        report(new RuntimeException('KlikQRIS top-up transaction signature changed.'));
+
+        return false;
+    }
+
+    private function markTopUpCreationAttempted(StoreBalanceTopUp $topUp): bool
+    {
+        $reserved = DB::transaction(function () use ($topUp): bool {
+            $locked = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            if ($locked->status === StoreBalanceTopUpStatus::Paid
+                || $locked->status === StoreBalanceTopUpStatus::InvalidProviderResult
+                || $locked->status === StoreBalanceTopUpStatus::Expired
+                || $locked->provider_create_state !== null
+                || is_array($locked->provider_payload)) {
+                return false;
+            }
+
+            if ($locked->expires_at !== null && ! $locked->expires_at->isFuture()) {
+                $locked->forceFill([
+                    'status' => StoreBalanceTopUpStatus::Expired,
+                    'provider_create_state' => 'provider_expired',
+                    'provider_create_last_error' => 'provider_expired',
+                ])->save();
+
+                return false;
+            }
+
+            $locked->forceFill([
+                'status' => StoreBalanceTopUpStatus::Pending,
+                'provider_create_state' => 'creating',
+                'provider_create_attempted_at' => now(),
+                'provider_create_last_error' => null,
+            ])->save();
+
+            return true;
+        }, 5);
+
+        if ($reserved) {
+            $topUp->refresh();
+        }
+
+        return $reserved;
+    }
+
+    private function markTopUpCreationOutcomeUnknown(StoreBalanceTopUp $topUp, Throwable $exception): void
+    {
+        $providerException = $exception->getPrevious() ?? $exception;
+
+        DB::transaction(function () use ($topUp, $providerException): void {
+            $locked = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->lockForUpdate()
+                ->first();
+            if ($locked === null || $locked->status === StoreBalanceTopUpStatus::Paid || $locked->isPayable()) {
+                return;
+            }
+
+            $locked->forceFill([
+                'status' => StoreBalanceTopUpStatus::RecoveryPending,
+                'provider_create_state' => 'outcome_unknown',
+                'provider_create_last_error' => substr($providerException::class, 0, 500),
+            ])->save();
+        }, 5);
+
+        $topUp->refresh();
+    }
+
+    private function markTopUpCreationDefinitivelyFailed(StoreBalanceTopUp $topUp, Throwable $exception): void
+    {
+        $providerException = $exception->getPrevious() ?? $exception;
+
+        DB::transaction(function () use ($topUp, $providerException): void {
+            $locked = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->lockForUpdate()
+                ->first();
+            if ($locked === null || $locked->status === StoreBalanceTopUpStatus::Paid || $locked->isPayable()) {
+                return;
+            }
+
+            $locked->forceFill([
+                'status' => StoreBalanceTopUpStatus::Failed,
+                'provider_create_state' => 'create_failed',
+                'provider_create_last_error' => substr($providerException::class, 0, 500),
+            ])->save();
+        }, 5);
+
+        $topUp->refresh();
+    }
+
+    private function resetTopUpPreRequestFailure(StoreBalanceTopUp $topUp): void
+    {
+        DB::transaction(function () use ($topUp): void {
+            $locked = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->lockForUpdate()
+                ->first();
+            if ($locked === null || $locked->provider_create_state !== 'create_failed') {
+                return;
+            }
+
+            $locked->forceFill([
+                'status' => StoreBalanceTopUpStatus::Pending,
+                'provider_create_state' => null,
+                'provider_create_last_error' => null,
+            ])->save();
+        }, 5);
+    }
+
+    private function markTopUpRecoveryUnconfirmed(StoreBalanceTopUp $topUp, Throwable $exception): void
+    {
+        DB::transaction(function () use ($topUp, $exception): void {
+            $locked = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->lockForUpdate()
+                ->first();
+            if ($locked === null || $locked->status === StoreBalanceTopUpStatus::Paid) {
+                return;
+            }
+
+            $locked->forceFill([
+                'status' => StoreBalanceTopUpStatus::RecoveryPending,
+                'provider_create_state' => 'recovery_unconfirmed',
+                'provider_create_last_error' => $this->recoveryDiagnostic($exception),
+            ])->save();
+        }, 5);
+
+        $topUp->refresh();
+    }
+
+    private function topUpProvider(): KlikQrisTopUpProviderAdapter
+    {
+        if (! $this->provider instanceof KlikQrisTopUpProviderAdapter) {
+            throw new KlikQrisCreatePreRequestException(
+                'KlikQRIS top-up create request was not sent: top-up adapter is unavailable.',
+            );
+        }
+
+        return $this->provider;
+    }
+
+    private function topUpLockLeaseSeconds(): int
+    {
+        return max(60, ProviderVerificationProfiles::requiredLeaseSeconds());
+    }
+
+    private function hasTopUpProviderCreateEvent(StoreBalanceTopUp $topUp): bool
+    {
+        return $topUp->events()
+            ->where('provider', PaymentProvider::KLIKQRIS)
+            ->where('event_type', 'provider_create')
+            ->exists();
+    }
+
+    private function topUpEventLogger(): StoreBalanceTopUpEventLogger
+    {
+        return $this->topUpEvents ?? app(StoreBalanceTopUpEventLogger::class);
     }
 }

@@ -29,6 +29,24 @@ class KlikQrisQrisImage
         }
     }
 
+    public function contentsForTopUp(KlikQrisPayableBalanceTopUp $payable, bool $preferFallback = false): string
+    {
+        $fallback = $payable->fallbackImageContents();
+        if ($preferFallback && $fallback !== null) {
+            return $fallback;
+        }
+
+        try {
+            return $this->download($payable->qrisUrl(), KlikQrisEnvironment::runtime());
+        } catch (InvalidArgumentException $exception) {
+            if ($fallback !== null) {
+                return $fallback;
+            }
+
+            throw $exception;
+        }
+    }
+
     private function download(string $url, KlikQrisEnvironment $environment): string
     {
         if (! KlikQrisTransaction::isAllowedQrisUrl($url, environment: $environment)) {

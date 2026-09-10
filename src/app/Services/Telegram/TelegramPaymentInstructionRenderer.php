@@ -6,12 +6,15 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
+use App\Models\StoreBalanceTopUp;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
+use App\Services\KlikQris\KlikQrisPayableBalanceTopUp;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirQrisFeePolicy;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahPayableInvoice;
+use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Support\DogfoodTiming;
 use Carbon\CarbonInterface;
 
@@ -250,6 +253,47 @@ class TelegramPaymentInstructionRenderer
                 'inline_keyboard' => [
                     [['text' => $this->text($locale, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]],
                     [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+                ],
+            ],
+        );
+    }
+
+    public function balanceTopUp(
+        StoreBalanceTopUp $topUp,
+        KlikQrisPayableBalanceTopUp $payable,
+        string $photoContents,
+        string $locale = 'id',
+    ): TelegramPaymentInstruction {
+        $lines = [
+            $this->text($locale, 'balance.topup.instruction.title'),
+            '━━━━━━━━━━━━━━',
+            $this->text($locale, 'balance.topup.credit', [
+                'amount' => $this->formatRupiah($payable->creditAmount()),
+            ]),
+            $this->text($locale, 'balance.topup.fee', [
+                'amount' => $this->formatRupiah($payable->providerFee()),
+            ]),
+            $this->text($locale, 'balance.topup.total', [
+                'amount' => $this->formatRupiah($payable->totalAmount()),
+            ]),
+            $this->text($locale, 'balance.topup.deadline', [
+                'expires' => $this->formatDate($payable->effectiveExpiresAt(), $locale),
+            ]),
+            '',
+            $this->text($locale, 'balance.topup.unpaid'),
+            $this->text($locale, 'balance.topup.help'),
+        ];
+
+        return new TelegramPaymentInstruction(
+            photoContents: $photoContents,
+            filename: 'balance-top-up-'.$topUp->getKey().'.png',
+            captionLines: $lines,
+            replyMarkup: [
+                'inline_keyboard' => [
+                    [[
+                        'text' => $this->text($locale, 'balance.topup.check'),
+                        'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),
+                    ]],
                 ],
             ],
         );

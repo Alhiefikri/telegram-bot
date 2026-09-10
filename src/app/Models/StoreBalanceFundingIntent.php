@@ -43,6 +43,11 @@ class StoreBalanceFundingIntent extends Model
         return $this->belongsTo(TelegramNavigationRoot::class, 'telegram_navigation_root_id');
     }
 
+    public function topUp()
+    {
+        return $this->hasOne(StoreBalanceTopUp::class);
+    }
+
     public function isPending(): bool
     {
         return $this->status === StoreBalanceFundingIntentStatus::Pending;

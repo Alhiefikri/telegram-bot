@@ -42,4 +42,9 @@ class Customer extends Model implements Authenticatable
     {
         return $this->hasMany(TelegramUpdate::class);
     }
+
+    public function balanceTopUps()
+    {
+        return $this->hasMany(StoreBalanceTopUp::class);
+    }
 }

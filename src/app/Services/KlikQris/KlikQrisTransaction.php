@@ -4,7 +4,9 @@ namespace App\Services\KlikQris;
 
 use App\Enums\KlikQrisEnvironment;
 use App\Enums\PaymentStatus;
+use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\Payment;
+use App\Models\StoreBalanceTopUp;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use RuntimeException;
@@ -27,6 +29,8 @@ final readonly class KlikQrisTransaction
         private ?string $signature,
         private ?CarbonImmutable $expiresAt,
         private ?CarbonImmutable $paidAt,
+        private ?int $providerFee,
+        private ?string $providerReference,
         private array $sanitizedPayload,
         private KlikQrisEnvironment $environment,
     ) {}
@@ -129,6 +133,73 @@ final readonly class KlikQrisTransaction
         }
     }
 
+    public static function fromPersistedTopUp(StoreBalanceTopUp $topUp, ?KlikQrisEnvironment $environment = null): self
+    {
+        $environment ??= KlikQrisEnvironment::runtime();
+        if (strtolower(trim((string) $topUp->provider)) !== PaymentProvider::KLIKQRIS) {
+            throw new RuntimeException('Persisted KlikQRIS top-up provider mismatch.');
+        }
+
+        if (! is_array($topUp->provider_payload)) {
+            throw new RuntimeException('Persisted KlikQRIS top-up payload is missing.');
+        }
+
+        $payload = $topUp->provider_payload;
+        $data = $payload['data'] ?? $payload;
+        if (! is_array($data)) {
+            throw new RuntimeException('Persisted KlikQRIS top-up payload is invalid.');
+        }
+
+        $protectedQrisUrl = trim((string) $topUp->provider_qris_url);
+        if ($protectedQrisUrl === '') {
+            throw new RuntimeException('Persisted KlikQRIS top-up QRIS URL is missing.');
+        }
+
+        if (array_key_exists('qris_url', $data)) {
+            $payloadQrisUrl = self::optionalString($data['qris_url']);
+            if ($payloadQrisUrl !== null && $payloadQrisUrl !== $protectedQrisUrl) {
+                throw new RuntimeException('Persisted KlikQRIS top-up QRIS URL does not match its protected value.');
+            }
+        }
+
+        $data = self::completePersistedTopUpPayload($data, $topUp, $protectedQrisUrl);
+        if (array_key_exists('data', $payload)) {
+            $payload['data'] = $data;
+        } else {
+            $payload = $data;
+        }
+
+        foreach (['order_id', 'amount', 'total_amount', 'status', 'qris_url', 'expired_at'] as $key) {
+            if (! array_key_exists($key, $data)) {
+                throw new RuntimeException('Persisted KlikQRIS top-up payload is incomplete.');
+            }
+        }
+
+        try {
+            $transaction = self::fromStatusPayload($payload, $environment);
+            $transaction->assertMatchesTopUp($topUp);
+
+            if (! self::isAllowedQrisUrl($transaction->qrisUrl(), environment: $environment)
+                || $transaction->expiresAt() === null
+                || $topUp->provider_expires_at === null
+                || $transaction->expiresAt()->getTimestamp() !== $topUp->provider_expires_at->getTimestamp()
+                || $topUp->provider_fee === null
+                || $transaction->providerFee() !== (int) $topUp->provider_fee) {
+                throw new RuntimeException('Persisted KlikQRIS top-up quote is inconsistent.');
+            }
+
+            if ($topUp->status !== StoreBalanceTopUpStatus::Paid && ! $topUp->isPayable()) {
+                throw new RuntimeException('Persisted KlikQRIS top-up is not payable.');
+            }
+
+            return $transaction;
+        } catch (RuntimeException $exception) {
+            throw $exception;
+        } catch (UnexpectedValueException $exception) {
+            throw new RuntimeException('Persisted KlikQRIS top-up is inconsistent.', previous: $exception);
+        }
+    }
+
     public static function isAllowedQrisUrl(?string $url, ?bool $production = null, ?KlikQrisEnvironment $environment = null): bool
     {
         $environment ??= $production === null
@@ -216,6 +287,18 @@ final readonly class KlikQrisTransaction
             self::optionalString($data['signature'] ?? null),
             self::optionalDate($data, 'expired_at'),
             self::optionalDate($data, 'paid_at'),
+            self::optionalNonNegativeAmount($data, [
+                'fee',
+                'provider_fee',
+                'fee_amount',
+                'qris_fee',
+            ]),
+            self::firstOptionalString($data, [
+                'provider_reference',
+                'transaction_id',
+                'transaction_ref',
+                'reference',
+            ]),
             KlikQrisPayloadSanitizer::sanitize($payload),
             $environment,
         );
@@ -259,6 +342,16 @@ final readonly class KlikQrisTransaction
     public function signature(): ?string
     {
         return $this->signature;
+    }
+
+    public function providerFee(): ?int
+    {
+        return $this->providerFee;
+    }
+
+    public function providerReference(): ?string
+    {
+        return $this->providerReference;
     }
 
     public function expiresAt(): ?CarbonImmutable
@@ -313,6 +406,32 @@ final readonly class KlikQrisTransaction
         }
     }
 
+    public function assertMatchesTopUp(StoreBalanceTopUp $topUp): void
+    {
+        if (strtolower(trim((string) $topUp->provider)) !== PaymentProvider::KLIKQRIS) {
+            throw new UnexpectedValueException('KlikQRIS top-up provider mismatch.');
+        }
+
+        if (trim((string) $topUp->merchant_ref) !== $this->orderId) {
+            throw new UnexpectedValueException('KlikQRIS top-up order_id mismatch.');
+        }
+
+        if ((int) $topUp->amount !== $this->amount->rupiah()) {
+            throw new UnexpectedValueException('KlikQRIS top-up amount mismatch.');
+        }
+
+        if ($topUp->provider_total_payment !== null
+            && (int) $topUp->provider_total_payment !== $this->totalAmount()) {
+            throw new UnexpectedValueException('KlikQRIS top-up total_amount mismatch.');
+        }
+
+        if ($topUp->provider_fee !== null
+            && $this->providerFee !== null
+            && (int) $topUp->provider_fee !== $this->providerFee) {
+            throw new UnexpectedValueException('KlikQRIS top-up fee mismatch.');
+        }
+    }
+
     /**
      * @param  array<mixed>  $payload
      * @return array<mixed>
@@ -351,6 +470,87 @@ final readonly class KlikQrisTransaction
         $string = trim((string) $value);
 
         return $string !== '' ? $string : null;
+    }
+
+    /** @param array<mixed> $data */
+    private static function optionalNonNegativeAmount(array $data, array $keys): ?int
+    {
+        $values = [];
+
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $data) || $data[$key] === null) {
+                continue;
+            }
+
+            $value = $data[$key];
+            if (! is_int($value) && ! is_string($value)) {
+                throw new UnexpectedValueException('KlikQRIS fee must be a non-negative whole-rupiah value.');
+            }
+
+            $raw = trim((string) $value);
+            if (preg_match('/^(?:0|[1-9][0-9]*)(?:\\.0+)?$/', $raw) !== 1) {
+                throw new UnexpectedValueException('KlikQRIS fee must be a non-negative whole-rupiah value.');
+            }
+
+            $values[] = $raw === '0' || str_starts_with($raw, '0.')
+                ? 0
+                : KlikQrisAmount::from($raw)->rupiah();
+        }
+
+        if ($values === []) {
+            return null;
+        }
+
+        if (count(array_unique($values)) !== 1) {
+            throw new UnexpectedValueException('KlikQRIS fee aliases disagree.');
+        }
+
+        return $values[0];
+    }
+
+    /** @param array<mixed> $data @param list<string> $keys */
+    private static function firstOptionalString(array $data, array $keys): ?string
+    {
+        foreach ($keys as $key) {
+            $value = self::optionalString($data[$key] ?? null);
+            if ($value !== null) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    private static function completePersistedTopUpPayload(
+        array $data,
+        StoreBalanceTopUp $topUp,
+        string $qrisUrl,
+    ): array {
+        $data['qris_url'] = $qrisUrl;
+
+        if (! self::hasNonNullKey($data, ['fee', 'provider_fee', 'fee_amount', 'qris_fee'])
+            && $topUp->provider_fee !== null) {
+            $data['provider_fee'] = (int) $topUp->provider_fee;
+        }
+
+        if ((! array_key_exists('expired_at', $data) || $data['expired_at'] === null)
+            && $topUp->provider_expires_at !== null) {
+            $data['expired_at'] = $topUp->provider_expires_at->toISOString();
+        }
+
+        return $data;
+    }
+
+    /** @param array<mixed> $data @param list<string> $keys */
+    private static function hasNonNullKey(array $data, array $keys): bool
+    {
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $data) && $data[$key] !== null) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param array<mixed> $data */

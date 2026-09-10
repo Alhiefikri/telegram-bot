@@ -3,10 +3,21 @@
 namespace Tests\Feature;
 
 use App\Enums\PaymentEventType;
+use App\Enums\StoreBalanceFundingIntentStatus;
+use App\Enums\TelegramNavigationMediaKind;
+use App\Enums\TelegramNavigationScreen;
+use App\Models\Customer;
 use App\Models\Payment;
+use App\Models\StoreBalanceFundingIntent;
+use App\Models\StoreBalanceTopUp;
+use App\Models\TelegramNavigationRoot;
+use App\Models\TelegramOutboundEffect;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
+use App\Services\KlikQris\KlikQrisTopUpProviderAdapter;
 use App\Services\KlikQris\KlikQrisTransaction;
+use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
@@ -143,6 +154,88 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
         $this->assertSame('created', Payment::findOrFail($payment->id)->provider_create_state);
     }
 
+    /** @group postgres */
+    public function test_postgres_parallel_top_up_confirmation_work_reuses_one_provider_target_and_instruction_effect(): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            $this->markTestSkipped('PostgreSQL concurrency check runs only with the pgsql test connection.');
+        }
+
+        if (! function_exists('pcntl_fork') || ! function_exists('pcntl_signal')) {
+            $this->markTestSkipped('PostgreSQL concurrency check requires pcntl fork and signal support.');
+        }
+
+        $this->guardIsolatedPostgresTestingDatabase();
+        $this->migrateCommittedPostgresFixtureSchema();
+        config()->set('cache.default', 'database');
+        Cache::purge('database');
+        $this->prepareConcurrencyTables();
+
+        $customer = Customer::factory()->create(['telegram_id' => 46290, 'locale' => 'en']);
+        $root = TelegramNavigationRoot::query()->create([
+            'customer_id' => $customer->id,
+            'chat_id' => (string) $customer->telegram_id,
+            'message_id' => 7790,
+            'media_kind' => TelegramNavigationMediaKind::Photo,
+            'screen' => TelegramNavigationScreen::AddBalance,
+            'locale' => $customer->locale,
+            'generation' => 1,
+        ]);
+        $intent = StoreBalanceFundingIntent::query()->create([
+            'customer_id' => $customer->id,
+            'telegram_navigation_root_id' => $root->id,
+            'chat_id' => (string) $customer->telegram_id,
+            'canonical_message_id' => $root->message_id,
+            'policy_version' => 1,
+            'amount' => 25_000,
+            'nonce' => bin2hex(random_bytes(16)),
+            'status' => StoreBalanceFundingIntentStatus::Confirmed,
+            'expires_at' => now()->addMinutes(10),
+            'claimed_at' => now(),
+        ]);
+
+        DB::disconnect();
+        $results = $this->runConcurrently([
+            function () use ($intent): string {
+                $topUp = app(StoreBalanceTopUpService::class)->createOrReuseConfirmedIntent(
+                    StoreBalanceFundingIntent::query()->findOrFail($intent->id),
+                );
+                $result = app(KlikQrisNativeQrisService::class)->lifecycleForTopUp($topUp);
+                if (! $result->isPayable()) {
+                    throw new RuntimeException('Top-up worker did not produce a payable result.');
+                }
+                $effect = app(TelegramOutboundEffectService::class)->recordBalanceTopUpInstructions(
+                    $topUp->fresh(['customer']),
+                    $topUp->customer,
+                );
+
+                return $topUp->getKey().':'.($effect?->getKey() ?? '');
+            },
+            function () use ($intent): string {
+                $topUp = app(StoreBalanceTopUpService::class)->createOrReuseConfirmedIntent(
+                    StoreBalanceFundingIntent::query()->findOrFail($intent->id),
+                );
+                $result = app(KlikQrisNativeQrisService::class)->lifecycleForTopUp($topUp);
+                if (! $result->isPayable()) {
+                    throw new RuntimeException('Top-up worker did not produce a payable result.');
+                }
+                $effect = app(TelegramOutboundEffectService::class)->recordBalanceTopUpInstructions(
+                    $topUp->fresh(['customer']),
+                    $topUp->customer,
+                );
+
+                return $topUp->getKey().':'.($effect?->getKey() ?? '');
+            },
+        ]);
+        DB::reconnect();
+
+        $this->assertSame(2, count(array_filter($results, fn (array $result): bool => $result['ok'] && $result['exit_code'] === 0)), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame($results[0]['value'] ?? null, $results[1]['value'] ?? null);
+        $this->assertSame(1, StoreBalanceTopUp::query()->count());
+        $this->assertSame(1, DB::table('klikqris_test_topup_provider_effects')->count());
+        $this->assertSame(1, TelegramOutboundEffect::query()->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP)->count());
+    }
+
     private function prepareConcurrencyTables(): void
     {
         Schema::dropIfExists('klikqris_test_provider_effects');
@@ -157,6 +250,13 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
         Schema::create('klikqris_test_status_lookups', function (Blueprint $table): void {
             $table->id();
             $table->uuid('payment_id');
+            $table->string('merchant_ref');
+            $table->timestamps();
+        });
+        Schema::dropIfExists('klikqris_test_topup_provider_effects');
+        Schema::create('klikqris_test_topup_provider_effects', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('top_up_id');
             $table->string('merchant_ref');
             $table->timestamps();
         });
@@ -398,7 +498,7 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
     }
 }
 
-final class DatabaseBackedKlikQrisProviderAdapter implements KlikQrisProviderAdapter
+final class DatabaseBackedKlikQrisProviderAdapter implements KlikQrisProviderAdapter, KlikQrisTopUpProviderAdapter
 {
     public function createTransaction(Payment $payment): KlikQrisTransaction
     {
@@ -430,5 +530,44 @@ final class DatabaseBackedKlikQrisProviderAdapter implements KlikQrisProviderAda
         return KlikQrisTransaction::fromStatusPayload(KlikQrisSandboxScenarios::createPayload($payment, [
             'expired_at' => now()->addMinutes(10)->toAtomString(),
         ]));
+    }
+
+    public function createTopUpTransaction(StoreBalanceTopUp $topUp): KlikQrisTransaction
+    {
+        DB::table('klikqris_test_topup_provider_effects')->insert([
+            'top_up_id' => $topUp->getKey(),
+            'merchant_ref' => $topUp->merchant_ref,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        usleep(150_000);
+
+        return KlikQrisTransaction::fromCreatePayload([
+            'data' => [
+                'order_id' => $topUp->merchant_ref,
+                'amount' => (int) $topUp->amount,
+                'total_amount' => (int) $topUp->amount + 16,
+                'fee' => 16,
+                'status' => 'PENDING',
+                'qris_url' => 'https://klikqris.com/storage/sandbox/sandbox_sample.png',
+                'signature' => 'top-up-concurrency-signature',
+                'expired_at' => now()->addMinutes(10)->toAtomString(),
+            ],
+        ]);
+    }
+
+    public function topUpTransactionStatus(StoreBalanceTopUp $topUp): KlikQrisTransaction
+    {
+        return KlikQrisTransaction::fromStatusPayload([
+            'data' => [
+                'order_id' => $topUp->merchant_ref,
+                'amount' => (int) $topUp->amount,
+                'total_amount' => (int) $topUp->amount + 16,
+                'status' => 'SUCCESS',
+                'signature' => 'top-up-concurrency-signature',
+                'expired_at' => now()->addMinutes(10)->toAtomString(),
+            ],
+        ]);
     }
 }

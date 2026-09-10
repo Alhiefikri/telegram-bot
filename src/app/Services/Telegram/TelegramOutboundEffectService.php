@@ -13,6 +13,7 @@ use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\SalesProofPost;
 use App\Models\StockNotificationRecipient;
+use App\Models\StoreBalanceTopUp;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
@@ -47,6 +48,8 @@ class TelegramOutboundEffectService
     public const TYPE_BINANCE_CHECKOUT = TelegramOutboundEffectType::BinanceCheckoutInstructions->value;
 
     public const TYPE_BSC_CHECKOUT = TelegramOutboundEffectType::BscCheckoutInstructions->value;
+
+    public const TYPE_BALANCE_TOP_UP = TelegramOutboundEffectType::BalanceTopUpInstructions->value;
 
     public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
 
@@ -107,6 +110,8 @@ class TelegramOutboundEffectService
     public const TEMPLATE_BINANCE_CHECKOUT = 'binance-payment-v1';
 
     public const TEMPLATE_BSC_CHECKOUT = 'bsc-payment-v1';
+
+    public const TEMPLATE_BALANCE_TOP_UP = 'balance-top-up-klikqris-v1';
 
     public const TEMPLATE_RECEIPT_CREDENTIALS = 'receipt-credentials-v1';
 
@@ -274,6 +279,50 @@ class TelegramOutboundEffectService
                 'state' => TelegramOutboundEffectState::Pending->value,
                 'attempts' => 0,
                 'next_attempt_at' => now(),
+            ],
+        );
+    }
+
+    public function recordBalanceTopUpInstructions(
+        StoreBalanceTopUp $topUp,
+        ?Customer $customer = null,
+    ): ?TelegramOutboundEffect {
+        $customer ??= $topUp->customer;
+        $chatId = trim((string) $topUp->chat_id);
+        if ($customer === null
+            || $customer->telegram_id === null
+            || $chatId === ''
+            || (string) $customer->telegram_id !== $chatId
+            || (int) $customer->getKey() !== (int) $topUp->customer_id
+            || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::KLIKQRIS
+            || ! $topUp->isPayable()) {
+            return null;
+        }
+
+        $effectKey = self::balanceTopUpEffectKey((string) $topUp->getKey());
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => self::TYPE_BALANCE_TOP_UP,
+                'source_type' => StoreBalanceTopUp::class,
+                'source_id' => (string) $topUp->getKey(),
+                'target_type' => 'customer',
+                'telegram_chat_id' => $chatId,
+                'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE,
+                'telegram_method' => 'sendPhoto',
+                'locale' => $topUp->locale ?: $customer->locale,
+                'template_version' => self::TEMPLATE_BALANCE_TOP_UP,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+                'outcome_metadata' => [
+                    'delivery_context' => 'balance_top_up',
+                    'attachment_type' => 'qris_png',
+                    'payment_method' => 'klikqris',
+                ],
             ],
         );
     }
@@ -1349,6 +1398,16 @@ class TelegramOutboundEffectService
         return self::checkoutEffectKey($orderId, self::TYPE_MANUAL_CHECKOUT);
     }
 
+    public static function balanceTopUpEffectKey(string $topUpId): string
+    {
+        $topUpId = trim($topUpId);
+        if (preg_match('/\A[1-9][0-9]{0,18}\z/D', $topUpId) !== 1) {
+            throw new InvalidArgumentException('Store Balance top-up reference is invalid.');
+        }
+
+        return 'balance-top-up:'.$topUpId.':klikqris-instructions:v1';
+    }
+
     public function forOrder(string $orderId, ?string $effectType = null): ?TelegramOutboundEffect
     {
         $query = TelegramOutboundEffect::query()
@@ -1369,6 +1428,17 @@ class TelegramOutboundEffectService
             ->where('source_id', $paymentId)
             ->when($effectType !== null, fn (Builder $query) => $query->where('effect_type', $effectType))
             ->when($effectType === null, fn (Builder $query) => $query->whereIn('effect_type', [self::TYPE_MANUAL_PAYMENT_PROOF]))
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    public function forBalanceTopUp(string $topUpId): ?TelegramOutboundEffect
+    {
+        return TelegramOutboundEffect::query()
+            ->where('source_type', StoreBalanceTopUp::class)
+            ->where('source_id', $topUpId)
+            ->where('effect_type', self::TYPE_BALANCE_TOP_UP)
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->first();
@@ -2235,6 +2305,10 @@ class TelegramOutboundEffectService
             }
         }
 
+        if ($effect->source_type === StoreBalanceTopUp::class) {
+            return 'Balance top-up #'.substr((string) $effect->source_id, 0, 12);
+        }
+
         if ($effect->source_type === TelegramBroadcastRecipient::class) {
             $broadcastId = TelegramBroadcastRecipient::query()
                 ->whereKey($effect->source_id)
@@ -2388,6 +2462,7 @@ class TelegramOutboundEffectService
             self::TYPE_PAKASIR_CHECKOUT => self::TEMPLATE_PAKASIR_CHECKOUT,
             self::TYPE_BINANCE_CHECKOUT => self::TEMPLATE_BINANCE_CHECKOUT,
             self::TYPE_BSC_CHECKOUT => self::TEMPLATE_BSC_CHECKOUT,
+            self::TYPE_BALANCE_TOP_UP => self::TEMPLATE_BALANCE_TOP_UP,
             self::TYPE_RECEIPT_CREDENTIALS => self::TEMPLATE_RECEIPT_CREDENTIALS,
             self::TYPE_RECEIPT_TXT_DOWNLOAD => self::TEMPLATE_RECEIPT_TXT_DOWNLOAD,
             self::TYPE_RECEIPT_ORDER_ACTIONS => self::TEMPLATE_RECEIPT_ORDER_ACTIONS,

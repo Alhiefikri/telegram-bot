@@ -162,6 +162,10 @@ _Avoid_: balance credit, ledger entry, provider quote
 A Customer-owned, expiring confirmation record that binds one normalized credit amount to the current funding-policy version, private chat, canonical navigation root, and opaque callback nonce. It is a pre-provider confirmation only: it is not a Payment, invoice, provider transaction, Store Balance Entry, or balance credit.
 _Avoid_: invoice, deposit balance, provider quote
 
+**Store Balance Top-up**:
+A Customer-owned, one-time KlikQRIS Native QRIS funding record created from a confirmed Store Balance Funding Intent. It keeps the requested credit amount separate from the provider-authoritative fee, final payable total, QR data, expiry, and settlement evidence; retries and recovery reuse the same merchant reference and idempotency identity. It is not an Order, Payment, invoice, or balance credit until authenticated provider success is settled.
+_Avoid_: invoice, Payment, merchandise Order, provider-neutral QRIS target
+
 **Store Balance Entry**:
 One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.
 _Avoid_: Transaction, balance mutation, adjustment row

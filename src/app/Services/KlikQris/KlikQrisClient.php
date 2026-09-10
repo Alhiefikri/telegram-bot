@@ -4,8 +4,8 @@ namespace App\Services\KlikQris;
 
 use App\Enums\KlikQrisEnvironment;
 use App\Models\Payment;
+use App\Models\StoreBalanceTopUp;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
-use Closure;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
@@ -16,7 +16,7 @@ use RuntimeException;
 use Throwable;
 use UnexpectedValueException;
 
-final readonly class KlikQrisClient implements KlikQrisProviderAdapter
+final readonly class KlikQrisClient implements KlikQrisProviderAdapter, KlikQrisTopUpProviderAdapter
 {
     private readonly KlikQrisEnvironment $environment;
 
@@ -85,6 +85,71 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
                     }
 
                     throw new RuntimeException('KlikQRIS status request failed: '.class_basename($exception).'.', previous: $exception);
+                }
+
+                $this->sleepBeforeStatusRetry($attempt);
+            }
+        }
+    }
+
+    public function createTopUpTransaction(StoreBalanceTopUp $topUp): KlikQrisTransaction
+    {
+        try {
+            $this->assertReady();
+        } catch (Throwable $exception) {
+            throw new KlikQrisCreatePreRequestException('KlikQRIS top-up create request was not sent: readiness failed.', $exception);
+        }
+
+        try {
+            $body = [
+                'order_id' => $topUp->merchant_ref,
+                'id_merchant' => $this->merchantId(),
+                'amount' => (int) $topUp->amount,
+                'keterangan' => 'Balance top-up '.$topUp->merchant_ref,
+            ];
+            $callbackUrl = config($this->environment->configKey('callback_url'));
+            if (is_string($callbackUrl) && filled($callbackUrl)) {
+                $body['callback_url'] = $callbackUrl;
+            }
+
+            $response = $this->request()->post($this->endpoint('/qris/create'), $body);
+        } catch (ConnectionException $exception) {
+            throw new KlikQrisCreateOutcomeUnknownException('KlikQRIS top-up create outcome is unknown: connection error.', $exception);
+        } catch (Throwable $exception) {
+            throw new KlikQrisCreateOutcomeUnknownException('KlikQRIS top-up create outcome is unknown: '.class_basename($exception).'.', $exception);
+        }
+
+        $this->throwIfCreateHttpFailed($response);
+
+        return $this->parseCreateTopUpResponse($response, $topUp);
+    }
+
+    public function topUpTransactionStatus(StoreBalanceTopUp $topUp): KlikQrisTransaction
+    {
+        $this->assertReady();
+
+        $attempt = 0;
+        $maxAttempts = ProviderVerificationProfiles::budget()['max_attempts'];
+
+        while (true) {
+            $attempt++;
+
+            try {
+                $response = $this->request()->get($this->endpoint('/qris/status/'.rawurlencode((string) $topUp->merchant_ref)));
+                $this->throwIfHttpFailed($response, 'status');
+
+                return $this->parseTopUpStatusResponse($response, $topUp);
+            } catch (Throwable $exception) {
+                if ($attempt >= $maxAttempts || ! $this->shouldRetryStatus($exception)) {
+                    if ($this->shouldRetryStatus($exception)) {
+                        throw new KlikQrisStatusUnavailableException;
+                    }
+
+                    if ($exception instanceof RuntimeException) {
+                        throw $exception;
+                    }
+
+                    throw new RuntimeException('KlikQRIS top-up status request failed: '.class_basename($exception).'.', previous: $exception);
                 }
 
                 $this->sleepBeforeStatusRetry($attempt);
@@ -342,6 +407,19 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
         }
     }
 
+    private function parseCreateTopUpResponse(Response $response, StoreBalanceTopUp $topUp): KlikQrisTransaction
+    {
+        $payload = $this->jsonPayload($response, 'create');
+        try {
+            $transaction = KlikQrisTransaction::fromCreatePayload($payload, $this->environment);
+            $transaction->assertMatchesTopUp($topUp);
+
+            return $transaction;
+        } catch (UnexpectedValueException $exception) {
+            throw new KlikQrisCreateOutcomeUnknownException('KlikQRIS top-up create outcome is unknown: response validation failed.', $exception);
+        }
+    }
+
     private function parseStatusResponse(Response $response, Payment $payment): KlikQrisTransaction
     {
         $payload = $this->jsonPayload($response, 'status');
@@ -354,6 +432,23 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter
         } catch (Throwable $exception) {
             throw new KlikQrisStatusResponseException(
                 'KlikQRIS status response validation failed: '.class_basename($exception).'.',
+                previous: $exception,
+            );
+        }
+    }
+
+    private function parseTopUpStatusResponse(Response $response, StoreBalanceTopUp $topUp): KlikQrisTransaction
+    {
+        $payload = $this->jsonPayload($response, 'status');
+
+        try {
+            $transaction = KlikQrisTransaction::fromStatusPayload($payload, $this->environment);
+            $transaction->assertMatchesTopUp($topUp);
+
+            return $transaction;
+        } catch (Throwable $exception) {
+            throw new KlikQrisStatusResponseException(
+                'KlikQRIS top-up status response validation failed: '.class_basename($exception).'.',
                 previous: $exception,
             );
         }

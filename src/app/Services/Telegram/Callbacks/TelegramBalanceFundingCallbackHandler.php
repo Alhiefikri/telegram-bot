@@ -4,13 +4,19 @@ namespace App\Services\Telegram\Callbacks;
 
 use App\Enums\StoreBalanceFundingIntentClaimOutcome;
 use App\Enums\TelegramNavigationRenderOutcome;
+use App\Enums\TelegramOutboundEffectState;
 use App\Models\Customer;
+use App\Models\StoreBalanceFundingIntent;
+use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramNavigationRoot;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
+use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\StoreBalance\StoreBalanceFundingAmountValidator;
 use App\Services\StoreBalance\StoreBalanceFundingIntentInput;
 use App\Services\StoreBalance\StoreBalanceFundingIntentOpening;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
+use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -21,6 +27,10 @@ use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramNavigationRootService;
+use App\Services\Telegram\TelegramNavigationSurface;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
+use App\Services\Telegram\TelegramOutboundEffectService;
+use Throwable;
 
 final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHandler
 {
@@ -32,6 +42,10 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         private readonly StoreBalanceFundingPolicyManager $fundingPolicies,
         private readonly StoreBalanceFundingAmountValidator $amounts,
         private readonly StoreBalanceFundingIntentService $intents,
+        private readonly StoreBalanceTopUpService $topUps,
+        private readonly KlikQrisNativeQrisService $nativeQris,
+        private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly TelegramOutboundEffectDispatcher $outboundDispatcher,
         private readonly TelegramLocale $locale,
         private readonly TelegramIntentSession $session,
         private readonly TelegramCatalogQuerySession $catalogQueries,
@@ -58,7 +72,8 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
     {
         return $context->data === self::ADD_BALANCE
             || StoreBalanceFundingPolicyManager::isPresetCallbackFormat($context->data)
-            || StoreBalanceFundingIntentService::isActionCallbackFormat($context->data);
+            || StoreBalanceFundingIntentService::isActionCallbackFormat($context->data)
+            || StoreBalanceTopUpService::isActionCallbackFormat($context->data);
     }
 
     public function handleDepositCommand(Customer $customer, string $chatId, string $text): void
@@ -90,6 +105,10 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             return false;
         }
 
+        $topUpAction = StoreBalanceTopUpService::actionFromCallback($context->data);
+        if ($topUpAction !== null) {
+            return $this->handleTopUpAction($context, $topUpAction['action'], $topUpAction['topUpId']);
+        }
         $root = $this->navigation->matchRoot($context->customer, $context);
         if ($root === null) {
             $currentRoot = $this->roots->currentForChat($context->customer, $context->chatId);
@@ -195,13 +214,22 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
 
         switch ($claim->outcome) {
             case StoreBalanceFundingIntentClaimOutcome::Confirmed:
-                $surface = $this->menu->fundingConfirmationAcceptedSurface($context->customer, $claim->intent);
+                $surface = $this->surfaceForConfirmedTopUp($context, $claim->intent, confirmationReceived: true);
                 $feedback = $this->locale->translate($context->customer, 'balance.confirmation.accepted');
                 break;
             case StoreBalanceFundingIntentClaimOutcome::AlreadyConfirmed:
-                $notice = 'balance.confirmation.already_confirmed';
-                $surface = $this->menu->addBalanceSurface($context->customer, $notice, $noticeReplacements);
-                $feedback = $this->locale->translate($context->customer, $notice);
+                if ($claim->intent !== null) {
+                    $surface = $this->surfaceForConfirmedTopUp(
+                        $context,
+                        $claim->intent,
+                        confirmationReceived: true,
+                        confirmationNoticeKey: 'balance.confirmation.already_confirmed',
+                    );
+                } else {
+                    $notice = 'balance.confirmation.already_confirmed';
+                    $surface = $this->menu->addBalanceSurface($context->customer, $notice, $noticeReplacements);
+                }
+                $feedback = $this->locale->translate($context->customer, 'balance.confirmation.already_confirmed');
                 break;
             case StoreBalanceFundingIntentClaimOutcome::Cancelled:
             case StoreBalanceFundingIntentClaimOutcome::AlreadyCancelled:
@@ -227,8 +255,138 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             $outcome = $this->navigation->presentOnRoot($root, $context->chatId, $surface);
             $feedback ??= $this->navigation->feedback($context->customer, $outcome);
         }
-
         $this->bot->answerCallbackQuery($context->callbackQueryId, $feedback);
+    }
+
+    private function surfaceForConfirmedTopUp(
+        TelegramCallbackContext $context,
+        ?StoreBalanceFundingIntent $intent,
+        bool $confirmationReceived = false,
+        ?string $confirmationNoticeKey = null,
+    ): TelegramNavigationSurface {
+        if ($intent === null) {
+            return $this->menu->addBalanceSurface($context->customer, 'balance.topup.retryable');
+        }
+
+        try {
+            $topUp = $this->topUps->createOrReuseConfirmedIntent($intent);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->menu->addBalanceSurface($context->customer, 'balance.topup.retryable');
+        }
+
+        $result = $this->resolveTopUp($topUp);
+        $instructionsSent = $this->dispatchTopUpInstructions($topUp, $result);
+
+        return $this->menu->fundingTopUpSurface(
+            $context->customer,
+            $topUp->fresh(),
+            $result,
+            $instructionsSent,
+            $confirmationReceived,
+            $confirmationNoticeKey,
+        );
+    }
+
+    private function resolveTopUp(
+        StoreBalanceTopUp $topUp,
+        bool $reconcile = false,
+    ): KlikQrisTopUpLifecycleResult {
+        try {
+            return $reconcile
+                ? $this->topUps->reconcile($topUp)
+                : $this->nativeQris->lifecycleForTopUp($topUp);
+        } catch (Throwable $exception) {
+            report($exception);
+            $topUp->refresh();
+
+            return $this->nativeQris->classifyTopUp($topUp);
+        }
+    }
+
+    private function dispatchTopUpInstructions(
+        StoreBalanceTopUp $topUp,
+        KlikQrisTopUpLifecycleResult $result,
+    ): bool {
+        if (! $result->isPayable() || $result->payable() === null) {
+            return false;
+        }
+
+        try {
+            $effect = $this->outboundEffects->recordBalanceTopUpInstructions(
+                $topUp->fresh(['customer']),
+                $topUp->customer,
+            );
+            if ($effect === null) {
+                return false;
+            }
+
+            $this->outboundDispatcher->dispatch($effect, now()->toISOString());
+
+            return $effect->fresh()?->state === TelegramOutboundEffectState::Sent;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return false;
+        }
+    }
+
+    private function handleTopUpAction(
+        TelegramCallbackContext $context,
+        string $action,
+        string $topUpId,
+    ): bool {
+        $topUp = $this->topUps->forAction($context->customer, $context->chatId, $topUpId);
+        $root = $this->roots->currentForChat($context->customer, $context->chatId);
+        $effect = $topUp === null
+            ? null
+            : $this->outboundEffects->forBalanceTopUp($topUp);
+
+        $rootMatches = $topUp !== null
+            && $root !== null
+            && (int) $topUp->telegram_navigation_root_id === (int) $root->getKey()
+            && (int) $topUp->canonical_message_id === (int) $root->message_id;
+        $messageMatches = $context->messageId !== null
+            && $rootMatches
+            && (int) $context->messageId === (int) $root->message_id;
+        $instructionMatches = $context->messageId !== null
+            && $effect !== null
+            && $effect->state === TelegramOutboundEffectState::Sent
+            && (string) $effect->telegram_chat_id === $context->chatId
+            && (int) $context->messageId === (int) $effect->telegram_message_id;
+
+        if (! $rootMatches || (! $messageMatches && ! $instructionMatches)) {
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $this->locale->translate($context->customer, 'callback.navigation_stale'),
+            );
+
+            return true;
+        }
+
+        $this->session->forgetWithLock($context->customer);
+        $this->catalogQueries->forget($context->customer);
+
+        if ($topUp === null || $root === null) {
+            return true;
+        }
+
+        $result = $this->resolveTopUp($topUp, $action === 'check');
+        $topUp->refresh();
+        $instructionsSent = $this->dispatchTopUpInstructions($topUp, $result);
+        $outcome = $this->navigation->presentOnRoot(
+            $root,
+            $context->chatId,
+            $this->menu->fundingTopUpSurface($context->customer, $topUp->fresh(), $result, $instructionsSent),
+        );
+
+        $this->bot->answerCallbackQuery(
+            $context->callbackQueryId,
+            $this->navigation->feedback($context->customer, $outcome),
+        );
+
+        return true;
     }
 
     private function presentOpening(

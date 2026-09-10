@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\SalesProofPost;
+use App\Models\StoreBalanceTopUp;
 use App\Models\StoreChannelSetting;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramBroadcastService;
@@ -51,6 +52,7 @@ class RecoverTelegramOutboundEffects extends Command
                 TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP,
                 TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
                 TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD,
                 TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS,
@@ -68,6 +70,24 @@ class RecoverTelegramOutboundEffects extends Command
                 foreach ($effects as $effect) {
                     $dispatcher->dispatch($effect, now()->toISOString());
                     $dispatched++;
+                }
+            });
+        StoreBalanceTopUp::query()
+            ->where('provider', PaymentProvider::KLIKQRIS)
+            ->where('status', 'payable')
+            ->with('customer')
+            ->orderBy('id')
+            ->chunkById((int) $this->option('chunk'), function ($topUps) use (&$dispatched, $outboundEffects, $dispatcher): void {
+                foreach ($topUps as $topUp) {
+                    if ($outboundEffects->forBalanceTopUp((string) $topUp->getKey()) !== null) {
+                        continue;
+                    }
+
+                    $effect = $outboundEffects->recordBalanceTopUpInstructions($topUp, $topUp->customer);
+                    if ($effect !== null) {
+                        $dispatcher->dispatch($effect, now()->toISOString());
+                        $dispatched++;
+                    }
                 }
             });
 
