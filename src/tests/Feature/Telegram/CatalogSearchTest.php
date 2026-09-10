@@ -189,7 +189,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $welcomePhotoIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendPhoto')
             && $record[0]['photo'] === 'banner-file-id');
         $welcomeMessageIndex = $recorded->search(fn (array $record) => str_ends_with($record[0]->url(), '/sendPhoto')
-            && str_contains((string) ($record[0]['caption'] ?? ''), 'Tempat belanja produk digital'));
+            && str_contains((string) ($record[0]['caption'] ?? ''), 'selamat datang di LHIE STORE'));
 
         $this->assertIsInt($welcomePhotoIndex);
         $this->assertIsInt($welcomeMessageIndex);
@@ -213,7 +213,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && $request['photo'] === 'banner-file-id'
-            && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Browse products')
+            && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Choose a button below')
+            && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Store Activity')
             && ($request->data()['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '🛍️ Browse Products'
             && ! array_key_exists('is_persistent', $request->data()['reply_markup'])
             && ! array_key_exists('keyboard', $request->data()['reply_markup']));

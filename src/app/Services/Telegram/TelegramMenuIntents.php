@@ -7,6 +7,7 @@ use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\TelegramNavigationRoot;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 
 class TelegramMenuIntents
@@ -23,6 +24,7 @@ class TelegramMenuIntents
         private TelegramNavigationRootService $roots,
         private TelegramWelcomeBanner $banner,
         private TelegramHtmlCaption $captions,
+        private StoreBalanceLedger $balances,
     ) {}
 
     public function sendLanguagePicker(string $chatId, ?Customer $customer = null, bool $isPrivateChat = true): void
@@ -123,25 +125,32 @@ class TelegramMenuIntents
 
         return $this->locale->translate($customer, 'welcome.group_caption', [
             'greeting' => implode(' ', $this->timeAwareGreeting($customer)),
-            'sold_units' => $metrics['sold_units'],
             'bot_users' => $metrics['bot_users'],
+            'successful_orders' => $metrics['successful_orders'],
         ]).$this->maintenanceNotice($customer);
     }
 
     /**
+     * The Customer Store Balance is read fresh from its own projection and is
+     * never part of the shared bounded-staleness global metrics cache.
+     *
      * @return array<string, string|int>
      */
     private function welcomeReplacements(Customer $customer): array
     {
         $metrics = $this->statsReport->startMetrics();
+        $balance = $this->balances->snapshot($customer);
 
         return [
             'greeting' => implode(' ', $this->timeAwareGreeting($customer)),
             'first_name' => $this->welcomeName($customer),
-            'sold_units' => $metrics['sold_units'],
-            'bot_users' => $metrics['bot_users'],
-            'name' => $this->displayName($customer),
+            'telegram_id' => (string) $customer->telegram_id,
             'username' => $this->displayUsername($customer),
+            'balance' => $balance->isAvailable()
+                ? $this->locale->idr($balance->balance())
+                : $this->locale->translate($customer, 'welcome.balance_unavailable'),
+            'bot_users' => $metrics['bot_users'],
+            'successful_orders' => $metrics['successful_orders'],
         ];
     }
 
@@ -222,13 +231,6 @@ class TelegramMenuIntents
         return $firstName !== '' ? $firstName : $this->locale->translate($customer, 'welcome.default_name');
     }
 
-    private function displayName(Customer $customer): string
-    {
-        $firstName = $this->profileName($customer);
-
-        return $firstName !== '' ? $firstName : '-';
-    }
-
     private function profileName(Customer $customer): string
     {
         $firstName = trim((string) $customer->first_name);
@@ -240,7 +242,7 @@ class TelegramMenuIntents
     {
         $username = trim((string) $customer->username);
 
-        return $username !== '' ? '@'.ltrim($username, '@') : '-';
+        return $username !== '' ? '@'.ltrim($username, '@') : $this->locale->translate($customer, 'welcome.missing_value');
     }
 
     public function sendSupport(Customer $customer, string $chatId): void

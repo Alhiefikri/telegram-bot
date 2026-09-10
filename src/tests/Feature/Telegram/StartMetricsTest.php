@@ -19,24 +19,25 @@ use Tests\Support\TelegramBotTestSupport;
 class StartMetricsTest extends TelegramBotTestSupport
 {
     /**
-     * @return array<string, array{0: string, 1: string, 2: string, 3: string, 4: string}>
+     * @return array<string, array{0: string, 1: string, 2: string, 3: string, 4: string, 5: string}>
      */
     public static function locales(): array
     {
         return [
-            'indonesian' => ['id', 'Terjual: 7 unit', 'Pengguna bot: 2', 'Nama: Ayu', 'Username: @ayu_store'],
-            'english' => ['en', 'Sold: 7', 'Bot users: 2', 'Name: Ayu', 'Username: @ayu_store'],
-            'malay' => ['ms', 'Terjual: 7 unit', 'Pengguna bot: 2', 'Nama: Ayu', 'Nama pengguna: @ayu_store'],
+            'indonesian' => ['id', 'Pesanan berhasil: 1', 'Pengguna Telegram: 2', 'Saldo Saya: Rp 0', 'Username: @ayu_store', 'Ayu'],
+            'english' => ['en', 'Successful orders: 1', 'Telegram users: 2', 'My Balance: Rp 0', 'Username: @ayu_store', 'Ayu'],
+            'malay' => ['ms', 'Pesanan berjaya: 1', 'Pengguna Telegram: 2', 'Baki Saya: Rp 0', 'Nama pengguna: @ayu_store', 'Ayu'],
         ];
     }
 
     #[DataProvider('locales')]
-    public function test_start_sends_one_localized_banner_with_metrics_and_inline_menu(
+    public function test_start_sends_one_localized_banner_with_store_activity_and_inline_menu(
         string $locale,
-        string $soldLine,
+        string $ordersLine,
         string $usersLine,
-        string $nameLine,
+        string $balanceLine,
         string $usernameLine,
+        string $greetingName,
     ): void {
         Cache::flush();
         config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
@@ -57,18 +58,19 @@ class StartMetricsTest extends TelegramBotTestSupport
         $request = $photos->first()[0];
         $caption = (string) $this->telegramRequestField($request, 'caption');
 
-        $this->assertStringContainsString($soldLine, $caption);
+        $this->assertStringContainsString($ordersLine, $caption);
         $this->assertStringContainsString($usersLine, $caption);
-        $this->assertStringContainsString($nameLine, $caption);
+        $this->assertStringContainsString($balanceLine, $caption);
         $this->assertStringContainsString($usernameLine, $caption);
+        $this->assertStringContainsString($greetingName, $caption);
+        $this->assertStringContainsString('12345', $caption);
         $this->assertArrayHasKey('inline_keyboard', $request->data()['reply_markup']);
         $this->assertArrayNotHasKey('keyboard', $request->data()['reply_markup']);
-        $this->assertStringNotContainsString('Rp', $caption);
-        $this->assertStringNotContainsString('rupiah', strtolower($caption));
-        $this->assertStringNotContainsString('revenue', strtolower($caption));
-        $this->assertStringNotContainsString('gmv', strtolower($caption));
-        $this->assertStringNotContainsString('earnings', strtolower($caption));
-        $this->assertStringNotContainsString('transaction value', strtolower($caption));
+
+        $lowered = mb_strtolower($caption);
+        foreach (['sold', 'terjual', 'revenue', 'gmv', 'earnings', 'transaction value', 'subscription'] as $forbidden) {
+            $this->assertStringNotContainsString($forbidden, $lowered);
+        }
     }
 
     public function test_start_group_keeps_public_metrics_but_omits_personal_fields(): void
@@ -89,11 +91,14 @@ class StartMetricsTest extends TelegramBotTestSupport
         $request = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->first()[0];
         $caption = (string) $this->telegramRequestField($request, 'caption');
 
-        $this->assertStringContainsString('Sold: 4', $caption);
-        $this->assertStringContainsString('Bot users: 1', $caption);
+        $this->assertStringContainsString('Successful orders: 1', $caption);
+        $this->assertStringContainsString('Telegram users: 1', $caption);
         $this->assertStringNotContainsString('Group Name', $caption);
         $this->assertStringNotContainsString('@group_user', $caption);
+        $this->assertStringNotContainsString('Rp', $caption);
+        $this->assertStringNotContainsString('My Balance', $caption);
         $this->assertArrayNotHasKey('web_app', $request->data()['reply_markup']['keyboard'][2][0] ?? []);
+        $this->assertStringNotContainsString('balance', json_encode($request->data()['reply_markup'], JSON_THROW_ON_ERROR));
     }
 
     public function test_group_language_selection_keeps_the_welcome_caption_public(): void
@@ -116,7 +121,7 @@ class StartMetricsTest extends TelegramBotTestSupport
         $request = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->first()[0];
         $caption = (string) $this->telegramRequestField($request, 'caption');
 
-        $this->assertStringContainsString('Sold: 0', $caption);
+        $this->assertStringContainsString('Successful orders: 0', $caption);
         $this->assertStringNotContainsString('Group Name', $caption);
         $this->assertStringNotContainsString('@group_user', $caption);
     }
@@ -136,28 +141,37 @@ class StartMetricsTest extends TelegramBotTestSupport
         $request = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->first()[0];
         $caption = (string) $this->telegramRequestField($request, 'caption');
 
-        $this->assertStringContainsString('Name: -', $caption);
-        $this->assertStringContainsString('Username: -', $caption);
+        $this->assertStringContainsString('Username: Not set', $caption);
+        $this->assertStringContainsString('there', $caption);
     }
 
-    public function test_start_metrics_sum_only_canonical_paid_order_items(): void
+    public function test_start_metrics_count_one_canonical_paid_payment_per_eligible_successful_order(): void
     {
         Cache::flush();
         $customer = Customer::factory()->create(['telegram_id' => null]);
-        $this->createOrderWithPayment($customer, PaymentStatus::Paid, 3);
+        $successful = $this->createOrderWithPayment($customer, PaymentStatus::Paid, 3);
         $this->createOrderWithPayment($customer, PaymentStatus::Paid, 90, OrderStatus::Cancelled);
         $this->createOrderWithPayment($customer, PaymentStatus::Pending, 50);
         $this->createOrderWithPayment($customer, PaymentStatus::Failed, 60, OrderStatus::Cancelled);
         $this->createOrderWithPayment($customer, PaymentStatus::Expired, 70, OrderStatus::Expired);
         $this->createOrderWithPayment($customer, PaymentStatus::Refunded, 80, OrderStatus::Completed);
+        Payment::factory()->for($successful)->create([
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now()->addMinute(),
+        ]);
+        Payment::factory()->for($successful)->create([
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now()->addMinutes(2),
+        ]);
 
         $metrics = app(TelegramStoreStatsReport::class)->startMetrics();
 
-        $this->assertSame(3, $metrics['sold_units']);
+        $this->assertSame(1, $metrics['successful_orders']);
         $this->assertSame(0, $metrics['bot_users']);
+        $this->assertArrayNotHasKey('sold_units', $metrics);
     }
 
-    public function test_start_metrics_use_aggregate_queries_and_a_short_lived_cache(): void
+    public function test_start_metrics_use_a_bounded_staleness_cache_with_two_aggregate_queries(): void
     {
         Cache::flush();
         config()->set('services.telegram.start_metrics_cache_seconds', 60);
@@ -178,9 +192,8 @@ class StartMetricsTest extends TelegramBotTestSupport
         $this->assertSame($first, $second);
         $this->assertSame(2, $queryCountAfterFirstRead);
         $this->assertCount(2, $queries);
-        $this->assertTrue(collect($queries)->contains(fn (string $query): bool => str_contains($query, 'sum(')));
-        $this->assertTrue(collect($queries)->contains(fn (string $query): bool => str_contains($query, 'count(')));
-        $this->assertTrue(Cache::has('telegram:start:metrics'));
+        $this->assertTrue(collect($queries)->every(fn (string $query): bool => str_contains($query, 'count(')));
+        $this->assertTrue(Cache::has('telegram:start:metrics:v2'));
     }
 
     private function createOrderWithPayment(

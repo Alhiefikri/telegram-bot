@@ -149,3 +149,15 @@ _Avoid_: ordinary send failure, retryable Telegram error
 **Manual Delivery Review**:
 The operator-controlled state for an Ambiguous Telegram Delivery that must be checked in Telegram or deliberately resent as a new effect before it is considered delivered.
 _Avoid_: Manual Fulfillment Review, automatic retry
+
+**Store Balance**:
+A Customer-owned IDR balance backed by an immutable ledger and an atomically maintained projection that can be reconstructed from its entries. It is spent as a full-payment checkout rail and funded through provider-backed top-ups.
+_Avoid_: Wallet, deposit balance, credits, loyalty points
+
+**Store Balance Entry**:
+One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.
+_Avoid_: Transaction, balance mutation, adjustment row
+
+**Store Activity**:
+The public-safe Telegram home summary of the Telegram Customer count and canonical successful Orders. It never discloses revenue, sold units, GMV, or earnings.
+_Avoid_: Sales report, revenue dashboard, store statistics

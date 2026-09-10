@@ -55,6 +55,24 @@ class PaymentReceiptReport
             ->sum(DB::raw("CASE WHEN {$net} > 0 THEN {$net} ELSE 0 END"));
     }
 
+    /**
+     * Counts orders whose one canonical paid Payment currently stands and
+     * whose Order is an eligible successful Order. Duplicate paid Payments,
+     * quantity lines, terminal Orders, and refunded Payments add nothing.
+     */
+    public function canonicalPaidOrderCount(?Carbon $start = null, ?Carbon $end = null, bool $includeEnd = false): int
+    {
+        return (int) $this->canonicalPaidPaymentsQuery($start, $end, $includeEnd)
+            ->whereExists(function ($query): void {
+                $query
+                    ->select(DB::raw(1))
+                    ->from('orders')
+                    ->whereColumn('orders.id', 'canonical_payments.order_id')
+                    ->whereIn('orders.order_status', [OrderStatus::Processing, OrderStatus::Completed]);
+            })
+            ->count();
+    }
+
     public function canonicalPaidOrderItemQuantity(?Carbon $start = null, ?Carbon $end = null, bool $includeEnd = false): int
     {
         $canonicalOrderIds = $this->canonicalPaidPaymentsQuery($start, $end, $includeEnd)

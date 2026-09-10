@@ -9,6 +9,7 @@ use App\Models\TelegramNavigationRoot;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramNavigationRootService;
+use App\Services\Telegram\TelegramNavigationSurface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Group;

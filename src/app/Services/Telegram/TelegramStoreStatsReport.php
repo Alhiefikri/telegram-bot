@@ -11,14 +11,14 @@ use Illuminate\Support\Facades\Cache;
 
 final class TelegramStoreStatsReport
 {
-    private const START_METRICS_CACHE_KEY = 'telegram:start:metrics';
+    private const START_METRICS_CACHE_KEY = 'telegram:start:metrics:v2';
 
     public function __construct(
         private readonly PaymentReceiptReport $receiptReport,
     ) {}
 
     /**
-     * @return array{sold_units: int, bot_users: int}
+     * @return array{successful_orders: int, bot_users: int}
      */
     public function startMetrics(): array
     {
@@ -129,12 +129,12 @@ final class TelegramStoreStatsReport
     }
 
     /**
-     * @return array{sold_units: int, bot_users: int}
+     * @return array{successful_orders: int, bot_users: int}
      */
     private function calculateStartMetrics(): array
     {
         return [
-            'sold_units' => $this->receiptReport->canonicalPaidOrderItemQuantity(),
+            'successful_orders' => $this->receiptReport->canonicalPaidOrderCount(),
             'bot_users' => (int) Customer::query()->whereNotNull('telegram_id')->count(),
         ];
     }
