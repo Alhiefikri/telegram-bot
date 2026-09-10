@@ -87,7 +87,7 @@
                                                     <p role="alert" class="mt-2 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-sm font-black leading-6 text-[var(--sf-ink)]">{{ $item->conflictMessage }}</p>
                                                 @endif
                                             </div>
-                                            <p class="min-w-0 shrink-0 text-left text-sm font-black leading-6 text-[var(--sf-ink)] sm:text-right">
+                                            <p class="min-w-0 w-full shrink-0 text-left text-sm font-black leading-6 text-[var(--sf-ink)] sm:w-auto sm:text-right">
                                                 <span class="block text-xs uppercase tracking-wide text-[var(--sf-muted)]">Subtotal review</span>
                                                 <span data-checkout-item-subtotal>{{ $item->subtotal === null ? '—' : $storefront->idr($item->subtotal) }}</span>
                                             </p>
