@@ -116,6 +116,17 @@ class OrderCheckoutService
             throw new InvalidCheckout('Cart is not active.');
         }
         $this->maintenance->guardNewOrder();
+        $storeBalanceCustomer = null;
+        if (strtolower(trim($paymentIntent->provider())) === PaymentProvider::STORE_BALANCE) {
+            $storeBalanceCustomer = Customer::query()->findOrFail($lockedCart->customer_id);
+            if ($storeBalanceCustomer->telegram_id === null) {
+                throw new InvalidCheckout('Store Balance checkout is available only for Telegram customers.');
+            }
+
+            // Store Balance checkout and refund paths both acquire the account
+            // before any Product locks.
+            $this->storeBalance->lockForTransaction($storeBalanceCustomer);
+        }
 
         $items = $lockedCart->cartItems()->orderBy('product_id')->lockForUpdate()->get();
         if ($items->isEmpty()) {
@@ -170,18 +181,13 @@ class OrderCheckoutService
             preflight: $preflight,
         ));
         $isStoreBalance = $paymentPlan->postCreationBehavior() === CheckoutPostCreationBehavior::StoreBalancePaid;
-        $storeBalanceCustomer = null;
         if ($isStoreBalance) {
             if ($paymentPlan->orderCurrency() !== 'IDR'
                 || $paymentPlan->paymentCurrency() !== 'IDR'
                 || $paymentPlan->amount() !== $total
-                || $paymentPlan->amount() <= 0) {
+                || $paymentPlan->amount() <= 0
+                || $storeBalanceCustomer === null) {
                 throw new InvalidCheckout('Store Balance checkout requires the complete positive IDR Order total.');
-            }
-
-            $storeBalanceCustomer = Customer::query()->findOrFail($lockedCart->customer_id);
-            if ($storeBalanceCustomer->telegram_id === null) {
-                throw new InvalidCheckout('Store Balance checkout is available only for Telegram customers.');
             }
         }
 
@@ -200,8 +206,7 @@ class OrderCheckoutService
         }
 
         if ($isStoreBalance) {
-            // Store Balance checkout extends the existing lock order:
-            // cart -> cart items/products -> account -> order/payment. The
+            // Store Balance account lock was acquired before Product locks;
             // debit and paid lifecycle remain inside this transaction.
             $this->storeBalance->debit(
                 customer: $storeBalanceCustomer,

@@ -546,6 +546,39 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString($case['otherGuidance'], $text);
     }
 
+    #[DataProvider('storeBalanceGuidanceLocaleCases')]
+    public function test_store_balance_guidance_uses_localized_refund_and_delivery_copy(array $case): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create([
+            'telegram_id' => 12345,
+            'locale' => $case['locale'],
+        ]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-BALANCE-GUIDANCE-'.$case['locale'].'-'.$case['state'],
+            'order_status' => $case['orderStatus'],
+            'payment_status' => $case['paymentStatus'],
+            'total_amount' => 15_000,
+            'currency' => 'IDR',
+            'telegram_receipt_sent_at' => null,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'store_balance',
+            'method' => 'STORE_BALANCE',
+            'status' => $case['paymentStatus'],
+            'amount' => 15_000,
+            'currency' => 'IDR',
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(306, '/order '.$order->invoice_number))->assertOk();
+
+        $text = $this->sentMessageContaining($order->invoice_number);
+        $this->assertStringContainsString($case['guidance'], $text);
+        $this->assertStringNotContainsString($case['otherGuidance'], $text);
+    }
+
     #[DataProvider('customerLocaleCases')]
     public function test_group_privacy_denials_follow_customer_locale_for_message_and_callback(array $copy): void
     {
@@ -990,6 +1023,60 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         }
 
         return $cases;
+    }
+
+    public static function storeBalanceGuidanceLocaleCases(): array
+    {
+        return [
+            'id-refunded' => [[
+                'locale' => 'id',
+                'state' => 'refunded',
+                'orderStatus' => OrderStatus::Completed,
+                'paymentStatus' => PaymentStatus::Refunded,
+                'guidance' => 'Pembayaran dengan Saldo sudah dikembalikan. Rp 15.000 sudah dikembalikan ke Saldo kamu.',
+                'otherGuidance' => 'Your Store Balance payment was refunded.',
+            ]],
+            'en-refunded' => [[
+                'locale' => 'en',
+                'state' => 'refunded',
+                'orderStatus' => OrderStatus::Completed,
+                'paymentStatus' => PaymentStatus::Refunded,
+                'guidance' => 'Your Store Balance payment was refunded. Rp 15.000 was restored to your Balance.',
+                'otherGuidance' => 'Pembayaran dengan Saldo sudah dikembalikan.',
+            ]],
+            'ms-refunded' => [[
+                'locale' => 'ms',
+                'state' => 'refunded',
+                'orderStatus' => OrderStatus::Completed,
+                'paymentStatus' => PaymentStatus::Refunded,
+                'guidance' => 'Bayaran Baki anda telah dipulangkan. Rp 15.000 telah dikembalikan ke Baki anda.',
+                'otherGuidance' => 'Your Store Balance payment was refunded.',
+            ]],
+            'id-pending-delivery' => [[
+                'locale' => 'id',
+                'state' => 'pending-delivery',
+                'orderStatus' => OrderStatus::Processing,
+                'paymentStatus' => PaymentStatus::Paid,
+                'guidance' => 'Pembayaran dengan Saldo berhasil. Bukti pesanan masih sedang dikirim; coba cek Pesanan lagi sebentar.',
+                'otherGuidance' => 'Your Store Balance payment succeeded.',
+            ]],
+            'en-pending-delivery' => [[
+                'locale' => 'en',
+                'state' => 'pending-delivery',
+                'orderStatus' => OrderStatus::Processing,
+                'paymentStatus' => PaymentStatus::Paid,
+                'guidance' => 'Your Store Balance payment succeeded. Your order receipt is still being delivered; check Orders again shortly.',
+                'otherGuidance' => 'Pembayaran dengan Saldo berhasil.',
+            ]],
+            'ms-pending-delivery' => [[
+                'locale' => 'ms',
+                'state' => 'pending-delivery',
+                'orderStatus' => OrderStatus::Processing,
+                'paymentStatus' => PaymentStatus::Paid,
+                'guidance' => 'Bayaran melalui Baki berjaya. Resit pesanan anda masih sedang dihantar; semak Pesanan semula sebentar lagi.',
+                'otherGuidance' => 'Your Store Balance payment succeeded.',
+            ]],
+        ];
     }
 
     public static function cancellationFailureLocaleCases(): array

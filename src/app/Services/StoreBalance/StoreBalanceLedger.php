@@ -4,6 +4,7 @@ namespace App\Services\StoreBalance;
 
 use App\Enums\StoreBalanceEntryKind;
 use App\Exceptions\InsufficientStoreBalance;
+use App\Exceptions\StoreBalanceProjectionMismatchException;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\StoreBalanceEntry;
@@ -68,8 +69,8 @@ final class StoreBalanceLedger
         string $sourceId,
         string $idempotencyKey,
     ): StoreBalanceMutationResult {
-        if (! $kind->isCredit()) {
-            throw new InvalidArgumentException('A Store Balance credit requires a credit kind.');
+        if ($kind !== StoreBalanceEntryKind::TopUpCredit) {
+            throw new InvalidArgumentException('Store Balance refunds must use the canonical refund operation.');
         }
 
         return $this->apply($customer, $kind, $amount, $sourceType, $sourceId, $idempotencyKey);
@@ -92,6 +93,10 @@ final class StoreBalanceLedger
         string $sourceId,
         string $idempotencyKey,
     ): StoreBalanceMutationResult {
+        if ($sourceType !== 'order') {
+            throw new InvalidArgumentException('Store Balance refunds require an Order source.');
+        }
+
         return $this->apply(
             $customer,
             StoreBalanceEntryKind::RefundCredit,
@@ -120,7 +125,8 @@ final class StoreBalanceLedger
         try {
             return DB::transaction(function () use ($customer, $kind, $amount, $sourceType, $sourceId, $idempotencyKey, $requiresPurchaseDebit): StoreBalanceMutationResult {
                 $account = $this->lockAccount($customer);
-                $existing = $this->findEntry($account, $kind, $sourceType, $sourceId, $idempotencyKey);
+                $this->assertProjectionIsConsistent($account, $customer);
+                $existing = $this->findEntry($account, $kind, $amount, $sourceType, $sourceId, $idempotencyKey);
                 if ($existing !== null) {
                     return StoreBalanceMutationResult::replayed($existing);
                 }
@@ -147,11 +153,11 @@ final class StoreBalanceLedger
                 $account->forceFill(['balance' => $balanceAfter])->save();
 
                 return StoreBalanceMutationResult::applied($entry);
-            });
+            }, 5);
         } catch (UniqueConstraintViolationException $exception) {
             // The unique source/idempotency claims are the final guard for a
             // concurrent claim that committed after this transaction started.
-            $existing = $this->findEntryAfterConflict($customer, $kind, $sourceType, $sourceId, $idempotencyKey);
+            $existing = $this->findEntryAfterConflict($customer, $kind, $amount, $sourceType, $sourceId, $idempotencyKey);
             if ($existing !== null) {
                 return StoreBalanceMutationResult::replayed($existing);
             }
@@ -193,21 +199,59 @@ final class StoreBalanceLedger
     private function findEntry(
         CustomerBalanceAccount $account,
         StoreBalanceEntryKind $kind,
+        int $amount,
         string $sourceType,
         string $sourceId,
         string $idempotencyKey,
     ): ?StoreBalanceEntry {
-        return StoreBalanceEntry::query()
-            ->where(function ($query) use ($account, $idempotencyKey): void {
-                $query->where('customer_balance_account_id', $account->id)
-                    ->where('idempotency_key', $idempotencyKey);
-            })
-            ->orWhere(function ($query) use ($kind, $sourceType, $sourceId): void {
-                $query->where('source_type', $sourceType)
-                    ->where('source_id', $sourceId)
-                    ->where('kind', $kind);
-            })
+        $byIdempotency = StoreBalanceEntry::query()
+            ->where('customer_balance_account_id', $account->id)
+            ->where('idempotency_key', $idempotencyKey)
             ->first();
+        $bySource = StoreBalanceEntry::query()
+            ->where('source_type', $sourceType)
+            ->where('source_id', $sourceId)
+            ->where('kind', $kind)
+            ->first();
+
+        foreach ([$byIdempotency, $bySource] as $entry) {
+            if ($entry === null) {
+                continue;
+            }
+
+            if ((int) $entry->customer_balance_account_id !== (int) $account->id
+                || $entry->kind !== $kind
+                || (int) $entry->amount !== $amount
+                || $entry->source_type !== $sourceType
+                || $entry->source_id !== $sourceId) {
+                throw new InvalidArgumentException('Store Balance economic identity was already claimed with different values.');
+            }
+        }
+
+        if ($byIdempotency !== null && $bySource !== null && $byIdempotency->id !== $bySource->id) {
+            throw new InvalidArgumentException('Store Balance idempotency and source claims refer to different entries.');
+        }
+
+        return $byIdempotency ?? $bySource;
+    }
+
+    private function assertProjectionIsConsistent(CustomerBalanceAccount $account, Customer $customer): void
+    {
+        $ledgerBalance = (int) StoreBalanceEntry::query()
+            ->where('customer_balance_account_id', $account->id)
+            ->selectRaw(
+                'COALESCE(SUM(CASE WHEN kind = ? THEN -amount ELSE amount END), 0) AS ledger_balance',
+                [StoreBalanceEntryKind::PurchaseDebit->value],
+            )
+            ->value('ledger_balance');
+
+        if ((int) $account->balance !== $ledgerBalance) {
+            throw new StoreBalanceProjectionMismatchException(
+                customerId: (int) $customer->getKey(),
+                projectedBalance: (int) $account->balance,
+                ledgerBalance: $ledgerBalance,
+            );
+        }
     }
 
     private function hasPurchaseDebit(
@@ -228,32 +272,36 @@ final class StoreBalanceLedger
     private function findEntryAfterConflict(
         Customer $customer,
         StoreBalanceEntryKind $kind,
+        int $amount,
         string $sourceType,
         string $sourceId,
         string $idempotencyKey,
     ): ?StoreBalanceEntry {
-        $entry = StoreBalanceEntry::query()
-            ->where('source_type', $sourceType)
-            ->where('source_id', $sourceId)
-            ->where('kind', $kind)
+        $account = CustomerBalanceAccount::query()
+            ->where('customer_id', $customer->getKey())
             ->first();
 
-        if ($entry !== null) {
-            return $entry;
-        }
+        if ($account === null) {
+            $foreignEntry = StoreBalanceEntry::query()
+                ->where('source_type', $sourceType)
+                ->where('source_id', $sourceId)
+                ->first();
 
-        $accountId = CustomerBalanceAccount::query()
-            ->where('customer_id', $customer->id)
-            ->value('id');
+            if ($foreignEntry !== null) {
+                throw new InvalidArgumentException('Store Balance source belongs to another Customer.');
+            }
 
-        if ($accountId === null) {
             return null;
         }
 
-        return StoreBalanceEntry::query()
-            ->where('customer_balance_account_id', $accountId)
-            ->where('idempotency_key', $idempotencyKey)
-            ->first();
+        return $this->findEntry(
+            account: $account,
+            kind: $kind,
+            amount: $amount,
+            sourceType: $sourceType,
+            sourceId: $sourceId,
+            idempotencyKey: $idempotencyKey,
+        );
     }
 
     private function assertPositiveAmount(int $amount): void

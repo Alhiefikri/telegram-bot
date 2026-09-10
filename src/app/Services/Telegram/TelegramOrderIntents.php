@@ -276,7 +276,19 @@ class TelegramOrderIntents
             );
         }
         if ($paymentStatus === PaymentStatus::Refunded) {
+            if (strtolower(trim((string) $payment?->provider)) === PaymentProvider::STORE_BALANCE) {
+                return $this->locale->translate($customer, 'order.guidance.store_balance_refunded', [
+                    'amount' => 'Rp '.number_format((int) ($payment?->amount ?? $order->total_amount), 0, ',', '.'),
+                ]);
+            }
+
             return $this->locale->translate($customer, 'order.guidance.refunded');
+        }
+        if (strtolower(trim((string) $payment?->provider)) === PaymentProvider::STORE_BALANCE
+            && $paymentStatus === PaymentStatus::Paid
+            && $orderStatus === OrderStatus::Processing
+            && $order->telegram_receipt_sent_at === null) {
+            return $this->locale->translate($customer, 'order.guidance.store_balance_pending_delivery');
         }
         if ($orderStatus === OrderStatus::Expired || $orderStatus === OrderStatus::Cancelled) {
             if ($paymentStatus === PaymentStatus::Paid) {

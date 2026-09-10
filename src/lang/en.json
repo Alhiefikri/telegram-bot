@@ -397,6 +397,8 @@
   "order.guidance.expired": "This order expired before payment was completed. You can check out again via /products.",
   "order.guidance.payment_failed": "Payment failed or was rejected, so this order was cancelled and stock was released. You can check out again via /products.",
   "order.guidance.refunded": "This payment was refunded. Contact support via /support if you need help.",
+  "order.guidance.store_balance_refunded": "Your Store Balance payment was refunded. :amount was restored to your Balance. Open Balance again if the updated amount is not visible.",
+  "order.guidance.store_balance_pending_delivery": "Your Store Balance payment succeeded. Your order receipt is still being delivered; check Orders again shortly.",
   "order.guidance.late_payment": "Payment was received after this order expired. It is being handled as a late payment; stock is not reserved again automatically.",
   "order.guidance.manual_review": "Payment was received after this order expired and is waiting for manual review. Stock is not reserved again automatically; no further action is needed right now.",
   "order.guidance.support": "Need help? Contact store support via /support.",

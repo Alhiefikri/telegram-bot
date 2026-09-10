@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\StoreBalanceEntryKind;
 use App\Exceptions\InsufficientStoreBalance;
+use App\Exceptions\StoreBalanceProjectionMismatchException;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\StoreBalanceEntry;
@@ -71,14 +72,68 @@ final class StoreBalanceLedgerTest extends TestCase
         $customer = Customer::factory()->create(['telegram_id' => 901103]);
         $ledger = app(StoreBalanceLedger::class);
 
-        $first = $ledger->credit($customer, 15000, StoreBalanceEntryKind::RefundCredit, 'order', '701', 'order:701:refund:attempt-1');
-        $replayed = $ledger->credit($customer, 15000, StoreBalanceEntryKind::RefundCredit, 'order', '701', 'order:701:refund:attempt-2');
+        $ledger->credit($customer, 15000, StoreBalanceEntryKind::TopUpCredit, 'balance_top_up', '701', 'balance_top_up:701:credit');
+        $ledger->debit($customer, 15000, 'order', '701', 'order:701:debit');
+        $first = $ledger->refund($customer, 15000, 'order', '701', 'order:701:refund:attempt-1');
+        $replayed = $ledger->refund($customer, 15000, 'order', '701', 'order:701:refund:attempt-2');
 
         $this->assertTrue($first->applied);
         $this->assertFalse($replayed->applied);
         $this->assertSame($first->entryId, $replayed->entryId);
-        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(3, StoreBalanceEntry::query()->count());
         $this->assertSame(15000, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+    }
+
+    public function test_generic_credit_cannot_bypass_the_canonical_refund_operation(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 901115]);
+
+        $this->expectException(InvalidArgumentException::class);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            15000,
+            StoreBalanceEntryKind::RefundCredit,
+            'order',
+            '702',
+            'order:702:refund',
+        );
+    }
+
+    public function test_reusing_a_claim_with_different_amount_or_source_is_rejected(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 901113]);
+        $ledger = app(StoreBalanceLedger::class);
+
+        $ledger->credit(
+            $customer,
+            10000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            'claim-1',
+            'shared-claim',
+        );
+
+        foreach ([
+            [12000, 'balance_top_up', 'claim-2'],
+            [10000, 'other_source', 'claim-1'],
+        ] as [$amount, $sourceType, $sourceId]) {
+            try {
+                $ledger->credit(
+                    $customer,
+                    $amount,
+                    StoreBalanceEntryKind::TopUpCredit,
+                    $sourceType,
+                    $sourceId,
+                    'shared-claim',
+                );
+                $this->fail('A claimed Store Balance identity must reject conflicting values.');
+            } catch (InvalidArgumentException) {
+                // Expected.
+            }
+        }
+
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(10000, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
     }
 
     public function test_the_same_idempotency_key_is_scoped_to_one_customer(): void
@@ -226,6 +281,37 @@ final class StoreBalanceLedgerTest extends TestCase
         $drifted = $ledger->snapshot($customer);
         $this->assertFalse($drifted->isAvailable());
         $this->assertSame(0, $drifted->balance());
+        try {
+            $ledger->credit($customer, 1000, StoreBalanceEntryKind::TopUpCredit, 'balance_top_up', '8', 'balance_top_up:8:credit');
+            $this->fail('A projection mismatch must block balance mutation.');
+        } catch (StoreBalanceProjectionMismatchException $exception) {
+            $this->assertSame($customer->id, $exception->customerId);
+            $this->assertSame(999999, $exception->projectedBalance);
+            $this->assertSame(10000, $exception->ledgerBalance);
+        }
+
+        $this->assertSame(2, StoreBalanceEntry::query()->count());
+        $this->assertSame(999999, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+    }
+
+    public function test_refund_requires_a_matching_order_debit(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 901114]);
+        $ledger = app(StoreBalanceLedger::class);
+
+        $ledger->credit($customer, 10000, StoreBalanceEntryKind::TopUpCredit, 'balance_top_up', '9', 'balance_top_up:9:credit');
+        $ledger->debit($customer, 10000, 'order', '903', 'manual-debit-key');
+
+        try {
+            $ledger->refund($customer, 9000, 'order', '903', 'order:903:refund');
+            $this->fail('A refund must require the exact original debit amount.');
+        } catch (\RuntimeException) {
+            // Expected.
+        }
+
+        $this->assertSame(0, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(2, StoreBalanceEntry::query()->count());
+        $this->assertSame(0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());
     }
 
     public function test_account_with_an_untracked_balance_and_no_entries_is_unavailable(): void

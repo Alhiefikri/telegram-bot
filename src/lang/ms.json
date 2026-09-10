@@ -395,6 +395,8 @@
   "order.guidance.expired": "Pesanan ini tamat tempoh sebelum bayaran selesai. Anda boleh membuat pesanan baharu melalui /produk.",
   "order.guidance.payment_failed": "Bayaran gagal atau ditolak, jadi pesanan ini dibatalkan dan stok dilepaskan. Anda boleh membuat pesanan baharu melalui /produk.",
   "order.guidance.refunded": "Bayaran ini telah dipulangkan. Hubungi sokongan melalui /support jika perlukan bantuan.",
+  "order.guidance.store_balance_refunded": "Bayaran Baki anda telah dipulangkan. :amount telah dikembalikan ke Baki anda. Buka Baki semula jika jumlah terkini belum dipaparkan.",
+  "order.guidance.store_balance_pending_delivery": "Bayaran melalui Baki berjaya. Resit pesanan anda masih sedang dihantar; semak Pesanan semula sebentar lagi.",
   "order.guidance.late_payment": "Bayaran diterima selepas pesanan tamat tempoh. Ia dikendalikan sebagai bayaran lewat; stok tidak dipegang semula secara automatik.",
   "order.guidance.manual_review": "Bayaran diterima selepas pesanan tamat tempoh dan sedang menunggu semakan manual. Stok tidak dipegang semula secara automatik; anda tidak perlu melakukan apa-apa buat masa ini.",
   "order.guidance.support": "Perlukan bantuan? Hubungi sokongan kedai melalui /support.",

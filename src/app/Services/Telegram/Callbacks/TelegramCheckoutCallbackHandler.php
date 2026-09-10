@@ -8,6 +8,7 @@ use App\Exceptions\InsufficientStock;
 use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
+use App\Exceptions\StoreBalanceProjectionMismatchException;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendBscCheckoutInstructions;
@@ -637,6 +638,10 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             return;
         } catch (InsufficientStoreBalance) {
             $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.balance.insufficient'));
+
+            return;
+        } catch (StoreBalanceProjectionMismatchException) {
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.balance.recovery'));
 
             return;
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {

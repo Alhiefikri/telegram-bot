@@ -58,12 +58,17 @@ preset list never creates a balance entry or changes any Customer projection.
   current checkout/refund callers consume `StoreBalanceLedger` instead of
   writing the projection.
 - Store Balance checkout is an internal full-payment rail. The canonical
-  `OrderCheckoutService` transaction locks the Cart/Product snapshot, debits
-  the exact IDR Order total through this ledger, and delegates paid state and
-  fulfillment to `OrderLifecycle`.
-- Store Balance refunds are owned by `OrderLifecycle` and call
-  `StoreBalanceLedger::refund()` with the original Order source identity.
-  The refund requires the matching purchase debit and is replay-safe.
+  `OrderCheckoutService` transaction locks the Cart, then the Customer account
+  before the CartItem/Product snapshot, debits the exact IDR Order total
+  through this ledger, and delegates paid state and fulfillment to
+  `OrderLifecycle`.
+- Store Balance refunds are owned by `OrderLifecycle` and use the common
+  transaction lock order: Customer account, Order, Payment, then inventory
+  resources. The lifecycle calls `StoreBalanceLedger::refund()` with the
+  original Order source identity and exact Payment amount.
+- The refund requires the matching purchase debit and is replay-safe. A
+  projection mismatch or any source, Customer, currency, amount, or lifecycle
+  mismatch fails closed before the refund credit is appended.
 - Idempotency is enforced twice: the account lock serializes same-Customer
   claims in the application, and the unique indexes are the final database
   guard for concurrent or out-of-band writes.

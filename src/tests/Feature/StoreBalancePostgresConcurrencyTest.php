@@ -324,6 +324,76 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         $this->assertProjectionMatchesLedger($customer, 20_000);
     }
 
+    public function test_postgres_store_balance_refund_serializes_with_another_account_mutation(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $customer = $this->createCustomer(45411);
+        $product = Product::factory()->create([
+            'price_amount' => 20_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $this->createdProductIds[] = $product->id;
+        $cart = Cart::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => CartStatus::Active,
+            'expires_at' => now()->addHour(),
+        ]);
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ]);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            20_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '45411',
+            'balance_top_up:45411:credit',
+        );
+
+        $order = app(OrderCheckoutService::class)->checkout(
+            $cart,
+            CheckoutPaymentIntents::storeBalance(),
+            'postgres-balance-refund-mutation',
+        );
+        $paymentId = $order->payments()->sole()->id;
+
+        $results = $this->runConcurrentWorkers(2, function (int $index) use ($customer, $paymentId): string {
+            if ($index === 0) {
+                $result = app(OrderStateMachine::class)->applyPaymentRefunded(
+                    Payment::query()->findOrFail($paymentId),
+                );
+
+                return $result->newlyApplied ? 'RefundApplied' : 'RefundReplayed';
+            }
+
+            $result = app(StoreBalanceLedger::class)->credit(
+                Customer::query()->findOrFail($customer->id),
+                5_000,
+                StoreBalanceEntryKind::TopUpCredit,
+                'balance_top_up',
+                '45411-race',
+                'balance_top_up:45411-race:credit',
+            );
+
+            return $result->applied ? 'BalanceApplied' : 'BalanceReplayed';
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $outcomes = array_map(static fn (array $result): string => (string) ($result['value'] ?? ''), $results);
+        sort($outcomes);
+        $this->assertSame(['BalanceApplied', 'RefundApplied'], $outcomes, json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(25_000, $this->balanceOf($customer));
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());
+        $this->assertSame(3, StoreBalanceEntry::query()->count());
+        $this->assertProjectionMatchesLedger($customer, 25_000);
+    }
+
     public function test_postgres_parallel_credits_reconstruct_from_immutable_entries(): void
     {
         $this->requirePostgresConcurrency();
@@ -353,17 +423,19 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         $this->assertProjectionMatchesLedger($customer, 10000);
     }
 
-    public function test_postgres_duplicate_source_identity_settles_one_economic_effect(): void
+    public function test_postgres_duplicate_refund_source_identity_settles_one_economic_effect(): void
     {
         $this->requirePostgresConcurrency();
 
         $customer = $this->createCustomer(45404);
+        $ledger = app(StoreBalanceLedger::class);
+        $ledger->credit($customer, 9000, StoreBalanceEntryKind::TopUpCredit, 'balance_top_up', '9001', 'balance_top_up:9001:credit');
+        $ledger->debit($customer, 9000, 'order', '9001', 'order:9001:debit');
 
         $results = $this->runConcurrentWorkers(2, function (int $index) use ($customer): string {
-            $result = app(StoreBalanceLedger::class)->credit(
+            $result = app(StoreBalanceLedger::class)->refund(
                 Customer::query()->findOrFail($customer->id),
                 9000,
-                StoreBalanceEntryKind::RefundCredit,
                 'order',
                 '9001',
                 'order:9001:refund:attempt-'.$index,
@@ -377,8 +449,9 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         sort($outcomes);
         $this->assertSame(['Applied', 'Replayed'], $outcomes, json_encode($results, JSON_THROW_ON_ERROR));
 
-        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(3, StoreBalanceEntry::query()->count());
         $this->assertSame(9000, $this->balanceOf($customer));
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());
         $this->assertProjectionMatchesLedger($customer, 9000);
     }
 

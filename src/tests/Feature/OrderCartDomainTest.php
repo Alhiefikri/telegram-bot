@@ -182,6 +182,105 @@ class OrderCartDomainTest extends TestCase
         $this->assertNotNull($stockItem->fresh()->retired_at);
     }
 
+    public function test_store_balance_refund_rejects_mixed_lifecycle_state_without_credit(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 910005]);
+        $product = Product::factory()->create(['price_amount' => 15_000, 'stock' => 1, 'reserved_stock' => 0]);
+        $cart = $this->cartForCustomer($customer, $product);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            15_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '910005',
+            'balance_top_up:910005:credit',
+        );
+
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::storeBalance(), 'telegram-balance-mixed-910005');
+        $payment = $order->payments()->sole();
+        $payment->update(['status' => PaymentStatus::Refunded]);
+
+        try {
+            app(OrderStateMachine::class)->applyPaymentRefunded($payment->fresh());
+            $this->fail('A mixed Store Balance lifecycle state must not refund money.');
+        } catch (InvalidOrderTransition) {
+            // Expected.
+        }
+
+        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(0, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());
+    }
+
+    public function test_store_balance_refund_rejects_partial_amount_without_credit(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 910006]);
+        $product = Product::factory()->create(['price_amount' => 15_000, 'stock' => 1, 'reserved_stock' => 0]);
+        $cart = $this->cartForCustomer($customer, $product);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            15_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '910006',
+            'balance_top_up:910006:credit',
+        );
+
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::storeBalance(), 'telegram-balance-partial-910006');
+        $payment = $order->payments()->sole();
+        $payment->update(['amount' => 10_000]);
+
+        try {
+            app(OrderStateMachine::class)->applyPaymentRefunded($payment->fresh());
+            $this->fail('A partial Store Balance refund must not refund money.');
+        } catch (InvalidOrderTransition) {
+            // Expected.
+        }
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(0, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());
+    }
+
+    public function test_store_balance_refund_rejects_foreign_customer_and_unmatched_debit(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 910007]);
+        $product = Product::factory()->create(['price_amount' => 15_000, 'stock' => 1, 'reserved_stock' => 0]);
+        $cart = $this->cartForCustomer($customer, $product);
+        $ledger = app(StoreBalanceLedger::class);
+        $ledger->credit(
+            $customer,
+            15_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '910007',
+            'balance_top_up:910007:credit',
+        );
+
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::storeBalance(), 'telegram-balance-owner-910007');
+        $foreign = Customer::factory()->create(['telegram_id' => 910008]);
+
+        try {
+            $ledger->refund($foreign, 15_000, 'order', (string) $order->id, 'order:'.$order->id.':refund');
+            $this->fail('A Store Balance refund must remain bound to the original Customer.');
+        } catch (\InvalidArgumentException|\RuntimeException) {
+            // Expected.
+        }
+
+        try {
+            $ledger->refund($customer, 15_000, 'order', 'missing-order', 'order:missing-order:refund');
+            $this->fail('A Store Balance refund must require its original debit.');
+        } catch (\RuntimeException) {
+            // Expected.
+        }
+
+        $this->assertNull(CustomerBalanceAccount::query()->where('customer_id', $foreign->id)->first());
+        $this->assertSame(0, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());
+    }
+
     public function test_insufficient_store_balance_rolls_back_order_stock_credentials_and_debit(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 910002]);

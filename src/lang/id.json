@@ -396,6 +396,8 @@
   "order.guidance.expired": "Order ini expired sebelum pembayaran selesai. Kamu bisa checkout ulang lewat /produk.",
   "order.guidance.payment_failed": "Pembayaran gagal atau ditolak, jadi order ini dibatalkan dan stok sudah dilepas. Kamu bisa checkout ulang lewat /produk.",
   "order.guidance.refunded": "Pembayaran ini sudah dikembalikan. Kalau butuh bantuan, hubungi /support.",
+  "order.guidance.store_balance_refunded": "Pembayaran dengan Saldo sudah dikembalikan. :amount sudah dikembalikan ke Saldo kamu. Buka Saldo lagi kalau nominal terbaru belum terlihat.",
+  "order.guidance.store_balance_pending_delivery": "Pembayaran dengan Saldo berhasil. Bukti pesanan masih sedang dikirim; coba cek Pesanan lagi sebentar.",
   "order.guidance.late_payment": "Pembayaran diterima setelah order expired. Pembayaran ini ditangani sebagai pembayaran terlambat; stok tidak dikunci ulang otomatis.",
   "order.guidance.manual_review": "Pembayaran diterima setelah order expired dan sedang menunggu review manual. Stok tidak dikunci ulang otomatis; untuk sekarang kamu tidak perlu melakukan apa-apa.",
   "order.guidance.support": "Kalau butuh bantuan, hubungi admin toko lewat /support.",

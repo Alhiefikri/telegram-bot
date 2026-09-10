@@ -10,6 +10,7 @@ use App\Jobs\DeleteAdminPendingOrderNotification;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
+use App\Models\Customer;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
@@ -145,15 +146,15 @@ class OrderStateMachine implements OrderLifecycle
     {
         return DB::transaction(function () use ($payment) {
             $initial = Payment::findOrFail($payment->id);
-            $this->lockStoreBalanceAccount($initial);
+            $storeBalanceCustomerId = $this->lockStoreBalanceAccount($initial);
 
-            return $this->withLockedOrderPayments($initial->order_id, function (Order $order, $payments) use ($payment): OrderLifecycleResult {
+            return $this->withLockedOrderPayments($initial->order_id, function (Order $order, $payments) use ($payment, $storeBalanceCustomerId): OrderLifecycleResult {
                 $lockedPayment = $payments->firstWhere('id', $payment->id);
                 if (! $lockedPayment) {
                     throw new InvalidOrderTransition('Payment is not attached to order.');
                 }
 
-                $this->refundStoreBalance($order, $lockedPayment);
+                $this->refundStoreBalance($order, $lockedPayment, $storeBalanceCustomerId);
                 $wasAlreadyRefunded = $lockedPayment->status === PaymentStatus::Refunded
                     && $order->payment_status === PaymentStatus::Refunded;
 
@@ -482,38 +483,57 @@ class OrderStateMachine implements OrderLifecycle
             && $payment->status === PaymentStatus::Pending;
     }
 
-    private function lockStoreBalanceAccount(Payment $payment): void
+    private function lockStoreBalanceAccount(Payment $payment): ?int
     {
-        if ($payment->provider !== PaymentProvider::STORE_BALANCE) {
-            return;
+        if (strtolower(trim((string) $payment->provider)) !== PaymentProvider::STORE_BALANCE) {
+            return null;
         }
-        $payment->loadMissing('order.customer');
 
-        $customer = $payment->order?->customer;
+        $order = Order::query()
+            ->select(['id', 'customer_id'])
+            ->find($payment->order_id);
+        $customerId = $order?->customer_id;
+        if ($customerId === null) {
+            throw new InvalidOrderTransition('Store Balance refund customer is missing.');
+        }
+
+        $customer = Customer::query()->find($customerId);
         if ($customer === null) {
             throw new InvalidOrderTransition('Store Balance refund customer is missing.');
         }
 
         $this->storeBalanceLedger()->lockForTransaction($customer);
+
+        return (int) $customer->getKey();
     }
 
-    private function refundStoreBalance(Order $order, Payment $payment): void
+    private function refundStoreBalance(Order $order, Payment $payment, ?int $lockedCustomerId): void
     {
-        if ($payment->provider !== PaymentProvider::STORE_BALANCE) {
+        if (strtolower(trim((string) $payment->provider)) !== PaymentProvider::STORE_BALANCE) {
             return;
         }
 
-        if ($payment->method !== 'STORE_BALANCE'
-            || $payment->currency !== 'IDR'
-            || $order->currency !== 'IDR'
-            || ! in_array($payment->status, [PaymentStatus::Paid, PaymentStatus::Refunded], true)
-            || ! in_array($order->payment_status, [PaymentStatus::Paid, PaymentStatus::Refunded], true)
+        $paymentStatus = $payment->status;
+        $orderPaymentStatus = $order->payment_status;
+        $alreadyRefunded = $paymentStatus === PaymentStatus::Refunded
+            && $orderPaymentStatus === PaymentStatus::Refunded
+            && in_array($order->order_status, [OrderStatus::Cancelled, OrderStatus::Completed], true);
+        $isPaid = $paymentStatus === PaymentStatus::Paid
+            && $orderPaymentStatus === PaymentStatus::Paid
+            && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true);
+
+        if ($lockedCustomerId === null
+            || (int) $order->customer_id !== $lockedCustomerId
+            || strtoupper(trim((string) $payment->method)) !== 'STORE_BALANCE'
+            || strtoupper(trim((string) $payment->currency)) !== 'IDR'
+            || strtoupper(trim((string) $order->currency)) !== 'IDR'
+            || (! $alreadyRefunded && ! $isPaid)
             || (int) $payment->amount !== (int) $order->total_amount
             || (int) $payment->amount <= 0) {
             throw new InvalidOrderTransition('Store Balance refund does not match the original IDR Order debit.');
         }
 
-        $customer = $order->customer()->first();
+        $customer = Customer::query()->find($order->customer_id);
         if ($customer === null) {
             throw new InvalidOrderTransition('Store Balance refund customer is missing.');
         }

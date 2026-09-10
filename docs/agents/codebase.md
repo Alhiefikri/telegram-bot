@@ -109,17 +109,20 @@ ledger entry atau kredit saldo.
 
 Store Balance checkout memakai `StoreBalanceCheckoutIntent` dan
 `StoreBalanceCheckoutPaymentPreparation` sebagai rail internal IDR penuh.
-`OrderCheckoutService` tetap memiliki transaksi bersama: callback Telegram tidak
-menentukan nominal, debit dilakukan melalui `StoreBalanceLedger` setelah
-snapshot Cart/Product terkunci, lalu `OrderLifecycle` menerapkan status paid dan
-effect fulfillment canonical.
+`OrderCheckoutService` menjaga satu transaksi bersama: callback Telegram tidak
+memilih nominal; untuk Store Balance, transaksi mengunci account Customer tepat
+setelah Cart dan sebelum snapshot CartItem/Product, lalu melakukan debit melalui
+`StoreBalanceLedger` dan menyerahkan state paid serta efek fulfillment canonical
+ke `OrderLifecycle`.
 
-Refund Store Balance hanya boleh melewati `OrderLifecycle`. `StoreBalanceLedger::refund()`
-mengunci account dalam transaksi lifecycle, memverifikasi debit Order asal,
-dan memakai source/idempotency identity Order yang sama sehingga retry refund
-tidak membuat credit kedua. Pada checkout, urutan lock finansial adalah
-Cart → CartItem/Product → Store Balance account → Order/Payment; jalur refund
-memperoleh Store Balance account lock sebelum lock Order/Payment.
+Refund Order yang didanai Store Balance hanya boleh melalui `OrderLifecycle`.
+`StoreBalanceLedger::refund()` mengunci account sebelum lock Order/Payment dan
+resource inventory, memverifikasi debit Order asli serta nominal Payment yang
+tepat, dan memakai identity source/idempotency Order yang sama agar retry tidak
+membuat credit kedua. Urutan lock bersama adalah `Cart ->
+CustomerBalanceAccount -> CartItem/Product` untuk checkout dan
+`CustomerBalanceAccount -> Order -> Payment ->
+OrderItem/InventoryMovement/Product` untuk refund.
 
 ### Store Channel dan Sales Proof Post
 
@@ -352,22 +355,23 @@ Payment Provider Switch berlaku hanya untuk checkout baru. Jangan memindahkan Pa
 
 ### 5.2 Checkout transaction
 
-`OrderCheckoutService::checkout()` membungkus pembuatan checkout dalam database transaction dan retry conflict unique reference. Ia:
+`OrderCheckoutService::checkout()` wraps order creation in a database transaction and retries unique-reference conflicts. It:
 
-1. menormalisasi intent, memilih adapter `CheckoutPaymentPreparation`, dan menjalankan `preflight()` sebelum transaksi/checkout locks;
-2. dedupe berdasarkan `checkout_key` bila ada;
-3. lock Cart dan reuse Order yang sudah ada untuk Cart `checked_out`;
-4. validasi Cart aktif dan belum kedaluwarsa, lalu memanggil `CheckoutMaintenance::guardNewOrder()`;
-5. lock CartItem/Product dan `ManualPaymentSetting` dalam urutan canonical;
-6. memvalidasi ulang selected provider-setting snapshot serta preflight identity di dalam transaksi;
-7. memanggil `prepare()` setelah seluruh checkout lock tersedia; fase ini hanya melakukan validation, allocation, dan snapshot work yang transaction-local;
-8. membuat Order dan meminta [`CheckoutPaymentPlanWriter`](../../src/app/Services/Checkout/CheckoutPaymentPlanWriter.php) mempersist Payment plan generik;
-9. membuat OrderItem dengan snapshot delivery/usage guide;
-10. mengalokasikan credential stock bila relevan;
-11. merekam reservation inventory melalui `InventoryLedger`;
-12. mematerialisasi Telegram Outbound Effects dan menandai Cart `checked_out`.
+1. normalizes the intent, selects the `CheckoutPaymentPreparation` adapter, and runs `preflight()` before the transaction/checkout locks;
+2. deduplicates by `checkout_key` when present;
+3. locks the Cart and reuses an existing Order for a `checked_out` Cart;
+4. validates that the Cart is active and not expired, then calls `CheckoutMaintenance::guardNewOrder()`;
+5. for a Store Balance intent, locks the Customer's `CustomerBalanceAccount` immediately after the Cart and before any CartItem/Product lock;
+6. locks CartItem/Product and `ManualPaymentSetting` in canonical order;
+7. revalidates the selected provider-setting snapshot and preflight identity inside the transaction;
+8. calls `prepare()` after all checkout locks are held; this phase only performs transaction-local validation, allocation, and snapshot work;
+9. creates the Order and asks [`CheckoutPaymentPlanWriter`](../../src/app/Services/Checkout/CheckoutPaymentPlanWriter.php) to persist the generic Payment plan;
+10. creates OrderItem with delivery/usage-guide snapshots;
+11. allocates credential stock when relevant;
+12. records the inventory reservation through `InventoryLedger`;
+13. materializes Telegram Outbound Effects and marks the Cart `checked_out`.
 
-OrderCheckoutService tidak memetakan rail, menghitung field Binance/BSC, atau melakukan external I/O dari fase `prepare()`. Aturan amount/receiver/verification rail tetap berada pada preparation adapter dan service verification masing-masing.
+The Store Balance lock order is therefore `Cart -> CustomerBalanceAccount -> CartItem/Product -> ManualPaymentSetting -> Order/Payment`; the debit and paid lifecycle run after the account lock in that same transaction. Store Balance refund uses `CustomerBalanceAccount -> Order -> Payment -> OrderItem/InventoryMovement/Product`, with the account acquired before the lifecycle resource locks. Neither path performs provider, Telegram, or queue I/O while these locks are held.
 
 ### 5.3 Pakasir legacy settlement
 
