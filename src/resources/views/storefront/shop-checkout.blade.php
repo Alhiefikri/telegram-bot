@@ -101,12 +101,12 @@
                             @endif
 
                             <dl class="mt-4 grid gap-2 border-t-[3px] border-[var(--sf-border)] pt-3 text-sm">
-                                <div class="flex items-center justify-between gap-3 text-base font-black text-[var(--sf-ink)]">
+                                <div class="flex min-w-0 flex-wrap items-center justify-between gap-3 text-base font-black text-[var(--sf-ink)]">
                                     <dt>Subtotal review (IDR)</dt>
                                     <dd data-checkout-order-subtotal>{{ $storefront->idr($cartSubtotal) }}</dd>
                                 </div>
                                 @if ($cartUsdtSubtotal !== null)
-                                    <div class="flex items-center justify-between gap-3 font-bold text-[var(--sf-muted)]">
+                                    <div class="flex min-w-0 flex-wrap items-center justify-between gap-3 font-bold text-[var(--sf-muted)]">
                                         <dt>Total dasar USDT / estimasi</dt>
                                         <dd class="font-black text-[var(--sf-ink)]" data-checkout-order-usdt-subtotal>{{ $storefront->usdt($cartUsdtSubtotal) }}</dd>
                                     </div>
