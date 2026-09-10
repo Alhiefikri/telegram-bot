@@ -2,8 +2,10 @@
 
 namespace App\Services\Telegram\Callbacks;
 
+use App\Enums\PaymentStatus;
 use App\Exceptions\CheckoutMaintenanceActive;
 use App\Exceptions\InsufficientStock;
+use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
@@ -22,6 +24,7 @@ use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use App\Services\OrderCheckoutService;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramBinanceRailSelectionSession;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
@@ -56,6 +59,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         private TelegramBinanceRailSelectionSession $railSession,
         private TelegramLocale $locale,
         private CheckoutMaintenance $maintenance,
+        private StoreBalanceLedger $storeBalance,
         private TelegramOutboundEffectService $outboundEffects,
         private TelegramOutboundEffectDispatcher $dispatcher,
     ) {}
@@ -74,11 +78,12 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
     {
         return $context->data === 'checkout'
             || $context->data === 'checkout:current'
+            || $context->data === 'checkout:balance'
             || $context->data === 'checkout:binance'
             || preg_match('/^checkout:binance:(?:rail:)?(binance_pay_id|usdt_bep20):[a-f0-9]{16}$/', $context->data) === 1
             || preg_match('/^checkout:binance:cancel:[a-f0-9]{16}$/', $context->data) === 1
             || preg_match('/^manual:paid:([0-9a-fA-F-]+)$/', $context->data) === 1
-            || preg_match('/^detail:pay:(qris|binance):([1-9][0-9]*):[A-Za-z0-9_-]+$/', $context->data) === 1;
+            || preg_match('/^detail:pay:(qris|binance|balance):([1-9][0-9]*):[A-Za-z0-9_-]+$/', $context->data) === 1;
     }
 
     public function handle(TelegramCallbackContext $context): bool
@@ -101,6 +106,13 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 $this->checkoutIntentKey($context->customer, $context->chatId, $context->messageId, 'checkout:binance-selector'),
                 fn () => $this->openCartBinanceSelector($context),
             );
+
+            return true;
+        }
+
+        if ($context->data === 'checkout:balance') {
+            $checkoutKey = $this->checkoutIntentKey($context->customer, $context->chatId, $context->messageId, $this->checkoutIntentPayload($context->data));
+            $this->withCheckoutIntentLock($context, $checkoutKey, fn () => $this->checkout($context, CheckoutPaymentIntents::RAIL_STORE_BALANCE, true, $checkoutKey));
 
             return true;
         }
@@ -132,7 +144,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
-        if (preg_match('/^detail:pay:(qris|binance):([1-9][0-9]*):([A-Za-z0-9_-]+)$/', $context->data, $matches) === 1) {
+        if (preg_match('/^detail:pay:(qris|binance|balance):([1-9][0-9]*):([A-Za-z0-9_-]+)$/', $context->data, $matches) === 1) {
             $paymentMethod = $matches[1];
             $productId = (int) $matches[2];
             $token = $matches[3];
@@ -147,7 +159,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 $this->withCheckoutIntentLock(
                     $context,
                     $checkoutKey,
-                    fn () => $this->checkoutProductDetail($context, false, $productId, $token, $checkoutKey),
+                    fn () => $this->checkoutProductDetail($context, $paymentMethod, $productId, $token, $checkoutKey),
                 );
             }
 
@@ -408,7 +420,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         ]), (string) config('app.key'));
     }
 
-    private function checkoutProductDetail(TelegramCallbackContext $context, bool $binance, int $productId, string $token, string $checkoutKey): void
+    private function checkoutProductDetail(TelegramCallbackContext $context, string $rail, int $productId, string $token, string $checkoutKey): void
     {
         if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
@@ -416,7 +428,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             return;
         }
 
-        $this->session->withLock($context->customer, function () use ($context, $binance, $productId, $token, $checkoutKey): void {
+        $this->session->withLock($context->customer, function () use ($context, $rail, $productId, $token, $checkoutKey): void {
             if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
                 $this->bot->answerCallbackQuery($context->callbackQueryId);
 
@@ -456,7 +468,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 return;
             }
 
-            if ($binance && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
+            if ($rail === 'binance' && ($product->usdt_price_amount === null || ! $this->checkoutIntents->binancePayEnabled())) {
                 $this->session->forget($context->customer);
                 $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.binance_unavailable_product'));
 
@@ -465,7 +477,12 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
             // Resolve the rail before mutating the active Cart. The checkout
             // service remains the authoritative second check inside its transaction.
-            $this->paymentIntentSelector->select($binance);
+            $requestedRail = match ($rail) {
+                'balance' => CheckoutPaymentIntents::RAIL_STORE_BALANCE,
+                'binance' => CheckoutPaymentIntents::RAIL_BINANCE_PAY_ID,
+                default => CheckoutPaymentIntents::RAIL_QRIS,
+            };
+            $this->paymentIntentSelector->select($requestedRail);
 
             $this->bot->answerCallbackQuery($context->callbackQueryId);
             $added = $this->cart->addProductToCart(
@@ -483,13 +500,12 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             }
 
             $this->session->forget($context->customer);
-            $this->checkout($context, $binance, false, $checkoutKey);
+            $this->checkout($context, $requestedRail, false, $checkoutKey);
         });
     }
 
     private function choosePaymentMethod(TelegramCallbackContext $context, ?string $checkoutKey = null): void
     {
-
         if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
 
@@ -513,16 +529,30 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
             return;
         }
-        $cart->load('cartItems.product');
-        if (! $this->checkoutIntents->binanceRailSelectable() || ! $cart->cartItems->every(fn ($item) => $item->product?->usdt_price_amount !== null)) {
-            $this->checkout($context, false, true, $checkoutKey);
 
-            return;
+        $cart->load('cartItems.product');
+        $balance = $this->storeBalance->snapshot($context->customer);
+        $balanceLabel = $balance->isAvailable()
+            ? $this->locale->idr($balance->balance())
+            : $this->locale->translate($context->customer, 'checkout.balance.unavailable');
+        $qrisButton = [[
+            'text' => $this->locale->translate($context->customer, 'checkout.payment.qris'),
+            'callback_data' => 'checkout:current',
+        ]];
+        $balanceButton = [[
+            'text' => $this->locale->translate($context->customer, 'checkout.payment.store_balance', ['balance' => $balanceLabel]),
+            'callback_data' => 'checkout:balance',
+        ]];
+        $buttons = [$qrisButton, $balanceButton];
+        if ($this->checkoutIntents->binanceRailSelectable()
+            && $cart->cartItems->every(fn ($item) => $item->product?->usdt_price_amount !== null)) {
+            $micro = $cart->cartItems->sum(fn ($item) => $item->product->usdt_price_amount * $item->quantity);
+            $buttons[] = [[
+                'text' => $this->locale->translate($context->customer, 'checkout.payment.binance', ['amount' => $this->checkoutIntents->formatUsdt($micro)]),
+                'callback_data' => 'checkout:binance',
+            ]];
         }
-        $micro = $cart->cartItems->sum(fn ($item) => $item->product->usdt_price_amount * $item->quantity);
-        $qrisButton = [['text' => $this->locale->translate($context->customer, 'checkout.payment.qris'), 'callback_data' => 'checkout:current']];
-        $binanceButton = [['text' => $this->locale->translate($context->customer, 'checkout.payment.binance', ['amount' => $this->checkoutIntents->formatUsdt($micro)]), 'callback_data' => 'checkout:binance']];
-        $buttons = [$qrisButton, $binanceButton];
+
         $this->bot->answerCallbackQuery($context->callbackQueryId);
         $paymentMethodMessage = $this->locale->translate($context->customer, 'checkout.payment_method')
             ."\n\n"
@@ -605,6 +635,10 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             );
 
             return;
+        } catch (InsufficientStoreBalance) {
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.balance.insufficient'));
+
+            return;
         } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
             $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.invalid_cart'));
 
@@ -619,6 +653,10 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     private function dispatchCheckoutInstructions(Order $order, Payment $payment): void
     {
+        if ($payment->provider === PaymentProvider::STORE_BALANCE) {
+            return;
+        }
+
         $effectType = TelegramOutboundEffectService::typeForPayment($payment);
         $effect = $effectType === null
             ? null
@@ -643,6 +681,10 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     private function dispatchPendingAdminNotification(Order $order): void
     {
+        if ($order->payment_status !== PaymentStatus::Pending) {
+            return;
+        }
+
         $effect = $this->outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_ADMIN_PENDING);
         if ($effect !== null) {
             $this->dispatcher->dispatch($effect);
@@ -664,7 +706,8 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             CheckoutPostCreationBehavior::BscInstructions,
             CheckoutPostCreationBehavior::ManualQrisInstructions,
             CheckoutPostCreationBehavior::KlikQrisInstructions,
-            CheckoutPostCreationBehavior::SakurupiahInstructions => null,
+            CheckoutPostCreationBehavior::SakurupiahInstructions,
+            CheckoutPostCreationBehavior::StoreBalancePaid => null,
         };
     }
 
@@ -752,8 +795,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     private function checkoutIntentPayload(string $data): string
     {
-
-        if (in_array($data, ['checkout:current', 'checkout:binance'], true)) {
+        if (in_array($data, ['checkout:current', 'checkout:balance', 'checkout:binance'], true)) {
             return 'checkout:choice';
         }
 

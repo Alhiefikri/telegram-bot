@@ -15,6 +15,7 @@ use App\Services\Admin\ProductImageOptimizer;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class TelegramCatalogIntents
@@ -35,6 +36,7 @@ class TelegramCatalogIntents
         private TelegramFamilyCallbackToken $familyTokens,
         private TelegramNavigationRootService $roots,
         private ProductImageOptimizer $images,
+        private StoreBalanceLedger $storeBalance,
     ) {}
 
     public function sendCategoryCatalog(Customer $customer, string $chatId, ?int $messageId = null): void
@@ -446,6 +448,17 @@ class TelegramCatalogIntents
                     'callback_data' => 'detail:pay:qris:'.$productId.':'.$token,
                     'style' => 'success',
                 ]];
+                $balance = $this->storeBalance->snapshot($customer);
+                $balanceLabel = $balance->isAvailable()
+                    ? $this->locale->idr($balance->balance())
+                    : $this->locale->translate($customer, 'checkout.balance.unavailable');
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'catalog.detail.pay_balance', [
+                        'amount' => number_format($product->price_amount * $quantity, 0, ',', '.'),
+                        'balance' => $balanceLabel,
+                    ]),
+                    'callback_data' => 'detail:pay:balance:'.$productId.':'.$token,
+                ]];
                 if ($binanceAvailable) {
                     $keyboard[] = [[
                         'text' => $this->locale->translate($customer, 'catalog.detail.pay_binance', [
@@ -454,8 +467,8 @@ class TelegramCatalogIntents
                         'callback_data' => 'detail:pay:binance:'.$productId.':'.$token,
                     ]];
                 }
-            }
 
+            }
             $keyboard[] = [[
                 'text' => $this->locale->translate($customer, 'catalog.detail.back_products'),
                 'callback_data' => 'detail:back:'.$productId.':'.$token,

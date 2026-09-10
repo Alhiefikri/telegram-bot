@@ -431,15 +431,18 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
             ->values()
             ->all();
 
-        $this->assertCount(2, $idPaymentButtons);
-        $this->assertCount(2, $enPaymentButtons);
-        $this->assertCount(2, $msPaymentButtons);
+        $this->assertCount(3, $idPaymentButtons);
+        $this->assertCount(3, $enPaymentButtons);
+        $this->assertCount(3, $msPaymentButtons);
         $this->assertSame('💳 Bayar dengan QRIS · Rp50.000', $idPaymentButtons[0]['text']);
-        $this->assertSame('💎 Bayar dengan Binance · 3 USDT', $idPaymentButtons[1]['text']);
+        $this->assertStringContainsString('Bayar dengan Saldo', $idPaymentButtons[1]['text']);
+        $this->assertSame('💎 Bayar dengan Binance · 3 USDT', $idPaymentButtons[2]['text']);
         $this->assertSame('💳 Pay with QRIS · Rp50.000', $enPaymentButtons[0]['text']);
-        $this->assertSame('💎 Pay with Binance · 3 USDT', $enPaymentButtons[1]['text']);
+        $this->assertStringContainsString('Pay with Balance', $enPaymentButtons[1]['text']);
+        $this->assertSame('💎 Pay with Binance · 3 USDT', $enPaymentButtons[2]['text']);
         $this->assertSame('💳 Bayar dengan QRIS · Rp50.000', $msPaymentButtons[0]['text']);
-        $this->assertSame('💎 Bayar dengan Binance · 3 USDT', $msPaymentButtons[1]['text']);
+        $this->assertStringContainsString('Bayar dengan Baki', $msPaymentButtons[1]['text']);
+        $this->assertSame('💎 Bayar dengan Binance · 3 USDT', $msPaymentButtons[2]['text']);
         $this->assertStringNotContainsString('checkout.payment_method', json_encode($idPayload, JSON_THROW_ON_ERROR));
         $this->assertLocalizedCopy($idPayload, ['QRIS Antarnegara saat ini mendukung koneksi dengan:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP'], ['QRIS Cross-Border currently supports connections with:', 'Availability still depends on the payment app/provider']);
         $this->assertLocalizedCopy($enPayload, ['QRIS Cross-Border currently supports connections with:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China', 'Availability still depends on the payment app/provider'], ['QRIS Antarnegara saat ini mendukung koneksi dengan:', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP']);
@@ -483,11 +486,14 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $msCheckoutButtons = collect($msCheckoutPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
 
         $this->assertSame('checkout:current', $idCheckoutButtons[0]);
-        $this->assertSame('checkout:binance', $idCheckoutButtons[1]);
+        $this->assertSame('checkout:balance', $idCheckoutButtons[1]);
+        $this->assertSame('checkout:binance', $idCheckoutButtons[2]);
         $this->assertSame('checkout:current', $enCheckoutButtons[0]);
-        $this->assertSame('checkout:binance', $enCheckoutButtons[1]);
+        $this->assertSame('checkout:balance', $enCheckoutButtons[1]);
+        $this->assertSame('checkout:binance', $enCheckoutButtons[2]);
         $this->assertSame('checkout:current', $msCheckoutButtons[0]);
-        $this->assertSame('checkout:binance', $msCheckoutButtons[1]);
+        $this->assertSame('checkout:balance', $msCheckoutButtons[1]);
+        $this->assertSame('checkout:binance', $msCheckoutButtons[2]);
         $this->assertLocalizedCopy(
             $idCheckoutPayload,
             ['Pilih metode pembayaran di bawah.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok'],

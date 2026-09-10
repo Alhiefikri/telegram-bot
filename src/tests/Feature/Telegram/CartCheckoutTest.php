@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\StoreBalanceEntryKind;
 use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
@@ -14,6 +15,7 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
+use App\Models\CustomerBalanceAccount;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
@@ -23,6 +25,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramBinanceRailSelectionSession;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramIntentSession;
@@ -93,11 +96,12 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $carts->addItem($carts->activeCartFor($customer), $product, 1);
         $this->assertSame(1, Cart::where('status', CartStatus::Active)->count());
 
-        $this->postTelegramWebhook($this->callbackUpdate(1952, 'checkout-first', 'checkout', [], 7101))
+        $this->postTelegramWebhook($this->callbackUpdate(1952, 'checkout-first', 'checkout', [], 7101, 'private', 8100))
             ->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(1953, 'checkout-duplicate', 'checkout', [], 7101))
+        $this->postTelegramWebhook($this->callbackUpdate(1953, 'checkout-qris', 'checkout:current', [], 7101, 'private', 8100))
             ->assertOk();
-
+        $this->postTelegramWebhook($this->callbackUpdate(1954, 'checkout-duplicate', 'checkout:current', [], 7101, 'private', 8100))
+            ->assertOk();
         $this->assertSame(1, Order::count());
         $this->assertSame(1, Cart::where('status', CartStatus::CheckedOut)->count());
         $this->assertSame(0, Cart::where('status', CartStatus::Active)->count());
@@ -113,6 +117,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $product->forceFill(['stock' => 0, 'reserved_stock' => 0])->save();
 
         $this->postTelegramWebhook($this->callbackUpdate(1954, 'checkout-changed-stock', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1955, 'checkout-changed-stock-confirm', 'checkout:current'))->assertOk();
 
         $this->assertSame(0, Order::count());
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
@@ -170,7 +175,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(17, 'cb3', 'checkout', ['username' => 'buyer']))->assertOk();
-
+        $this->postTelegramWebhook($this->callbackUpdate(18, 'cb3-qris', 'checkout:current', ['username' => 'buyer']))->assertOk();
         $order = Order::firstOrFail();
         $this->assertDatabaseHas('payments', ['order_id' => $order->id, 'provider' => 'manual', 'method' => 'QR_MANUAL', 'provider_reference' => null]);
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendPhoto')
@@ -197,6 +202,50 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertNotNull($order->fresh()->admin_pending_order_notified_at);
     }
 
+    public function test_store_balance_cart_checkout_shows_balance_rail_and_finishes_paid_without_provider_instructions(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12348, 'username' => 'balance-buyer', 'locale' => 'en']);
+        $product = Product::factory()->create(['name' => 'Balance Product', 'price_amount' => 15_000, 'stock' => 2, 'reserved_stock' => 0]);
+        app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            20_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '12348',
+            'balance_top_up:12348:credit',
+        );
+
+        $this->postTelegramWebhook($this->callbackUpdate(30, 'balance-selector', 'checkout', [], 12348, 'private', 9001))
+            ->assertOk();
+        $selectorPayload = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12348')->first()[0]->data();
+        $selectorJson = json_encode($selectorPayload, JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('Balance', $selectorJson);
+        $this->assertStringContainsString('Rp 20.000', $selectorJson);
+        $this->assertStringContainsString('checkout:balance', $selectorJson);
+        $this->postTelegramWebhook($this->callbackUpdate(31, 'balance-checkout', 'checkout:balance', [], 12348, 'private', 9001))
+            ->assertOk();
+
+        $order = Order::query()->sole();
+        $payment = $order->payments()->sole();
+        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame('store_balance', $payment->provider);
+        $this->assertSame('STORE_BALANCE', $payment->method);
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(5_000, (int) CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertDatabaseHas('store_balance_entries', [
+            'kind' => StoreBalanceEntryKind::PurchaseDebit->value,
+            'source_type' => 'order',
+            'source_id' => (string) $order->id,
+            'amount' => 15_000,
+        ]);
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains((string) ($request['body'] ?? ''), 'Scan the QR'));
+    }
+
     public function test_manual_paid_button_edits_qr_caption_to_proof_instructions_without_new_buyer_message(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');
@@ -207,6 +256,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(18, 'checkout-manual-proof', 'checkout', [], 12346))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(181, 'checkout-manual-proof-qris', 'checkout:current', [], 12346))->assertOk();
 
         $order = Order::query()->sole();
         $this->postTelegramWebhook($this->callbackUpdate(
@@ -233,7 +283,8 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame('buyer:cancel-pending:'.$order->id, $edited['reply_markup']['inline_keyboard'][0][0]['callback_data']);
         $buyerMessages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '12346');
-        $this->assertCount(0, $buyerMessages);
+        $this->assertCount(1, $buyerMessages);
+        $this->assertStringContainsString('Choose a payment method', (string) $buyerMessages->first()[0]->data()['text']);
     }
 
     public function test_manual_paid_button_rejects_an_expired_order_without_editing_or_sending(): void
@@ -246,6 +297,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(20, 'expired-checkout', 'checkout', [], 12347))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(201, 'expired-checkout-qris', 'checkout:current', [], 12347))->assertOk();
         $order = Order::query()->sole();
         $order->update(['expires_at' => now()->subMinute()]);
 
@@ -260,8 +312,10 @@ class CartCheckoutTest extends TelegramBotTestSupport
         ))->assertOk();
 
         $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/editMessageCaption')));
-        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && (string) ($request['chat_id'] ?? '') === '12347'));
+        $buyerMessages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12347');
+        $this->assertCount(1, $buyerMessages);
+        $this->assertStringContainsString('Choose a payment method', (string) $buyerMessages->first()[0]->data()['text']);
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
             && ($request['callback_query_id'] ?? null) === 'expired-manual-paid'
             && str_contains((string) ($request['text'] ?? ''), 'no longer awaiting payment'));
@@ -279,6 +333,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(173, 'cb-manual-queued', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(174, 'cb-manual-queued-qris', 'checkout:current'))->assertOk();
 
         $order = Order::firstOrFail();
         Queue::assertPushedOn('telegram-outbound', SendManualCheckoutNotifications::class, fn (SendManualCheckoutNotifications $job): bool => $job->orderId === $order->id);
@@ -425,6 +480,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(172, 'cb-manual-timing', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(173, 'cb-manual-timing-qris', 'checkout:current'))->assertOk();
 
         foreach ([
             'order_checkout',
@@ -450,6 +506,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(171, 'cb-manual-override', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(172, 'cb-manual-override-qris', 'checkout:current'))->assertOk();
 
         $order = Order::firstOrFail();
         $this->assertDatabaseHas('payments', [

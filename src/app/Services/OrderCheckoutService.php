@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
+use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -17,9 +18,11 @@ use App\Services\Checkout\CheckoutPaymentPreflight;
 use App\Services\Checkout\CheckoutPaymentPreflightContext;
 use App\Services\Checkout\CheckoutPaymentPreparationContext;
 use App\Services\Checkout\CheckoutPaymentPreparationResolver;
+use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use DateTimeInterface;
@@ -37,6 +40,8 @@ class OrderCheckoutService
         private readonly CheckoutPaymentPlanWriter $paymentPlanWriter,
         private readonly CheckoutMaintenance $maintenance,
         private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly StoreBalanceLedger $storeBalance,
+        private readonly OrderLifecycle $lifecycle,
     ) {}
 
     public function checkout(
@@ -47,6 +52,7 @@ class OrderCheckoutService
         ?DateTimeInterface $termsAcceptedAt = null,
     ): Order {
         $paymentIntent ??= $this->providerResolver->resolve()->paymentIntent;
+        $this->assertStoreBalanceEligibility($cart, $paymentIntent);
         if (($termsVersion === null) !== ($termsAcceptedAt === null)) {
             throw new InvalidCheckout('Checkout terms snapshot is incomplete.');
         }
@@ -163,6 +169,21 @@ class OrderCheckoutService
             lockedSetting: $activeSetting,
             preflight: $preflight,
         ));
+        $isStoreBalance = $paymentPlan->postCreationBehavior() === CheckoutPostCreationBehavior::StoreBalancePaid;
+        $storeBalanceCustomer = null;
+        if ($isStoreBalance) {
+            if ($paymentPlan->orderCurrency() !== 'IDR'
+                || $paymentPlan->paymentCurrency() !== 'IDR'
+                || $paymentPlan->amount() !== $total
+                || $paymentPlan->amount() <= 0) {
+                throw new InvalidCheckout('Store Balance checkout requires the complete positive IDR Order total.');
+            }
+
+            $storeBalanceCustomer = Customer::query()->findOrFail($lockedCart->customer_id);
+            if ($storeBalanceCustomer->telegram_id === null) {
+                throw new InvalidCheckout('Store Balance checkout is available only for Telegram customers.');
+            }
+        }
 
         $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'terms_version' => $termsVersion, 'terms_accepted_at' => $termsAcceptedAt, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentPlan->orderCurrency(), 'expires_at' => $paymentPlan->orderExpiresAt()]);
 
@@ -178,12 +199,38 @@ class OrderCheckoutService
             $this->inventory->reserveOrderItem($order, $product, $item->quantity);
         }
 
-        $this->outboundEffects->recordCheckoutInstructions($order, $payment, $lockedCart->customer);
-        $this->outboundEffects->recordAdminOrderPendingNotification($order);
+        if ($isStoreBalance) {
+            // Store Balance checkout extends the existing lock order:
+            // cart -> cart items/products -> account -> order/payment. The
+            // debit and paid lifecycle remain inside this transaction.
+            $this->storeBalance->debit(
+                customer: $storeBalanceCustomer,
+                amount: $total,
+                sourceType: 'order',
+                sourceId: (string) $order->getKey(),
+                idempotencyKey: 'order:'.$order->getKey().':debit',
+            );
+            $this->lifecycle->applyPaymentPaid($payment);
+        } else {
+            $this->outboundEffects->recordCheckoutInstructions($order, $payment, $lockedCart->customer);
+            $this->outboundEffects->recordAdminOrderPendingNotification($order);
+        }
 
         $lockedCart->update(['status' => CartStatus::CheckedOut]);
 
         return $order->fresh(['orderItems', 'payments']);
+    }
+
+    private function assertStoreBalanceEligibility(Cart $cart, CheckoutPaymentIntent $paymentIntent): void
+    {
+        if (strtolower(trim($paymentIntent->provider())) !== PaymentProvider::STORE_BALANCE) {
+            return;
+        }
+
+        $cart->loadMissing('customer');
+        if ($cart->customer?->telegram_id === null) {
+            throw new InvalidCheckout('Store Balance checkout is available only for Telegram customers.');
+        }
     }
 
     private function isUniqueViolation(QueryException $e): bool

@@ -9,4 +9,5 @@ enum CheckoutPostCreationBehavior
     case BscInstructions;
     case KlikQrisInstructions;
     case SakurupiahInstructions;
+    case StoreBalancePaid;
 }

@@ -98,6 +98,20 @@ Unique index `(customer_balance_account_id, idempotency_key)` dan `(source_type,
 
 Metric global Store Activity (jumlah Customer Telegram dan canonical successful Order) boleh memakai cache singkat; Store Balance Customer selalu dibaca fresh dan tidak boleh masuk cache global.
 
+Store Balance checkout memakai `StoreBalanceCheckoutIntent` dan
+`StoreBalanceCheckoutPaymentPreparation` sebagai rail internal IDR penuh.
+`OrderCheckoutService` tetap memiliki transaksi bersama: callback Telegram tidak
+menentukan nominal, debit dilakukan melalui `StoreBalanceLedger` setelah
+snapshot Cart/Product terkunci, lalu `OrderLifecycle` menerapkan status paid dan
+effect fulfillment canonical.
+
+Refund Store Balance hanya boleh melewati `OrderLifecycle`. `StoreBalanceLedger::refund()`
+mengunci account dalam transaksi lifecycle, memverifikasi debit Order asal,
+dan memakai source/idempotency identity Order yang sama sehingga retry refund
+tidak membuat credit kedua. Pada checkout, urutan lock finansial adalah
+Cart → CartItem/Product → Store Balance account → Order/Payment; jalur refund
+memperoleh Store Balance account lock sebelum lock Order/Payment.
+
 ### Store Channel dan Sales Proof Post
 
 `StoreChannelSetting` menyimpan konfigurasi Store Channel, Community Gate, dan Sales Proof Post. `SalesProofPost` dipublish setelah payment paid dan inventory sale tercatat; publikasi dilakukan job sehingga OrderLifecycle tidak mengirim pesan Telegram langsung.

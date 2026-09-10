@@ -52,6 +52,14 @@ final class StoreBalanceLedger
             : StoreBalanceSnapshot::unavailable();
     }
 
+    /**
+     * Acquire the Customer account lock inside a caller-owned transaction.
+     */
+    public function lockForTransaction(Customer $customer): CustomerBalanceAccount
+    {
+        return $this->lockAccount($customer);
+    }
+
     public function credit(
         Customer $customer,
         int $amount,
@@ -77,6 +85,24 @@ final class StoreBalanceLedger
         return $this->apply($customer, StoreBalanceEntryKind::PurchaseDebit, $amount, $sourceType, $sourceId, $idempotencyKey);
     }
 
+    public function refund(
+        Customer $customer,
+        int $amount,
+        string $sourceType,
+        string $sourceId,
+        string $idempotencyKey,
+    ): StoreBalanceMutationResult {
+        return $this->apply(
+            $customer,
+            StoreBalanceEntryKind::RefundCredit,
+            $amount,
+            $sourceType,
+            $sourceId,
+            $idempotencyKey,
+            requiresPurchaseDebit: true,
+        );
+    }
+
     private function apply(
         Customer $customer,
         StoreBalanceEntryKind $kind,
@@ -84,6 +110,7 @@ final class StoreBalanceLedger
         string $sourceType,
         string $sourceId,
         string $idempotencyKey,
+        bool $requiresPurchaseDebit = false,
     ): StoreBalanceMutationResult {
         $this->assertPositiveAmount($amount);
         $this->assertIdentity('source type', $sourceType, 64);
@@ -91,11 +118,14 @@ final class StoreBalanceLedger
         $this->assertIdentity('idempotency key', $idempotencyKey, 191);
 
         try {
-            return DB::transaction(function () use ($customer, $kind, $amount, $sourceType, $sourceId, $idempotencyKey): StoreBalanceMutationResult {
+            return DB::transaction(function () use ($customer, $kind, $amount, $sourceType, $sourceId, $idempotencyKey, $requiresPurchaseDebit): StoreBalanceMutationResult {
                 $account = $this->lockAccount($customer);
                 $existing = $this->findEntry($account, $kind, $sourceType, $sourceId, $idempotencyKey);
                 if ($existing !== null) {
                     return StoreBalanceMutationResult::replayed($existing);
+                }
+                if ($requiresPurchaseDebit && ! $this->hasPurchaseDebit($account, $sourceType, $sourceId, $amount)) {
+                    throw new RuntimeException('Cannot refund a Store Balance Order without its original debit.');
                 }
 
                 $balanceAfter = (int) $account->balance + ($kind->direction() * $amount);
@@ -178,6 +208,21 @@ final class StoreBalanceLedger
                     ->where('kind', $kind);
             })
             ->first();
+    }
+
+    private function hasPurchaseDebit(
+        CustomerBalanceAccount $account,
+        string $sourceType,
+        string $sourceId,
+        int $amount,
+    ): bool {
+        return StoreBalanceEntry::query()
+            ->where('customer_balance_account_id', $account->id)
+            ->where('kind', StoreBalanceEntryKind::PurchaseDebit)
+            ->where('source_type', $sourceType)
+            ->where('source_id', $sourceId)
+            ->where('amount', $amount)
+            ->exists();
     }
 
     private function findEntryAfterConflict(

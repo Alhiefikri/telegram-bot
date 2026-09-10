@@ -237,6 +237,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
         $carts->addItem($carts->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(40, 'checkout-first', 'checkout', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99040))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(41, 'checkout-qris', 'checkout:current', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99040))->assertOk();
         $this->assertSame(1, Order::query()->count());
 
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
@@ -245,7 +246,7 @@ class CheckoutMaintenanceTest extends TelegramBotTestSupport
             'activated_at' => now(),
         ]);
 
-        $this->postTelegramWebhook($this->callbackUpdate(41, 'checkout-repeat', 'checkout', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99040))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(42, 'checkout-repeat', 'checkout:current', ['id' => 12345, 'username' => 'buyer'], 12345, 'private', 99040))->assertOk();
 
         $this->assertSame(1, Order::query()->count());
         $maintenanceAnswers = Http::recorded(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')

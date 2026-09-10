@@ -16,8 +16,10 @@ use App\Models\Payment;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\Bsc\BscConfirmationGrace;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\DB;
 
 class OrderStateMachine implements OrderLifecycle
@@ -30,6 +32,7 @@ class OrderStateMachine implements OrderLifecycle
         private readonly ?TelegramOutboundEffectDispatcher $outboundDispatcher = null,
         private readonly ?BscConfirmationGrace $bscConfirmationGrace = null,
         private readonly ?GuestOrderNotificationService $guestOrderNotifications = null,
+        private readonly ?StoreBalanceLedger $storeBalance = null,
     ) {}
 
     public function markPaymentPaid(Payment $payment): Order
@@ -142,6 +145,7 @@ class OrderStateMachine implements OrderLifecycle
     {
         return DB::transaction(function () use ($payment) {
             $initial = Payment::findOrFail($payment->id);
+            $this->lockStoreBalanceAccount($initial);
 
             return $this->withLockedOrderPayments($initial->order_id, function (Order $order, $payments) use ($payment): OrderLifecycleResult {
                 $lockedPayment = $payments->firstWhere('id', $payment->id);
@@ -149,6 +153,7 @@ class OrderStateMachine implements OrderLifecycle
                     throw new InvalidOrderTransition('Payment is not attached to order.');
                 }
 
+                $this->refundStoreBalance($order, $lockedPayment);
                 $wasAlreadyRefunded = $lockedPayment->status === PaymentStatus::Refunded
                     && $order->payment_status === PaymentStatus::Refunded;
 
@@ -475,6 +480,56 @@ class OrderStateMachine implements OrderLifecycle
             && $order->payment_status === PaymentStatus::Pending
             && $payment?->provider === 'manual'
             && $payment->status === PaymentStatus::Pending;
+    }
+
+    private function lockStoreBalanceAccount(Payment $payment): void
+    {
+        if ($payment->provider !== PaymentProvider::STORE_BALANCE) {
+            return;
+        }
+        $payment->loadMissing('order.customer');
+
+        $customer = $payment->order?->customer;
+        if ($customer === null) {
+            throw new InvalidOrderTransition('Store Balance refund customer is missing.');
+        }
+
+        $this->storeBalanceLedger()->lockForTransaction($customer);
+    }
+
+    private function refundStoreBalance(Order $order, Payment $payment): void
+    {
+        if ($payment->provider !== PaymentProvider::STORE_BALANCE) {
+            return;
+        }
+
+        if ($payment->method !== 'STORE_BALANCE'
+            || $payment->currency !== 'IDR'
+            || $order->currency !== 'IDR'
+            || ! in_array($payment->status, [PaymentStatus::Paid, PaymentStatus::Refunded], true)
+            || ! in_array($order->payment_status, [PaymentStatus::Paid, PaymentStatus::Refunded], true)
+            || (int) $payment->amount !== (int) $order->total_amount
+            || (int) $payment->amount <= 0) {
+            throw new InvalidOrderTransition('Store Balance refund does not match the original IDR Order debit.');
+        }
+
+        $customer = $order->customer()->first();
+        if ($customer === null) {
+            throw new InvalidOrderTransition('Store Balance refund customer is missing.');
+        }
+
+        $this->storeBalanceLedger()->refund(
+            customer: $customer,
+            amount: (int) $payment->amount,
+            sourceType: 'order',
+            sourceId: (string) $order->getKey(),
+            idempotencyKey: 'order:'.$order->getKey().':refund',
+        );
+    }
+
+    private function storeBalanceLedger(): StoreBalanceLedger
+    {
+        return $this->storeBalance ?? app(StoreBalanceLedger::class);
     }
 
     private function releaseRefundedOrderResources(Order $order): void

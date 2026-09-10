@@ -113,6 +113,7 @@ class TelegramLocale
             'qris', 'hosted' => 'QRIS',
             'binance_pay_id', 'binance pay' => 'Binance Pay',
             'usdt_bep20' => 'USDT BEP20 (BSC)',
+            'store_balance' => $this->translate($customer, 'payment.method.store_balance'),
             'qr_manual' => $this->translate($customer, 'payment.method.manual'),
             'bank_transfer', 'bank transfer' => $this->translate($customer, 'payment.method.bank_transfer'),
             default => $label !== '' ? $label : $this->translate($customer, 'payment.method.unknown'),

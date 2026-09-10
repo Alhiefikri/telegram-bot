@@ -113,7 +113,8 @@ class AuditValidationTemporaryTest extends TelegramBotTestSupport
         ]);
 
         try {
-            $this->postTelegramWebhook($this->callbackUpdate(9001, 'audit-checkout-timeout', 'checkout'));
+            $this->postTelegramWebhook($this->callbackUpdate(9001, 'audit-checkout-selector', 'checkout', ['id' => 12345], 12345, 'private', 99041));
+            $this->postTelegramWebhook($this->callbackUpdate(9002, 'audit-checkout-timeout', 'checkout:current', ['id' => 12345], 12345, 'private', 99041));
         } catch (\Throwable) {
             // The synchronous testing queue surfaces the failed outbound job.
         }
@@ -149,7 +150,8 @@ class AuditValidationTemporaryTest extends TelegramBotTestSupport
             app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
             try {
-                $this->postTelegramWebhook($this->callbackUpdate(9002, 'audit-boundary-timeout', 'checkout'));
+                $this->postTelegramWebhook($this->callbackUpdate(9002, 'audit-boundary-selector', 'checkout', ['id' => 12345], 12345, 'private', 99042));
+                $this->postTelegramWebhook($this->callbackUpdate(9003, 'audit-boundary-timeout', 'checkout:current', ['id' => 12345], 12345, 'private', 99042));
             } catch (\Throwable) {
                 // The synchronous testing queue surfaces the failed outbound job.
             }

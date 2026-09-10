@@ -2,11 +2,21 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CartStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Exceptions\InsufficientStoreBalance;
+use App\Models\Cart;
+use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
+use App\Models\Order;
+use App\Models\Payment;
+use App\Models\Product;
 use App\Models\StoreBalanceEntry;
+use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\OrderCheckoutService;
+use App\Services\OrderStateMachine;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\StoreBalance\StoreBalanceReconciliation;
 use Illuminate\Database\QueryException;
@@ -23,6 +33,9 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
 {
     /** @var list<int> */
     private array $createdCustomerIds = [];
+
+    /** @var list<int> */
+    private array $createdProductIds = [];
 
     protected function setUp(): void
     {
@@ -42,6 +55,9 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
     {
         if ($this->createdCustomerIds !== [] && Schema::hasTable('store_balance_entries')) {
             Customer::query()->whereKey($this->createdCustomerIds)->delete();
+        }
+        if ($this->createdProductIds !== [] && Schema::hasTable('products')) {
+            Product::query()->whereKey($this->createdProductIds)->delete();
         }
 
         parent::tearDown();
@@ -105,6 +121,167 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
         $this->assertSame(2, StoreBalanceEntry::query()->count());
         $this->assertProjectionMatchesLedger($customer, 5000);
+    }
+
+    public function test_postgres_competing_store_balance_checkouts_commit_one_order_without_overspending(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $customer = $this->createCustomer(45408);
+        $cartIds = [];
+        for ($index = 0; $index < 2; $index++) {
+            $product = Product::factory()->create([
+                'price_amount' => 20_000,
+                'stock' => 1,
+                'reserved_stock' => 0,
+                'is_active' => true,
+            ]);
+            $this->createdProductIds[] = $product->id;
+            $cart = Cart::factory()->create([
+                'customer_id' => $customer->id,
+                'status' => CartStatus::Active,
+                'expires_at' => now()->addHour(),
+            ]);
+            CartItem::factory()->create([
+                'cart_id' => $cart->id,
+                'product_id' => $product->id,
+                'quantity' => 1,
+            ]);
+            $cartIds[] = $cart->id;
+        }
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            25_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '45408',
+            'balance_top_up:45408:credit',
+        );
+
+        $results = $this->runConcurrentWorkers(2, function (int $index) use ($cartIds): string {
+            $order = app(OrderCheckoutService::class)->checkout(
+                Cart::query()->findOrFail($cartIds[$index]),
+                CheckoutPaymentIntents::storeBalance(),
+                'postgres-balance-checkout:'.$index,
+            );
+
+            return $order->payment_status->value;
+        });
+
+        $successes = array_values(array_filter($results, static fn (array $result): bool => ($result['value'] ?? null) === PaymentStatus::Paid->value));
+        $failures = array_values(array_filter($results, static fn (array $result): bool => ($result['ok'] ?? false) === false));
+        $this->assertCount(1, $successes, json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertCount(1, $failures, json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(InsufficientStoreBalance::class, $failures[0]['class'] ?? null);
+        $this->assertSame(1, Order::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertSame(5_000, $this->balanceOf($customer));
+        $this->assertProjectionMatchesLedger($customer, 5_000);
+    }
+
+    public function test_postgres_same_checkout_key_reuses_one_paid_order_and_one_debit(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $customer = $this->createCustomer(45409);
+        $product = Product::factory()->create([
+            'price_amount' => 20_000,
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $this->createdProductIds[] = $product->id;
+        $cart = Cart::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => CartStatus::Active,
+            'expires_at' => now()->addHour(),
+        ]);
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ]);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            20_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '45409',
+            'balance_top_up:45409:credit',
+        );
+
+        $results = $this->runConcurrentWorkers(2, function () use ($cart): string {
+            $order = app(OrderCheckoutService::class)->checkout(
+                Cart::query()->findOrFail($cart->id),
+                CheckoutPaymentIntents::storeBalance(),
+                'postgres-balance-same-intent',
+            );
+
+            return $order->payment_status->value;
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame([PaymentStatus::Paid->value, PaymentStatus::Paid->value], array_map(static fn (array $result): string => (string) ($result['value'] ?? ''), $results));
+        $this->assertSame(1, Order::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertSame(0, $this->balanceOf($customer));
+        $this->assertProjectionMatchesLedger($customer, 0);
+    }
+
+    public function test_postgres_concurrent_store_balance_refunds_credit_once_through_lifecycle(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $customer = $this->createCustomer(45410);
+        $product = Product::factory()->create([
+            'price_amount' => 20_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $this->createdProductIds[] = $product->id;
+        $cart = Cart::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => CartStatus::Active,
+            'expires_at' => now()->addHour(),
+        ]);
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ]);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            20_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '45410',
+            'balance_top_up:45410:credit',
+        );
+
+        $order = app(OrderCheckoutService::class)->checkout(
+            $cart,
+            CheckoutPaymentIntents::storeBalance(),
+            'postgres-balance-refund',
+        );
+        $paymentId = $order->payments()->sole()->id;
+        $results = $this->runConcurrentWorkers(2, function () use ($paymentId): string {
+            $result = app(OrderStateMachine::class)->applyPaymentRefunded(
+                Payment::query()->findOrFail($paymentId),
+            );
+
+            return $result->newlyApplied ? 'Applied' : 'Replayed';
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $outcomes = array_map(static fn (array $result): string => (string) ($result['value'] ?? ''), $results);
+        sort($outcomes);
+        $this->assertSame(['Applied', 'Replayed'], $outcomes, json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(PaymentStatus::Refunded->value, $order->fresh()->payment_status->value);
+        $this->assertSame(20_000, $this->balanceOf($customer));
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());
+        $this->assertProjectionMatchesLedger($customer, 20_000);
     }
 
     public function test_postgres_parallel_credits_reconstruct_from_immutable_entries(): void

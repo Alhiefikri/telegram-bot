@@ -3,15 +3,21 @@
 namespace Tests\Feature\Telegram;
 
 use App\Enums\CartStatus;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Enums\StoreBalanceEntryKind;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\Cart;
 use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
+use App\Models\CustomerBalanceAccount;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\StoreBalanceEntry;
 use App\Models\TelegramOutboundEffect;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramIntentSession;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -35,13 +41,16 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $detail = $this->lastDetailMessage('Detail Product');
         $keyboard = $detail['reply_markup']['inline_keyboard'];
 
-        $this->assertCount(4, $keyboard);
+        $this->assertCount(5, $keyboard);
         $this->assertCount(3, $keyboard[0]);
         $this->assertCount(1, $keyboard[1]);
         $this->assertCount(1, $keyboard[2]);
         $this->assertCount(1, $keyboard[3]);
+        $this->assertCount(1, $keyboard[4]);
         $this->assertSame('success', $keyboard[2][0]['style'] ?? null);
         $this->assertSame('💳 Pay with QRIS · Rp10.000', $keyboard[2][0]['text']);
+        $this->assertStringContainsString('Pay with Balance', $keyboard[3][0]['text']);
+        $this->assertStringStartsWith('detail:pay:balance:', $keyboard[3][0]['callback_data']);
         $this->assertStringContainsString('Price: Rp10.000', (string) $detail['text']);
         $this->assertStringContainsString('Available stock: 3', (string) $detail['text']);
         $this->assertStringContainsString('Quantity: 1', (string) $detail['text']);
@@ -580,7 +589,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->openDetail($customer, $product);
         $detail = $this->lastDetailMessage('Binance Product');
         $keyboard = $detail['reply_markup']['inline_keyboard'];
-        $this->assertCount(5, $keyboard);
+        $this->assertCount(6, $keyboard);
         $this->assertCount(3, $keyboard[0]);
         foreach (array_slice($keyboard, 1) as $row) {
             $this->assertCount(1, $row);
@@ -994,6 +1003,57 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
             ->where('effect_type', TelegramOutboundEffectType::ManualCheckoutInstructions->value)
             ->count());
         $this->assertSame(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->count());
+    }
+
+    public function test_store_balance_product_detail_checkout_creates_one_paid_order_and_one_debit(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 318082, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'Balance Detail Product',
+            'price_amount' => 15_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            20_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '318082',
+            'balance_top_up:318082:credit',
+        );
+
+        $callback = 'detail:pay:balance:'.$product->id.':'.$state['interactionToken'];
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180821,
+            'balance-detail-checkout',
+            $callback,
+            [],
+            318082,
+            'private',
+            88082,
+        ))->assertOk();
+
+        $order = Order::query()->sole();
+        $payment = $order->payments()->sole();
+        $this->assertSame(CartStatus::CheckedOut, Cart::query()->sole()->status);
+        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame('store_balance', $payment->provider);
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(5_000, (int) CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertDatabaseHas('store_balance_entries', [
+            'kind' => StoreBalanceEntryKind::PurchaseDebit->value,
+            'source_type' => 'order',
+            'source_id' => (string) $order->id,
+            'amount' => 15_000,
+        ]);
     }
 
     private function openDetail(Customer $customer, Product $product): void

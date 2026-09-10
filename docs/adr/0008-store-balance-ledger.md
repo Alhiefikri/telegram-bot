@@ -50,8 +50,15 @@ Balance is never stored in shared global cache and is always read fresh.
 ## Consequences
 
 - Money moves only through ledger-owned transactions; controllers, jobs, and
-  future checkout/refund callers consume `StoreBalanceLedger` instead of
+  current checkout/refund callers consume `StoreBalanceLedger` instead of
   writing the projection.
+- Store Balance checkout is an internal full-payment rail. The canonical
+  `OrderCheckoutService` transaction locks the Cart/Product snapshot, debits
+  the exact IDR Order total through this ledger, and delegates paid state and
+  fulfillment to `OrderLifecycle`.
+- Store Balance refunds are owned by `OrderLifecycle` and call
+  `StoreBalanceLedger::refund()` with the original Order source identity.
+  The refund requires the matching purchase debit and is replay-safe.
 - Idempotency is enforced twice: the account lock serializes same-Customer
   claims in the application, and the unique indexes are the final database
   guard for concurrent or out-of-band writes.

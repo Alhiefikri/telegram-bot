@@ -28,6 +28,7 @@ use App\Services\Checkout\CheckoutPaymentPreparationResolver;
 use App\Services\Checkout\KlikQrisCheckoutPaymentPreparation;
 use App\Services\Checkout\ManualQrisCheckoutPaymentPreparation;
 use App\Services\Checkout\SakurupiahCheckoutPaymentPreparation;
+use App\Services\Checkout\StoreBalanceCheckoutPaymentPreparation;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\KlikQris\KlikQrisClient;
@@ -99,6 +100,7 @@ class AppServiceProvider extends ServiceProvider
                 BinanceCheckoutPaymentPreparation::IDENTITY => $app->make(BinanceCheckoutPaymentPreparation::class),
                 BscCheckoutPaymentPreparation::IDENTITY => $app->make(BscCheckoutPaymentPreparation::class),
                 SakurupiahCheckoutPaymentPreparation::IDENTITY => $app->make(SakurupiahCheckoutPaymentPreparation::class),
+                StoreBalanceCheckoutPaymentPreparation::IDENTITY => $app->make(StoreBalanceCheckoutPaymentPreparation::class),
             ]);
         });
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());

@@ -6,6 +6,8 @@ final class CheckoutPaymentIntents
 {
     public const RAIL_QRIS = 'qris';
 
+    public const RAIL_STORE_BALANCE = 'store_balance';
+
     public const RAIL_BINANCE_PAY = 'binance_pay';
 
     public const RAIL_BINANCE_PAY_ID = 'binance_pay_id';
@@ -15,13 +17,13 @@ final class CheckoutPaymentIntents
     /** @return list<string> */
     public static function supportedPaymentRails(): array
     {
-        return [self::RAIL_QRIS, self::RAIL_BINANCE_PAY_ID, self::RAIL_USDT_BEP20];
+        return [self::RAIL_QRIS, self::RAIL_STORE_BALANCE, self::RAIL_BINANCE_PAY_ID, self::RAIL_USDT_BEP20];
     }
 
     /** @return list<string> */
     public static function acceptedPaymentRails(): array
     {
-        return [...self::supportedPaymentRails(), self::RAIL_BINANCE_PAY];
+        return [self::RAIL_QRIS, self::RAIL_BINANCE_PAY_ID, self::RAIL_USDT_BEP20, self::RAIL_BINANCE_PAY];
     }
 
     public static function normalizePaymentRail(?string $paymentRail): string
@@ -64,6 +66,11 @@ final class CheckoutPaymentIntents
     public static function manualQris(): ManualQrisCheckoutIntent
     {
         return new ManualQrisCheckoutIntent;
+    }
+
+    public static function storeBalance(): StoreBalanceCheckoutIntent
+    {
+        return new StoreBalanceCheckoutIntent;
     }
 
     public static function binancePayId(): BinancePayCheckoutIntent

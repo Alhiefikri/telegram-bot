@@ -20,9 +20,9 @@ final readonly class PaymentProviderResolver
         $providerVersion = (int) ($setting?->payment_provider_version ?? 0);
         $settingId = $setting?->getKey();
 
-        // Binance rails are customer-selected payment rails, not values of the
-        // active QRIS provider switch. Resolve them directly and do not let a
-        // provider readiness result rewrite the rail.
+        // Binance and Store Balance rails are customer-selected payment rails,
+        // not values of the active QRIS provider switch. Resolve them directly
+        // and do not let a provider readiness result rewrite the rail.
         if (CheckoutPaymentIntents::isBinancePaymentRail($paymentRail)) {
             return new PaymentProviderSelection(
                 requestedProvider: $requestedProvider,
@@ -30,6 +30,15 @@ final readonly class PaymentProviderResolver
                 providerVersion: $providerVersion,
                 settingId: $settingId,
                 paymentIntent: $this->intentFor($paymentRail, PaymentProvider::MANUAL),
+            );
+        }
+        if ($paymentRail === CheckoutPaymentIntents::RAIL_STORE_BALANCE) {
+            return new PaymentProviderSelection(
+                requestedProvider: $requestedProvider,
+                provider: PaymentProvider::STORE_BALANCE,
+                providerVersion: $providerVersion,
+                settingId: $settingId,
+                paymentIntent: $this->intentFor($paymentRail, PaymentProvider::STORE_BALANCE),
             );
         }
         if ($requestedProvider === PaymentProvider::PAKASIR) {
@@ -72,6 +81,9 @@ final readonly class PaymentProviderResolver
         }
         if (CheckoutPaymentIntents::isUsdtBep20Rail($paymentRail)) {
             return CheckoutPaymentIntents::usdtBep20();
+        }
+        if ($paymentRail === CheckoutPaymentIntents::RAIL_STORE_BALANCE) {
+            return CheckoutPaymentIntents::storeBalance();
         }
 
         return match ($provider) {

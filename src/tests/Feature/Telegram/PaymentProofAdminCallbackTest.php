@@ -754,6 +754,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($buyer), $product->fresh(), 1);
         $this->postTelegramWebhook($this->callbackUpdate(221, 'cb-checkout-secret', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1221, 'cb-checkout-secret-qris', 'checkout:current'))->assertOk();
         $order = Order::firstOrFail();
 
         $this->postTelegramWebhook($this->callbackUpdate(222, 'approve-secret', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
@@ -915,6 +916,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product->fresh(), 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(231, 'cb-manual', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1231, 'cb-manual-qris', 'checkout:current'))->assertOk();
         $order = Order::firstOrFail();
         $orderItem = $order->orderItems()->firstOrFail();
         $this->assertSame(1, $product->fresh()->reserved_stock);
@@ -962,6 +964,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(211, 'cb-manual', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1211, 'cb-manual-qris', 'checkout:current'))->assertOk();
         $order = Order::firstOrFail();
 
         $this->postTelegramWebhook($this->paymentPhotoUpdate(212, $order->invoice_number, ['username' => 'buyer']))->assertOk();
@@ -1036,6 +1039,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(CartService::class)->addItem($cart, $second, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(301, 'cb-manual-proof', 'checkout', from: $telegramFrom, chatId: 123456789))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1301, 'cb-manual-proof-qris', 'checkout:current', from: $telegramFrom, chatId: 123456789))->assertOk();
         $order = Order::firstOrFail();
         ProductStockItem::create([
             'product_id' => $first->id,
@@ -1755,6 +1759,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(214, 'cb-manual', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1214, 'cb-manual-qris', 'checkout:current'))->assertOk();
         $order = Order::firstOrFail();
 
         $this->postTelegramWebhook($this->callbackUpdate(215, 'fake-approve', 'admin:approve-payment:'.$order->id, ['id' => 555, 'first_name' => 'Mallory'], 555))->assertOk();
@@ -1779,6 +1784,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(236, 'cb-manual-group', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1236, 'cb-manual-group-qris', 'checkout:current'))->assertOk();
         $order = Order::firstOrFail();
 
         $this->postTelegramWebhook($this->paymentPhotoUpdate(237, $order->invoice_number, ['username' => 'buyer']))->assertOk();
@@ -1818,6 +1824,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($buyer), $product->fresh(), 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(250, 'checkout-cancel-command', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1250, 'checkout-cancel-command-qris', 'checkout:current'))->assertOk();
         $order = Order::firstOrFail();
 
         $this->postTelegramWebhook($this->messageUpdate(251, '/cancel '.$order->invoice_number, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
@@ -1842,6 +1849,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(234, 'cb-manual', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1234, 'cb-manual-qris', 'checkout:current'))->assertOk();
         $order = Order::firstOrFail();
 
         $this->postTelegramWebhook($this->callbackUpdate(235, 'fake-reject', 'admin:reject-payment:'.$order->id, ['id' => 555, 'first_name' => 'Mallory'], 555))->assertOk();
@@ -1864,6 +1872,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($owner), $product, 1);
 
         $this->postTelegramWebhook($this->callbackUpdate(216, 'cb-manual-owner', 'checkout'))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1216, 'cb-manual-owner-qris', 'checkout:current'))->assertOk();
         $order = Order::firstOrFail();
 
         $this->postTelegramWebhook($this->paymentPhotoUpdate(217, $order->invoice_number, ['id' => $attacker->telegram_id, 'username' => 'mallory'], 54321))->assertOk();

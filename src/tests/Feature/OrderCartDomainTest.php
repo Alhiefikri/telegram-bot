@@ -6,7 +6,9 @@ use App\Enums\CartStatus;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\StoreBalanceEntryKind;
 use App\Exceptions\InsufficientStock;
+use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\InvalidCheckout;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\DeleteAdminPendingOrderNotification;
@@ -14,12 +16,14 @@ use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Models\CustomerBalanceAccount;
 use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\StoreBalanceEntry;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -30,6 +34,7 @@ use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleResult;
 use App\Services\OrderStateMachine;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Support\PaymentProvider;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
@@ -80,6 +85,160 @@ class OrderCartDomainTest extends TestCase
         $this->assertSame(1, Order::where('cart_id', $cart->id)->count());
     }
 
+    public function test_store_balance_checkout_debits_exact_total_and_applies_paid_lifecycle_once(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 910001, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'price_amount' => 15_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'balance-secret']);
+        $cart = $this->cartForCustomer($customer, $product);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            25_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '910001',
+            'balance_top_up:910001:credit',
+        );
+
+        $service = app(OrderCheckoutService::class);
+        $order = $service->checkout($cart, CheckoutPaymentIntents::storeBalance(), 'telegram-balance-910001');
+        $replayed = $service->checkout($cart->fresh(), CheckoutPaymentIntents::storeBalance(), 'telegram-balance-910001');
+        $payment = $order->payments()->sole();
+
+        $this->assertTrue($order->is($replayed));
+        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame('IDR', $order->currency);
+        $this->assertSame(15_000, $order->total_amount);
+        $this->assertSame('store_balance', $payment->provider);
+        $this->assertSame('STORE_BALANCE', $payment->method);
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(15_000, $payment->amount);
+        $this->assertSame('IDR', $payment->currency);
+        $this->assertSame(10_000, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertDatabaseHas('store_balance_entries', [
+            'kind' => StoreBalanceEntryKind::PurchaseDebit->value,
+            'source_type' => 'order',
+            'source_id' => (string) $order->id,
+            'idempotency_key' => 'order:'.$order->id.':debit',
+            'amount' => 15_000,
+            'balance_after' => 10_000,
+        ]);
+        $this->assertSame(CartStatus::CheckedOut, $cart->fresh()->status);
+        $this->assertSame(1, InventoryMovement::query()->where('order_id', $order->id)->where('type', InventoryMovementType::Sale)->count());
+        $this->assertNotNull($stockItem->fresh()->order_item_id);
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(1, Order::query()->where('checkout_key', 'telegram-balance-910001')->count());
+    }
+
+    public function test_store_balance_refund_credits_exact_debit_once_through_order_lifecycle(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 910004, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'price_amount' => 15_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'balance-refund-secret']);
+        $cart = $this->cartForCustomer($customer, $product);
+        $ledger = app(StoreBalanceLedger::class);
+        $ledger->credit(
+            $customer,
+            15_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '910004',
+            'balance_top_up:910004:credit',
+        );
+
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::storeBalance(), 'telegram-balance-refund-910004');
+        $payment = $order->payments()->sole();
+        $refunded = app(OrderStateMachine::class)->applyPaymentRefunded($payment);
+        $replay = app(OrderStateMachine::class)->applyPaymentRefunded($payment->fresh());
+
+        $this->assertTrue($refunded->newlyApplied);
+        $this->assertFalse($replay->newlyApplied);
+        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(15_000, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());
+        $this->assertDatabaseHas('store_balance_entries', [
+            'kind' => StoreBalanceEntryKind::RefundCredit->value,
+            'source_type' => 'order',
+            'source_id' => (string) $order->id,
+            'idempotency_key' => 'order:'.$order->id.':refund',
+            'amount' => 15_000,
+            'balance_after' => 15_000,
+        ]);
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertNotNull($stockItem->fresh()->retired_at);
+    }
+
+    public function test_insufficient_store_balance_rolls_back_order_stock_credentials_and_debit(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 910002]);
+        $product = Product::factory()->create(['price_amount' => 15_000, 'stock' => 1, 'reserved_stock' => 0]);
+        $stockItem = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'balance-insufficient']);
+        $cart = $this->cartForCustomer($customer, $product);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            5_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '910002',
+            'balance_top_up:910002:credit',
+        );
+
+        try {
+            app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::storeBalance(), 'telegram-balance-910002');
+            $this->fail('Expected insufficient Store Balance.');
+        } catch (InsufficientStoreBalance) {
+            // Expected.
+        }
+
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+        $this->assertSame(0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertSame(5_000, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(CartStatus::Active, $cart->fresh()->status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertNull($stockItem->fresh()->order_item_id);
+    }
+
+    public function test_store_balance_checkout_rejects_non_telegram_customers_before_order_creation(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => null]);
+        $product = Product::factory()->create(['price_amount' => 15_000, 'stock' => 1, 'reserved_stock' => 0]);
+        $cart = $this->cartForCustomer($customer, $product);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            20_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '910003',
+            'balance_top_up:910003:credit',
+        );
+
+        try {
+            app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::storeBalance(), 'web-balance-910003');
+            $this->fail('Expected Store Balance to be Telegram-only.');
+        } catch (InvalidCheckout $exception) {
+            $this->assertSame('Store Balance checkout is available only for Telegram customers.', $exception->getMessage());
+        }
+
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertSame(CartStatus::Active, $cart->fresh()->status);
+    }
+
     public function test_binance_checkout_persists_usdt_payment_currency(): void
     {
         config()->set('services.binance.pay_id', '987654321');
@@ -100,6 +259,7 @@ class OrderCartDomainTest extends TestCase
     {
         $cases = [
             [CheckoutPaymentIntents::manualQris(), 'manual', 'QR_MANUAL', CheckoutPostCreationBehavior::ManualQrisInstructions],
+            [CheckoutPaymentIntents::storeBalance(), 'store_balance', 'STORE_BALANCE', CheckoutPostCreationBehavior::StoreBalancePaid],
             [CheckoutPaymentIntents::klikQris(), 'klikqris', 'QRIS', CheckoutPostCreationBehavior::KlikQrisInstructions],
             [CheckoutPaymentIntents::binancePay(), 'manual', 'BINANCE_PAY_ID', CheckoutPostCreationBehavior::BinancePayInstructions],
             [CheckoutPaymentIntents::usdtBep20(), 'manual', 'USDT_BEP20', CheckoutPostCreationBehavior::BscInstructions],
@@ -729,6 +889,22 @@ class OrderCartDomainTest extends TestCase
         } finally {
             $this->travelBack();
         }
+    }
+
+    private function cartForCustomer(Customer $customer, Product $product, int $quantity = 1): Cart
+    {
+        $cart = Cart::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => CartStatus::Active,
+            'expires_at' => now()->addHour(),
+        ]);
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => $quantity,
+        ]);
+
+        return $cart;
     }
 
     private function cartWithProduct(?Product $product = null, int $stock = 10, int $quantity = 1): Cart
