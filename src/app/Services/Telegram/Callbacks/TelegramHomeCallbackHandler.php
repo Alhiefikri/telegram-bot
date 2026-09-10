@@ -27,7 +27,6 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
         'menu:support',
         'menu:language',
         'balance',
-        'balance:add',
     ];
 
     public function __construct(
@@ -68,15 +67,6 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
             $this->bot->answerCallbackQuery(
                 $context->callbackQueryId,
                 $this->locale->translate($context->customer, 'callback.navigation_stale'),
-            );
-
-            return true;
-        }
-
-        if ($context->data === 'balance:add') {
-            $this->bot->answerCallbackQuery(
-                $context->callbackQueryId,
-                $this->locale->translate($context->customer, 'balance.add_unavailable'),
             );
 
             return true;

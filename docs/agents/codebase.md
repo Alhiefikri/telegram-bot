@@ -98,6 +98,15 @@ Unique index `(customer_balance_account_id, idempotency_key)` dan `(source_type,
 
 Metric global Store Activity (jumlah Customer Telegram dan canonical successful Order) boleh memakai cache singkat; Store Balance Customer selalu dibaca fresh dan tidak boleh masuk cache global.
 
+`StoreBalanceFundingPolicyManager` memiliki konfigurasi funding yang terpisah dari
+ledger: satu row singleton `store_balance_funding_policies` menyimpan minimum,
+preset berurutan, dan versi optimistik. Manager ini memiliki validasi nominal
+whole-IDR berbatas provider, lock/update, audit atomik, serta identitas callback
+Telegram yang opaque dan terikat versi. Admin Dashboard adalah satu-satunya
+caller mutasi; chooser Add Balance hanya membaca policy terbaru dan tidak pernah
+memindahkan saldo. Funding policy yang berubah tidak boleh dianggap sebagai
+ledger entry atau kredit saldo.
+
 Store Balance checkout memakai `StoreBalanceCheckoutIntent` dan
 `StoreBalanceCheckoutPaymentPreparation` sebagai rail internal IDR penuh.
 `OrderCheckoutService` tetap memiliki transaksi bersama: callback Telegram tidak
@@ -137,6 +146,7 @@ creates an Order, Payment, inventory movement, or durable Sales Proof effect.
 | provider baru untuk checkout                                    | [`PaymentProviderSwitcher`](../../src/app/Services/Admin/PaymentProviderSwitcher.php) dan [`PaymentProviderResolver`](../../src/app/Services/Checkout/PaymentProviderResolver.php)                              | channel-specific provider selection                                    |
 | reservation/sale/release stock                                  | [`InventoryLedger`](../../src/app/Services/InventoryLedger.php)                                                                                                                                                    | model/controller langsung mengubah stock                               |
 | Store Balance credit/debit dan projection                        | [`StoreBalanceLedger`](../../src/app/Services/StoreBalance/StoreBalanceLedger.php)                                                                                                                                 | checkout, refund, top-up, atau Telegram adapter menulis balance langsung |
+| Store Balance funding policy admin/customer chooser                 | [`StoreBalanceFundingPolicyManager`](../../src/app/Services/StoreBalance/StoreBalanceFundingPolicyManager.php) | controller admin, form, atau callback mempercayai nominal langsung |
 | KlikQRIS create/recovery/payability                             | [`KlikQrisNativeQrisService`](../../src/app/Services/KlikQris/KlikQrisNativeQrisService.php)                                                                                                                     | Store Bot/Storefront mengklasifikasi persistence state                  |
 | provider status verification                                    | callback processor + provider adapter masing-masing                                                                                                                                                               | callback payload langsung menandai paid                                |
 | Telegram outbound effect state dan delivery ledger              | [`TelegramOutboundEffectLedgerProtocol`](../../src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php) dan service materialization-nya                                                                  | checkout caller, queue job, channel adapter                              |
@@ -601,10 +611,11 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/AdminDashboardReportingTest.php` — active-tab isolation, role policy, local matching, filters, safe errors, pagination, and proof URL safety.
 - `tests/Feature/CustomerAccountTest.php` — customer ownership, all Order filters/statuses, pagination, non-paid privacy, and paid credential continuity.
 - `tests/Feature/StoreBalanceLedgerTest.php` — immutable ledger append, atomic projection update, idempotency and source replay, insufficient funds, immutability guards, and fail-safe snapshots.
+- `tests/Feature/StoreBalanceFundingPolicyTest.php` — versioned Admin policy updates, strict bounded validation, role authorization, no-op/audit atomicity, and stale-version recovery.
 - `tests/Feature/StoreBalanceReconciliationTest.php` — projection/ledger mismatch detection via `store-balance:check` without changing money, customer scoping, limit, and sanitized JSON output.
-- `tests/Feature/StoreBalancePostgresConcurrencyTest.php` — process races for one idempotency claim, competing debits, parallel credits, duplicate source identity, and PostgreSQL non-negative/positive/unique constraints; runs only through the PostgreSQL gate.
+- `tests/Feature/StoreBalancePostgresConcurrencyTest.php` — process races for one idempotency claim, competing debits, parallel credits, duplicate source identity, and PostgreSQL non-negative/positive/unique constraints plus one-stale-version funding-policy update; runs only through the PostgreSQL gate.
 - `tests/Feature/Telegram/StoreBalanceHomeTest.php` — private home greeting → Profile → Store Activity → prompt ordering, fresh Store Balance independent of the global metrics cache, fail-safe unavailable projection, localized missing value, and public-safe group home.
-- `tests/Feature/Telegram/TelegramRoutineNavigationTest.php` — webhook-level single-message navigation evidence: Home → Balance → Home → Language → Home → Orders → Support on one canonical message, Balance screen + Add Balance, stale/ambiguous/missing-root recovery, catalog navigation on the root, long-screen text-root replacement, group public-safe surface, and id/en/ms screen copy.
+- `tests/Feature/Telegram/TelegramRoutineNavigationTest.php` — webhook-level single-message navigation evidence: Home → Balance → Home → Language → Home → Orders → Support on one canonical message, Balance screen + Add Balance with opaque presets, stale/ambiguous/missing-root recovery, catalog navigation on the root, long-screen text-root replacement, group public-safe surface, and id/en/ms screen copy.
 - `tests/Feature/Telegram/TelegramNavigationRootTest.php` dan `TelegramNavigationRootPostgresConcurrencyTest.php` — root establishment/replacement/lease semantics dan race PostgreSQL-nya.
 - `tests/Feature/Telegram/StartMetricsTest.php` — canonical successful Order and Telegram Customer metrics with bounded staleness cache.
 - `tests/Unit/Services/` — pure parser/policy/outcome/verification behavior.

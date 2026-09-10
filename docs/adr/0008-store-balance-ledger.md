@@ -47,6 +47,11 @@ Global Store Activity metrics (Telegram Customers and canonical successful
 Orders) stay in the bounded-staleness Telegram cache. A Customer's Store
 Balance is never stored in shared global cache and is always read fresh.
 
+Funding-policy configuration for Store Balance top-ups is deliberately outside
+this ledger. `StoreBalanceFundingPolicyManager` owns its versioned singleton,
+strict provider-bounded validation, and operator audit; changing the minimum or
+preset list never creates a balance entry or changes any Customer projection.
+
 ## Consequences
 
 - Money moves only through ledger-owned transactions; controllers, jobs, and

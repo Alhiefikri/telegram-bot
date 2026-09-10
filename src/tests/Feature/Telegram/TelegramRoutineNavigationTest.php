@@ -13,6 +13,8 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\StoreBalanceEntry;
+use App\Models\StoreBalanceFundingPolicy;
 use App\Models\TelegramNavigationRoot;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramLocale;
@@ -111,11 +113,74 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->callbackUpdate(45413, 'balance-add', 'balance:add', [], 45411, 'private', $root->message_id))->assertOk();
 
+        $addEdit = $this->lastCanonicalEdit(45411);
+        $this->assertSame($root->message_id, (int) $addEdit['message_id']);
+        $this->assertStringContainsString('➕ Tambah Saldo', $this->editCopy($addEdit));
+        $this->assertStringContainsString('Minimum tambah saldo: Rp 5.000', $this->editCopy($addEdit));
+        $this->assertStringContainsString('/deposit &lt;amount&gt;', $this->editCopy($addEdit));
+
+        $keyboard = $addEdit['reply_markup']['inline_keyboard'];
+        $presetRows = array_slice($keyboard, 0, -1);
+        $this->assertSame(
+            ['Rp 5.000', 'Rp 10.000', 'Rp 25.000', 'Rp 50.000', 'Rp 100.000', 'Rp 250.000'],
+            array_map(static fn (array $row): string => $row[0]['text'], $presetRows),
+        );
+        foreach ($presetRows as $row) {
+            $callbackData = $row[0]['callback_data'];
+            $this->assertMatchesRegularExpression('/\Abalance:p:0:[A-Za-z0-9_-]{11}\z/', $callbackData);
+            $this->assertStringNotContainsString('5000', $callbackData);
+            $this->assertStringNotContainsString('250000', $callbackData);
+        }
+        $this->assertSame(['menu:back', 'menu:home'], array_column($keyboard[array_key_last($keyboard)], 'callback_data'));
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
-            && ($request['callback_query_id'] ?? null) === 'balance-add'
-            && ($request['text'] ?? null) === 'Tambah Saldo belum tersedia.');
-        $this->assertSame(1, $this->editCount(45411), 'Add Balance must not re-render or duplicate the canonical message.');
+            && ($request['callback_query_id'] ?? null) === 'balance-add');
+
+        $this->postTelegramWebhook($this->callbackUpdate(45414, 'balance-preset', $presetRows[0][0]['callback_data'], [], 45411, 'private', $root->message_id))->assertOk();
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'balance-preset'
+            && ($request['text'] ?? null) === 'Pilihan top-up belum bisa diproses. Coba lagi nanti.');
+        $this->assertSame(2, $this->editCount(45411), 'Add Balance must edit the canonical message.');
+        $this->assertSame(1, $this->routineMessageCount(45411), 'Add Balance must not send a second message.');
+        $this->postTelegramWebhook($this->callbackUpdate(45415, 'balance-back', 'menu:back', [], 45411, 'private', $root->message_id))->assertOk();
+        $this->assertSame($root->message_id, (int) $this->lastCanonicalEdit(45411)['message_id']);
+        $this->assertSame(TelegramNavigationScreen::Home, $root->fresh()->screen);
+        $this->assertSame(3, $this->editCount(45411), 'Back must reuse the canonical message.');
         $this->assertSame(1, $this->routineMessageCount(45411));
+    }
+
+    public function test_stale_funding_preset_recovers_to_the_current_chooser_without_sending(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45414, 'locale' => 'en']);
+
+        $this->postTelegramWebhook($this->messageUpdate(45414, '/start', [], 45414))->assertOk();
+        $root = TelegramNavigationRoot::query()->sole();
+        $this->postTelegramWebhook($this->callbackUpdate(45415, 'funding-open', 'balance:add', [], 45414, 'private', $root->message_id))->assertOk();
+        $stalePreset = $this->lastCanonicalEdit(45414)['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+
+        $policy = StoreBalanceFundingPolicy::query()->firstOrFail();
+        $policy->forceFill([
+            'minimum_amount' => 5_000,
+            'preset_amounts' => [5_000, 15_000],
+            'version' => 1,
+        ])->save();
+
+        $this->postTelegramWebhook($this->callbackUpdate(45416, 'funding-stale', $stalePreset, [], 45414, 'private', $root->message_id))->assertOk();
+
+        $edit = $this->lastCanonicalEdit(45414);
+        $this->assertSame($root->message_id, (int) $edit['message_id']);
+        $this->assertStringContainsString('Choose a top-up amount:', $this->editCopy($edit));
+        $keyboard = $edit['reply_markup']['inline_keyboard'];
+        $this->assertSame(['Rp 5.000', 'Rp 15.000'], array_map(
+            static fn (array $row): string => $row[0]['text'],
+            array_slice($keyboard, 0, -1),
+        ));
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'funding-stale'
+            && ($request['text'] ?? null) === 'The top-up options changed. The latest options are shown.');
+        $this->assertSame(2, $this->editCount(45414));
+        $this->assertSame(1, $this->routineMessageCount(45414));
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
     }
 
     public function test_stale_navigation_callback_recovers_locally_without_sending(): void
@@ -349,13 +414,23 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->assertStringContainsString($expected[4], json_encode($this->lastCanonicalEdit(45481)['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
         $this->assertStringContainsString($expected[5], json_encode($this->lastCanonicalEdit(45481)['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
 
-        $this->postTelegramWebhook($this->callbackUpdate(45483, 'locale-orders', 'menu:orders', [], 45481, 'private', $messageId))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(45483, 'locale-add', 'balance:add', [], 45481, 'private', $messageId))->assertOk();
+        $addBalance = $this->editCopy($this->lastCanonicalEdit(45481));
+        $this->assertStringContainsString($expected[6], $addBalance);
+        $addMarkup = json_encode($this->lastCanonicalEdit(45481)['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString($expected[4], $addMarkup);
+        $this->assertStringContainsString($expected[5], $addMarkup);
+        $this->assertStringContainsString($expected[7], $addBalance);
+        $this->assertStringContainsString($expected[8], $addBalance);
+        $this->assertStringContainsString($expected[9], $addBalance);
+
+        $this->postTelegramWebhook($this->callbackUpdate(45484, 'locale-orders', 'menu:orders', [], 45481, 'private', $messageId))->assertOk();
         $this->assertStringContainsString($expected[2], $this->editCopy($this->lastCanonicalEdit(45481)));
 
-        $this->postTelegramWebhook($this->callbackUpdate(45484, 'locale-support', 'menu:support', [], 45481, 'private', $messageId))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(45485, 'locale-support', 'menu:support', [], 45481, 'private', $messageId))->assertOk();
         $this->assertStringContainsString($expected[3], $this->editCopy($this->lastCanonicalEdit(45481)));
 
-        $this->assertSame(3, $this->editCount(45481));
+        $this->assertSame(4, $this->editCount(45481));
         $this->assertSame(1, $this->routineMessageCount(45481));
     }
 
@@ -372,6 +447,10 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
                 'Ada kendala order, pembayaran, atau login akun?',
                 '⬅️ Kembali',
                 '🏠 Beranda',
+                '➕ Tambah Saldo',
+                'Minimum tambah saldo: Rp 5.000',
+                '/deposit &lt;amount&gt;',
+                'Pilih nominal top-up:',
             ]],
             'english' => ['en', [
                 '💰 My Balance',
@@ -380,6 +459,10 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
                 'Need help with an order, payment, or account login?',
                 '⬅️ Back',
                 '🏠 Home',
+                '➕ Add Balance',
+                'Minimum top-up: Rp 5.000',
+                '/deposit &lt;amount&gt;',
+                'Choose a top-up amount:',
             ]],
             'malay' => ['ms', [
                 '💰 Baki Saya',
@@ -388,6 +471,10 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
                 'Ada masalah dengan pesanan, bayaran atau log masuk akaun?',
                 '⬅️ Kembali',
                 '🏠 Utama',
+                '➕ Tambah Baki',
+                'Minimum tambah baki: Rp 5.000',
+                '/deposit &lt;amount&gt;',
+                'Pilih jumlah tambah baki:',
             ]],
         ];
     }

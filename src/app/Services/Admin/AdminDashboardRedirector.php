@@ -98,6 +98,11 @@ class AdminDashboardRedirector
         return $this->dashboard(self::TAB_STATS, 'admin-checkout-maintenance');
     }
 
+    public function fundingPolicy(): RedirectResponse
+    {
+        return $this->dashboard(self::TAB_STATS, 'admin-store-balance-funding-policy');
+    }
+
     public function broadcast(): RedirectResponse
     {
         return $this->dashboard(self::TAB_BROADCAST, self::TAB_FALLBACK_TARGETS[self::TAB_BROADCAST]);

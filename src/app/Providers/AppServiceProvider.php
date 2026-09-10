@@ -43,6 +43,7 @@ use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Telegram\Callbacks\TelegramAdminPaymentCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramAdminStatsCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramBalanceFundingCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBinanceVerifyCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBroadcastCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBscVerifyCallbackHandler;
@@ -109,9 +110,9 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(TelegramCheckoutPaymentIntentSelector::class, TelegramConfiguredCheckoutPaymentIntentSelector::class);
         $this->app->singleton(TelegramCallbackHandlerPipeline::class, fn ($app) => new TelegramCallbackHandlerPipeline([
             $app->make(TelegramLocaleCallbackHandler::class),
+            $app->make(TelegramBalanceFundingCallbackHandler::class),
             $app->make(TelegramHomeCallbackHandler::class),
             $app->make(TelegramCommunityGateVerifyCallbackHandler::class),
-            $app->make(TelegramCheckoutMaintenanceCallbackHandler::class),
             $app->make(TelegramAdminPaymentCallbackHandler::class),
             $app->make(TelegramBroadcastCallbackHandler::class),
             $app->make(TelegramAdminStatsCallbackHandler::class),
@@ -121,6 +122,7 @@ class AppServiceProvider extends ServiceProvider
             $app->make(TelegramReceiptActionCallbackHandler::class),
             $app->make(TelegramCartCallbackHandler::class),
             $app->make(TelegramCheckoutCallbackHandler::class),
+            $app->make(TelegramCheckoutMaintenanceCallbackHandler::class),
             $app->make(TelegramBscVerifyCallbackHandler::class),
             $app->make(TelegramBinanceVerifyCallbackHandler::class),
             $app->make(TelegramPaymentProofCallbackHandler::class),

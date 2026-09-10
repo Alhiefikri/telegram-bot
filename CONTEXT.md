@@ -154,6 +154,10 @@ _Avoid_: Manual Fulfillment Review, automatic retry
 A Customer-owned IDR balance backed by an immutable ledger and an atomically maintained projection that can be reconstructed from its entries. It is spent as a full-payment checkout rail and funded through provider-backed top-ups.
 _Avoid_: Wallet, deposit balance, credits, loyalty points
 
+**Store Balance Funding Policy**:
+The versioned, Admin-managed minimum and ordered preset amounts used to present and validate provider-backed top-ups. It is configuration only: changing it never creates a Store Balance Entry or changes a Customer projection.
+_Avoid_: balance credit, ledger entry, provider quote
+
 **Store Balance Entry**:
 One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.
 _Avoid_: Transaction, balance mutation, adjustment row

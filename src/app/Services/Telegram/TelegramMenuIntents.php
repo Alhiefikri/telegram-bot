@@ -7,6 +7,7 @@ use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\TelegramNavigationRoot;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 
@@ -26,6 +27,7 @@ class TelegramMenuIntents
         private TelegramWelcomeBanner $banner,
         private TelegramHtmlCaption $captions,
         private StoreBalanceLedger $balances,
+        private StoreBalanceFundingPolicyManager $fundingPolicies,
     ) {}
 
     public function sendLanguagePicker(string $chatId, ?Customer $customer = null, bool $isPrivateChat = true): void
@@ -143,6 +145,38 @@ class TelegramMenuIntents
                 ]],
                 $this->navigationRow($customer),
             ]],
+        );
+    }
+
+    public function addBalanceSurface(Customer $customer): TelegramNavigationSurface
+    {
+        $policy = $this->fundingPolicies->current();
+        $lines = [
+            $this->locale->translate($customer, 'balance.add.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'balance.add.minimum', [
+                'amount' => $this->locale->idr($policy->minimumAmount),
+            ]),
+            $this->locale->translate($customer, 'balance.add.prompt'),
+            '',
+            $this->locale->translate($customer, 'balance.add.command_hint'),
+        ];
+        $keyboard = [];
+
+        foreach ($policy->presetAmounts as $index => $amount) {
+            $keyboard[] = [[
+                'text' => $this->locale->idr($amount),
+                'callback_data' => $this->fundingPolicies->presetCallback($policy, $index),
+            ]];
+        }
+
+        $keyboard[] = $this->navigationRow($customer);
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::AddBalance,
+            $this->locale->code($customer),
+            $this->captions->html(implode("\n", $lines)),
+            ['inline_keyboard' => $keyboard],
         );
     }
 

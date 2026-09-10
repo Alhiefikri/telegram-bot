@@ -13,6 +13,7 @@ use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\PaymentReceiptReport;
 use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\Telegram\SalesProofPostNumbering;
 use App\Support\Money;
 use App\Support\PaymentProvider;
@@ -26,6 +27,7 @@ final class AdminDashboardStatsData
         private readonly SalesProofPostNumbering $salesProofNumbers,
         private readonly PaymentReceiptReport $receiptReport,
         private readonly CheckoutMaintenance $maintenance,
+        private readonly StoreBalanceFundingPolicyManager $fundingPolicies,
         private readonly BscDashboardData $bscDashboard,
         private readonly SakurupiahOperationalMetrics $sakurupiahMetrics,
     ) {}
@@ -44,6 +46,7 @@ final class AdminDashboardStatsData
         return $header + [
             'balance' => $this->balance($metrics['read_only_balance_amount']),
             'cards' => $this->statsCards($metrics),
+            'fundingPolicy' => $this->fundingPolicy($user),
             'paymentControl' => $this->paymentControl($user),
             'statusCounts' => $statusCounts,
             'actionableStatusCounts' => $this->actionableStatusCounts($statusCounts),
@@ -146,6 +149,29 @@ final class AdminDashboardStatsData
             'version' => $state->version,
             'update_url' => route('admin.checkout-maintenance.update'),
             'can_manage' => (bool) $user?->role?->canManageStoreOperations(),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function fundingPolicy(User $user): array
+    {
+        $state = $this->fundingPolicies->current();
+
+        return [
+            'minimum_amount' => $state->minimumAmount,
+            'minimum_formatted' => Money::idr($state->minimumAmount),
+            'preset_amounts' => $state->presetAmounts,
+            'preset_amounts_formatted' => array_map(
+                static fn (int $amount): string => Money::idr($amount),
+                $state->presetAmounts,
+            ),
+            'preset_amounts_input' => implode(
+                "\n",
+                array_map(static fn (int $amount): string => (string) $amount, $state->presetAmounts),
+            ),
+            'version' => $state->version,
+            'update_url' => route('admin.store-balance.funding-policy.update'),
+            'can_manage' => (bool) $user->role?->canManageStoreOperations(),
         ];
     }
 

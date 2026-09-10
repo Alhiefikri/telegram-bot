@@ -30,6 +30,7 @@ use App\Http\Controllers\Admin\AdminProductStockItemUpdateController;
 use App\Http\Controllers\Admin\AdminProductUpdateController;
 use App\Http\Controllers\Admin\AdminProductVisibilityController;
 use App\Http\Controllers\Admin\AdminSalesProofRetryController;
+use App\Http\Controllers\Admin\AdminStoreBalanceFundingPolicyController;
 use App\Http\Controllers\Admin\AdminStoreChannelController;
 use App\Http\Controllers\Admin\AdminStoreChannelTestController;
 use App\Http\Controllers\Admin\AdminStorefrontPlaceholderController;
@@ -144,6 +145,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('receivers/{receiver}/deactivate', [AdminBscReceiverController::class, 'deactivate'])->name('receivers.deactivate');
             });
             Route::post('checkout-maintenance', AdminCheckoutMaintenanceController::class)->name('checkout-maintenance.update');
+            Route::post('store-balance/funding-policy', AdminStoreBalanceFundingPolicyController::class)->name('store-balance.funding-policy.update');
             Route::post('support-settings', AdminSupportSettingsController::class)->name('support-settings.update');
             Route::post('storefront-placeholder', AdminStorefrontPlaceholderController::class)->name('storefront-placeholder.update');
             Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');

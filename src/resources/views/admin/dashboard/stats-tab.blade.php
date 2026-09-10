@@ -520,6 +520,72 @@
                 </x-admin-dashboard.card>
 
                 <x-admin-dashboard.card
+                    id="admin-store-balance-funding-policy"
+                    data-admin-return-target
+                    tabindex="-1"
+                    as="section"
+                    tone="blue"
+                    padding="compact"
+                    shadow="sm"
+                    class="rounded-[1.125rem]"
+                    aria-label="Kebijakan Top-up Saldo"
+                >
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Store Balance</p>
+                            <h2 class="mt-1 font-display text-base font-bold text-neo-ink">Kebijakan Top-up Saldo</h2>
+                        </div>
+                        <x-admin-dashboard.badge tone="blue" dot>VERSI {{ $fundingPolicy['version'] ?? 0 }}</x-admin-dashboard.badge>
+                    </div>
+
+                    <p class="mt-2 text-xs font-semibold leading-5 text-brand-muted">
+                        Minimum saat ini:
+                        <span class="font-black text-neo-ink">{{ $fundingPolicy['minimum_formatted'] ?? '—' }}</span>
+                    </p>
+                    <div class="mt-3 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3">
+                        <p class="text-[11px] font-black uppercase tracking-wider text-brand-muted">Preset nominal berurutan</p>
+                        <ol class="mt-2 grid gap-1 text-sm font-black text-neo-ink sm:grid-cols-2">
+                            @foreach (($fundingPolicy['preset_amounts_formatted'] ?? []) as $amount)
+                                <li>{{ $amount }}</li>
+                            @endforeach
+                        </ol>
+                    </div>
+
+                    @error('minimum_amount', 'fundingPolicy')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('preset_amounts', 'fundingPolicy')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('version', 'fundingPolicy')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+
+                    @if ($fundingPolicy['can_manage'] ?? false)
+                        <form method="POST" action="{{ $fundingPolicy['update_url'] }}" class="mt-4 space-y-3" aria-label="Kebijakan top-up Saldo">
+                            @csrf
+                            <input type="hidden" name="version" value="{{ $fundingPolicy['version'] }}">
+                            <label class="block text-xs font-bold text-neo-ink">
+                                Minimum top-up (IDR)
+                                <x-admin-dashboard.input class="mt-1" name="minimum_amount" inputmode="numeric" autocomplete="off" :value="old('minimum_amount', $fundingPolicy['minimum_amount'])" required />
+                            </label>
+                            <label class="block text-xs font-bold text-neo-ink">
+                                Preset top-up (satu nominal per baris)
+                                <textarea name="preset_amounts" rows="6" inputmode="numeric" class="neo-input mt-1 min-h-32 w-full bg-white px-3 py-2 text-sm font-semibold" autocomplete="off" required>{{ is_array(old('preset_amounts')) ? implode("\n", old('preset_amounts')) : old('preset_amounts', $fundingPolicy['preset_amounts_input'] ?? '') }}</textarea>
+                            </label>
+                            <p class="text-[11px] font-semibold leading-5 text-brand-muted">Gunakan angka rupiah utuh tanpa titik, koma, atau desimal. Maksimal {{ \App\Models\StoreBalanceFundingPolicy::MAX_PRESETS }} preset; semua preset harus unik, menaik, dan tidak kurang dari minimum.</p>
+                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">
+                                Simpan kebijakan top-up
+                            </x-admin-dashboard.button>
+                        </form>
+                    @else
+                        <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">
+                            Finance dan Support dapat melihat kebijakan, tetapi tidak dapat mengubah minimum atau preset top-up.
+                        </x-admin-dashboard.notice>
+                    @endif
+                </x-admin-dashboard.card>
+
+                <x-admin-dashboard.card
                     id="admin-checkout-maintenance"
                     data-admin-return-target
                     tabindex="-1"

@@ -5,7 +5,10 @@ namespace Tests\Feature;
 use App\Enums\CartStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
+use App\Enums\UserRole;
 use App\Exceptions\InsufficientStoreBalance;
+use App\Exceptions\StoreBalanceFundingPolicyConflict;
+use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -14,9 +17,12 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\StoreBalanceEntry;
+use App\Models\StoreBalanceFundingPolicy;
+use App\Models\User;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\StoreBalance\StoreBalanceReconciliation;
 use Illuminate\Database\QueryException;
@@ -61,6 +67,40 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         }
 
         parent::tearDown();
+    }
+
+    public function test_postgres_competing_policy_updates_allow_one_stale_version_winner(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $owners = User::factory()->count(2)->create(['role' => UserRole::Owner]);
+        $ownerIds = $owners->modelKeys();
+
+        $results = $this->runConcurrentWorkers(2, function (int $index) use ($ownerIds): string {
+            try {
+                app(StoreBalanceFundingPolicyManager::class)->change(
+                    minimumAmount: '5000',
+                    presetAmounts: $index === 0 ? [5000, 10000] : [5000, 25000],
+                    expectedVersion: 0,
+                    actor: User::query()->findOrFail($ownerIds[$index]),
+                    ip: '198.51.100.'.($index + 10),
+                );
+
+                return 'Applied';
+            } catch (StoreBalanceFundingPolicyConflict) {
+                return 'Conflict';
+            }
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $outcomes = array_map(static fn (array $result): string => (string) ($result['value'] ?? ''), $results);
+        sort($outcomes);
+        $this->assertSame(['Applied', 'Conflict'], $outcomes, json_encode($results, JSON_THROW_ON_ERROR));
+
+        $policy = StoreBalanceFundingPolicy::query()->sole();
+        $this->assertSame(1, $policy->policyVersion());
+        $this->assertContains($policy->presetAmounts(), [[5000, 10000], [5000, 25000]]);
+        $this->assertSame(1, AuditLog::query()->where('action', 'store_balance.funding_policy.updated')->count());
     }
 
     public function test_postgres_workers_settle_one_idempotency_claim_exactly_once(): void
