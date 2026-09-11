@@ -1,0 +1,297 @@
+<?php
+
+namespace App\Services\Telegram;
+
+use App\Enums\StoreBalanceTopUpStatus;
+use App\Enums\TelegramOutboundEffectState;
+use App\Models\StoreBalanceTopUp;
+use App\Models\TelegramOutboundEffect;
+use App\Support\PaymentProvider;
+use Closure;
+use Illuminate\Database\Eloquent\Builder;
+use InvalidArgumentException;
+use Throwable;
+
+/**
+ * Owns Store Balance top-up source eligibility and the handoff from a
+ * committed top-up to the shared Telegram Outbound Effect ledger.
+ *
+ * This module materializes through TelegramOutboundEffectService and queues
+ * through TelegramOutboundEffectDispatcher. Claim, lease, ambiguity, and
+ * finalization remain exclusively in TelegramOutboundEffectLedgerProtocol.
+ */
+final class StoreBalanceTopUpOutbound
+{
+    public function __construct(
+        private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly TelegramOutboundEffectDispatcher $dispatcher,
+        private readonly TelegramOutboundEffectLedgerProtocol $ledger,
+    ) {}
+
+    public function handoffInstructions(StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult
+    {
+        return $this->handoff(
+            $topUp,
+            fn (StoreBalanceTopUp $source): ?TelegramOutboundEffect => $this->outboundEffects->recordBalanceTopUpInstructions($source),
+            fn (string $topUpId): ?TelegramOutboundEffect => $this->outboundEffects->forBalanceTopUp($topUpId),
+            fn (StoreBalanceTopUp $source): bool => $this->eligibleInstructions($source),
+        );
+    }
+
+    public function handoffReceipt(StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult
+    {
+        return $this->handoff(
+            $topUp,
+            fn (StoreBalanceTopUp $source): ?TelegramOutboundEffect => $this->outboundEffects->recordBalanceTopUpReceipt($source),
+            fn (string $topUpId): ?TelegramOutboundEffect => $this->outboundEffects->forBalanceTopUpReceipt($topUpId),
+            fn (StoreBalanceTopUp $source): bool => $this->eligibleReceipt($source),
+        );
+    }
+
+    /**
+     * Discover committed payable top-ups whose instruction handoff is absent.
+     * The returned count is the number of queue handoffs attempted.
+     */
+    public function recoverMissingInstructions(int $chunk = 100): int
+    {
+        return $this->recoverMissingFromQuery(
+            $this->missingInstructionsQuery(),
+            $chunk,
+            fn (StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult => $this->handoffInstructions($topUp),
+        );
+    }
+
+    /**
+     * Discover committed paid and settled top-ups whose receipt handoff is
+     * absent. The returned count is the number of queue handoffs attempted.
+     */
+    public function recoverMissingReceipts(int $chunk = 100): int
+    {
+        return $this->recoverMissingFromQuery(
+            $this->missingReceiptsQuery(),
+            $chunk,
+            fn (StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult => $this->handoffReceipt($topUp),
+        );
+    }
+
+    /**
+     * Recover both top-up effect families through their normal handoff rules.
+     * Existing effects, review states, and non-dispatchable retries are left
+     * to the shared ledger and are not blindly resent.
+     */
+    public function recoverMissing(int $chunk = 100): int
+    {
+        return $this->recoverMissingInstructions($chunk)
+            + $this->recoverMissingReceipts($chunk);
+    }
+
+    /**
+     * @param  Closure(StoreBalanceTopUp): ?TelegramOutboundEffect  $materialize
+     * @param  Closure(string): ?TelegramOutboundEffect  $find
+     * @param  Closure(StoreBalanceTopUp): bool  $eligible
+     */
+    private function handoff(
+        StoreBalanceTopUp $topUp,
+        Closure $materialize,
+        Closure $find,
+        Closure $eligible,
+    ): StoreBalanceTopUpOutboundResult {
+        try {
+            $source = $topUp->fresh(['customer']);
+            if ($source === null || ! $eligible($source)) {
+                return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::NotEligible);
+            }
+
+            $topUpId = (string) $source->getKey();
+            if ($topUpId === '') {
+                return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::NotEligible);
+            }
+
+            $effect = $find($topUpId) ?? $materialize($source);
+            if ($effect === null) {
+                return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::NotEligible);
+            }
+
+            return $this->handoffEffect($effect);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::Failed);
+        }
+    }
+
+    private function handoffEffect(
+        TelegramOutboundEffect $effect,
+    ): StoreBalanceTopUpOutboundResult {
+        $current = $effect->fresh() ?? $effect;
+        $initial = $this->resultForExistingState($current);
+        if ($initial !== null) {
+            return $initial;
+        }
+
+        if (! $this->ledger->isDispatchable($current)) {
+            return $this->resultForNonDispatchable($current);
+        }
+
+        try {
+            $this->dispatcher->dispatch($current);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::Failed);
+        }
+
+        $afterDispatch = $current->fresh() ?? $current;
+
+        return $this->resultAfterDispatch($afterDispatch);
+    }
+
+    private function resultForExistingState(
+        TelegramOutboundEffect $effect,
+    ): ?StoreBalanceTopUpOutboundResult {
+        $outcome = $this->outcomeForNonDispatchState($this->stateOf($effect));
+
+        return $outcome === null
+            ? null
+            : new StoreBalanceTopUpOutboundResult($outcome);
+    }
+
+    private function resultForNonDispatchable(
+        TelegramOutboundEffect $effect,
+    ): StoreBalanceTopUpOutboundResult {
+        return new StoreBalanceTopUpOutboundResult(
+            $this->retryScheduled($effect)
+                ? StoreBalanceTopUpOutboundOutcome::RetryScheduled
+                : StoreBalanceTopUpOutboundOutcome::Failed,
+        );
+    }
+
+    private function resultAfterDispatch(
+        TelegramOutboundEffect $effect,
+    ): StoreBalanceTopUpOutboundResult {
+        $state = $this->stateOf($effect);
+        $outcome = $this->outcomeForNonDispatchState($state);
+        if ($outcome !== null) {
+            return new StoreBalanceTopUpOutboundResult($outcome);
+        }
+
+        if ($this->retryScheduled($effect)) {
+            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::RetryScheduled);
+        }
+
+        if ($state === TelegramOutboundEffectState::Failed) {
+            return new StoreBalanceTopUpOutboundResult(
+                $this->ledger->isTerminalFailure($effect)
+                    ? StoreBalanceTopUpOutboundOutcome::Failed
+                    : StoreBalanceTopUpOutboundOutcome::Queued,
+            );
+        }
+
+        return new StoreBalanceTopUpOutboundResult(
+            $state === TelegramOutboundEffectState::Pending
+                ? StoreBalanceTopUpOutboundOutcome::Queued
+                : StoreBalanceTopUpOutboundOutcome::Failed,
+        );
+    }
+
+    private function outcomeForNonDispatchState(
+        ?TelegramOutboundEffectState $state,
+    ): ?StoreBalanceTopUpOutboundOutcome {
+        return match ($state) {
+            TelegramOutboundEffectState::Sent => StoreBalanceTopUpOutboundOutcome::Delivered,
+            TelegramOutboundEffectState::Sending => StoreBalanceTopUpOutboundOutcome::InProgress,
+            TelegramOutboundEffectState::Unknown,
+            TelegramOutboundEffectState::ManualReview => StoreBalanceTopUpOutboundOutcome::ReviewRequired,
+            default => null,
+        };
+    }
+
+    private function retryScheduled(TelegramOutboundEffect $effect): bool
+    {
+        return $this->stateOf($effect) === TelegramOutboundEffectState::Failed
+            && $effect->next_attempt_at !== null
+            && $effect->next_attempt_at->isFuture();
+    }
+
+    private function eligibleInstructions(StoreBalanceTopUp $topUp): bool
+    {
+        return $topUp->isPayable() && $this->hasCustomerChat($topUp);
+    }
+
+    private function eligibleReceipt(StoreBalanceTopUp $topUp): bool
+    {
+        return $topUp->status === StoreBalanceTopUpStatus::Paid
+            && strtolower(trim((string) $topUp->provider)) === PaymentProvider::KLIKQRIS
+            && $topUp->provider_total_payment !== null
+            && $topUp->settled_at !== null
+            && $this->hasCustomerChat($topUp);
+    }
+
+    private function hasCustomerChat(StoreBalanceTopUp $topUp): bool
+    {
+        $chatId = trim((string) $topUp->chat_id);
+        $customer = $topUp->customer;
+
+        return $customer !== null
+            && $customer->telegram_id !== null
+            && $chatId !== ''
+            && (string) $customer->telegram_id === $chatId
+            && (int) $customer->getKey() === (int) $topUp->customer_id;
+    }
+
+    /** @return Builder<StoreBalanceTopUp> */
+    private function klikQrisTopUpsQuery(): Builder
+    {
+        return StoreBalanceTopUp::query()
+            ->with('customer')
+            ->whereRaw('LOWER(TRIM(provider)) = ?', [PaymentProvider::KLIKQRIS]);
+    }
+
+    /** @return Builder<StoreBalanceTopUp> */
+    private function missingInstructionsQuery(): Builder
+    {
+        return $this->klikQrisTopUpsQuery()
+            ->where('status', StoreBalanceTopUpStatus::Payable->value)
+            ->whereDoesntHave('outboundEffects', fn (Builder $effects): Builder => $effects->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP))
+            ->orderBy('id');
+    }
+
+    /** @return Builder<StoreBalanceTopUp> */
+    private function missingReceiptsQuery(): Builder
+    {
+        return $this->klikQrisTopUpsQuery()
+            ->where('status', StoreBalanceTopUpStatus::Paid->value)
+            ->whereNotNull('settled_at')
+            ->whereDoesntHave('outboundEffects', fn (Builder $effects): Builder => $effects->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT))
+            ->orderBy('id');
+    }
+
+    /**
+     * @param  Builder<StoreBalanceTopUp>  $query
+     * @param  Closure(StoreBalanceTopUp): StoreBalanceTopUpOutboundResult  $handoff
+     */
+    private function recoverMissingFromQuery(Builder $query, int $chunk, Closure $handoff): int
+    {
+        if ($chunk < 1 || $chunk > 1000) {
+            throw new InvalidArgumentException('Store Balance top-up outbound chunk must be between 1 and 1000.');
+        }
+
+        $dispatches = 0;
+        $query->chunkById($chunk, function ($topUps) use (&$dispatches, $handoff): void {
+            foreach ($topUps as $topUp) {
+                $dispatches += $handoff($topUp)->isAccepted() ? 1 : 0;
+            }
+        });
+
+        return $dispatches;
+    }
+
+    private function stateOf(TelegramOutboundEffect $effect): ?TelegramOutboundEffectState
+    {
+        $state = $effect->getAttribute('state');
+
+        return $state instanceof TelegramOutboundEffectState
+            ? $state
+            : TelegramOutboundEffectState::tryFrom((string) $state);
+    }
+}
