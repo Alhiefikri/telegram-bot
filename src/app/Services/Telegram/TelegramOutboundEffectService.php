@@ -168,6 +168,8 @@ class TelegramOutboundEffectService
 
     public const RECEIPT_QUEUE = 'notifications';
 
+    public const STOCK_NOTIFICATION_QUEUE = 'telegram-stock';
+
     public const RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS = TelegramOutboundEffectPolicy::RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS;
 
     public const RECEIPT_ACTIONS_MAX_ATTEMPTS = TelegramOutboundEffectPolicy::RECEIPT_ACTIONS_MAX_ATTEMPTS;
@@ -656,7 +658,7 @@ class TelegramOutboundEffectService
             'source_id' => (string) $recipient->getKey(),
             'target_type' => trim((string) $recipient->recipient_type) ?: 'customer',
             'telegram_chat_id' => (string) $recipient->telegram_id,
-            'queue' => 'telegram-broadcast',
+            'queue' => self::STOCK_NOTIFICATION_QUEUE,
             'telegram_method' => $recipient->photo_path !== null
                 && mb_strlen((string) $recipient->text, 'UTF-8') <= 1024
                 ? 'sendPhoto'

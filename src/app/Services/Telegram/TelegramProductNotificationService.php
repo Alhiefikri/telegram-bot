@@ -90,17 +90,55 @@ class TelegramProductNotificationService
         ?int $availableBefore,
         ?int $availableAfter = null,
     ): array {
+        $deliveries = [];
+        $cursor = 0;
+
+        do {
+            $batch = $this->stockAddedDeliveryBatch(
+                $product,
+                $addedQuantity,
+                $availableBefore,
+                $availableAfter,
+                $cursor,
+                100,
+            );
+            $deliveries = [...$deliveries, ...$batch['deliveries']];
+            $cursor = $batch['next_cursor'];
+        } while ($batch['has_more']);
+
+        return $deliveries;
+    }
+
+    /**
+     * @return array{
+     *     deliveries:list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array,photo_path:?string}>,
+     *     next_cursor:int,
+     *     has_more:bool
+     * }
+     */
+    public function stockAddedDeliveryBatch(
+        Product $product,
+        int $addedQuantity,
+        ?int $availableBefore,
+        ?int $availableAfter = null,
+        int $customerCursor = 0,
+        int $limit = 100,
+    ): array {
         $product = $product->fresh();
+        $customerCursor = max(0, $customerCursor);
+        $limit = max(1, $limit);
+
         if (! $product || ! $product->is_active || $addedQuantity < 1) {
-            return [];
+            return ['deliveries' => [], 'next_cursor' => $customerCursor, 'has_more' => false];
         }
         $availableStock = $availableAfter ?? $product->availableStock();
         if ($availableStock < 1) {
-            return [];
+            return ['deliveries' => [], 'next_cursor' => $customerCursor, 'has_more' => false];
         }
 
+        $channelChatId = $this->storeChannelChatId();
         $deliveries = [];
-        if ($channelChatId = $this->storeChannelChatId()) {
+        if ($customerCursor === 0 && $channelChatId) {
             $deliveries[] = [
                 'customer_id' => null,
                 'recipient_type' => 'store_channel',
@@ -112,11 +150,32 @@ class TelegramProductNotificationService
             ];
         }
 
-        if ($this->shouldNotifyCustomers($availableBefore, $channelChatId)) {
-            $deliveries = [...$deliveries, ...$this->customerDeliveries($product, $availableStock, false)];
+        if (! $this->shouldNotifyCustomers($availableBefore, $channelChatId)) {
+            return ['deliveries' => $deliveries, 'next_cursor' => $customerCursor, 'has_more' => false];
         }
 
-        return $deliveries;
+        $customers = Customer::query()
+            ->whereNotNull('telegram_id')
+            ->where('id', '>', $customerCursor)
+            ->orderBy('id')
+            ->limit($limit + 1)
+            ->get(['id', 'telegram_id', 'locale']);
+        $customerPage = $customers->take($limit);
+        $deliveries = [
+            ...$deliveries,
+            ...$this->renderCustomerDeliveries(
+                $product,
+                $availableStock,
+                false,
+                $customerPage->filter(fn (Customer $customer): bool => trim((string) $customer->telegram_id) !== ''),
+            ),
+        ];
+
+        return [
+            'deliveries' => $deliveries,
+            'next_cursor' => (int) ($customerPage->last()?->id ?? $customerCursor),
+            'has_more' => $customers->count() > $limit,
+        ];
     }
 
     /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array,photo_path:?string}> */
@@ -141,8 +200,10 @@ class TelegramProductNotificationService
     private function customerDeliveries(Product $product, int $availableStock, bool $created): array
     {
         $seen = [];
-
-        return Customer::query()->whereNotNull('telegram_id')->orderBy('id')->get(['id', 'telegram_id', 'locale'])
+        $customers = Customer::query()
+            ->whereNotNull('telegram_id')
+            ->orderBy('id')
+            ->get(['id', 'telegram_id', 'locale'])
             ->filter(function (Customer $customer) use (&$seen): bool {
                 $id = trim((string) $customer->telegram_id);
                 if ($id === '' || isset($seen[$id])) {
@@ -151,36 +212,50 @@ class TelegramProductNotificationService
                 $seen[$id] = true;
 
                 return true;
-            })->map(function (Customer $customer) use ($product, $availableStock, $created): array {
-                $locale = $this->locale->code($customer);
-                $title = $this->locale->translateLocale($locale, $created ? 'notification.product.created.title' : 'notification.product.restock.title');
-                $lead = $this->locale->translateLocale($locale, $created ? 'notification.product.created.lead' : 'notification.product.restock.lead');
-                $text = implode("\n", [
-                    $title,
-                    '━━━━━━━━━━━━━━',
-                    $lead,
-                    '📦 '.$product->name,
-                    $this->locale->translateLocale($locale, 'notification.product.price', [
-                        'amount' => number_format($product->price_amount, 0, ',', '.'),
-                    ]),
-                    $this->locale->translateLocale($locale, 'notification.product.stock', ['stock' => $availableStock]),
-                    '',
-                    $this->locale->translateLocale($locale, 'notification.product.description'),
-                    $this->descriptionText($product, $locale),
-                    '',
-                    $this->locale->translateLocale($locale, 'notification.broadcast.help'),
-                ]);
+            });
 
-                return [
-                    'customer_id' => $customer->id,
-                    'recipient_type' => 'customer',
-                    'telegram_id' => (string) $customer->telegram_id,
-                    'locale' => $locale,
-                    'text' => $text,
-                    'reply_markup' => $this->productReplyMarkup($product, $availableStock, $locale),
-                    'photo_path' => null,
-                ];
-            })->values()->all();
+        return $this->renderCustomerDeliveries($product, $availableStock, $created, $customers);
+    }
+
+    /**
+     * @param  iterable<Customer>  $customers
+     * @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:string,text:string,reply_markup:array,photo_path:?string}>
+     */
+    private function renderCustomerDeliveries(Product $product, int $availableStock, bool $created, iterable $customers): array
+    {
+        $deliveries = [];
+        foreach ($customers as $customer) {
+            $locale = $this->locale->code($customer);
+            $title = $this->locale->translateLocale($locale, $created ? 'notification.product.created.title' : 'notification.product.restock.title');
+            $lead = $this->locale->translateLocale($locale, $created ? 'notification.product.created.lead' : 'notification.product.restock.lead');
+            $text = implode("\n", [
+                $title,
+                '━━━━━━━━━━━━━━',
+                $lead,
+                '📦 '.$product->name,
+                $this->locale->translateLocale($locale, 'notification.product.price', [
+                    'amount' => number_format($product->price_amount, 0, ',', '.'),
+                ]),
+                $this->locale->translateLocale($locale, 'notification.product.stock', ['stock' => $availableStock]),
+                '',
+                $this->locale->translateLocale($locale, 'notification.product.description'),
+                $this->descriptionText($product, $locale),
+                '',
+                $this->locale->translateLocale($locale, 'notification.broadcast.help'),
+            ]);
+
+            $deliveries[] = [
+                'customer_id' => $customer->id,
+                'recipient_type' => 'customer',
+                'telegram_id' => (string) $customer->telegram_id,
+                'locale' => $locale,
+                'text' => $text,
+                'reply_markup' => $this->productReplyMarkup($product, $availableStock, $locale),
+                'photo_path' => null,
+            ];
+        }
+
+        return $deliveries;
     }
 
     private function descriptionText(Product $product, string $locale): string

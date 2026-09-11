@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Services\Admin\AdminDashboardProductsData;
 use App\Services\ProductStockIntake;
 use App\Services\ProductStockIntakeSubmission;
+use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -671,7 +672,7 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertLessThan(500, $durationMs, "Stock response took {$durationMs} ms while waiting for Telegram.");
         $this->assertSame(1, $product->fresh()->stock);
         $movement = InventoryMovement::query()->where('product_id', $product->id)->latest('id')->firstOrFail();
-        Queue::assertPushedOn('telegram-broadcast', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $movement->id);
+        Queue::assertPushedOn(StockNotificationDeliveryPipeline::QUEUE, SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $movement->id);
         Http::assertNothingSent();
     }
 

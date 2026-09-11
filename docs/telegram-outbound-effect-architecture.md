@@ -109,7 +109,7 @@ transport details, and synchronization of its own read projection:
 | Manual payment proof | Proof attachment forwarding and Payment projection | notifications |
 | Sales Proof Post | Store Channel announcement rendering and SalesProofPost projection | notifications |
 | Admin Broadcast | Recipient snapshot, locale/content wrappers, batching, rate limiting, and aggregate projection | telegram-broadcast |
-| Stock notification | Inventory-recipient batching and aggregate projection | telegram-broadcast |
+| Stock notification | Inventory-recipient batching and aggregate projection | telegram-stock |
 | Price notification | Localized customer and Store Channel rendering, batching, and price-event projection | telegram-broadcast |
 
 The principal adapters are
@@ -122,7 +122,7 @@ ProductPriceChangeNotificationService. They all use the same ledger seam.
 ## Durable handoff and dispatch
 
 For checkout, Order lifecycle, receipts, payment proof, Sales Proof Post,
-stock, and price notifications, the source mutation and the pending effect are
+and price notifications, the source mutation and the pending effect are
 created in the same database transaction. A queue dispatch happens after the
 transaction commits, but losing that dispatch does not remove the committed
 effect; telegram:recover-outbound can find it.
@@ -136,6 +136,22 @@ The dispatch path is deliberately split into three concerns:
 Queue uniqueness and afterCommit reduce duplicate work and ordering hazards.
 They are not remote Telegram idempotency and do not replace the ledger's claim
 token or recovery rules.
+
+### Deferred Stock Notification materialization
+
+Canonical positive stock intake records the `StockNotificationEvent` handoff
+inside the inventory transaction, but defers customer recipient rendering and
+Telegram effect materialization until after commit. A null
+`recipients_snapshotted_at` is the durable marker that the immutable audience
+snapshot is still owed; `materialization_cursor` bounds each worker pass.
+
+The `telegram-stock` job snapshots at most 100 customers per pass, creates
+missing ledger effects idempotently, then sends at most one recipient effect per
+job execution. It self-dispatches while the event or its effects still have
+work. `telegram:reconcile-stock-notifications` and the stock branch of
+`telegram:recover-outbound` discover null snapshot markers and lost dispatches.
+The source event therefore closes the interval between the inventory commit and
+queue pickup without holding the inventory transaction during customer fan-out.
 
 ## Ledger state contract
 

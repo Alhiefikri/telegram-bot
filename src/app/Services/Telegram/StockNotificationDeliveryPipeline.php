@@ -22,9 +22,11 @@ class StockNotificationDeliveryPipeline
 {
     public const MAX_ATTEMPTS = TelegramOutboundEffectPolicy::STOCK_NOTIFICATION_MAX_ATTEMPTS;
 
-    public const QUEUE = 'telegram-broadcast';
+    public const QUEUE = TelegramOutboundEffectService::STOCK_NOTIFICATION_QUEUE;
 
-    private const RETRY_DELAY_SECONDS = 30;
+    public const JOB_BATCH_SIZE = 1;
+
+    private const RECIPIENT_MATERIALIZATION_BATCH_SIZE = 100;
 
     public function __construct(
         private TelegramProductNotificationService $notifications,
@@ -35,9 +37,39 @@ class StockNotificationDeliveryPipeline
         private ?TelegramOutboundResponseValidator $responseValidator = null,
     ) {}
 
+    public function register(int $movementId): ?StockNotificationEvent
+    {
+        return DB::transaction(function () use ($movementId): ?StockNotificationEvent {
+            $movement = InventoryMovement::query()
+                ->with('product')
+                ->whereKey($movementId)
+                ->lockForUpdate()
+                ->first();
+            if (! $movement || ! $this->isNotifiable($movement)) {
+                return null;
+            }
+
+            return StockNotificationEvent::query()->firstOrCreate(
+                ['inventory_movement_id' => $movement->id],
+                ['kind' => $movement->type->value],
+            );
+        }, 5);
+    }
+
     public function materialize(int $movementId): ?StockNotificationEvent
     {
-        return $this->snapshotEvent($movementId);
+        do {
+            $event = $this->snapshotEvent($movementId);
+            if (! $event) {
+                return null;
+            }
+        } while ($event->recipients_snapshotted_at === null);
+
+        while ($this->materializeRecipientEffects($movementId, (int) $event->id, 200) > 0) {
+            // Continue until compatibility callers have the complete ledger snapshot.
+        }
+
+        return $event->fresh() ?? $event;
     }
 
     /** @return array{processed:int, transient_failures:int, has_more:bool} */
@@ -60,6 +92,22 @@ class StockNotificationDeliveryPipeline
             return ['processed' => 0, 'transient_failures' => 0, 'has_more' => false];
         }
 
+        if ($event->recipients_snapshotted_at === null) {
+            DogfoodTiming::log('dogfood.telegram.broadcast_finished', [
+                'sent' => 0,
+                'failed' => 0,
+                'skipped' => false,
+                'materializing' => true,
+                'recipient_count' => 0,
+                'telegram_total_duration_ms' => 0.0,
+                'per_recipient_telegram' => [],
+                'duration_ms' => DogfoodTiming::elapsedMs($startedAt),
+            ]);
+
+            return ['processed' => 0, 'transient_failures' => 0, 'has_more' => true];
+        }
+
+        $this->materializeRecipientEffects($movementId, (int) $event->id, max(1, $batchSize));
         $effects = $this->dueEffects($event->id, $batchSize);
 
         $processed = 0;
@@ -116,11 +164,12 @@ class StockNotificationDeliveryPipeline
 
     public function reconcile(int $chunk = 100): int
     {
+        $limit = max(1, $chunk);
         $ledgerRecipientIds = $this->ledger()->readyToDispatchQuery()
             ->where('source_type', StockNotificationRecipient::class)
             ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->orderBy('id')
-            ->limit(max(1, $chunk))
+            ->limit($limit)
             ->pluck('source_id');
         $recipientMovementIds = StockNotificationRecipient::query()
             ->whereIn('id', $ledgerRecipientIds)
@@ -141,12 +190,18 @@ class StockNotificationDeliveryPipeline
             })
             ->with('event:id,inventory_movement_id')
             ->orderBy('id')
-            ->limit(max(1, $chunk))
+            ->limit($limit)
             ->get()
             ->pluck('event.inventory_movement_id')->filter()->unique()->values();
+        $unmaterializedEventMovementIds = StockNotificationEvent::query()
+            ->whereNull('recipients_snapshotted_at')
+            ->orderBy('id')
+            ->limit($limit)
+            ->pluck('inventory_movement_id');
 
         $movementIds = $recipientMovementIds
             ->merge($unmaterializedMovementIds)
+            ->merge($unmaterializedEventMovementIds)
             ->unique()
             ->values();
 
@@ -192,18 +247,30 @@ class StockNotificationDeliveryPipeline
                 return null;
             }
 
-            $event = StockNotificationEvent::firstOrCreate([
-                'inventory_movement_id' => $movement->id,
-            ], ['kind' => $movement->type->value]);
+            $event = StockNotificationEvent::query()->firstOrCreate(
+                ['inventory_movement_id' => $movement->id],
+                ['kind' => $movement->type->value],
+            );
             if ($event->recipients_snapshotted_at === null) {
-                $deliveries = $movement->type === InventoryMovementType::Adjustment
-                    ? $this->notifications->stockAddedDeliveries(
+                if ($movement->type === InventoryMovementType::Adjustment) {
+                    $batch = $this->notifications->stockAddedDeliveryBatch(
                         $movement->product,
                         $movement->quantity,
                         $movement->available_before,
                         $movement->available_after,
-                    )
-                    : $this->notifications->productSoldOutDeliveries($movement->product);
+                        (int) ($event->materialization_cursor ?? 0),
+                        self::RECIPIENT_MATERIALIZATION_BATCH_SIZE,
+                    );
+                    $deliveries = $batch['deliveries'];
+                    $event->forceFill([
+                        'materialization_cursor' => $batch['next_cursor'],
+                        'recipients_snapshotted_at' => $batch['has_more'] ? null : now(),
+                    ])->save();
+                } else {
+                    $deliveries = $this->notifications->productSoldOutDeliveries($movement->product);
+                    $event->forceFill(['recipients_snapshotted_at' => now()])->save();
+                }
+
                 $now = now();
                 $rows = array_map(fn (array $delivery): array => [
                     'stock_notification_event_id' => $event->id,
@@ -220,19 +287,39 @@ class StockNotificationDeliveryPipeline
                 if ($rows !== []) {
                     StockNotificationRecipient::query()->insertOrIgnore($rows);
                 }
-                $event->forceFill(['recipients_snapshotted_at' => $now])->save();
             }
 
-            StockNotificationRecipient::query()
-                ->where('stock_notification_event_id', $event->id)
-                ->orderBy('id')
-                ->chunkById(200, function ($recipients) use ($movement): void {
-                    foreach ($recipients as $recipient) {
-                        $this->materializeRecipientEffect($movement, $recipient);
-                    }
-                });
+            return $event->fresh() ?? $event;
+        }, 5);
+    }
 
-            return $event;
+    private function materializeRecipientEffects(int $movementId, int $eventId, int $limit): int
+    {
+        return DB::transaction(function () use ($movementId, $eventId, $limit): int {
+            $movement = InventoryMovement::query()->whereKey($movementId)->first();
+            if ($movement === null) {
+                return 0;
+            }
+
+            $recipients = StockNotificationRecipient::query()
+                ->where('stock_notification_event_id', $eventId)
+                ->whereNotExists(function ($effects): void {
+                    $effects
+                        ->selectRaw('1')
+                        ->from('telegram_outbound_effects')
+                        ->where('telegram_outbound_effects.source_type', StockNotificationRecipient::class)
+                        ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
+                        ->whereRaw('telegram_outbound_effects.source_id = CAST(stock_notification_recipients.id AS TEXT)');
+                })
+                ->orderBy('id')
+                ->limit(max(1, $limit))
+                ->get();
+
+            foreach ($recipients as $recipient) {
+                $this->materializeRecipientEffect($movement, $recipient);
+            }
+
+            return $recipients->count();
         }, 5);
     }
 
@@ -251,12 +338,27 @@ class StockNotificationDeliveryPipeline
 
     private function hasPendingEffects(int $eventId): bool
     {
-        return $this->ledger()->readyToDispatchQuery()
+        $ready = $this->ledger()->readyToDispatchQuery()
             ->where('source_type', StockNotificationRecipient::class)
             ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->whereIn('source_id', StockNotificationRecipient::query()
                 ->where('stock_notification_event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
+            ->exists();
+        if ($ready) {
+            return true;
+        }
+
+        return StockNotificationRecipient::query()
+            ->where('stock_notification_event_id', $eventId)
+            ->whereNotExists(function ($effects): void {
+                $effects
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects')
+                    ->where('telegram_outbound_effects.source_type', StockNotificationRecipient::class)
+                    ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
+                    ->whereRaw('telegram_outbound_effects.source_id = CAST(stock_notification_recipients.id AS TEXT)');
+            })
             ->exists();
     }
 
@@ -264,15 +366,6 @@ class StockNotificationDeliveryPipeline
         InventoryMovement $movement,
         StockNotificationRecipient $recipient,
     ): ?TelegramOutboundEffect {
-        $effectKey = TelegramOutboundEffectService::stockNotificationEffectKey(
-            (string) $movement->getKey(),
-            (string) $recipient->getKey(),
-        );
-        $existing = TelegramOutboundEffect::query()->where('effect_key', $effectKey)->first();
-        if ($existing !== null) {
-            return $existing;
-        }
-
         $state = TelegramOutboundEffectState::Pending->value;
         $sentAt = null;
         $failedAt = null;
@@ -483,6 +576,12 @@ class StockNotificationDeliveryPipeline
 
     private function syncStockNotificationProjection(int|string $movementId): void
     {
+        if (StockNotificationEvent::query()
+            ->where('inventory_movement_id', $movementId)
+            ->whereNull('recipients_snapshotted_at')
+            ->exists()) {
+            return;
+        }
         $recipientIds = StockNotificationRecipient::query()
             ->whereHas('event', fn (Builder $event) => $event->where('inventory_movement_id', $movementId))
             ->selectRaw('CAST(id AS TEXT)');

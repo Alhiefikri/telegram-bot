@@ -181,6 +181,42 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertNotNull(InventoryMovement::findOrFail($adjustment['movement_id'])->stock_notification_sent_at);
     }
 
+    public function test_stock_notification_job_sends_one_effect_and_requeues_remaining_delivery(): void
+    {
+        Queue::fake();
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 399020, 'locale' => 'id']);
+        Customer::factory()->create(['telegram_id' => 399021, 'locale' => 'en']);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product,
+            1,
+            'bounded stock notification',
+            $admin,
+            '127.0.0.1',
+            ['bounded-secret'],
+        )['movement_id'];
+
+        $job = new SendProductStockNotifications($movementId);
+        $job->handle(app(StockNotificationDeliveryPipeline::class));
+
+        $sendMessages = collect(Http::recorded())
+            ->filter(fn (array $request): bool => str_ends_with($request[0]->url(), '/sendMessage'));
+        $this->assertCount(1, $sendMessages);
+        Queue::assertPushedOn(
+            StockNotificationDeliveryPipeline::QUEUE,
+            SendProductStockNotifications::class,
+            fn (SendProductStockNotifications $queued): bool => $queued->movementId === $movementId,
+        );
+
+        $job->handle(app(StockNotificationDeliveryPipeline::class));
+
+        $sendMessages = collect(Http::recorded())
+            ->filter(fn (array $request): bool => str_ends_with($request[0]->url(), '/sendMessage'));
+        $this->assertCount(2, $sendMessages);
+    }
+
     public function test_sold_out_channel_notification_waits_for_confirmed_payment_and_does_not_create_an_order(): void
     {
         Queue::fake();
@@ -208,7 +244,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
             ->where('order_id', $order->id)
             ->where('type', InventoryMovementType::Sale)
             ->sole();
-        Queue::assertPushedOn('telegram-broadcast', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $sale->id);
+        Queue::assertPushedOn(StockNotificationDeliveryPipeline::QUEUE, SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $sale->id);
 
         (new SendProductStockNotifications($sale->id))->handle(app(TelegramProductNotificationService::class));
 

@@ -75,7 +75,7 @@ Queue existing tetap dipakai:
 
 - `telegram-outbound` untuk checkout instruction;
 - `notifications` untuk receipt, lifecycle notification, dan Sales Proof;
-- `telegram-broadcast` untuk recipient broadcast, stock, dan price notification.
+- `telegram-broadcast` untuk recipient broadcast dan price notification; `telegram-stock` khusus stock notification dengan bounded recipient delivery.
 
 ### 1.6 Payload dan data sensitif
 
@@ -118,7 +118,7 @@ Kolom claim lama tidak langsung dihapus. Rollout dilakukan bertahap:
 | Manual payment proof forwarding | Payment proof | `notifications` | Manual review karena attachment bisa sudah diterima |
 | Sales Proof Post | Paid Order Proof Event + Store Channel | `notifications` | Tidak blind retry public post; operator mark sent atau explicit new version |
 | Admin Broadcast recipient | Broadcast recipient | `telegram-broadcast` | Recipient-level unknown, batch lain tetap berjalan |
-| Stock notification | InventoryMovement | `telegram-broadcast` | Recipient/effect-level review, pertahankan rate limit |
+| Stock notification | InventoryMovement | `telegram-stock` | Recipient/effect-level review, bounded per-job delivery |
 | Price notification | PriceChangeEvent + recipient | `telegram-broadcast` | Recipient/effect-level review, pertahankan locale dan batching |
 
 ## 4. Skema database garis besar

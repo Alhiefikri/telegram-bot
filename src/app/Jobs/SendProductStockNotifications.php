@@ -13,6 +13,8 @@ class SendProductStockNotifications implements ShouldBeUniqueUntilProcessing, Sh
 
     public int $tries = 3;
 
+    public int $timeout = 55;
+
     public int $uniqueFor = 300;
 
     public function __construct(public readonly int $movementId, public ?string $jobEnqueuedAt = null) {}
@@ -33,7 +35,7 @@ class SendProductStockNotifications implements ShouldBeUniqueUntilProcessing, Sh
         if (! $pipeline instanceof StockNotificationDeliveryPipeline) {
             $pipeline = app(StockNotificationDeliveryPipeline::class);
         }
-        $result = $pipeline->deliver($this->movementId);
+        $result = $pipeline->deliver($this->movementId, StockNotificationDeliveryPipeline::JOB_BATCH_SIZE);
         if ($result['has_more']) {
             self::dispatch($this->movementId, now()->toISOString())
                 ->onQueue(StockNotificationDeliveryPipeline::QUEUE)

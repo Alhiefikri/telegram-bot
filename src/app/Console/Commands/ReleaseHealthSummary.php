@@ -22,6 +22,7 @@ class ReleaseHealthSummary extends Command
                 'telegram-outbound',
                 'notifications',
                 'telegram-broadcast',
+                'telegram-stock',
                 (string) config('services.binance.verification_queue', 'binance-verification'),
             ];
             $queue = $this->queueSummary();

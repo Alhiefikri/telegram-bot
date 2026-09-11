@@ -159,7 +159,11 @@ final class ProductStockIntake
                 ])->save();
 
                 if ($itemCount > 0) {
-                    $this->stockNotifications->materialize($movement->id);
+                    if ($dispatchNotifications) {
+                        $this->stockNotifications->register($movement->id);
+                    } else {
+                        $this->stockNotifications->materialize($movement->id);
+                    }
                     $this->waitlistNotifications->scheduleForMovement($movement->id);
                     if ($dispatchNotifications) {
                         DB::afterCommit(fn (): mixed => SendProductStockNotifications::dispatch($movement->id)

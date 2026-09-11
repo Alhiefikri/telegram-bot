@@ -585,7 +585,8 @@ Scheduler service hanya menjalankan `php artisan schedule:run`; jangan mengganda
 - `default` — Telegram update processing and bounded Sakurupiah webhook verification.
 - `telegram-outbound` — checkout instructions, Store Balance top-up QR instructions, dan pending-order admin notification.
 - `notifications` — receipt, paid/expired notifications, Sales Proof Post, cleanup instruction, KlikQRIS owner alert, and legacy Pakasir cancellation attempts.
-- `telegram-broadcast` — broadcast dan price/stock notification batches.
+- `telegram-broadcast` — admin broadcast dan price notification batches.
+- `telegram-stock` — stock notification recipient batches; each job sends one effect and requeues the movement until complete.
 
 Jobs yang mengirim efek eksternal memakai unique/claim markers agar retry tidak mengirim efek ganda. Queue job bukan tempat menaruh business transition baru; job memanggil service owner lalu dapat retry bila dependency eksternal gagal.
 

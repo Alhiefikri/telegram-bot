@@ -195,6 +195,25 @@ handling. No recipient-level Telegram Outbound Effect is considered durable
 until its recipient snapshot exists; the committed broadcast handoff is the
 recovery guarantee that closes that interval.
 
+### Deferred Stock Notification materialization
+
+Canonical positive stock intake is the second deferred-materialization
+exception. The inventory transaction durably creates a
+`StockNotificationEvent`; its nullable `recipients_snapshotted_at` and
+`materialization_cursor` identify the audience snapshot still owed. The
+transaction does not render every customer message or create every Telegram
+effect while product and stock rows are locked.
+
+The after-commit `telegram-stock` worker snapshots at most 100 customers per
+pass, inserts recipient rows idempotently, materializes missing ledger effects
+in bounded slices, and sends at most one recipient effect per job execution.
+The job self-dispatches until the event and its effects are complete.
+`telegram:reconcile-stock-notifications` and `telegram:recover-outbound`
+rediscover events whose snapshot marker is null, so a process death before
+queue pickup cannot lose the committed restock intent. Existing compatibility
+paths that explicitly opt out of notification dispatch retain eager
+materialization.
+
 ## Consequences
 
 - A committed checkout or lifecycle transition cannot lose its durable Telegram effect merely because the process dies before queue dispatch.
@@ -207,7 +226,4 @@ recovery guarantee that closes that interval.
   then dispatches only due `pending` or policy-retryable `failed` effects
   through the shared dispatcher. It does not automatically resend an
   Ambiguous Telegram Delivery.
-- Admin Broadcast remains the documented deferred-materialization exception:
-  the committed broadcast row with a null `recipients_materialized_at` is the
-  durable handoff, and recovery redispatches that handoff through the same
-  locked queue boundary until recipient effects are materialized.
+- Admin Broadcast and canonical Stock Notification remain documented deferred-materialization exceptions: their committed source row/event and null snapshot marker are the durable handoff, and recovery redispatches the handoff through its locked queue boundary until recipient effects are materialized.

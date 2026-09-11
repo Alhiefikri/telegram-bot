@@ -19,7 +19,7 @@ Pick an item from **Part B** (highest priority first). Each item lists: the exac
 - **Tests run on SQLite `:memory:`** (`phpunit.xml`). Any raw SQL must be SQLite-portable (use `CASE`, not `GREATEST`). Run: `php artisan test` (or a path/`--filter`). App code lives under `src/`.
 - **CI gates on Pint** (`./vendor/bin/pint --test`) — fixers in play include `fully_qualified_strict_types` (import types, don't inline-FQN) and `ordered_imports`. Run `./vendor/bin/pint <files>` before finishing.
 - **CI gates on migration filename prefixes** (see commit "Gate code style and migration prefixes in CI"). New migrations use the `YYYY_MM_DD_NNNNNN_*` convention already present.
-- **Queue topology (already well-designed):** four named queues — `default` (inbound Telegram updates), `telegram-outbound` (buyer sends), `notifications` (order lifecycle), `telegram-broadcast` (fan-outs). Workers configured in `supervisord.conf` / `docker-compose.yml`. Reuse `telegram-broadcast` for any new fan-out.
+- **Queue topology:** named queues are `default` (inbound Telegram updates), `telegram-outbound` (buyer sends), `notifications` (order lifecycle), `telegram-broadcast` (admin/price fan-outs), and `telegram-stock` (bounded stock fan-out). Workers are configured in `supervisord.conf` / `docker-compose.yml`; preserve family isolation for new fan-out paths.
 
 ---
 
@@ -77,16 +77,15 @@ Verified: `php artisan test` → 730 tests, 714 passed, 16 skipped, 0 failed (B6
   - **(B)** restore `product.stock` in the same transaction and re-pool — cheaper on inventory, but the refunded buyer still holds the credential.
 - **Verify:** feature test for the refund action (state transitions + revenue exclusion) and for the chosen credential behavior.
 
-### B4 — Synchronous Telegram fan-out on request/inline paths (CRITICAL/HIGH perf) — ✅ bot broadcast path fixed 2026-08-13
+### B4 — Synchronous Telegram fan-out on request/inline paths (CRITICAL/HIGH perf) — ✅ DONE
 
-> **✅ APPLIED for the live bot-admin path.** `TelegramBroadcastIntents` now materializes a broadcast snapshot (including localized reply markup) and dispatches `SendTelegramBroadcastBatch` on `telegram-broadcast`. The `ProcessTelegramUpdate` worker acknowledges and queues the work without looping over customers; the existing per-recipient claim, retry, and idempotency pipeline is reused.
+> **✅ APPLIED.** Admin Broadcast remains on `telegram-broadcast`. Canonical positive stock intake now commits only a durable `StockNotificationEvent` handoff and queues `SendProductStockNotifications` on the dedicated `telegram-stock` worker after commit. Recipient rendering is cursor-bounded at 100 customers per pass; delivery sends one ledger effect per job and self-requeues until complete.
 
-- **Where:** `TelegramBroadcastService::sendToActiveUsers` (line 134) sends to every customer serially with a blocking `sendMessage` (10s timeout each). Callers:
-  - **Live:** `SendProductStockNotifications` job (`tries=1`, no `$timeout`) → `TelegramProductNotificationService::notifyStockAdded` → `sendToActiveUsers`. Truncates & is unrecoverable on timeout.
-  - **Fixed:** `TelegramBroadcastIntents` (bot-initiated admin broadcast) now queues the durable batch pipeline instead of running inside `ProcessTelegramUpdate` on the `default` queue.
-  - **Latent:** `AdminProductCreateController.php:49` → `notifyProductCreated` (currently a no-op because products are created with `stock=0`; becomes live if that changes).
-- **Fix:** route all three through the durable batched pipeline that the **dashboard broadcast already uses correctly** — copy the shape of `TelegramBroadcastService::queueAdminBroadcast` (line 31), `SendTelegramBroadcastBatch`, and `ProductPriceChangeNotificationService` / `SendProductPriceChangeNotifications`: materialize recipients, batch 25, per-recipient claim tokens + attempts, self-requeue with backoff, on the `telegram-broadcast` queue. Reply "queued" immediately from the bot path.
-- **Verify:** assert the request/job enqueues batches instead of sending inline; assert a mid-run failure resumes without duplicate sends (claim tokens).
+- **Where:** `ProductStockIntake` records the event inside the inventory transaction and dispatches after commit; `StockNotificationDeliveryPipeline` owns cursor-based snapshotting, effect materialization, claim/finalization, and aggregate projection.
+- **Isolation:** stock notification work no longer shares the admin broadcast worker, so a restock burst cannot head-of-line block admin broadcasts or price notifications.
+- **Timeout safety:** `SendProductStockNotifications` declares a 55-second job timeout, while each execution performs at most one Telegram request. The worker remains below the database queue connection's 180-second `retry_after`.
+- **Recovery:** a null `recipients_snapshotted_at` is a durable deferred handoff. Both `telegram:recover-outbound` and `telegram:reconcile-stock-notifications` rediscover it when after-commit dispatch or worker pickup is lost.
+- **Verify:** `ProductStockIntakeTest` proves the admin transaction commits before recipient rendering; `ProductInventoryRaceTest::test_stock_notification_job_sends_one_effect_and_requeues_remaining_delivery` proves one-effect job bounds and continuation.
 
 ### B5 — Pakasir verify blocks the request path ~31s > 15s single-flight lease (HIGH perf)
 

@@ -817,6 +817,7 @@ SH);
         $this->assertStringContainsString('--queue=telegram-outbound', $release);
         $this->assertStringContainsString('--queue=notifications', $release);
         $this->assertStringContainsString('--queue=telegram-broadcast', $release);
+        $this->assertStringContainsString('--queue=telegram-stock', $release);
         $this->assertStringContainsString('--queue=binance-verification', $release);
         $this->assertStringContainsString('if ! compose exec -T app php artisan ops:check-telegram-webhook', $release);
 

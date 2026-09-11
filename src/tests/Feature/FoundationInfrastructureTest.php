@@ -46,7 +46,7 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertSame('jobs', config('queue.connections.database.table'));
     }
 
-    public function test_supervisor_database_workers_isolate_update_outbound_notifications_and_broadcast_queues(): void
+    public function test_supervisor_database_workers_isolate_update_outbound_notifications_broadcast_and_stock_queues(): void
     {
         $contents = file_get_contents(base_path('../supervisord.conf'));
         $compose = file_get_contents(base_path('../docker-compose.yml'));
@@ -64,6 +64,8 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('--queue=notifications', $contents);
         $this->assertStringContainsString('[program:laravel-broadcast-worker]', $contents);
         $this->assertStringContainsString('--queue=telegram-broadcast', $contents);
+        $this->assertStringContainsString('[program:laravel-stock-worker]', $contents);
+        $this->assertStringContainsString('--queue=telegram-stock', $contents);
         $this->assertStringContainsString('--queue=binance-verification', $contents);
         $this->assertStringNotContainsString('ENV_LARAVEL_', $contents);
         $this->assertStringNotContainsString('ENV_BINANCE_VERIFICATION_QUEUE', $contents);
@@ -71,8 +73,9 @@ class FoundationInfrastructureTest extends TestCase
         foreach ([
             'LARAVEL_UPDATE_WORKER_PROCESSES',
             'LARAVEL_OUTBOUND_WORKER_PROCESSES',
-            'LARAVEL_NOTIFICATION_WORKER_PROCESSES',
             'LARAVEL_BROADCAST_WORKER_PROCESSES',
+            'LARAVEL_NOTIFICATION_WORKER_PROCESSES',
+            'LARAVEL_STOCK_WORKER_PROCESSES',
             'LARAVEL_BINANCE_VERIFICATION_WORKER_PROCESSES',
             'LARAVEL_UPDATE_WORKER_SLEEP',
             'LARAVEL_OUTBOUND_WORKER_SLEEP',
@@ -87,6 +90,7 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('laravel-outbound-worker:*', $healthCheck);
         $this->assertStringContainsString('laravel-notification-worker:*', $healthCheck);
         $this->assertStringContainsString('laravel-broadcast-worker:*', $healthCheck);
+        $this->assertStringContainsString('laravel-stock-worker:*', $healthCheck);
     }
 
     public function test_sakurupiah_verification_and_reconciliation_use_release_owned_paths(): void
@@ -126,6 +130,7 @@ class FoundationInfrastructureTest extends TestCase
             ->expectsOutput('Queue telegram-outbound: depth=0 oldest_age=0s')
             ->expectsOutput('Queue notifications: depth=0 oldest_age=0s')
             ->expectsOutput('Queue telegram-broadcast: depth=0 oldest_age=0s')
+            ->expectsOutput('Queue telegram-stock: depth=0 oldest_age=0s')
             ->assertSuccessful();
     }
 

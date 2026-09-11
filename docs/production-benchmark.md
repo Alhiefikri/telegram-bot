@@ -79,7 +79,7 @@ On 2026-07-02, issue #70 was verified with clean dogfood volumes by running:
 BENCHMARK_COMPOSE_PROJECT=telegram-bot-dogfood-issue70 WEB_PORT=18081 BASE_URL=http://127.0.0.1:18081 ./scripts/benchmark-production.sh
 ```
 
-Result: passed. The report measured webhook ACK p95 at 31.049 ms, handler drain at 4133.749 ms, final queue depth at 0, and failed jobs at 0. This run used fake Telegram outbound for safe synthetic handler coverage, but exercised the then-current Docker/Nginx/PostgreSQL/Supervisor queue topology with split `default` and combined `telegram-outbound,notifications` workers. Current runs should show the later issue #171 topology with independent `default`, `telegram-outbound`, `notifications`, and `telegram-broadcast` pools.
+Result: passed. The report measured webhook ACK p95 at 31.049 ms, handler drain at 4133.749 ms, final queue depth at 0, and failed jobs at 0. This run used fake Telegram outbound for safe synthetic handler coverage, but exercised the then-current Docker/Nginx/PostgreSQL/Supervisor queue topology with split `default` and combined `telegram-outbound,notifications` workers. Current runs should show the later issue #171 topology with independent `default`, `telegram-outbound`, `notifications`, `telegram-broadcast`, and `telegram-stock` pools.
 
 ## Synthetic Versus Real External Calls
 

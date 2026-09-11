@@ -9,16 +9,20 @@ use App\Enums\UserRole;
 use App\Jobs\SendProductStockNotifications;
 use App\Models\AuditLog;
 use App\Models\CredentialIdentity;
+use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Product;
 use App\Models\ProductStockIntakeOperation;
 use App\Models\ProductStockItem;
 use App\Models\StockNotificationEvent;
+use App\Models\StockNotificationRecipient;
 use App\Models\User;
 use App\Services\ProductStockIntake;
 use App\Services\ProductStockIntakeIdempotencyConflict;
 use App\Services\ProductStockIntakeSubmission;
+use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -77,8 +81,74 @@ class ProductStockIntakeTest extends TestCase
         $this->assertStringNotContainsString('Account.One@Example.test', (string) $movement->notes);
         $this->assertStringNotContainsString('multi', (string) json_encode($audit->new_values));
         $this->assertSame(1, ProductStockIntakeOperation::query()->count());
-        $this->assertSame(1, StockNotificationEvent::query()->where('inventory_movement_id', $movement->id)->count());
-        Queue::assertPushedOn('telegram-broadcast', SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $movement->id);
+        $event = StockNotificationEvent::query()->where('inventory_movement_id', $movement->id)->sole();
+        $this->assertNull($event->recipients_snapshotted_at);
+        $this->assertSame(0, $event->recipients()->count());
+        Queue::assertPushedOn(StockNotificationDeliveryPipeline::QUEUE, SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $movement->id);
+    }
+
+    public function test_reconcile_rediscovers_a_committed_stock_handoff_when_queue_dispatch_is_lost(): void
+    {
+        Queue::fake([SendProductStockNotifications::class]);
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        $result = app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::structured([
+                [
+                    'email' => 'recovery@example.test',
+                    'password' => 'recovery-password',
+                    'access_method' => 'otp_mail_link',
+                    'access_value' => 'https://mail.example.test/recovery',
+                ],
+            ], (string) Str::uuid()),
+            $admin,
+            '203.0.113.11',
+        );
+
+        Queue::fake([SendProductStockNotifications::class]);
+        $this->artisan('telegram:reconcile-stock-notifications --chunk=25')
+            ->expectsOutput('Queued 1 stock notification event(s).')
+            ->assertSuccessful();
+
+        Queue::assertPushedOn(
+            StockNotificationDeliveryPipeline::QUEUE,
+            SendProductStockNotifications::class,
+            fn (SendProductStockNotifications $job): bool => $job->movementId === $result->movementId,
+        );
+    }
+
+    public function test_deferred_stock_handoff_materializes_and_delivers_after_commit(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 777]])]);
+        Customer::factory()->create(['telegram_id' => 399030, 'locale' => 'id']);
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        $result = app(ProductStockIntake::class)->submit(
+            $product,
+            ProductStockIntakeSubmission::structured([
+                [
+                    'email' => 'delivery@example.test',
+                    'password' => 'delivery-password',
+                    'access_method' => 'otp_mail_link',
+                    'access_value' => 'https://mail.example.test/delivery',
+                ],
+            ], (string) Str::uuid()),
+            $admin,
+            '203.0.113.12',
+        );
+
+        (new SendProductStockNotifications($result->movementId))
+            ->handle(app(StockNotificationDeliveryPipeline::class));
+
+        $recipient = StockNotificationRecipient::query()->sole();
+        $this->assertNotNull($recipient->sent_at);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '399030');
     }
 
     public function test_bulk_mfa_secret_format_validates_each_triplet_and_keeps_legacy_delivery_compatibility(): void
