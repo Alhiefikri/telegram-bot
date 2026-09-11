@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\Admin\AdminDashboardData;
 use App\Services\Admin\AdminProductDashboardState;
 use App\Services\Admin\StorefrontFunnelReport;
+use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\ViewErrorBag;
@@ -20,7 +21,9 @@ class AdminDashboardController extends Controller
         if ($requestedTab === StorefrontFunnelReport::TAB) {
             abort_unless($funnelReport->canView($user), 403);
         }
-
+        if ($requestedTab === StoreBalanceOwnerCompensationService::TAB) {
+            abort_unless($user?->role?->canCompensateStoreBalance() === true, 403);
+        }
         $viewData = $dashboardData->forActiveTab(
             $user,
             $requestedTab,
@@ -39,8 +42,13 @@ class AdminDashboardController extends Controller
                 'rail' => $request->query('rail'),
                 'source' => $request->query('source'),
                 'utm_source' => $request->query('utm_source'),
-                'utm_medium' => $request->query('utm_medium'),
                 'utm_campaign' => $request->query('utm_campaign'),
+                'balance_telegram_id' => $request->query('balance_telegram_id'),
+                'balance_username' => $request->query('balance_username'),
+                'balance_status' => $request->query('balance_status'),
+                'balance_age' => $request->query('balance_age'),
+                'balance_provider_reference' => $request->query('balance_provider_reference'),
+                'balance_page' => $request->query('balance_page'),
             ],
         );
         $dashboardErrors = $request->session()->get('errors', new ViewErrorBag);

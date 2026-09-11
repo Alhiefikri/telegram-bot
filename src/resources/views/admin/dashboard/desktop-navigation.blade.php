@@ -104,6 +104,22 @@
                     </svg>
                     <span class="text-[11px] font-black uppercase tracking-wide">Riwayat</span>
                 </x-admin-dashboard.button>
+                @if ($canManageBalanceIssues)
+                <x-admin-dashboard.button
+                    type="button"
+                    variant="neutral"
+                    size="sm"
+                    x-on:click="goToTab('balance-issues')"
+                    class="py-3"
+                    x-bind:class="activeTab === 'balance-issues' ? 'bottom-nav-active' : ''"
+                    x-bind:aria-current="activeTab === 'balance-issues' ? 'page' : null"
+                >
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v18m9-9H3m15.5-6.5-13 13m0-13 13 13" />
+                    </svg>
+                    <span class="text-[11px] font-black uppercase tracking-wide">Kompensasi</span>
+                </x-admin-dashboard.button>
+                @endif
 
                 @if ($canViewWithdraw)
                 <x-admin-dashboard.button

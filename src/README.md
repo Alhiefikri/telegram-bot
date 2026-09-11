@@ -295,7 +295,18 @@ For a repeatable production-like benchmark with pass/fail budgets and no real Te
 
 The command writes `report.json` and `report.md` under `artifacts/production-benchmark/<timestamp>/`, reports p50/p95/max latency, status counts, queue depth, failed jobs, health, and container memory, and exits non-zero when budgets fail. Details and budget environment variables are documented in `../docs/production-benchmark.md`.
 
-Run the PostgreSQL concurrency deploy gate before shipping changes that affect inventory, cart, checkout, payment, order expiry, or admin stock operations:
+Run the PostgreSQL concurrency deploy gate before shipping changes that affect inventory, cart, checkout, payment, order expiry, or admin stock operations.
+
+For a local machine without a PostgreSQL service, use the disposable Docker-backed gate:
+
+```bash
+cd src
+composer test:concurrency-gate:local
+```
+
+The local wrapper starts `postgres:16-alpine` on `127.0.0.1:55432`, waits for readiness, runs the same gate, removes the container on exit, and retains the report under a writable temporary directory. Override `CONCURRENCY_POSTGRES_PORT`, `CONCURRENCY_POSTGRES_IMAGE`, or `CONCURRENCY_GATE_ARTIFACT_DIR` when needed. The default credentials are disposable local-test values only.
+
+If PostgreSQL is already running, the lower-level gate can use it directly:
 
 ```bash
 cd src
@@ -309,7 +320,7 @@ CONCURRENCY_DB_APP_PASSWORD='postgres-password' \
 composer test:concurrency-gate
 ```
 
-The gate creates a one-off PostgreSQL database named like `telegram_bot_concurrency_test_*`, runs the `concurrency` PHPUnit group with `RUN_CONCURRENCY_TESTS=1`, fails if PHPUnit reports any skipped concurrency test, and drops the database during cleanup. It writes `phpunit.log`, `junit.xml`, and `report.md` under `artifacts/concurrency-gate/<timestamp>/`. Attach the latest `report.md` to the issue or PR so reviewers can see the test count, skipped count, failures, and exit code.
+Both commands create a one-off PostgreSQL database named like `telegram_bot_concurrency_test_*`, run the `concurrency` PHPUnit group with `RUN_CONCURRENCY_TESTS=1`, fail if PHPUnit reports any skipped concurrency test, and drop the database during cleanup. Attach the generated `report.md` to the issue or PR so reviewers can see the test count, skipped count, failures, and exit code.
 
 Use the faster default suite for ordinary edits:
 

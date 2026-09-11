@@ -92,6 +92,31 @@ class StoreBalanceTopUp extends Model
             ->where('kind', StoreBalanceEntryKind::TopUpCredit->value);
     }
 
+    public function compensation()
+    {
+        return $this->hasOne(StoreBalanceCompensation::class, 'store_balance_top_up_id');
+    }
+
+    public function isEligibleForOwnerCompensation(): bool
+    {
+        if ($this->status === StoreBalanceTopUpStatus::Compensated
+            || $this->status === StoreBalanceTopUpStatus::Paid
+            || $this->compensation !== null) {
+            return false;
+        }
+
+        if (in_array($this->status, [
+            StoreBalanceTopUpStatus::Expired,
+            StoreBalanceTopUpStatus::RecoveryPending,
+            StoreBalanceTopUpStatus::InvalidProviderResult,
+        ], true)) {
+            return true;
+        }
+
+        return $this->status === StoreBalanceTopUpStatus::Failed
+            && ($this->provider_created_at !== null || filled($this->provider_reference));
+    }
+
     public function outboundEffects()
     {
         return $this->morphMany(TelegramOutboundEffect::class, 'source');

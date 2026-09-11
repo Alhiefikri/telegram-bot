@@ -31,6 +31,7 @@ use App\Http\Controllers\Admin\AdminProductUpdateController;
 use App\Http\Controllers\Admin\AdminProductVisibilityController;
 use App\Http\Controllers\Admin\AdminSalesProofRetryController;
 use App\Http\Controllers\Admin\AdminStoreBalanceFundingPolicyController;
+use App\Http\Controllers\Admin\AdminStoreBalanceTopUpCompensationController;
 use App\Http\Controllers\Admin\AdminStoreChannelController;
 use App\Http\Controllers\Admin\AdminStoreChannelTestController;
 use App\Http\Controllers\Admin\AdminStorefrontPlaceholderController;
@@ -146,6 +147,9 @@ Route::middleware('admin.no-cache')->group(function (): void {
             });
             Route::post('checkout-maintenance', AdminCheckoutMaintenanceController::class)->name('checkout-maintenance.update');
             Route::post('store-balance/funding-policy', AdminStoreBalanceFundingPolicyController::class)->name('store-balance.funding-policy.update');
+            Route::post('store-balance/top-ups/{topUp}/compensate', AdminStoreBalanceTopUpCompensationController::class)
+                ->middleware('admin.store-balance-owner')
+                ->name('store-balance.top-ups.compensate');
             Route::post('support-settings', AdminSupportSettingsController::class)->name('support-settings.update');
             Route::post('storefront-placeholder', AdminStorefrontPlaceholderController::class)->name('storefront-placeholder.update');
             Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');

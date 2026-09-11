@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
@@ -14,6 +15,7 @@ use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\SalesProofPost;
 use App\Models\StockNotificationRecipient;
+use App\Models\StoreBalanceCompensation;
 use App\Models\StoreBalanceTopUp;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramBroadcast;
@@ -53,6 +55,8 @@ class TelegramOutboundEffectService
     public const TYPE_BALANCE_TOP_UP = TelegramOutboundEffectType::BalanceTopUpInstructions->value;
 
     public const TYPE_BALANCE_TOP_UP_RECEIPT = TelegramOutboundEffectType::BalanceTopUpReceipt->value;
+
+    public const TYPE_OWNER_COMPENSATION_NOTIFICATION = TelegramOutboundEffectType::OwnerCompensationNotification->value;
 
     public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
 
@@ -117,6 +121,8 @@ class TelegramOutboundEffectService
     public const TEMPLATE_BALANCE_TOP_UP = 'balance-top-up-klikqris-v1';
 
     public const TEMPLATE_BALANCE_TOP_UP_RECEIPT = 'balance-top-up-receipt-v1';
+
+    public const TEMPLATE_OWNER_COMPENSATION_NOTIFICATION = 'balance-owner-compensation-v1';
 
     public const TEMPLATE_RECEIPT_CREDENTIALS = 'receipt-credentials-v1';
 
@@ -371,6 +377,57 @@ class TelegramOutboundEffectService
                 'next_attempt_at' => now(),
                 'outcome_metadata' => [
                     'delivery_context' => 'balance_top_up_receipt',
+                    'delivery_method' => 'sendMessage',
+                ],
+            ],
+        );
+    }
+
+    public function recordOwnerCompensationNotification(
+        StoreBalanceCompensation $compensation,
+        ?Customer $customer = null,
+    ): ?TelegramOutboundEffect {
+        $customer ??= $compensation->customer;
+        $topUp = $compensation->topUp;
+        $ledgerEntry = $compensation->ledgerEntry;
+        $chatId = trim((string) $topUp?->chat_id);
+        if ($customer === null
+            || $topUp === null
+            || $ledgerEntry === null
+            || $ledgerEntry->kind !== StoreBalanceEntryKind::OwnerCompensationCredit
+            || $ledgerEntry->amount !== (int) $topUp->amount
+            || $ledgerEntry->source_type !== 'owner_compensation'
+            || $customer->telegram_id === null
+            || $chatId === ''
+            || (string) $customer->telegram_id !== $chatId
+            || (int) $customer->getKey() !== (int) $compensation->customer_id
+            || (int) $topUp->customer_id !== (int) $compensation->customer_id
+            || $topUp->status !== StoreBalanceTopUpStatus::Compensated
+            || (int) $compensation->amount !== (int) $topUp->amount) {
+            return null;
+        }
+
+        $effectKey = self::ownerCompensationEffectKey((string) $compensation->getKey());
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => self::TYPE_OWNER_COMPENSATION_NOTIFICATION,
+                'source_type' => StoreBalanceCompensation::class,
+                'source_id' => (string) $compensation->getKey(),
+                'target_type' => 'customer',
+                'telegram_chat_id' => $chatId,
+                'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE,
+                'telegram_method' => 'sendMessage',
+                'locale' => $customer->locale,
+                'template_version' => self::TEMPLATE_OWNER_COMPENSATION_NOTIFICATION,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+                'outcome_metadata' => [
+                    'delivery_context' => 'balance_owner_compensation',
                     'delivery_method' => 'sendMessage',
                 ],
             ],
@@ -1468,6 +1525,16 @@ class TelegramOutboundEffectService
         return 'balance-top-up:'.$topUpId.':klikqris-receipt:v1';
     }
 
+    public static function ownerCompensationEffectKey(string $compensationId): string
+    {
+        $compensationId = trim($compensationId);
+        if (preg_match('/\A[1-9][0-9]{0,18}\z/D', $compensationId) !== 1) {
+            throw new InvalidArgumentException('Store Balance compensation reference is invalid.');
+        }
+
+        return 'balance-owner-compensation:'.$compensationId.':notification:v1';
+    }
+
     public function forOrder(string $orderId, ?string $effectType = null): ?TelegramOutboundEffect
     {
         $query = TelegramOutboundEffect::query()
@@ -1510,6 +1577,17 @@ class TelegramOutboundEffectService
             ->where('source_type', StoreBalanceTopUp::class)
             ->where('source_id', $topUpId)
             ->where('effect_type', self::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    public function forOwnerCompensation(string $compensationId): ?TelegramOutboundEffect
+    {
+        return TelegramOutboundEffect::query()
+            ->where('source_type', StoreBalanceCompensation::class)
+            ->where('source_id', $compensationId)
+            ->where('effect_type', self::TYPE_OWNER_COMPENSATION_NOTIFICATION)
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->first();
@@ -2405,6 +2483,9 @@ class TelegramOutboundEffectService
                 return 'Payment proof '.$invoice;
             }
         }
+        if ($effect->source_type === StoreBalanceCompensation::class) {
+            return 'Balance compensation #'.substr((string) $effect->source_id, 0, 12);
+        }
 
         if ($effect->source_type === StoreBalanceTopUp::class) {
             return 'Balance top-up #'.substr((string) $effect->source_id, 0, 12);
@@ -2565,6 +2646,7 @@ class TelegramOutboundEffectService
             self::TYPE_BSC_CHECKOUT => self::TEMPLATE_BSC_CHECKOUT,
             self::TYPE_BALANCE_TOP_UP => self::TEMPLATE_BALANCE_TOP_UP,
             self::TYPE_BALANCE_TOP_UP_RECEIPT => self::TEMPLATE_BALANCE_TOP_UP_RECEIPT,
+            self::TYPE_OWNER_COMPENSATION_NOTIFICATION => self::TEMPLATE_OWNER_COMPENSATION_NOTIFICATION,
             self::TYPE_RECEIPT_CREDENTIALS => self::TEMPLATE_RECEIPT_CREDENTIALS,
             self::TYPE_RECEIPT_TXT_DOWNLOAD => self::TEMPLATE_RECEIPT_TXT_DOWNLOAD,
             self::TYPE_RECEIPT_ORDER_ACTIONS => self::TEMPLATE_RECEIPT_ORDER_ACTIONS,

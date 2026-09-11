@@ -11,4 +11,5 @@ enum StoreBalanceTopUpStatus: string
     case RecoveryPending = 'recovery_pending';
     case InvalidProviderResult = 'invalid_provider_result';
     case Expired = 'expired';
+    case Compensated = 'compensated';
 }

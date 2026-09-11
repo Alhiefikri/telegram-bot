@@ -38,8 +38,12 @@
             $historyTab = $historyTab ?? [];
             $withdrawTab = $withdrawTab ?? [];
             $funnelTab = $funnelTab ?? [];
-            $canViewWithdraw = (bool) ($withdrawTab['can_view'] ?? false);
+            $balanceIssuesTab = $balanceIssuesTab ?? [];
             $canViewFunnel = (bool) ($funnelTab['can_view'] ?? false);
+            $canViewWithdraw = (bool) ($withdrawTab['can_view'] ?? false);
+            $canManageBalanceIssues = ($admin['role'] ?? '') === 'owner';
+            $canViewBalanceIssues = ($navigation['activeTab'] ?? '') === 'balance-issues'
+                && ($balanceIssuesTab['state'] ?? null) === 'ready';
             $structuredStockInputEnabled = (bool) ($dashboardState['structuredStockInputEnabled'] ?? false);
         @endphp
 
@@ -76,6 +80,8 @@
                 @include('admin.dashboard.withdraw-tab')
             @elseif ($navigation['activeTab'] === 'funnel')
                 @include('admin.dashboard.funnel-tab')
+            @elseif ($navigation['activeTab'] === 'balance-issues')
+                @include('admin.dashboard.balance-issues-tab')
             @endif
             @include('admin.dashboard.mobile-navigation')
         </main>

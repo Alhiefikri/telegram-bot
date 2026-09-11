@@ -395,9 +395,10 @@ class KlikQrisNativeQrisService
                 && $providerState === 'reconciled_SUCCESS',
             retryable: $topUp->status === StoreBalanceTopUpStatus::Failed
                 && $providerState === 'create_failed',
-            manualReview: $topUp->status === StoreBalanceTopUpStatus::InvalidProviderResult
-                || ($topUp->status !== StoreBalanceTopUpStatus::Expired
-                    && $providerState === 'reconciliation_review'),
+            manualReview: $topUp->status !== StoreBalanceTopUpStatus::Compensated
+                && ($topUp->status === StoreBalanceTopUpStatus::InvalidProviderResult
+                    || ($topUp->status !== StoreBalanceTopUpStatus::Expired
+                        && $providerState === 'reconciliation_review')),
             checkable: in_array($topUp->status, [
                 StoreBalanceTopUpStatus::Pending,
                 StoreBalanceTopUpStatus::RecoveryPending,
@@ -445,6 +446,10 @@ class KlikQrisNativeQrisService
     {
         if ($refresh) {
             $topUp->refresh();
+        }
+
+        if ($topUp->status === StoreBalanceTopUpStatus::Compensated) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult);
         }
 
         if ($topUp->status === StoreBalanceTopUpStatus::Expired
@@ -508,6 +513,7 @@ class KlikQrisNativeQrisService
                 StoreBalanceTopUpStatus::Expired,
                 StoreBalanceTopUpStatus::InvalidProviderResult,
                 StoreBalanceTopUpStatus::Paid,
+                StoreBalanceTopUpStatus::Compensated,
             ], true)
             || $result->outcome() === KlikQrisNativeQrisOutcome::Expired) {
             return $result;
@@ -550,6 +556,7 @@ class KlikQrisNativeQrisService
                 StoreBalanceTopUpStatus::Paid,
                 StoreBalanceTopUpStatus::Expired,
                 StoreBalanceTopUpStatus::InvalidProviderResult,
+                StoreBalanceTopUpStatus::Compensated,
             ], true)) {
                 return $this->classifyTopUp($topUp);
             }
@@ -1155,6 +1162,7 @@ class KlikQrisNativeQrisService
                 StoreBalanceTopUpStatus::Expired,
                 StoreBalanceTopUpStatus::InvalidProviderResult,
                 StoreBalanceTopUpStatus::Paid,
+                StoreBalanceTopUpStatus::Compensated,
             ], true)
             || $classified->outcome() === KlikQrisNativeQrisOutcome::Expired) {
             return $classified;
@@ -1212,7 +1220,8 @@ class KlikQrisNativeQrisService
                 return false;
             }
 
-            if ($lockedTopUp->status === StoreBalanceTopUpStatus::Paid) {
+            if ($lockedTopUp->status === StoreBalanceTopUpStatus::Paid
+                || $lockedTopUp->status === StoreBalanceTopUpStatus::Compensated) {
                 return true;
             }
 
@@ -1379,6 +1388,7 @@ class KlikQrisNativeQrisService
                 ->lockForUpdate()
                 ->firstOrFail();
             if ($locked->status === StoreBalanceTopUpStatus::Paid
+                || $locked->status === StoreBalanceTopUpStatus::Compensated
                 || $locked->status === StoreBalanceTopUpStatus::InvalidProviderResult
                 || $locked->status === StoreBalanceTopUpStatus::Expired
                 || $locked->provider_create_state !== null
@@ -1422,7 +1432,10 @@ class KlikQrisNativeQrisService
                 ->whereKey($topUp->getKey())
                 ->lockForUpdate()
                 ->first();
-            if ($locked === null || $locked->status === StoreBalanceTopUpStatus::Paid || $locked->isPayable()) {
+            if ($locked === null
+                || $locked->status === StoreBalanceTopUpStatus::Paid
+                || $locked->status === StoreBalanceTopUpStatus::Compensated
+                || $locked->isPayable()) {
                 return;
             }
 
@@ -1445,7 +1458,10 @@ class KlikQrisNativeQrisService
                 ->whereKey($topUp->getKey())
                 ->lockForUpdate()
                 ->first();
-            if ($locked === null || $locked->status === StoreBalanceTopUpStatus::Paid || $locked->isPayable()) {
+            if ($locked === null
+                || $locked->status === StoreBalanceTopUpStatus::Paid
+                || $locked->status === StoreBalanceTopUpStatus::Compensated
+                || $locked->isPayable()) {
                 return;
             }
 
@@ -1485,7 +1501,9 @@ class KlikQrisNativeQrisService
                 ->whereKey($topUp->getKey())
                 ->lockForUpdate()
                 ->first();
-            if ($locked === null || $locked->status === StoreBalanceTopUpStatus::Paid) {
+            if ($locked === null
+                || $locked->status === StoreBalanceTopUpStatus::Paid
+                || $locked->status === StoreBalanceTopUpStatus::Compensated) {
                 return;
             }
 

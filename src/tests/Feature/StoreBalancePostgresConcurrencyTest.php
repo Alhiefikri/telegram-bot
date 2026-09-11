@@ -21,6 +21,7 @@ use App\Models\CustomerBalanceAccount;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\StoreBalanceCompensation;
 use App\Models\StoreBalanceEntry;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceFundingPolicy;
@@ -39,6 +40,7 @@ use App\Services\StoreBalance\StoreBalanceFundingIntentInput;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use App\Services\StoreBalance\StoreBalanceReconciliation;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Support\PaymentProvider;
@@ -145,6 +147,9 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
             DB::table('cart_items')->whereIn('cart_id', $cartIds)->delete();
         }
         DB::table('carts')->whereIn('customer_id', $this->createdCustomerIds)->delete();
+        DB::table('store_balance_compensations')
+            ->whereIn('customer_id', $this->createdCustomerIds)
+            ->delete();
         Customer::query()->whereKey($this->createdCustomerIds)->delete();
 
         if ($this->createdProductIds !== [] && Schema::hasTable('products')) {
@@ -357,9 +362,81 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         )));
         $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
         $this->assertSame(1, StoreBalanceEntry::query()->count());
+
         $this->assertSame(1, StoreBalanceTopUpEvent::query()->where('event_type', 'callback')->count());
         $this->assertSame(1, StoreBalanceTopUpEvent::query()->where('event_type', 'reconciliation')->count());
         $this->assertSame(8000, StoreBalanceEntry::query()->sole()->amount);
+        $this->assertProjectionMatchesLedger($topUp->customer, 8000);
+    }
+
+    public function test_postgres_competing_owner_compensations_create_one_credit_and_one_resolution(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $topUp = $this->createSettlementTopUp(45432, 'owner-compensation-race');
+        $topUp->forceFill(['status' => StoreBalanceTopUpStatus::Expired])->save();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $results = $this->runConcurrentWorkers(2, function (int $index) use ($topUp, $owner): string {
+            $result = app(StoreBalanceOwnerCompensationService::class)->release(
+                topUpId: $topUp->id,
+                actor: User::query()->findOrFail($owner->id),
+                providerReference: 'OWNER-RACE-'.$index,
+                reason: 'Concurrent owner resolution.',
+            );
+
+            return $result->applied ? 'Applied' : 'Replayed';
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $outcomes = array_map(static fn (array $result): string => (string) ($result['value'] ?? ''), $results);
+        sort($outcomes);
+        $this->assertSame(['Applied', 'Replayed'], $outcomes, json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(StoreBalanceTopUpStatus::Compensated, $topUp->fresh()->status);
+        $this->assertSame(1, StoreBalanceCompensation::query()->count());
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::OwnerCompensationCredit)->count());
+        $this->assertSame(0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::TopUpCredit)->count());
+        $this->assertSame(8000, $this->balanceOf($topUp->customer));
+        $this->assertProjectionMatchesLedger($topUp->customer, 8000);
+    }
+
+    public function test_postgres_owner_compensation_and_provider_callback_race_never_credit_twice_or_restore_paid_status(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $topUp = $this->createSettlementTopUp(45433, 'owner-callback-race');
+        $topUp->forceFill(['status' => StoreBalanceTopUpStatus::Expired])->save();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $callbackPayload = $this->topUpCallbackPayload($topUp);
+        $statusPayload = $this->topUpStatusPayload($topUp);
+
+        $results = $this->runConcurrentWorkers(2, function (int $index) use ($topUp, $owner, $callbackPayload, $statusPayload): string {
+            if ($index === 0) {
+                return app(StoreBalanceOwnerCompensationService::class)->release(
+                    topUpId: $topUp->id,
+                    actor: User::query()->findOrFail($owner->id),
+                    providerReference: 'OWNER-CALLBACK-RACE',
+                    reason: 'Provider callback race resolution.',
+                )->applied ? 'compensation_applied' : 'compensation_replayed';
+            }
+
+            $callback = KlikQrisCallback::fromPayload($callbackPayload);
+            $transaction = KlikQrisTransaction::fromStatusPayload($statusPayload, KlikQrisEnvironment::Sandbox);
+            app(StoreBalanceTopUpService::class)->settleAuthoritativeTransaction(
+                StoreBalanceTopUp::query()->findOrFail($topUp->id),
+                $transaction,
+                fn (StoreBalanceTopUp $lockedTopUp): StoreBalanceTopUpEvent => app(StoreBalanceTopUpEventLogger::class)->logCallback($callback, $lockedTopUp),
+            );
+
+            return 'callback_checked';
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame(StoreBalanceTopUpStatus::Compensated, $topUp->fresh()->status);
+        $this->assertSame(1, StoreBalanceCompensation::query()->count());
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::OwnerCompensationCredit)->count());
+        $this->assertSame(0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::TopUpCredit)->count());
+        $this->assertSame(8000, $this->balanceOf($topUp->customer));
         $this->assertProjectionMatchesLedger($topUp->customer, 8000);
     }
 

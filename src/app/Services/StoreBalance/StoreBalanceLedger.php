@@ -98,6 +98,22 @@ final class StoreBalanceLedger
         );
     }
 
+    public function creditOwnerCompensation(
+        Customer $customer,
+        int $amount,
+        string $compensationId,
+        string $idempotencyKey,
+    ): StoreBalanceMutationResult {
+        return $this->apply(
+            $customer,
+            StoreBalanceEntryKind::OwnerCompensationCredit,
+            $amount,
+            'owner_compensation',
+            $compensationId,
+            $idempotencyKey,
+        );
+    }
+
     public function debit(
         Customer $customer,
         int $amount,
@@ -161,7 +177,12 @@ final class StoreBalanceLedger
                     throw new RuntimeException('Cannot refund a Store Balance Order without its original debit.');
                 }
 
-                $balanceAfter = (int) $account->balance + ($kind->direction() * $amount);
+                $balance = (int) $account->balance;
+                if ($kind->direction() > 0 && $amount > PHP_INT_MAX - $balance) {
+                    throw new InvalidArgumentException('Store Balance balance exceeds supported integer range.');
+                }
+
+                $balanceAfter = $balance + ($kind->direction() * $amount);
                 if ($balanceAfter < 0) {
                     throw new InsufficientStoreBalance('Store Balance cannot cover the requested amount.');
                 }

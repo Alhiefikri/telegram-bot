@@ -63,6 +63,10 @@
     "test:concurrency-gate": [
       "../scripts/concurrency-deploy-gate.sh"
     ],
+    "test:concurrency-gate:local": [
+      "Composer\\Config::disableProcessTimeout",
+      "../scripts/concurrency-deploy-gate-local.sh"
+    ],
     "test:foundation": [
       "@php artisan config:clear --ansi",
       "@php artisan test --filter=FoundationInfrastructureTest"

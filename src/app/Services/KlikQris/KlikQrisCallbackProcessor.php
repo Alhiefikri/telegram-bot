@@ -131,6 +131,10 @@ class KlikQrisCallbackProcessor
             return ($event ?? $this->topUpEvents->logCallback($callback, $topUp))->fresh();
         }
 
+        if ($topUp->status === StoreBalanceTopUpStatus::Compensated) {
+            return $this->topUps->recordCompensatedCallback($topUp, $callback);
+        }
+
         if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
             return $this->topUps->recordSettledCallback($topUp, $callback);
         }

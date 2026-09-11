@@ -19,6 +19,8 @@ class AdminDashboardRedirector
 
     public const TAB_STORE_CHANNEL = 'telegram-channel';
 
+    public const TAB_BALANCE_ISSUES = 'balance-issues';
+
     /**
      * @var array<string, string>
      */
@@ -28,6 +30,7 @@ class AdminDashboardRedirector
         self::TAB_SALES => 'admin-section-sales',
         self::TAB_BROADCAST => 'admin-section-broadcast',
         self::TAB_STORE_CHANNEL => 'admin-section-store-channel',
+        self::TAB_BALANCE_ISSUES => 'admin-section-balance-issues',
     ];
 
     /**
@@ -101,6 +104,11 @@ class AdminDashboardRedirector
     public function fundingPolicy(): RedirectResponse
     {
         return $this->dashboard(self::TAB_STATS, 'admin-store-balance-funding-policy');
+    }
+
+    public function balanceIssues(): RedirectResponse
+    {
+        return $this->dashboard(self::TAB_BALANCE_ISSUES, self::TAB_FALLBACK_TARGETS[self::TAB_BALANCE_ISSUES]);
     }
 
     public function broadcast(): RedirectResponse

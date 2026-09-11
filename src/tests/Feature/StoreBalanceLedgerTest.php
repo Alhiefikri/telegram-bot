@@ -51,6 +51,38 @@ final class StoreBalanceLedgerTest extends TestCase
         $this->assertNotNull($entry->created_at);
     }
 
+    public function test_credit_rejects_integer_overflow_without_mutating_balance(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 901117]);
+        $ledger = app(StoreBalanceLedger::class);
+
+        $ledger->credit(
+            $customer,
+            PHP_INT_MAX,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            'overflow-1',
+            'balance_top_up:overflow-1:credit',
+        );
+
+        try {
+            $ledger->credit(
+                $customer,
+                1,
+                StoreBalanceEntryKind::TopUpCredit,
+                'balance_top_up',
+                'overflow-2',
+                'balance_top_up:overflow-2:credit',
+            );
+            $this->fail('An overflowing Store Balance credit must be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('integer range', $exception->getMessage());
+        }
+
+        $this->assertSame(PHP_INT_MAX, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+    }
+
     public function test_reapplying_the_same_idempotency_key_returns_the_existing_result_without_a_second_entry(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 901102]);

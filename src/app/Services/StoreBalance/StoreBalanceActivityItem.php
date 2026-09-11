@@ -12,13 +12,16 @@ final class StoreBalanceActivityItem
 
     public const KIND_TOP_UP = 'top_up';
 
+    public const KIND_COMPENSATION = 'compensation';
+
     public const KIND_PURCHASE = 'purchase';
 
     public const KIND_REFUND = 'refund';
-
     public const STATE_CREDITED = 'credited';
 
     public const STATE_RECOVERED = 'recovered';
+
+    public const STATE_COMPENSATED = 'compensated';
 
     public const STATE_PENDING = 'pending';
 

@@ -9,6 +9,7 @@ use App\Models\StoreChannelSetting;
 use App\Models\TelegramBroadcast;
 use App\Models\User;
 use App\Services\PaymentReceiptReport;
+use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use App\Services\Telegram\FakeSalesProofPostPublisher;
 use App\Services\Telegram\TelegramBotApiRedactor;
 
@@ -22,6 +23,7 @@ final class AdminDashboardData
         private readonly PaymentReceiptReport $receiptReport,
         private readonly AdminDashboardReportingData $reportingData,
         private readonly StorefrontFunnelReport $funnelReport,
+        private readonly StoreBalanceOwnerCompensationService $ownerCompensation,
     ) {}
 
     /**
@@ -32,9 +34,9 @@ final class AdminDashboardData
      *     statsTab: array<string, mixed>,
      *     productsTab: array<string, mixed>,
      *     salesTab: array<string, mixed>,
-     *     historyTab: array<string, mixed>,
      *     withdrawTab: array<string, mixed>,
-     *     funnelTab: array<string, mixed>
+     *     funnelTab: array<string, mixed>,
+     *     balanceIssuesTab: array<string, mixed>
      * }
      */
     public function forAdmin(
@@ -47,11 +49,12 @@ final class AdminDashboardData
         $metrics = $this->metrics();
         $statusCounts = $this->statusCounts();
         $storeLink = $this->storeLink();
-        $navigation = $this->navigation($requestedTab);
+        $navigation = $this->navigation($requestedTab, $user);
         $canManageProducts = (bool) $user->role?->canMutateProducts();
         $funnelTab = $this->funnelReport->empty($user);
         $historyTab = $this->reportingData->emptyHistory();
         $withdrawTab = $this->reportingData->emptyWithdraw($user);
+        $balanceIssuesTab = $this->ownerCompensation->emptyQueue($user);
 
         if ($navigation['activeTab'] === StorefrontFunnelReport::TAB) {
             $funnelTab = $this->funnelReport->forAdmin($user, $reportingFilters);
@@ -63,6 +66,10 @@ final class AdminDashboardData
 
         if ($navigation['activeTab'] === 'withdraw') {
             $withdrawTab = $this->reportingData->forWithdraw($user, $reportingFilters);
+        }
+
+        if ($navigation['activeTab'] === StoreBalanceOwnerCompensationService::TAB) {
+            $balanceIssuesTab = $this->ownerCompensation->queue($user, $reportingFilters);
         }
 
         return [
@@ -77,6 +84,7 @@ final class AdminDashboardData
             'historyTab' => $historyTab,
             'withdrawTab' => $withdrawTab,
             'funnelTab' => $funnelTab,
+            'balanceIssuesTab' => $balanceIssuesTab,
         ];
     }
 
@@ -96,7 +104,7 @@ final class AdminDashboardData
         $metrics = $this->metrics();
         $statusCounts = $this->statusCounts();
         $storeLink = $this->storeLink();
-        $navigation = $this->navigation($requestedTab);
+        $navigation = $this->navigation($requestedTab, $user);
         $canManageProducts = (bool) $user->role?->canMutateProducts();
         $data = [
             'admin' => $this->adminIdentity($user),
@@ -127,6 +135,7 @@ final class AdminDashboardData
             'historyTab' => $this->reportingData->emptyHistory(),
             'withdrawTab' => $this->reportingData->emptyWithdraw($user),
             'funnelTab' => $this->funnelReport->empty($user),
+            'balanceIssuesTab' => $this->ownerCompensation->emptyQueue($user),
         ];
 
         match ($navigation['activeTab']) {
@@ -138,6 +147,7 @@ final class AdminDashboardData
             'riwayat' => $data['historyTab'] = $this->reportingData->forHistory($reportingFilters['page'] ?? 1),
             'withdraw' => $data['withdrawTab'] = $this->reportingData->forWithdraw($user, $reportingFilters),
             StorefrontFunnelReport::TAB => $data['funnelTab'] = $this->funnelReport->forAdmin($user, $reportingFilters),
+            StoreBalanceOwnerCompensationService::TAB => $data['balanceIssuesTab'] = $this->ownerCompensation->queue($user, $reportingFilters),
             default => null,
         };
 
@@ -175,7 +185,7 @@ final class AdminDashboardData
         ];
     }
 
-    private function navigation(?string $requestedTab): array
+    private function navigation(?string $requestedTab, User $user): array
     {
         $tabs = [
             ['id' => 'stats', 'label' => 'Stats'],
@@ -187,6 +197,9 @@ final class AdminDashboardData
             ['id' => 'riwayat', 'label' => 'Riwayat'],
             ['id' => StorefrontFunnelReport::TAB, 'label' => 'Funnel'],
         ];
+        if ($user->role?->canCompensateStoreBalance() === true) {
+            $tabs[] = ['id' => StoreBalanceOwnerCompensationService::TAB, 'label' => 'Kompensasi Top-up'];
+        }
         $tabIds = array_column($tabs, 'id');
         $requestedTab = (string) ($requestedTab ?: 'stats');
 

@@ -7,6 +7,7 @@
         'riwayat' => 'Riwayat KlikQRIS',
         'withdraw' => 'Withdraw Order Status',
         'funnel' => 'Funnel Storefront',
+        'balance-issues' => 'Kompensasi Top-up',
     ];
     $internalTabLabel = $internalTabLabels[$navigation['activeTab']] ?? 'Dashboard';
 @endphp

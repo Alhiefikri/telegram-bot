@@ -3,6 +3,7 @@
 namespace App\Services\StoreBalance;
 
 use App\Enums\StoreBalanceEntryKind;
+use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\Order;
@@ -22,6 +23,8 @@ final class StoreBalanceActivityService
 
     private const BALANCE_TOP_UP_SOURCE = 'balance_top_up';
 
+    private const OWNER_COMPENSATION_SOURCE = 'owner_compensation';
+
     private const ORDER_SOURCE = 'order';
 
     /**
@@ -31,6 +34,7 @@ final class StoreBalanceActivityService
         'id',
         'customer_id',
         'amount',
+        'status',
         'created_at',
     ];
 
@@ -100,16 +104,30 @@ final class StoreBalanceActivityService
         if ($topUp === null) {
             return null;
         }
-
         $accountId = $this->accountId($customer);
+
         $credit = $accountId === null
             ? null
             : StoreBalanceEntry::query()
                 ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'created_at'])
                 ->where('customer_balance_account_id', $accountId)
-                ->where('source_type', self::BALANCE_TOP_UP_SOURCE)
-                ->where('kind', StoreBalanceEntryKind::TopUpCredit->value)
-                ->where('source_id', (string) $topUp->getKey())
+                ->whereIn('kind', [
+                    StoreBalanceEntryKind::TopUpCredit->value,
+                    StoreBalanceEntryKind::OwnerCompensationCredit->value,
+                ])
+                ->where(function (Builder $query) use ($topUp): void {
+                    $query
+                        ->where(function (Builder $query) use ($topUp): void {
+                            $query
+                                ->where('source_type', self::BALANCE_TOP_UP_SOURCE)
+                                ->where('source_id', (string) $topUp->getKey());
+                        })
+                        ->orWhere(function (Builder $query) use ($topUp): void {
+                            $query
+                                ->where('source_type', self::OWNER_COMPENSATION_SOURCE)
+                                ->where('source_id', 'top_up:'.$topUp->getKey());
+                        });
+                })
                 ->first();
         $presentation = $this->nativeQris->topUpPresentation($topUp);
 
@@ -243,16 +261,18 @@ final class StoreBalanceActivityService
             ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'created_at'])
             ->where('customer_balance_account_id', $accountId)
             ->where(function (Builder $query) use ($customerId): void {
-                $query->where('source_type', '!=', self::BALANCE_TOP_UP_SOURCE)
-                    ->orWhere(function (Builder $query) use ($customerId): void {
-                        $query->where('source_type', self::BALANCE_TOP_UP_SOURCE)
-                            ->whereNotExists(function ($topUps) use ($customerId): void {
-                                $topUps->selectRaw('1')
-                                    ->from('store_balance_top_ups')
-                                    ->where('customer_id', $customerId)
-                                    ->whereRaw('CAST(store_balance_top_ups.id AS TEXT) = store_balance_entries.source_id');
-                            });
-                    });
+                $query->whereNotIn('source_type', [
+                    self::BALANCE_TOP_UP_SOURCE,
+                    self::OWNER_COMPENSATION_SOURCE,
+                ])->orWhere(function (Builder $query) use ($customerId): void {
+                    $query->where('source_type', self::BALANCE_TOP_UP_SOURCE)
+                        ->whereNotExists(function ($topUps) use ($customerId): void {
+                            $topUps->selectRaw('1')
+                                ->from('store_balance_top_ups')
+                                ->where('customer_id', $customerId)
+                                ->whereRaw('CAST(store_balance_top_ups.id AS TEXT) = store_balance_entries.source_id');
+                        });
+                });
             });
         if ($cursor !== null) {
             $this->applyCursor($query, $cursor, StoreBalanceActivityCursor::ENTRY_RANK, $newer);
@@ -312,11 +332,32 @@ final class StoreBalanceActivityService
         return StoreBalanceEntry::query()
             ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'created_at'])
             ->where('customer_balance_account_id', $accountId)
-            ->where('source_type', self::BALANCE_TOP_UP_SOURCE)
-            ->where('kind', StoreBalanceEntryKind::TopUpCredit->value)
-            ->whereIn('source_id', array_map('strval', $ids))
+            ->whereIn('kind', [
+                StoreBalanceEntryKind::TopUpCredit->value,
+                StoreBalanceEntryKind::OwnerCompensationCredit->value,
+            ])
+            ->where(function (Builder $query) use ($ids): void {
+                $query
+                    ->where(function (Builder $query) use ($ids): void {
+                        $query
+                            ->where('source_type', self::BALANCE_TOP_UP_SOURCE)
+                            ->whereIn('source_id', array_map('strval', $ids));
+                    })
+                    ->orWhere(function (Builder $query) use ($ids): void {
+                        $query
+                            ->where('source_type', self::OWNER_COMPENSATION_SOURCE)
+                            ->whereIn('source_id', array_map(
+                                static fn (int|string $id): string => 'top_up:'.$id,
+                                $ids,
+                            ));
+                    });
+            })
             ->get()
-            ->keyBy(fn (StoreBalanceEntry $entry): string => (string) $entry->source_id);
+            ->keyBy(function (StoreBalanceEntry $entry): string {
+                return $entry->source_type === self::OWNER_COMPENSATION_SOURCE
+                    ? substr((string) $entry->source_id, strlen('top_up:'))
+                    : (string) $entry->source_id;
+            });
     }
 
     /**
@@ -392,25 +433,31 @@ final class StoreBalanceActivityService
         KlikQrisTopUpPresentation $presentation,
     ): StoreBalanceActivityItem {
         $creditMatchesRequest = $credit !== null
-            && $credit->kind === StoreBalanceEntryKind::TopUpCredit
+            && in_array($credit->kind, [
+                StoreBalanceEntryKind::TopUpCredit,
+                StoreBalanceEntryKind::OwnerCompensationCredit,
+            ], true)
             && (int) $credit->amount === (int) $topUp->amount
             && (int) $credit->amount > 0;
-        $state = $this->topUpState($presentation, $creditMatchesRequest);
+        $state = $this->topUpState($presentation, $creditMatchesRequest, $topUp->status);
         $creditedAmount = $creditMatchesRequest ? (int) $credit->amount : null;
+        $isCompensated = $topUp->status === StoreBalanceTopUpStatus::Compensated;
 
         return new StoreBalanceActivityItem(
             type: StoreBalanceActivityItem::TYPE_TOP_UP,
             id: (int) $topUp->getKey(),
             occurredAt: $this->immutable($topUp->created_at),
-            kind: StoreBalanceActivityItem::KIND_TOP_UP,
+            kind: $isCompensated
+                ? StoreBalanceActivityItem::KIND_COMPENSATION
+                : StoreBalanceActivityItem::KIND_TOP_UP,
             state: $state,
             amount: $creditedAmount ?? (int) $topUp->amount,
             signedAmount: $creditedAmount,
             reference: '#'.(int) $topUp->getKey(),
             requestedAmount: (int) $topUp->amount,
             creditedAmount: $creditedAmount,
-            topUpCanCheck: $presentation->canCheck(),
-            topUpCanRetry: $presentation->canRetry(),
+            topUpCanCheck: ! $isCompensated && $presentation->canCheck(),
+            topUpCanRetry: ! $isCompensated && $presentation->canRetry(),
         );
     }
 
@@ -424,11 +471,13 @@ final class StoreBalanceActivityService
     ): StoreBalanceActivityItem {
         $kind = match ($entry->kind) {
             StoreBalanceEntryKind::TopUpCredit => StoreBalanceActivityItem::KIND_TOP_UP,
+            StoreBalanceEntryKind::OwnerCompensationCredit => StoreBalanceActivityItem::KIND_COMPENSATION,
             StoreBalanceEntryKind::PurchaseDebit => StoreBalanceActivityItem::KIND_PURCHASE,
             StoreBalanceEntryKind::RefundCredit => StoreBalanceActivityItem::KIND_REFUND,
         };
         $state = match ($entry->kind) {
             StoreBalanceEntryKind::TopUpCredit => StoreBalanceActivityItem::STATE_CREDITED,
+            StoreBalanceEntryKind::OwnerCompensationCredit => StoreBalanceActivityItem::STATE_COMPENSATED,
             StoreBalanceEntryKind::PurchaseDebit => StoreBalanceActivityItem::STATE_DEBITED,
             StoreBalanceEntryKind::RefundCredit => StoreBalanceActivityItem::STATE_REFUNDED,
         };
@@ -453,7 +502,12 @@ final class StoreBalanceActivityService
     private function topUpState(
         KlikQrisTopUpPresentation $presentation,
         bool $creditMatchesRequest,
+        StoreBalanceTopUpStatus $status,
     ): string {
+        if ($status === StoreBalanceTopUpStatus::Compensated) {
+            return StoreBalanceActivityItem::STATE_COMPENSATED;
+        }
+
         if ($presentation->isPaid()) {
             if (! $creditMatchesRequest) {
                 return StoreBalanceActivityItem::STATE_REVIEW;
@@ -477,6 +531,7 @@ final class StoreBalanceActivityService
             KlikQrisNativeQrisOutcome::Payable,
             KlikQrisNativeQrisOutcome::ProviderTotalPending => StoreBalanceActivityItem::STATE_PENDING,
         };
+
     }
 
     private function entryReference(StoreBalanceEntry $entry, ?Order $order): string

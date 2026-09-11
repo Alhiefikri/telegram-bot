@@ -47,4 +47,9 @@ class Customer extends Model implements Authenticatable
     {
         return $this->hasMany(StoreBalanceTopUp::class);
     }
+
+    public function balanceAccount()
+    {
+        return $this->hasOne(CustomerBalanceAccount::class);
+    }
 }

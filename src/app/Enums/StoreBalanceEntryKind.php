@@ -7,6 +7,7 @@ enum StoreBalanceEntryKind: string
     case TopUpCredit = 'top_up_credit';
     case PurchaseDebit = 'purchase_debit';
     case RefundCredit = 'refund_credit';
+    case OwnerCompensationCredit = 'owner_compensation_credit';
 
     /**
      * Every ledger entry stores a positive amount; the kind owns the
@@ -15,7 +16,7 @@ enum StoreBalanceEntryKind: string
     public function direction(): int
     {
         return match ($this) {
-            self::TopUpCredit, self::RefundCredit => 1,
+            self::TopUpCredit, self::RefundCredit, self::OwnerCompensationCredit => 1,
             self::PurchaseDebit => -1,
         };
     }

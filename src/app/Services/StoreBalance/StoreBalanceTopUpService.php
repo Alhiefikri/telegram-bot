@@ -181,7 +181,8 @@ final class StoreBalanceTopUpService
             $current = $topUp->fresh();
             if ($current !== null
                 && $current->status !== StoreBalanceTopUpStatus::Paid
-                && $current->status !== StoreBalanceTopUpStatus::Expired) {
+                && $current->status !== StoreBalanceTopUpStatus::Expired
+                && $current->status !== StoreBalanceTopUpStatus::Compensated) {
                 $due = ($current->expires_at !== null && ! $current->expires_at->isFuture())
                     || ($current->provider_expires_at !== null && ! $current->provider_expires_at->isFuture());
                 if ($due) {
@@ -208,7 +209,8 @@ final class StoreBalanceTopUpService
         if ($current !== null
             && $current->provider_create_state === 'provider_signature_missing'
             && $current->status !== StoreBalanceTopUpStatus::Paid
-            && $current->status !== StoreBalanceTopUpStatus::Expired) {
+            && $current->status !== StoreBalanceTopUpStatus::Expired
+            && $current->status !== StoreBalanceTopUpStatus::Compensated) {
             $this->markReconciliationReview($current, 'provider_signature_missing');
         }
 
@@ -234,7 +236,8 @@ final class StoreBalanceTopUpService
             if ($locked === null
                 || $locked->status === StoreBalanceTopUpStatus::Paid
                 || $locked->status === StoreBalanceTopUpStatus::Expired
-                || $locked->status === StoreBalanceTopUpStatus::InvalidProviderResult) {
+                || $locked->status === StoreBalanceTopUpStatus::InvalidProviderResult
+                || $locked->status === StoreBalanceTopUpStatus::Compensated) {
                 return false;
             }
 
@@ -324,7 +327,11 @@ final class StoreBalanceTopUpService
                 return;
             }
 
-            if (in_array($locked->status, [StoreBalanceTopUpStatus::Paid, StoreBalanceTopUpStatus::Expired], true)) {
+            if (in_array($locked->status, [
+                StoreBalanceTopUpStatus::Paid,
+                StoreBalanceTopUpStatus::Expired,
+                StoreBalanceTopUpStatus::Compensated,
+            ], true)) {
                 $event = $this->events->logReconciliationReview($locked, $reason);
                 if ($event->processed_at === null) {
                     $event->forceFill(['processed_at' => now()])->save();
@@ -414,6 +421,50 @@ final class StoreBalanceTopUpService
         }, attempts: 5);
     }
 
+    public function recordCompensatedCallback(
+        StoreBalanceTopUp $topUp,
+        KlikQrisCallback $callback,
+    ): StoreBalanceTopUpEvent {
+        return DB::transaction(function () use ($topUp, $callback): StoreBalanceTopUpEvent {
+            $lockedTopUp = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->where('customer_id', $topUp->customer_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $event = $this->events->logCallback($callback, $lockedTopUp);
+            if ((int) $event->store_balance_top_up_id !== (int) $lockedTopUp->getKey()) {
+                throw new RuntimeException('Store Balance top-up event ownership mismatch.');
+            }
+
+            $lockedEvent = StoreBalanceTopUpEvent::query()
+                ->whereKey($event->getKey())
+                ->where('store_balance_top_up_id', $lockedTopUp->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            if ($lockedEvent->processed_at !== null) {
+                return $lockedEvent->fresh();
+            }
+
+            if ($lockedTopUp->status === StoreBalanceTopUpStatus::Compensated
+                && $this->matchesCompensatedCallback($lockedTopUp, $callback)) {
+                $lockedEvent->forceFill(['processed_at' => now()])->save();
+                ($this->audit ?? app(AuditLogger::class))->logWithResolvedContext(
+                    'store_balance.top_up.compensation_provider_evidence',
+                    $lockedTopUp,
+                    old: ['status' => StoreBalanceTopUpStatus::Compensated->value],
+                    new: [
+                        'status' => StoreBalanceTopUpStatus::Compensated->value,
+                        'provider_event_id' => (int) $lockedEvent->getKey(),
+                        'provider_reference_hash' => $this->referenceHash($callback->providerReference()),
+                        'late_evidence' => true,
+                    ],
+                );
+            }
+
+            return $lockedEvent->fresh();
+        }, attempts: 5);
+    }
+
     /**
      * @param  Closure(StoreBalanceTopUp): StoreBalanceTopUpEvent  $eventFactory
      */
@@ -471,6 +522,26 @@ final class StoreBalanceTopUpService
 
                 $lockedEvent->forceFill(['processed_at' => now()])->save();
                 StoreBalanceTopUpSettled::dispatch((string) $lockedTopUp->getKey());
+
+                return $lockedEvent->fresh();
+            }
+            if ($lockedTopUp->status === StoreBalanceTopUpStatus::Compensated) {
+                if (! $this->matchesSettledEvidence($lockedTopUp, $transaction)) {
+                    return $lockedEvent->fresh();
+                }
+
+                $lockedEvent->forceFill(['processed_at' => now()])->save();
+                ($this->audit ?? app(AuditLogger::class))->logWithResolvedContext(
+                    'store_balance.top_up.compensation_provider_evidence',
+                    $lockedTopUp,
+                    old: ['status' => StoreBalanceTopUpStatus::Compensated->value],
+                    new: [
+                        'status' => StoreBalanceTopUpStatus::Compensated->value,
+                        'provider_event_id' => (int) $lockedEvent->getKey(),
+                        'provider_reference_hash' => $this->referenceHash($transaction->providerReference()),
+                        'late_evidence' => true,
+                    ],
+                );
 
                 return $lockedEvent->fresh();
             }
@@ -568,11 +639,14 @@ final class StoreBalanceTopUpService
         KlikQrisTransaction $transaction,
     ): bool {
         $providerReference = $transaction->providerReference();
+        $totalMatches = $topUp->status === StoreBalanceTopUpStatus::Compensated
+            ? $transaction->totalAmount() >= (int) $topUp->amount
+            : $topUp->provider_total_payment !== null
+                && $transaction->totalAmount() === (int) $topUp->provider_total_payment;
 
         return $transaction->isSuccess()
             && $transaction->amount()->rupiah() === (int) $topUp->amount
-            && $topUp->provider_total_payment !== null
-            && $transaction->totalAmount() === (int) $topUp->provider_total_payment
+            && $totalMatches
             && ($providerReference === null
                 || $topUp->provider_reference === null
                 || $providerReference === (string) $topUp->provider_reference);
@@ -592,6 +666,23 @@ final class StoreBalanceTopUpService
             && (int) $topUp->amount === $callback->amount()->rupiah()
             && $topUp->provider_total_payment !== null
             && (int) $topUp->provider_total_payment === $callback->totalAmount()
+            && ($providerReference === null
+                || $topUp->provider_reference === null
+                || $providerReference === (string) $topUp->provider_reference);
+    }
+
+    private function matchesCompensatedCallback(
+        StoreBalanceTopUp $topUp,
+        KlikQrisCallback $callback,
+    ): bool {
+        $providerReference = $callback->providerReference();
+
+        return $topUp->status === StoreBalanceTopUpStatus::Compensated
+            && $callback->isPaidTrigger()
+            && strtolower(trim((string) $topUp->provider)) === PaymentProvider::KLIKQRIS
+            && trim((string) $topUp->merchant_ref) === $callback->orderId()
+            && (int) $topUp->amount === $callback->amount()->rupiah()
+            && $callback->totalAmount() >= (int) $topUp->amount
             && ($providerReference === null
                 || $topUp->provider_reference === null
                 || $providerReference === (string) $topUp->provider_reference);
