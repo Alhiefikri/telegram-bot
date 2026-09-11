@@ -9,9 +9,9 @@ use App\Models\TelegramOutboundEffect;
 use Carbon\CarbonInterface;
 
 /**
- * Coordinates lease recovery with family read-projection repair. The ledger
- * protocol performs the only state transition; family adapters only refresh
- * projections for recovered unknown outcomes or completed delivery handoffs.
+ * Coordinates lease recovery with family projection repair and source handoff.
+ * The ledger protocol performs the only delivery-state transition; family
+ * adapters own projection repair and source-specific materialization rules.
  */
 final class TelegramOutboundEffectRecovery
 {
@@ -25,6 +25,7 @@ final class TelegramOutboundEffectRecovery
         private readonly CheckoutInstructionDeliveryPipeline $checkoutInstructions,
         private readonly StockNotificationDeliveryPipeline $stockNotifications,
         private readonly ProductPriceChangeNotificationService $priceNotifications,
+        private readonly StoreBalanceTopUpOutbound $storeBalanceTopUps,
     ) {}
 
     /**
@@ -38,6 +39,14 @@ final class TelegramOutboundEffectRecovery
     public function reconcileCompletedReceiptProjections(int $chunk = 100): array
     {
         return $this->receipts->reconcileCompletedProjections($chunk, dispatchCleanup: false);
+    }
+
+    /**
+     * Recover missing committed Store Balance top-up outbound effects.
+     */
+    public function recoverMissingStoreBalanceTopUpEffects(int $chunk = 100): int
+    {
+        return $this->storeBalanceTopUps->recoverMissing($chunk);
     }
 
     /**

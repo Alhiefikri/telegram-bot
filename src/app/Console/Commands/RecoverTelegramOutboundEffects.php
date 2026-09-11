@@ -10,7 +10,6 @@ use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\SalesProofPost;
-use App\Models\StoreBalanceTopUp;
 use App\Models\StoreChannelSetting;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramBroadcastService;
@@ -73,43 +72,7 @@ class RecoverTelegramOutboundEffects extends Command
                     $dispatched++;
                 }
             });
-        StoreBalanceTopUp::query()
-            ->where('provider', PaymentProvider::KLIKQRIS)
-            ->where('status', 'payable')
-            ->with('customer')
-            ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($topUps) use (&$dispatched, $outboundEffects, $dispatcher): void {
-                foreach ($topUps as $topUp) {
-                    if ($outboundEffects->forBalanceTopUp((string) $topUp->getKey()) !== null) {
-                        continue;
-                    }
-
-                    $effect = $outboundEffects->recordBalanceTopUpInstructions($topUp, $topUp->customer);
-                    if ($effect !== null) {
-                        $dispatcher->dispatch($effect, now()->toISOString());
-                        $dispatched++;
-                    }
-                }
-            });
-        StoreBalanceTopUp::query()
-            ->where('provider', PaymentProvider::KLIKQRIS)
-            ->where('status', 'paid')
-            ->whereNotNull('settled_at')
-            ->with('customer')
-            ->orderBy('id')
-            ->chunkById((int) $this->option('chunk'), function ($topUps) use (&$dispatched, $outboundEffects, $dispatcher): void {
-                foreach ($topUps as $topUp) {
-                    if ($outboundEffects->forBalanceTopUpReceipt((string) $topUp->getKey()) !== null) {
-                        continue;
-                    }
-
-                    $effect = $outboundEffects->recordBalanceTopUpReceipt($topUp, $topUp->customer);
-                    if ($effect !== null) {
-                        $dispatcher->dispatch($effect, now()->toISOString());
-                        $dispatched++;
-                    }
-                }
-            });
+        $dispatched += $recovery->recoverMissingStoreBalanceTopUpEffects((int) $this->option('chunk'));
 
         SalesProofPost::query()
             ->whereIn('status', [

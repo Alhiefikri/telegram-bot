@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
+use App\Events\StoreBalanceTopUpSettled;
 use App\Jobs\SendStoreBalanceTopUpInstructions;
 use App\Jobs\SendStoreBalanceTopUpReceipt;
 use App\Models\Customer;
@@ -13,6 +14,8 @@ use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\StoreBalanceTopUpOutboundOutcome;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Support\TelegramBotTestSupport;
@@ -99,6 +102,102 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
             'effect_type' => TelegramOutboundEffectType::BalanceTopUpReceipt->value,
         ]);
         Queue::assertPushed(SendStoreBalanceTopUpInstructions::class);
+        Queue::assertPushed(SendStoreBalanceTopUpReceipt::class);
+    }
+
+    public function test_generic_recovery_repairs_missing_instruction_and_receipt_effects_without_duplicate_rows(): void
+    {
+        Queue::fake();
+        $instructionTopUp = $this->makeTopUp();
+        $receiptTopUp = $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Paid,
+            'paid_at' => now()->subMinute(),
+            'settled_at' => now()->subMinute(),
+        ]);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $instructionTopUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpInstructions->value)
+            ->count());
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $receiptTopUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpReceipt->value)
+            ->count());
+        $this->assertSame(2, TelegramOutboundEffect::query()->count());
+        Queue::assertPushed(SendStoreBalanceTopUpInstructions::class);
+        Queue::assertPushed(SendStoreBalanceTopUpReceipt::class);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $instructionTopUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpInstructions->value)
+            ->count());
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $receiptTopUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpReceipt->value)
+            ->count());
+        $this->assertSame(2, TelegramOutboundEffect::query()->count());
+    }
+
+    public function test_generic_recovery_repairs_a_receipt_when_the_settlement_listener_handoff_is_missed(): void
+    {
+        Queue::fake();
+        $topUp = $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Paid,
+            'paid_at' => now()->subMinute(),
+            'settled_at' => now()->subMinute(),
+        ]);
+
+        Event::fakeFor(function () use ($topUp): void {
+            DB::transaction(function () use ($topUp): void {
+                StoreBalanceTopUpSettled::dispatch((string) $topUp->getKey());
+            });
+        });
+
+        $this->assertSame(0, TelegramOutboundEffect::query()->count());
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $topUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpReceipt->value)
+            ->count());
+        Queue::assertPushed(SendStoreBalanceTopUpReceipt::class);
+    }
+
+    public function test_settlement_listener_defers_receipt_handoff_and_recovery_reuses_it(): void
+    {
+        Queue::fake();
+        $topUp = $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Paid,
+            'paid_at' => now()->subMinute(),
+            'settled_at' => now()->subMinute(),
+        ]);
+
+        DB::transaction(function () use ($topUp): void {
+            StoreBalanceTopUpSettled::dispatch((string) $topUp->getKey());
+
+            $this->assertSame(0, TelegramOutboundEffect::query()->count());
+        });
+
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $topUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpReceipt->value)
+            ->count());
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $topUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpReceipt->value)
+            ->count());
         Queue::assertPushed(SendStoreBalanceTopUpReceipt::class);
     }
 
