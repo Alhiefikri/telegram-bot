@@ -4,6 +4,7 @@ namespace App\Services\StoreBalance;
 
 use App\Enums\StoreBalanceFundingIntentStatus;
 use App\Enums\StoreBalanceTopUpStatus;
+use App\Events\StoreBalanceTopUpSettled;
 use App\Models\Customer;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
@@ -18,8 +19,6 @@ use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
-use App\Services\Telegram\TelegramOutboundEffectDispatcher;
-use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Closure;
 use Illuminate\Database\QueryException;
@@ -37,8 +36,6 @@ final class StoreBalanceTopUpService
         private readonly StoreBalanceTopUpEventLogger $events,
         private readonly KlikQrisNativeQrisService $nativeQris,
         private readonly ?AuditLogger $audit = null,
-        private readonly ?TelegramOutboundEffectService $outboundEffects = null,
-        private readonly ?TelegramOutboundEffectDispatcher $outboundDispatcher = null,
     ) {}
 
     public static function actionCallback(string $action, int|string $topUpId): string
@@ -410,7 +407,7 @@ final class StoreBalanceTopUpService
 
             if ($this->matchesSettledCallback($lockedTopUp, $callback)) {
                 $lockedEvent->forceFill(['processed_at' => now()])->save();
-                $this->materializePaidReceipt($lockedTopUp);
+                StoreBalanceTopUpSettled::dispatch((string) $lockedTopUp->getKey());
             }
 
             return $lockedEvent->fresh();
@@ -451,7 +448,7 @@ final class StoreBalanceTopUpService
 
             if ($lockedEvent->processed_at !== null) {
                 if ($lockedTopUp->status === StoreBalanceTopUpStatus::Paid) {
-                    $this->materializePaidReceipt($lockedTopUp);
+                    StoreBalanceTopUpSettled::dispatch((string) $lockedTopUp->getKey());
                 }
 
                 return $lockedEvent->fresh();
@@ -473,7 +470,7 @@ final class StoreBalanceTopUpService
                 }
 
                 $lockedEvent->forceFill(['processed_at' => now()])->save();
-                $this->materializePaidReceipt($lockedTopUp);
+                StoreBalanceTopUpSettled::dispatch((string) $lockedTopUp->getKey());
 
                 return $lockedEvent->fresh();
             }
@@ -515,7 +512,7 @@ final class StoreBalanceTopUpService
                 );
             }
 
-            $this->materializePaidReceipt($lockedTopUp);
+            StoreBalanceTopUpSettled::dispatch((string) $lockedTopUp->getKey());
 
             return $lockedEvent->fresh();
         }, attempts: 5);
@@ -598,15 +595,6 @@ final class StoreBalanceTopUpService
             && ($providerReference === null
                 || $topUp->provider_reference === null
                 || $providerReference === (string) $topUp->provider_reference);
-    }
-
-    private function materializePaidReceipt(StoreBalanceTopUp $topUp): void
-    {
-        $effects = $this->outboundEffects ?? app(TelegramOutboundEffectService::class);
-        $effect = $effects->recordBalanceTopUpReceipt($topUp->fresh(['customer']));
-        if ($effect !== null) {
-            ($this->outboundDispatcher ?? app(TelegramOutboundEffectDispatcher::class))->dispatch($effect);
-        }
     }
 
     private function referenceHash(?string $reference): ?string

@@ -241,10 +241,13 @@ Untuk KlikQRIS, `delivery_outcome=retry_notice_sent` tidak dianggap selesai: ket
 
 Balance top-ups use the same KlikQRIS Native QRIS lifecycle boundary but never
 create an Order or Payment. `StoreBalanceTopUpEventLogger` stores only
-sanitized provider evidence, `StoreBalanceTopUpService` settles the requested
-credit through `StoreBalanceLedger`, and
-`BalanceTopUpInstructionDeliveryPipeline` sends one separate durable QRIS
-effect after the canonical navigation update.
+sanitized provider evidence, while `StoreBalanceTopUpService` settles the
+requested credit through `StoreBalanceLedger` and emits `StoreBalanceTopUpSettled`
+as an after-commit application event. `MaterializeStoreBalanceTopUpReceipt`
+reloads the committed top-up, materializes the idempotent Telegram receipt
+effect, and hands it to `TelegramOutboundEffectDispatcher`. The
+`BalanceTopUpInstructionDeliveryPipeline` still sends one separate durable
+QRIS effect after the canonical navigation update.
 
 Receipt successor/readiness is exposed by
 `TelegramOutboundEffectLedgerProtocol::nextReceiptEffect($groupKey, $afterSequence)`.

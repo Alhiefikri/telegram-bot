@@ -6,7 +6,7 @@ Accepted - 2026-08-17
 
 ## Decision
 
-Durable business deliveries to Telegram use one transactional Outbound Effect Ledger written in the same database transaction as the Order, Payment, inventory, Sales Proof, or other source change that requires the delivery. The ledger tracks ordered delivery units with `pending`, `sending`, `sent`, `failed`, `unknown`, and `manual_review` outcomes, using a database lease and claim token for ownership. It does not include ephemeral callback acknowledgements or cleanup calls.
+Durable business deliveries to Telegram use one transactional Outbound Effect Ledger written in the same database transaction as the Order, Payment, inventory, Sales Proof, or other source change that requires the delivery, except for the deferred-materialization handoffs documented below. The ledger tracks ordered delivery units with `pending`, `sending`, `sent`, `failed`, `unknown`, and `manual_review` outcomes, using a database lease and claim token for ownership. It does not include ephemeral callback acknowledgements or cleanup calls.
 
 Telegram does not document an outbound idempotency key for `sendMessage` or `sendPhoto`, so a timeout, connection failure, or worker crash after the send may have an ambiguous outcome. Ambiguous effects are never blindly retried. They remain auditable for operator verification or an explicit new resend effect. Existing `orders.checkout_key` remains responsible for checkout mutation idempotency, while queue uniqueness and `afterCommit()` remain supporting optimisations rather than delivery guarantees.
 
@@ -155,6 +155,18 @@ The Sales Proof recovery contract is covered by
 `TelegramLifecycleOutboundEffectTest::test_recovery_repairs_a_sent_sales_proof_projection_without_resending_it`
 and
 `TelegramLifecycleOutboundEffectTest::test_recovery_leaves_unknown_and_manual_review_sales_proof_effects_untouched`.
+
+### Deferred Store Balance receipt materialization
+
+A successful Store Balance settlement changes authoritative top-up and ledger
+state inside `StoreBalanceTopUpService`'s transaction. The service emits the
+`StoreBalanceTopUpSettled` application event, which implements
+`ShouldDispatchAfterCommit`; `MaterializeStoreBalanceTopUpReceipt` then
+reloads the committed top-up, materializes the idempotent Telegram receipt
+effect, and passes it to the dispatcher. No Telegram service or dispatcher
+runs under financial locks. If the process stops after commit before the
+listener runs, `telegram:recover-outbound` finds paid settled top-ups without
+a receipt effect and performs the same handoff. Replays reuse the effect key.
 
 ### Deferred Admin Broadcast materialization
 
