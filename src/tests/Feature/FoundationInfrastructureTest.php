@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Console\Commands\ReconcileKlikQrisPayments;
+use App\Console\Commands\ReconcileStoreBalanceTopUps;
 use App\Http\Middleware\RedirectToCanonicalHost;
 use App\Providers\AppServiceProvider;
 use App\Services\Telegram\TelegramBotClient;
@@ -165,6 +166,10 @@ class FoundationInfrastructureTest extends TestCase
         ]);
 
         $this->assertSame(4, ReconcileKlikQrisPayments::schedulerMutexMinutes());
+        $schedule = file_get_contents(base_path('routes/console.php'));
+        $this->assertStringContainsString('klikqris:reconcile-balance-top-ups --chunk=100 --max-top-ups=10', $schedule);
+        $this->assertStringContainsString('withoutOverlapping(ReconcileStoreBalanceTopUps::schedulerMutexMinutes())', $schedule);
+        $this->assertSame(4, ReconcileStoreBalanceTopUps::schedulerMutexMinutes());
     }
 
     public function test_production_php_upload_limits_allow_product_images(): void

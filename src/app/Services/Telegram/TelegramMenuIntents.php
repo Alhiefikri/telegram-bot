@@ -271,8 +271,11 @@ class TelegramMenuIntents
             $this->locale->translate($customer, 'balance.confirmation.no_invoice'),
         ] : [];
         if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
+            $paidNoticeKey = $topUp->provider_create_state === 'reconciled_SUCCESS'
+                ? 'balance.topup.recovered'
+                : 'balance.topup.paid';
             $lines = array_merge($confirmationLines, [
-                $this->locale->translate($customer, 'balance.topup.paid', [
+                $this->locale->translate($customer, $paidNoticeKey, [
                     'amount' => $this->locale->idr((int) $topUp->amount),
                 ]),
             ]);
@@ -307,15 +310,17 @@ class TelegramMenuIntents
                 ],
             ], $this->navigationRow($customer)];
         } else {
-            $noticeKey = $topUp->canRetryCreate()
-                ? 'balance.topup.retryable'
-                : match ($result->outcome()) {
-                    KlikQrisNativeQrisOutcome::RecoveryPending => 'balance.topup.uncertain',
-                    KlikQrisNativeQrisOutcome::ProviderTotalPending => 'balance.topup.retryable',
+            $noticeKey = match (true) {
+                $topUp->canRetryCreate() => 'balance.topup.retryable',
+                $topUp->provider_create_state === 'reconciliation_review' => 'balance.topup.manual_review',
+                default => match ($result->outcome()) {
+                    KlikQrisNativeQrisOutcome::RecoveryPending => 'balance.topup.pending',
+                    KlikQrisNativeQrisOutcome::ProviderTotalPending => 'balance.topup.retry_later',
                     KlikQrisNativeQrisOutcome::InvalidProviderResult => 'balance.topup.invalid',
                     KlikQrisNativeQrisOutcome::Expired => 'balance.topup.expired',
                     default => 'balance.topup.preparing',
-                };
+                },
+            };
             $lines = array_merge($confirmationLines, [
                 $this->locale->translate($customer, $noticeKey),
                 $this->locale->translate($customer, 'balance.topup.help'),

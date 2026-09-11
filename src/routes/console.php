@@ -2,6 +2,7 @@
 
 use App\Console\Commands\ReconcileKlikQrisPayments;
 use App\Console\Commands\ReconcileSakurupiahPayments;
+use App\Console\Commands\ReconcileStoreBalanceTopUps;
 use App\Enums\KlikQrisEnvironment;
 use App\Enums\SakurupiahEnvironment;
 use App\Jobs\SendDailyAdminStatsNotification;
@@ -17,7 +18,7 @@ if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnviron
     Schedule::command('klikqris:backfill-in-flight --chunk=100')->everyFiveMinutes()->withoutOverlapping();
     Schedule::command('klikqris:reconcile-balance-top-ups --chunk=100 --max-top-ups=10')
         ->everyMinute()
-        ->withoutOverlapping(10);
+        ->withoutOverlapping(ReconcileStoreBalanceTopUps::schedulerMutexMinutes());
 }
 
 // Sakurupiah reconciliation runs only when the environment is enabled,

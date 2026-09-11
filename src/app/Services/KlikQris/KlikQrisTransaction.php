@@ -437,6 +437,11 @@ final readonly class KlikQrisTransaction
             throw new UnexpectedValueException('KlikQRIS top-up fee mismatch.');
         }
 
+        if ($topUp->provider_expires_at !== null
+            && $this->expiresAt !== null
+            && $topUp->provider_expires_at->getTimestamp() !== $this->expiresAt->getTimestamp()) {
+            throw new UnexpectedValueException('KlikQRIS top-up expiry mismatch.');
+        }
     }
 
     /**

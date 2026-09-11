@@ -96,6 +96,23 @@ final class StoreBalanceTopUpEventLogger
         );
     }
 
+    public function logReconciliationReview(StoreBalanceTopUp $topUp, string $reason): StoreBalanceTopUpEvent
+    {
+        $safeReason = preg_replace('/[^a-z0-9_.-]/i', '_', trim($reason)) ?: 'reconciliation_review';
+
+        return $this->logCanonical(
+            'reconciliation_review',
+            hash('sha256', (string) $topUp->merchant_ref),
+            'REVIEW',
+            [
+                'outcome' => 'manual_review',
+                'reason' => substr($safeReason, 0, 120),
+                'merchant_ref_hash' => hash('sha256', (string) $topUp->merchant_ref),
+            ],
+            $topUp,
+        );
+    }
+
     /** @param array<mixed> $sanitizedPayload */
     private function logCanonical(
         string $eventType,

@@ -435,7 +435,11 @@ class KlikQrisNativeQrisService
 
         try {
             $topUp->refresh();
-            if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
+            if (in_array($topUp->status, [
+                StoreBalanceTopUpStatus::Paid,
+                StoreBalanceTopUpStatus::Expired,
+                StoreBalanceTopUpStatus::InvalidProviderResult,
+            ], true)) {
                 return $this->classifyTopUp($topUp);
             }
 
@@ -1090,6 +1094,12 @@ class KlikQrisNativeQrisService
                 ->whereKey($topUp->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
+            if (in_array($lockedTopUp->status, [
+                StoreBalanceTopUpStatus::Expired,
+                StoreBalanceTopUpStatus::InvalidProviderResult,
+            ], true)) {
+                return false;
+            }
 
             if ($lockedTopUp->status === StoreBalanceTopUpStatus::Paid) {
                 return true;

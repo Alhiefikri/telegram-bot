@@ -13,6 +13,8 @@ use App\Services\AuditLogger;
 use App\Services\KlikQris\KlikQrisCallback;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
+use App\Services\KlikQris\KlikQrisStatusResponseException;
+use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
@@ -24,6 +26,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Throwable;
+use UnexpectedValueException;
 
 final class StoreBalanceTopUpService
 {
@@ -145,18 +148,206 @@ final class StoreBalanceTopUpService
 
     public function reconcile(StoreBalanceTopUp $topUp): KlikQrisTopUpLifecycleResult
     {
-        $result = $this->nativeQris->reconcileTopUp(
-            $topUp,
-            function (StoreBalanceTopUp $current, KlikQrisTransaction $transaction): void {
-                $this->settleAuthoritativeTransaction(
-                    $current,
-                    $transaction,
-                    fn (StoreBalanceTopUp $lockedTopUp): StoreBalanceTopUpEvent => $this->events->logReconciliation($transaction, $lockedTopUp),
-                );
-            },
-        );
+        $quote = $this->reconciliationQuoteSnapshot($topUp);
+        $authoritative = null;
+        $event = null;
+
+        try {
+            $result = $this->nativeQris->reconcileTopUp(
+                $topUp,
+                function (StoreBalanceTopUp $current, KlikQrisTransaction $transaction) use (&$authoritative, &$event, $quote): void {
+                    $authoritative = $transaction;
+                    if (! $this->matchesReconciliationQuote($quote, $transaction)) {
+                        return;
+                    }
+
+                    $event = $this->settleAuthoritativeTransaction(
+                        $current,
+                        $transaction,
+                        fn (StoreBalanceTopUp $lockedTopUp): StoreBalanceTopUpEvent => $this->events->logReconciliation($transaction, $lockedTopUp),
+                    );
+                },
+            );
+        } catch (KlikQrisStatusResponseException $exception) {
+            $this->markReconciliationReview($topUp, $this->reviewReason($exception));
+
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult);
+        } catch (UnexpectedValueException) {
+            $this->markReconciliationReview($topUp, 'status_response_invalid');
+
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult);
+        } catch (KlikQrisStatusUnavailableException) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending);
+        }
+
+        if ($authoritative?->isSuccess()) {
+            $current = $topUp->fresh();
+            if ($current !== null
+                && $current->status !== StoreBalanceTopUpStatus::Paid
+                && $current->status !== StoreBalanceTopUpStatus::Expired) {
+                $due = ($current->expires_at !== null && ! $current->expires_at->isFuture())
+                    || ($current->provider_expires_at !== null && ! $current->provider_expires_at->isFuture());
+                if ($due) {
+                    $this->expireIfDue($current);
+                } else {
+                    $reason = null;
+                    if (! $this->matchesReconciliationQuote($quote, $authoritative)) {
+                        $reason = 'quote_conflict';
+                    } elseif ($event?->processed_at === null) {
+                        $reason = 'paid_evidence_not_settleable';
+                    }
+                    if ($reason !== null) {
+                        $this->markReconciliationReview($current, $reason);
+                    }
+                }
+            }
+        }
+
+        if ($event?->processed_at !== null) {
+            $this->markReconciledPaid($topUp);
+        }
+
+        $current = $topUp->fresh();
+        if ($current !== null
+            && $current->provider_create_state === 'provider_signature_missing'
+            && $current->status !== StoreBalanceTopUpStatus::Paid
+            && $current->status !== StoreBalanceTopUpStatus::Expired) {
+            $this->markReconciliationReview($current, 'provider_signature_missing');
+        }
 
         return $result ?? KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Creating);
+    }
+
+    public function expireIfDue(StoreBalanceTopUp $topUp): bool
+    {
+        return DB::transaction(function () use ($topUp): bool {
+            $locked = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($locked === null
+                || $locked->status === StoreBalanceTopUpStatus::Paid
+                || $locked->status === StoreBalanceTopUpStatus::Expired
+                || $locked->status === StoreBalanceTopUpStatus::InvalidProviderResult) {
+                return false;
+            }
+
+            $now = now();
+            $due = ($locked->expires_at !== null && $locked->expires_at->lte($now))
+                || ($locked->provider_expires_at !== null && $locked->provider_expires_at->lte($now));
+            if (! $due) {
+                return false;
+            }
+
+            $locked->forceFill([
+                'status' => StoreBalanceTopUpStatus::Expired,
+                'provider_create_state' => 'provider_expired',
+                'provider_create_last_error' => null,
+            ])->save();
+
+            return true;
+        });
+    }
+
+    private function markReconciledPaid(StoreBalanceTopUp $topUp): void
+    {
+        DB::transaction(function () use ($topUp): void {
+            $locked = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->lockForUpdate()
+                ->first();
+            if ($locked === null
+                || $locked->status !== StoreBalanceTopUpStatus::Paid
+                || $locked->provider_create_state !== 'provider_SUCCESS') {
+                return;
+            }
+
+            $locked->forceFill(['provider_create_state' => 'reconciled_SUCCESS'])->save();
+        });
+    }
+
+    /**
+     * @return array{total: ?int, fee: ?int, reference: ?string, expires_at: ?int}
+     */
+    private function reconciliationQuoteSnapshot(StoreBalanceTopUp $topUp): array
+    {
+        return [
+            'total' => $topUp->provider_total_payment === null ? null : (int) $topUp->provider_total_payment,
+            'fee' => $topUp->provider_fee === null ? null : (int) $topUp->provider_fee,
+            'reference' => filled($topUp->provider_reference) ? trim((string) $topUp->provider_reference) : null,
+            'expires_at' => $topUp->provider_expires_at?->getTimestamp(),
+        ];
+    }
+
+    /** @param array{total: ?int, fee: ?int, reference: ?string, expires_at: ?int} $quote */
+    private function matchesReconciliationQuote(array $quote, KlikQrisTransaction $transaction): bool
+    {
+        if ($quote['total'] !== null && $quote['total'] !== $transaction->totalAmount()) {
+            return false;
+        }
+
+        if ($quote['fee'] !== null
+            && $transaction->providerFee() !== null
+            && $quote['fee'] !== $transaction->providerFee()) {
+            return false;
+        }
+
+        if ($quote['reference'] !== null
+            && $transaction->providerReference() !== null
+            && $quote['reference'] !== trim($transaction->providerReference())) {
+            return false;
+        }
+
+        if ($quote['expires_at'] !== null
+            && $transaction->expiresAt() !== null
+            && $quote['expires_at'] !== $transaction->expiresAt()->getTimestamp()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function markReconciliationReview(StoreBalanceTopUp $topUp, string $reason): void
+    {
+        DB::transaction(function () use ($topUp, $reason): void {
+            $locked = StoreBalanceTopUp::query()
+                ->whereKey($topUp->getKey())
+                ->lockForUpdate()
+                ->first();
+            if ($locked === null) {
+                return;
+            }
+
+            if (in_array($locked->status, [StoreBalanceTopUpStatus::Paid, StoreBalanceTopUpStatus::Expired], true)) {
+                $event = $this->events->logReconciliationReview($locked, $reason);
+                if ($event->processed_at === null) {
+                    $event->forceFill(['processed_at' => now()])->save();
+                }
+
+                return;
+            }
+
+            $locked->forceFill([
+                'status' => StoreBalanceTopUpStatus::InvalidProviderResult,
+                'provider_create_state' => 'reconciliation_review',
+                'provider_create_last_error' => $reason,
+            ])->save();
+
+            $event = $this->events->logReconciliationReview($locked, $reason);
+            if ($event->processed_at === null) {
+                $event->forceFill(['processed_at' => now()])->save();
+            }
+        }, attempts: 5);
+
+        $topUp->refresh();
+    }
+
+    private function reviewReason(KlikQrisStatusResponseException $exception): string
+    {
+        return $exception->httpStatus === null
+            ? 'status_response_invalid'
+            : 'status_http_'.$exception->httpStatus;
     }
 
     public function applyAuthoritativeTransaction(
