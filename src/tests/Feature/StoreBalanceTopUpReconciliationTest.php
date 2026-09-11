@@ -97,6 +97,19 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
         $this->assertSame(StoreBalanceTopUpStatus::Payable, $topUp->fresh()->status);
         $this->assertSame(0, StoreBalanceEntry::query()->count());
         $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame(
+            'balance-top-up:'.$topUp->getKey().':klikqris-instructions:v1',
+            $effect->effect_key,
+        );
+
+        $this->artisan('klikqris:reconcile-balance-top-ups --chunk=10 --max-top-ups=10')
+            ->expectsOutputToContain('pending=1')
+            ->assertSuccessful();
+
+        $this->assertSame(StoreBalanceTopUpStatus::Payable, $topUp->fresh()->status);
+        $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        $this->assertSame($effect->getKey(), TelegramOutboundEffect::query()->sole()->getKey());
     }
 
     public function test_expired_provider_status_never_credits_the_requested_balance(): void

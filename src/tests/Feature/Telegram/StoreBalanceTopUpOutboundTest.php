@@ -14,10 +14,13 @@ use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\StoreBalanceTopUpOutboundOutcome;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\TelegramBotTestSupport;
 
 final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
@@ -30,8 +33,13 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
         $result = app(StoreBalanceTopUpOutbound::class)->handoffInstructions($topUp);
 
         $this->assertSame(StoreBalanceTopUpOutboundOutcome::Queued, $result->outcome);
+        $effect = TelegramOutboundEffect::query()->sole();
         $this->assertSame(1, TelegramOutboundEffect::query()->count());
-        $this->assertSame(TelegramOutboundEffectType::BalanceTopUpInstructions->value, TelegramOutboundEffect::query()->sole()->effect_type);
+        $this->assertSame(TelegramOutboundEffectType::BalanceTopUpInstructions->value, $effect->effect_type);
+        $this->assertSame(StoreBalanceTopUp::class, $effect->source_type);
+        $this->assertSame((string) $topUp->getKey(), $effect->source_id);
+        $this->assertSame('balance-top-up:'.$topUp->getKey().':klikqris-instructions:v1', $effect->effect_key);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->state);
         Queue::assertPushed(SendStoreBalanceTopUpInstructions::class);
     }
 
@@ -47,9 +55,34 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
         $result = app(StoreBalanceTopUpOutbound::class)->handoffReceipt($topUp);
 
         $this->assertSame(StoreBalanceTopUpOutboundOutcome::Queued, $result->outcome);
+        $effect = TelegramOutboundEffect::query()->sole();
         $this->assertSame(1, TelegramOutboundEffect::query()->count());
-        $this->assertSame(TelegramOutboundEffectType::BalanceTopUpReceipt->value, TelegramOutboundEffect::query()->sole()->effect_type);
+        $this->assertSame(TelegramOutboundEffectType::BalanceTopUpReceipt->value, $effect->effect_type);
+        $this->assertSame(StoreBalanceTopUp::class, $effect->source_type);
+        $this->assertSame((string) $topUp->getKey(), $effect->source_id);
+        $this->assertSame('balance-top-up:'.$topUp->getKey().':klikqris-receipt:v1', $effect->effect_key);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->state);
         Queue::assertPushed(SendStoreBalanceTopUpReceipt::class);
+    }
+
+    public function test_repeated_instruction_handoff_reuses_one_deterministic_effect(): void
+    {
+        Queue::fake();
+        $topUp = $this->makeTopUp();
+        $outbound = app(StoreBalanceTopUpOutbound::class);
+
+        $first = $outbound->handoffInstructions($topUp);
+        $firstEffect = TelegramOutboundEffect::query()->sole();
+        $second = $outbound->handoffInstructions($topUp->fresh());
+        $secondEffect = TelegramOutboundEffect::query()->sole();
+
+        $this->assertSame($first->outcome, $second->outcome);
+        $this->assertSame($firstEffect->getKey(), $secondEffect->getKey());
+        $this->assertSame(
+            'balance-top-up:'.$topUp->getKey().':klikqris-instructions:v1',
+            $secondEffect->effect_key,
+        );
+        $this->assertSame(1, TelegramOutboundEffect::query()->count());
     }
 
     public function test_non_payable_top_up_is_not_handed_off(): void
@@ -64,17 +97,85 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
         Queue::assertNotPushed(SendStoreBalanceTopUpInstructions::class);
     }
 
-    public function test_repeated_instruction_handoff_reuses_one_deterministic_effect(): void
+    public function test_failed_instruction_delivery_leaves_one_retryable_effect_without_resending(): void
     {
         Queue::fake();
-        $topUp = $this->makeTopUp();
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $topUp = $this->makeTopUp([
+            'provider_qris_url' => 'https://klikqris.com/storage/sandbox/qris_balance_top_up.png',
+        ]);
         $outbound = app(StoreBalanceTopUpOutbound::class);
+        $outbound->handoffInstructions($topUp);
+        $effect = TelegramOutboundEffect::query()->sole();
 
-        $first = $outbound->handoffInstructions($topUp);
-        $second = $outbound->handoffInstructions($topUp->fresh());
+        $this->fakeTelegramHttp([
+            $topUp->provider_qris_url => Http::response("\x89PNG\r\n\x1A\nqris", 200, ['Content-Type' => 'image/png']),
+            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true]),
+        ]);
 
-        $this->assertSame($first->outcome, $second->outcome);
+        try {
+            (new SendStoreBalanceTopUpInstructions(
+                (string) $topUp->getKey(),
+                effectId: (string) $effect->getKey(),
+            ))->handle();
+            $this->fail('A Telegram response without a message identifier must fail the instruction effect.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('successful message ID', $exception->getMessage());
+        }
+
+        $failed = $effect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Failed, $failed->state);
+        $this->assertSame('telegram_response_missing_message_id', $failed->last_error_code);
+        $this->assertNotNull($failed->failed_at);
+        $this->assertNotNull($failed->next_attempt_at);
+        $this->assertNull($failed->telegram_message_id);
+
+        Queue::fake();
+        $retry = $outbound->handoffInstructions($topUp->fresh());
+
+        $this->assertSame(StoreBalanceTopUpOutboundOutcome::RetryScheduled, $retry->outcome);
         $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        Queue::assertNotPushed(SendStoreBalanceTopUpInstructions::class);
+    }
+
+    public function test_ambiguous_instruction_delivery_stays_unresolved_without_a_blind_resend(): void
+    {
+        Queue::fake();
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $topUp = $this->makeTopUp([
+            'provider_qris_url' => 'https://klikqris.com/storage/sandbox/qris_balance_top_up.png',
+        ]);
+        $outbound = app(StoreBalanceTopUpOutbound::class);
+        $outbound->handoffInstructions($topUp);
+        $effect = TelegramOutboundEffect::query()->sole();
+        $sendCalls = 0;
+
+        $this->fakeTelegramHttp([
+            $topUp->provider_qris_url => Http::response("\x89PNG\r\n\x1A\nqris", 200, ['Content-Type' => 'image/png']),
+            'https://api.telegram.org/*/sendPhoto' => function () use (&$sendCalls): never {
+                $sendCalls++;
+                throw new ConnectionException('connection closed after Telegram accepted the request');
+            },
+        ]);
+
+        (new SendStoreBalanceTopUpInstructions(
+            (string) $topUp->getKey(),
+            effectId: (string) $effect->getKey(),
+        ))->handle();
+
+        $unknown = $effect->fresh();
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $unknown->state);
+        $this->assertSame('telegram_transport_ambiguous', $unknown->last_error_code);
+        $this->assertNotNull($unknown->unknown_at);
+        $this->assertNull($unknown->next_attempt_at);
+        $this->assertSame(1, $sendCalls);
+
+        Queue::fake();
+        $review = $outbound->handoffInstructions($topUp->fresh());
+
+        $this->assertSame(StoreBalanceTopUpOutboundOutcome::ReviewRequired, $review->outcome);
+        $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        Queue::assertNotPushed(SendStoreBalanceTopUpInstructions::class);
     }
 
     public function test_missing_instruction_and_receipt_effects_are_discovered_once(): void

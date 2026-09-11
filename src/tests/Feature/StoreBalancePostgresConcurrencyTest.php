@@ -10,6 +10,7 @@ use App\Enums\StoreBalanceFundingIntentStatus;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramNavigationMediaKind;
 use App\Enums\TelegramNavigationScreen;
+use App\Enums\TelegramOutboundEffectType;
 use App\Enums\UserRole;
 use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\StoreBalanceFundingPolicyConflict;
@@ -28,6 +29,7 @@ use App\Models\StoreBalanceFundingPolicy;
 use App\Models\StoreBalanceTopUp;
 use App\Models\StoreBalanceTopUpEvent;
 use App\Models\TelegramNavigationRoot;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\KlikQris\KlikQrisCallback;
@@ -43,10 +45,12 @@ use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use App\Services\StoreBalance\StoreBalanceReconciliation;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Support\PaymentProvider;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
@@ -367,6 +371,49 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         $this->assertSame(1, StoreBalanceTopUpEvent::query()->where('event_type', 'reconciliation')->count());
         $this->assertSame(8000, StoreBalanceEntry::query()->sole()->amount);
         $this->assertProjectionMatchesLedger($topUp->customer, 8000);
+    }
+
+    public function test_postgres_concurrent_store_balance_outbound_discovery_reuses_one_effect_per_family(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $instructionTopUp = $this->createSettlementTopUp(45434, 'outbound-instruction-race');
+        $instructionTopUp->forceFill([
+            'chat_id' => (string) $instructionTopUp->customer->telegram_id,
+        ])->save();
+        $receiptTopUp = $this->createSettlementTopUp(45435, 'outbound-receipt-race');
+        $receiptTopUp->forceFill([
+            'chat_id' => (string) $receiptTopUp->customer->telegram_id,
+            'status' => StoreBalanceTopUpStatus::Paid,
+            'paid_at' => now()->subMinute(),
+            'settled_at' => now()->subMinute(),
+        ])->save();
+        Queue::fake();
+
+        $results = $this->runConcurrentWorkers(2, function (): string {
+            $outbound = app(StoreBalanceTopUpOutbound::class);
+
+            return (string) ($outbound->recoverMissingInstructions(1) + $outbound->recoverMissingReceipts(1));
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $outcomes = array_map(static fn (array $result): int => (int) ($result['value'] ?? -1), $results);
+        $this->assertGreaterThan(0, max($outcomes), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertLessThanOrEqual(2, max($outcomes), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $instructionTopUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpInstructions->value)
+            ->count());
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $receiptTopUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpReceipt->value)
+            ->count());
+        $this->assertSame(2, TelegramOutboundEffect::query()
+            ->whereIn('source_id', [
+                (string) $instructionTopUp->getKey(),
+                (string) $receiptTopUp->getKey(),
+            ])
+            ->count());
     }
 
     public function test_postgres_competing_owner_compensations_create_one_credit_and_one_resolution(): void

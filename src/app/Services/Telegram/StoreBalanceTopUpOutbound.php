@@ -9,6 +9,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Support\PaymentProvider;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use InvalidArgumentException;
 use Throwable;
 
@@ -113,6 +114,17 @@ final class StoreBalanceTopUpOutbound
             }
 
             return $this->handoffEffect($effect);
+        } catch (UniqueConstraintViolationException $exception) {
+            $source = $topUp->fresh(['customer']);
+            $topUpId = $source?->getKey();
+            $effect = $topUpId === null ? null : $find((string) $topUpId);
+            if ($effect !== null) {
+                return $this->handoffEffect($effect);
+            }
+
+            report($exception);
+
+            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::Failed);
         } catch (Throwable $exception) {
             report($exception);
 
@@ -252,7 +264,14 @@ final class StoreBalanceTopUpOutbound
     {
         return $this->klikQrisTopUpsQuery()
             ->where('status', StoreBalanceTopUpStatus::Payable->value)
-            ->whereDoesntHave('outboundEffects', fn (Builder $effects): Builder => $effects->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP))
+            ->whereNotExists(function ($effects): void {
+                $effects
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects')
+                    ->where('telegram_outbound_effects.source_type', StoreBalanceTopUp::class)
+                    ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP)
+                    ->whereRaw('telegram_outbound_effects.source_id = CAST(store_balance_top_ups.id AS TEXT)');
+            })
             ->orderBy('id');
     }
 
@@ -262,7 +281,14 @@ final class StoreBalanceTopUpOutbound
         return $this->klikQrisTopUpsQuery()
             ->where('status', StoreBalanceTopUpStatus::Paid->value)
             ->whereNotNull('settled_at')
-            ->whereDoesntHave('outboundEffects', fn (Builder $effects): Builder => $effects->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT))
+            ->whereNotExists(function ($effects): void {
+                $effects
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects')
+                    ->where('telegram_outbound_effects.source_type', StoreBalanceTopUp::class)
+                    ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+                    ->whereRaw('telegram_outbound_effects.source_id = CAST(store_balance_top_ups.id AS TEXT)');
+            })
             ->orderBy('id');
     }
 

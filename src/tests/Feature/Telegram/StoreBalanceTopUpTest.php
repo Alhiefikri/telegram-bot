@@ -198,6 +198,66 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
     }
 
+    public function test_interactive_confirmation_and_scheduled_reconciliation_converge_on_one_effect_per_family(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $createCalls = 0;
+        $statusCalls = 0;
+        $this->fakeProvider($createCalls, $statusCalls);
+
+        Customer::factory()->create(['telegram_id' => 46251, 'locale' => 'en']);
+        $root = $this->openFundingChooser(46251, 46251);
+        $this->postTelegramUpdate($this->messageUpdate(46253, '/deposit 5000', [], 46251));
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46254,
+            'top-up-confirm-convergence',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            46251,
+            'private',
+            $root->message_id,
+        ));
+
+        $topUp = StoreBalanceTopUp::query()->sole();
+        $instruction = TelegramOutboundEffect::query()->sole();
+        $instructionKey = $instruction->effect_key;
+        $this->assertSame(
+            'balance-top-up:'.$topUp->getKey().':klikqris-instructions:v1',
+            $instructionKey,
+        );
+
+        $this->artisan('klikqris:reconcile-balance-top-ups --chunk=10 --max-top-ups=10')
+            ->expectsOutputToContain('recovered=1')
+            ->assertSuccessful();
+
+        $topUp->refresh();
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->status);
+        $this->assertSame(1, $createCalls);
+        $this->assertSame(1, $statusCalls);
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $topUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP)
+            ->count());
+        $this->assertSame(
+            $instructionKey,
+            TelegramOutboundEffect::query()
+                ->where('source_id', (string) $topUp->getKey())
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP)
+                ->sole()
+                ->effect_key,
+        );
+        $receipt = TelegramOutboundEffect::query()
+            ->where('source_id', (string) $topUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->sole();
+        $this->assertSame(
+            'balance-top-up:'.$topUp->getKey().':klikqris-receipt:v1',
+            $receipt->effect_key,
+        );
+    }
+
     public function test_paid_callback_after_reconciliation_is_processed_without_recrediting(): void
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
