@@ -102,7 +102,7 @@ class TelegramMenuIntents
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::Home,
             $this->locale->code($customer),
-            $this->captions->html($this->privateCaption($customer)),
+            $this->privateCaption($customer),
             $this->homeKeyboard($customer, $chatId),
         );
     }
@@ -116,7 +116,7 @@ class TelegramMenuIntents
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::Home,
             $this->locale->code($customer),
-            $this->captions->html($this->groupCaption($customer)),
+            $this->groupCaption($customer),
             $this->groupKeyboard($customer),
         );
     }
@@ -641,19 +641,35 @@ class TelegramMenuIntents
 
     private function privateCaption(Customer $customer): string
     {
-        return $this->locale->translate($customer, 'welcome.caption', $this->welcomeReplacements($customer))
-            .$this->maintenanceNotice($customer);
+        $replacements = $this->welcomeReplacements($customer);
+        $profile = $this->locale->translate($customer, 'welcome.profile', $replacements);
+        $activity = $this->locale->translate($customer, 'welcome.activity', $replacements);
+
+        return $this->captions->htmlWithBlockquotes(
+            $this->locale->translate($customer, 'welcome.caption', [
+                ...$replacements,
+                'profile' => $profile,
+                'activity' => $activity,
+            ]).$this->maintenanceNotice($customer),
+            [$profile, $activity],
+        );
     }
 
     private function groupCaption(Customer $customer): string
     {
         $metrics = $this->statsReport->startMetrics();
-
-        return $this->locale->translate($customer, 'welcome.group_caption', [
-            'greeting' => implode(' ', $this->timeAwareGreeting($customer)),
+        $activity = $this->locale->translate($customer, 'welcome.activity', [
             'bot_users' => $metrics['bot_users'],
             'successful_orders' => $metrics['successful_orders'],
-        ]).$this->maintenanceNotice($customer);
+        ]);
+
+        return $this->captions->htmlWithBlockquotes(
+            $this->locale->translate($customer, 'welcome.group_caption', [
+                'greeting' => implode(' ', $this->timeAwareGreeting($customer)),
+                'activity' => $activity,
+            ]).$this->maintenanceNotice($customer),
+            [$activity],
+        );
     }
 
     /**

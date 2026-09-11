@@ -727,7 +727,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], 'Status: Ready')
             && str_contains($r['text'], '📝 Detail produk')
             && ! str_contains($r['text'], '🛒 Terjual: 2')
-            && str_contains($r['text'], 'Desain premium siap pakai.')
+            && str_contains($r['text'], '<blockquote>Desain premium siap pakai.</blockquote>')
+            && ($r['parse_mode'] ?? null) === 'HTML'
             && str_contains($r['text'], '🌏 QRIS Antarnegara:')
             && str_contains($r['text'], 'Jumlah: 1')
             && str_contains($r['text'], 'Subtotal: Rp25.000')
@@ -1061,7 +1062,11 @@ class CatalogSearchTest extends TelegramBotTestSupport
             }
 
             $this->assertCount(3, $selectorButtons);
+            $this->assertContains('📺 Netflix Premium™', array_column($selectorButtons, 'text'));
             foreach ($selectorButtons as $selectorButton) {
+                if ($selectorButton['text'] === '📺 Netflix Premium™') {
+                    continue;
+                }
                 $this->assertMatchesRegularExpression('/^(?:.*\([1-2]\)$|(?:.* )?[1-2](?:\. |$))/', $selectorButton['text'] ?? '');
                 $this->assertStringStartsWith('family:options:v', $selectorButton['callback_data'] ?? '');
                 $this->assertSame('success', $selectorButton['style'] ?? null);

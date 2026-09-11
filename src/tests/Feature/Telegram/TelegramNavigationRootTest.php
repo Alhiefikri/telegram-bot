@@ -180,7 +180,7 @@ final class TelegramNavigationRootTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(45114, '/start', ['id' => 45106, 'first_name' => '<Alice & \"quoted\">', 'username' => 'buyer<&'], 45106))->assertOk();
         $request = Http::recorded(fn (Request $recorded): bool => str_ends_with($recorded->url(), '/sendPhoto'))->first()[0];
         $caption = (string) $this->telegramRequestField($request, 'caption');
-        $parsedCaption = html_entity_decode($caption, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $parsedCaption = html_entity_decode(strip_tags($caption), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
         $this->assertStringContainsString('&lt;Alice', $caption);
         $this->assertStringContainsString('buyer&lt;&amp;', $caption);

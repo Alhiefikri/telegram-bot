@@ -34,6 +34,7 @@ class TelegramCatalogIntents
         private ProductBrandIconResolver $icons,
         private TelegramCatalogQuerySession $catalogQueries,
         private TelegramFamilyCallbackToken $familyTokens,
+        private TelegramHtmlCaption $captions,
         private TelegramNavigationRootService $roots,
         private ProductImageOptimizer $images,
         private StoreBalanceLedger $storeBalance,
@@ -491,7 +492,7 @@ class TelegramCatalogIntents
         }
 
         $lines = [
-            $this->productIcon($product->name, $product->icon).' '.$product->name,
+            $this->escapeHtml($this->productIcon($product->name, $product->icon).' '.$product->name),
             '━━━━━━━━━━━━━━',
             $this->locale->translate($customer, 'catalog.price').number_format($product->price_amount, 0, ',', '.'),
         ];
@@ -513,10 +514,10 @@ class TelegramCatalogIntents
         }
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.details');
-        $lines[] = $this->descriptionText($customer, $product);
+        $lines[] = $this->captions->blockquote($this->descriptionText($customer, $product));
         if ($maintenance->active) {
             $lines[] = '';
-            $lines[] = $this->maintenanceNotice($customer, $maintenance);
+            $lines[] = $this->escapeHtml($this->maintenanceNotice($customer, $maintenance));
             if ($availableStock < 1) {
                 $lines[] = $this->locale->translate($customer, 'catalog.sold_out_guidance');
             }
@@ -537,8 +538,9 @@ class TelegramCatalogIntents
         // Product photography stays an explicit new-message entry point only
         // when this chat has no canonical message to edit; on the canonical
         // message routine navigation must never re-upload media.
+        $options = ['parse_mode' => 'HTML'];
         if ($messageId === null
-            && mb_strlen($text, 'UTF-8') <= TelegramHtmlCaption::LIMIT
+            && $this->captions->fitsMediaCaption($text, $options)
             && $telegramPhoto !== null
             && $this->roots->currentForChat($customer, $chatId) === null) {
             $this->bot->sendPhoto(
@@ -547,12 +549,13 @@ class TelegramCatalogIntents
                 $telegramPhoto['filename'],
                 $text,
                 ['inline_keyboard' => $keyboard],
+                $options,
             );
 
             return;
         }
 
-        $this->sendCatalogMessage($customer, $chatId, $text, ['inline_keyboard' => $keyboard], $messageId);
+        $this->sendCatalogMessage($customer, $chatId, $text, ['inline_keyboard' => $keyboard], $messageId, $options);
     }
 
     /**
@@ -903,14 +906,16 @@ class TelegramCatalogIntents
                 }
                 $buttons[] = [
                     'text' => $mode === 'catalog'
-                        ? $this->productIcon($family->name, $this->familyIconOverride($family)).' ('.$number.')'
+                        ? $this->productIcon($family->name, $this->familyIconOverride($family)).' '.$family->name
                         : $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
                     'callback_data' => $callback,
                     'style' => $family->isAvailable ? 'success' : 'danger',
                 ];
             } elseif ($product !== null) {
                 $buttons[] = [
-                    'text' => $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
+                    'text' => $mode === 'catalog'
+                        ? $this->productIcon($product->name, $product->icon).' '.$product->name
+                        : $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
                     'callback_data' => 'product:'.$product->id,
                     'style' => $product->isAvailable ? 'success' : 'danger',
                 ];

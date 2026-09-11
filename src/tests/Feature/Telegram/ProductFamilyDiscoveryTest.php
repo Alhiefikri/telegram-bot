@@ -756,10 +756,10 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $keyboard = $catalog['reply_markup']['inline_keyboard'];
         $this->assertStringContainsString('01. 🖌️ Canva (2)', (string) $catalog['text']);
         $this->assertCount(2, $keyboard[0]);
-        $this->assertSame('🖌️ (1)', $keyboard[0][0]['text']);
-        $this->assertSame('🎬 (2)', $keyboard[0][1]['text']);
-        $this->assertSame('🤖 (3)', $keyboard[1][0]['text']);
-        $this->assertSame('✨ (4)', $keyboard[1][1]['text']);
+        $this->assertSame('🖌️ Canva', $keyboard[0][0]['text']);
+        $this->assertSame('🎬 CapCut', $keyboard[0][1]['text']);
+        $this->assertSame('🤖 ChatGPT', $keyboard[1][0]['text']);
+        $this->assertSame('✨ Gemini AI', $keyboard[1][1]['text']);
     }
 
     public function test_family_options_show_per_product_quotes_and_two_column_icon_buttons(): void

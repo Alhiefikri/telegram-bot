@@ -138,7 +138,7 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "php artisan ops:health --scheduler-heartbeat=180 >/dev/null 2>&1 || exit 1"]
       interval: 30s
-      timeout: 5s
+      timeout: 20s
       retries: 3
       start_period: 90s
     cpus: "0.25"

@@ -93,6 +93,7 @@ class StartMetricsTest extends TelegramBotTestSupport
 
         $this->assertStringContainsString('Successful orders: 1', $caption);
         $this->assertStringContainsString('Telegram users: 1', $caption);
+        $this->assertStringContainsString("<blockquote>👥 Telegram users: 1\n🧾 Successful orders: 1</blockquote>", $caption);
         $this->assertStringNotContainsString('Group Name', $caption);
         $this->assertStringNotContainsString('@group_user', $caption);
         $this->assertStringNotContainsString('Rp', $caption);

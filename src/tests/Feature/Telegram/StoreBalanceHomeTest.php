@@ -58,6 +58,14 @@ final class StoreBalanceHomeTest extends TelegramBotTestSupport
         $this->assertStringContainsString('📊 Store Activity', $caption);
         $this->assertStringContainsString('👥 Telegram users: 2', $caption);
         $this->assertStringContainsString('🧾 Successful orders: 1', $caption);
+        $this->assertStringContainsString(
+            "<blockquote>🆔 Telegram ID: 45301\n🔗 Username: @ayu_store\n💰 My Balance: Rp 25.000</blockquote>",
+            $caption,
+        );
+        $this->assertStringContainsString(
+            "<blockquote>👥 Telegram users: 2\n🧾 Successful orders: 1</blockquote>",
+            $caption,
+        );
         $this->assertStringContainsString('Choose a button below', $caption);
 
         $positions = array_map(fn (string $needle): int|false => mb_strpos($caption, $needle), [
@@ -83,7 +91,7 @@ final class StoreBalanceHomeTest extends TelegramBotTestSupport
             $this->assertStringNotContainsString($forbidden, $lowered);
         }
 
-        $parsed = html_entity_decode($caption, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $parsed = html_entity_decode(strip_tags($caption), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $this->assertLessThanOrEqual(1024, mb_strlen($parsed));
         $this->assertSame(0, Http::recorded(fn (Request $recorded): bool => str_ends_with($recorded->url(), '/sendMessage')
             && (string) ($recorded['chat_id'] ?? '') === '45301')->count());
