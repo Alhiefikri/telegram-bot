@@ -12,9 +12,14 @@ use App\Models\TelegramNavigationRoot;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
+use App\Services\StoreBalance\StoreBalanceActivityDetail;
+use App\Services\StoreBalance\StoreBalanceActivityItem;
+use App\Services\StoreBalance\StoreBalanceActivityPage;
+use App\Services\StoreBalance\StoreBalanceActivityService;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\StoreBalance\StoreBalanceSnapshot;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 
@@ -34,6 +39,8 @@ class TelegramMenuIntents
         private TelegramWelcomeBanner $banner,
         private TelegramHtmlCaption $captions,
         private StoreBalanceLedger $balances,
+        private StoreBalanceActivityService $activities,
+        private TelegramBalanceActivityToken $activityTokens,
         private StoreBalanceFundingPolicyManager $fundingPolicies,
     ) {}
 
@@ -131,6 +138,122 @@ class TelegramMenuIntents
     public function balanceSurface(Customer $customer): TelegramNavigationSurface
     {
         $balance = $this->balances->snapshot($customer);
+        $page = $balance->isAvailable() ? $this->activities->firstPage($customer) : null;
+
+        return $this->renderBalanceSurface($customer, $balance, $page);
+    }
+
+    public function balanceActivitySurface(
+        Customer $customer,
+        StoreBalanceActivityPage $page,
+        ?string $noticeKey = null,
+    ): TelegramNavigationSurface {
+        $balance = $this->balances->snapshot($customer);
+
+        return $this->renderBalanceSurface(
+            $customer,
+            $balance,
+            $balance->isAvailable() ? $page : null,
+            $noticeKey,
+        );
+    }
+
+    public function balanceActivityDetailSurface(
+        Customer $customer,
+        StoreBalanceActivityDetail $detail,
+    ): TelegramNavigationSurface {
+        $balance = $this->balances->snapshot($customer);
+        if (! $balance->isAvailable()) {
+            return $this->renderBalanceSurface($customer, $balance, null);
+        }
+        $item = $detail->item;
+        $lines = [
+            $this->locale->translate($customer, 'balance.activity.detail.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'balance.activity.detail.kind', [
+                'kind' => $this->locale->translate($customer, 'balance.activity.kind.'.$item->kind),
+            ]),
+            $this->locale->translate($customer, 'balance.activity.detail.state', [
+                'state' => $this->locale->translate($customer, 'balance.activity.state.'.$item->state),
+            ]),
+        ];
+        if ($item->isTopUp() && $item->requestedAmount !== null) {
+            $lines[] = $this->locale->translate($customer, 'balance.activity.detail.requested', [
+                'amount' => $this->locale->idr($item->requestedAmount),
+            ]);
+        }
+        if ($item->signedAmount !== null) {
+            $lines[] = $this->locale->translate($customer, 'balance.activity.detail.amount', [
+                'amount' => $this->activityAmount($item),
+            ]);
+        }
+        if ($item->creditedAmount !== null) {
+            $lines[] = $this->locale->translate($customer, 'balance.activity.detail.credited', [
+                'amount' => $this->locale->idr($item->creditedAmount),
+            ]);
+        }
+        $lines[] = $this->locale->translate($customer, 'balance.activity.detail.date', [
+            'date' => $this->locale->formatDate($customer, $item->occurredAt),
+        ]);
+        $lines[] = $this->locale->translate($customer, 'balance.activity.detail.reference', [
+            'reference' => $item->reference,
+        ]);
+
+        $keyboard = [];
+        if ($item->topUpCanRetry) {
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'balance.topup.retry'),
+                'callback_data' => StoreBalanceTopUpService::actionCallback('retry', $item->id),
+            ]];
+        }
+        if ($item->topUpCanCheck) {
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'balance.topup.check'),
+                'callback_data' => StoreBalanceTopUpService::actionCallback('check', $item->id),
+            ]];
+        }
+        if ($detail->relatedItem !== null) {
+            $related = $detail->relatedItem;
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'balance.activity.detail.original_button', [
+                    'reference' => $related->reference,
+                ]),
+                'callback_data' => 'balance:a:d:'.$this->activityTokens->detailToken(
+                    $customer->id,
+                    $related->type,
+                    $related->id,
+                ),
+            ]];
+            $lines[] = $this->locale->translate($customer, 'balance.activity.detail.original', [
+                'reference' => $related->reference,
+                'amount' => $this->activityAmount($related),
+            ]);
+        }
+        if ($item->isTopUp() && $item->signedAmount === null) {
+            $lines[] = $this->locale->translate($customer, 'balance.activity.detail.support');
+        }
+        $keyboard[] = [[
+            'text' => $this->locale->translate($customer, 'balance.activity.detail.back'),
+            'callback_data' => 'balance',
+        ], [
+            'text' => $this->locale->translate($customer, 'menu.home'),
+            'callback_data' => 'menu:home',
+        ]];
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::Balance,
+            $this->locale->code($customer),
+            $this->captions->html(implode("\n", $lines)),
+            ['inline_keyboard' => $keyboard],
+        );
+    }
+
+    private function renderBalanceSurface(
+        Customer $customer,
+        StoreBalanceSnapshot $balance,
+        ?StoreBalanceActivityPage $page,
+        ?string $noticeKey = null,
+    ): TelegramNavigationSurface {
         $lines = [
             $this->locale->translate($customer, 'balance.title'),
             '━━━━━━━━━━━━━━',
@@ -140,19 +263,104 @@ class TelegramMenuIntents
                     : $this->locale->translate($customer, 'welcome.balance_unavailable'),
             ]),
         ];
+        if ($noticeKey !== null) {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, $noticeKey);
+        }
+
+        if (! $balance->isAvailable()) {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'balance.activity.unavailable');
+            $lines[] = $this->locale->translate($customer, 'balance.activity.support');
+
+            return new TelegramNavigationSurface(
+                TelegramNavigationScreen::Balance,
+                $this->locale->code($customer),
+                $this->captions->html(implode("\n", $lines)),
+                ['inline_keyboard' => [$this->navigationRow($customer)]],
+            );
+        }
+
+        $lines[] = '';
+        $lines[] = $this->locale->translate($customer, 'balance.activity.title');
+        if ($page === null || $page->isEmpty()) {
+            $lines[] = $this->locale->translate($customer, 'balance.activity.empty');
+        } else {
+            foreach ($page->items as $index => $item) {
+                $lines[] = $this->locale->translate($customer, 'balance.activity.row', [
+                    'number' => $index + 1,
+                    'kind' => $this->locale->translate($customer, 'balance.activity.kind.'.$item->kind),
+                    'state' => $this->locale->translate($customer, 'balance.activity.state.'.$item->state),
+                    'amount' => $this->activityAmount($item),
+                ]);
+                $lines[] = $this->locale->translate($customer, 'balance.activity.date', [
+                    'date' => $this->locale->formatShortDate($customer, $item->occurredAt),
+                ]);
+                $lines[] = $this->locale->translate($customer, 'balance.activity.reference', [
+                    'reference' => $item->reference,
+                ]);
+            }
+        }
+
+        $keyboard = [[[
+            'text' => $this->locale->translate($customer, 'balance.add'),
+            'callback_data' => 'balance:add',
+        ]], $this->navigationRow($customer)];
+        if ($page !== null) {
+            foreach ($page->items as $item) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'balance.activity.detail_button', [
+                        'reference' => $item->reference,
+                    ]),
+                    'callback_data' => 'balance:a:d:'.$this->activityTokens->detailToken(
+                        $customer->id,
+                        $item->type,
+                        $item->id,
+                    ),
+                ]];
+            }
+
+            $paging = [];
+            if ($page->hasNewer && $page->newerCursor !== null) {
+                $paging[] = [
+                    'text' => $this->locale->translate($customer, 'balance.activity.newer'),
+                    'callback_data' => 'balance:a:n:'.$this->activityTokens->cursorToken(
+                        $customer->id,
+                        $page->newerCursor,
+                    ),
+                ];
+            }
+            if ($page->hasOlder && $page->olderCursor !== null) {
+                $paging[] = [
+                    'text' => $this->locale->translate($customer, 'balance.activity.older'),
+                    'callback_data' => 'balance:a:o:'.$this->activityTokens->cursorToken(
+                        $customer->id,
+                        $page->olderCursor,
+                    ),
+                ];
+            }
+            if ($paging !== []) {
+                $keyboard[] = $paging;
+            }
+        }
 
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::Balance,
             $this->locale->code($customer),
             $this->captions->html(implode("\n", $lines)),
-            ['inline_keyboard' => [
-                [[
-                    'text' => $this->locale->translate($customer, 'balance.add'),
-                    'callback_data' => 'balance:add',
-                ]],
-                $this->navigationRow($customer),
-            ]],
+            ['inline_keyboard' => $keyboard],
         );
+    }
+
+    private function activityAmount(StoreBalanceActivityItem $item): string
+    {
+        if ($item->signedAmount === null) {
+            return $this->locale->idr($item->amount);
+        }
+
+        return $item->signedAmount < 0
+            ? '-'.$this->locale->idr(abs($item->signedAmount))
+            : '+'.$this->locale->idr($item->signedAmount);
     }
 
     public function addBalanceSurface(

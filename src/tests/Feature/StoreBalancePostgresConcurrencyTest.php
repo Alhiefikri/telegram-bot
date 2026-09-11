@@ -34,6 +34,7 @@ use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\StoreBalance\StoreBalanceActivityService;
 use App\Services\StoreBalance\StoreBalanceFundingIntentInput;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
@@ -763,6 +764,102 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         $this->assertSame(0, $reader['divergences']);
         $this->assertSame(15000, $this->balanceOf($customer));
         $this->assertProjectionMatchesLedger($customer, 15000);
+    }
+
+    public function test_postgres_activity_pages_read_each_committed_effect_during_refund_mutations(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $customer = $this->createCustomer(45412);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            20_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            'activity-seed',
+            'balance_top_up:activity-seed:credit',
+        );
+
+        $results = $this->runConcurrentWorkers(2, function (int $index) use ($customer): string {
+            if ($index === 0) {
+                $ledger = app(StoreBalanceLedger::class);
+                for ($mutation = 1; $mutation <= 10; $mutation++) {
+                    $fresh = Customer::query()->findOrFail($customer->id);
+                    $ledger->credit(
+                        $fresh,
+                        1_000,
+                        StoreBalanceEntryKind::TopUpCredit,
+                        'balance_top_up',
+                        'activity-race-credit-'.$mutation,
+                        'balance_top_up:activity-race-credit-'.$mutation.':credit',
+                    );
+                    $ledger->debit(
+                        Customer::query()->findOrFail($customer->id),
+                        500,
+                        'order',
+                        'activity-race-order-'.$mutation,
+                        'order:activity-race-order:'.$mutation.':debit',
+                    );
+                    $ledger->refund(
+                        Customer::query()->findOrFail($customer->id),
+                        500,
+                        'order',
+                        'activity-race-order-'.$mutation,
+                        'order:activity-race-order:'.$mutation.':refund',
+                    );
+                    usleep(2_000);
+                }
+
+                return 'writer';
+            }
+
+            $samples = 0;
+            $duplicatePages = 0;
+            $activity = app(StoreBalanceActivityService::class);
+            for ($sample = 0; $sample < 30; $sample++) {
+                $page = $activity->firstPage(Customer::query()->findOrFail($customer->id));
+                $ids = array_map(
+                    static fn ($item): string => $item->type.':'.$item->id,
+                    $page->items,
+                );
+                if (count($ids) !== count(array_unique($ids))) {
+                    $duplicatePages++;
+                }
+                $samples++;
+                usleep(2_000);
+            }
+
+            return json_encode([
+                'samples' => $samples,
+                'duplicate_pages' => $duplicatePages,
+            ], JSON_THROW_ON_ERROR);
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $reader = json_decode((string) ($results[1]['value'] ?? ''), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertGreaterThanOrEqual(3, $reader['samples']);
+        $this->assertSame(0, $reader['duplicate_pages']);
+
+        $customer = $customer->fresh();
+        $service = app(StoreBalanceActivityService::class);
+        $page = $service->firstPage($customer);
+        $ids = [];
+        do {
+            foreach ($page->items as $item) {
+                $ids[] = $item->type.':'.$item->id;
+            }
+            if (! $page->hasOlder) {
+                break;
+            }
+            $page = $service->olderPage($customer, $page->olderCursor);
+            $this->assertNotNull($page);
+        } while (true);
+
+        $this->assertSame(31, StoreBalanceEntry::query()->whereHas('account', fn ($query) => $query->where('customer_id', $customer->id))->count());
+        $this->assertCount(31, $ids);
+        $this->assertCount(31, array_unique($ids));
+        $this->assertSame(30_000, $this->balanceOf($customer));
+        $this->assertProjectionMatchesLedger($customer, 30_000);
     }
 
     private function createSettlementTopUp(int $telegramId, string $suffix): StoreBalanceTopUp
