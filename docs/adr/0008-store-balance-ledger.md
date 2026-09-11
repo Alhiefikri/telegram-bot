@@ -58,9 +58,11 @@ preset list never creates a balance entry or changes any Customer projection.
   current checkout/refund callers consume `StoreBalanceLedger` instead of
   writing the projection.
 - Store Balance checkout is an internal full-payment rail. The canonical
-  `OrderCheckoutService` transaction locks the Cart, then the Customer account
-  before the CartItem/Product snapshot, debits the exact IDR Order total
-  through this ledger, and delegates paid state and fulfillment to
+  `OrderCheckoutService` transaction follows the common checkout lock order:
+  Cart, the Customer account for Store Balance, the Checkout Maintenance
+  singleton, CartItem/Product, then `ManualPaymentSetting`. Non-Store Balance
+  rails omit the account step. The transaction then debits the exact IDR
+  Order total through this ledger and delegates paid state and fulfillment to
   `OrderLifecycle`.
 - Store Balance refunds are owned by `OrderLifecycle` and use the common
   transaction lock order: Customer account, Order, Payment, then inventory

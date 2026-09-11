@@ -386,6 +386,7 @@ OrderCheckoutService retains the current transaction and retry loop:
 ~~~text
 checkout_key lookup/reuse
   → Cart lock
+  → Store Balance CustomerBalanceAccount lock (Store Balance only)
   → Checkout Maintenance guard
   → CartItem/Product locks
   → provider-setting lock
@@ -400,14 +401,21 @@ checkout_key lookup/reuse
   → Cart checked_out
 ~~~
 
-The implementation must preserve the documented lock order:
+The implementation must preserve this common checkout lock order:
 
 ~~~text
 cart
+→ customer_balance_accounts (Store Balance only)
 → checkout_maintenance_settings
 → cart items/products
 → ManualPaymentSetting
 ~~~
+
+Non-Store Balance rails omit the account step; all other lock positions stay
+identical. `CheckoutMaintenance::guardNewOrder()` owns the singleton lock at
+the documented position. Order/Payment writes and Store Balance debit follow
+these locks in the same transaction, and no provider, Telegram, or queue I/O
+may run while the financial locks are held.
 
 The preparation adapter receives the locked setting and the preflight result.
 It performs rail-specific validation and transaction-local allocation.

@@ -26,6 +26,12 @@ final class CheckoutMaintenance
         return $this->state($setting);
     }
 
+    /**
+     * Lock and validate the maintenance singleton at the checkout boundary.
+     *
+     * OrderCheckoutService calls this after Cart and, for Store Balance, the
+     * CustomerBalanceAccount; it precedes CartItem/Product and ManualPaymentSetting.
+     */
     public function guardNewOrder(): void
     {
         $setting = CheckoutMaintenanceSetting::query()

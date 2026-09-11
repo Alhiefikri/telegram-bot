@@ -115,7 +115,6 @@ class OrderCheckoutService
         if ($lockedCart->status !== CartStatus::Active || ($lockedCart->expires_at && $lockedCart->expires_at->isPast())) {
             throw new InvalidCheckout('Cart is not active.');
         }
-        $this->maintenance->guardNewOrder();
         $storeBalanceCustomer = null;
         if (strtolower(trim($paymentIntent->provider())) === PaymentProvider::STORE_BALANCE) {
             $storeBalanceCustomer = Customer::query()->findOrFail($lockedCart->customer_id);
@@ -127,6 +126,10 @@ class OrderCheckoutService
             // before any Product locks.
             $this->storeBalance->lockForTransaction($storeBalanceCustomer);
         }
+
+        // Every checkout rail acquires the maintenance singleton before any
+        // CartItem/Product or ManualPaymentSetting lock.
+        $this->maintenance->guardNewOrder();
 
         $items = $lockedCart->cartItems()->orderBy('product_id')->lockForUpdate()->get();
         if ($items->isEmpty()) {

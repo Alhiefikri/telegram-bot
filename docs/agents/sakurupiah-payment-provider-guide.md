@@ -372,7 +372,7 @@ If no provider reference is available and duplicate-reference lookup is undocume
 2. Add a Sakurupiah QRIS intent or provider-bound intent with normalized provider/method identity.
 3. Add typed snapshot and register it in `CheckoutPaymentPlan` validation.
 4. Add `SakurupiahCheckoutPaymentPreparation` to the preparation resolver and AppServiceProvider. `preflight()` may perform bounded readiness/channel lookup; `prepare()` may only use locked local data and preflight fingerprint.
-5. Preserve common checkout lock order: `cart → checkout_maintenance_settings → cart items/products → ManualPaymentSetting`.
+5. For non-Store Balance checkout, preserve the lock order: `cart → checkout_maintenance_settings → cart items/products → ManualPaymentSetting`.
 6. Do not add Sakurupiah HTTP to `OrderCheckoutService` or `CheckoutPaymentPlanWriter`.
 7. Make provider setting version/ID part of the existing snapshot validation. Provider switches affect only new checkout.
 8. Ensure preparation failure creates no Order, Payment, reservation, credential allocation, or outbound effect.

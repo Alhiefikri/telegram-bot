@@ -130,7 +130,7 @@ A `checkout_url` with credentials/token query data must not enter logs, audit me
 
 ## Checkout and create invariants
 
-1. The documented checkout lock order remains:
+1. For non-Store Balance checkout, the documented lock order remains:
    ```text
    cart → checkout_maintenance_settings → cart items/products → ManualPaymentSetting
    ```

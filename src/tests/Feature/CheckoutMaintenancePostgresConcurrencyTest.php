@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Enums\CartStatus;
 use App\Enums\InventoryMovementType;
+use App\Enums\PaymentStatus;
+use App\Enums\StoreBalanceEntryKind;
 use App\Enums\UserRole;
 use App\Exceptions\CheckoutMaintenanceActive;
 use App\Exceptions\CheckoutMaintenanceConflict;
@@ -11,16 +13,21 @@ use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
+use App\Models\CustomerBalanceAccount;
 use App\Models\InventoryMovement;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\StoreBalanceEntry;
 use App\Models\User;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\OrderCheckoutService;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Throwable;
@@ -40,7 +47,69 @@ class CheckoutMaintenancePostgresConcurrencyTest extends TestCase
         $this->artisan('migrate:fresh', ['--force' => true])->assertSuccessful();
     }
 
-    public function test_checkout_that_locks_maintenance_first_commits_before_activation(): void
+    public function test_store_balance_checkout_waits_for_maintenance_lock_without_deadlock(): void
+    {
+        $this->requireConcurrencyLane();
+        Http::fake();
+        Queue::fake();
+        $product = Product::factory()->create([
+            'price_amount' => 20_000,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $cart = $this->cartForProduct($product);
+        app(StoreBalanceLedger::class)->credit(
+            $cart->customer,
+            25_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            'maintenance-contention',
+            'balance_top_up:maintenance-contention',
+        );
+        $signal = $this->temporarySignal();
+
+        $results = $this->runConcurrently([
+            function () use ($cart, $signal): string {
+                $this->waitForSignal($signal);
+
+                return app(OrderCheckoutService::class)
+                    ->checkout(
+                        Cart::findOrFail($cart->id),
+                        CheckoutPaymentIntents::storeBalance(),
+                        'postgres-maintenance-store-balance',
+                    )
+                    ->payment_status
+                    ->value;
+            },
+            function () use ($signal): bool {
+                return DB::transaction(function () use ($signal): bool {
+                    app(CheckoutMaintenance::class)->guardNewOrder();
+                    touch($signal);
+                    usleep(250_000);
+
+                    return true;
+                }, 5);
+            },
+        ]);
+
+        @unlink($signal);
+        $values = $this->resultValues($results);
+        $this->assertSame(2, $this->successfulResultCount($results), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame([], $this->failedResultClasses($results), json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(PaymentStatus::Paid->value, $values[0]);
+        $this->assertTrue((bool) $values[1]);
+        $this->assertSame(1, Order::query()->where('customer_id', $cart->customer_id)->count());
+        $this->assertSame(1, Payment::query()->count());
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
+
+        $balance = (int) CustomerBalanceAccount::query()
+            ->where('customer_id', $cart->customer_id)
+            ->value('balance');
+        $this->assertSame(5_000, $balance);
+        $this->assertGreaterThanOrEqual(0, $balance);
+    }
+
+    public function test_checkout_commits_before_activation_when_checkout_holds_maintenance_lock(): void
     {
         $this->requireConcurrencyLane();
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);

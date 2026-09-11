@@ -348,7 +348,7 @@ Untuk stok, `AdminProductAccountStockController` menerima JSON Account Input (1�
 
 `CheckoutMaintenance` adalah owner canonical untuk state **Checkout Maintenance** melalui [`CheckoutMaintenance::current()`](../../src/app/Services/CheckoutMaintenance/CheckoutMaintenance.php), `change()`, dan `guardNewOrder()`. `AdminCheckoutMaintenanceController` hanya mengorkestrasi request; role predicate `UserRole::canManageStoreOperations()` membatasi mutasi ke Owner/Admin, sedangkan `AdminDashboardStatsData` menyajikan status untuk semua role admin. `change()` mengunci row singleton `checkout_maintenance_settings`, memeriksa optimistic `version`, menormalkan note, mendeteksi no-op, lalu menulis setting dan `AuditLogger` dalam transaksi yang sama. Perubahan nyata menaikkan version dan menyimpan activation timestamp; deactivation selalu menghapus public note, sementara nilai lama tetap berada di audit.
 
-`OrderCheckoutService` adalah owner transaksi checkout yang authoritative. Setelah reuse `checkout_key`, lock cart, reuse Order dari cart `checked_out`, dan validasi cart, ia mempertahankan urutan lock `cart → checkout_maintenance_settings → cart items/products → ManualPaymentSetting`. `CheckoutPaymentPreparation::preflight()` sudah dijalankan sebelum transaksi dan lock; setelah lock serta validasi snapshot setting, `prepare()` membentuk immutable `CheckoutPaymentPlan` tanpa external I/O. `OrderCheckoutService` hanya mempersist plan generik lalu mengorkestrasi Order, reservation melalui `InventoryLedger`, credential allocation, Telegram Outbound Effect materialization, dan Cart transition. Karena `guardNewOrder()` berjalan di transaksi yang sama dan mutation admin memakai row lock yang sama, commit order menentukan race: checkout lebih dulu menghasilkan satu Order yang sah; activation lebih dulu menghasilkan tidak ada efek checkout baru. Order, Payment, reservation, credential allocation, notification, callback, reconciliation, expiry, cancellation, fulfillment, receipt, dan Sales Proof Post yang sudah ada tidak membaca state maintenance.
+`OrderCheckoutService` adalah owner transaksi checkout yang authoritative. Setelah reuse `checkout_key`, lock cart, reuse Order dari cart `checked_out`, dan validasi cart, ia mempertahankan urutan lock bersama `cart → customer_balance_accounts (Store Balance only) → checkout_maintenance_settings → cart items/products → ManualPaymentSetting`; rail non-Store Balance menghilangkan account step. `CheckoutPaymentPreparation::preflight()` sudah dijalankan sebelum transaksi dan lock; setelah lock serta validasi snapshot setting, `prepare()` membentuk immutable `CheckoutPaymentPlan` tanpa external I/O. `OrderCheckoutService` hanya mempersist plan generik lalu mengorkestrasi Order, reservation melalui `InventoryLedger`, credential allocation, Telegram Outbound Effect materialization, dan Cart transition. Karena `guardNewOrder()` berjalan di transaksi yang sama dan mutation admin memakai row lock yang sama, commit order menentukan race: checkout lebih dulu menghasilkan satu Order yang sah; activation lebih dulu menghasilkan tidak ada efek checkout baru. Order, Payment, reservation, credential allocation, notification, callback, reconciliation, expiry, cancellation, fulfillment, receipt, dan Sales Proof Post yang sudah ada tidak membaca state maintenance.
 
 Adapter presentation tidak memiliki aturan cutoff sendiri. `StorefrontShopCheckout` hanya melakukan preflight non-authoritative sebelum membuat Customer/cart; guard service tetap wajib. `StorefrontResponseCache` memasukkan maintenance `version` ke cache identity sehingga request pertama setelah perubahan nyata tidak memakai HTML lama, sedangkan no-op mempertahankan identity. `StorefrontCatalogPageBuilder`/presenter dan view partial menampilkan notice serta mengganti CTA; `TelegramMenuIntents`, `TelegramCatalogIntents`, `TelegramCartIntents`, dan callback handlers mempertahankan browsing/stock/cart, sementara `TelegramCheckoutMaintenanceCallbackHandler` menyediakan Cek Status. Status callback terdaftar sekali setelah privacy/community gate dan tidak mengirim broadcast.
 
@@ -390,18 +390,19 @@ Payment Provider Switch berlaku hanya untuk checkout baru. Jangan memindahkan Pa
 1. normalizes the intent, selects the `CheckoutPaymentPreparation` adapter, and runs `preflight()` before the transaction/checkout locks;
 2. deduplicates by `checkout_key` when present;
 3. locks the Cart and reuses an existing Order for a `checked_out` Cart;
-4. validates that the Cart is active and not expired, then calls `CheckoutMaintenance::guardNewOrder()`;
-5. for a Store Balance intent, locks the Customer's `CustomerBalanceAccount` immediately after the Cart and before any CartItem/Product lock;
-6. locks CartItem/Product and `ManualPaymentSetting` in canonical order;
-7. revalidates the selected provider-setting snapshot and preflight identity inside the transaction;
-8. calls `prepare()` after all checkout locks are held; this phase only performs transaction-local validation, allocation, and snapshot work;
-9. creates the Order and asks [`CheckoutPaymentPlanWriter`](../../src/app/Services/Checkout/CheckoutPaymentPlanWriter.php) to persist the generic Payment plan;
-10. creates OrderItem with delivery/usage-guide snapshots;
-11. allocates credential stock when relevant;
-12. records the inventory reservation through `InventoryLedger`;
-13. materializes Telegram Outbound Effects and marks the Cart `checked_out`.
+4. validates that the Cart is active and not expired;
+5. for a Store Balance intent, locks the Customer's `CustomerBalanceAccount` immediately after the Cart and before the maintenance guard;
+6. calls `CheckoutMaintenance::guardNewOrder()` for every rail;
+7. locks CartItem/Product and `ManualPaymentSetting` in canonical order;
+8. revalidates the selected provider-setting snapshot and preflight identity inside the transaction;
+9. calls `prepare()` after all checkout locks are held; this phase only performs transaction-local validation, allocation, and snapshot work;
+10. creates the Order and asks [`CheckoutPaymentPlanWriter`](../../src/app/Services/Checkout/CheckoutPaymentPlanWriter.php) to persist the generic Payment plan;
+11. creates OrderItem with delivery/usage-guide snapshots;
+12. allocates credential stock when relevant;
+13. records the inventory reservation through `InventoryLedger`;
+14. materializes Telegram Outbound Effects and marks the Cart `checked_out`.
 
-The Store Balance lock order is therefore `Cart -> CustomerBalanceAccount -> CartItem/Product -> ManualPaymentSetting -> Order/Payment`; the debit and paid lifecycle run after the account lock in that same transaction. Store Balance refund uses `CustomerBalanceAccount -> Order -> Payment -> OrderItem/InventoryMovement/Product`, with the account acquired before the lifecycle resource locks. Neither path performs provider, Telegram, or queue I/O while these locks are held.
+The common checkout lock order is `Cart -> CustomerBalanceAccount (Store Balance only) -> CheckoutMaintenance -> CartItem/Product -> ManualPaymentSetting`; non-Store Balance rails omit the account step. `CheckoutMaintenance::guardNewOrder()` owns the `checkout_maintenance_settings` singleton lock at its documented position. Order/Payment writes, Store Balance debit, and the paid lifecycle follow those locks in the same transaction. Store Balance refund uses `CustomerBalanceAccount -> Order -> Payment -> OrderItem/InventoryMovement/Product`, with the account acquired before lifecycle resource locks. Neither checkout nor refund performs provider, Telegram, or queue I/O while these locks are held.
 
 ### 5.3 Pakasir legacy settlement
 
