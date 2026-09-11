@@ -25,12 +25,36 @@ use Throwable;
  *
  * One Payment and Store Balance top-up lifecycle owns dynamic QR create,
  * recovery, persistence, expiry tightening, payability evaluation, and safe
- * outcome classification. Callers only ever receive lifecycle outcomes; raw
- * provider payloads and persistence-state strings stay internal.
+ * outcome classification. Callers only ever receive safe lifecycle outcomes
+ * and presentation DTOs; raw provider payloads and persistence-state strings
+ * stay internal.
  */
 class KlikQrisNativeQrisService
 {
     private const PAYMENT_LOCK_WAIT_SECONDS = 10;
+
+    /**
+     * @var list<string>
+     */
+    private const TOP_UP_PRESENTATION_COLUMNS = [
+        'id',
+        'customer_id',
+        'merchant_ref',
+        'provider',
+        'currency',
+        'amount',
+        'status',
+        'provider_reference',
+        'provider_payload',
+        'provider_qris_url',
+        'provider_fee',
+        'provider_total_payment',
+        'provider_payment_method',
+        'provider_expires_at',
+        'expires_at',
+        'provider_create_state',
+        'created_at',
+    ];
 
     private const OWNER_ALERT_TERMINAL_STATE = 'terminal';
 
@@ -347,18 +371,80 @@ class KlikQrisNativeQrisService
         return 'klikqris:callback-status:'.$payment->getKey();
     }
 
-    public function classifyTopUp(StoreBalanceTopUp $topUp): KlikQrisTopUpLifecycleResult
-    {
-        $topUp->refresh();
+    /**
+     * Reduce persisted top-up state to the customer-safe outcome and
+     * presentation flags. Provider persistence states never cross this seam.
+     */
+    public function topUpPresentation(
+        StoreBalanceTopUp $topUp,
+        ?KlikQrisTopUpLifecycleResult $lifecycle = null,
+        bool $refresh = true,
+    ): KlikQrisTopUpPresentation {
+        if ($refresh) {
+            $topUp->refresh();
+        }
 
-        if ($topUp->isPayable()) {
-            try {
-                return KlikQrisTopUpLifecycleResult::payableResult(
-                    KlikQrisPayableBalanceTopUp::fromTopUp($topUp),
-                );
-            } catch (RuntimeException) {
-                // Fall through to the persisted state classification.
+        $lifecycle ??= $this->classifyTopUp($topUp, refresh: false);
+        $outcome = $lifecycle->outcome();
+        $providerState = trim((string) $topUp->provider_create_state);
+
+        return KlikQrisTopUpPresentation::fromLifecycle(
+            $lifecycle,
+            paid: $topUp->status === StoreBalanceTopUpStatus::Paid,
+            recovered: $topUp->status === StoreBalanceTopUpStatus::Paid
+                && $providerState === 'reconciled_SUCCESS',
+            retryable: $topUp->status === StoreBalanceTopUpStatus::Failed
+                && $providerState === 'create_failed',
+            manualReview: $topUp->status === StoreBalanceTopUpStatus::InvalidProviderResult
+                || ($topUp->status !== StoreBalanceTopUpStatus::Expired
+                    && $providerState === 'reconciliation_review'),
+            checkable: in_array($topUp->status, [
+                StoreBalanceTopUpStatus::Pending,
+                StoreBalanceTopUpStatus::RecoveryPending,
+            ], true) && in_array($outcome, [
+                KlikQrisNativeQrisOutcome::Creating,
+                KlikQrisNativeQrisOutcome::RecoveryPending,
+                KlikQrisNativeQrisOutcome::ProviderTotalPending,
+            ], true),
+        );
+    }
+
+    /**
+     * @param  iterable<StoreBalanceTopUp>  $topUps
+     * @return array<string, KlikQrisTopUpPresentation>
+     */
+    public function topUpPresentations(iterable $topUps): array
+    {
+        $ids = [];
+        foreach ($topUps as $topUp) {
+            $ids[(int) $topUp->getKey()] = true;
+        }
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $freshTopUps = StoreBalanceTopUp::query()
+            ->select(self::TOP_UP_PRESENTATION_COLUMNS)
+            ->whereKey(array_keys($ids))
+            ->get()
+            ->keyBy(static fn (StoreBalanceTopUp $topUp): string => (string) $topUp->getKey());
+        $presentations = [];
+        foreach (array_keys($ids) as $id) {
+            $key = (string) $id;
+            $freshTopUp = $freshTopUps->get($key);
+            if ($freshTopUp !== null) {
+                $presentations[$key] = $this->topUpPresentation($freshTopUp, refresh: false);
             }
+        }
+
+        return $presentations;
+    }
+
+    public function classifyTopUp(StoreBalanceTopUp $topUp, bool $refresh = true): KlikQrisTopUpLifecycleResult
+    {
+        if ($refresh) {
+            $topUp->refresh();
         }
 
         if ($topUp->status === StoreBalanceTopUpStatus::Expired
@@ -367,24 +453,49 @@ class KlikQrisNativeQrisService
             return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired);
         }
 
+        if ($topUp->status === StoreBalanceTopUpStatus::Paid
+            || $topUp->status === StoreBalanceTopUpStatus::InvalidProviderResult) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult);
+        }
+
+        $providerState = trim((string) $topUp->provider_create_state);
         if ($topUp->status === StoreBalanceTopUpStatus::Payable) {
-            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult);
+            if ($providerState !== 'created') {
+                return KlikQrisTopUpLifecycleResult::state(
+                    $providerState === '' || $providerState === 'create_failed'
+                        ? KlikQrisNativeQrisOutcome::InvalidProviderResult
+                        : $this->topUpOutcomeForProviderState($providerState),
+                );
+            }
+
+            if (! $topUp->isPayable()) {
+                return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult);
+            }
+
+            try {
+                return KlikQrisTopUpLifecycleResult::payableResult(
+                    KlikQrisPayableBalanceTopUp::fromTopUp($topUp, refresh: false),
+                );
+            } catch (RuntimeException) {
+                return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult);
+            }
         }
 
-        if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
-            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult);
-        }
+        return KlikQrisTopUpLifecycleResult::state(
+            $this->topUpOutcomeForProviderState($providerState),
+        );
+    }
 
-        if ($topUp->isRecoveryPending()) {
-            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending);
-        }
-
-        return match ($topUp->provider_create_state) {
-            'provider_total_pending', 'provider_fee_missing' => KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::ProviderTotalPending),
+    private function topUpOutcomeForProviderState(string $providerState): KlikQrisNativeQrisOutcome
+    {
+        return match ($providerState) {
+            'creating', 'outcome_unknown', 'recovery_unconfirmed' => KlikQrisNativeQrisOutcome::RecoveryPending,
+            'provider_total_pending', 'provider_fee_missing' => KlikQrisNativeQrisOutcome::ProviderTotalPending,
             'provider_total_invalid', 'provider_qris_unusable', 'provider_not_payable',
-            'provider_SUCCESS', 'provider_signature_missing' => KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult),
-            'provider_expired', 'provider_EXPIRED' => KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired),
-            default => KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Creating),
+            'provider_SUCCESS', 'provider_signature_missing', 'reconciliation_review' => KlikQrisNativeQrisOutcome::InvalidProviderResult,
+            'provider_expired', 'provider_EXPIRED' => KlikQrisNativeQrisOutcome::Expired,
+            '', 'create_failed', 'created' => KlikQrisNativeQrisOutcome::Creating,
+            default => KlikQrisNativeQrisOutcome::InvalidProviderResult,
         };
     }
 

@@ -215,7 +215,15 @@ final class StoreBalanceTopUpService
             $this->markReconciliationReview($current, 'provider_signature_missing');
         }
 
-        return $result ?? KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Creating);
+        if ($result === null) {
+            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::Creating);
+        }
+
+        $current = $topUp->fresh();
+
+        return $current === null
+            ? $result
+            : $this->nativeQris->classifyTopUp($current);
     }
 
     public function expireIfDue(StoreBalanceTopUp $topUp): bool

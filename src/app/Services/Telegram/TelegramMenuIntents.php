@@ -2,7 +2,6 @@
 
 namespace App\Services\Telegram;
 
-use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramNavigationRenderOutcome;
 use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
@@ -11,6 +10,7 @@ use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramNavigationRoot;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\StoreBalance\StoreBalanceActivityDetail;
 use App\Services\StoreBalance\StoreBalanceActivityItem;
@@ -41,6 +41,7 @@ class TelegramMenuIntents
         private StoreBalanceLedger $balances,
         private StoreBalanceActivityService $activities,
         private TelegramBalanceActivityToken $activityTokens,
+        private KlikQrisNativeQrisService $nativeQris,
         private StoreBalanceFundingPolicyManager $fundingPolicies,
     ) {}
 
@@ -478,8 +479,9 @@ class TelegramMenuIntents
             ]),
             $this->locale->translate($customer, 'balance.confirmation.no_invoice'),
         ] : [];
-        if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
-            $paidNoticeKey = $topUp->provider_create_state === 'reconciled_SUCCESS'
+        $presentation = $this->nativeQris->topUpPresentation($topUp, $result);
+        if ($presentation->isPaid()) {
+            $paidNoticeKey = $presentation->isRecovered()
                 ? 'balance.topup.recovered'
                 : 'balance.topup.paid';
             $lines = array_merge($confirmationLines, [
@@ -488,8 +490,8 @@ class TelegramMenuIntents
                 ]),
             ]);
             $keyboard = [$this->navigationRow($customer)];
-        } elseif ($result->isPayable() && $result->payable() !== null) {
-            $payable = $result->payable();
+        } elseif ($presentation->isPayable() && $presentation->payable() !== null) {
+            $payable = $presentation->payable();
             $lines = array_merge($confirmationLines, [
                 $this->locale->translate($customer, 'balance.topup.instruction.title'),
                 '━━━━━━━━━━━━━━',
@@ -519,9 +521,9 @@ class TelegramMenuIntents
             ], $this->navigationRow($customer)];
         } else {
             $noticeKey = match (true) {
-                $topUp->canRetryCreate() => 'balance.topup.retryable',
-                $topUp->provider_create_state === 'reconciliation_review' => 'balance.topup.manual_review',
-                default => match ($result->outcome()) {
+                $presentation->canRetry() => 'balance.topup.retryable',
+                $presentation->isManualReview() => 'balance.topup.manual_review',
+                default => match ($presentation->outcome()) {
                     KlikQrisNativeQrisOutcome::RecoveryPending => 'balance.topup.pending',
                     KlikQrisNativeQrisOutcome::ProviderTotalPending => 'balance.topup.retry_later',
                     KlikQrisNativeQrisOutcome::InvalidProviderResult => 'balance.topup.invalid',
@@ -534,13 +536,13 @@ class TelegramMenuIntents
                 $this->locale->translate($customer, 'balance.topup.help'),
             ]);
             $keyboard = [];
-            if ($topUp->canRetryCreate()) {
+            if ($presentation->canRetry()) {
                 $keyboard[] = [[
                     'text' => $this->locale->translate($customer, 'balance.topup.retry'),
                     'callback_data' => StoreBalanceTopUpService::actionCallback('retry', $topUp->getKey()),
                 ]];
             }
-            if ($result->outcome() !== KlikQrisNativeQrisOutcome::Expired) {
+            if ($presentation->outcome() !== KlikQrisNativeQrisOutcome::Expired) {
                 $keyboard[] = [[
                     'text' => $this->locale->translate($customer, 'balance.topup.check'),
                     'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),

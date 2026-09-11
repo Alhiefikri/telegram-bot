@@ -21,18 +21,24 @@ final readonly class KlikQrisPayableBalanceTopUp
         private ?string $fallbackImageContents,
     ) {}
 
-    public static function fromTopUp(StoreBalanceTopUp $topUp, ?KlikQrisEnvironment $environment = null): self
-    {
-        return self::fromTopUpWithTransientImage($topUp, null, $environment);
+    public static function fromTopUp(
+        StoreBalanceTopUp $topUp,
+        ?KlikQrisEnvironment $environment = null,
+        bool $refresh = true,
+    ): self {
+        return self::fromTopUpWithTransientImage($topUp, null, $environment, $refresh);
     }
 
     public static function fromTopUpWithTransientImage(
         StoreBalanceTopUp $topUp,
         ?string $qrisImageBase64,
         ?KlikQrisEnvironment $environment = null,
+        bool $refresh = true,
     ): self {
         $environment ??= KlikQrisEnvironment::runtime();
-        $topUp->refresh();
+        if ($refresh) {
+            $topUp->refresh();
+        }
 
         if (! $topUp->isPayable()) {
             throw new RuntimeException('Store Balance top-up is not payable.');

@@ -3,12 +3,14 @@
 namespace App\Services\StoreBalance;
 
 use App\Enums\StoreBalanceEntryKind;
-use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\Order;
 use App\Models\StoreBalanceEntry;
 use App\Models\StoreBalanceTopUp;
+use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
+use App\Services\KlikQris\KlikQrisTopUpPresentation;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -29,10 +31,12 @@ final class StoreBalanceActivityService
         'id',
         'customer_id',
         'amount',
-        'status',
-        'provider_create_state',
         'created_at',
     ];
+
+    public function __construct(
+        private readonly KlikQrisNativeQrisService $nativeQris,
+    ) {}
 
     public function firstPage(Customer $customer): StoreBalanceActivityPage
     {
@@ -107,8 +111,9 @@ final class StoreBalanceActivityService
                 ->where('kind', StoreBalanceEntryKind::TopUpCredit->value)
                 ->where('source_id', (string) $topUp->getKey())
                 ->first();
+        $presentation = $this->nativeQris->topUpPresentation($topUp);
 
-        return new StoreBalanceActivityDetail($this->topUpItem($topUp, $credit));
+        return new StoreBalanceActivityDetail($this->topUpItem($topUp, $credit, $presentation));
     }
 
     private function page(
@@ -126,6 +131,7 @@ final class StoreBalanceActivityService
             ? collect()
             : $this->entryCandidates($customer->id, $accountId, $cursor, $newer);
         $credits = $this->creditEntriesForTopUps($accountId, $topUps);
+        $presentations = $this->nativeQris->topUpPresentations($topUps);
         $orders = $this->ordersForEntries($customer->id, $entries);
         $originals = $accountId === null
             ? collect()
@@ -134,7 +140,9 @@ final class StoreBalanceActivityService
         $items = [];
         foreach ($topUps as $topUp) {
             $creditsByTopUp = $credits->get((string) $topUp->getKey());
-            $items[] = $this->topUpItem($topUp, $creditsByTopUp);
+            $presentation = $presentations[(string) $topUp->getKey()]
+                ?? $this->nativeQris->topUpPresentation($topUp);
+            $items[] = $this->topUpItem($topUp, $creditsByTopUp, $presentation);
         }
         foreach ($entries as $entry) {
 
@@ -378,13 +386,16 @@ final class StoreBalanceActivityService
             ->first();
     }
 
-    private function topUpItem(StoreBalanceTopUp $topUp, ?StoreBalanceEntry $credit): StoreBalanceActivityItem
-    {
+    private function topUpItem(
+        StoreBalanceTopUp $topUp,
+        ?StoreBalanceEntry $credit,
+        KlikQrisTopUpPresentation $presentation,
+    ): StoreBalanceActivityItem {
         $creditMatchesRequest = $credit !== null
             && $credit->kind === StoreBalanceEntryKind::TopUpCredit
             && (int) $credit->amount === (int) $topUp->amount
             && (int) $credit->amount > 0;
-        $state = $this->topUpState($topUp, $creditMatchesRequest);
+        $state = $this->topUpState($presentation, $creditMatchesRequest);
         $creditedAmount = $creditMatchesRequest ? (int) $credit->amount : null;
 
         return new StoreBalanceActivityItem(
@@ -398,11 +409,8 @@ final class StoreBalanceActivityService
             reference: '#'.(int) $topUp->getKey(),
             requestedAmount: (int) $topUp->amount,
             creditedAmount: $creditedAmount,
-            topUpCanCheck: in_array($state, [
-                StoreBalanceActivityItem::STATE_PENDING,
-                StoreBalanceActivityItem::STATE_UNCERTAIN,
-            ], true),
-            topUpCanRetry: $topUp->canRetryCreate(),
+            topUpCanCheck: $presentation->canCheck(),
+            topUpCanRetry: $presentation->canRetry(),
         );
     }
 
@@ -442,25 +450,32 @@ final class StoreBalanceActivityService
         );
     }
 
-    private function topUpState(StoreBalanceTopUp $topUp, bool $creditMatchesRequest): string
-    {
-        if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
+    private function topUpState(
+        KlikQrisTopUpPresentation $presentation,
+        bool $creditMatchesRequest,
+    ): string {
+        if ($presentation->isPaid()) {
             if (! $creditMatchesRequest) {
                 return StoreBalanceActivityItem::STATE_REVIEW;
             }
 
-            return $topUp->provider_create_state === 'reconciled_SUCCESS'
+            return $presentation->isRecovered()
                 ? StoreBalanceActivityItem::STATE_RECOVERED
                 : StoreBalanceActivityItem::STATE_CREDITED;
         }
+        if ($presentation->isManualReview()) {
+            return StoreBalanceActivityItem::STATE_REVIEW;
+        }
 
-        return match (true) {
-            $topUp->status === StoreBalanceTopUpStatus::Expired => StoreBalanceActivityItem::STATE_EXPIRED,
-            $topUp->status === StoreBalanceTopUpStatus::InvalidProviderResult
-                || $topUp->provider_create_state === 'reconciliation_review' => StoreBalanceActivityItem::STATE_REVIEW,
-            $topUp->status === StoreBalanceTopUpStatus::RecoveryPending || $topUp->isRecoveryPending() => StoreBalanceActivityItem::STATE_UNCERTAIN,
-            $topUp->status === StoreBalanceTopUpStatus::Failed => StoreBalanceActivityItem::STATE_FAILED,
-            default => StoreBalanceActivityItem::STATE_PENDING,
+        return match ($presentation->outcome()) {
+            KlikQrisNativeQrisOutcome::Expired => StoreBalanceActivityItem::STATE_EXPIRED,
+            KlikQrisNativeQrisOutcome::InvalidProviderResult => StoreBalanceActivityItem::STATE_REVIEW,
+            KlikQrisNativeQrisOutcome::RecoveryPending => StoreBalanceActivityItem::STATE_UNCERTAIN,
+            KlikQrisNativeQrisOutcome::Creating => $presentation->canRetry()
+                ? StoreBalanceActivityItem::STATE_FAILED
+                : StoreBalanceActivityItem::STATE_PENDING,
+            KlikQrisNativeQrisOutcome::Payable,
+            KlikQrisNativeQrisOutcome::ProviderTotalPending => StoreBalanceActivityItem::STATE_PENDING,
         };
     }
 

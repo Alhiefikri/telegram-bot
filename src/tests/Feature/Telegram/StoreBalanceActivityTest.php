@@ -160,6 +160,20 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
         $this->assertSame(5000, $item->requestedAmount);
     }
 
+    public function test_unknown_top_up_provider_state_fails_closed_without_customer_actions(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        $customer = Customer::factory()->create(['telegram_id' => 46305, 'locale' => 'en']);
+        $this->makeTopUp($customer, StoreBalanceTopUpStatus::Pending, 'provider_state_renamed', now());
+
+        $item = app(StoreBalanceActivityService::class)->firstPage($customer)->items[0];
+
+        $this->assertSame('review', $item->state);
+        $this->assertNull($item->signedAmount);
+        $this->assertFalse($item->topUpCanCheck);
+        $this->assertFalse($item->topUpCanRetry);
+    }
+
     public function test_activity_callbacks_use_cursors_and_reject_foreign_or_tampered_tokens(): void
     {
         $this->fakeCanonicalTelegram();
