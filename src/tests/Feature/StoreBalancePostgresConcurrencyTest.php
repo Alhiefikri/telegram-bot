@@ -39,10 +39,12 @@ use App\Services\StoreBalance\StoreBalanceFundingIntentInput;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\StoreBalance\StoreBalanceReconciliation;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Support\PaymentProvider;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
@@ -62,6 +64,9 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 123456]]),
+        ]);
 
         if (DB::getDriverName() !== 'pgsql' || (string) env('RUN_CONCURRENCY_TESTS', '') !== '1') {
             return;
@@ -75,14 +80,77 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
 
     protected function tearDown(): void
     {
-        if ($this->createdCustomerIds !== [] && Schema::hasTable('store_balance_entries')) {
-            Customer::query()->whereKey($this->createdCustomerIds)->delete();
-        }
-        if ($this->createdProductIds !== [] && Schema::hasTable('products')) {
-            Product::query()->whereKey($this->createdProductIds)->delete();
-        }
+        $this->cleanupFixtures();
 
         parent::tearDown();
+    }
+
+    private function cleanupFixtures(): void
+    {
+        if ($this->createdCustomerIds === [] || ! Schema::hasTable('store_balance_entries')) {
+            return;
+        }
+
+        $orderIds = Order::query()
+            ->whereIn('customer_id', $this->createdCustomerIds)
+            ->pluck('id')
+            ->all();
+
+        if ($orderIds !== []) {
+            $paymentIds = Payment::query()
+                ->whereIn('order_id', $orderIds)
+                ->pluck('id')
+                ->all();
+
+            if ($paymentIds !== []) {
+                foreach ([
+                    'bsc_payment_transfer_evidence',
+                    'payment_bsc_details',
+                    'payment_events',
+                    'manual_fulfillment_reviews',
+                    'provider_cancellation_attempts',
+                ] as $table) {
+                    DB::table($table)->whereIn('payment_id', $paymentIds)->delete();
+                }
+            }
+
+            DB::table('order_notification_events')->whereIn('order_id', $orderIds)->delete();
+            DB::table('sales_proof_posts')->whereIn('order_id', $orderIds)->delete();
+
+            $movementIds = DB::table('inventory_movements')
+                ->whereIn('order_id', $orderIds)
+                ->pluck('id')
+                ->all();
+
+            if ($movementIds !== []) {
+                DB::table('product_stock_intake_operations')->whereIn('inventory_movement_id', $movementIds)->delete();
+                DB::table('product_waitlist_events')->whereIn('inventory_movement_id', $movementIds)->delete();
+                DB::table('stock_notification_events')->whereIn('inventory_movement_id', $movementIds)->delete();
+                DB::table('inventory_movements')->whereIn('id', $movementIds)->delete();
+            }
+
+            DB::table('order_items')->whereIn('order_id', $orderIds)->delete();
+            if ($paymentIds !== []) {
+                DB::table('payments')->whereIn('id', $paymentIds)->delete();
+            }
+            DB::table('orders')->whereIn('id', $orderIds)->delete();
+        }
+
+        $cartIds = DB::table('carts')
+            ->whereIn('customer_id', $this->createdCustomerIds)
+            ->pluck('id')
+            ->all();
+
+        if ($cartIds !== []) {
+            DB::table('cart_items')->whereIn('cart_id', $cartIds)->delete();
+        }
+        DB::table('carts')->whereIn('customer_id', $this->createdCustomerIds)->delete();
+        Customer::query()->whereKey($this->createdCustomerIds)->delete();
+
+        if ($this->createdProductIds !== [] && Schema::hasTable('products')) {
+            DB::table('product_stock_items')->whereIn('product_id', $this->createdProductIds)->delete();
+            Product::query()->whereKey($this->createdProductIds)->delete();
+        }
     }
 
     public function test_postgres_competing_policy_updates_allow_one_stale_version_winner(): void
@@ -553,7 +621,7 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         $this->assertSame(25_000, $this->balanceOf($customer));
         $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
         $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());
-        $this->assertSame(3, StoreBalanceEntry::query()->count());
+        $this->assertSame(4, StoreBalanceEntry::query()->count());
         $this->assertProjectionMatchesLedger($customer, 25_000);
     }
 
@@ -793,19 +861,20 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
                         'activity-race-credit-'.$mutation,
                         'balance_top_up:activity-race-credit-'.$mutation.':credit',
                     );
+                    $orderSourceId = '00000000-0000-0000-0000-'.str_pad((string) $mutation, 12, '0', STR_PAD_LEFT);
                     $ledger->debit(
                         Customer::query()->findOrFail($customer->id),
                         500,
                         'order',
-                        'activity-race-order-'.$mutation,
-                        'order:activity-race-order:'.$mutation.':debit',
+                        $orderSourceId,
+                        'order:'.$orderSourceId.':debit',
                     );
                     $ledger->refund(
                         Customer::query()->findOrFail($customer->id),
                         500,
                         'order',
-                        'activity-race-order-'.$mutation,
-                        'order:activity-race-order:'.$mutation.':refund',
+                        $orderSourceId,
+                        'order:'.$orderSourceId.':refund',
                     );
                     usleep(2_000);
                 }

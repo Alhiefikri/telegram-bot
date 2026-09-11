@@ -929,6 +929,7 @@ SH);
             'tests/Feature/Telegram/CartCheckoutTest.php',
             'tests/Feature/Telegram/PaymentProofAdminCallbackTest.php',
             'tests/Feature/AdminOrderPaymentOperationsTest.php',
+            'tests/Feature/StoreBalancePostgresConcurrencyTest.php',
         ] as $criticalTest) {
             $this->assertStringContainsString($criticalTest, $postgresConfig);
         }

@@ -17,6 +17,7 @@
             <file>tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php</file>
             <file>tests/Feature/KlikQrisWebhookPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SakurupiahInvoiceLifecyclePostgresConcurrencyTest.php</file>
+            <file>tests/Feature/StoreBalancePostgresConcurrencyTest.php</file>
         </testsuite>
     </testsuites>
     <source>

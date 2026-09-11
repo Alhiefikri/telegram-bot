@@ -225,6 +225,7 @@ jobs:
           DB_DATABASE: telegram_bot_ci_test
           DB_USERNAME: telegram_bot_ci
           DB_PASSWORD: ci-only-not-production
+          RUN_CONCURRENCY_TESTS: '1'
         run: |
           set -euo pipefail
           artifact_dir=../artifacts/postgres-release
