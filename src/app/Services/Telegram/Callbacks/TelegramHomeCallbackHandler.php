@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram\Callbacks;
 
+use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -13,7 +14,6 @@ use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramNavigationSurface;
 use App\Services\Telegram\TelegramOrderIntents;
-use App\Services\Telegram\TelegramOutboundEffectService;
 
 /**
  * Presents every routine customer menu screen on the canonical message. The
@@ -38,7 +38,7 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
         private TelegramIntentSession $session,
         private TelegramCatalogQuerySession $catalogQueries,
         private TelegramNavigationPresenter $navigation,
-        private TelegramOutboundEffectService $outboundEffects,
+        private StoreBalanceTopUpOutbound $topUpOutbound,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -66,11 +66,11 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
         if ($root === null
             && in_array($context->data, ['balance', 'menu:home', 'menu:support'], true)
             && $context->messageId !== null
-            && $this->outboundEffects->sentBalanceTopUpReceiptFor(
+            && $this->topUpOutbound->hasSentReceiptFor(
                 $context->customer,
                 $context->chatId,
                 $context->messageId,
-            ) !== null) {
+            )) {
             $this->session->forgetWithLock($context->customer);
             $this->catalogQueries->forget($context->customer);
             $outcome = $this->navigation->presentOnCurrentRoot(

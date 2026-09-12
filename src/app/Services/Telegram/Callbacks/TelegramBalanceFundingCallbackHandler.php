@@ -4,7 +4,6 @@ namespace App\Services\Telegram\Callbacks;
 
 use App\Enums\StoreBalanceFundingIntentClaimOutcome;
 use App\Enums\TelegramNavigationRenderOutcome;
-use App\Enums\TelegramOutboundEffectState;
 use App\Models\Customer;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
@@ -29,7 +28,6 @@ use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramNavigationSurface;
-use App\Services\Telegram\TelegramOutboundEffectService;
 use Throwable;
 
 final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHandler
@@ -44,7 +42,6 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         private readonly StoreBalanceFundingIntentService $intents,
         private readonly StoreBalanceTopUpService $topUps,
         private readonly KlikQrisNativeQrisService $nativeQris,
-        private readonly TelegramOutboundEffectService $outboundEffects,
         private readonly StoreBalanceTopUpOutbound $topUpOutbound,
         private readonly TelegramLocale $locale,
         private readonly TelegramIntentSession $session,
@@ -114,11 +111,11 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         if ($root === null
             && $context->data === 'balance'
             && $context->messageId !== null
-            && $this->outboundEffects->sentBalanceTopUpReceiptFor(
+            && $this->topUpOutbound->hasSentReceiptFor(
                 $context->customer,
                 $context->chatId,
                 $context->messageId,
-            ) !== null) {
+            )) {
             $currentRoot = $this->roots->currentForChat($context->customer, $context->chatId);
             if ($currentRoot !== null) {
                 $this->session->forgetWithLock($context->customer);
@@ -302,7 +299,7 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
 
         $result = $this->resolveTopUp($topUp);
 
-        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp);
+        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp, $result);
 
         return $this->menu->fundingTopUpSurface(
             $context->customer,
@@ -330,8 +327,14 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         }
     }
 
-    private function topUpInstructionsWereDelivered(StoreBalanceTopUp $topUp): bool
-    {
+    private function topUpInstructionsWereDelivered(
+        StoreBalanceTopUp $topUp,
+        KlikQrisTopUpLifecycleResult $result,
+    ): bool {
+        if (! $result->isPayable() || $result->payable() === null) {
+            return false;
+        }
+
         return $this->topUpOutbound->handoffInstructions($topUp)->isDelivered();
     }
 
@@ -342,9 +345,6 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
     ): bool {
         $topUp = $this->topUps->forAction($context->customer, $context->chatId, $topUpId);
         $root = $this->roots->currentForChat($context->customer, $context->chatId);
-        $effect = $topUp === null
-            ? null
-            : $this->outboundEffects->forBalanceTopUp($topUp);
 
         $rootMatches = $topUp !== null
             && $root !== null
@@ -354,10 +354,12 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             && $rootMatches
             && (int) $context->messageId === (int) $root->message_id;
         $instructionMatches = $context->messageId !== null
-            && $effect !== null
-            && $effect->state === TelegramOutboundEffectState::Sent
-            && (string) $effect->telegram_chat_id === $context->chatId
-            && (int) $context->messageId === (int) $effect->telegram_message_id;
+            && $topUp !== null
+            && $this->topUpOutbound->hasSentInstructionFor(
+                $topUp,
+                $context->chatId,
+                $context->messageId,
+            );
 
         if (! $rootMatches || (! $messageMatches && ! $instructionMatches)) {
             $this->bot->answerCallbackQuery(
@@ -377,7 +379,7 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
 
         $result = $this->resolveTopUp($topUp, $action === 'check');
         $topUp->refresh();
-        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp);
+        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp, $result);
         $outcome = $this->navigation->presentOnRoot(
             $root,
             $context->chatId,

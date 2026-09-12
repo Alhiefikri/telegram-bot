@@ -1595,36 +1595,6 @@ class TelegramOutboundEffectService
             ->first();
     }
 
-    public function sentBalanceTopUpReceiptFor(
-        Customer $customer,
-        string $chatId,
-        int|string $messageId,
-    ): ?TelegramOutboundEffect {
-        $chatId = trim($chatId);
-        $messageId = (string) $messageId;
-        if ($chatId === '' || preg_match('/\A[1-9][0-9]{0,18}\z/D', $messageId) !== 1) {
-            return null;
-        }
-
-        $effect = TelegramOutboundEffect::query()
-            ->where('source_type', StoreBalanceTopUp::class)
-            ->where('effect_type', self::TYPE_BALANCE_TOP_UP_RECEIPT)
-            ->where('telegram_chat_id', $chatId)
-            ->where('telegram_message_id', $messageId)
-            ->where('state', TelegramOutboundEffectState::Sent->value)
-            ->first();
-        if ($effect === null) {
-            return null;
-        }
-
-        return StoreBalanceTopUp::query()
-            ->whereKey($effect->source_id)
-            ->where('customer_id', $customer->getKey())
-            ->exists()
-            ? $effect
-            : null;
-    }
-
     /** @return Builder<TelegramOutboundEffect> */
     public function reviewQuery(): Builder
     {

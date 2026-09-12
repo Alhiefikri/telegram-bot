@@ -244,10 +244,11 @@ create an Order or Payment. `StoreBalanceTopUpEventLogger` stores only
 sanitized provider evidence, while `StoreBalanceTopUpService` settles the
 requested credit through `StoreBalanceLedger` and emits `StoreBalanceTopUpSettled`
 as an after-commit application event. `MaterializeStoreBalanceTopUpReceipt`
-reloads the committed top-up, materializes the idempotent Telegram receipt
-effect, and hands it to `TelegramOutboundEffectDispatcher`. The
-`BalanceTopUpInstructionDeliveryPipeline` still sends one separate durable
-QRIS effect after the canonical navigation update.
+reloads the committed top-up and delegates the idempotent receipt handoff to
+`StoreBalanceTopUpOutbound`; the family module owns both top-up effect
+eligibility/identity and safe callback matching. `TelegramBalanceFundingCallbackHandler`
+and routine navigation callbacks consume that seam without inspecting
+Telegram Outbound Effect state. No Telegram work runs inside financial locks.
 
 Receipt successor/readiness is exposed by
 `TelegramOutboundEffectLedgerProtocol::nextReceiptEffect($groupKey, $afterSequence)`.

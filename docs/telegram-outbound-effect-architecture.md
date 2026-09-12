@@ -92,6 +92,14 @@ review summaries, and creates explicit resend versions. It is not a delivery
 state façade. New callers must not add claim or finalization pass-throughs to
 it, to a job, or to a family adapter.
 
+`StoreBalanceTopUpOutbound` is the family boundary for Store Balance top-up
+instructions and receipts. It owns source eligibility, deterministic effect
+identity, materialization and dispatch handoff, plus safe navigation matches
+for sent instruction and receipt messages. Interactive callbacks consume these
+safe outcomes; they do not inspect `TelegramOutboundEffectState` or query
+Store Balance effects themselves. Delivery-state transitions remain owned by
+the shared ledger protocol.
+
 The review service and review projection are a narrow adapter for operator
 actions across families. They reuse the ledger protocol and do not introduce a
 second claim or ambiguity protocol.
@@ -104,6 +112,7 @@ transport details, and synchronization of its own read projection:
 | Family | Adapter responsibility | Queue boundary |
 | --- | --- | --- |
 | Checkout instructions | Provider-specific instruction rendering and customer Order notification projection | telegram-outbound |
+| Store Balance top-up | Instruction and receipt eligibility, deterministic handoff, and callback navigation matching | telegram-outbound |
 | Receipt credentials | Ordered chunk rendering, credential delivery projection, and completion cleanup | telegram-outbound / notifications |
 | Admin Order notifications | Pending, paid, and expired admin projections | telegram-outbound / notifications |
 | Manual payment proof | Proof attachment forwarding and Payment projection | notifications |
@@ -126,6 +135,18 @@ and price notifications, the source mutation and the pending effect are
 created in the same database transaction. A queue dispatch happens after the
 transaction commits, but losing that dispatch does not remove the committed
 effect; telegram:recover-outbound can find it.
+
+Store Balance settlement is a deferred-materialization exception. The
+`StoreBalanceTopUpService` transaction commits the authoritative top-up and
+ledger state, then emits `StoreBalanceTopUpSettled`. The after-commit
+`MaterializeStoreBalanceTopUpReceipt` listener reloads the committed source
+and invokes `StoreBalanceTopUpOutbound::handoffReceipt`; it does not own
+effect identity or delivery policy. Interactive confirmation and top-up
+action callbacks invoke `handoffInstructions` only after the KlikQRIS
+lifecycle returns both `isPayable()` and a non-null `payable()` value. If the
+listener handoff is missed, the same family discovers and repairs the missing
+receipt (and instruction) effect during recovery without running Telegram work
+under financial locks.
 
 The dispatch path is deliberately split into three concerns:
 
@@ -287,9 +308,10 @@ marker. It never claims or redispatches the already-sent effect.
 8. The command selects due pending and retryable failed ledger rows through
    readyToDispatchQuery() and dispatches them through
    TelegramOutboundEffectDispatcher.
-9. It materializes missing checkout, receipt, admin notification, Sales Proof
-   Post, stock, and price effects from committed source state when the
-   deterministic effect key proves that the effect is absent.
+9. It materializes missing checkout, receipt, Store Balance top-up, admin
+   notification, Sales Proof Post, stock, and price effects from committed
+   source state when the deterministic effect key proves that the effect is
+   absent.
 10. It redispatches recoverable Admin Broadcast handoffs through the same locked
    broadcast queue boundary.
 11. Non-ledger cleanup work, such as deleting old customer-facing checkout

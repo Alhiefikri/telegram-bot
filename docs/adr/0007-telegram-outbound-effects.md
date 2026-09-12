@@ -32,6 +32,16 @@ effect service, but no caller may reintroduce claim/finalization pass-throughs
 or a family-specific delivery-state switchboard. See the companion
 [architecture and recovery contract](../telegram-outbound-effect-architecture.md).
 
+### Store Balance top-up family boundary
+
+`StoreBalanceTopUpOutbound` is the single family seam for Store Balance
+instruction and receipt effects. It owns source eligibility, deterministic
+effect identity, materialization, dispatch handoff, and safe callback
+navigation matching. Interactive callbacks consume its safe results and do not
+inspect Telegram effect rows or delivery states directly. The family delegates
+claim, lease, ambiguity, and finalization to
+`TelegramOutboundEffectLedgerProtocol`.
+
 An effect is `sent` only after a successful Telegram response with a valid
 positive integer message identifier. Transport ambiguity and expired leases
 become `unknown`; they are not returned to `pending` by recovery. Operator
@@ -161,12 +171,15 @@ and
 A successful Store Balance settlement changes authoritative top-up and ledger
 state inside `StoreBalanceTopUpService`'s transaction. The service emits the
 `StoreBalanceTopUpSettled` application event, which implements
-`ShouldDispatchAfterCommit`; `MaterializeStoreBalanceTopUpReceipt` then
-reloads the committed top-up, materializes the idempotent Telegram receipt
-effect, and passes it to the dispatcher. No Telegram service or dispatcher
+`ShouldDispatchAfterCommit`; `MaterializeStoreBalanceTopUpReceipt` reloads the
+committed top-up and delegates the receipt handoff to
+`StoreBalanceTopUpOutbound::handoffReceipt`. The listener owns only the
+after-commit trigger; the family owns eligibility, deterministic effect
+identity, materialization, and dispatch. No Telegram service or dispatcher
 runs under financial locks. If the process stops after commit before the
-listener runs, `telegram:recover-outbound` finds paid settled top-ups without
-a receipt effect and performs the same handoff. Replays reuse the effect key.
+listener runs, `telegram:recover-outbound` asks the same family to discover
+paid settled top-ups without a receipt effect and perform the handoff. Replays
+reuse the effect key.
 
 ### Deferred Admin Broadcast materialization
 

@@ -6,6 +6,7 @@ use App\Enums\KlikQrisEnvironment;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceFundingIntentStatus;
 use App\Enums\StoreBalanceTopUpStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
 use App\Models\Customer;
 use App\Models\StoreBalanceEntry;
@@ -20,8 +21,8 @@ use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\TelegramMenuIntents;
-use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
@@ -129,13 +130,16 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
             'expired_at' => $expiresAt->toISOString(),
             'signature' => 'top-up-signature',
         ]);
-
-        $outboundEffects = Mockery::mock(TelegramOutboundEffectService::class);
-        $outboundEffects->shouldReceive('forBalanceTopUp')
-            ->andReturnNull();
-        $outboundEffects->shouldReceive('recordBalanceTopUpInstructions')
-            ->andThrow(new \RuntimeException('Telegram handoff unavailable.'));
-        $this->app->instance(TelegramOutboundEffectService::class, $outboundEffects);
+        Queue::fake();
+        app(StoreBalanceTopUpOutbound::class)->handoffInstructions($topUp);
+        TelegramOutboundEffect::query()->sole()->forceFill([
+            'state' => TelegramOutboundEffectState::Failed,
+            'attempts' => 3,
+            'failed_at' => now(),
+            'next_attempt_at' => null,
+            'last_error_code' => 'telegram_http_400',
+            'last_error' => 'Telegram rejected the request.',
+        ])->save();
         Log::spy();
 
         $this->artisan('klikqris:reconcile-balance-top-ups --chunk=10 --max-top-ups=10')
@@ -155,7 +159,8 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
 
         $this->assertSame(StoreBalanceTopUpStatus::Payable, $topUp->fresh()->status);
         $this->assertSame(0, StoreBalanceEntry::query()->count());
-        $this->assertSame(0, TelegramOutboundEffect::query()->count());
+        $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        $this->assertSame(TelegramOutboundEffectState::Failed, TelegramOutboundEffect::query()->sole()->state);
     }
 
     public function test_expired_provider_status_never_credits_the_requested_balance(): void

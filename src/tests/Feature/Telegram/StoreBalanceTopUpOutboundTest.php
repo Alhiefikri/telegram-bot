@@ -97,6 +97,45 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
         Queue::assertNotPushed(SendStoreBalanceTopUpInstructions::class);
     }
 
+    public function test_navigation_matching_is_owned_by_top_up_outbound_family(): void
+    {
+        Queue::fake();
+        $instructionTopUp = $this->makeTopUp();
+        $receiptTopUp = $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Paid,
+            'paid_at' => now()->subMinute(),
+            'settled_at' => now()->subMinute(),
+        ]);
+        $outbound = app(StoreBalanceTopUpOutbound::class);
+
+        $outbound->handoffInstructions($instructionTopUp);
+        $instruction = TelegramOutboundEffect::query()
+            ->where('source_id', (string) $instructionTopUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpInstructions->value)
+            ->sole();
+        $instruction->forceFill([
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_chat_id' => (string) $instructionTopUp->chat_id,
+            'telegram_message_id' => 701,
+        ])->save();
+
+        $outbound->handoffReceipt($receiptTopUp);
+        $receipt = TelegramOutboundEffect::query()
+            ->where('source_id', (string) $receiptTopUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpReceipt->value)
+            ->sole();
+        $receipt->forceFill([
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_chat_id' => (string) $receiptTopUp->chat_id,
+            'telegram_message_id' => 702,
+        ])->save();
+
+        $this->assertTrue($outbound->hasSentInstructionFor($instructionTopUp, (string) $instructionTopUp->chat_id, 701));
+        $this->assertFalse($outbound->hasSentInstructionFor($instructionTopUp, (string) $instructionTopUp->chat_id, 799));
+        $this->assertTrue($outbound->hasSentReceiptFor($receiptTopUp->customer, (string) $receiptTopUp->chat_id, 702));
+        $this->assertFalse($outbound->hasSentReceiptFor(Customer::factory()->create(), (string) $receiptTopUp->chat_id, 702));
+    }
+
     public function test_failed_instruction_delivery_leaves_one_retryable_effect_without_resending(): void
     {
         Queue::fake();

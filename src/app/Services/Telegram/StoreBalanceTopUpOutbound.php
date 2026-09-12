@@ -4,12 +4,14 @@ namespace App\Services\Telegram;
 
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
+use App\Models\Customer;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
 use App\Support\PaymentProvider;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Throwable;
 
@@ -47,6 +49,66 @@ final class StoreBalanceTopUpOutbound
             fn (string $topUpId): ?TelegramOutboundEffect => $this->outboundEffects->forBalanceTopUpReceipt($topUpId),
             fn (StoreBalanceTopUp $source): bool => $this->eligibleReceipt($source),
         );
+    }
+
+    /**
+     * Match an interactive callback to a sent instruction effect without
+     * exposing effect persistence or delivery state to the callback adapter.
+     */
+    public function hasSentInstructionFor(
+        StoreBalanceTopUp $topUp,
+        string $chatId,
+        int|string $messageId,
+    ): bool {
+        try {
+            $effect = $this->outboundEffects->forBalanceTopUp((string) $topUp->getKey());
+
+            return $this->matchesSentEffect($effect, $chatId, $messageId);
+        } catch (Throwable $exception) {
+            Log::warning('telegram.store_balance_top_up.navigation_match_failed', [
+                'exception' => $exception::class,
+            ]);
+
+            return false;
+        }
+    }
+
+    /**
+     * Match a customer callback to a sent Store Balance receipt.
+     */
+    public function hasSentReceiptFor(
+        Customer $customer,
+        string $chatId,
+        int|string $messageId,
+    ): bool {
+        $chatId = trim($chatId);
+        $messageId = (string) $messageId;
+        if ($chatId === '' || preg_match('/\A[1-9][0-9]{0,18}\z/D', $messageId) !== 1) {
+            return false;
+        }
+
+        try {
+            $effect = TelegramOutboundEffect::query()
+                ->where('source_type', StoreBalanceTopUp::class)
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+                ->where('telegram_chat_id', $chatId)
+                ->where('telegram_message_id', $messageId)
+                ->first();
+            if ($effect === null || ! $this->matchesSentEffect($effect, $chatId, $messageId)) {
+                return false;
+            }
+
+            return StoreBalanceTopUp::query()
+                ->whereKey($effect->source_id)
+                ->where('customer_id', $customer->getKey())
+                ->exists();
+        } catch (Throwable $exception) {
+            Log::warning('telegram.store_balance_top_up.navigation_match_failed', [
+                'exception' => $exception::class,
+            ]);
+
+            return false;
+        }
     }
 
     /**
@@ -319,5 +381,16 @@ final class StoreBalanceTopUpOutbound
         return $state instanceof TelegramOutboundEffectState
             ? $state
             : TelegramOutboundEffectState::tryFrom((string) $state);
+    }
+
+    private function matchesSentEffect(
+        ?TelegramOutboundEffect $effect,
+        string $chatId,
+        int|string $messageId,
+    ): bool {
+        return $effect !== null
+            && $this->stateOf($effect) === TelegramOutboundEffectState::Sent
+            && (string) $effect->telegram_chat_id === trim($chatId)
+            && (int) $effect->telegram_message_id === (int) $messageId;
     }
 }

@@ -19,6 +19,7 @@ use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUpdate;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramUpdateProcessor;
@@ -141,7 +142,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         $this->assertStringContainsString($topUp->merchant_ref, $receiptText);
         $this->assertStringNotContainsString(self::QRIS_URL, $receiptText);
         $this->assertNotNull(app(TelegramNavigationRootService::class)->currentForChat($customer, (string) $customer->telegram_id));
-        $this->assertNotNull(app(TelegramOutboundEffectService::class)->sentBalanceTopUpReceiptFor(
+        $this->assertTrue(app(StoreBalanceTopUpOutbound::class)->hasSentReceiptFor(
             $customer,
             (string) $customer->telegram_id,
             (int) $receiptEffect->telegram_message_id,
@@ -519,6 +520,50 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         $this->assertStringContainsString('The QRIS will be sent in a separate message.', $surface);
         $this->assertStringNotContainsString('The QRIS was sent in a separate message.', $surface);
         $this->assertSame('pending', TelegramOutboundEffect::query()->sole()->state->value);
+    }
+
+    public function test_invalid_lifecycle_does_not_create_instruction_effect_for_malformed_payable_quote(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $createCalls = 0;
+        $statusCalls = 0;
+        $this->fakeProvider($createCalls, $statusCalls);
+
+        Customer::factory()->create(['telegram_id' => 46281, 'locale' => 'en']);
+        $root = $this->openFundingChooser(46281, 46281);
+        $this->postTelegramUpdate($this->messageUpdate(46283, '/deposit 5000', [], 46281));
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46284,
+            'top-up-confirm-malformed',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            46281,
+            'private',
+            $root->message_id,
+        ));
+
+        $topUp = StoreBalanceTopUp::query()->sole();
+        TelegramOutboundEffect::query()->sole()->delete();
+        $payload = $topUp->provider_payload;
+        $payload['data']['qris_url'] = 'https://malformed.example/qris.png';
+        $topUp->forceFill(['provider_payload' => $payload])->save();
+
+        $this->assertTrue($topUp->fresh()->isPayable());
+
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46285,
+            'top-up-retry-malformed',
+            StoreBalanceTopUpService::actionCallback('retry', $topUp->getKey()),
+            [],
+            46281,
+            'private',
+            $root->message_id,
+        ));
+
+        $this->assertSame(StoreBalanceTopUpStatus::Payable, $topUp->fresh()->status);
+        $this->assertSame(0, TelegramOutboundEffect::query()->count());
     }
 
     private function postTelegramUpdate(array $payload): void
