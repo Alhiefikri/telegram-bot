@@ -17,8 +17,8 @@ use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendProductStockNotifications;
 use App\Jobs\SendSakurupiahCheckoutInstructions;
 use App\Jobs\SendStoreBalanceOwnerCompensationNotification;
-use App\Jobs\SendStoreBalanceTopUpAdminReview;
 use App\Jobs\SendStoreBalanceTopUpInstructions;
+use App\Jobs\SendStoreBalanceTopUpPaymentProof;
 use App\Jobs\SendStoreBalanceTopUpReceipt;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Jobs\SendTelegramReceipt;
@@ -91,7 +91,7 @@ final class TelegramOutboundEffectDispatcher
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),
             ),
-            TelegramOutboundEffectType::BalanceTopUpManualReview->value => SendStoreBalanceTopUpAdminReview::dispatch(
+            TelegramOutboundEffectType::BalanceTopUpPaymentProof->value => SendStoreBalanceTopUpPaymentProof::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),

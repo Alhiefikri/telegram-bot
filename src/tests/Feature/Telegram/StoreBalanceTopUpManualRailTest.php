@@ -40,7 +40,7 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         ]);
     }
 
-    public function test_manual_confirmation_sends_static_qr_and_creates_one_admin_review(): void
+    public function test_manual_confirmation_sends_static_qr_and_asks_for_a_payment_proof(): void
     {
         Customer::factory()->create(['telegram_id' => self::BUYER_CHAT_ID, 'locale' => 'en']);
 
@@ -71,19 +71,50 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         $photo = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->last()[0];
         $caption = (string) $this->telegramRequestField($photo, 'caption');
         $this->assertStringContainsString('Balance credit after payment confirmation: Rp5.000', $caption);
-        $this->assertStringContainsString('An admin will verify the payment.', $caption);
+        $this->assertStringContainsString('Send the payment proof photo to this chat with the /payment caption.', $caption);
 
-        $review = TelegramOutboundEffect::query()
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_MANUAL_REVIEW)
+        // No admin effect exists before the customer sends a proof: the proof
+        // itself is the review artifact, exactly like a manual product purchase.
+        $this->assertSame(0, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
+            ->count());
+    }
+
+    public function test_payment_proof_is_forwarded_to_the_admin_with_decision_buttons(): void
+    {
+        Customer::factory()->create(['telegram_id' => self::BUYER_CHAT_ID, 'locale' => 'en']);
+
+        $root = $this->openFundingChooser();
+        $topUp = $this->confirmTopUp($root, 46612, 46613);
+
+        $this->postTelegramUpdate($this->paymentPhotoUpdate(46616, '', [], self::BUYER_CHAT_ID));
+
+        $fresh = $topUp->fresh();
+        $this->assertSame('large-photo', (string) $fresh->payment_proof_file_id);
+        $this->assertNotNull($fresh->payment_proof_submitted_at);
+        $this->assertNotNull($fresh->payment_proof_forwarded_at);
+        $this->assertSame(StoreBalanceTopUpStatus::AwaitingConfirmation, $fresh->status);
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+
+        $proof = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
             ->sole();
-        $this->assertSame(self::ADMIN_CHAT_ID, (int) $review->telegram_chat_id);
-        $this->assertSame('sent', $review->state->value);
+        $this->assertSame('sent', $proof->state->value);
+        $this->assertSame(self::ADMIN_CHAT_ID, (int) $proof->telegram_chat_id);
+        $this->assertSame('balance-top-up:'.$topUp->getKey().':admin-payment-proof:v1', $proof->effect_key);
 
-        $adminMessage = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->last()[0];
-        $this->assertSame(self::ADMIN_CHAT_ID, (int) $this->telegramRequestField($adminMessage, 'chat_id'));
-        $keyboard = $this->telegramRequestField($adminMessage, 'reply_markup');
+        $adminPhoto = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && (string) $this->telegramRequestField($request, 'chat_id') === (string) self::ADMIN_CHAT_ID)->last()[0];
+        $this->assertSame('large-photo', (string) $this->telegramRequestField($adminPhoto, 'photo'));
+        $keyboard = $this->telegramRequestField($adminPhoto, 'reply_markup');
         $this->assertSame('admin:topup-approve:'.$topUp->getKey(), $keyboard['inline_keyboard'][0][0]['callback_data']);
         $this->assertSame('admin:topup-reject:'.$topUp->getKey(), $keyboard['inline_keyboard'][0][1]['callback_data']);
+
+        // A second proof for the same top-up is refused without a second effect.
+        $this->postTelegramUpdate($this->paymentPhotoUpdate(46617, '', [], self::BUYER_CHAT_ID));
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
+            ->count());
     }
 
     public function test_admin_approval_credits_the_balance_exactly_once_and_sends_the_receipt(): void
@@ -92,14 +123,15 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         Customer::factory()->create(['telegram_id' => self::ADMIN_CHAT_ID, 'locale' => 'id']);
 
         $root = $this->openFundingChooser();
-        $topUp = $this->confirmTopUp($root, 46614, 46615);
+        $topUp = $this->confirmTopUp($root, 46622, 46623);
+        $this->postTelegramUpdate($this->paymentPhotoUpdate(46626, '', [], self::BUYER_CHAT_ID));
         $messageId = (int) TelegramOutboundEffect::query()
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_MANUAL_REVIEW)
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
             ->sole()
             ->telegram_message_id;
 
         $this->postTelegramUpdate($this->callbackUpdate(
-            46616,
+            46627,
             'topup-approve',
             'admin:topup-approve:'.$topUp->getKey(),
             [],
@@ -121,7 +153,7 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         $this->assertSame('balance-top-up:'.$topUp->getKey().':manual-receipt:v1', $receipt->effect_key);
 
         $this->postTelegramUpdate($this->callbackUpdate(
-            46617,
+            46628,
             'topup-approve-again',
             'admin:topup-approve:'.$topUp->getKey(),
             [],
@@ -140,14 +172,15 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         Customer::factory()->create(['telegram_id' => self::ADMIN_CHAT_ID, 'locale' => 'id']);
 
         $root = $this->openFundingChooser();
-        $topUp = $this->confirmTopUp($root, 46624, 46625);
+        $topUp = $this->confirmTopUp($root, 46632, 46633);
+        $this->postTelegramUpdate($this->paymentPhotoUpdate(46636, '', [], self::BUYER_CHAT_ID));
         $messageId = (int) TelegramOutboundEffect::query()
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_MANUAL_REVIEW)
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
             ->sole()
             ->telegram_message_id;
 
         $this->postTelegramUpdate($this->callbackUpdate(
-            46626,
+            46637,
             'topup-reject',
             'admin:topup-reject:'.$topUp->getKey(),
             [],
@@ -168,10 +201,11 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         Customer::factory()->create(['telegram_id' => self::BUYER_CHAT_ID, 'locale' => 'en']);
 
         $root = $this->openFundingChooser();
-        $topUp = $this->confirmTopUp($root, 46634, 46635);
+        $topUp = $this->confirmTopUp($root, 46642, 46643);
+        $this->postTelegramUpdate($this->paymentPhotoUpdate(46646, '', [], self::BUYER_CHAT_ID));
 
         $this->postTelegramUpdate($this->callbackUpdate(
-            46636,
+            46647,
             'topup-approve-buyer',
             'admin:topup-approve:'.$topUp->getKey(),
             [],
@@ -189,7 +223,7 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         Customer::factory()->create(['telegram_id' => self::BUYER_CHAT_ID, 'locale' => 'en']);
 
         $root = $this->openFundingChooser();
-        $topUp = $this->confirmTopUp($root, 46644, 46645);
+        $topUp = $this->confirmTopUp($root, 46652, 46653);
         $topUp->forceFill([
             'status' => StoreBalanceTopUpStatus::AwaitingConfirmation,
             'expires_at' => now()->subSecond(),
@@ -211,7 +245,7 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         $this->postTelegramUpdate($this->messageUpdate(46601, '/start', [], self::BUYER_CHAT_ID));
         $root = TelegramNavigationRoot::query()->sole();
         $this->postTelegramUpdate($this->callbackUpdate(
-            46601 + 1,
+            46602,
             'funding-open',
             'balance:add',
             [],

@@ -2,7 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Services\Telegram\BalanceTopUpAdminReviewDeliveryPipeline;
+use App\Services\Telegram\BalanceTopUpPaymentProofDeliveryPipeline;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -10,7 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
-final class SendStoreBalanceTopUpAdminReview implements ShouldBeUnique, ShouldQueue
+final class SendStoreBalanceTopUpPaymentProof implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -27,7 +27,7 @@ final class SendStoreBalanceTopUpAdminReview implements ShouldBeUnique, ShouldQu
     public function uniqueId(): string
     {
         return $this->effectId === null
-            ? 'balance-top-up-review:'.$this->topUpId
+            ? 'balance-top-up-proof:'.$this->topUpId
             : 'effect:'.$this->effectId;
     }
 
@@ -36,9 +36,9 @@ final class SendStoreBalanceTopUpAdminReview implements ShouldBeUnique, ShouldQu
         return [5, 30, 120];
     }
 
-    public function handle(?BalanceTopUpAdminReviewDeliveryPipeline $delivery = null): void
+    public function handle(?BalanceTopUpPaymentProofDeliveryPipeline $delivery = null): void
     {
-        ($delivery ??= app(BalanceTopUpAdminReviewDeliveryPipeline::class))->deliver(
+        ($delivery ??= app(BalanceTopUpPaymentProofDeliveryPipeline::class))->deliver(
             $this->topUpId,
             $this->effectId,
         );

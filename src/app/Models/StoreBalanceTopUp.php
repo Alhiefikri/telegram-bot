@@ -36,6 +36,10 @@ use Illuminate\Database\Eloquent\Model;
     'provider_create_state',
     'provider_create_attempted_at',
     'provider_create_last_error',
+    'payment_proof_file_id',
+    'payment_proof_submitted_at',
+    'payment_proof_admin_chat_id',
+    'payment_proof_forwarded_at',
     'paid_at',
     'settled_at',
 ])]
@@ -66,6 +70,8 @@ class StoreBalanceTopUp extends Model
             'provider_expires_at' => 'datetime',
             'expires_at' => 'datetime',
             'provider_create_attempted_at' => 'datetime',
+            'payment_proof_submitted_at' => 'datetime',
+            'payment_proof_forwarded_at' => 'datetime',
             'paid_at' => 'datetime',
             'settled_at' => 'datetime',
         ];
@@ -146,6 +152,16 @@ class StoreBalanceTopUp extends Model
     {
         return $this->status === StoreBalanceTopUpStatus::Failed
             && in_array($this->provider_create_state, ['create_failed', 'provider_unavailable'], true);
+    }
+
+    public function hasPaymentProof(): bool
+    {
+        return filled($this->payment_proof_file_id) && $this->payment_proof_submitted_at !== null;
+    }
+
+    public function owesManualProof(): bool
+    {
+        return filled($this->payment_proof_admin_chat_id) && $this->payment_proof_forwarded_at === null;
     }
 
     public function isRecoveryPending(): bool

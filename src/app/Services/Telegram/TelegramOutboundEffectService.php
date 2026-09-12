@@ -56,7 +56,7 @@ class TelegramOutboundEffectService
 
     public const TYPE_BALANCE_TOP_UP_RECEIPT = TelegramOutboundEffectType::BalanceTopUpReceipt->value;
 
-    public const TYPE_BALANCE_TOP_UP_MANUAL_REVIEW = TelegramOutboundEffectType::BalanceTopUpManualReview->value;
+    public const TYPE_BALANCE_TOP_UP_PAYMENT_PROOF = TelegramOutboundEffectType::BalanceTopUpPaymentProof->value;
 
     public const TYPE_OWNER_COMPENSATION_NOTIFICATION = TelegramOutboundEffectType::OwnerCompensationNotification->value;
 
@@ -128,7 +128,7 @@ class TelegramOutboundEffectService
 
     public const TEMPLATE_BALANCE_TOP_UP_RECEIPT = 'balance-top-up-receipt-v1';
 
-    public const TEMPLATE_BALANCE_TOP_UP_ADMIN_REVIEW = 'balance-top-up-admin-review-v1';
+    public const TEMPLATE_BALANCE_TOP_UP_PAYMENT_PROOF = 'balance-top-up-payment-proof-v1';
 
     public const TEMPLATE_OWNER_COMPENSATION_NOTIFICATION = 'balance-owner-compensation-v1';
 
@@ -394,37 +394,39 @@ class TelegramOutboundEffectService
         );
     }
 
-    public function recordBalanceTopUpManualReview(StoreBalanceTopUp $topUp): ?TelegramOutboundEffect
+    public function recordBalanceTopUpPaymentProof(StoreBalanceTopUp $topUp): ?TelegramOutboundEffect
     {
-        $chatId = $this->adminTargetChatId();
+        $chatId = $this->adminTargetChatId($topUp->payment_proof_admin_chat_id);
         if ($chatId === null
             || $topUp->status !== StoreBalanceTopUpStatus::AwaitingConfirmation
-            || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::MANUAL) {
+            || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::MANUAL
+            || ! $topUp->hasPaymentProof()
+            || $topUp->payment_proof_forwarded_at !== null) {
             return null;
         }
 
-        $effectKey = 'balance-top-up:'.$topUp->getKey().':admin-review:v1';
+        $effectKey = 'balance-top-up:'.$topUp->getKey().':admin-payment-proof:v1';
 
         return TelegramOutboundEffect::query()->firstOrCreate(
             ['effect_key' => $effectKey],
             [
                 'effect_group_key' => $effectKey,
                 'sequence' => 1,
-                'effect_type' => self::TYPE_BALANCE_TOP_UP_MANUAL_REVIEW,
+                'effect_type' => self::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF,
                 'source_type' => StoreBalanceTopUp::class,
                 'source_id' => (string) $topUp->getKey(),
                 'target_type' => 'admin',
                 'telegram_chat_id' => $chatId,
                 'queue' => 'notifications',
-                'telegram_method' => 'sendMessage',
+                'telegram_method' => 'sendPhoto',
                 'locale' => null,
-                'template_version' => self::TEMPLATE_BALANCE_TOP_UP_ADMIN_REVIEW,
+                'template_version' => self::TEMPLATE_BALANCE_TOP_UP_PAYMENT_PROOF,
                 'state' => TelegramOutboundEffectState::Pending->value,
                 'attempts' => 0,
                 'next_attempt_at' => now(),
                 'outcome_metadata' => [
-                    'delivery_context' => 'balance_top_up_admin_review',
-                    'delivery_method' => 'sendMessage',
+                    'delivery_context' => 'balance_top_up_payment_proof',
+                    'delivery_method' => 'sendPhoto',
                 ],
             ],
         );

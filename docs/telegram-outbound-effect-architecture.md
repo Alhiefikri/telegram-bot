@@ -113,7 +113,7 @@ transport details, and synchronization of its own read projection:
 | --- | --- | --- |
 | Checkout instructions | Provider-specific instruction rendering and customer Order notification projection | telegram-outbound |
 | Store Balance top-up | Instruction and receipt eligibility, deterministic handoff, and callback navigation matching | telegram-outbound |
-| Store Balance top-up admin review | Manual-rail admin review rendering with operator approve/reject actions and admin projection | notifications |
+| Store Balance top-up payment proof | Manual-rail customer payment proof forwarded to the admin chat with operator approve/reject actions and admin projection | notifications |
 | Receipt credentials | Ordered chunk rendering, credential delivery projection, and completion cleanup | telegram-outbound / notifications |
 | Admin Order notifications | Pending, paid, and expired admin projections | telegram-outbound / notifications |
 | Manual payment proof | Proof attachment forwarding and Payment projection | notifications |
@@ -127,11 +127,11 @@ CheckoutInstructionDeliveryPipeline, ReceiptDeliveryPipeline,
 AdminOrderNotificationDeliveryPipeline, ManualPaymentProofDeliveryPipeline,
 SalesProofDeliveryPipeline, AdminBroadcastDeliveryPipeline,
 StockNotificationDeliveryPipeline, ProductPriceChangeNotificationService, and
-BalanceTopUpAdminReviewDeliveryPipeline. They all use the same ledger seam.
+BalanceTopUpPaymentProofDeliveryPipeline. They all use the same ledger seam.
 
 The Store Balance top-up admin review family is delivered by
-`BalanceTopUpAdminReviewDeliveryPipeline` under the
-`admin.balance_top_up_manual_review` effect type on the `notifications` queue.
+`BalanceTopUpPaymentProofDeliveryPipeline` under the
+`admin.balance_top_up_payment_proof` effect type on the `notifications` queue.
 The effect is admin-targeted, renders approve/reject action buttons
 (`admin:topup-approve:{id}` / `admin:topup-reject:{id}`) for the operator, and is
 never automatically resent; a manual top-up settles only through the confirmed

@@ -50,17 +50,18 @@ final class StoreBalanceTopUpOutbound
         );
     }
 
-    public function handoffAdminReview(StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult
+    public function handoffPaymentProof(StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult
     {
         return $this->handoff(
             $topUp,
-            fn (StoreBalanceTopUp $source): ?TelegramOutboundEffect => $this->outboundEffects->recordBalanceTopUpManualReview($source),
+            fn (StoreBalanceTopUp $source): ?TelegramOutboundEffect => $this->outboundEffects->recordBalanceTopUpPaymentProof($source),
             fn (string $topUpId): ?TelegramOutboundEffect => TelegramOutboundEffect::query()
                 ->where('source_type', StoreBalanceTopUp::class)
                 ->where('source_id', $topUpId)
-                ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_MANUAL_REVIEW)
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
                 ->first(),
-            fn (StoreBalanceTopUp $source): bool => $source->status === StoreBalanceTopUpStatus::AwaitingConfirmation,
+            fn (StoreBalanceTopUp $source): bool => $source->status === StoreBalanceTopUpStatus::AwaitingConfirmation
+                && $source->hasPaymentProof(),
         );
     }
 

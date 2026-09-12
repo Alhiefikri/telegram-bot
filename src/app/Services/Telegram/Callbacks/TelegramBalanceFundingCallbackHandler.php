@@ -297,9 +297,6 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
 
         $presentation = $this->resolveTopUp($topUp);
         $instructionsSent = $this->topUpInstructionsWereDelivered($topUp, $presentation);
-        if ($presentation->isAwaitingConfirmation()) {
-            $this->topUpOutbound->handoffAdminReview($topUp->fresh() ?? $topUp);
-        }
 
         return $this->menu->fundingTopUpSurface(
             $context->customer,
@@ -382,9 +379,6 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         $presentation = $this->resolveTopUp($topUp, $action === 'check');
         $topUp->refresh();
         $instructionsSent = $this->topUpInstructionsWereDelivered($topUp, $presentation);
-        if ($presentation->isAwaitingConfirmation()) {
-            $this->topUpOutbound->handoffAdminReview($topUp);
-        }
         $outcome = $this->navigation->presentOnRoot(
             $root,
             $context->chatId,

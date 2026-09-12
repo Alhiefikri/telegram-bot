@@ -258,7 +258,7 @@ fallback and transport ambiguity never triggers one.
 
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
 
-Untuk delivery durable, [`TelegramOutboundEffectLedgerProtocol`](../../src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php) adalah satu-satunya seam state: claim/lease, token-checked finalization, ambiguity, retry scheduling, terminal failure, dan receipt ordering. [`TelegramOutboundEffectPolicy`](../../src/app/Services/Telegram/TelegramOutboundEffectPolicy.php) memasok limit dan policy family tanpa memindahkan state machine ke adapter. `TelegramOutboundEffectService` hanya mematerialisasi effect, melakukan lookup, dan menyimpan resend history; queue mapping berada di `TelegramOutboundEffectDispatcher`. Delivery/projection adapter per family adalah `CheckoutInstructionDeliveryPipeline`, `ReceiptDeliveryPipeline`, `AdminOrderNotificationDeliveryPipeline`, `ManualPaymentProofDeliveryPipeline`, `SalesProofDeliveryPipeline`, `AdminBroadcastDeliveryPipeline`, `StockNotificationDeliveryPipeline`, `ProductPriceChangeNotificationService`, dan `BalanceTopUpAdminReviewDeliveryPipeline`. Jangan menambahkan claim/finalization pass-through baru ke service materializer atau job. Boundary lengkap, scope #286, recovery, dan Manual Delivery Review ada di [`telegram-outbound-effect-architecture.md`](../../docs/telegram-outbound-effect-architecture.md); migration/incident runbook ada di [`runbook-telegram-outbound-effect-contract.md`](../../docs/runbook-telegram-outbound-effect-contract.md).
+Untuk delivery durable, [`TelegramOutboundEffectLedgerProtocol`](../../src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php) adalah satu-satunya seam state: claim/lease, token-checked finalization, ambiguity, retry scheduling, terminal failure, dan receipt ordering. [`TelegramOutboundEffectPolicy`](../../src/app/Services/Telegram/TelegramOutboundEffectPolicy.php) memasok limit dan policy family tanpa memindahkan state machine ke adapter. `TelegramOutboundEffectService` hanya mematerialisasi effect, melakukan lookup, dan menyimpan resend history; queue mapping berada di `TelegramOutboundEffectDispatcher`. Delivery/projection adapter per family adalah `CheckoutInstructionDeliveryPipeline`, `ReceiptDeliveryPipeline`, `AdminOrderNotificationDeliveryPipeline`, `ManualPaymentProofDeliveryPipeline`, `SalesProofDeliveryPipeline`, `AdminBroadcastDeliveryPipeline`, `StockNotificationDeliveryPipeline`, `ProductPriceChangeNotificationService`, dan `BalanceTopUpPaymentProofDeliveryPipeline`. Jangan menambahkan claim/finalization pass-through baru ke service materializer atau job. Boundary lengkap, scope #286, recovery, dan Manual Delivery Review ada di [`telegram-outbound-effect-architecture.md`](../../docs/telegram-outbound-effect-architecture.md); migration/incident runbook ada di [`runbook-telegram-outbound-effect-contract.md`](../../docs/runbook-telegram-outbound-effect-contract.md).
 Untuk KlikQRIS, `delivery_outcome=retry_notice_sent` tidak dianggap selesai: ketika customer menekan Check Payment atau reconciliation menemukan Payment yang sama sudah kembali payable, service mematerialisasi effect sequence 2 dan dispatcher mengantrekan ulang QR melalui Payment yang sama. Effect ini hanya dibuat untuk order/payment yang masih pending dan tidak menduplikasi effect awal `qris_sent`.
 
 Balance top-ups follow the store's selected provider rail (`manual`, `klikqris`,
@@ -273,8 +273,10 @@ reloads the committed top-up and delegates the idempotent receipt handoff to
 `StoreBalanceTopUpOutbound`; the family module owns both top-up effect
 eligibility/identity and safe callback matching, and provider-scoped effect keys
 and templates keep each rail's instructions and receipt distinct (KlikQRIS keeps
-its historical key). Manual top-ups add an admin review family: the effect
-`admin.balance_top_up_manual_review` is admin-targeted on the `notifications`
+its historical key). Manual top-ups reuse the manual product-purchase proof
+habit: the customer sends the payment photo with the `/payment` caption, the
+effect `admin.balance_top_up_payment_proof` forwards it to the admin on the
+`notifications`
 queue and carries approve/reject callbacks
 (`admin:topup-approve:{id}` / `admin:topup-reject:{id}`) handled by
 `TelegramAdminPaymentCallbackHandler` (stage `BeforePrivacy`, guarded by
@@ -622,7 +624,7 @@ Scheduler service hanya menjalankan `php artisan schedule:run`; jangan mengganda
 
 - `default` — Telegram update processing and bounded Sakurupiah webhook verification.
 - `telegram-outbound` — checkout instructions, Store Balance top-up QR instructions, dan pending-order admin notification.
-- `notifications` — receipt, paid/expired notifications, Sales Proof Post, Store Balance top-up admin review, cleanup instruction, KlikQRIS owner alert, and legacy Pakasir cancellation attempts.
+- `notifications` — receipt, paid/expired notifications, Sales Proof Post, Store Balance top-up payment proof, cleanup instruction, KlikQRIS owner alert, and legacy Pakasir cancellation attempts.
 - `telegram-broadcast` — admin broadcast dan price notification batches.
 - `telegram-stock` — stock notification recipient batches; each job sends one effect and requeues the movement until complete.
 
@@ -700,7 +702,7 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/StoreBalanceReconciliationTest.php` — projection/ledger mismatch detection via `store-balance:check` without changing money, customer scoping, limit, and sanitized JSON output.
 - `tests/Feature/StoreBalancePostgresConcurrencyTest.php` — process races for one idempotency claim, competing debits, parallel credits, duplicate source identity, competing Store Balance funding-intent submissions/claims, and PostgreSQL non-negative/positive/unique constraints plus one-stale-version funding-policy update; runs only through the PostgreSQL gate.
 - `tests/Feature/Telegram/StoreBalanceTopUpTest.php` — confirmation-to-provider quote, safe evidence redaction, durable QR instruction separation, exact requested credit settlement, and replayed confirmation; the shared top-up tests now pin the KlikQRIS rail via `KlikQrisSandboxScenarios::selectKlikQrisProvider()`.
-- `tests/Feature/Telegram/StoreBalanceTopUpManualRailTest.php` — manual rail creation in `awaiting_confirmation`, admin review notification with approve/reject callback, operator confirmation/rejection audit and idempotency, and exact-credit settlement.
+- `tests/Feature/Telegram/StoreBalanceTopUpManualRailTest.php` — manual rail creation in `awaiting_confirmation`, `/payment` proof forwarding to the admin with approve/reject callbacks, operator confirmation/rejection audit and idempotency, and exact-credit settlement.
 - `tests/Feature/Telegram/StoreBalanceTopUpSakurupiahRailTest.php` — Sakurupiah rail create/refresh, encrypted QR payload presentation, scheduled reconciliation settlement, and exact-credit credit.
 - `tests/Feature/Telegram/StoreBalanceTopUpProviderUnavailableTest.php` — fail-closed `provider_unavailable` for a rail that is not operationally ready, with no QR claimed or sent and no provider request.
 - `tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php` — Payment and Store Balance top-up provider single-flight races, same-target recovery, and one instruction-effect materialization; runs only through the PostgreSQL gate.

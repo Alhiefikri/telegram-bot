@@ -26,6 +26,7 @@ class TelegramMessageRouter
         private TelegramCatalogIntents $catalog,
         private TelegramOrderIntents $orders,
         private TelegramManualPaymentIntents $manualPayments,
+        private TelegramManualTopUpIntents $manualTopUps,
         private TelegramAdminAccess $adminAccess,
         private TelegramAdminStatsIntents $adminStats,
         private TelegramBroadcastIntents $broadcasts,
@@ -234,7 +235,12 @@ class TelegramMessageRouter
 
         if ($text === '/payment' || str_starts_with($text, '/payment ')) {
             $this->session->forgetWithLock($customer);
-            $this->manualPayments->submitManualPaymentProof($customer, $chatId, $message, trim(substr($text, strlen('/payment'))));
+            $invoice = trim(substr($text, strlen('/payment')));
+            if ($invoice === '' && $this->manualTopUps->submitTopUpProof($customer, $chatId, $message)) {
+                return;
+            }
+
+            $this->manualPayments->submitManualPaymentProof($customer, $chatId, $message, $invoice);
 
             return;
         }
