@@ -10,8 +10,8 @@ use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
-use App\Services\Telegram\TelegramOutboundEffectDispatcher;
-use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\StoreBalanceTopUpOutbound;
+use App\Services\Telegram\StoreBalanceTopUpOutboundOutcome;
 use App\Support\PaymentProvider;
 use Closure;
 use DateTimeImmutable;
@@ -70,8 +70,7 @@ final class ReconcileStoreBalanceTopUps extends Command
     public function handle(
         StoreBalanceTopUpService $topUps,
         KlikQrisProviderReadiness $readiness,
-        TelegramOutboundEffectService $outboundEffects,
-        TelegramOutboundEffectDispatcher $outboundDispatcher,
+        StoreBalanceTopUpOutbound $topUpOutbound,
     ): int {
         $chunk = $this->validatedInteger('chunk', self::MAX_CHUNK);
         $maxTopUps = $this->validatedInteger('max-top-ups', self::MAX_TOP_UPS);
@@ -173,12 +172,13 @@ final class ReconcileStoreBalanceTopUps extends Command
                     };
 
                     if ($outcome === 'pending' && $result->isPayable()) {
-                        $effect = $outboundEffects->recordBalanceTopUpInstructions(
-                            $topUp->fresh(['customer']),
-                            $topUp->customer,
-                        );
-                        if ($effect !== null) {
-                            $outboundDispatcher->dispatch($effect);
+                        try {
+                            $handoff = $topUpOutbound->handoffInstructions($topUp);
+                            if ($handoff->outcome === StoreBalanceTopUpOutboundOutcome::Failed) {
+                                $this->reportOutboundHandoffFailure($topUp, $itemStartedAt);
+                            }
+                        } catch (Throwable $exception) {
+                            $this->reportOutboundHandoffFailure($topUp, $itemStartedAt, $exception::class);
                         }
                     }
 
@@ -378,6 +378,24 @@ final class ReconcileStoreBalanceTopUps extends Command
             'age_seconds' => $ageSeconds,
             'duration_ms' => $this->elapsedMilliseconds($startedAt),
         ]);
+    }
+
+    private function reportOutboundHandoffFailure(
+        StoreBalanceTopUp $topUp,
+        int $startedAt,
+        ?string $exceptionClass = null,
+    ): void {
+        $context = [
+            'top_up_id' => (string) $topUp->getKey(),
+            'merchant_ref_hash' => $this->referenceHash($topUp->merchant_ref),
+            'outcome' => StoreBalanceTopUpOutboundOutcome::Failed->value,
+            'duration_ms' => $this->elapsedMilliseconds($startedAt),
+        ];
+        if ($exceptionClass !== null) {
+            $context['exception'] = $exceptionClass;
+        }
+
+        Log::warning('klikqris.balance_top_up_reconciliation.outbound_handoff_failed', $context);
     }
 
     private function referenceHash(?string $reference): ?string

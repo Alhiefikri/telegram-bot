@@ -21,9 +21,12 @@ use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\Telegram\TelegramMenuIntents;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Mockery;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -110,6 +113,49 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
         $this->assertSame(StoreBalanceTopUpStatus::Payable, $topUp->fresh()->status);
         $this->assertSame(1, TelegramOutboundEffect::query()->count());
         $this->assertSame($effect->getKey(), TelegramOutboundEffect::query()->sole()->getKey());
+    }
+
+    public function test_telegram_handoff_failure_does_not_fail_financial_reconciliation(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $expiresAt = now()->addMinutes(10)->startOfSecond();
+        $topUp = $this->makeTopUp([
+            'provider_expires_at' => $expiresAt,
+            'expires_at' => $expiresAt,
+        ]);
+        $this->fakeStatus($topUp, [
+            'status' => 'PENDING',
+            'expired_at' => $expiresAt->toISOString(),
+            'signature' => 'top-up-signature',
+        ]);
+
+        $outboundEffects = Mockery::mock(TelegramOutboundEffectService::class);
+        $outboundEffects->shouldReceive('forBalanceTopUp')
+            ->andReturnNull();
+        $outboundEffects->shouldReceive('recordBalanceTopUpInstructions')
+            ->andThrow(new \RuntimeException('Telegram handoff unavailable.'));
+        $this->app->instance(TelegramOutboundEffectService::class, $outboundEffects);
+        Log::spy();
+
+        $this->artisan('klikqris:reconcile-balance-top-ups --chunk=10 --max-top-ups=10')
+            ->expectsOutputToContain('pending=1')
+            ->assertSuccessful();
+
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->with(
+                'klikqris.balance_top_up_reconciliation.outbound_handoff_failed',
+                Mockery::on(static function (array $context) use ($topUp): bool {
+                    return ($context['top_up_id'] ?? null) === (string) $topUp->getKey()
+                        && ($context['merchant_ref_hash'] ?? null) === hash('sha256', $topUp->merchant_ref)
+                        && ! array_key_exists('merchant_ref', $context);
+                }),
+            );
+
+        $this->assertSame(StoreBalanceTopUpStatus::Payable, $topUp->fresh()->status);
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+        $this->assertSame(0, TelegramOutboundEffect::query()->count());
     }
 
     public function test_expired_provider_status_never_credits_the_requested_balance(): void
