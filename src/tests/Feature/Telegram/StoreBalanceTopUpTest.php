@@ -92,7 +92,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Balance credit after payment confirmation: Rp5.000', $caption);
         $this->assertStringContainsString('Provider fee: Rp16', $caption);
         $this->assertStringContainsString('Final amount to pay: Rp5.016', $caption);
-        $this->assertStringContainsString('not credited until KlikQRIS confirms', $caption);
+        $this->assertStringContainsString('not credited until the payment is confirmed', $caption);
 
         $this->postJson('/api/webhook/klikqris/sandbox', [
             'order_id' => $topUp->merchant_ref,
@@ -138,7 +138,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         $receiptText = (string) $this->telegramRequestField($receiptMessage, 'text');
         $this->assertStringContainsString('Store Balance top-up paid', $receiptText);
         $this->assertStringContainsString('Credited to Store Balance: Rp 5.000', $receiptText);
-        $this->assertStringContainsString('KlikQRIS total paid: Rp 5.016', $receiptText);
+        $this->assertStringContainsString('Total paid: Rp 5.016', $receiptText);
         $this->assertStringContainsString($topUp->merchant_ref, $receiptText);
         $this->assertStringNotContainsString(self::QRIS_URL, $receiptText);
         $this->assertNotNull(app(TelegramNavigationRootService::class)->currentForChat($customer, (string) $customer->telegram_id));

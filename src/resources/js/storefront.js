@@ -1297,12 +1297,12 @@ function initCheckoutReview() {
     });
     if (contactRequirement) {
       contactRequirement.textContent = requiresSakurupiahContact
-        ? "WhatsApp wajib untuk Sakurupiah"
+        ? "WhatsApp wajib untuk metode pembayaran ini"
         : "Opsional";
     }
     if (contactHelp) {
       contactHelp.textContent = requiresSakurupiahContact
-        ? "Nomor WhatsApp diperlukan untuk checkout Sakurupiah. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan."
+        ? "Nomor WhatsApp diperlukan untuk metode pembayaran ini. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan."
         : contactHelp.dataset.defaultContactHelp || "";
     }
 

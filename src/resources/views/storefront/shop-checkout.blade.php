@@ -169,16 +169,12 @@
                                 $termsAccepted = in_array(old('terms_accepted'), [true, 1, '1', 'on', 'yes', 'true'], true);
                                 $paymentCopy = static function (array $option): array {
                                     if ($option['value'] === 'qris') {
-                                        $providerLabel = match ($option['provider'] ?? null) {
-                                            'manual' => 'QR Manual',
-                                            'sakurupiah' => 'Sakurupiah',
-                                            default => 'KlikQRIS',
-                                        };
+                                        $providerLabel = ($option['provider'] ?? null) === 'manual' ? 'QR Manual' : 'QRIS';
 
                                         return [
                                             'amount_kind' => 'idr',
                                             'amount_label' => 'Subtotal review (IDR)',
-                                            'amount_help' => 'Total QRIS final ditentukan '.$providerLabel.' pada invoice. Bayar nominal invoice.',
+                                            'amount_help' => 'Total QRIS final ditentukan pada invoice. Bayar nominal invoice.',
                                             'submit_label' => 'Buat invoice '.$providerLabel.' & lanjut bayar',
                                         ];
                                     }
@@ -259,7 +255,7 @@
                                                 <p class="mt-1 text-sm font-semibold leading-5" data-checkout-payment-amount-help>{{ $optionCopy['amount_help'] }}</p>
                                             </div>
                                             @if (($option['provider'] ?? null) === 'sakurupiah')
-                                                <p class="text-sm font-bold leading-6 text-[var(--sf-muted)]">Nomor WhatsApp wajib untuk checkout Sakurupiah.</p>
+                                                <p class="text-sm font-bold leading-6 text-[var(--sf-muted)]">Nomor WhatsApp wajib untuk metode pembayaran ini.</p>
                                             @endif
                                             <button type="submit" data-checkout-submit class="neo-button neo-button-stable inline-flex min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white" @if (! $checkoutCanSubmit) disabled aria-disabled="true" aria-describedby="checkout-submit-disabled-help" @endif>{{ $optionCopy['submit_label'] }}</button>
                                         </div>
@@ -286,7 +282,7 @@
                                                     <p class="mt-1 text-sm font-semibold leading-5" data-checkout-payment-amount-help>{{ $selectedOptionCopy['amount_help'] }}</p>
                                                 </div>
                                                 @if (($selectedPaymentOption['provider'] ?? null) === 'sakurupiah')
-                                                    <p class="text-sm font-bold leading-6 text-[var(--sf-muted)]">Nomor WhatsApp wajib untuk checkout Sakurupiah.</p>
+                                                    <p class="text-sm font-bold leading-6 text-[var(--sf-muted)]">Nomor WhatsApp wajib untuk metode pembayaran ini.</p>
                                                 @endif
                                                 <button type="submit" data-checkout-submit class="neo-button neo-button-stable inline-flex min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white" @if (! $checkoutCanSubmit) disabled aria-disabled="true" aria-describedby="checkout-submit-disabled-help" @endif @if ($paymentHasSakurupiah && ($selectedPaymentOption['provider'] ?? null) !== 'sakurupiah') formnovalidate @endif>{{ $selectedOptionCopy['submit_label'] }}</button>
                                             </div>
@@ -321,7 +317,7 @@
                                                                 <p class="mt-1 text-sm font-semibold leading-5" data-checkout-payment-amount-help>{{ $optionCopy['amount_help'] }}</p>
                                                             </div>
                                                             @if (($option['provider'] ?? null) === 'sakurupiah')
-                                                                <p class="text-sm font-bold leading-6 text-[var(--sf-muted)]">Nomor WhatsApp wajib untuk checkout Sakurupiah.</p>
+                                                                <p class="text-sm font-bold leading-6 text-[var(--sf-muted)]">Nomor WhatsApp wajib untuk metode pembayaran ini.</p>
                                                             @endif
                                                             <button type="submit" data-checkout-submit class="neo-button neo-button-stable hidden min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white peer-checked:inline-flex" @if (! $checkoutCanSubmit) disabled aria-disabled="true" aria-describedby="checkout-submit-disabled-help" @endif @if ($paymentHasSakurupiah && ($option['provider'] ?? null) !== 'sakurupiah') formnovalidate @endif>{{ $optionCopy['submit_label'] }}</button>
                                                         </div>
@@ -339,7 +335,7 @@
                                 <details id="checkout-contact-details" data-checkout-contact-details class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-2.5" @if ($contactDisclosureOpen) open @endif>
                                     <summary class="flex min-h-11 cursor-pointer items-center justify-between gap-3 text-sm font-black text-[var(--sf-ink)] focus-visible:outline focus-visible:outline-3 focus-visible:outline-[var(--sf-blue)] focus-visible:outline-offset-2">
                                         <span>Tambahkan email atau kontak bantuan</span>
-                                        <span class="text-xs font-bold text-[var(--sf-muted)]" data-checkout-contact-requirement>{{ $paymentHasSakurupiah ? 'WhatsApp wajib untuk Sakurupiah' : 'Opsional' }}</span>
+                                        <span class="text-xs font-bold text-[var(--sf-muted)]" data-checkout-contact-requirement>{{ $paymentHasSakurupiah ? 'WhatsApp wajib untuk metode pembayaran ini' : 'Opsional' }}</span>
                                     </summary>
                                     <div class="mt-2 grid gap-3">
                                         <div class="grid gap-2">
@@ -361,7 +357,7 @@
                                                 </select>
                                                 <input id="checkout-support-contact-value" name="support_contact_value" type="text" value="{{ old('support_contact_value') }}" placeholder="@username atau nomor WhatsApp" @if($paymentHasSakurupiah) required aria-required="true" @endif @if($errors->has('support_contact_value')) aria-invalid="true" aria-describedby="checkout-support-contact-help checkout-support-contact-value-error" @else aria-describedby="checkout-support-contact-help" @endif class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)] @error('support_contact_value') border-[#9f1d2d] @enderror">
                                             </div>
-                                            <p id="checkout-support-contact-help" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]" data-checkout-contact-help data-default-contact-help="{{ $copy['shop']['support_contact_help'] }}">{{ $selectedPaymentProvider === 'sakurupiah' ? 'Nomor WhatsApp diperlukan untuk checkout Sakurupiah. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan.' : ($paymentHasSakurupiah ? 'Nomor WhatsApp wajib jika memilih Sakurupiah. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan.' : $copy['shop']['support_contact_help']) }}</p>
+                                            <p id="checkout-support-contact-help" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]" data-checkout-contact-help data-default-contact-help="{{ $copy['shop']['support_contact_help'] }}">{{ $selectedPaymentProvider === 'sakurupiah' ? 'Nomor WhatsApp diperlukan untuk metode pembayaran ini. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan.' : ($paymentHasSakurupiah ? 'Nomor WhatsApp wajib untuk metode pembayaran ini. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan.' : $copy['shop']['support_contact_help']) }}</p>
                                             @error('support_contact_channel')
                                                 <p id="checkout-support-contact-channel-error" role="alert" class="text-sm font-black leading-6 text-[#9f1d2d]">{{ $message }}</p>
                                             @enderror

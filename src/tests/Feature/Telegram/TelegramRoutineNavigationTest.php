@@ -140,7 +140,7 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(45414, 'balance-preset', $presetRows[0][0]['callback_data'], [], 45411, 'private', $root->message_id))->assertOk();
         $confirmation = $this->lastCanonicalEdit(45411);
         $this->assertStringContainsString('Saldo yang dikreditkan: Rp 5.000', $this->editCopy($confirmation));
-        $this->assertStringContainsString('Biaya provider dan total pembayaran akhir dari KlikQRIS', $this->editCopy($confirmation));
+        $this->assertStringContainsString('Biaya layanan dan total pembayaran akhir ditentukan setelah konfirmasi.', $this->editCopy($confirmation));
         $this->assertStringContainsString('Belum ada invoice pembayaran.', $this->editCopy($confirmation));
         $confirmationKeyboard = $confirmation['reply_markup']['inline_keyboard'];
         $this->assertMatchesRegularExpression('/\Abalance:confirm:[a-f0-9]{32}\z/', $confirmationKeyboard[0][0]['callback_data']);
@@ -574,7 +574,7 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $caption = $this->editCopy($confirmation);
         $this->assertStringContainsString('Confirm Store Balance top-up', $caption);
         $this->assertStringContainsString('Store Balance credit: Rp 25.000', $caption);
-        $this->assertStringContainsString('provider fee and final payable total', $caption);
+        $this->assertStringContainsString('service fee and final payable total', $caption);
         $this->assertStringContainsString('No payment invoice exists yet.', $caption);
         $keyboard = $confirmation['reply_markup']['inline_keyboard'];
         $this->assertMatchesRegularExpression('/\Abalance:confirm:[a-f0-9]{32}\z/', $keyboard[0][0]['callback_data']);

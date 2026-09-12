@@ -72,9 +72,9 @@ class SakurupiahStorefrontTest extends TestCase
         $this->assertSame($payment->expired_at->toIso8601String(), $invoice->qrisEffectiveExpiresAt?->toIso8601String());
 
         $html = $this->get($invoice->redirectUrl)->assertOk()->getContent();
-        $this->assertStringContainsString('Pembayaran Sakurupiah', $html);
-        $this->assertStringContainsString('Invoice Sakurupiah', $html);
-        $this->assertStringContainsString('Bayar total QRIS final Sakurupiah', $html);
+        $this->assertStringContainsString('Pembayaran QRIS', $html);
+        $this->assertStringContainsString('Invoice QRIS', $html);
+        $this->assertStringContainsString('Bayar total QRIS final pada invoice', $html);
         $this->assertStringContainsString('data-native-qris-crop="top-square"', $html);
         $this->assertStringNotContainsString(self::DIRECT_QRIS, $html);
         $this->assertStringNotContainsString('secret-provider-value', $html);
@@ -105,9 +105,9 @@ class SakurupiahStorefrontTest extends TestCase
         $this->assertSame('https://sakurupiah.id/pay/invoice', $invoice->hostedPaymentUrl);
 
         $html = $this->get($invoice->redirectUrl)->assertOk()->getContent();
-        $this->assertStringContainsString('Invoice Sakurupiah', $html);
+        $this->assertStringContainsString('Invoice QRIS', $html);
         $this->assertStringContainsString('https://sakurupiah.id/pay/invoice', $html);
-        $this->assertStringContainsString('Bayar via Website Sakurupiah', $html);
+        $this->assertStringContainsString('Bayar via Website', $html);
         $this->assertStringNotContainsString(self::DIRECT_QRIS, $html);
         $this->assertStringNotContainsString('secret-provider-value', $html);
     }

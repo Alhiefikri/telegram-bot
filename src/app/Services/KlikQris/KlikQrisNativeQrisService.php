@@ -1241,8 +1241,13 @@ class KlikQrisNativeQrisService
                 )
                 ? $transaction->qrisUrl()
                 : $existingQrisUrl;
-            $providerFee = $transaction->providerFee() ?? $lockedTopUp->provider_fee;
             $providerTotal = $transaction->totalAmount();
+            // KlikQRIS does not always echo a fee field. Orders already derive
+            // it from the final total; top-ups must do the same, otherwise a
+            // fee-less quote could never become payable.
+            $providerFee = $transaction->providerFee()
+                ?? ($providerTotal >= (int) $lockedTopUp->amount ? $providerTotal - (int) $lockedTopUp->amount : null)
+                ?? $lockedTopUp->provider_fee;
             $topUpExpiresAt = $lockedTopUp->expires_at;
             if ($providerExpiresAt !== null
                 && ($topUpExpiresAt === null || $providerExpiresAt->lt($topUpExpiresAt))) {

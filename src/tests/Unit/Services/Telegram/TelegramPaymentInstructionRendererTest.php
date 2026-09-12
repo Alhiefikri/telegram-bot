@@ -480,7 +480,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $retry = $this->renderer()->klikQrisRetry($order, KlikQrisNativeQrisOutcome::ProviderTotalPending, 'ms');
 
         $this->assertCaptionIncludes($instruction, [
-            '✅ Checkout KlikQRIS berjaya dibuat',
+            '✅ Checkout QRIS berjaya dibuat',
             '🧾 Invois: INV-RENDERER-103',
             '💳 Jumlah bayaran QRIS: IDR 125875.00',
         ]);
@@ -501,7 +501,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             'en',
         );
 
-        $this->assertStringContainsString('safe Sakurupiah payment display', $retry);
+        $this->assertStringContainsString('safe QRIS payment display', $retry);
         $this->assertStringContainsString('Do not pay', $retry);
         $this->assertStringNotContainsString('provider-secret', $retry);
     }

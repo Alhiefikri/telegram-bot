@@ -340,6 +340,44 @@ class KlikQrisTransactionTest extends TestCase
         ];
     }
 
+    public function test_quote_never_infers_a_fee_from_the_total_amount(): void
+    {
+        $transaction = KlikQrisTransaction::fromStatusPayload($this->transactionPayload());
+
+        $this->assertSame(1000, $transaction->amount()->rupiah());
+        $this->assertSame(1016, $transaction->totalAmount());
+        $this->assertNull($transaction->providerFee());
+    }
+
+    #[DataProvider('providerFeeAliases')]
+    public function test_quote_reads_every_supported_fee_alias(string $key): void
+    {
+        $transaction = KlikQrisTransaction::fromStatusPayload($this->transactionPayload([$key => '16.00']));
+
+        $this->assertSame(16, $transaction->providerFee());
+    }
+
+    public static function providerFeeAliases(): array
+    {
+        return [
+            'fee' => ['fee'],
+            'provider_fee' => ['provider_fee'],
+            'fee_amount' => ['fee_amount'],
+            'qris_fee' => ['qris_fee'],
+        ];
+    }
+
+    public function test_quote_rejects_fee_aliases_that_disagree(): void
+    {
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('KlikQRIS fee aliases disagree.');
+
+        KlikQrisTransaction::fromStatusPayload($this->transactionPayload([
+            'fee' => '16.00',
+            'qris_fee' => '20.00',
+        ]));
+    }
+
     private function transactionPayload(array $overrides = []): array
     {
         return [

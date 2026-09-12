@@ -443,24 +443,6 @@ class TelegramMenuIntents
         );
     }
 
-    public function fundingConfirmationAcceptedSurface(
-        Customer $customer,
-        StoreBalanceFundingIntent $intent,
-    ): TelegramNavigationSurface {
-        return new TelegramNavigationSurface(
-            TelegramNavigationScreen::AddBalance,
-            $this->locale->code($customer),
-            $this->captions->html(implode("\n", [
-                $this->locale->translate($customer, 'balance.confirmation.accepted'),
-                $this->locale->translate($customer, 'balance.confirmation.credit', [
-                    'amount' => $this->locale->idr($intent->amount),
-                ]),
-                $this->locale->translate($customer, 'balance.confirmation.no_invoice'),
-            ])),
-            ['inline_keyboard' => [$this->navigationRow($customer)]],
-        );
-    }
-
     public function fundingTopUpSurface(
         Customer $customer,
         StoreBalanceTopUp $topUp,
@@ -469,6 +451,8 @@ class TelegramMenuIntents
         bool $confirmationReceived = false,
         ?string $confirmationNoticeKey = null,
     ): TelegramNavigationSurface {
+        // A confirmed top-up already owns a payment target, so the
+        // pre-confirmation "no invoice yet" line must never be repeated here.
         $confirmationLines = $confirmationReceived ? [
             $this->locale->translate(
                 $customer,
@@ -477,7 +461,6 @@ class TelegramMenuIntents
             $this->locale->translate($customer, 'balance.confirmation.credit', [
                 'amount' => $this->locale->idr((int) $topUp->amount),
             ]),
-            $this->locale->translate($customer, 'balance.confirmation.no_invoice'),
         ] : [];
         $presentation = $this->nativeQris->topUpPresentation($topUp, $result);
         if ($presentation->isPaid()) {

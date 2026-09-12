@@ -164,10 +164,10 @@ class StorefrontProductPresentationTest extends TestCase
 
         $this->assertFalse($presentation->checkoutReadiness->ready);
         $this->assertSame('klikqris', $presentation->checkoutReadiness->provider);
-        $this->assertSame('KlikQRIS belum siap', $presentation->checkoutReadiness->label);
+        $this->assertSame('QRIS otomatis belum siap', $presentation->checkoutReadiness->label);
         $this->assertFalse($presentation->isBuyable);
         $this->assertSame([], $presentation->checkoutChoices);
-        $this->assertStringContainsString('QRIS otomatis KlikQRIS', $presentation->checkoutReadiness->notice);
+        $this->assertStringContainsString('QRIS otomatis sedang belum siap', $presentation->checkoutReadiness->notice);
     }
 
     public function test_ready_klikqris_uses_native_qris_copy(): void
@@ -181,8 +181,8 @@ class StorefrontProductPresentationTest extends TestCase
 
         $this->assertTrue($presentation->checkoutReadiness->ready);
         $this->assertNotNull($websiteQris);
-        $this->assertSame('Bayar via KlikQRIS', $websiteQris->label);
-        $this->assertStringContainsString('KlikQRIS', $websiteQris->description);
+        $this->assertSame('Bayar via QRIS', $websiteQris->label);
+        $this->assertStringContainsString('QRIS otomatis dibuat setelah checkout', $websiteQris->description);
     }
 
     public function test_ready_sakurupiah_uses_native_qris_copy(): void
@@ -227,10 +227,10 @@ class StorefrontProductPresentationTest extends TestCase
 
         $this->assertTrue($presentation->checkoutReadiness->ready);
         $this->assertSame('sakurupiah', $presentation->checkoutReadiness->provider);
-        $this->assertSame('QRIS otomatis (Sakurupiah)', $presentation->checkoutReadiness->label);
+        $this->assertSame('QRIS otomatis', $presentation->checkoutReadiness->label);
         $this->assertNotNull($websiteQris);
-        $this->assertSame('Bayar via Sakurupiah', $websiteQris->label);
-        $this->assertStringContainsString('Sakurupiah', $websiteQris->description);
+        $this->assertSame('Bayar via QRIS', $websiteQris->label);
+        $this->assertStringContainsString('QRIS otomatis dibuat setelah checkout', $websiteQris->description);
         $this->assertSame('sakurupiah', $websiteQris->provider);
     }
 

@@ -136,19 +136,12 @@ class StorefrontProductPresenter
 
         if ($readiness->ready) {
             $isManual = $readiness->provider === PaymentProvider::MANUAL;
-            $isSakurupiah = $readiness->provider === PaymentProvider::SAKURUPIAH;
             $choices['website_qris'] = new StorefrontProductCheckoutChoice(
                 key: 'website_qris',
-                label: match (true) {
-                    $isManual => 'Bayar via QR Manual',
-                    $isSakurupiah => 'Bayar via Sakurupiah',
-                    default => 'Bayar via KlikQRIS',
-                },
-                description: match (true) {
-                    $isManual => 'Scan QR manual pada invoice, bayar tepat sesuai total produk, lalu hubungi admin dengan bukti pembayaran dan nomor invoice ini.',
-                    $isSakurupiah => 'QRIS otomatis dari Sakurupiah dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
-                    default => 'QRIS otomatis dari KlikQRIS dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
-                },
+                label: $isManual ? 'Bayar via QR Manual' : 'Bayar via QRIS',
+                description: $isManual
+                    ? 'Scan QR manual pada invoice, bayar tepat sesuai total produk, lalu hubungi admin dengan bukti pembayaran dan nomor invoice ini.'
+                    : 'QRIS otomatis dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
                 enabled: true,
                 provider: $readiness->provider,
             );
@@ -238,8 +231,8 @@ class StorefrontProductPresenter
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: $provider,
                 ready: true,
-                label: 'QRIS otomatis (KlikQRIS)',
-                notice: 'QRIS otomatis dari KlikQRIS dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
+                label: 'QRIS otomatis',
+                notice: 'QRIS otomatis dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
             );
         }
 
@@ -247,8 +240,8 @@ class StorefrontProductPresenter
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: $provider,
                 ready: false,
-                label: 'KlikQRIS belum siap',
-                notice: 'QRIS otomatis KlikQRIS sedang belum siap. Coba lagi nanti atau hubungi admin.',
+                label: 'QRIS otomatis belum siap',
+                notice: 'QRIS otomatis sedang belum siap. Coba lagi nanti atau hubungi admin.',
             );
         }
 
@@ -260,10 +253,10 @@ class StorefrontProductPresenter
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: $provider,
                 ready: $readiness->isReady(),
-                label: $readiness->isReady() ? 'QRIS otomatis (Sakurupiah)' : 'Sakurupiah belum siap',
+                label: $readiness->isReady() ? 'QRIS otomatis' : 'QRIS otomatis belum siap',
                 notice: $readiness->isReady()
-                    ? 'QRIS otomatis dari Sakurupiah dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.'
-                    : 'QRIS otomatis Sakurupiah sedang belum siap. Coba lagi nanti atau hubungi admin.',
+                    ? 'QRIS otomatis dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.'
+                    : 'QRIS otomatis sedang belum siap. Coba lagi nanti atau hubungi admin.',
             );
         }
 

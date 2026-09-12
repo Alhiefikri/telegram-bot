@@ -131,7 +131,7 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee(route('storefront.shop.checkout.product', $product), false)
             ->assertDontSee('data-product=', false)
             ->assertDontSee('Bayar via QR Manual')
-            ->assertDontSee('Bayar via KlikQRIS');
+            ->assertDontSee('Bayar via QRIS');
     }
 
     public function test_product_detail_disables_native_qris_when_klikqris_readiness_fails(): void
@@ -147,8 +147,8 @@ class StorefrontProductCheckoutTest extends TestCase
 
         $this->get(route('storefront.products.show', $product))
             ->assertOk()
-            ->assertSee('KlikQRIS belum siap')
-            ->assertSee('QRIS otomatis KlikQRIS sedang belum siap. Coba lagi nanti atau hubungi admin.')
+            ->assertSee('QRIS otomatis belum siap')
+            ->assertSee('QRIS otomatis sedang belum siap. Coba lagi nanti atau hubungi admin.')
             ->assertDontSee('Bayar QRIS di Website')
             ->assertDontSee('data-checkout-product=', false)
             ->assertDontSee('data-product=', false);
@@ -581,7 +581,7 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertSame(1, preg_match('/<select[^>]+name="support_contact_channel"[^>]+\brequired\b[^>]+aria-required="true"/', $html));
         $this->assertSame(1, preg_match('/<input[^>]+name="support_contact_value"[^>]+type="text"[^>]+required\b[^>]+aria-required="true"/', $html));
         $this->assertStringContainsString('value=""', $html);
-        $this->assertStringContainsString('Nomor WhatsApp diperlukan untuk checkout Sakurupiah.', $html);
+        $this->assertStringContainsString('Nomor WhatsApp diperlukan untuk metode pembayaran ini.', $html);
         Http::assertNothingSent();
     }
 
