@@ -140,6 +140,7 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
     {
         Queue::fake();
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $topUp = $this->makeTopUp([
             'provider_qris_url' => 'https://klikqris.com/storage/sandbox/qris_balance_top_up.png',
         ]);
@@ -181,6 +182,7 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
     {
         Queue::fake();
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $topUp = $this->makeTopUp([
             'provider_qris_url' => 'https://klikqris.com/storage/sandbox/qris_balance_top_up.png',
         ]);

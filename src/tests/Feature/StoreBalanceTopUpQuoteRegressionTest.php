@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceFundingIntentStatus;
+use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\Customer;
 use App\Models\StoreBalanceEntry;
@@ -15,6 +16,8 @@ use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResult;
+use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPresentation;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\StoreBalanceTopUpOutboundOutcome;
 use App\Services\Telegram\TelegramMenuIntents;
@@ -44,6 +47,7 @@ final class StoreBalanceTopUpQuoteRegressionTest extends TelegramBotTestSupport
 
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         Http::preventStrayRequests();
     }
 
@@ -230,7 +234,7 @@ final class StoreBalanceTopUpQuoteRegressionTest extends TelegramBotTestSupport
         $surface = app(TelegramMenuIntents::class)->fundingTopUpSurface(
             $topUp->customer,
             $topUp->fresh(),
-            $result,
+            app(StoreBalanceTopUpService::class)->presentation($topUp),
             instructionsSent: true,
             confirmationReceived: true,
         );
@@ -249,7 +253,9 @@ final class StoreBalanceTopUpQuoteRegressionTest extends TelegramBotTestSupport
         $surface = app(TelegramMenuIntents::class)->fundingTopUpSurface(
             $topUp->customer,
             $topUp,
-            KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::ProviderTotalPending),
+            StoreBalanceTopUpPresentation::fromLifecycle(
+                StoreBalanceTopUpLifecycleResult::state(StoreBalanceTopUpOutcome::ProviderTotalPending),
+            ),
             confirmationReceived: true,
         );
 

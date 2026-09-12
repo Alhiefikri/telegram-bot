@@ -179,6 +179,41 @@ Expected summary counters:
 Command restart and duplicate scheduler execution are idempotent: a Payment
 that already advanced is not re-queried or re-applied.
 
+## Store Balance top-ups on the Sakurupiah rail
+
+Store Balance top-ups follow the same store-wide provider selection as checkout,
+so a funding intent confirmed while Sakurupiah is the active provider creates a
+Sakurupiah `QRISC` top-up instead of the KlikQRIS rail. The provider is resolved
+once at funding confirmation and snapshotted on the top-up together with the
+payment setting identity and version; switching the active provider afterwards
+never re-targets an existing top-up. The EMV QR payload is stored encrypted on the
+top-up and rendered to a PNG locally, and settlement always credits only the exact
+requested amount through the shared Store Balance ledger
+(`balance_top_up:<id>:credit`), never the provider fee. A Sakurupiah top-up that
+is not operationally ready fails closed to `provider_unavailable` before any
+provider request.
+
+Top-up settlement currently converges through the scheduled reconciliation
+command:
+
+```bash
+php artisan sakurupiah:reconcile-balance-top-ups --chunk=100 --max-top-ups=10
+```
+
+It runs every minute only when the Sakurupiah readiness scheduling gate is open —
+the same `SakurupiahProviderReadiness::scheduleRegistrationEnabledFor()` gate that
+registers `sakurupiah:reconcile`. It performs authoritative status lookups (never a
+create request) under a per-top-up single-flight lock and reports only aggregate
+counts and redacted identifiers.
+
+There is currently no Sakurupiah **top-up webhook fast path**: unlike an Order
+Payment, a paid Sakurupiah top-up is not advanced by a dedicated top-up callback,
+so it settles on the next scheduled reconciliation sweep. Adding that fast path is
+a follow-up; until then, a top-up that looks paid in the provider portal but is
+still pending locally is expected to settle on the next sweep. Verify
+`sakurupiah:check-readiness --json` and `schedule:list` before expecting top-up
+reconciliation to run.
+
 ## Sandbox validation
 
 Before any production traffic, run a qualified sandbox end-to-end path with a

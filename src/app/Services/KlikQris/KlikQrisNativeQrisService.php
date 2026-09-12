@@ -394,7 +394,7 @@ class KlikQrisNativeQrisService
             recovered: $topUp->status === StoreBalanceTopUpStatus::Paid
                 && $providerState === 'reconciled_SUCCESS',
             retryable: $topUp->status === StoreBalanceTopUpStatus::Failed
-                && $providerState === 'create_failed',
+                && in_array($providerState, ['create_failed', 'provider_unavailable'], true),
             manualReview: $topUp->status !== StoreBalanceTopUpStatus::Compensated
                 && ($topUp->status === StoreBalanceTopUpStatus::InvalidProviderResult
                     || ($topUp->status !== StoreBalanceTopUpStatus::Expired

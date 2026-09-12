@@ -3,6 +3,7 @@
 namespace Tests\Support;
 
 use App\Enums\PaymentStatus;
+use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 
 final class KlikQrisSandboxScenarios
@@ -50,6 +51,20 @@ final class KlikQrisSandboxScenarios
     {
         config()->set('services.klikqris', self::readyConfig());
         config()->set('queue.default', 'database');
+    }
+
+    /**
+     * Select KlikQRIS as the store payment provider.
+     *
+     * Store Balance top-ups follow the provider switch, so a KlikQRIS top-up
+     * test must also select KlikQRIS on the store setting.
+     */
+    public static function selectKlikQrisProvider(): ManualPaymentSetting
+    {
+        return ManualPaymentSetting::query()->create([
+            'payment_mode' => 'klikqris',
+            'is_active' => true,
+        ]);
     }
 
     public static function pngDataUri(string $body = 'test-qris-png'): string

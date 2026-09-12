@@ -42,6 +42,10 @@ use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahClient;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\StoreBalance\TopUp\KlikQrisStoreBalanceTopUpLifecycle;
+use App\Services\StoreBalance\TopUp\ManualStoreBalanceTopUpLifecycle;
+use App\Services\StoreBalance\TopUp\SakurupiahStoreBalanceTopUpLifecycle;
+use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResolver;
 use App\Services\Telegram\Callbacks\TelegramAdminPaymentCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramAdminStatsCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBalanceActivityCallbackHandler;
@@ -115,6 +119,13 @@ class AppServiceProvider extends ServiceProvider
             ]);
         });
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());
+        $this->app->singleton(StoreBalanceTopUpLifecycleResolver::class, function ($app) {
+            return new StoreBalanceTopUpLifecycleResolver([
+                $app->make(KlikQrisStoreBalanceTopUpLifecycle::class),
+                $app->make(ManualStoreBalanceTopUpLifecycle::class),
+                $app->make(SakurupiahStoreBalanceTopUpLifecycle::class),
+            ]);
+        });
         $this->app->singleton(PaidInvoiceRenderer::class);
         $this->app->singleton(TelegramCallbackAckState::class);
         $this->app->bind(TelegramCheckoutPaymentIntentSelector::class, TelegramConfiguredCheckoutPaymentIntentSelector::class);

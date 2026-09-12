@@ -38,6 +38,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $createCalls = 0;
         $statusCalls = 0;
         $this->fakeProvider($createCalls, $statusCalls);
@@ -203,6 +204,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $createCalls = 0;
         $statusCalls = 0;
         $this->fakeProvider($createCalls, $statusCalls);
@@ -263,6 +265,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $createCalls = 0;
         $statusCalls = 0;
         $this->fakeProvider($createCalls, $statusCalls);
@@ -309,6 +312,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $createCalls = 0;
         $statusCalls = 0;
         $this->fakeProvider($createCalls, $statusCalls);
@@ -350,6 +354,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $createCalls = 0;
         $statusCalls = 0;
         $this->fakeProvider($createCalls, $statusCalls);
@@ -398,6 +403,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $createCalls = 0;
         $statusCalls = 0;
         $this->fakeProvider($createCalls, $statusCalls);
@@ -431,6 +437,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $createCalls = 0;
         $statusCalls = 0;
         $this->fakeProvider($createCalls, $statusCalls);
@@ -483,6 +490,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $createCalls = 0;
         $statusCalls = 0;
         $this->fakeProvider($createCalls, $statusCalls);
@@ -526,6 +534,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $createCalls = 0;
         $statusCalls = 0;
         $this->fakeProvider($createCalls, $statusCalls);

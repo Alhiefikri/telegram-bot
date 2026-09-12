@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\TelegramNavigationRenderOutcome;
 use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
@@ -9,9 +10,6 @@ use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramNavigationRoot;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
-use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
-use App\Services\KlikQris\KlikQrisNativeQrisService;
-use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\StoreBalance\StoreBalanceActivityDetail;
 use App\Services\StoreBalance\StoreBalanceActivityItem;
 use App\Services\StoreBalance\StoreBalanceActivityPage;
@@ -21,6 +19,7 @@ use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\StoreBalance\StoreBalanceSnapshot;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPresentation;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 
 class TelegramMenuIntents
@@ -41,7 +40,6 @@ class TelegramMenuIntents
         private StoreBalanceLedger $balances,
         private StoreBalanceActivityService $activities,
         private TelegramBalanceActivityToken $activityTokens,
-        private KlikQrisNativeQrisService $nativeQris,
         private StoreBalanceFundingPolicyManager $fundingPolicies,
     ) {}
 
@@ -446,7 +444,7 @@ class TelegramMenuIntents
     public function fundingTopUpSurface(
         Customer $customer,
         StoreBalanceTopUp $topUp,
-        KlikQrisTopUpLifecycleResult $result,
+        StoreBalanceTopUpPresentation $presentation,
         bool $instructionsSent = false,
         bool $confirmationReceived = false,
         ?string $confirmationNoticeKey = null,
@@ -462,7 +460,6 @@ class TelegramMenuIntents
                 'amount' => $this->locale->idr((int) $topUp->amount),
             ]),
         ] : [];
-        $presentation = $this->nativeQris->topUpPresentation($topUp, $result);
         if ($presentation->isPaid()) {
             $paidNoticeKey = $presentation->isRecovered()
                 ? 'balance.topup.recovered'
@@ -473,7 +470,9 @@ class TelegramMenuIntents
                 ]),
             ]);
             $keyboard = [$this->navigationRow($customer)];
-        } elseif ($presentation->isPayable() && $presentation->payable() !== null) {
+        } elseif (($presentation->isPayable() || $presentation->isAwaitingConfirmation())
+            && $presentation->payable() !== null) {
+            $awaitingConfirmation = $presentation->isAwaitingConfirmation();
             $payable = $presentation->payable();
             $lines = array_merge($confirmationLines, [
                 $this->locale->translate($customer, 'balance.topup.instruction.title'),
@@ -482,7 +481,7 @@ class TelegramMenuIntents
                     'amount' => $this->locale->idr($payable->creditAmount()),
                 ]),
                 $this->locale->translate($customer, 'balance.topup.fee', [
-                    'amount' => $this->locale->idr($payable->providerFee()),
+                    'amount' => $this->locale->idr($payable->providerFee() ?? 0),
                 ]),
                 $this->locale->translate($customer, 'balance.topup.total', [
                     'amount' => $this->locale->idr($payable->totalAmount()),
@@ -490,7 +489,12 @@ class TelegramMenuIntents
                 $this->locale->translate($customer, 'balance.topup.deadline', [
                     'expires' => $this->locale->formatDate($customer, $payable->effectiveExpiresAt()),
                 ]),
-                $this->locale->translate($customer, 'balance.topup.unpaid'),
+                $this->locale->translate(
+                    $customer,
+                    $awaitingConfirmation
+                        ? 'balance.topup.awaiting_confirmation'
+                        : 'balance.topup.unpaid',
+                ),
                 $this->locale->translate(
                     $customer,
                     $instructionsSent ? 'balance.topup.instructions_sent' : 'balance.topup.instructions_queued',
@@ -504,13 +508,16 @@ class TelegramMenuIntents
             ], $this->navigationRow($customer)];
         } else {
             $noticeKey = match (true) {
+                $presentation->isRejected() => 'balance.topup.rejected',
+                $presentation->outcome() === StoreBalanceTopUpOutcome::ProviderUnavailable => 'balance.topup.provider_unavailable',
                 $presentation->canRetry() => 'balance.topup.retryable',
                 $presentation->isManualReview() => 'balance.topup.manual_review',
                 default => match ($presentation->outcome()) {
-                    KlikQrisNativeQrisOutcome::RecoveryPending => 'balance.topup.pending',
-                    KlikQrisNativeQrisOutcome::ProviderTotalPending => 'balance.topup.retry_later',
-                    KlikQrisNativeQrisOutcome::InvalidProviderResult => 'balance.topup.invalid',
-                    KlikQrisNativeQrisOutcome::Expired => 'balance.topup.expired',
+                    StoreBalanceTopUpOutcome::RecoveryPending => 'balance.topup.pending',
+                    StoreBalanceTopUpOutcome::ProviderTotalPending => 'balance.topup.retry_later',
+                    StoreBalanceTopUpOutcome::InvalidProviderResult => 'balance.topup.invalid',
+                    StoreBalanceTopUpOutcome::ProviderUnavailable => 'balance.topup.provider_unavailable',
+                    StoreBalanceTopUpOutcome::Expired => 'balance.topup.expired',
                     default => 'balance.topup.preparing',
                 },
             };
@@ -525,7 +532,7 @@ class TelegramMenuIntents
                     'callback_data' => StoreBalanceTopUpService::actionCallback('retry', $topUp->getKey()),
                 ]];
             }
-            if ($presentation->outcome() !== KlikQrisNativeQrisOutcome::Expired) {
+            if ($presentation->outcome() !== StoreBalanceTopUpOutcome::Expired) {
                 $keyboard[] = [[
                     'text' => $this->locale->translate($customer, 'balance.topup.check'),
                     'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\KlikQrisEnvironment;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceFundingIntentStatus;
+use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
@@ -15,8 +16,6 @@ use App\Models\StoreBalanceTopUp;
 use App\Models\StoreBalanceTopUpEvent;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
-use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
-use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
@@ -39,6 +38,7 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $expiresAt = now()->addMinutes(10)->startOfSecond();
         $topUp = $this->makeTopUp([
             'provider_expires_at' => $expiresAt,
@@ -74,7 +74,7 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
         $surface = app(TelegramMenuIntents::class)->fundingTopUpSurface(
             $topUp->fresh(['customer'])->customer,
             $topUp->fresh(),
-            KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::InvalidProviderResult),
+            app(StoreBalanceTopUpService::class)->presentation($topUp),
         );
         $this->assertStringContainsString('delayed payment was recovered', strtolower($surface->caption));
     }
@@ -83,6 +83,7 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $expiresAt = now()->addMinutes(10)->startOfSecond();
         $topUp = $this->makeTopUp([
             'provider_expires_at' => $expiresAt,
@@ -120,6 +121,7 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $expiresAt = now()->addMinutes(10)->startOfSecond();
         $topUp = $this->makeTopUp([
             'provider_expires_at' => $expiresAt,
@@ -167,6 +169,7 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $expiresAt = now()->addMinutes(10)->startOfSecond();
         $topUp = $this->makeTopUp([
             'provider_expires_at' => $expiresAt,
@@ -190,6 +193,7 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $expiresAt = now()->addMinutes(10)->startOfSecond();
         $topUp = $this->makeTopUp([
             'provider_expires_at' => $expiresAt,
@@ -205,7 +209,7 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
         $this->travelTo($expiresAt->copy()->addSecond());
         $result = app(StoreBalanceTopUpService::class)->reconcile($topUp);
 
-        $this->assertSame(KlikQrisNativeQrisOutcome::Expired, $result->outcome());
+        $this->assertSame(StoreBalanceTopUpOutcome::Expired, $result->outcome());
         $this->assertSame(StoreBalanceTopUpStatus::Expired, $topUp->fresh()->status);
         $this->assertSame(0, StoreBalanceEntry::query()->count());
         $this->assertSame(0, TelegramOutboundEffect::query()->count());
@@ -215,6 +219,7 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $expiresAt = now()->addMinutes(10)->startOfSecond();
         $topUp = $this->makeTopUp([
             'provider_expires_at' => $expiresAt,
@@ -245,6 +250,7 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         config()->set('services.provider_verification.reconciliation.max_attempts', 1);
         $expiresAt = now()->addMinutes(10)->startOfSecond();
         $topUp = $this->makeTopUp([

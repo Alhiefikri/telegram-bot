@@ -7,7 +7,6 @@ use App\Enums\TelegramOutboundEffectState;
 use App\Models\Customer;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
-use App\Support\PaymentProvider;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -48,6 +47,20 @@ final class StoreBalanceTopUpOutbound
             fn (StoreBalanceTopUp $source): ?TelegramOutboundEffect => $this->outboundEffects->recordBalanceTopUpReceipt($source),
             fn (string $topUpId): ?TelegramOutboundEffect => $this->outboundEffects->forBalanceTopUpReceipt($topUpId),
             fn (StoreBalanceTopUp $source): bool => $this->eligibleReceipt($source),
+        );
+    }
+
+    public function handoffAdminReview(StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult
+    {
+        return $this->handoff(
+            $topUp,
+            fn (StoreBalanceTopUp $source): ?TelegramOutboundEffect => $this->outboundEffects->recordBalanceTopUpManualReview($source),
+            fn (string $topUpId): ?TelegramOutboundEffect => TelegramOutboundEffect::query()
+                ->where('source_type', StoreBalanceTopUp::class)
+                ->where('source_id', $topUpId)
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_MANUAL_REVIEW)
+                ->first(),
+            fn (StoreBalanceTopUp $source): bool => $source->status === StoreBalanceTopUpStatus::AwaitingConfirmation,
         );
     }
 
@@ -289,13 +302,15 @@ final class StoreBalanceTopUpOutbound
 
     private function eligibleInstructions(StoreBalanceTopUp $topUp): bool
     {
-        return $topUp->isPayable() && $this->hasCustomerChat($topUp);
+        $deliverable = $topUp->status === StoreBalanceTopUpStatus::AwaitingConfirmation
+            || $topUp->isPayable();
+
+        return $deliverable && $this->hasCustomerChat($topUp);
     }
 
     private function eligibleReceipt(StoreBalanceTopUp $topUp): bool
     {
         return $topUp->status === StoreBalanceTopUpStatus::Paid
-            && strtolower(trim((string) $topUp->provider)) === PaymentProvider::KLIKQRIS
             && $topUp->provider_total_payment !== null
             && $topUp->settled_at !== null
             && $this->hasCustomerChat($topUp);
@@ -314,18 +329,19 @@ final class StoreBalanceTopUpOutbound
     }
 
     /** @return Builder<StoreBalanceTopUp> */
-    private function klikQrisTopUpsQuery(): Builder
+    private function topUpsQuery(): Builder
     {
-        return StoreBalanceTopUp::query()
-            ->with('customer')
-            ->whereRaw('LOWER(TRIM(provider)) = ?', [PaymentProvider::KLIKQRIS]);
+        return StoreBalanceTopUp::query()->with('customer');
     }
 
     /** @return Builder<StoreBalanceTopUp> */
     private function missingInstructionsQuery(): Builder
     {
-        return $this->klikQrisTopUpsQuery()
-            ->where('status', StoreBalanceTopUpStatus::Payable->value)
+        return $this->topUpsQuery()
+            ->whereIn('status', [
+                StoreBalanceTopUpStatus::Payable->value,
+                StoreBalanceTopUpStatus::AwaitingConfirmation->value,
+            ])
             ->whereNotExists(function ($effects): void {
                 $effects
                     ->selectRaw('1')
@@ -340,7 +356,7 @@ final class StoreBalanceTopUpOutbound
     /** @return Builder<StoreBalanceTopUp> */
     private function missingReceiptsQuery(): Builder
     {
-        return $this->klikQrisTopUpsQuery()
+        return $this->topUpsQuery()
             ->where('status', StoreBalanceTopUpStatus::Paid->value)
             ->whereNotNull('settled_at')
             ->whereNotExists(function ($effects): void {

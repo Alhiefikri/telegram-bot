@@ -8,14 +8,13 @@ use App\Models\Customer;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramNavigationRoot;
-use App\Services\KlikQris\KlikQrisNativeQrisService;
-use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\StoreBalance\StoreBalanceFundingAmountValidator;
 use App\Services\StoreBalance\StoreBalanceFundingIntentInput;
 use App\Services\StoreBalance\StoreBalanceFundingIntentOpening;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPresentation;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
@@ -41,7 +40,6 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         private readonly StoreBalanceFundingAmountValidator $amounts,
         private readonly StoreBalanceFundingIntentService $intents,
         private readonly StoreBalanceTopUpService $topUps,
-        private readonly KlikQrisNativeQrisService $nativeQris,
         private readonly StoreBalanceTopUpOutbound $topUpOutbound,
         private readonly TelegramLocale $locale,
         private readonly TelegramIntentSession $session,
@@ -297,14 +295,16 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             return $this->menu->addBalanceSurface($context->customer, 'balance.topup.retryable');
         }
 
-        $result = $this->resolveTopUp($topUp);
-
-        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp, $result);
+        $presentation = $this->resolveTopUp($topUp);
+        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp, $presentation);
+        if ($presentation->isAwaitingConfirmation()) {
+            $this->topUpOutbound->handoffAdminReview($topUp->fresh() ?? $topUp);
+        }
 
         return $this->menu->fundingTopUpSurface(
             $context->customer,
             $topUp->fresh(),
-            $result,
+            $presentation,
             $instructionsSent,
             $confirmationReceived,
             $confirmationNoticeKey,
@@ -314,24 +314,26 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
     private function resolveTopUp(
         StoreBalanceTopUp $topUp,
         bool $reconcile = false,
-    ): KlikQrisTopUpLifecycleResult {
+    ): StoreBalanceTopUpPresentation {
         try {
-            return $reconcile
-                ? $this->topUps->reconcile($topUp)
-                : $this->nativeQris->lifecycleForTopUp($topUp);
+            if ($reconcile) {
+                $this->topUps->reconcile($topUp);
+            } else {
+                $this->topUps->lifecycle($topUp);
+            }
         } catch (Throwable $exception) {
             report($exception);
-            $topUp->refresh();
-
-            return $this->nativeQris->classifyTopUp($topUp);
         }
+
+        return $this->topUps->presentation($topUp);
     }
 
     private function topUpInstructionsWereDelivered(
         StoreBalanceTopUp $topUp,
-        KlikQrisTopUpLifecycleResult $result,
+        StoreBalanceTopUpPresentation $presentation,
     ): bool {
-        if (! $result->isPayable() || $result->payable() === null) {
+        if ($presentation->payable() === null
+            || (! $presentation->isPayable() && ! $presentation->isAwaitingConfirmation())) {
             return false;
         }
 
@@ -377,13 +379,16 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             return true;
         }
 
-        $result = $this->resolveTopUp($topUp, $action === 'check');
+        $presentation = $this->resolveTopUp($topUp, $action === 'check');
         $topUp->refresh();
-        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp, $result);
+        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp, $presentation);
+        if ($presentation->isAwaitingConfirmation()) {
+            $this->topUpOutbound->handoffAdminReview($topUp);
+        }
         $outcome = $this->navigation->presentOnRoot(
             $root,
             $context->chatId,
-            $this->menu->fundingTopUpSurface($context->customer, $topUp->fresh(), $result, $instructionsSent),
+            $this->menu->fundingTopUpSurface($context->customer, $topUp->fresh(), $presentation, $instructionsSent),
         );
 
         $this->bot->answerCallbackQuery(

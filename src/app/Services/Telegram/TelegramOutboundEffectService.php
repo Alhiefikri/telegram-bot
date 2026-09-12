@@ -56,6 +56,8 @@ class TelegramOutboundEffectService
 
     public const TYPE_BALANCE_TOP_UP_RECEIPT = TelegramOutboundEffectType::BalanceTopUpReceipt->value;
 
+    public const TYPE_BALANCE_TOP_UP_MANUAL_REVIEW = TelegramOutboundEffectType::BalanceTopUpManualReview->value;
+
     public const TYPE_OWNER_COMPENSATION_NOTIFICATION = TelegramOutboundEffectType::OwnerCompensationNotification->value;
 
     public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
@@ -120,7 +122,13 @@ class TelegramOutboundEffectService
 
     public const TEMPLATE_BALANCE_TOP_UP = 'balance-top-up-klikqris-v1';
 
+    public const TEMPLATE_BALANCE_TOP_UP_SAKURUPIAH = 'balance-top-up-sakurupiah-v1';
+
+    public const TEMPLATE_BALANCE_TOP_UP_MANUAL = 'balance-top-up-manual-v1';
+
     public const TEMPLATE_BALANCE_TOP_UP_RECEIPT = 'balance-top-up-receipt-v1';
+
+    public const TEMPLATE_BALANCE_TOP_UP_ADMIN_REVIEW = 'balance-top-up-admin-review-v1';
 
     public const TEMPLATE_OWNER_COMPENSATION_NOTIFICATION = 'balance-owner-compensation-v1';
 
@@ -302,17 +310,19 @@ class TelegramOutboundEffectService
     ): ?TelegramOutboundEffect {
         $customer ??= $topUp->customer;
         $chatId = trim((string) $topUp->chat_id);
+        $deliverable = $topUp->status === StoreBalanceTopUpStatus::AwaitingConfirmation
+            || $topUp->isPayable();
         if ($customer === null
             || $customer->telegram_id === null
             || $chatId === ''
             || (string) $customer->telegram_id !== $chatId
             || (int) $customer->getKey() !== (int) $topUp->customer_id
-            || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::KLIKQRIS
-            || ! $topUp->isPayable()) {
+            || ! $deliverable) {
             return null;
         }
 
-        $effectKey = self::balanceTopUpEffectKey((string) $topUp->getKey());
+        $provider = (string) $topUp->provider;
+        $effectKey = self::balanceTopUpEffectKey((string) $topUp->getKey(), $provider);
 
         return TelegramOutboundEffect::query()->firstOrCreate(
             ['effect_key' => $effectKey],
@@ -327,14 +337,14 @@ class TelegramOutboundEffectService
                 'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE,
                 'telegram_method' => 'sendPhoto',
                 'locale' => $topUp->locale ?: $customer->locale,
-                'template_version' => self::TEMPLATE_BALANCE_TOP_UP,
+                'template_version' => self::balanceTopUpTemplate($provider),
                 'state' => TelegramOutboundEffectState::Pending->value,
                 'attempts' => 0,
                 'next_attempt_at' => now(),
                 'outcome_metadata' => [
                     'delivery_context' => 'balance_top_up',
                     'attachment_type' => 'qris_png',
-                    'payment_method' => 'klikqris',
+                    'payment_method' => strtolower(trim($provider)),
                 ],
             ],
         );
@@ -351,14 +361,13 @@ class TelegramOutboundEffectService
             || $chatId === ''
             || (string) $customer->telegram_id !== $chatId
             || (int) $customer->getKey() !== (int) $topUp->customer_id
-            || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::KLIKQRIS
             || $topUp->status !== StoreBalanceTopUpStatus::Paid
             || $topUp->settled_at === null
             || $topUp->provider_total_payment === null) {
             return null;
         }
 
-        $effectKey = self::balanceTopUpReceiptEffectKey((string) $topUp->getKey());
+        $effectKey = self::balanceTopUpReceiptEffectKey((string) $topUp->getKey(), (string) $topUp->provider);
 
         return TelegramOutboundEffect::query()->firstOrCreate(
             ['effect_key' => $effectKey],
@@ -379,6 +388,42 @@ class TelegramOutboundEffectService
                 'next_attempt_at' => now(),
                 'outcome_metadata' => [
                     'delivery_context' => 'balance_top_up_receipt',
+                    'delivery_method' => 'sendMessage',
+                ],
+            ],
+        );
+    }
+
+    public function recordBalanceTopUpManualReview(StoreBalanceTopUp $topUp): ?TelegramOutboundEffect
+    {
+        $chatId = $this->adminTargetChatId();
+        if ($chatId === null
+            || $topUp->status !== StoreBalanceTopUpStatus::AwaitingConfirmation
+            || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::MANUAL) {
+            return null;
+        }
+
+        $effectKey = 'balance-top-up:'.$topUp->getKey().':admin-review:v1';
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => self::TYPE_BALANCE_TOP_UP_MANUAL_REVIEW,
+                'source_type' => StoreBalanceTopUp::class,
+                'source_id' => (string) $topUp->getKey(),
+                'target_type' => 'admin',
+                'telegram_chat_id' => $chatId,
+                'queue' => 'notifications',
+                'telegram_method' => 'sendMessage',
+                'locale' => null,
+                'template_version' => self::TEMPLATE_BALANCE_TOP_UP_ADMIN_REVIEW,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+                'outcome_metadata' => [
+                    'delivery_context' => 'balance_top_up_admin_review',
                     'delivery_method' => 'sendMessage',
                 ],
             ],
@@ -1507,24 +1552,46 @@ class TelegramOutboundEffectService
         return self::checkoutEffectKey($orderId, self::TYPE_MANUAL_CHECKOUT);
     }
 
-    public static function balanceTopUpEffectKey(string $topUpId): string
-    {
+    public static function balanceTopUpEffectKey(
+        string $topUpId,
+        string $provider = PaymentProvider::KLIKQRIS,
+    ): string {
         $topUpId = trim($topUpId);
         if (preg_match('/\A[1-9][0-9]{0,18}\z/D', $topUpId) !== 1) {
             throw new InvalidArgumentException('Store Balance top-up reference is invalid.');
         }
 
-        return 'balance-top-up:'.$topUpId.':klikqris-instructions:v1';
+        return 'balance-top-up:'.$topUpId.':'.self::providerEffectSegment($provider).'-instructions:v1';
     }
 
-    public static function balanceTopUpReceiptEffectKey(string $topUpId): string
-    {
+    public static function balanceTopUpReceiptEffectKey(
+        string $topUpId,
+        string $provider = PaymentProvider::KLIKQRIS,
+    ): string {
         $topUpId = trim($topUpId);
         if (preg_match('/\A[1-9][0-9]{0,18}\z/D', $topUpId) !== 1) {
             throw new InvalidArgumentException('Store Balance top-up receipt reference is invalid.');
         }
 
-        return 'balance-top-up:'.$topUpId.':klikqris-receipt:v1';
+        return 'balance-top-up:'.$topUpId.':'.self::providerEffectSegment($provider).'-receipt:v1';
+    }
+
+    public static function balanceTopUpTemplate(string $provider): string
+    {
+        return match (strtolower(trim($provider))) {
+            PaymentProvider::SAKURUPIAH => self::TEMPLATE_BALANCE_TOP_UP_SAKURUPIAH,
+            PaymentProvider::MANUAL => self::TEMPLATE_BALANCE_TOP_UP_MANUAL,
+            default => self::TEMPLATE_BALANCE_TOP_UP,
+        };
+    }
+
+    private static function providerEffectSegment(string $provider): string
+    {
+        return match (strtolower(trim($provider))) {
+            PaymentProvider::SAKURUPIAH => PaymentProvider::SAKURUPIAH,
+            PaymentProvider::MANUAL => PaymentProvider::MANUAL,
+            default => PaymentProvider::KLIKQRIS,
+        };
     }
 
     public static function ownerCompensationEffectKey(string $compensationId): string

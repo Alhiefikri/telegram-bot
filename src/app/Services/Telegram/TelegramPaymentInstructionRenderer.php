@@ -8,13 +8,13 @@ use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\StoreBalanceTopUp;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
-use App\Services\KlikQris\KlikQrisPayableBalanceTopUp;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirQrisFeePolicy;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahPayableInvoice;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPayable;
 use App\Support\DogfoodTiming;
 use Carbon\CarbonInterface;
 
@@ -260,9 +260,10 @@ class TelegramPaymentInstructionRenderer
 
     public function balanceTopUp(
         StoreBalanceTopUp $topUp,
-        KlikQrisPayableBalanceTopUp $payable,
+        StoreBalanceTopUpPayable $payable,
         string $photoContents,
         string $locale = 'id',
+        bool $awaitingConfirmation = false,
     ): TelegramPaymentInstruction {
         $lines = [
             $this->text($locale, 'balance.topup.instruction.title'),
@@ -271,7 +272,7 @@ class TelegramPaymentInstructionRenderer
                 'amount' => $this->formatRupiah($payable->creditAmount()),
             ]),
             $this->text($locale, 'balance.topup.fee', [
-                'amount' => $this->formatRupiah($payable->providerFee()),
+                'amount' => $this->formatRupiah($payable->providerFee() ?? 0),
             ]),
             $this->text($locale, 'balance.topup.total', [
                 'amount' => $this->formatRupiah($payable->totalAmount()),
@@ -280,7 +281,12 @@ class TelegramPaymentInstructionRenderer
                 'expires' => $this->formatDate($payable->effectiveExpiresAt(), $locale),
             ]),
             '',
-            $this->text($locale, 'balance.topup.unpaid'),
+            $this->text(
+                $locale,
+                $awaitingConfirmation
+                    ? 'balance.topup.awaiting_confirmation'
+                    : 'balance.topup.unpaid',
+            ),
             $this->text($locale, 'balance.topup.help'),
         ];
 

@@ -21,6 +21,12 @@ if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnviron
         ->withoutOverlapping(ReconcileStoreBalanceTopUps::schedulerMutexMinutes());
 }
 
+// Every top-up rail needs a deadline sweep, including the manual rail which
+// has no provider to poll. This command performs no provider I/O.
+Schedule::command('store-balance:expire-top-ups --chunk=100')
+    ->everyMinute()
+    ->withoutOverlapping(2);
+
 // Sakurupiah reconciliation runs only when the environment is enabled,
 // operationally ready, and the verification queue is served by the release.
 // The reconciliation itself is synchronous scheduler work (no enqueue to an
@@ -31,6 +37,9 @@ if (app(SakurupiahProviderReadiness::class)->scheduleRegistrationEnabledFor($sak
     Schedule::command((string) config('services.sakurupiah.reconciliation_command', 'sakurupiah:reconcile --chunk=100'))
         ->everyMinute()
         ->withoutOverlapping(ReconcileSakurupiahPayments::schedulerMutexMinutes());
+    Schedule::command('sakurupiah:reconcile-balance-top-ups --chunk=100 --max-top-ups=10')
+        ->everyMinute()
+        ->withoutOverlapping(2);
 }
 Schedule::command('pakasir:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
 Schedule::command('binance:reconcile --chunk=100')->everyMinute()->withoutOverlapping();

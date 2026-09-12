@@ -115,7 +115,25 @@ menandai replacement, expiry, stale-policy, cancel, dan confirm secara
 idempotent. Intent ini tidak membuat Payment, invoice, provider request, atau
 `StoreBalanceEntry`; sebelum Confirm seluruh recovery tetap lokal ke chooser.
 Setelah Confirm, `StoreBalanceTopUpService` mengunci Customer, intent, current
-root, dan top-up identity untuk membuat/reuse satu `StoreBalanceTopUp`.
+root, dan top-up identity untuk membuat/reuse satu `StoreBalanceTopUp`. Top-up
+mengikuti provider yang dipilih store, sama seperti checkout: provider
+(`manual`, `klikqris`, atau `sakurupiah`) diresolusi sekali saat Confirm dari
+`ManualPaymentSetting::current()` dan disnapshot pada top-up bersama
+`payment_setting_id`/`payment_provider_version`, sementara `pakasir` tidak
+dipilih dan provider tak dikenal fail closed ke `manual`. Seluruh lifecycle,
+presentasi, recovery, settlement, dan expiry kemudian dibaca dari snapshot
+top-up itu, sehingga mengganti Payment Provider Switch hanya memengaruhi
+top-up yang di-confirm setelah switch. Perilaku provider berada di balik satu
+seam `StoreBalanceTopUpLifecycle`, yang dipilih
+`StoreBalanceTopUpLifecycleResolver` dari provider top-up:
+`KlikQrisStoreBalanceTopUpLifecycle` mendelegasikan ke
+`KlikQrisNativeQrisService`, `SakurupiahStoreBalanceTopUpLifecycle` membuat/
+refresh invoice `QRISC` lewat adapter Sakurupiah dan menyimpan payload QR
+terenkripsi, dan `ManualStoreBalanceTopUpLifecycle` membuat top-up
+`awaiting_confirmation` untuk dikonfirmasi operator. Rail mengembalikan DTO
+provider-neutral dan tidak pernah memindahkan saldo: `StoreBalanceTopUpService`
+tetap pemilik transaksi top-up, urutan lock, validasi settlement evidence,
+transisi status, dan satu identity kredit ledger `balance_top_up:<id>:credit`.
 
 Store Balance checkout memakai `StoreBalanceCheckoutIntent` dan
 `StoreBalanceCheckoutPaymentPreparation` sebagai rail internal IDR penuh.
@@ -161,6 +179,8 @@ creates an Order, Payment, inventory movement, or durable Sales Proof effect.
 | reservation/sale/release stock                                  | [`InventoryLedger`](../../src/app/Services/InventoryLedger.php)                                                                                                                                                    | model/controller langsung mengubah stock                               |
 | Store Balance credit/debit dan projection                        | [`StoreBalanceLedger`](../../src/app/Services/StoreBalance/StoreBalanceLedger.php)                                                                                                                                 | checkout, refund, top-up, atau Telegram adapter menulis balance langsung |
 | Store Balance funding policy admin/customer chooser                 | [`StoreBalanceFundingPolicyManager`](../../src/app/Services/StoreBalance/StoreBalanceFundingPolicyManager.php) | controller admin, form, atau callback mempercayai nominal langsung |
+| Store Balance top-up provider rail lifecycle                    | [`StoreBalanceTopUpLifecycle`](../../src/app/Services/StoreBalance/TopUp/StoreBalanceTopUpLifecycle.php) yang dipilih [`StoreBalanceTopUpLifecycleResolver`](../../src/app/Services/StoreBalance/TopUp/StoreBalanceTopUpLifecycleResolver.php) | `StoreBalanceTopUpService`, provider resolver, atau adapter Telegram memilih perilaku rail |
+| manual Store Balance top-up operator confirmation               | [`ManualStoreBalanceTopUpConfirmationService`](../../src/app/Services/StoreBalance/TopUp/ManualStoreBalanceTopUpConfirmationService.php) | callback Telegram menandai paid/expired atau mengkredit saldo langsung |
 | KlikQRIS create/recovery/payability                             | [`KlikQrisNativeQrisService`](../../src/app/Services/KlikQris/KlikQrisNativeQrisService.php)                                                                                                                     | Store Bot/Storefront mengklasifikasi persistence state                  |
 | provider status verification                                    | callback processor + provider adapter masing-masing                                                                                                                                                               | callback payload langsung menandai paid                                |
 | Telegram outbound effect state dan delivery ledger              | [`TelegramOutboundEffectLedgerProtocol`](../../src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php) dan service materialization-nya                                                                  | checkout caller, queue job, channel adapter                              |
@@ -219,8 +239,10 @@ effect, atau ledger entry; sesudah Confirm, top-up/provider recovery berjalan
 pada top-up dan merchant reference yang sama.
 
 `TelegramCatalogIntents` consumes `CatalogBrowse::browsePublic()` for the Product Family and standalone Product discovery list, while optional category
-filtering and search retain their existing Product projection. The list shows
-up to ten entries per page; family option callbacks use the signed compact
+filtering and search retain their existing Product projection. The discovery
+list shows up to fifteen entries per page, with entries pressed against their
+divider rule instead of padded by blank lines, while category filtering and
+search keep up to ten; family option callbacks use the signed compact
 `TelegramFamilyCallbackToken` and resolve the existing Product ID only after
 the current public family projection and page are revalidated. Product Detail,
 quantity, payment, Cart, Order, and outbound-effect ownership remains unchanged.
@@ -236,17 +258,30 @@ fallback and transport ambiguity never triggers one.
 
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
 
-Untuk delivery durable, [`TelegramOutboundEffectLedgerProtocol`](../../src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php) adalah satu-satunya seam state: claim/lease, token-checked finalization, ambiguity, retry scheduling, terminal failure, dan receipt ordering. [`TelegramOutboundEffectPolicy`](../../src/app/Services/Telegram/TelegramOutboundEffectPolicy.php) memasok limit dan policy family tanpa memindahkan state machine ke adapter. `TelegramOutboundEffectService` hanya mematerialisasi effect, melakukan lookup, dan menyimpan resend history; queue mapping berada di `TelegramOutboundEffectDispatcher`. Delivery/projection adapter per family adalah `CheckoutInstructionDeliveryPipeline`, `ReceiptDeliveryPipeline`, `AdminOrderNotificationDeliveryPipeline`, `ManualPaymentProofDeliveryPipeline`, `SalesProofDeliveryPipeline`, `AdminBroadcastDeliveryPipeline`, `StockNotificationDeliveryPipeline`, dan `ProductPriceChangeNotificationService`. Jangan menambahkan claim/finalization pass-through baru ke service materializer atau job. Boundary lengkap, scope #286, recovery, dan Manual Delivery Review ada di [`telegram-outbound-effect-architecture.md`](../../docs/telegram-outbound-effect-architecture.md); migration/incident runbook ada di [`runbook-telegram-outbound-effect-contract.md`](../../docs/runbook-telegram-outbound-effect-contract.md).
+Untuk delivery durable, [`TelegramOutboundEffectLedgerProtocol`](../../src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php) adalah satu-satunya seam state: claim/lease, token-checked finalization, ambiguity, retry scheduling, terminal failure, dan receipt ordering. [`TelegramOutboundEffectPolicy`](../../src/app/Services/Telegram/TelegramOutboundEffectPolicy.php) memasok limit dan policy family tanpa memindahkan state machine ke adapter. `TelegramOutboundEffectService` hanya mematerialisasi effect, melakukan lookup, dan menyimpan resend history; queue mapping berada di `TelegramOutboundEffectDispatcher`. Delivery/projection adapter per family adalah `CheckoutInstructionDeliveryPipeline`, `ReceiptDeliveryPipeline`, `AdminOrderNotificationDeliveryPipeline`, `ManualPaymentProofDeliveryPipeline`, `SalesProofDeliveryPipeline`, `AdminBroadcastDeliveryPipeline`, `StockNotificationDeliveryPipeline`, `ProductPriceChangeNotificationService`, dan `BalanceTopUpAdminReviewDeliveryPipeline`. Jangan menambahkan claim/finalization pass-through baru ke service materializer atau job. Boundary lengkap, scope #286, recovery, dan Manual Delivery Review ada di [`telegram-outbound-effect-architecture.md`](../../docs/telegram-outbound-effect-architecture.md); migration/incident runbook ada di [`runbook-telegram-outbound-effect-contract.md`](../../docs/runbook-telegram-outbound-effect-contract.md).
 Untuk KlikQRIS, `delivery_outcome=retry_notice_sent` tidak dianggap selesai: ketika customer menekan Check Payment atau reconciliation menemukan Payment yang sama sudah kembali payable, service mematerialisasi effect sequence 2 dan dispatcher mengantrekan ulang QR melalui Payment yang sama. Effect ini hanya dibuat untuk order/payment yang masih pending dan tidak menduplikasi effect awal `qris_sent`.
 
-Balance top-ups use the same KlikQRIS Native QRIS lifecycle boundary but never
-create an Order or Payment. `StoreBalanceTopUpEventLogger` stores only
-sanitized provider evidence, while `StoreBalanceTopUpService` settles the
-requested credit through `StoreBalanceLedger` and emits `StoreBalanceTopUpSettled`
-as an after-commit application event. `MaterializeStoreBalanceTopUpReceipt`
+Balance top-ups follow the store's selected provider rail (`manual`, `klikqris`,
+`sakurupiah`) but never create an Order or Payment. The provider is resolved once
+at funding confirmation and snapshotted on the top-up, and
+`StoreBalanceTopUpService` selects the rail through
+`StoreBalanceTopUpLifecycleResolver`; the service then settles the requested
+credit through `StoreBalanceLedger` and emits `StoreBalanceTopUpSettled` as an
+after-commit application event. `StoreBalanceTopUpEventLogger` stores only
+sanitized provider evidence. `MaterializeStoreBalanceTopUpReceipt`
 reloads the committed top-up and delegates the idempotent receipt handoff to
 `StoreBalanceTopUpOutbound`; the family module owns both top-up effect
-eligibility/identity and safe callback matching. `TelegramBalanceFundingCallbackHandler`
+eligibility/identity and safe callback matching, and provider-scoped effect keys
+and templates keep each rail's instructions and receipt distinct (KlikQRIS keeps
+its historical key). Manual top-ups add an admin review family: the effect
+`admin.balance_top_up_manual_review` is admin-targeted on the `notifications`
+queue and carries approve/reject callbacks
+(`admin:topup-approve:{id}` / `admin:topup-reject:{id}`) handled by
+`TelegramAdminPaymentCallbackHandler` (stage `BeforePrivacy`, guarded by
+`TelegramAdminAccess::isAdmin`) and settled through
+`ManualStoreBalanceTopUpConfirmationService`, audited as
+`store_balance.top_up.manually_confirmed` / `.manually_rejected`.
+`TelegramBalanceFundingCallbackHandler`
 and routine navigation callbacks consume that seam without inspecting
 Telegram Outbound Effect state. No Telegram work runs inside financial locks.
 
@@ -560,8 +595,10 @@ Semua webhook provider harus aman terhadap duplicate delivery, mismatch, unknown
 Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php). Yang paling penting:
 
 - `klikqris:reconcile` tiap menit bila environment KlikQRIS aktif dan scheduling enabled; mutex `withoutOverlapping` dihitung dalam menit dari execution budget sweep ditambah retry/timeout status provider dan safety margin, sehingga satu lookup terburuk yang dimulai sebelum deadline tetap tidak overlap;
-- `klikqris:reconcile-balance-top-ups --chunk=100 --max-top-ups=10` tiap menit pada readiness gate yang sama; command hanya memproses top-up KlikQRIS yang sudah memiliki create state dalam batas chunk/count dan tidak menahan database lock saat status provider dipanggil;
+- `klikqris:reconcile-balance-top-ups --chunk=100 --max-top-ups=10` tiap menit pada readiness gate yang sama; command hanya memproses top-up KlikQRIS yang sudah memiliki create state dalam batas chunk/count, tidak menahan database lock saat status provider dipanggil, dan deadline sweep-nya kini memakai jalur `store-balance:expire-top-ups` yang sama;
+- `store-balance:expire-top-ups --chunk=100` tiap menit untuk seluruh rail top-up (termasuk rail `manual` yang tidak punya provider untuk dipoll) tanpa provider I/O dan tanpa readiness gate provider;
 - `sakurupiah:reconcile --chunk=100` tiap menit hanya bila `SakurupiahProviderReadiness::scheduleRegistrationEnabledFor()` true (environment enabled, operational ready, verification queue `default` yang disupervisi); bounded page memakai predicate kandidat bersama, narrow select + eager `Order`, cursor `(created_at,id)` yang berputar, dan execution deadline; mutex `withoutOverlapping` dihitung dari execution budget dan provider lookup budget; setelah bootstrap, `schedulingEnabledFor()` memeriksa event scheduler yang terdaftar;
+- `sakurupiah:reconcile-balance-top-ups --chunk=100 --max-top-ups=10` tiap menit hanya bila gate readiness Sakurupiah yang sama (`scheduleRegistrationEnabledFor()`) terbuka; command merekonsiliasi top-up rail Sakurupiah secara bounded melalui status lookup authoritative tanpa menahan database lock di HTTP;
 - `pakasir:reconcile --chunk=100` tiap menit untuk payment legacy;
 - `binance:reconcile --chunk=100` tiap menit;
 - `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;
@@ -585,7 +622,7 @@ Scheduler service hanya menjalankan `php artisan schedule:run`; jangan mengganda
 
 - `default` — Telegram update processing and bounded Sakurupiah webhook verification.
 - `telegram-outbound` — checkout instructions, Store Balance top-up QR instructions, dan pending-order admin notification.
-- `notifications` — receipt, paid/expired notifications, Sales Proof Post, cleanup instruction, KlikQRIS owner alert, and legacy Pakasir cancellation attempts.
+- `notifications` — receipt, paid/expired notifications, Sales Proof Post, Store Balance top-up admin review, cleanup instruction, KlikQRIS owner alert, and legacy Pakasir cancellation attempts.
 - `telegram-broadcast` — admin broadcast dan price notification batches.
 - `telegram-stock` — stock notification recipient batches; each job sends one effect and requeues the movement until complete.
 
@@ -662,7 +699,10 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/StoreBalanceFundingPolicyTest.php` — versioned Admin policy updates, strict bounded validation, role authorization, no-op/audit atomicity, and stale-version recovery.
 - `tests/Feature/StoreBalanceReconciliationTest.php` — projection/ledger mismatch detection via `store-balance:check` without changing money, customer scoping, limit, and sanitized JSON output.
 - `tests/Feature/StoreBalancePostgresConcurrencyTest.php` — process races for one idempotency claim, competing debits, parallel credits, duplicate source identity, competing Store Balance funding-intent submissions/claims, and PostgreSQL non-negative/positive/unique constraints plus one-stale-version funding-policy update; runs only through the PostgreSQL gate.
-- `tests/Feature/Telegram/StoreBalanceTopUpTest.php` — confirmation-to-provider quote, safe evidence redaction, durable QR instruction separation, exact requested credit settlement, and replayed confirmation.
+- `tests/Feature/Telegram/StoreBalanceTopUpTest.php` — confirmation-to-provider quote, safe evidence redaction, durable QR instruction separation, exact requested credit settlement, and replayed confirmation; the shared top-up tests now pin the KlikQRIS rail via `KlikQrisSandboxScenarios::selectKlikQrisProvider()`.
+- `tests/Feature/Telegram/StoreBalanceTopUpManualRailTest.php` — manual rail creation in `awaiting_confirmation`, admin review notification with approve/reject callback, operator confirmation/rejection audit and idempotency, and exact-credit settlement.
+- `tests/Feature/Telegram/StoreBalanceTopUpSakurupiahRailTest.php` — Sakurupiah rail create/refresh, encrypted QR payload presentation, scheduled reconciliation settlement, and exact-credit credit.
+- `tests/Feature/Telegram/StoreBalanceTopUpProviderUnavailableTest.php` — fail-closed `provider_unavailable` for a rail that is not operationally ready, with no QR claimed or sent and no provider request.
 - `tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php` — Payment and Store Balance top-up provider single-flight races, same-target recovery, and one instruction-effect materialization; runs only through the PostgreSQL gate.
 - `tests/Feature/Telegram/StoreBalanceHomeTest.php` — private home greeting → Profile → Store Activity → prompt ordering, fresh Store Balance independent of the global metrics cache, fail-safe unavailable projection, localized missing value, and public-safe group home.
 - `tests/Feature/Telegram/TelegramRoutineNavigationTest.php` — webhook-level single-message navigation evidence: Home → Balance → Home → Language → Home → Orders → Support on one canonical message, preset/custom Store Balance confirmation intents, strict amount recovery, confirm/cancel/back/expiry/stale-policy replay behavior, zero pre-confirm provider/Payment/ledger effects, stale/ambiguous/missing-root recovery, catalog navigation on the root, long-screen text-root replacement, group privacy, and id/en/ms screen copy.

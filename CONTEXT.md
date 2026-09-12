@@ -163,8 +163,16 @@ A Customer-owned, expiring confirmation record that binds one normalized credit 
 _Avoid_: invoice, deposit balance, provider quote
 
 **Store Balance Top-up**:
-A Customer-owned, one-time KlikQRIS Native QRIS funding record created from a confirmed Store Balance Funding Intent. It keeps the requested credit amount separate from the provider-authoritative fee, final payable total, QR data, expiry, and settlement evidence; retries and recovery reuse the same merchant reference and idempotency identity. It is not an Order, Payment, invoice, or balance credit until authenticated provider success is settled.
+A Customer-owned, one-time funding record created from a confirmed Store Balance Funding Intent on the store's currently selected payment provider rail (`manual`, `klikqris`, or `sakurupiah`). It keeps the requested credit amount separate from the provider-authoritative fee, final payable total, QR data, expiry, and settlement evidence; retries and recovery reuse the same merchant reference and idempotency identity. It is not an Order, Payment, invoice, or balance credit until authenticated provider success is settled. Because the provider is captured when the top-up is confirmed, the Payment Provider Switch applies to new top-ups only.
 _Avoid_: invoice, Payment, merchandise Order, provider-neutral QRIS target
+
+**Manual Store Balance Top-up**:
+A Store Balance Top-up created on the `manual` rail that starts awaiting operator confirmation: the customer receives the store's static QR instructions with the credit amount and deadline, and an Owner/Admin/Finance operator confirms or rejects it from the admin Telegram notification. Rejection or deadline expiry ends it without a credit; only a confirmed operator decision settles it.
+_Avoid_: automatic settlement, provider-confirmed top-up, ordinary pending Payment
+
+**Store Balance Top-up Provider Snapshot**:
+The provider together with the payment setting identity and version recorded on a Store Balance Top-up at funding confirmation. Every later lifecycle, presentation, recovery, settlement, and expiry decision reads this snapshot, so changing the Payment Provider Switch never rewrites, re-targets, or invalidates an existing top-up.
+_Avoid_: live provider selection, retroactive provider change, automatic provider fallback
 
 **Store Balance Entry**:
 One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.

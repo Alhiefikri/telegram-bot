@@ -174,6 +174,7 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
         config()->set('cache.default', 'database');
         Cache::purge('database');
         $this->prepareConcurrencyTables();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
 
         $customer = Customer::factory()->create(['telegram_id' => 46290, 'locale' => 'en']);
         $root = TelegramNavigationRoot::query()->create([
@@ -386,6 +387,7 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
 
     private function createPayableTopUpForConcurrency(): StoreBalanceTopUp
     {
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
         $customer = Customer::factory()->create(['telegram_id' => 46291, 'locale' => 'en']);
         $root = TelegramNavigationRoot::query()->create([
             'customer_id' => $customer->id,

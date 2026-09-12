@@ -5,8 +5,7 @@ namespace App\Services\Telegram;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
-use App\Services\KlikQris\KlikQrisPayableBalanceTopUp;
-use App\Services\KlikQris\KlikQrisQrisImage;
+use App\Services\StoreBalance\StoreBalanceTopUpService;
 use Throwable;
 
 final class BalanceTopUpInstructionDeliveryPipeline
@@ -16,7 +15,7 @@ final class BalanceTopUpInstructionDeliveryPipeline
         private readonly TelegramOutboundEffectLedgerProtocol $ledger,
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramBotClient $bot,
-        private readonly KlikQrisQrisImage $images,
+        private readonly StoreBalanceTopUpService $topUps,
         private readonly TelegramPaymentInstructionRenderer $renderer,
     ) {}
 
@@ -56,8 +55,7 @@ final class BalanceTopUpInstructionDeliveryPipeline
             }
 
             if ($topUp->status === StoreBalanceTopUpStatus::Paid
-                || $topUp->status === StoreBalanceTopUpStatus::Expired
-                || ! $topUp->isPayable()) {
+                || $topUp->status === StoreBalanceTopUpStatus::Expired) {
                 $this->ledger->finalizeNotDeliverable(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
@@ -70,10 +68,28 @@ final class BalanceTopUpInstructionDeliveryPipeline
                 return;
             }
 
-            $payable = KlikQrisPayableBalanceTopUp::fromTopUp($topUp);
-            $photo = $this->images->contentsForTopUp($payable);
+            $presentation = $this->topUps->presentation($topUp);
+            $payable = $presentation->payable();
+            if ($payable === null
+                || (! $presentation->isPayable() && ! $presentation->isAwaitingConfirmation())) {
+                $this->ledger->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'balance_top_up_not_payable',
+                );
+
+                return;
+            }
+
+            $attachment = $this->topUps->instructionAttachment($topUp, $payable);
             $locale = (string) ($claimed->locale ?: $topUp->locale ?: $topUp->customer?->locale ?: 'en');
-            $instruction = $this->renderer->balanceTopUp($topUp, $payable, $photo, $locale);
+            $instruction = $this->renderer->balanceTopUp(
+                $topUp,
+                $payable,
+                $attachment->photoContents(),
+                $locale,
+                awaitingConfirmation: $presentation->isAwaitingConfirmation(),
+            );
             $response = $this->bot->sendPhoto(
                 (string) $claimed->telegram_chat_id,
                 $instruction->photoContents,

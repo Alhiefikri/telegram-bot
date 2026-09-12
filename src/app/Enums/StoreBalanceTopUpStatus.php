@@ -6,6 +6,7 @@ enum StoreBalanceTopUpStatus: string
 {
     case Pending = 'pending';
     case Payable = 'payable';
+    case AwaitingConfirmation = 'awaiting_confirmation';
     case Paid = 'paid';
     case Failed = 'failed';
     case RecoveryPending = 'recovery_pending';

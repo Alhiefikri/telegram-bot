@@ -4,7 +4,6 @@ namespace App\Models;
 
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceTopUpStatus;
-use App\Support\PaymentProvider;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
@@ -16,6 +15,8 @@ use Illuminate\Database\Eloquent\Model;
     'canonical_message_id',
     'locale',
     'provider',
+    'payment_setting_id',
+    'payment_provider_version',
     'merchant_ref',
     'idempotency_key',
     'currency',
@@ -24,6 +25,7 @@ use Illuminate\Database\Eloquent\Model;
     'provider_reference',
     'provider_payload',
     'provider_qris_url',
+    'provider_qris_payload',
     'provider_fee',
     'provider_total_payment',
     'provider_payment_method',
@@ -41,6 +43,7 @@ class StoreBalanceTopUp extends Model
 {
     protected $hidden = [
         'provider_qris_url',
+        'provider_qris_payload',
         'provider_signature',
     ];
 
@@ -49,12 +52,15 @@ class StoreBalanceTopUp extends Model
         return [
             'telegram_navigation_root_id' => 'integer',
             'canonical_message_id' => 'integer',
+            'payment_setting_id' => 'integer',
+            'payment_provider_version' => 'integer',
             'amount' => 'integer',
             'provider_fee' => 'integer',
             'provider_total_payment' => 'integer',
             'status' => StoreBalanceTopUpStatus::class,
             'provider_payload' => 'array',
             'provider_qris_url' => 'encrypted',
+            'provider_qris_payload' => 'encrypted',
             'provider_signature' => 'encrypted',
             'provider_created_at' => 'datetime',
             'provider_expires_at' => 'datetime',
@@ -125,15 +131,13 @@ class StoreBalanceTopUp extends Model
     public function isPayable(): bool
     {
         return $this->status === StoreBalanceTopUpStatus::Payable
-            && strtolower(trim((string) $this->provider)) === PaymentProvider::KLIKQRIS
             && strtoupper(trim((string) $this->currency)) === 'IDR'
-            && strtolower(trim((string) $this->provider_payment_method)) === 'qris'
+            && strtoupper(trim((string) $this->provider_payment_method)) === 'QRIS'
             && $this->amount > 0
             && $this->provider_fee !== null
             && $this->provider_fee >= 0
             && $this->provider_total_payment !== null
             && $this->provider_total_payment >= $this->amount
-            && filled($this->provider_qris_url)
             && $this->provider_expires_at?->isFuture() === true
             && $this->expires_at?->isFuture() === true;
     }
@@ -141,7 +145,7 @@ class StoreBalanceTopUp extends Model
     public function canRetryCreate(): bool
     {
         return $this->status === StoreBalanceTopUpStatus::Failed
-            && $this->provider_create_state === 'create_failed';
+            && in_array($this->provider_create_state, ['create_failed', 'provider_unavailable'], true);
     }
 
     public function isRecoveryPending(): bool

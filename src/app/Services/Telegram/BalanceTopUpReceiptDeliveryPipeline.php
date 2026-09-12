@@ -5,7 +5,6 @@ namespace App\Services\Telegram;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
-use App\Support\PaymentProvider;
 use Throwable;
 
 final class BalanceTopUpReceiptDeliveryPipeline
@@ -55,7 +54,6 @@ final class BalanceTopUpReceiptDeliveryPipeline
             }
 
             if ($topUp->status !== StoreBalanceTopUpStatus::Paid
-                || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::KLIKQRIS
                 || $topUp->provider_total_payment === null
                 || $topUp->settled_at === null
                 || $topUp->customer === null
