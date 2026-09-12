@@ -426,6 +426,101 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         $this->assertSame(0, StoreBalanceEntry::query()->count());
     }
 
+    public function test_repeated_top_up_actions_reuse_one_instruction_effect_and_keep_pending_surface(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $createCalls = 0;
+        $statusCalls = 0;
+        $this->fakeProvider($createCalls, $statusCalls);
+
+        Customer::factory()->create(['telegram_id' => 46261, 'locale' => 'en']);
+        $root = $this->openFundingChooser(46261, 46261);
+        $this->postTelegramUpdate($this->messageUpdate(46263, '/deposit 5000', [], 46261));
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46264,
+            'top-up-confirm-action',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            46261,
+            'private',
+            $root->message_id,
+        ));
+
+        $topUp = StoreBalanceTopUp::query()->sole();
+        $callback = StoreBalanceTopUpService::actionCallback('retry', $topUp->getKey());
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46265,
+            'top-up-retry-1',
+            $callback,
+            [],
+            46261,
+            'private',
+            $root->message_id,
+        ));
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46266,
+            'top-up-retry-2',
+            $callback,
+            [],
+            46261,
+            'private',
+            $root->message_id,
+        ));
+
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_id', (string) $topUp->getKey())
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP)
+            ->count());
+        $surface = $this->editCopy($this->lastCanonicalEdit(46261));
+        $this->assertStringContainsString('The QRIS will be sent in a separate message.', $surface);
+        $this->assertStringNotContainsString('The QRIS was sent in a separate message.', $surface);
+    }
+
+    public function test_failed_top_up_instruction_dispatch_keeps_pending_surface(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $createCalls = 0;
+        $statusCalls = 0;
+        $this->fakeProvider($createCalls, $statusCalls);
+
+        Customer::factory()->create(['telegram_id' => 46271, 'locale' => 'en']);
+        $root = $this->openFundingChooser(46271, 46271);
+        $this->postTelegramUpdate($this->messageUpdate(46273, '/deposit 5000', [], 46271));
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46274,
+            'top-up-confirm-failure',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            46271,
+            'private',
+            $root->message_id,
+        ));
+
+        $topUp = StoreBalanceTopUp::query()->sole();
+        $payload = $this->callbackUpdate(
+            46275,
+            'top-up-retry-failure',
+            StoreBalanceTopUpService::actionCallback('retry', $topUp->getKey()),
+            [],
+            46271,
+            'private',
+            $root->message_id,
+        );
+        $this->postTelegramWebhook($payload)->assertOk();
+        $update = TelegramUpdate::query()->where('update_id', 46275)->sole();
+        config()->set('queue.default', 'missing');
+        (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
+
+        $surface = $this->editCopy($this->lastCanonicalEdit(46271));
+        $this->assertStringContainsString('The QRIS will be sent in a separate message.', $surface);
+        $this->assertStringNotContainsString('The QRIS was sent in a separate message.', $surface);
+        $this->assertSame('pending', TelegramOutboundEffect::query()->sole()->state->value);
+    }
+
     private function postTelegramUpdate(array $payload): void
     {
         $this->postTelegramWebhook($payload)->assertOk();
@@ -448,6 +543,23 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         ));
 
         return $root->fresh();
+    }
+
+    /** @return array<string, mixed> */
+    private function lastCanonicalEdit(int $chatId): array
+    {
+        $edits = Http::recorded(fn (Request $request): bool => (
+            str_ends_with($request->url(), '/editMessageCaption')
+            || str_ends_with($request->url(), '/editMessageText')
+        ) && (string) ($request['chat_id'] ?? '') === (string) $chatId);
+        $this->assertNotEmpty($edits, "Expected a canonical edit for chat {$chatId}.");
+
+        return $edits->last()[0]->data();
+    }
+
+    private function editCopy(array $edit): string
+    {
+        return (string) ($edit['caption'] ?? $edit['text'] ?? '');
     }
 
     private function fakeProvider(int &$createCalls, int &$statusCalls): void

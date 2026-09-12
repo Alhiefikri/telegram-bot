@@ -17,6 +17,7 @@ use App\Services\StoreBalance\StoreBalanceFundingIntentOpening;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -28,7 +29,6 @@ use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramNavigationSurface;
-use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Throwable;
 
@@ -45,7 +45,7 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         private readonly StoreBalanceTopUpService $topUps,
         private readonly KlikQrisNativeQrisService $nativeQris,
         private readonly TelegramOutboundEffectService $outboundEffects,
-        private readonly TelegramOutboundEffectDispatcher $outboundDispatcher,
+        private readonly StoreBalanceTopUpOutbound $topUpOutbound,
         private readonly TelegramLocale $locale,
         private readonly TelegramIntentSession $session,
         private readonly TelegramCatalogQuerySession $catalogQueries,
@@ -301,7 +301,8 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         }
 
         $result = $this->resolveTopUp($topUp);
-        $instructionsSent = $this->dispatchTopUpInstructions($topUp, $result);
+
+        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp);
 
         return $this->menu->fundingTopUpSurface(
             $context->customer,
@@ -329,31 +330,9 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         }
     }
 
-    private function dispatchTopUpInstructions(
-        StoreBalanceTopUp $topUp,
-        KlikQrisTopUpLifecycleResult $result,
-    ): bool {
-        if (! $result->isPayable() || $result->payable() === null) {
-            return false;
-        }
-
-        try {
-            $effect = $this->outboundEffects->recordBalanceTopUpInstructions(
-                $topUp->fresh(['customer']),
-                $topUp->customer,
-            );
-            if ($effect === null) {
-                return false;
-            }
-
-            $this->outboundDispatcher->dispatch($effect, now()->toISOString());
-
-            return $effect->fresh()?->state === TelegramOutboundEffectState::Sent;
-        } catch (Throwable $exception) {
-            report($exception);
-
-            return false;
-        }
+    private function topUpInstructionsWereDelivered(StoreBalanceTopUp $topUp): bool
+    {
+        return $this->topUpOutbound->handoffInstructions($topUp)->isDelivered();
     }
 
     private function handleTopUpAction(
@@ -398,7 +377,7 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
 
         $result = $this->resolveTopUp($topUp, $action === 'check');
         $topUp->refresh();
-        $instructionsSent = $this->dispatchTopUpInstructions($topUp, $result);
+        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp);
         $outcome = $this->navigation->presentOnRoot(
             $root,
             $context->chatId,
