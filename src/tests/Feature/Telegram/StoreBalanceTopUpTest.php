@@ -24,6 +24,7 @@ use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\TelegramBotTestSupport;
@@ -85,7 +86,13 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         $this->assertSame(StoreBalanceTopUp::class, $effect->source_type);
         $this->assertSame((string) $topUp->id, $effect->source_id);
         $this->assertSame('pending', $effect->state->value);
-        (new SendStoreBalanceTopUpInstructions((string) $topUp->id, effectId: (string) $effect->getKey()))->handle();
+        $outboundJobs = DB::table('jobs')
+            ->where('queue', 'telegram-outbound')
+            ->where('payload', 'like', '%SendStoreBalanceTopUpInstructions%')
+            ->get();
+        $this->assertCount(1, $outboundJobs);
+        $this->artisan('queue:work database --queue=telegram-outbound --once --tries=1')
+            ->assertSuccessful();
         $effect->refresh();
         $this->assertSame('sent', $effect->state->value);
         $photo = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->last()[0];
@@ -486,7 +493,7 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('The QRIS was sent in a separate message.', $surface);
     }
 
-    public function test_failed_top_up_instruction_dispatch_keeps_pending_surface(): void
+    public function test_failed_top_up_instruction_dispatch_can_be_retried_without_new_top_up(): void
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
@@ -510,9 +517,17 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         ));
 
         $topUp = StoreBalanceTopUp::query()->sole();
+        $effect = TelegramOutboundEffect::query()->sole();
+        $effect->forceFill([
+            'state' => 'failed',
+            'attempts' => 1,
+            'failed_at' => now(),
+            'next_attempt_at' => now()->addMinute(),
+            'last_error_code' => 'telegram_http_500',
+        ])->save();
         $payload = $this->callbackUpdate(
             46275,
-            'top-up-retry-failure',
+            'top-up-retry-recovered',
             StoreBalanceTopUpService::actionCallback('retry', $topUp->getKey()),
             [],
             46271,
@@ -521,13 +536,80 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         );
         $this->postTelegramWebhook($payload)->assertOk();
         $update = TelegramUpdate::query()->where('update_id', 46275)->sole();
-        config()->set('queue.default', 'missing');
         (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
 
         $surface = $this->editCopy($this->lastCanonicalEdit(46271));
         $this->assertStringContainsString('The QRIS will be sent in a separate message.', $surface);
-        $this->assertStringNotContainsString('The QRIS was sent in a separate message.', $surface);
+        $this->assertStringNotContainsString('The QRIS could not be sent.', $surface);
         $this->assertSame('pending', TelegramOutboundEffect::query()->sole()->state->value);
+        $this->assertSame(1, StoreBalanceTopUp::query()->count());
+    }
+
+    public function test_confirmation_reports_instruction_enqueue_failure_and_offers_retry(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
+        $createCalls = 0;
+        $statusCalls = 0;
+        $this->fakeProvider(
+            $createCalls,
+            $statusCalls,
+            function (): void {
+                // Keep provider readiness valid, then make only the outbound
+                // enqueue boundary fail after the provider quote is stored.
+                config()->set('queue.default', 'broken');
+                config()->set('queue.connections.broken.driver', 'broken');
+            },
+        );
+
+        Customer::factory()->create(['telegram_id' => 46291, 'locale' => 'en']);
+        $root = $this->openFundingChooser(46291, 46291);
+        $this->postTelegramUpdate($this->messageUpdate(46293, '/deposit 5000', [], 46291));
+        $intent = StoreBalanceFundingIntent::query()->sole();
+
+        // The provider quote succeeds, but the outbound queue connection is
+        // unavailable. The customer-facing surface must not claim that a QR
+        // message is queued when no job can be enqueued.
+        $confirmPayload = $this->callbackUpdate(
+            46294,
+            'top-up-confirm-enqueue-failure',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            46291,
+            'private',
+            $root->message_id,
+        );
+        $this->postTelegramWebhook($confirmPayload)->assertOk();
+        $update = TelegramUpdate::query()->where('update_id', 46294)->sole();
+        (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
+
+        $surface = $this->editCopy($this->lastCanonicalEdit(46291));
+        $edit = $this->lastCanonicalEdit(46291);
+        $this->assertStringContainsString('The QRIS could not be sent.', $surface);
+        $this->assertStringNotContainsString('The QRIS will be sent in a separate message.', $surface);
+        $this->assertStringContainsString(
+            StoreBalanceTopUpService::actionCallback('retry', StoreBalanceTopUp::query()->sole()->getKey()),
+            json_encode($edit, JSON_THROW_ON_ERROR),
+        );
+        $this->assertSame('pending', TelegramOutboundEffect::query()->sole()->state->value);
+
+        config()->set('queue.default', 'database');
+        $topUp = StoreBalanceTopUp::query()->sole();
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46295,
+            'top-up-retry-after-enqueue-recovery',
+            StoreBalanceTopUpService::actionCallback('retry', $topUp->getKey()),
+            [],
+            46291,
+            'private',
+            $root->message_id,
+        ));
+
+        $this->assertSame('pending', TelegramOutboundEffect::query()->sole()->state->value);
+        $this->artisan('queue:work database --queue=telegram-outbound --once --tries=1')
+            ->assertSuccessful();
+        $this->assertSame('sent', TelegramOutboundEffect::query()->sole()->fresh()->state->value);
     }
 
     public function test_invalid_lifecycle_does_not_create_instruction_effect_for_malformed_payable_quote(): void
@@ -616,11 +698,15 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         return (string) ($edit['caption'] ?? $edit['text'] ?? '');
     }
 
-    private function fakeProvider(int &$createCalls, int &$statusCalls): void
+    private function fakeProvider(int &$createCalls, int &$statusCalls, ?callable $afterCreate = null): void
     {
         $this->fakeTelegramHttp([
-            'https://klikqris.com/api/sandbox/qris/create' => function (Request $request) use (&$createCalls) {
+            'https://klikqris.com/api/sandbox/qris/create' => function (Request $request) use (&$createCalls, $afterCreate) {
                 $createCalls++;
+
+                // The optional hook is used by failure tests to alter only a
+                // downstream boundary after readiness and provider creation.
+                ($afterCreate ?? static function (Request $request): void {})($request);
 
                 return Http::response(['data' => [
                     'order_id' => $request['order_id'],

@@ -6,6 +6,7 @@ final readonly class StoreBalanceTopUpOutboundResult
 {
     public function __construct(
         public StoreBalanceTopUpOutboundOutcome $outcome,
+        public bool $retryable = false,
     ) {}
 
     public function isDelivered(): bool
@@ -29,6 +30,11 @@ final readonly class StoreBalanceTopUpOutboundResult
     public function requiresReview(): bool
     {
         return $this->outcome === StoreBalanceTopUpOutboundOutcome::ReviewRequired;
+    }
+
+    public function canRetry(): bool
+    {
+        return $this->retryable;
     }
 
     /** @return array{outcome:string} */

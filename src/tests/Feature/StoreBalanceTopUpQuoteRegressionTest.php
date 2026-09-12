@@ -266,6 +266,84 @@ final class StoreBalanceTopUpQuoteRegressionTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('No payment invoice exists yet.', $surface->caption);
     }
 
+    #[DataProvider('instructionOutcomeCases')]
+    public function test_payable_surface_describes_each_instruction_delivery_outcome(
+        ?StoreBalanceTopUpOutboundOutcome $outcome,
+        string $expectedCopy,
+        bool $retryButton,
+    ): void {
+        $this->fakeProvider();
+        $topUp = $this->makePendingTopUp();
+        $this->lifecycle($topUp);
+        $fresh = $topUp->fresh(['customer']);
+
+        $surface = app(TelegramMenuIntents::class)->fundingTopUpSurface(
+            $fresh->customer,
+            $fresh,
+            app(StoreBalanceTopUpService::class)->presentation($fresh),
+            instructionsSent: $outcome === StoreBalanceTopUpOutboundOutcome::Delivered,
+            instructionOutcome: $outcome,
+        );
+
+        $this->assertStringContainsString($expectedCopy, $surface->caption);
+        if (! in_array($outcome, [
+            null,
+            StoreBalanceTopUpOutboundOutcome::Queued,
+            StoreBalanceTopUpOutboundOutcome::InProgress,
+        ], true)) {
+            $this->assertStringNotContainsString(
+                'The QRIS will be sent in a separate message.',
+                $surface->caption,
+            );
+        }
+        $keyboard = json_encode($surface->keyboard, JSON_THROW_ON_ERROR);
+        $hasRetry = str_contains(
+            $keyboard,
+            StoreBalanceTopUpService::actionCallback('retry', $fresh->getKey()),
+        );
+        $this->assertSame($retryButton, $hasRetry);
+    }
+
+    public function test_terminal_instruction_failure_does_not_offer_a_retry_or_tell_customer_to_pay(): void
+    {
+        $this->fakeProvider();
+        $topUp = $this->makePendingTopUp();
+        $this->lifecycle($topUp);
+        $fresh = $topUp->fresh(['customer']);
+
+        $surface = app(TelegramMenuIntents::class)->fundingTopUpSurface(
+            $fresh->customer,
+            $fresh,
+            app(StoreBalanceTopUpService::class)->presentation($fresh),
+            instructionOutcome: StoreBalanceTopUpOutboundOutcome::Failed,
+            instructionRetryable: false,
+        );
+
+        $this->assertStringContainsString('The QRIS could not be sent. Contact Support before paying.', $surface->caption);
+        $this->assertStringNotContainsString('Tap Retry setup', $surface->caption);
+        $this->assertStringNotContainsString(
+            StoreBalanceTopUpService::actionCallback('retry', $fresh->getKey()),
+            json_encode($surface->keyboard, JSON_THROW_ON_ERROR),
+        );
+    }
+
+    /**
+     * @return array<string, array{0: ?StoreBalanceTopUpOutboundOutcome, 1: string, 2: bool}>
+     */
+    public static function instructionOutcomeCases(): array
+    {
+        return [
+            'legacy queued fallback' => [null, 'The QRIS will be sent in a separate message.', false],
+            'queued' => [StoreBalanceTopUpOutboundOutcome::Queued, 'The QRIS will be sent in a separate message.', false],
+            'in progress' => [StoreBalanceTopUpOutboundOutcome::InProgress, 'The QRIS will be sent in a separate message.', false],
+            'delivered' => [StoreBalanceTopUpOutboundOutcome::Delivered, 'The QRIS was sent in a separate message.', false],
+            'retry scheduled' => [StoreBalanceTopUpOutboundOutcome::RetryScheduled, 'QRIS delivery failed temporarily.', true],
+            'failed' => [StoreBalanceTopUpOutboundOutcome::Failed, 'The QRIS could not be sent.', true],
+            'not eligible' => [StoreBalanceTopUpOutboundOutcome::NotEligible, 'The QRIS could not be sent.', true],
+            'review required' => [StoreBalanceTopUpOutboundOutcome::ReviewRequired, 'QRIS delivery needs Support review.', false],
+        ];
+    }
+
     public function test_pre_confirmation_surface_still_states_that_no_invoice_exists(): void
     {
         $topUp = $this->makePendingTopUp();

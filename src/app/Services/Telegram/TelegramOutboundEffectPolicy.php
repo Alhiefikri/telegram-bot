@@ -129,7 +129,10 @@ final class TelegramOutboundEffectPolicy
                             ->where(function (Builder $available) use ($effectType, $maximum): void {
                                 $available->where('attempts', '<', $maximum);
 
-                                if ($effectType === TelegramOutboundEffectType::SalesProofPost->value) {
+                                if (in_array($effectType, [
+                                    TelegramOutboundEffectType::SalesProofPost->value,
+                                    TelegramOutboundEffectType::BalanceTopUpInstructions->value,
+                                ], true)) {
                                     $available->orWhereJsonContains('outcome_metadata', ['manual_retry_requested' => true]);
                                 }
                             });
@@ -216,7 +219,7 @@ final class TelegramOutboundEffectPolicy
     /** @return array<string, mixed> */
     public function claimMetadata(TelegramOutboundEffect $effect): array
     {
-        return $effect->effect_type === TelegramOutboundEffectType::SalesProofPost->value
+        return $this->supportsManualRetry($effect)
             ? ['manual_retry_requested' => false]
             : [];
     }
@@ -284,23 +287,36 @@ final class TelegramOutboundEffectPolicy
 
     public function manualRetryRequested(TelegramOutboundEffect $effect): bool
     {
-        return $effect->effect_type === TelegramOutboundEffectType::SalesProofPost->value
+        return $this->supportsManualRetry($effect)
             && (($effect->outcome_metadata['manual_retry_requested'] ?? false) === true);
     }
 
     public function canRequestManualRetry(TelegramOutboundEffect $effect): bool
     {
-        return $effect->effect_type === TelegramOutboundEffectType::SalesProofPost->value
-            && $this->stateValue($effect) === TelegramOutboundEffectState::Failed->value;
+        return $this->supportsManualRetry($effect)
+            && $this->stateValue($effect) === TelegramOutboundEffectState::Failed->value
+            && ! $this->isNonRetryableFailure($effect->last_error_code);
     }
 
     /** @return array<string, mixed> */
-    public function manualRetryMetadata(): array
+    public function manualRetryMetadata(?TelegramOutboundEffect $effect = null): array
     {
-        return [
+        $metadata = [
             'manual_retry_requested' => true,
-            'delivery_context' => 'sales_proof',
         ];
+        if ($effect?->effect_type === TelegramOutboundEffectType::SalesProofPost->value) {
+            $metadata['delivery_context'] = 'sales_proof';
+        }
+
+        return $metadata;
+    }
+
+    private function supportsManualRetry(TelegramOutboundEffect $effect): bool
+    {
+        return in_array($effect->effect_type, [
+            TelegramOutboundEffectType::SalesProofPost->value,
+            TelegramOutboundEffectType::BalanceTopUpInstructions->value,
+        ], true);
     }
 
     private function orderedPredecessorIsResolved(TelegramOutboundEffect $effect): bool

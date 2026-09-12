@@ -448,6 +448,8 @@ class TelegramMenuIntents
         bool $instructionsSent = false,
         bool $confirmationReceived = false,
         ?string $confirmationNoticeKey = null,
+        ?StoreBalanceTopUpOutboundOutcome $instructionOutcome = null,
+        ?bool $instructionRetryable = null,
     ): TelegramNavigationSurface {
         // A confirmed top-up already owns a payment target, so the
         // pre-confirmation "no invoice yet" line must never be repeated here.
@@ -497,15 +499,21 @@ class TelegramMenuIntents
                 ),
                 $this->locale->translate(
                     $customer,
-                    $instructionsSent ? 'balance.topup.instructions_sent' : 'balance.topup.instructions_queued',
+                    $this->instructionNoticeKey($instructionsSent, $instructionOutcome, $instructionRetryable),
                 ),
             ]);
-            $keyboard = [[
-                [
-                    'text' => $this->locale->translate($customer, 'balance.topup.check'),
-                    'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),
-                ],
-            ], $this->navigationRow($customer)];
+            $keyboard = [];
+            if ($instructionRetryable ?? $this->defaultInstructionRetryable($instructionOutcome)) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'balance.topup.retry'),
+                    'callback_data' => StoreBalanceTopUpService::actionCallback('retry', $topUp->getKey()),
+                ]];
+            }
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'balance.topup.check'),
+                'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),
+            ]];
+            $keyboard[] = $this->navigationRow($customer);
         } else {
             $noticeKey = match (true) {
                 $presentation->isRejected() => 'balance.topup.rejected',
@@ -547,6 +555,40 @@ class TelegramMenuIntents
             $this->captions->html(implode("\n", $lines)),
             ['inline_keyboard' => $keyboard],
         );
+    }
+
+    private function instructionNoticeKey(
+        bool $instructionsSent,
+        ?StoreBalanceTopUpOutboundOutcome $instructionOutcome,
+        ?bool $instructionRetryable,
+    ): string {
+        if ($instructionOutcome === null) {
+            return $instructionsSent
+                ? 'balance.topup.instructions_sent'
+                : 'balance.topup.instructions_queued';
+        }
+
+        return match ($instructionOutcome) {
+            StoreBalanceTopUpOutboundOutcome::Delivered => 'balance.topup.instructions_sent',
+            StoreBalanceTopUpOutboundOutcome::RetryScheduled => 'balance.topup.instructions_retry_scheduled',
+            StoreBalanceTopUpOutboundOutcome::Failed,
+            StoreBalanceTopUpOutboundOutcome::NotEligible => ($instructionRetryable
+                ?? $this->defaultInstructionRetryable($instructionOutcome))
+                ? 'balance.topup.instructions_failed'
+                : 'balance.topup.instructions_unavailable',
+            StoreBalanceTopUpOutboundOutcome::ReviewRequired => 'balance.topup.instructions_review',
+            StoreBalanceTopUpOutboundOutcome::InProgress,
+            StoreBalanceTopUpOutboundOutcome::Queued => 'balance.topup.instructions_queued',
+        };
+    }
+
+    private function defaultInstructionRetryable(?StoreBalanceTopUpOutboundOutcome $instructionOutcome): bool
+    {
+        return in_array($instructionOutcome, [
+            StoreBalanceTopUpOutboundOutcome::Failed,
+            StoreBalanceTopUpOutboundOutcome::NotEligible,
+            StoreBalanceTopUpOutboundOutcome::RetryScheduled,
+        ], true);
     }
 
     public function supportSurface(Customer $customer): TelegramNavigationSurface

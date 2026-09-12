@@ -231,7 +231,7 @@ class TelegramOutboundEffectLedgerProtocol
                 'failed_at' => null,
                 'last_error_code' => null,
                 'last_error' => null,
-                'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $this->policy->manualRetryMetadata()),
+                'outcome_metadata' => $this->mergeOutcomeMetadata($effect, $this->policy->manualRetryMetadata($effect)),
             ])->save();
 
             return $effect->fresh();

@@ -176,6 +176,13 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
         $this->assertSame(StoreBalanceTopUpOutboundOutcome::RetryScheduled, $retry->outcome);
         $this->assertSame(1, TelegramOutboundEffect::query()->count());
         Queue::assertNotPushed(SendStoreBalanceTopUpInstructions::class);
+
+        $manualRetry = $outbound->retryInstructions($topUp->fresh());
+
+        $this->assertSame(StoreBalanceTopUpOutboundOutcome::Queued, $manualRetry->outcome);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->fresh()->state);
+        $this->assertTrue((bool) $effect->fresh()->outcome_metadata['manual_retry_requested']);
+        Queue::assertPushed(SendStoreBalanceTopUpInstructions::class);
     }
 
     public function test_ambiguous_instruction_delivery_stays_unresolved_without_a_blind_resend(): void
@@ -216,6 +223,12 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
 
         $this->assertSame(StoreBalanceTopUpOutboundOutcome::ReviewRequired, $review->outcome);
         $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        Queue::assertNotPushed(SendStoreBalanceTopUpInstructions::class);
+
+        $retry = $outbound->retryInstructions($topUp->fresh());
+
+        $this->assertSame(StoreBalanceTopUpOutboundOutcome::ReviewRequired, $retry->outcome);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
         Queue::assertNotPushed(SendStoreBalanceTopUpInstructions::class);
     }
 
@@ -362,6 +375,67 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
         $this->assertSame(StoreBalanceTopUpOutboundOutcome::ReviewRequired, $result->outcome);
         $this->assertSame(TelegramOutboundEffectState::Unknown, TelegramOutboundEffect::query()->sole()->state);
         Queue::assertNotPushed(SendStoreBalanceTopUpInstructions::class);
+    }
+
+    public function test_terminal_instruction_failure_can_be_explicitly_retried_with_same_effect(): void
+    {
+        Queue::fake();
+        $topUp = $this->makeTopUp();
+        $outbound = app(StoreBalanceTopUpOutbound::class);
+        $outbound->handoffInstructions($topUp);
+        $effect = TelegramOutboundEffect::query()->sole();
+        $effect->forceFill([
+            'state' => TelegramOutboundEffectState::Failed,
+            'attempts' => 3,
+            'failed_at' => now(),
+            'next_attempt_at' => null,
+            'last_error_code' => 'telegram_http_500',
+        ])->save();
+        Queue::fake();
+
+        $blocked = $outbound->handoffInstructions($topUp->fresh());
+
+        $this->assertSame(StoreBalanceTopUpOutboundOutcome::Failed, $blocked->outcome);
+        $this->assertFalse($blocked->canRetry());
+        Queue::assertNotPushed(SendStoreBalanceTopUpInstructions::class);
+
+        $result = $outbound->retryInstructions($topUp->fresh());
+
+        $fresh = $effect->fresh();
+        $this->assertSame(StoreBalanceTopUpOutboundOutcome::Queued, $result->outcome);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $fresh->state);
+        $this->assertSame(3, (int) $fresh->attempts);
+        $this->assertTrue((bool) $fresh->outcome_metadata['manual_retry_requested']);
+        Queue::assertPushed(SendStoreBalanceTopUpInstructions::class);
+    }
+
+    public function test_duplicate_instruction_jobs_are_claim_fenced_to_one_telegram_photo(): void
+    {
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $topUp = $this->makeTopUp([
+            'provider_qris_url' => 'https://klikqris.com/storage/sandbox/qris_balance_top_up.png',
+        ]);
+        $outbound = app(StoreBalanceTopUpOutbound::class);
+
+        $outbound->handoffInstructions($topUp);
+        $outbound->handoffInstructions($topUp->fresh());
+        $this->assertSame(2, DB::table('jobs')
+            ->where('queue', 'telegram-outbound')
+            ->count());
+
+        $this->fakeTelegramHttp([
+            $topUp->provider_qris_url => Http::response("\x89PNG\r\n\x1A\nqris", 200, ['Content-Type' => 'image/png']),
+        ]);
+        $this->artisan('queue:work database --queue=telegram-outbound --once --tries=1')
+            ->assertSuccessful();
+        $this->artisan('queue:work database --queue=telegram-outbound --once --tries=1')
+            ->assertSuccessful();
+
+        $this->assertSame(TelegramOutboundEffectState::Sent, TelegramOutboundEffect::query()->sole()->state);
+        $this->assertCount(
+            1,
+            Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')),
+        );
     }
 
     /** @param array<string, mixed> $overrides */

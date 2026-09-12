@@ -16,6 +16,8 @@ use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPresentation;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
+use App\Services\Telegram\StoreBalanceTopUpOutboundOutcome;
+use App\Services\Telegram\StoreBalanceTopUpOutboundResult;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -296,15 +298,17 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         }
 
         $presentation = $this->resolveTopUp($topUp);
-        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp, $presentation);
+        $instructionHandoff = $this->topUpInstructionsHandoff($topUp, $presentation);
 
         return $this->menu->fundingTopUpSurface(
             $context->customer,
             $topUp->fresh(),
             $presentation,
-            $instructionsSent,
-            $confirmationReceived,
-            $confirmationNoticeKey,
+            instructionsSent: $instructionHandoff->isDelivered(),
+            confirmationReceived: $confirmationReceived,
+            confirmationNoticeKey: $confirmationNoticeKey,
+            instructionOutcome: $instructionHandoff->outcome,
+            instructionRetryable: $instructionHandoff->canRetry(),
         );
     }
 
@@ -325,16 +329,16 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         return $this->topUps->presentation($topUp);
     }
 
-    private function topUpInstructionsWereDelivered(
+    private function topUpInstructionsHandoff(
         StoreBalanceTopUp $topUp,
         StoreBalanceTopUpPresentation $presentation,
-    ): bool {
+    ): StoreBalanceTopUpOutboundResult {
         if ($presentation->payable() === null
             || (! $presentation->isPayable() && ! $presentation->isAwaitingConfirmation())) {
-            return false;
+            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::NotEligible);
         }
 
-        return $this->topUpOutbound->handoffInstructions($topUp)->isDelivered();
+        return $this->topUpOutbound->handoffInstructions($topUp);
     }
 
     private function handleTopUpAction(
@@ -378,11 +382,21 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
 
         $presentation = $this->resolveTopUp($topUp, $action === 'check');
         $topUp->refresh();
-        $instructionsSent = $this->topUpInstructionsWereDelivered($topUp, $presentation);
+        $instructionHandoff = $action === 'retry'
+            && ($presentation->isPayable() || $presentation->isAwaitingConfirmation())
+            ? $this->topUpOutbound->retryInstructions($topUp)
+            : $this->topUpInstructionsHandoff($topUp, $presentation);
         $outcome = $this->navigation->presentOnRoot(
             $root,
             $context->chatId,
-            $this->menu->fundingTopUpSurface($context->customer, $topUp->fresh(), $presentation, $instructionsSent),
+            $this->menu->fundingTopUpSurface(
+                $context->customer,
+                $topUp->fresh(),
+                $presentation,
+                instructionsSent: $instructionHandoff->isDelivered(),
+                instructionOutcome: $instructionHandoff->outcome,
+                instructionRetryable: $instructionHandoff->canRetry(),
+            ),
         );
 
         $this->bot->answerCallbackQuery(

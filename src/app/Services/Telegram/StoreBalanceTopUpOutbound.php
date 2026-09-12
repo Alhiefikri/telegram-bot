@@ -40,6 +40,34 @@ final class StoreBalanceTopUpOutbound
         );
     }
 
+    /**
+     * Retry a definite instruction delivery failure without creating a new
+     * top-up or effect. Ambiguous deliveries deliberately remain in review and
+     * are never reset by this customer-facing action.
+     */
+    public function retryInstructions(StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult
+    {
+        try {
+            $source = $topUp->fresh(['customer']);
+            if ($source === null || ! $this->eligibleInstructions($source)) {
+                return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::NotEligible);
+            }
+
+            $effect = $this->outboundEffects->forBalanceTopUp((string) $source->getKey());
+            if ($effect === null) {
+                return $this->handoffInstructions($source);
+            }
+
+            $reset = $this->ledger->requestManualRetry((string) $effect->getKey());
+
+            return $this->handoffEffect($reset ?? $effect);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::Failed, retryable: true);
+        }
+    }
+
     public function handoffReceipt(StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult
     {
         return $this->handoff(
@@ -200,11 +228,11 @@ final class StoreBalanceTopUpOutbound
 
             report($exception);
 
-            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::Failed);
+            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::Failed, retryable: true);
         } catch (Throwable $exception) {
             report($exception);
 
-            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::Failed);
+            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::Failed, retryable: true);
         }
     }
 
@@ -226,7 +254,7 @@ final class StoreBalanceTopUpOutbound
         } catch (Throwable $exception) {
             report($exception);
 
-            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::Failed);
+            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::Failed, retryable: true);
         }
 
         $afterDispatch = $current->fresh() ?? $current;
@@ -251,6 +279,7 @@ final class StoreBalanceTopUpOutbound
             $this->retryScheduled($effect)
                 ? StoreBalanceTopUpOutboundOutcome::RetryScheduled
                 : StoreBalanceTopUpOutboundOutcome::Failed,
+            retryable: $this->retryScheduled($effect),
         );
     }
 
@@ -264,7 +293,7 @@ final class StoreBalanceTopUpOutbound
         }
 
         if ($this->retryScheduled($effect)) {
-            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::RetryScheduled);
+            return new StoreBalanceTopUpOutboundResult(StoreBalanceTopUpOutboundOutcome::RetryScheduled, retryable: true);
         }
 
         if ($state === TelegramOutboundEffectState::Failed) {
@@ -272,6 +301,7 @@ final class StoreBalanceTopUpOutbound
                 $this->ledger->isTerminalFailure($effect)
                     ? StoreBalanceTopUpOutboundOutcome::Failed
                     : StoreBalanceTopUpOutboundOutcome::Queued,
+                retryable: ! $this->ledger->isTerminalFailure($effect),
             );
         }
 
