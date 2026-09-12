@@ -22,7 +22,7 @@ class TelegramCatalogIntents
 {
     private const PRODUCTS_PER_PAGE = 10;
 
-    private const FAMILY_LIST_PER_PAGE = 10;
+    private const FAMILY_LIST_PER_PAGE = 15;
 
     public function __construct(
         private TelegramBotClient $bot,
@@ -149,8 +149,16 @@ class TelegramCatalogIntents
         $stateToken = $this->catalogQueries->familyState($customer)['token'] ?? null;
         $optionButtons = $pageMembers
             ->map(function (CatalogProductReadModel $member, int $index) use ($family, $page, $returnPage): array {
+                $label = $this->iconButton($member->name, (string) ($index + 1), $member->icon);
+                if (! $member->isAvailable) {
+                    // A disabled button is its own button type, so it carries no
+                    // callback data and Telegram renders it inert.
+                    return [...$label, 'style' => 'danger', 'disabled' => (object) []];
+                }
+
                 return [
-                    ...$this->iconButton($member->name, (string) ($index + 1), $member->icon),
+                    ...$label,
+                    'style' => 'success',
                     'callback_data' => $this->familySelectCallback($family->id, $member->id, $page, $returnPage),
                 ];
             })
@@ -526,7 +534,7 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->translate($customer, 'catalog.sold_out_guidance');
         } else {
             $lines[] = '';
-            $lines[] = $this->locale->qrisCrossBorderSupport($customer);
+            $lines[] = $this->captions->blockquote($this->locale->qrisCrossBorderSupport($customer));
         }
         $text = implode("\n", $lines);
         $telegramImagePath = $product->telegram_image_path
@@ -815,7 +823,11 @@ class TelegramCatalogIntents
         }
         foreach ($result->entries as $index => $entry) {
             $number = $index + 1;
-            $lines[] = '';
+            // Catalog entries are already divided by a rule, so only the first
+            // one keeps the blank line that separates the list from the header.
+            if ($mode !== 'catalog' || $index === 0) {
+                $lines[] = '';
+            }
             $lines[] = $this->entryBlock($customer, $entry, $number);
             if ($mode === 'catalog' && $index < count($result->entries) - 1) {
                 $lines[] = '━━━━━━━━━━━━━━';

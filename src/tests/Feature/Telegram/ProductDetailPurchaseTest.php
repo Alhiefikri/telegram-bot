@@ -58,6 +58,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Product details', (string) $detail['text']);
         $this->assertStringNotContainsString('Sold:', (string) $detail['text']);
         $this->assertStringContainsString('🌏 QRIS Cross-Border:', (string) $detail['text']);
+        $this->assertMatchesRegularExpression('/<blockquote>🌏 QRIS Cross-Border:.*<\/blockquote>/su', (string) $detail['text']);
         $this->assertStringNotContainsString('checkout.payment_method', json_encode($detail, JSON_THROW_ON_ERROR));
 
         $state = $this->selection($customer);

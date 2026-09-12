@@ -35,6 +35,7 @@ use App\Services\Telegram\TelegramCartIntents;
 use App\Services\Telegram\TelegramCatalogIntents;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
+use App\Services\Telegram\TelegramHtmlCaption;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramManualPaymentIntents;
@@ -63,6 +64,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         private StoreBalanceLedger $storeBalance,
         private TelegramOutboundEffectService $outboundEffects,
         private TelegramOutboundEffectDispatcher $dispatcher,
+        private TelegramHtmlCaption $captions,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -555,10 +557,10 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         $this->bot->answerCallbackQuery($context->callbackQueryId);
-        $paymentMethodMessage = $this->locale->translate($context->customer, 'checkout.payment_method')
+        $paymentMethodMessage = $this->captions->html($this->locale->translate($context->customer, 'checkout.payment_method'))
             ."\n\n"
-            .$this->locale->qrisCrossBorderSupport($context->customer);
-        $this->bot->sendMessage($context->chatId, $paymentMethodMessage, ['inline_keyboard' => $buttons]);
+            .$this->captions->blockquote($this->locale->qrisCrossBorderSupport($context->customer));
+        $this->bot->sendMessage($context->chatId, $paymentMethodMessage, ['inline_keyboard' => $buttons], ['parse_mode' => 'HTML']);
     }
 
     private function checkout(TelegramCallbackContext $context, string|bool $rail = 'qris', bool $answerCallback = true, ?string $checkoutKey = null): void

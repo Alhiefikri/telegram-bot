@@ -66,15 +66,23 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('01. ', (string) $options['text']);
         $this->assertStringContainsString('Family 5 Profile', (string) $options['text']);
         $this->assertStringContainsString('Harga: Rp28.000', (string) $options['text']);
-        $this->assertStringContainsString('Stok: Habis', (string) $options['text']);
+        $this->assertStringContainsString('❌ Stok: Habis', (string) $options['text']);
         $this->assertStringContainsString('02. ', (string) $options['text']);
         $this->assertStringContainsString('Individual 1 Profile', (string) $options['text']);
         $this->assertStringContainsString('Stok tersedia: 3', (string) $options['text']);
         $this->assertStringContainsString('Terjual: 0', (string) $options['text']);
-        $this->assertStringStartsWith('family:select:v', $options['reply_markup']['inline_keyboard'][0][0]['callback_data']);
-        $this->assertStringStartsWith('family:select:v', $options['reply_markup']['inline_keyboard'][0][1]['callback_data']);
+        $soldOutButton = $options['reply_markup']['inline_keyboard'][0][0];
+        $this->assertSame('danger', $soldOutButton['style']);
+        $this->assertSame('{}', json_encode($soldOutButton['disabled'], JSON_THROW_ON_ERROR));
+        $this->assertArrayNotHasKey('callback_data', $soldOutButton);
+        $availableButton = $options['reply_markup']['inline_keyboard'][0][1];
+        $this->assertSame('success', $availableButton['style']);
+        $this->assertArrayNotHasKey('disabled', $availableButton);
+        $this->assertStringStartsWith('family:select:v', $availableButton['callback_data']);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request->body(), '"style":"danger","disabled":{}'));
         $this->assertStringStartsWith('family:list:1:o', $options['reply_markup']['inline_keyboard'][1][0]['callback_data']);
-        $selectCallback = $options['reply_markup']['inline_keyboard'][0][1]['callback_data'];
+        $selectCallback = $availableButton['callback_data'];
         $this->postTelegramWebhook($this->callbackUpdate(41004, 'family-select-token', $selectCallback, [], 41001))->assertOk();
         $this->assertStringContainsString('Netflix Individual', (string) $this->lastMessageContaining('Netflix Individual')['text']);
         $selection = app(TelegramIntentSession::class)->get($customer);
@@ -132,12 +140,12 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Terjual: 6', (string) $options['text']);
     }
 
-    public function test_product_menu_paginates_ten_product_families_per_page(): void
+    public function test_product_menu_paginates_fifteen_product_families_per_page(): void
     {
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 41007, 'locale' => 'en']);
 
-        foreach (range(1, 11) as $number) {
+        foreach (range(1, 16) as $number) {
             $family = ProductFamily::factory()->create([
                 'name' => 'Paged Family '.$number,
                 'slug' => 'paged-family-'.$number,
@@ -153,18 +161,22 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         }
 
         $this->postTelegramWebhook($this->messageUpdate(41007, '/produk', [], 41007))->assertOk();
-        $firstPage = $this->lastMessageContaining('Paged Family 10');
+        $firstPage = $this->lastMessageContaining('Paged Family 15');
         $this->assertStringContainsString('Page 1 of 2', (string) $firstPage['text']);
-        $this->assertStringNotContainsString('Paged Family 11', (string) $firstPage['text']);
+        $this->assertStringNotContainsString('Paged Family 16', (string) $firstPage['text']);
         $keyboard = $firstPage['reply_markup']['inline_keyboard'];
-        $familyButtons = collect(array_slice($keyboard, 0, 5))->flatten(1);
-        $this->assertCount(10, $familyButtons);
-        $this->assertSame('family:list:2', $keyboard[5][0]['callback_data']);
+        $familyButtons = collect(array_slice($keyboard, 0, 8))->flatten(1);
+        $this->assertCount(15, $familyButtons);
+        $this->assertSame('family:list:2', $keyboard[8][0]['callback_data']);
+
+        // Entries sit directly on their divider instead of one blank line apart.
+        $this->assertMatchesRegularExpression('/01\. .+\n━+\n02\. /u', (string) $firstPage['text']);
+        $this->assertStringNotContainsString("━\n\n", (string) $firstPage['text']);
 
         $this->postTelegramWebhook($this->callbackUpdate(41008, 'paged-family-next', 'family:list:2', [], 41007))->assertOk();
-        $secondPage = $this->lastMessageContaining('Paged Family 11');
+        $secondPage = $this->lastMessageContaining('Paged Family 16');
         $this->assertStringContainsString('Page 2 of 2', (string) $secondPage['text']);
-        $this->assertStringNotContainsString('Paged Family 10', (string) $secondPage['text']);
+        $this->assertStringNotContainsString('Paged Family 15', (string) $secondPage['text']);
     }
 
     public function test_signed_family_option_callback_is_rejected_without_current_catalog_state(): void

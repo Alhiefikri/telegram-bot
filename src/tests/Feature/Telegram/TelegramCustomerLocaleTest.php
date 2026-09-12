@@ -509,6 +509,13 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
             ['Pilih kaedah bayaran di bawah.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepun', '🇰🇷 Korea Selatan', '🇨🇳 China'],
             ['Pilih metode pembayaran di bawah.', 'Choose a payment method below.'],
         );
+
+        // The cross-border block is quoted so it reads as one panel on every locale.
+        foreach ([$idCheckoutPayload, $enCheckoutPayload, $msCheckoutPayload] as $checkoutPayload) {
+            $this->assertSame('HTML', $checkoutPayload['parse_mode'] ?? null);
+            $this->assertStringContainsString('<blockquote>🌏 QRIS', (string) $checkoutPayload['text']);
+            $this->assertStringEndsWith('</blockquote>', (string) $checkoutPayload['text']);
+        }
     }
 
     public function test_router_error_and_empty_order_copy_follow_customer_voice(): void
