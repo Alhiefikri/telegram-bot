@@ -17,6 +17,7 @@ final class StoreBalanceActivityItem
     public const KIND_PURCHASE = 'purchase';
 
     public const KIND_REFUND = 'refund';
+
     public const STATE_CREDITED = 'credited';
 
     public const STATE_RECOVERED = 'recovered';
