@@ -36,8 +36,17 @@ final class StoreBalanceTopUpSakurupiahRailTest extends TelegramBotTestSupport
 
         $this->travelTo('2026-07-28 10:10:00 UTC');
         $this->fakeTelegramHttp();
-        config()->set('services.sakurupiah.sandbox_api_id', 'test-api-id');
-        config()->set('services.sakurupiah.sandbox_api_key', 'test-api-key');
+        config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
+            'sandbox_api_id' => 'test-api-id',
+            'sandbox_api_key' => 'test-api-key',
+            'sandbox_callback_url' => 'https://store.example.test/api/webhook/sakurupiah',
+            'sandbox_return_url' => 'https://store.example.test/shop/orders',
+            'sandbox_allowed_hosts' => ['sakurupiah.id'],
+            'sandbox_callback_allowed_hosts' => ['store.example.test'],
+            'sandbox_return_allowed_hosts' => ['store.example.test'],
+        ]));
         ManualPaymentSetting::query()->create([
             'payment_mode' => 'sakurupiah',
             'is_active' => true,
