@@ -357,6 +357,79 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
             ->count());
     }
 
+    public function test_top_up_recovers_provider_qris_image_when_qris_url_returns_invalid_png(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadyProduction();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
+
+        $qrisUrl = 'https://api.klikqris.example/storage/qris_api/qris_balance_top_up_unavailable.png';
+        $fallbackImage = KlikQrisSandboxScenarios::pngDataUri('top-up-status-fallback');
+        $statusCalls = 0;
+
+        $this->fakeTelegramHttp([
+            'https://api.klikqris.example/qris/create' => function (Request $request) use ($qrisUrl) {
+                return Http::response(['data' => [
+                    'order_id' => $request['order_id'],
+                    'amount' => 5000,
+                    'total_amount' => 5016,
+                    'fee' => 16,
+                    'status' => 'PENDING',
+                    'qris_url' => $qrisUrl,
+                    'signature' => 'top-up-signature',
+                    'expired_at' => now()->addMinutes(15)->toISOString(),
+                ]]);
+            },
+            'https://api.klikqris.example/qris/status/*' => function (Request $request) use (&$statusCalls, $fallbackImage, $qrisUrl) {
+                $statusCalls++;
+
+                return Http::response(['data' => [
+                    'order_id' => basename($request->url()),
+                    'amount' => 5000,
+                    'total_amount' => 5016,
+                    'status' => 'PENDING',
+                    'qris_url' => $qrisUrl,
+                    'qris_image' => $fallbackImage,
+                    'signature' => 'top-up-signature',
+                    'expired_at' => now()->addMinutes(15)->toISOString(),
+                ]]);
+            },
+            $qrisUrl => Http::response('not-a-png-body', 200, ['Content-Type' => 'image/png']),
+        ]);
+
+        Customer::factory()->create(['telegram_id' => 46301, 'locale' => 'en']);
+        $root = $this->openFundingChooser(46301, 46301);
+        $this->postTelegramUpdate($this->messageUpdate(46303, '/deposit 5000', [], 46301));
+        $intent = StoreBalanceFundingIntent::query()->sole();
+
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46304,
+            'top-up-image-recovery',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            46301,
+            'private',
+            $root->message_id,
+        ));
+
+        $topUp = StoreBalanceTopUp::query()->sole();
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->artisan('queue:work database --queue=telegram-outbound --once --tries=1')
+            ->assertSuccessful();
+
+        $topUpPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Balance credit after payment confirmation'));
+        $this->assertCount(1, $topUpPhotos);
+        $this->assertStringContainsString("\x89PNG\r\n\x1A\ntop-up-status-fallback", $topUpPhotos->first()[0]->body());
+        $this->assertSame('sent', $effect->fresh()->state->value);
+        $this->assertSame(1, $statusCalls);
+        $this->assertSame(1, StoreBalanceTopUp::query()->count());
+        $this->assertStringNotContainsString(
+            $fallbackImage,
+            json_encode($topUp->fresh()->provider_payload, JSON_THROW_ON_ERROR),
+        );
+    }
+
     public function test_failed_credit_rolls_back_callback_event_top_up_and_ledger_mutation(): void
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');

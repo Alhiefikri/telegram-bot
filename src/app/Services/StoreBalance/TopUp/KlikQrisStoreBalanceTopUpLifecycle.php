@@ -18,6 +18,7 @@ use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use Throwable;
 use UnexpectedValueException;
 
@@ -164,8 +165,19 @@ final class KlikQrisStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLifec
     ): StoreBalanceTopUpInstructionAttachment {
         $klikQrisPayable = KlikQrisPayableBalanceTopUp::fromTopUp($topUp);
 
+        try {
+            $contents = $this->images->contentsForTopUp($klikQrisPayable);
+        } catch (InvalidArgumentException $exception) {
+            $recoveredPayable = $this->nativeQris->recoverTopUpPresentationImage($topUp);
+            if ($recoveredPayable === null) {
+                throw $exception;
+            }
+
+            $contents = $this->images->contentsForTopUp($recoveredPayable, preferFallback: true);
+        }
+
         return new StoreBalanceTopUpInstructionAttachment(
-            $this->images->contentsForTopUp($klikQrisPayable),
+            $contents,
         );
     }
 

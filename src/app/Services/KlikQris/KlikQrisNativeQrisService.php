@@ -242,6 +242,42 @@ class KlikQrisNativeQrisService
     }
 
     /**
+     * Recover a provider-supplied QR image for a payable Store Balance top-up
+     * when its trusted URL cannot be rendered. The image stays transient and
+     * is never added to the persisted provider payload.
+     */
+    public function recoverTopUpPresentationImage(StoreBalanceTopUp $topUp): ?KlikQrisPayableBalanceTopUp
+    {
+        $result = $this->tryWithTopUpLock($topUp, function () use ($topUp): ?KlikQrisPayableBalanceTopUp {
+            $topUp->refresh();
+            if (! $topUp->isPayable()) {
+                return null;
+            }
+
+            try {
+                $transaction = $this->topUpProvider()->topUpTransactionStatus($topUp);
+                $transaction->assertMatchesTopUp($topUp);
+                if (! $transaction->isPending() || blank($transaction->qrisImageBase64())) {
+                    return null;
+                }
+
+                $topUp->refresh();
+
+                $payable = KlikQrisPayableBalanceTopUp::fromTopUpWithTransientImage(
+                    $topUp,
+                    $transaction->qrisImageBase64(),
+                );
+
+                return $payable->fallbackImageContents() === null ? null : $payable;
+            } catch (Throwable) {
+                return null;
+            }
+        });
+
+        return $result instanceof KlikQrisPayableBalanceTopUp ? $result : null;
+    }
+
+    /**
      * Reconcile one Payment while holding the same lock used by customer
      * refreshes and callback verification.
      *
