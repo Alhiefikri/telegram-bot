@@ -27,8 +27,10 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Illuminate\Support\ViewErrorBag;
 use LogicException;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
+#[Group('postgres-release')]
 final class StoreBalanceOwnerCompensationTest extends TestCase
 {
     use RefreshDatabase;
@@ -116,7 +118,10 @@ final class StoreBalanceOwnerCompensationTest extends TestCase
             'user_id' => $owner->id,
         ]);
 
-        $effect = TelegramOutboundEffect::query()->sole();
+        $effect = TelegramOutboundEffect::query()
+            ->where('source_type', StoreBalanceCompensation::class)
+            ->where('source_id', (string) $compensation->id)
+            ->sole();
         $this->assertSame(TelegramOutboundEffectType::OwnerCompensationNotification->value, $effect->effect_type);
         $this->assertSame(StoreBalanceCompensation::class, $effect->source_type);
         $this->assertSame((string) $compensation->id, $effect->source_id);
@@ -150,7 +155,10 @@ final class StoreBalanceOwnerCompensationTest extends TestCase
         ])->assertRedirect();
 
         $compensation = StoreBalanceCompensation::query()->sole();
-        $effect = TelegramOutboundEffect::query()->sole();
+        $effect = TelegramOutboundEffect::query()
+            ->where('source_type', StoreBalanceCompensation::class)
+            ->where('source_id', (string) $compensation->id)
+            ->sole();
         $job = new SendStoreBalanceOwnerCompensationNotification(
             (string) $compensation->id,
             effectId: (string) $effect->id,
@@ -188,7 +196,10 @@ final class StoreBalanceOwnerCompensationTest extends TestCase
         $this->assertSame('First owner resolution.', $compensation->reason);
         $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::OwnerCompensationCredit)->count());
         $this->assertSame((int) $topUp->amount, (int) $topUp->customer->balanceAccount()->value('balance'));
-        $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_type', StoreBalanceCompensation::class)
+            ->where('source_id', (string) $compensation->id)
+            ->count());
 
         $this->expectException(LogicException::class);
         $compensation->update(['reason' => 'tampered']);
@@ -239,6 +250,31 @@ final class StoreBalanceOwnerCompensationTest extends TestCase
         $this->assertSame(0, collect($queries)->filter(
             fn (string $sql): bool => str_contains($sql, 'from "customer_balance_accounts"') && str_contains($sql, ' = ?'),
         )->count());
+    }
+
+    public function test_queue_hides_credited_top_ups_even_when_their_status_is_still_queueable(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $credited = $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Expired,
+            'provider_reference' => 'KLIK-CREDITED-5000',
+        ]);
+        app(StoreBalanceLedger::class)->creditTopUp(
+            $credited->customer,
+            (int) $credited->amount,
+            (string) $credited->getKey(),
+            'balance-top-up:'.$credited->getKey().':credit',
+        );
+        $queueable = $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Expired,
+            'provider_reference' => 'KLIK-EXPIRED-5000',
+        ]);
+
+        $queue = app(StoreBalanceOwnerCompensationService::class)->queue($owner, []);
+
+        $ids = array_column($queue['items'], 'top_up_id');
+        $this->assertNotContains($credited->getKey(), $ids);
+        $this->assertContains($queueable->getKey(), $ids);
     }
 
     /** @param array<string, mixed> $overrides */

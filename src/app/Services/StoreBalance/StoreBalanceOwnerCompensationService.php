@@ -16,6 +16,7 @@ use App\Services\Telegram\TelegramBotApiRedactor;
 use App\Support\Money;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\UnauthorizedException;
@@ -100,7 +101,14 @@ final class StoreBalanceOwnerCompensationService
         $filters = $this->normalizeFilters($filters);
         $query = StoreBalanceTopUp::query()
             ->with(['customer.balanceAccount', 'compensation'])
-            ->whereDoesntHave('creditEntry')
+            ->whereNotExists(function (QueryBuilder $query): void {
+                $query
+                    ->selectRaw('1')
+                    ->from('store_balance_entries')
+                    ->whereRaw('CAST(store_balance_top_ups.id AS TEXT) = store_balance_entries.source_id')
+                    ->where('store_balance_entries.source_type', 'balance_top_up')
+                    ->where('store_balance_entries.kind', StoreBalanceEntryKind::TopUpCredit->value);
+            })
             ->whereDoesntHave('compensation')
             ->where(function (Builder $query): void {
                 $query
