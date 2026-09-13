@@ -121,6 +121,11 @@ class AdminDashboardRedirector
         return $this->dashboard(self::TAB_STORE_CHANNEL, self::TAB_FALLBACK_TARGETS[self::TAB_STORE_CHANNEL]);
     }
 
+    public function telegramWelcomeBanner(): RedirectResponse
+    {
+        return $this->dashboard(self::TAB_STORE_CHANNEL, 'admin-section-telegram-welcome-banner');
+    }
+
     public function storeChannelTest(): RedirectResponse
     {
         return $this->dashboard(self::TAB_STORE_CHANNEL, 'admin-store-channel-test');

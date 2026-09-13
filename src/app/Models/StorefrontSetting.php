@@ -5,7 +5,13 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['singleton_key', 'product_placeholder_image_path'])]
+#[Fillable([
+    'singleton_key',
+    'product_placeholder_image_path',
+    'telegram_welcome_banner_path',
+    'telegram_welcome_banner_file_id',
+    'telegram_welcome_banner_version',
+])]
 class StorefrontSetting extends Model
 {
     public const SINGLETON_KEY = 'storefront';

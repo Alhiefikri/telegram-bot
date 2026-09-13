@@ -10,5 +10,6 @@ final class TelegramWelcomeBannerSend
         public readonly int $messageId,
         public readonly TelegramNavigationMediaKind $mediaKind,
         public readonly ?string $reference,
+        public readonly ?int $bannerVersion = null,
     ) {}
 }

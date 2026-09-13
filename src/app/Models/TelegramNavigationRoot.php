@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Model;
     'screen',
     'locale',
     'banner_reference',
+    'banner_version',
     'generation',
     'render_token',
     'render_started_at',
@@ -29,6 +30,7 @@ class TelegramNavigationRoot extends Model
             'media_kind' => TelegramNavigationMediaKind::class,
             'screen' => TelegramNavigationScreen::class,
             'generation' => 'integer',
+            'banner_version' => 'integer',
             'render_started_at' => 'datetime',
             'rendered_at' => 'datetime',
         ];

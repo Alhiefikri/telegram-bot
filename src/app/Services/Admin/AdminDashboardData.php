@@ -6,12 +6,14 @@ use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
+use App\Models\StorefrontSetting;
 use App\Models\TelegramBroadcast;
 use App\Models\User;
 use App\Services\PaymentReceiptReport;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use App\Services\Telegram\FakeSalesProofPostPublisher;
 use App\Services\Telegram\TelegramBotApiRedactor;
+use Illuminate\Support\Facades\Storage;
 
 final class AdminDashboardData
 {
@@ -230,6 +232,7 @@ final class AdminDashboardData
 
         return [
             'setting' => $setting,
+            'welcome_banner' => $this->welcomeBannerTab($user),
             'status' => $status,
             'details' => [
                 'chat_id_label' => $setting->telegram_chat_id ?: 'Belum ada',
@@ -243,6 +246,25 @@ final class AdminDashboardData
             'update_url' => route('admin.store-channel.update'),
             'test_url' => route('admin.store-channel.test'),
             'fake_sales_proof' => $this->fakeSalesProof->dashboardState($setting, $ready, $canManage),
+        ];
+    }
+
+    private function welcomeBannerTab(User $user): array
+    {
+        $setting = StorefrontSetting::current();
+        $path = trim((string) $setting->telegram_welcome_banner_path);
+        $isCustom = $path !== ''
+            && str_starts_with($path, 'telegram/welcome-banners/')
+            && ! str_contains($path, '..')
+            && Storage::disk('public')->exists($path);
+
+        return [
+            'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
+            'is_custom' => $isCustom,
+            'image_url' => $isCustom ? '/storage/'.ltrim($path, '/') : null,
+            'version' => (int) ($setting->telegram_welcome_banner_version ?? 0),
+            'file_id_cached' => $isCustom && filled($setting->telegram_welcome_banner_file_id),
+            'update_url' => route('admin.telegram-welcome-banner.update'),
         ];
     }
 

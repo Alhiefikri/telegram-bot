@@ -82,12 +82,16 @@ class TelegramNavigationRootService
     {
         $chatId = trim($chatId);
         $current = $this->current($customer);
-        $preferredReference = $current?->chat_id === $chatId ? $current->banner_reference : null;
+        $sameChat = $current?->chat_id === $chatId;
+        $preferredReference = $sameChat ? $current?->banner_reference : null;
+        $preferredBannerVersion = $sameChat ? $current?->banner_version : null;
         $sent = $this->banner->send(
             $chatId,
             $surface->caption,
             $surface->keyboard,
-            $preferredReference,
+            preferredReference: $preferredReference,
+            options: $surface->options,
+            preferredBannerVersion: $preferredBannerVersion,
         );
 
         return $this->persistRoot($customer, $chatId, $surface, $sent);
@@ -165,6 +169,7 @@ class TelegramNavigationRootService
                 'screen' => $surface->screen,
                 'locale' => $surface->locale,
                 'banner_reference' => $sent->reference,
+                'banner_version' => $sent->bannerVersion,
                 'render_token' => null,
                 'render_started_at' => null,
                 'rendered_at' => now(),
@@ -254,7 +259,14 @@ class TelegramNavigationRootService
     private function replaceRoot(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRenderOutcome
     {
         try {
-            $sent = $this->banner->send($chatId, $surface->caption, $surface->keyboard, $root->banner_reference, $surface->options);
+            $sent = $this->banner->send(
+                $chatId,
+                $surface->caption,
+                $surface->keyboard,
+                preferredReference: $root->banner_reference,
+                options: $surface->options,
+                preferredBannerVersion: $root->banner_version,
+            );
         } catch (Throwable $exception) {
             $this->releaseClaim($root);
             $this->logAmbiguous($root, $exception);
@@ -271,6 +283,7 @@ class TelegramNavigationRootService
                 'message_id' => $sent->messageId,
                 'media_kind' => $sent->mediaKind,
                 'banner_reference' => $sent->reference ?? $root->banner_reference,
+                'banner_version' => $sent->bannerVersion ?? $root->banner_version,
                 'screen' => $surface->screen,
                 'locale' => $surface->locale,
                 'generation' => $root->generation + 1,

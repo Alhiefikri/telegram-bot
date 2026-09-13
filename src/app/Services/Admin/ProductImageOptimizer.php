@@ -19,6 +19,8 @@ final class ProductImageOptimizer
 
     private const TELEGRAM_FAMILY_DIRECTORY = 'telegram-product-families';
 
+    private const WELCOME_BANNER_DIRECTORY = 'telegram/welcome-banners';
+
     private const MAX_DIMENSION = 1600;
 
     private const WEBP_QUALITY = 84;
@@ -46,6 +48,11 @@ final class ProductImageOptimizer
     public function storePlaceholder(UploadedFile $image): string
     {
         return $this->storeInDirectory($image, self::PLACEHOLDER_DIRECTORY);
+    }
+
+    public function storeWelcomeBanner(UploadedFile $image): string
+    {
+        return $this->storeInDirectory($image, self::WELCOME_BANNER_DIRECTORY);
     }
 
     private function storeInDirectory(UploadedFile $image, string $directory): string
@@ -153,6 +160,25 @@ final class ProductImageOptimizer
             : null;
     }
 
+    /**
+     * @return array{contents: string, filename: string}|null
+     */
+    public function welcomeBannerPhoto(?string $path): ?array
+    {
+        if ($path === null
+            || ! str_starts_with($path, self::WELCOME_BANNER_DIRECTORY.'/')
+            || str_contains($path, '..')
+            || ! Storage::disk('public')->exists($path)) {
+            return null;
+        }
+
+        $contents = Storage::disk('public')->get($path);
+
+        return is_string($contents) && $contents !== ''
+            ? ['contents' => $contents, 'filename' => basename($path)]
+            : null;
+    }
+
     private function createImageResource(UploadedFile $image): \GdImage
     {
         $contents = file_get_contents($image->getRealPath());
@@ -203,7 +229,8 @@ final class ProductImageOptimizer
                 && ! str_starts_with($path, self::FAMILY_DIRECTORY.'/')
                 && ! str_starts_with($path, self::PLACEHOLDER_DIRECTORY.'/')
                 && ! str_starts_with($path, self::TELEGRAM_DIRECTORY.'/')
-                && ! str_starts_with($path, self::TELEGRAM_FAMILY_DIRECTORY.'/'))) {
+                && ! str_starts_with($path, self::TELEGRAM_FAMILY_DIRECTORY.'/')
+                && ! str_starts_with($path, self::WELCOME_BANNER_DIRECTORY.'/'))) {
             return;
         }
 
