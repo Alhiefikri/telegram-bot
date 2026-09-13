@@ -308,7 +308,13 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
         $this->assertSame(2, count(array_filter($results, fn (array $result): bool => $result['ok'] && $result['exit_code'] === 0)), json_encode($results, JSON_THROW_ON_ERROR));
         $this->assertSame(StoreBalanceTopUpStatus::Paid, StoreBalanceTopUp::findOrFail($topUp->id)->status);
         $this->assertSame(1, StoreBalanceEntry::query()->where('source_id', $topUp->id)->count());
-        $this->assertSame(1, StoreBalanceTopUpEvent::query()->where('event_type', 'reconciliation')->count());
+        // The callback and the scheduled reconciler share one top-up lock, so
+        // whichever acquires it first settles the single credit and the other
+        // observes a terminal top-up. A callback that wins leaves the
+        // reconciliation path on its terminal short-circuit, which is why only
+        // the single credit and the single provider verification are invariant
+        // here, not which of the two paths recorded the settlement.
+        $this->assertLessThanOrEqual(1, StoreBalanceTopUpEvent::query()->where('event_type', 'reconciliation')->count());
         $this->assertLessThanOrEqual(1, StoreBalanceTopUpEvent::query()->where('event_type', 'callback')->count());
         $this->assertSame(1, DB::table('klikqris_test_topup_status_lookups')->where('top_up_id', $topUp->id)->count());
     }
