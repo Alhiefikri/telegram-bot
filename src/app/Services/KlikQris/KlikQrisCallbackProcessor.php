@@ -186,9 +186,10 @@ class KlikQrisCallbackProcessor
     {
         if (! $callback->isPaidTrigger()
             || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::KLIKQRIS
-            || ! in_array($topUp->status, [StoreBalanceTopUpStatus::Pending, StoreBalanceTopUpStatus::Payable], true)
-            || ($topUp->expires_at !== null && ! $topUp->expires_at->isFuture())
-            || ($topUp->provider_expires_at !== null && ! $topUp->provider_expires_at->isFuture())) {
+            || in_array($topUp->status, [
+                StoreBalanceTopUpStatus::Paid,
+                StoreBalanceTopUpStatus::Compensated,
+            ], true)) {
             return false;
         }
 

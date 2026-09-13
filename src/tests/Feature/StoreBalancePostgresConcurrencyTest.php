@@ -13,6 +13,7 @@ use App\Enums\TelegramNavigationScreen;
 use App\Enums\TelegramOutboundEffectType;
 use App\Enums\UserRole;
 use App\Exceptions\InsufficientStoreBalance;
+use App\Exceptions\StoreBalanceCompensationRejected;
 use App\Exceptions\StoreBalanceFundingPolicyConflict;
 use App\Models\AuditLog;
 use App\Models\Cart;
@@ -459,12 +460,18 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
 
         $results = $this->runConcurrentWorkers(2, function (int $index) use ($topUp, $owner, $callbackPayload, $statusPayload): string {
             if ($index === 0) {
-                return app(StoreBalanceOwnerCompensationService::class)->release(
-                    topUpId: $topUp->id,
-                    actor: User::query()->findOrFail($owner->id),
-                    providerReference: 'OWNER-CALLBACK-RACE',
-                    reason: 'Provider callback race resolution.',
-                )->applied ? 'compensation_applied' : 'compensation_replayed';
+                try {
+                    return app(StoreBalanceOwnerCompensationService::class)->release(
+                        topUpId: $topUp->id,
+                        actor: User::query()->findOrFail($owner->id),
+                        providerReference: 'OWNER-CALLBACK-RACE',
+                        reason: 'Provider callback race resolution.',
+                    )->applied ? 'compensation_applied' : 'compensation_replayed';
+                } catch (StoreBalanceCompensationRejected) {
+                    // A verified provider success can settle the top-up first;
+                    // the owner resolution is then rejected as already paid.
+                    return 'compensation_rejected';
+                }
             }
 
             $callback = KlikQrisCallback::fromPayload($callbackPayload);
@@ -479,12 +486,45 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
         });
 
         $this->assertWorkersSucceeded($results);
-        $this->assertSame(StoreBalanceTopUpStatus::Compensated, $topUp->fresh()->status);
-        $this->assertSame(1, StoreBalanceCompensation::query()->count());
-        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::OwnerCompensationCredit)->count());
-        $this->assertSame(0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::TopUpCredit)->count());
+        $this->assertSame(1, StoreBalanceEntry::query()
+            ->whereIn('kind', [
+                StoreBalanceEntryKind::TopUpCredit,
+                StoreBalanceEntryKind::OwnerCompensationCredit,
+            ])
+            ->where(function ($query) use ($topUp): void {
+                $query->where('source_id', (string) $topUp->id)
+                    ->orWhere('source_id', 'top_up:'.$topUp->id);
+            })
+            ->count());
         $this->assertSame(8000, $this->balanceOf($topUp->customer));
         $this->assertProjectionMatchesLedger($topUp->customer, 8000);
+
+        if ($topUp->fresh()->status === StoreBalanceTopUpStatus::Compensated) {
+            $this->assertSame(1, StoreBalanceCompensation::query()->where('store_balance_top_up_id', $topUp->id)->count());
+            $this->assertSame(1, StoreBalanceEntry::query()
+                ->where('kind', StoreBalanceEntryKind::OwnerCompensationCredit)
+                ->where('source_id', 'top_up:'.$topUp->id)
+                ->count());
+            $this->assertSame(0, StoreBalanceEntry::query()
+                ->where('kind', StoreBalanceEntryKind::TopUpCredit)
+                ->where('source_id', (string) $topUp->id)
+                ->count());
+
+            return;
+        }
+
+        // The verified callback won the race: one late credit and no
+        // compensation row, mirroring a provider-confirmed late payment.
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+        $this->assertSame(1, StoreBalanceEntry::query()
+            ->where('kind', StoreBalanceEntryKind::TopUpCredit)
+            ->where('source_id', (string) $topUp->id)
+            ->count());
+        $this->assertSame(0, StoreBalanceCompensation::query()->where('store_balance_top_up_id', $topUp->id)->count());
+        $this->assertSame(0, StoreBalanceEntry::query()
+            ->where('kind', StoreBalanceEntryKind::OwnerCompensationCredit)
+            ->where('source_id', 'top_up:'.$topUp->id)
+            ->count());
     }
 
     public function test_postgres_competing_debits_never_commit_a_negative_balance(): void

@@ -320,7 +320,7 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
     }
 
     /** @group postgres */
-    public function test_postgres_top_up_reconciliation_and_expiry_race_never_credit_expired_top_up(): void
+    public function test_postgres_top_up_reconciliation_and_expiry_race_settles_one_late_credit(): void
     {
         if (DB::getDriverName() !== 'pgsql') {
             $this->markTestSkipped('PostgreSQL concurrency check runs only with the pgsql test connection.');
@@ -351,9 +351,9 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
         DB::reconnect();
 
         $this->assertSame(2, count(array_filter($results, fn (array $result): bool => $result['ok'] && $result['exit_code'] === 0)), json_encode($results, JSON_THROW_ON_ERROR));
-        $this->assertSame(StoreBalanceTopUpStatus::Expired, StoreBalanceTopUp::findOrFail($topUp->id)->status);
-        $this->assertSame(0, StoreBalanceEntry::query()->where('source_id', $topUp->id)->count());
-        $this->assertSame(0, StoreBalanceTopUpEvent::query()->whereNotNull('processed_at')->count());
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, StoreBalanceTopUp::findOrFail($topUp->id)->status);
+        $this->assertSame(1, StoreBalanceEntry::query()->where('source_id', $topUp->id)->count());
+        $this->assertSame(1, StoreBalanceTopUpEvent::query()->whereNotNull('processed_at')->count());
     }
 
     private function prepareConcurrencyTables(): void

@@ -54,6 +54,30 @@ class SalesProofPostFormatter
     }
 
     /**
+     * Format the public English Store Channel caption for a settled Store
+     * Balance top-up. The input is already a public-safe immutable
+     * presentation, and the caption deliberately omits the order counter so a
+     * top-up never inflates the published successful-order number.
+     */
+    public function formatTopUp(PaidInvoicePresentation $presentation): string
+    {
+        $lines = [
+            '🎉 BALANCE TOP-UP CONFIRMED',
+            '',
+            '👤 Buyer: '.$presentation->buyerName,
+            '🧾 Top-up ID: '.$presentation->invoiceId,
+            '💳 Paid via: '.$presentation->paymentMethod,
+            '🕒 Completed: '.$presentation->paidAtWib(),
+            '💰 Amount paid: '.$this->money($presentation->totalPaid, $presentation->currency),
+            '',
+            '━━━━━━━━━━━━━━',
+            '✨ Thank you for topping up at Lhie Store.',
+        ];
+
+        return $this->boundedCaption($lines);
+    }
+
+    /**
      * Dispatch the previously materialized text-only template unchanged.
      */
     public function formatLegacy(Order $order, ?int $successfulPostNumber = null): string

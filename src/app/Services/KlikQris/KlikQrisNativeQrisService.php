@@ -590,8 +590,6 @@ class KlikQrisNativeQrisService
             $topUp->refresh();
             if (in_array($topUp->status, [
                 StoreBalanceTopUpStatus::Paid,
-                StoreBalanceTopUpStatus::Expired,
-                StoreBalanceTopUpStatus::InvalidProviderResult,
                 StoreBalanceTopUpStatus::Compensated,
             ], true)) {
                 return $this->classifyTopUp($topUp);
@@ -609,7 +607,7 @@ class KlikQrisNativeQrisService
             $transaction->assertMatchesTopUp($topUp);
             $signaturePersisted = $this->persistAuthoritativeTopUp($topUp, $transaction);
             $current = $topUp->fresh();
-            if ($signaturePersisted) {
+            if ($signaturePersisted || $this->observesLateSettlement($current, $transaction)) {
                 $onAuthoritativeStatus($current, $transaction);
             }
 
@@ -626,6 +624,21 @@ class KlikQrisNativeQrisService
     public function persistAuthoritativeTopUp(StoreBalanceTopUp $topUp, KlikQrisTransaction $transaction): bool
     {
         return $this->persistTopUpTransaction($topUp, $transaction, false);
+    }
+
+    /**
+     * A terminal-but-unresolved top-up can still be settled by a verified
+     * provider success: persistence refuses to mutate terminal rows, so the
+     * success observation itself authorizes the late settlement attempt.
+     */
+    private function observesLateSettlement(?StoreBalanceTopUp $topUp, KlikQrisTransaction $transaction): bool
+    {
+        return $topUp !== null
+            && $transaction->isSuccess()
+            && in_array($topUp->status, [
+                StoreBalanceTopUpStatus::Expired,
+                StoreBalanceTopUpStatus::InvalidProviderResult,
+            ], true);
     }
 
     public function tryWithTopUpLock(StoreBalanceTopUp $topUp, Closure $callback): mixed

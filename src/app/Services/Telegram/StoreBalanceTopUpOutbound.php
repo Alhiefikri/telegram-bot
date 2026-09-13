@@ -24,6 +24,13 @@ use Throwable;
  */
 final class StoreBalanceTopUpOutbound
 {
+    /**
+     * Recovery never publishes historical proofs: a lost handoff is repaired
+     * only for recently settled top-ups, so enabling the channel feature never
+     * floods the public channel with old receipts.
+     */
+    private const CHANNEL_PROOF_RECOVERY_WINDOW_DAYS = 7;
+
     public function __construct(
         private readonly TelegramOutboundEffectService $outboundEffects,
         private readonly TelegramOutboundEffectDispatcher $dispatcher,
@@ -90,6 +97,27 @@ final class StoreBalanceTopUpOutbound
                 ->first(),
             fn (StoreBalanceTopUp $source): bool => $source->status === StoreBalanceTopUpStatus::AwaitingConfirmation
                 && $source->hasPaymentProof(),
+        );
+    }
+
+    public function handoffOwnerAlert(StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult
+    {
+        return $this->handoff(
+            $topUp,
+            fn (StoreBalanceTopUp $source): ?TelegramOutboundEffect => $this->outboundEffects->recordBalanceTopUpOwnerAlert($source),
+            fn (string $topUpId): ?TelegramOutboundEffect => $this->outboundEffects->forBalanceTopUpOwnerAlert($topUpId),
+            fn (StoreBalanceTopUp $source): bool => $source->isEligibleForOwnerAttention(),
+        );
+    }
+
+    public function handoffChannelProof(StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult
+    {
+        return $this->handoff(
+            $topUp,
+            fn (StoreBalanceTopUp $source): ?TelegramOutboundEffect => $this->outboundEffects->recordBalanceTopUpChannelProof($source),
+            fn (string $topUpId): ?TelegramOutboundEffect => $this->outboundEffects->forBalanceTopUpChannelProof($topUpId),
+            fn (StoreBalanceTopUp $source): bool => $source->status === StoreBalanceTopUpStatus::Paid
+                && $source->settled_at !== null,
         );
     }
 
@@ -180,6 +208,33 @@ final class StoreBalanceTopUpOutbound
     }
 
     /**
+     * Discover top-ups that may carry real money but could not be settled
+     * automatically, so the owner is alerted once per top-up.
+     */
+    public function recoverMissingOwnerAlerts(int $chunk = 100): int
+    {
+        return $this->recoverMissingFromQuery(
+            $this->missingOwnerAlertsQuery(),
+            $chunk,
+            fn (StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult => $this->handoffOwnerAlert($topUp),
+        );
+    }
+
+    /**
+     * Discover settled top-ups whose public Store Channel proof handoff is
+     * absent. Existing effects, disabled channel settings, and non-dispatchable
+     * retries stay owned by the shared ledger and are never blindly resent.
+     */
+    public function recoverMissingChannelProofs(int $chunk = 100): int
+    {
+        return $this->recoverMissingFromQuery(
+            $this->missingChannelProofsQuery(),
+            $chunk,
+            fn (StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult => $this->handoffChannelProof($topUp),
+        );
+    }
+
+    /**
      * Recover both top-up effect families through their normal handoff rules.
      * Existing effects, review states, and non-dispatchable retries are left
      * to the shared ledger and are not blindly resent.
@@ -187,7 +242,9 @@ final class StoreBalanceTopUpOutbound
     public function recoverMissing(int $chunk = 100): int
     {
         return $this->recoverMissingInstructions($chunk)
-            + $this->recoverMissingReceipts($chunk);
+            + $this->recoverMissingReceipts($chunk)
+            + $this->recoverMissingOwnerAlerts($chunk)
+            + $this->recoverMissingChannelProofs($chunk);
     }
 
     /**
@@ -396,6 +453,53 @@ final class StoreBalanceTopUpOutbound
                     ->from('telegram_outbound_effects')
                     ->where('telegram_outbound_effects.source_type', StoreBalanceTopUp::class)
                     ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+                    ->whereRaw('telegram_outbound_effects.source_id = CAST(store_balance_top_ups.id AS TEXT)');
+            })
+            ->orderBy('id');
+    }
+
+    /** @return Builder<StoreBalanceTopUp> */
+    private function missingOwnerAlertsQuery(): Builder
+    {
+        return $this->topUpsQuery()
+            ->where(function (Builder $query): void {
+                $query
+                    ->whereIn('status', [
+                        StoreBalanceTopUpStatus::RecoveryPending->value,
+                        StoreBalanceTopUpStatus::InvalidProviderResult->value,
+                    ])
+                    ->orWhere(function (Builder $query): void {
+                        $query
+                            ->where('status', StoreBalanceTopUpStatus::Expired->value)
+                            ->whereNotNull('payment_proof_file_id');
+                    });
+            })
+            ->whereDoesntHave('compensation')
+            ->whereNotExists(function ($effects): void {
+                $effects
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects')
+                    ->where('telegram_outbound_effects.source_type', StoreBalanceTopUp::class)
+                    ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_OWNER_ALERT)
+                    ->whereRaw('telegram_outbound_effects.source_id = CAST(store_balance_top_ups.id AS TEXT)');
+            })
+            ->orderBy('id');
+    }
+
+    /** @return Builder<StoreBalanceTopUp> */
+    private function missingChannelProofsQuery(): Builder
+    {
+        return $this->topUpsQuery()
+            ->where('status', StoreBalanceTopUpStatus::Paid->value)
+            ->whereNotNull('settled_at')
+            ->where('settled_at', '>=', now()->subDays(self::CHANNEL_PROOF_RECOVERY_WINDOW_DAYS))
+            ->whereNotNull('provider_total_payment')
+            ->whereNotExists(function ($effects): void {
+                $effects
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects')
+                    ->where('telegram_outbound_effects.source_type', StoreBalanceTopUp::class)
+                    ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_CHANNEL_PROOF)
                     ->whereRaw('telegram_outbound_effects.source_id = CAST(store_balance_top_ups.id AS TEXT)');
             })
             ->orderBy('id');

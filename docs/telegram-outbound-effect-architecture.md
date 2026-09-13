@@ -116,6 +116,8 @@ transport details, and synchronization of its own read projection:
 | Checkout instructions | Provider-specific instruction rendering and customer Order notification projection | telegram-outbound |
 | Store Balance top-up | Instruction and receipt eligibility, deterministic handoff, callback navigation matching, and post-settlement instruction cleanup | telegram-outbound / notifications |
 | Store Balance top-up payment proof | Manual-rail customer payment proof forwarded to the admin chat with operator approve/reject actions and admin projection | notifications |
+| Store Balance owner alert | Admin alert for top-ups that may carry money but could not be settled automatically, deduplicated per top-up with sanitized diagnostics | notifications |
+| Store Balance top-up channel proof | Public Store Channel photo proof for a settled top-up, reusing the paid-invoice image and masked-buyer caption | notifications |
 | Receipt credentials | Ordered chunk rendering, credential delivery projection, and completion cleanup | telegram-outbound / notifications |
 | Admin Order notifications | Pending, paid, and expired admin projections | telegram-outbound / notifications |
 | Manual payment proof | Proof attachment forwarding and Payment projection | notifications |
@@ -128,8 +130,9 @@ The principal adapters are
 CheckoutInstructionDeliveryPipeline, ReceiptDeliveryPipeline,
 AdminOrderNotificationDeliveryPipeline, ManualPaymentProofDeliveryPipeline,
 SalesProofDeliveryPipeline, AdminBroadcastDeliveryPipeline,
-StockNotificationDeliveryPipeline, ProductPriceChangeNotificationService, and
-BalanceTopUpPaymentProofDeliveryPipeline. They all use the same ledger seam.
+StockNotificationDeliveryPipeline, ProductPriceChangeNotificationService,
+BalanceTopUpPaymentProofDeliveryPipeline, BalanceTopUpOwnerAlertDeliveryPipeline,
+and BalanceTopUpChannelProofDeliveryPipeline. They all use the same ledger seam.
 
 The Store Balance top-up admin review family is delivered by
 `BalanceTopUpPaymentProofDeliveryPipeline` under the
@@ -138,6 +141,31 @@ The effect is admin-targeted, renders approve/reject action buttons
 (`admin:topup-approve:{id}` / `admin:topup-reject:{id}`) for the operator, and is
 never automatically resent; a manual top-up settles only through the confirmed
 operator decision, which is audited and does not create a second review effect.
+
+The Store Balance owner alert family is delivered by
+`BalanceTopUpOwnerAlertDeliveryPipeline` under the
+`admin.balance_top_up_owner_alert` effect type on the `notifications` queue.
+`StoreBalanceTopUpOutbound::recoverMissingOwnerAlerts` materializes at most one
+effect per top-up (`recovery_pending`, `invalid_provider_result`, or `expired`
+with a customer payment proof), and delivery re-checks that the top-up still
+qualifies so a resolved or compensated top-up is finalized without sending. The
+message reports only the top-up identity, customer, requested amount, state, and
+a sanitized diagnostic; the Admin Dashboard remains the decision surface, so the
+alert never carries release actions.
+
+The Store Balance top-up channel proof family is delivered by
+`BalanceTopUpChannelProofDeliveryPipeline` under the
+`balance.top_up_channel_proof` effect type on the `notifications` queue. A
+settled top-up materializes at most one effect
+(`balance-top-up:<id>:channel-proof:v1`) through the
+`MaterializeStoreBalanceTopUpChannelProof` listener; `telegram:recover-outbound`
+rediscovers settled top-ups that lost their handoff, bounded to the last seven
+days so enabling the feature never floods the channel with old receipts. The
+public post reuses the
+same `PaidInvoiceRenderer` and masked-buyer caption seam as an order sales
+proof, so it publishes an invoice-style photo with no raw identifiers, and it is
+gated by the existing Store Channel `sales_proof_enabled` setting. It never
+touches the order proof counter, because a top-up is not a successful order.
 
 ## Durable handoff and dispatch
 

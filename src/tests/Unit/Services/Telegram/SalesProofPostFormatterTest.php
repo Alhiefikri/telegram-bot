@@ -66,4 +66,37 @@ class SalesProofPostFormatterTest extends TestCase
         $this->assertStringNotContainsString('Buyer ID:', $caption);
         $this->assertStringNotContainsString('284*****24', $caption);
     }
+
+    public function test_top_up_caption_is_bounded_and_never_inflates_the_order_counter(): void
+    {
+        $presentation = new PaidInvoicePresentation(
+            invoiceId: 'BALANCE-9F3K2M7Q',
+            buyerIdentifier: '858*****05',
+            buyerName: 'Cia***',
+            paidAt: CarbonImmutable::parse('2026-09-13 13:15:00 UTC')->setTimezone('Asia/Jakarta'),
+            paymentMethod: 'QRIS',
+            currency: 'IDR',
+            items: [[
+                'product_name' => 'Store Balance Top-Up',
+                'quantity' => 1,
+                'unit_price' => 50000,
+                'subtotal' => 50000,
+            ]],
+            providerFee: 16,
+            totalPaid: 50016,
+        );
+
+        $caption = app(SalesProofPostFormatter::class)->formatTopUp($presentation);
+
+        $this->assertLessThanOrEqual(SalesProofPostFormatter::MAX_CAPTION_LENGTH, mb_strlen($caption, 'UTF-8'));
+        $this->assertStringContainsString('BALANCE TOP-UP CONFIRMED', $caption);
+        $this->assertStringContainsString('Buyer: Cia***', $caption);
+        $this->assertStringContainsString('Top-up ID: BALANCE-9F3K2M7Q', $caption);
+        $this->assertStringContainsString('Paid via: QRIS', $caption);
+        $this->assertStringContainsString('Completed: 13 September 2026, 20:15 WIB', $caption);
+        $this->assertStringContainsString('Amount paid: Rp 50.016', $caption);
+        $this->assertStringContainsString('Thank you for topping up at Lhie Store.', $caption);
+        $this->assertStringNotContainsString('Successful orders:', $caption);
+        $this->assertStringNotContainsString('858*****05', $caption);
+    }
 }

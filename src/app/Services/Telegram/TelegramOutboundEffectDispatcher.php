@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\TelegramOutboundEffectType;
 use App\Jobs\ForwardManualPaymentProof;
+use App\Jobs\PublishBalanceTopUpChannelProof;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
@@ -18,6 +19,7 @@ use App\Jobs\SendProductStockNotifications;
 use App\Jobs\SendSakurupiahCheckoutInstructions;
 use App\Jobs\SendStoreBalanceOwnerCompensationNotification;
 use App\Jobs\SendStoreBalanceTopUpInstructions;
+use App\Jobs\SendStoreBalanceTopUpOwnerAlert;
 use App\Jobs\SendStoreBalanceTopUpPaymentProof;
 use App\Jobs\SendStoreBalanceTopUpReceipt;
 use App\Jobs\SendTelegramBroadcastBatch;
@@ -92,6 +94,16 @@ final class TelegramOutboundEffectDispatcher
                 (string) $effect->getKey(),
             ),
             TelegramOutboundEffectType::BalanceTopUpPaymentProof->value => SendStoreBalanceTopUpPaymentProof::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            TelegramOutboundEffectType::BalanceTopUpOwnerAlert->value => SendStoreBalanceTopUpOwnerAlert::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            TelegramOutboundEffectType::BalanceTopUpChannelProof->value => PublishBalanceTopUpChannelProof::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),

@@ -50,6 +50,8 @@ final class TelegramOutboundEffectPolicy
         'balance_top_up_not_paid',
         'balance_owner_compensation_missing',
         'balance_owner_compensation_not_eligible',
+        'balance_top_up_owner_alert_not_eligible',
+        'balance_top_up_proof_not_eligible',
         'receipt_txt_credentials_missing',
         'receipt_txt_render_failed',
         'receipt_actions_not_eligible',
@@ -86,6 +88,8 @@ final class TelegramOutboundEffectPolicy
         TelegramOutboundEffectType::PriceChangeStoreChannel->value => self::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS,
         TelegramOutboundEffectType::BalanceTopUpInstructions->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
         TelegramOutboundEffectType::BalanceTopUpReceipt->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
+        TelegramOutboundEffectType::BalanceTopUpOwnerAlert->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
+        TelegramOutboundEffectType::BalanceTopUpChannelProof->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
         TelegramOutboundEffectType::OwnerCompensationNotification->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
     ];
 
@@ -100,6 +104,8 @@ final class TelegramOutboundEffectPolicy
         TelegramOutboundEffectType::PriceChangeStoreChannel->value => 'price_change_store_channel_attempts_exhausted',
         TelegramOutboundEffectType::BalanceTopUpInstructions->value => 'balance_top_up_attempts_exhausted',
         TelegramOutboundEffectType::BalanceTopUpReceipt->value => 'balance_top_up_receipt_attempts_exhausted',
+        TelegramOutboundEffectType::BalanceTopUpOwnerAlert->value => 'balance_top_up_owner_alert_attempts_exhausted',
+        TelegramOutboundEffectType::BalanceTopUpChannelProof->value => 'balance_top_up_channel_proof_attempts_exhausted',
         TelegramOutboundEffectType::OwnerCompensationNotification->value => 'balance_owner_compensation_attempts_exhausted',
     ];
 

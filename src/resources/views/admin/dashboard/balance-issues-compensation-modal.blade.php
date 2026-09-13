@@ -26,7 +26,7 @@
             @csrf
             <label class="block text-xs font-black uppercase tracking-wide text-brand-muted">
                 Referensi provider <span class="text-neo-danger-text">*</span>
-                <input type="text" name="provider_reference" value="{{ old('provider_reference') }}" maxlength="191" required class="mt-1 w-full rounded-xl border-[3px] border-neo-ink bg-white px-3 py-2 font-bold text-neo-ink" placeholder="Reference provider / tiket internal">
+                <input type="text" name="provider_reference" value="{{ old('provider_reference', $item['provider_reference'] === '—' ? '' : $item['provider_reference']) }}" maxlength="191" required class="mt-1 w-full rounded-xl border-[3px] border-neo-ink bg-white px-3 py-2 font-bold text-neo-ink" placeholder="Reference provider / tiket internal">
             </label>
             <label class="block text-xs font-black uppercase tracking-wide text-brand-muted">
                 Alasan resolusi <span class="text-neo-danger-text">*</span>

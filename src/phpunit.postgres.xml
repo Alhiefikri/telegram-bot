@@ -18,6 +18,8 @@
             <file>tests/Feature/KlikQrisWebhookPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SakurupiahInvoiceLifecyclePostgresConcurrencyTest.php</file>
             <file>tests/Feature/StoreBalanceOwnerCompensationTest.php</file>
+            <file>tests/Feature/Telegram/StoreBalanceOwnerAlertTest.php</file>
+            <file>tests/Feature/Telegram/StoreBalanceTopUpChannelProofTest.php</file>
             <file>tests/Feature/StoreBalancePostgresConcurrencyTest.php</file>
         </testsuite>
     </testsuites>

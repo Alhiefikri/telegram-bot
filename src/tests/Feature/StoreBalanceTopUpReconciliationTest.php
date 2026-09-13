@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Enums\KlikQrisEnvironment;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceFundingIntentStatus;
-use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
@@ -16,6 +15,7 @@ use App\Models\StoreBalanceTopUp;
 use App\Models\StoreBalanceTopUpEvent;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
+use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
@@ -189,7 +189,7 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
         $this->assertSame(0, TelegramOutboundEffect::query()->count());
     }
 
-    public function test_success_observed_after_local_deadline_expires_without_crediting_balance(): void
+    public function test_success_observed_after_local_deadline_settles_the_original_credit(): void
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         KlikQrisSandboxScenarios::configureReadySandbox();
@@ -207,12 +207,108 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
         ]);
 
         $this->travelTo($expiresAt->copy()->addSecond());
-        $result = app(StoreBalanceTopUpService::class)->reconcile($topUp);
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
 
-        $this->assertSame(StoreBalanceTopUpOutcome::Expired, $result->outcome());
-        $this->assertSame(StoreBalanceTopUpStatus::Expired, $topUp->fresh()->status);
-        $this->assertSame(0, StoreBalanceEntry::query()->count());
-        $this->assertSame(0, TelegramOutboundEffect::query()->count());
+        $topUp->refresh();
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->status);
+        $this->assertSame('reconciled_SUCCESS', $topUp->provider_create_state);
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(StoreBalanceEntryKind::TopUpCredit, StoreBalanceEntry::query()->sole()->kind);
+        $this->assertSame(5000, StoreBalanceEntry::query()->sole()->amount);
+        $this->assertNotNull(StoreBalanceTopUpEvent::query()->where('event_type', 'reconciliation')->sole()->processed_at);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'store_balance.top_up.late_settled']);
+        $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        $surface = app(TelegramMenuIntents::class)->fundingTopUpSurface(
+            $topUp->fresh(['customer'])->customer,
+            $topUp->fresh(),
+            app(StoreBalanceTopUpService::class)->presentation($topUp),
+        );
+        $this->assertStringContainsString('delayed payment was recovered', strtolower($surface->caption));
+
+        app(StoreBalanceTopUpService::class)->reconcile($topUp->fresh());
+
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+    }
+
+    public function test_verified_success_settles_an_already_expired_top_up_once(): void
+    {
+        Queue::fake();
+        $expiresAt = now()->subMinute()->startOfSecond();
+        $topUp = $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Expired,
+            'provider_expires_at' => $expiresAt,
+            'expires_at' => $expiresAt,
+            'provider_create_state' => 'provider_expired',
+        ]);
+        $transaction = KlikQrisTransaction::fromStatusPayload([
+            'order_id' => $topUp->merchant_ref,
+            'amount' => (int) $topUp->amount,
+            'total_amount' => (int) $topUp->provider_total_payment,
+            'status' => 'SUCCESS',
+            'fee' => (int) $topUp->provider_fee,
+            'paid_at' => $expiresAt->copy()->subMinute()->toISOString(),
+            'expired_at' => $expiresAt->toISOString(),
+            'signature' => 'top-up-signature',
+            'provider_reference' => 'provider-late-reference',
+        ], KlikQrisEnvironment::Sandbox);
+
+        $event = app(StoreBalanceTopUpService::class)->settleAuthoritativeTransaction(
+            $topUp->fresh(),
+            $transaction,
+            fn (StoreBalanceTopUp $lockedTopUp): StoreBalanceTopUpEvent => app(StoreBalanceTopUpEventLogger::class)->logReconciliation($transaction, $lockedTopUp),
+        );
+
+        $topUp->refresh();
+        $this->assertNotNull($event->processed_at);
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->status);
+        $this->assertSame('reconciled_SUCCESS', $topUp->provider_create_state);
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertDatabaseHas('audit_logs', ['action' => 'store_balance.top_up.late_settled']);
+
+        app(StoreBalanceTopUpService::class)->settleAuthoritativeTransaction(
+            $topUp->fresh(),
+            $transaction,
+            fn (StoreBalanceTopUp $lockedTopUp): StoreBalanceTopUpEvent => app(StoreBalanceTopUpEventLogger::class)->logReconciliation($transaction, $lockedTopUp),
+        );
+
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+    }
+
+    public function test_provider_success_callback_after_expiry_settles_the_late_credit(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
+        $expiresAt = now()->addMinutes(10)->startOfSecond();
+        $topUp = $this->makeTopUp([
+            'provider_expires_at' => $expiresAt,
+            'expires_at' => $expiresAt,
+        ]);
+        $this->fakeStatus($topUp, [
+            'status' => 'SUCCESS',
+            'paid_at' => $expiresAt->copy()->subMinute()->toISOString(),
+            'expired_at' => $expiresAt->toISOString(),
+            'signature' => 'top-up-signature',
+        ]);
+
+        $this->travelTo($expiresAt->copy()->addMinutes(5));
+        $this->assertTrue(app(StoreBalanceTopUpService::class)->expireIfDue($topUp->fresh()));
+
+        $event = app(KlikQrisCallbackProcessor::class)->processCallback([
+            'order_id' => $topUp->merchant_ref,
+            'amount' => (int) $topUp->amount,
+            'total_amount' => (int) $topUp->provider_total_payment,
+            'status' => 'SUCCESS',
+            'signature' => 'top-up-signature',
+        ]);
+
+        $topUp->refresh();
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->status);
+        $this->assertSame('reconciled_SUCCESS', $topUp->provider_create_state);
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(StoreBalanceEntryKind::TopUpCredit, StoreBalanceEntry::query()->sole()->kind);
+        $this->assertNotNull($event->processed_at);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'store_balance.top_up.late_settled']);
     }
 
     public function test_conflicting_paid_evidence_moves_top_up_to_explicit_manual_review_without_credit(): void

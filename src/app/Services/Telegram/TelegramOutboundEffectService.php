@@ -58,6 +58,10 @@ class TelegramOutboundEffectService
 
     public const TYPE_BALANCE_TOP_UP_PAYMENT_PROOF = TelegramOutboundEffectType::BalanceTopUpPaymentProof->value;
 
+    public const TYPE_BALANCE_TOP_UP_OWNER_ALERT = TelegramOutboundEffectType::BalanceTopUpOwnerAlert->value;
+
+    public const TYPE_BALANCE_TOP_UP_CHANNEL_PROOF = TelegramOutboundEffectType::BalanceTopUpChannelProof->value;
+
     public const TYPE_OWNER_COMPENSATION_NOTIFICATION = TelegramOutboundEffectType::OwnerCompensationNotification->value;
 
     public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
@@ -129,6 +133,10 @@ class TelegramOutboundEffectService
     public const TEMPLATE_BALANCE_TOP_UP_RECEIPT = 'balance-top-up-receipt-v1';
 
     public const TEMPLATE_BALANCE_TOP_UP_PAYMENT_PROOF = 'balance-top-up-payment-proof-v1';
+
+    public const TEMPLATE_BALANCE_TOP_UP_OWNER_ALERT = 'balance-top-up-owner-alert-v1';
+
+    public const TEMPLATE_BALANCE_TOP_UP_CHANNEL_PROOF = 'balance-top-up-channel-proof-v1';
 
     public const TEMPLATE_OWNER_COMPENSATION_NOTIFICATION = 'balance-owner-compensation-v1';
 
@@ -426,6 +434,81 @@ class TelegramOutboundEffectService
                 'next_attempt_at' => now(),
                 'outcome_metadata' => [
                     'delivery_context' => 'balance_top_up_payment_proof',
+                    'delivery_method' => 'sendPhoto',
+                ],
+            ],
+        );
+    }
+
+    public function recordBalanceTopUpOwnerAlert(StoreBalanceTopUp $topUp): ?TelegramOutboundEffect
+    {
+        $topUpId = (string) $topUp->getKey();
+        $chatId = $this->adminTargetChatId();
+        if ($chatId === null || $topUpId === '' || ! $topUp->isEligibleForOwnerAttention()) {
+            return null;
+        }
+
+        $effectKey = self::balanceTopUpOwnerAlertEffectKey($topUpId);
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => self::TYPE_BALANCE_TOP_UP_OWNER_ALERT,
+                'source_type' => StoreBalanceTopUp::class,
+                'source_id' => $topUpId,
+                'target_type' => 'admin',
+                'telegram_chat_id' => $chatId,
+                'queue' => self::RECEIPT_QUEUE,
+                'telegram_method' => 'sendMessage',
+                'locale' => null,
+                'template_version' => self::TEMPLATE_BALANCE_TOP_UP_OWNER_ALERT,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+                'outcome_metadata' => [
+                    'delivery_context' => 'balance_top_up_owner_alert',
+                    'delivery_method' => 'sendMessage',
+                ],
+            ],
+        );
+    }
+
+    public function recordBalanceTopUpChannelProof(StoreBalanceTopUp $topUp): ?TelegramOutboundEffect
+    {
+        $setting = StoreChannelSetting::current();
+        $chatId = trim((string) ($setting->telegram_chat_id ?: $setting->channel_username));
+        if (! $setting->sales_proof_enabled
+            || $chatId === ''
+            || $topUp->status !== StoreBalanceTopUpStatus::Paid
+            || $topUp->settled_at === null
+            || $topUp->provider_total_payment === null
+            || (int) $topUp->amount <= 0) {
+            return null;
+        }
+
+        $effectKey = self::balanceTopUpChannelProofEffectKey((string) $topUp->getKey());
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => self::TYPE_BALANCE_TOP_UP_CHANNEL_PROOF,
+                'source_type' => StoreBalanceTopUp::class,
+                'source_id' => (string) $topUp->getKey(),
+                'target_type' => 'store_channel',
+                'telegram_chat_id' => $chatId,
+                'queue' => self::SALES_PROOF_QUEUE,
+                'telegram_method' => 'sendPhoto',
+                'locale' => 'en',
+                'template_version' => self::TEMPLATE_BALANCE_TOP_UP_CHANNEL_PROOF,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+                'outcome_metadata' => [
+                    'delivery_context' => 'balance_top_up_channel_proof',
                     'delivery_method' => 'sendPhoto',
                 ],
             ],
@@ -1606,6 +1689,26 @@ class TelegramOutboundEffectService
         return 'balance-owner-compensation:'.$compensationId.':notification:v1';
     }
 
+    public static function balanceTopUpOwnerAlertEffectKey(string $topUpId): string
+    {
+        $topUpId = trim($topUpId);
+        if (preg_match('/\A[1-9][0-9]{0,18}\z/D', $topUpId) !== 1) {
+            throw new InvalidArgumentException('Store Balance top-up reference is invalid.');
+        }
+
+        return 'balance-top-up-owner-alert:'.$topUpId.':v1';
+    }
+
+    public static function balanceTopUpChannelProofEffectKey(string $topUpId): string
+    {
+        $topUpId = trim($topUpId);
+        if (preg_match('/\A[1-9][0-9]{0,18}\z/D', $topUpId) !== 1) {
+            throw new InvalidArgumentException('Store Balance top-up reference is invalid.');
+        }
+
+        return 'balance-top-up:'.$topUpId.':channel-proof:v1';
+    }
+
     public function forOrder(string $orderId, ?string $effectType = null): ?TelegramOutboundEffect
     {
         $query = TelegramOutboundEffect::query()
@@ -1648,6 +1751,28 @@ class TelegramOutboundEffectService
             ->where('source_type', StoreBalanceTopUp::class)
             ->where('source_id', $topUpId)
             ->where('effect_type', self::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    public function forBalanceTopUpOwnerAlert(string $topUpId): ?TelegramOutboundEffect
+    {
+        return TelegramOutboundEffect::query()
+            ->where('source_type', StoreBalanceTopUp::class)
+            ->where('source_id', $topUpId)
+            ->where('effect_type', self::TYPE_BALANCE_TOP_UP_OWNER_ALERT)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    public function forBalanceTopUpChannelProof(string $topUpId): ?TelegramOutboundEffect
+    {
+        return TelegramOutboundEffect::query()
+            ->where('source_type', StoreBalanceTopUp::class)
+            ->where('source_id', $topUpId)
+            ->where('effect_type', self::TYPE_BALANCE_TOP_UP_CHANNEL_PROOF)
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->first();

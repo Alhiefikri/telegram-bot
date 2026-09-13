@@ -384,8 +384,13 @@ final class StoreBalanceTopUpService
                 return $lockedEvent->fresh();
             }
 
+            $lateSettlement = false;
             if (! $this->isEligibleForSettlement($lockedTopUp, $evidence)) {
-                return $lockedEvent->fresh();
+                if (! $this->isEligibleForLateSettlement($lockedTopUp, $evidence)) {
+                    return $lockedEvent->fresh();
+                }
+
+                $lateSettlement = true;
             }
 
             $mutation = $this->ledger->creditTopUp(
@@ -398,7 +403,9 @@ final class StoreBalanceTopUpService
             $previousStatus = $lockedTopUp->status->value;
             $lockedTopUp->forceFill([
                 'status' => StoreBalanceTopUpStatus::Paid,
-                'provider_create_state' => 'provider_'.$evidence->rawStatus(),
+                'provider_create_state' => $lateSettlement
+                    ? 'reconciled_'.$evidence->rawStatus()
+                    : 'provider_'.$evidence->rawStatus(),
                 'paid_at' => $evidence->paidAt() ?? now(),
                 'settled_at' => now(),
             ])->save();
@@ -406,7 +413,7 @@ final class StoreBalanceTopUpService
 
             if ($mutation->applied) {
                 ($this->audit ?? app(AuditLogger::class))->logWithResolvedContext(
-                    'store_balance.top_up.settled',
+                    $lateSettlement ? 'store_balance.top_up.late_settled' : 'store_balance.top_up.settled',
                     $lockedTopUp,
                     old: ['status' => $previousStatus],
                     new: [
@@ -417,6 +424,7 @@ final class StoreBalanceTopUpService
                         'provider_event_id' => (int) $lockedEvent->getKey(),
                         'credit_entry_id' => $mutation->entryId,
                         'balance_after' => $mutation->balanceAfter,
+                        'late_settlement' => $lateSettlement,
                     ],
                 );
             }
@@ -601,10 +609,33 @@ final class StoreBalanceTopUpService
             StoreBalanceTopUpStatus::Payable,
             StoreBalanceTopUpStatus::AwaitingConfirmation,
         ], true)
-            && strtoupper(trim((string) $topUp->currency)) === 'IDR'
-            && in_array(strtoupper(trim((string) $topUp->provider_payment_method)), ['QRIS', 'QR_MANUAL'], true)
             && $topUp->expires_at?->isFuture() === true
             && $topUp->provider_expires_at?->isFuture() === true
+            && $this->settlementIdentityMatches($topUp, $evidence);
+    }
+
+    /**
+     * A verified provider success that arrives after the local deadline is
+     * still real money, so it settles the same credit instead of waiting for a
+     * manual owner compensation.
+     */
+    private function isEligibleForLateSettlement(
+        StoreBalanceTopUp $topUp,
+        StoreBalanceTopUpSettlementEvidence $evidence,
+    ): bool {
+        return ! in_array($topUp->status, [
+            StoreBalanceTopUpStatus::Paid,
+            StoreBalanceTopUpStatus::Compensated,
+        ], true)
+            && $this->settlementIdentityMatches($topUp, $evidence);
+    }
+
+    private function settlementIdentityMatches(
+        StoreBalanceTopUp $topUp,
+        StoreBalanceTopUpSettlementEvidence $evidence,
+    ): bool {
+        return strtoupper(trim((string) $topUp->currency)) === 'IDR'
+            && in_array(strtoupper(trim((string) $topUp->provider_payment_method)), ['QRIS', 'QR_MANUAL'], true)
             && $topUp->provider_fee !== null
             && $topUp->provider_total_payment !== null
             && (int) $topUp->provider_total_payment >= (int) $topUp->amount

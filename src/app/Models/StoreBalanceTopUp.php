@@ -129,6 +129,25 @@ class StoreBalanceTopUp extends Model
             && ($this->provider_created_at !== null || filled($this->provider_reference));
     }
 
+    public function isEligibleForOwnerAttention(): bool
+    {
+        if ($this->status === StoreBalanceTopUpStatus::Paid
+            || $this->status === StoreBalanceTopUpStatus::Compensated
+            || $this->compensation !== null) {
+            return false;
+        }
+
+        if (in_array($this->status, [
+            StoreBalanceTopUpStatus::RecoveryPending,
+            StoreBalanceTopUpStatus::InvalidProviderResult,
+        ], true)) {
+            return true;
+        }
+
+        return $this->status === StoreBalanceTopUpStatus::Expired
+            && filled($this->payment_proof_file_id);
+    }
+
     public function outboundEffects()
     {
         return $this->morphMany(TelegramOutboundEffect::class, 'source');

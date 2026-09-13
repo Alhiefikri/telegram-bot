@@ -53,6 +53,8 @@ class RecoverTelegramOutboundEffects extends Command
                 TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP,
                 TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT,
+                TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_OWNER_ALERT,
+                TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_CHANNEL_PROOF,
                 TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
                 TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD,
                 TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS,

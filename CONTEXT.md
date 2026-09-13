@@ -174,6 +174,14 @@ _Avoid_: automatic settlement, provider-confirmed top-up, ordinary pending Payme
 The provider together with the payment setting identity and version recorded on a Store Balance Top-up at funding confirmation. Every later lifecycle, presentation, recovery, settlement, and expiry decision reads this snapshot, so changing the Payment Provider Switch never rewrites, re-targets, or invalidates an existing top-up.
 _Avoid_: live provider selection, retroactive provider change, automatic provider fallback
 
+**Store Balance Late Settlement**:
+The settlement of one Store Balance Top-Up from trusted provider success observed after the top-up deadline had already passed, without waiting for an Owner compensation. It keeps the single credit identity, never reopens a compensated top-up, and is recorded apart from an in-window settlement.
+_Avoid_: Late Payment, compensation release, second credit
+
+**Store Balance Top-Up Proof Post**:
+A public Telegram channel post that announces a successfully settled Store Balance Top-Up using the same masked-buyer invoice photo and caption treatment as an order sales proof. It never publishes raw identifiers and never changes the published successful-order number.
+_Avoid_: Top-up receipt, sales report, revenue post
+
 **Store Balance Entry**:
 One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.
 _Avoid_: Transaction, balance mutation, adjustment row
