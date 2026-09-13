@@ -37,8 +37,10 @@ class AdminMenuTest extends TelegramBotTestSupport
         $keyboard = $home->data()['reply_markup']['inline_keyboard'];
         $this->assertSame('🛠️ Admin Dashboard', $keyboard[3][0]['text'] ?? null);
         $this->assertStringStartsWith('https://store.example/admin?v=', (string) ($keyboard[3][0]['web_app']['url'] ?? ''));
-        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR);
-        $this->assertStringNotContainsString('📊 Statistik', $encoded);
+        $this->assertSame('📊 Statistik', $keyboard[4][0]['text'] ?? null);
+        $this->assertSame('statistik_harian', $keyboard[4][0]['callback_data'] ?? null);
+        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        $this->assertStringNotContainsString('📊 Statistik Harian', $encoded);
         $this->assertStringNotContainsString('☰ Menu', $encoded);
         $this->assertStringNotContainsString('Akun Saya', $encoded);
         $this->assertArrayNotHasKey('keyboard', $home->data()['reply_markup']);
@@ -58,7 +60,9 @@ class AdminMenuTest extends TelegramBotTestSupport
         $keyboard = $home->data()['reply_markup']['inline_keyboard'];
         $this->assertSame('🛠️ Admin Dashboard', $keyboard[3][0]['text'] ?? null);
         $this->assertStringStartsWith('https://store.example/admin?source=telegram&v=', (string) ($keyboard[3][0]['web_app']['url'] ?? ''));
-        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertSame('📊 Statistik', $keyboard[4][0]['text'] ?? null);
+        $this->assertSame('statistik_harian', $keyboard[4][0]['callback_data'] ?? null);
+        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
         $this->assertStringNotContainsString('☰ Menu', $encoded);
         $this->assertStringNotContainsString('Akun Saya', $encoded);
     }
@@ -96,8 +100,9 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(306, '/start', ['id' => 999], 12345))->assertOk();
 
-        $encoded = json_encode($this->homeRequest(12345)->data()['reply_markup'], JSON_THROW_ON_ERROR);
+        $encoded = json_encode($this->homeRequest(12345)->data()['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
         $this->assertStringContainsString('Lihat Produk', $encoded);
+        $this->assertStringContainsString('📊 Statistik', $encoded);
         $this->assertStringNotContainsString('Admin Dashboard', $encoded);
         $this->assertStringNotContainsString('web_app', $encoded);
         $this->assertStringNotContainsString('localhost', $encoded);
@@ -142,10 +147,38 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->assertSame('💰 Saldo', $keyboard[1][0]['text'] ?? null);
         $this->assertSame('📦 Pesanan', $keyboard[1][1]['text'] ?? null);
         $this->assertCount(3, $keyboard);
-        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR);
+        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
         $this->assertStringNotContainsString('Admin Dashboard', $encoded);
+        $this->assertStringNotContainsString('📊 Statistik', $encoded);
         $this->assertStringNotContainsString('☰ Menu', $encoded);
         $this->assertStringNotContainsString('Akun Saya', $encoded);
+    }
+
+    public function test_admin_statistics_button_opens_three_period_report(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
+
+        $this->postTelegramWebhook($this->messageUpdate(318, '/start', ['id' => 999], 999))->assertOk();
+
+        $home = $this->homeRequest(999);
+        $button = $home->data()['reply_markup']['inline_keyboard'][4][0] ?? [];
+        $this->assertSame('📊 Statistik', $button['text'] ?? null);
+        $this->assertSame('statistik_harian', $button['callback_data'] ?? null);
+
+        $this->postTelegramWebhook(
+            $this->callbackUpdate(319, 'home-stats', (string) $button['callback_data'], ['id' => 999], 999),
+        )->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'home-stats');
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && str_contains((string) ($request['text'] ?? ''), '☀️ Hari Ini')
+            && str_contains((string) ($request['text'] ?? ''), '🗓 Minggu Ini')
+            && str_contains((string) ($request['text'] ?? ''), '📅 Bulan Ini'));
     }
 
     private function homeRequest(int $chatId): Request
@@ -543,7 +576,9 @@ class AdminMenuTest extends TelegramBotTestSupport
             && str_contains((string) $this->telegramRequestField($request, 'caption'), 'selamat datang di LHIE STORE')
             && ($request->data()['reply_markup']['inline_keyboard'][3][0]['text'] ?? null) === '🛠️ Admin Dashboard'
             && str_starts_with((string) ($request->data()['reply_markup']['inline_keyboard'][3][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v=')
-            && ! str_contains(json_encode($request->data()['reply_markup']), '📊 Statistik Harian'));
+            && ($request->data()['reply_markup']['inline_keyboard'][4][0]['text'] ?? null) === '📊 Statistik'
+            && ($request->data()['reply_markup']['inline_keyboard'][4][0]['callback_data'] ?? null) === 'statistik_harian'
+            && ! str_contains(json_encode($request->data()['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), '📊 Statistik Harian'));
     }
 
     public function test_start_welcome_hides_mini_app_dashboard_when_admin_url_is_local(): void
@@ -558,10 +593,11 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && str_contains((string) $this->telegramRequestField($request, 'caption'), 'selamat datang di LHIE STORE')
-            && str_contains(json_encode($request->data()['reply_markup'] ?? []), 'Lihat Produk')
-            && ! str_contains(json_encode($request->data()['reply_markup'] ?? []), 'Mini App Dashboard')
-            && ! str_contains(json_encode($request->data()['reply_markup'] ?? []), 'web_app')
-            && ! str_contains(json_encode($request->data()['reply_markup'] ?? []), 'localhost'));
+            && str_contains(json_encode($request->data()['reply_markup'] ?? [], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), 'Lihat Produk')
+            && str_contains(json_encode($request->data()['reply_markup'] ?? [], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), '📊 Statistik')
+            && ! str_contains(json_encode($request->data()['reply_markup'] ?? [], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), 'Mini App Dashboard')
+            && ! str_contains(json_encode($request->data()['reply_markup'] ?? [], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), 'web_app')
+            && ! str_contains(json_encode($request->data()['reply_markup'] ?? [], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), 'localhost'));
     }
 
     public function test_start_welcome_hides_mini_app_dashboard_from_non_admin(): void

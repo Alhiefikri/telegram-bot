@@ -654,6 +654,10 @@ class TelegramMenuIntents
             if ($adminButton !== null) {
                 $keyboard['inline_keyboard'][] = [$adminButton];
             }
+            $keyboard['inline_keyboard'][] = [[
+                'text' => '📊 Statistik',
+                'callback_data' => 'statistik_harian',
+            ]];
         }
 
         return $keyboard;
