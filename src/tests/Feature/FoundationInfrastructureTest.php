@@ -167,6 +167,11 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('COPY docker-scheduler.sh /usr/local/bin/docker-scheduler-laravel', $dockerfile);
         $this->assertStringContainsString('php artisan schedule:run', $script);
         $this->assertStringContainsString('storage/framework/scheduler-heartbeat', $script);
+        $this->assertLessThan(
+            strpos($script, 'if ! run_scheduler; then'),
+            strpos($script, '> "$HEARTBEAT_FILE"'),
+            'The scheduler heartbeat must be stamped before each schedule:run cycle.',
+        );
     }
 
     public function test_telegram_outbound_recovery_mutex_has_a_bounded_expiration(): void
