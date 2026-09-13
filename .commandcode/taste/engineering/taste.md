@@ -19,6 +19,8 @@
 
 ## Deployment / CI-CD workflow
 - Treats a deploy as finished only when verified against independent production evidence, not the CI conclusion alone: the live site's release SHA marker must equal the CI-green commit, the site must answer HTTP 200, and the running containers must use the image digest approved during CI. Confidence: 0.6
+- Wants CI/deploy workloads on GitHub-hosted runners, never self-hosted runners on his own low-spec hardware ("spek kentang"): builds, test containers and browser lanes must not compete with his VPS/host for CPU, memory or bandwidth, and keeping that host responsive outranks the convenience of a persistent runner cache. Confidence: 0.65
+- When a recent change degrades his environment, prefers restoring the previously working configuration (recovered from git history) over patching forward — e.g. "kembalikan deploy ssh pakai github ci kembali" — while keeping the deploy/release logic itself untouched. Confidence: 0.5
 - Deployment gates are repo-scripted and testable — release/redaction/concurrency guard shell scripts each have their own test script that is run locally before pushing. Confidence: 0.5
 - Never renames an already-applied migration; a duplicate timestamp prefix is resolved by renaming the later, not-yet-shipped migration (or allowlisting only prefixes already live), after confirming via local DB, migration history, and the current production SHA that it has never been applied anywhere. Confidence: 0.65
 
