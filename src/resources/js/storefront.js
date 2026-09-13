@@ -114,11 +114,28 @@ function initMobileMenu() {
 
   const isOpen = () => mobileMenu.getAttribute("aria-hidden") === "false";
   let opener = null;
+  let openFocusFrame = null;
+
+  const cancelPendingMenuFocus = () => {
+    if (openFocusFrame !== null) {
+      window.cancelAnimationFrame(openFocusFrame);
+      openFocusFrame = null;
+    }
+  };
+
+  const focusableOpener = () =>
+    opener instanceof HTMLElement &&
+    opener.isConnected &&
+    opener.offsetParent !== null
+      ? opener
+      : menuButton;
+
   const closeMenu = (restoreFocus = true) => {
     if (!isOpen()) {
       return;
     }
 
+    cancelPendingMenuFocus();
     toggleMobileMenu(
       mobileMenu,
       menuIconTop,
@@ -129,7 +146,7 @@ function initMobileMenu() {
       true
     );
     if (restoreFocus) {
-      (opener || menuButton).focus();
+      focusableOpener().focus();
     }
     opener = null;
   };
@@ -149,11 +166,17 @@ function initMobileMenu() {
       menuButton,
       backdrop
     );
-    window.requestAnimationFrame(() =>
+    cancelPendingMenuFocus();
+    openFocusFrame = window.requestAnimationFrame(() => {
+      openFocusFrame = null;
+      if (!isOpen()) {
+        return;
+      }
+
       (
         closeButton || mobileMenu.querySelector(STOREFRONT_FOCUSABLE_SELECTOR)
-      )?.focus()
-    );
+      )?.focus();
+    });
   });
 
   closeButton?.addEventListener("click", () => closeMenu());
