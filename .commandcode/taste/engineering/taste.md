@@ -14,6 +14,9 @@
 - Wants fixes to follow established best practices and be grounded in official library documentation — explicitly asks the agent to "refer context7" (the context7 MCP) for framework/API behaviour instead of ad-hoc patching. Confidence: 0.6
 - Expects a fixed defect to be locked down by exhaustive regression coverage of every condition, not just the reproduced case: a data-provider matrix over all relevant provider/system response variants (key missing/nulled/aliased, zero, contradictory aliases, negative/fractional values, HTTP failures, expired/success states, pre-fix stuck rows) plus end-to-end assertions on the money path, justified as preventing recurrence in production. Confidence: 0.75
 
+## Production debugging / auditing
+- Diagnoses production-only incidents against live evidence, but strictly read-only: he explicitly asks for a read-only production audit over SSH (host identity/time, deployed commit and working-tree state, memory/disk capacity, running containers, failed units, bounded log windows) and expects nothing on the production host or its data to be changed. Confidence: 0.55
+
 ## Deployment / CI-CD workflow
 - Treats a deploy as finished only when verified against independent production evidence, not the CI conclusion alone: the live site's release SHA marker must equal the CI-green commit, the site must answer HTTP 200, and the running containers must use the image digest approved during CI. Confidence: 0.6
 - Deployment gates are repo-scripted and testable — release/redaction/concurrency guard shell scripts each have their own test script that is run locally before pushing. Confidence: 0.5
