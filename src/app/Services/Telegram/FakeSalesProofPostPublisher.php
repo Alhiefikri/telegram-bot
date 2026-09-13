@@ -28,6 +28,7 @@ class FakeSalesProofPostPublisher
         private readonly TelegramBotClient $bot,
         private readonly SalesProofPostFormatter $formatter,
         private readonly SalesProofPostNumbering $numbering,
+        private readonly SalesProofStockSignal $stockSignal,
         private readonly StorefrontUrl $urls,
         private readonly PaidInvoiceRenderer $invoiceRenderer,
         private readonly PaidInvoiceSyntheticPresentationAdapter $invoicePresentation,
@@ -196,7 +197,7 @@ class FakeSalesProofPostPublisher
                 $chatId,
                 $invoice->bytes,
                 $invoice->filename,
-                $this->formatter->format($presentation, $this->fakeOrderNumber()),
+                $this->formatter->format($presentation, $this->fakeOrderNumber(), $this->stockSignal->forProduct($product)),
                 $this->shoppingButtonMarkup($product),
             );
             $this->responseValidator->messageIdFromResponse($response, 'Telegram fake Sales Proof');
@@ -263,7 +264,7 @@ class FakeSalesProofPostPublisher
      */
     private function availableProducts(): Builder
     {
-        return Product::query()->publicVisible()->availableForPurchase();
+        return Product::query()->withAvailability()->publicVisible()->availableForPurchase();
     }
 
     private function randomAvailableProduct(): ?Product

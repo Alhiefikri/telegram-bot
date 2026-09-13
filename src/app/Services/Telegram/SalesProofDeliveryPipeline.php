@@ -32,6 +32,7 @@ final class SalesProofDeliveryPipeline
         private readonly TelegramBotClient $bot,
         private readonly SalesProofPostFormatter $formatter,
         private readonly SalesProofPostNumbering $numbering,
+        private readonly SalesProofStockSignal $stockSignal,
         private readonly InventoryLedger $inventory,
         private readonly StorefrontUrl $urls,
         private readonly PaidInvoiceRenderer $invoiceRenderer,
@@ -80,6 +81,7 @@ final class SalesProofDeliveryPipeline
             if ($this->isPhotoEffect($claimed)) {
                 $presentation = $this->invoicePresentation->present($order);
                 $invoice = $this->invoiceRenderer->render($presentation);
+                $remainingStock = $this->stockSignal->forOrder($order);
                 $postNumber = $this->numbering->reserveNextNumber();
 
                 try {
@@ -87,7 +89,7 @@ final class SalesProofDeliveryPipeline
                         (string) $claimed->telegram_chat_id,
                         $invoice->bytes,
                         $invoice->filename,
-                        $this->formatter->format($presentation, $postNumber),
+                        $this->formatter->format($presentation, $postNumber, $remainingStock),
                         [
                             'inline_keyboard' => [[[
                                 'text' => '🛒 Shop Now',

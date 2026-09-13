@@ -254,10 +254,11 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
             && (string) $request['chat_id'] === '-100123'
             && str_contains((string) $request['text'], 'ChatGPT')
             && str_contains((string) $request['text'], 'SOLD OUT')
-            && str_contains((string) $request['text'], 'payment was successfully confirmed')
-            && str_contains((string) $request['text'], 'Thank you for your enthusiasm and trust')
-            && str_contains((string) $request['text'], 'cannot be ordered again for now')
-            && str_contains((string) $request['text'], 'Follow this channel for the next stock update')
+            && str_contains((string) $request['text'], 'The last unit was just taken')
+            && str_contains((string) $request['text'], 'Thank you for your trust')
+            && str_contains((string) $request['text'], 'Cannot be ordered for now.')
+            && str_contains((string) $request['text'], 'Follow this channel for the next restock')
+            && ! str_contains((string) $request['text'], 'available again')
             && ! str_contains((string) $request['text'], 'TERJUAL HABIS')
             && ! str_contains((string) $request['text'], 'Stok terakhir')
             && ! str_contains((string) $request['text'], 'invoice'));
@@ -505,7 +506,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
 
         $channelRecipient = StockNotificationRecipient::query()->where('recipient_type', 'store_channel')->sole();
         $this->assertNull($channelRecipient->locale);
-        $this->assertStringContainsString('☁️ ', (string) $channelRecipient->text);
+        $this->assertStringContainsString('📦 ', (string) $channelRecipient->text);
         $this->assertStringContainsString('➕ Added: 1', (string) $channelRecipient->text);
         $this->assertStringContainsString('📦 Current stock: 1', (string) $channelRecipient->text);
         $this->assertStringContainsString('💵 Unit price: Rp. 15.000', (string) $channelRecipient->text);
@@ -634,7 +635,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '-100123'
             && str_contains((string) $request['text'], 'ChatGPT Plus Private')
-            && str_contains((string) $request['text'], '☁️ ChatGPT Plus Private')
+            && str_contains((string) $request['text'], '📦 ChatGPT Plus Private')
             && str_contains((string) $request['text'], '➕ Added: 3')
             && str_contains((string) $request['text'], '📦 Current stock: 3')
             && str_contains((string) $request['text'], '💵 Unit price: Rp. 35.000 / $1.25')
@@ -654,7 +655,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '-100123'
-            && str_contains((string) $request['text'], '☁️ ChatGPT Plus Private')
+            && str_contains((string) $request['text'], '📦 ChatGPT Plus Private')
             && str_contains((string) $request['text'], '➕ Added: 2')
             && str_contains((string) $request['text'], '📦 Current stock: 5')
             && str_contains((string) $request['text'], '💵 Unit price: Rp. 35.000 / $1.25'));

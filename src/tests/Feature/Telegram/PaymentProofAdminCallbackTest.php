@@ -1108,6 +1108,59 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         }
     }
 
+    /** @return array<string, array{int, string|null}> */
+    public static function stockSignalCaptionCases(): array
+    {
+        return [
+            'units remain' => [3, '🔥 Only 2 left in stock'],
+            'last unit sold' => [1, null],
+        ];
+    }
+
+    #[DataProvider('stockSignalCaptionCases')]
+    public function test_sales_proof_caption_announces_remaining_units_only_while_stock_lasts(int $stock, ?string $expectedLine): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        config()->set('services.telegram.admin_user_id', '999');
+        StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 88]]),
+        ]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        $customer = Customer::factory()->create([
+            'telegram_id' => 123456789,
+            'first_name' => 'Gradit',
+            'username' => 'gradit',
+            'locale' => 'id',
+        ]);
+        $telegramFrom = ['id' => 123456789, 'first_name' => 'Gradit', 'username' => 'gradit'];
+        $product = Product::factory()->create(['name' => 'Gemini Pro Voucher', 'stock' => $stock, 'price_amount' => 8000]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+
+        $this->postTelegramWebhook($this->callbackUpdate(401, 'cb-stock-proof', 'checkout', from: $telegramFrom, chatId: 123456789))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(1401, 'cb-stock-proof-qris', 'checkout:current', from: $telegramFrom, chatId: 123456789))->assertOk();
+        $order = Order::firstOrFail();
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(402, $order->invoice_number, $telegramFrom, chatId: 123456789))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(403, 'approve-stock-proof', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+        app()->call([new PublishSalesProofPost($order->id), 'handle']);
+
+        $this->assertSame($stock - 1, $product->refresh()->availableStock());
+
+        $channelPhotos = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && (string) $this->telegramRequestField($request, 'chat_id') === '-100123');
+        $this->assertCount(1, $channelPhotos);
+        $caption = (string) $this->telegramRequestField($channelPhotos->first()[0], 'caption');
+
+        if ($expectedLine === null) {
+            $this->assertStringNotContainsString('left in stock', $caption);
+
+            return;
+        }
+
+        $this->assertStringContainsString($expectedLine, $caption);
+    }
+
     public function test_already_materialized_text_sales_proof_remains_dispatchable_after_photo_cutover(): void
     {
         StoreChannelSetting::create([

@@ -21,9 +21,9 @@ This plan captures the domain decisions and implementation slices for adding a S
 - The public Sales Proof Post is one English `sendPhoto` delivery: the shared
   public-safe invoice image plus an English caption with a masked Telegram
   buyer name (display name first, username fallback),
-  invoice/order ID, item summary, payment method, WIB completion time,
-  quantity, subtotal, amount paid, successful-order number, thanks, and the
-  `🛒 Shop Now` action.
+  invoice/order ID, item summary, an optional low-stock line, payment method,
+  WIB completion time, quantity, subtotal, amount paid, successful-order
+  number, thanks, and the `🛒 Shop Now` action.
 - Product category lists and search results show active products even when unavailable, using `✅` for available products and `❌` for unavailable products.
 
 - Unavailable products can be opened, but cannot be bought or added to cart.
@@ -127,12 +127,22 @@ Per-customer prompt reuse/deletion state:
    - `ORDER PAYMENT CONFIRMED`,
    - masked Telegram buyer name and full invoice/order ID,
    - one item line or bounded multi-item list,
+   - a `🔥 Only N left in stock` line only for a single-item order whose
+     Product is still public-visible with between one and five units left,
    - `Paid via` and English WIB completion time,
    - quantity, subtotal, amount paid, and successful-order number,
    - `Thank you for choosing Lhie Store.`,
 5. The bot sends one `sendPhoto` request with the shared invoice PNG, caption, and `🛒 Shop Now` action.
 6. Success stores Telegram `message_id` and marks the post `sent`.
 7. Definite failure increments attempts and remains retryable; ambiguous delivery becomes `unknown` and is never automatically resent. Finalization synchronizes the SalesProofPost projection without affecting the paid Order.
+
+The low-stock line is deliberately narrow and owned by
+`SalesProofStockSignal`: it reads mutable Product availability and hands a
+plain number to the formatter, so `PaidInvoicePresentation` stays immutable and
+the formatter stays a pure function of its inputs. The caption stays silent at
+zero remaining units because the Store Channel already publishes the dedicated
+sold-out post from the same inventory sale, and it stays silent for multi-item
+posts where the bounded item list would leave some Products without a number.
 
 Pre-cutover text effects remain an explicit compatibility exception only when
 their template is `sales-proof-post-v1`. The repair migration and runtime

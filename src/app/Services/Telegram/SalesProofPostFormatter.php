@@ -18,8 +18,12 @@ class SalesProofPostFormatter
      * Format the public English Store Channel caption for a photo-capable
      * Sales Proof. The input is already a public-safe immutable presentation,
      * so fake publication never needs a persisted Order.
+     *
+     * The optional remaining stock is a decision already made by
+     * SalesProofStockSignal; the formatter renders the scarcity line it is
+     * handed and never reads mutable Product state itself.
      */
-    public function format(PaidInvoicePresentation $presentation, ?int $successfulPostNumber = null): string
+    public function format(PaidInvoicePresentation $presentation, ?int $successfulPostNumber = null, ?int $remainingStock = null): string
     {
         $successfulPostNumber ??= $this->numbering->nextNumber();
         $items = $presentation->items;
@@ -29,20 +33,21 @@ class SalesProofPostFormatter
         ));
 
         $lines = [
-            'ORDER PAYMENT CONFIRMED',
+            '🎉 ORDER PAYMENT CONFIRMED',
             '',
-            'Buyer: '.$presentation->buyerName,
-            'Order ID: '.$presentation->invoiceId,
+            '👤 Buyer: '.$presentation->buyerName,
+            '🧾 Order ID: '.$presentation->invoiceId,
             ...$this->itemSummaryLines($items),
-            'Paid via: '.$presentation->paymentMethod,
-            'Completed: '.$presentation->paidAtWib(),
-            'Quantity: '.$quantity,
-            'Subtotal: '.$this->money($presentation->subtotal(), $presentation->currency),
-            'Amount paid: '.$this->money($presentation->totalPaid, $presentation->currency),
-            'Successful orders: #'.$successfulPostNumber,
+            ...$this->lowStockLines($remainingStock),
+            '💳 Paid via: '.$presentation->paymentMethod,
+            '🕒 Completed: '.$presentation->paidAtWib(),
+            '📦 Quantity: '.$quantity,
+            '💵 Subtotal: '.$this->money($presentation->subtotal(), $presentation->currency),
+            '💰 Amount paid: '.$this->money($presentation->totalPaid, $presentation->currency),
+            '🏆 Successful orders: #'.$successfulPostNumber,
             '',
             '━━━━━━━━━━━━━━',
-            'Thank you for choosing Lhie Store.',
+            '✨ Thank you for choosing Lhie Store.',
         ];
 
         return $this->boundedCaption($lines);
@@ -74,16 +79,16 @@ class SalesProofPostFormatter
     private function itemSummaryLines(array $items): array
     {
         if ($items === []) {
-            return ['Item: Digital product'];
+            return ['🛍️ Item: Digital product'];
         }
 
         if (count($items) === 1) {
             $item = $items[0];
 
-            return ['Item: '.$this->itemLabel($item)];
+            return ['🛍️ Item: '.$this->itemLabel($item)];
         }
 
-        $lines = ['Items:'];
+        $lines = ['🛍️ Items:'];
         $visibleItems = array_slice($items, 0, 6);
         foreach ($visibleItems as $item) {
             $lines[] = '• '.$this->itemLabel($item);
@@ -107,6 +112,14 @@ class SalesProofPostFormatter
         }
 
         return $name.' × '.max(0, (int) ($item['quantity'] ?? 0));
+    }
+
+    /** @return list<string> */
+    private function lowStockLines(?int $remainingStock): array
+    {
+        return $remainingStock === null || $remainingStock < 1
+            ? []
+            : ['🔥 Only '.$remainingStock.' left in stock'];
     }
 
     private function nextSuccessfulPostNumber(Order $order): int

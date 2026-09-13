@@ -164,6 +164,10 @@ canonical paid Payment; `PaidInvoiceSyntheticPresentationAdapter` reads one
 selected available Product in memory for Fake Sales Proof. Buyer receipts and
 real/fake Store Channel posts use the same renderer; fake publication never
 creates an Order, Payment, inventory movement, or durable Sales Proof effect.
+`SalesProofStockSignal` owns the optional low-stock line of the public caption:
+it reads mutable Product availability and passes a plain number into the
+formatter, so `PaidInvoicePresentation` keeps only immutable order/payment data
+and the caption never publishes a number that the sold-out post will contradict.
 
 ## 3. Ownership aturan bisnis
 

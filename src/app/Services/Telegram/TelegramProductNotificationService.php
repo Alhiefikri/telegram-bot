@@ -385,10 +385,9 @@ class TelegramProductNotificationService
             '━━━━━━━━━━━━━━',
             '',
             $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.confirmation'),
-            '',
             $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.thanks'),
-            $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.unavailable'),
             '',
+            $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.unavailable'),
             $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.follow_up'),
         ]);
     }
