@@ -807,6 +807,7 @@ SH);
         $this->assertStringContainsString('release-state.env', $release);
         $this->assertStringContainsString('release-journal.log', $release);
         $this->assertStringContainsString('GHCR_TOKEN: ${{ github.token }}', $contents);
+        $this->assertStringContainsString('ssh-keyscan -p "$PRODUCTION_SSH_PORT" -H "$PRODUCTION_HOST" >> ~/.ssh/known_hosts', $contents);
         $this->assertStringContainsString("docker login ghcr.io --username '\$GHCR_USERNAME' --password-stdin", $contents);
         $this->assertStringContainsString('docker logout ghcr.io', $contents);
         $this->assertStringNotContainsString('docker login ghcr.io', $release);

@@ -165,6 +165,7 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > ~/.ssh/production_key
           chmod 600 ~/.ssh/production_key
+          ssh-keyscan -p "$PRODUCTION_SSH_PORT" -H "$PRODUCTION_HOST" >> ~/.ssh/known_hosts
 
       - name: Authenticate VPS Docker to GHCR for this release
         env:
