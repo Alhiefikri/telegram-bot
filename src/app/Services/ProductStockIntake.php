@@ -29,8 +29,6 @@ final class ProductStockIntake
 {
     private const MAX_STRUCTURED_ITEMS = 20;
 
-    private const MAX_LEGACY_CHARACTERS = 5000;
-
     public function __construct(
         private readonly AuditLogger $auditLogger,
         private readonly StockNotificationDeliveryPipeline $stockNotifications,
@@ -363,7 +361,6 @@ final class ProductStockIntake
         $errors = [];
         $items = [];
         $canonicalItems = [];
-        $rawLength = 0;
 
         foreach ($submission->items() as $index => $value) {
             if (! is_string($value)) {
@@ -376,7 +373,6 @@ final class ProductStockIntake
             if ($secret === '') {
                 continue;
             }
-            $rawLength += strlen($secret) + ($rawLength === 0 ? 0 : 1);
             $identities = $this->legacyIdentities($secret);
             $items[] = [
                 'index' => (int) $index,
@@ -388,9 +384,6 @@ final class ProductStockIntake
             $canonicalItems[] = ['secret' => $secret];
         }
 
-        if ($rawLength > self::MAX_LEGACY_CHARACTERS) {
-            $errors['stock_items'][] = 'Catatan stok maksimal 5000 karakter.';
-        }
         if ($items === []) {
             $errors['stock_items'][] = 'Isi minimal satu baris stok.';
         }
@@ -424,7 +417,6 @@ final class ProductStockIntake
         $errors = [];
         $items = [];
         $canonicalItems = [];
-        $rawLength = 0;
 
         foreach ($submission->items() as $index => $value) {
             if (! is_string($value)) {
@@ -438,7 +430,6 @@ final class ProductStockIntake
                 continue;
             }
 
-            $rawLength += strlen($secret) + ($rawLength === 0 ? 0 : 1);
             $parts = $this->bulkTripletParts($secret);
             if ($parts === null) {
                 $errors["stock_items.{$index}"][] = 'Format baris harus email|password|MFA secret.';
@@ -456,9 +447,6 @@ final class ProductStockIntake
             $canonicalItems[] = ['secret' => $secret];
         }
 
-        if ($rawLength > self::MAX_LEGACY_CHARACTERS) {
-            $errors['stock_items'][] = 'Catatan stok maksimal 5000 karakter.';
-        }
         if ($items === []) {
             $errors['stock_items'][] = 'Isi minimal satu baris stok.';
         }
@@ -491,7 +479,6 @@ final class ProductStockIntake
         $errors = [];
         $items = [];
         $canonicalItems = [];
-        $rawLength = 0;
 
         foreach ($submission->items() as $index => $value) {
             if (! is_string($value)) {
@@ -505,7 +492,6 @@ final class ProductStockIntake
                 continue;
             }
 
-            $rawLength += strlen($secret) + ($rawLength === 0 ? 0 : 1);
             $parts = $this->bulkReaderMailLinkParts($secret);
             if ($parts === null) {
                 $errors["stock_items.{$index}"][] = 'Format baris harus email|password|token|link atau email|password|email|password|token|UUID|link.';
@@ -538,9 +524,6 @@ final class ProductStockIntake
             $canonicalItems[] = $payload->toArray();
         }
 
-        if ($rawLength > self::MAX_LEGACY_CHARACTERS) {
-            $errors['stock_items'][] = 'Catatan stok maksimal 5000 karakter.';
-        }
         if ($items === []) {
             $errors['stock_items'][] = 'Isi minimal satu baris stok.';
         }
@@ -573,7 +556,6 @@ final class ProductStockIntake
         $errors = [];
         $items = [];
         $canonicalItems = [];
-        $rawLength = 0;
 
         foreach ($submission->items() as $index => $value) {
             if (! is_string($value)) {
@@ -587,7 +569,6 @@ final class ProductStockIntake
                 continue;
             }
 
-            $rawLength += strlen($secret) + ($rawLength === 0 ? 0 : 1);
             $parts = $this->bulkAccessTokenParts($secret);
             if ($parts === null) {
                 $errors["stock_items.{$index}"][] = 'Format baris harus email|password|akses token.';
@@ -618,9 +599,6 @@ final class ProductStockIntake
             $canonicalItems[] = $payload->toArray();
         }
 
-        if ($rawLength > self::MAX_LEGACY_CHARACTERS) {
-            $errors['stock_items'][] = 'Catatan stok maksimal 5000 karakter.';
-        }
         if ($items === []) {
             $errors['stock_items'][] = 'Isi minimal satu baris stok.';
         }

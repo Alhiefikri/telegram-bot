@@ -380,6 +380,7 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSeeInOrder(['Bagikan', 'Pause', 'Arsipkan'])
             ->assertSee('Tambah kategori')
             ->assertSee('Kelola stok')
+            ->assertSee('Tidak ada batas total karakter pada Input Cepat.')
             ->assertSee('available@example.test|pass')
             ->assertSee('claimed@example.test|pass')
             ->assertSee('bg-[#ef4444] text-white', false)
@@ -640,6 +641,37 @@ class AdminDashboardStockFlowsTest extends TestCase
         );
     }
 
+    public function test_admin_can_add_20_bulk_reader_mail_links_over_5000_characters(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+        $rows = array_map(
+            static fn (int $index): string => sprintf(
+                'reader-%02d@example.test|Reader-password-%02d|READER-TOKEN-%02d|https://serviceactivation.google.com/subscription/new/%s',
+                $index,
+                $index,
+                $index,
+                str_repeat('A', 580).sprintf('%02d', $index),
+            ),
+            range(1, 20),
+        );
+        $stockItems = implode("\n", $rows);
+
+        $this->assertGreaterThan(5000, strlen($stockItems));
+
+        $response = $this->actingAs($admin)
+            ->post(route('admin.products.stock.store', $product), [
+                'stock_format' => ProductStockIntakeSubmission::BULK_FORMAT_READER_MAIL_LINK,
+                'stock_items' => $stockItems,
+            ]);
+
+        $this->assertSame(302, $response->getStatusCode());
+        $this->assertSame(route('admin.dashboard', ['tab' => 'produk']).'#product-'.$product->id, $response->headers->get('Location'));
+
+        $this->assertSame(20, $product->fresh()->stock);
+        $this->assertSame(20, ProductStockItem::query()->where('product_id', $product->id)->count());
+    }
+
     public function test_add_stock_response_does_not_wait_for_slow_telegram_delivery(): void
     {
         Queue::fake([SendProductStockNotifications::class]);
@@ -767,6 +799,7 @@ class AdminDashboardStockFlowsTest extends TestCase
 
         $this->from('/admin?tab=produk')
             ->post(route('admin.products.stock.store', $product), [
+                'stock_format' => ProductStockIntakeSubmission::BULK_FORMAT_MFA_SECRET,
                 'stock_items' => $submittedSecret,
             ])
             ->assertRedirect(route('admin.dashboard', ['tab' => 'produk']))

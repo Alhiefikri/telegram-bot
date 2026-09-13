@@ -102,6 +102,7 @@
                                         x-ref="stockItems"
                                         required
                                     />
+                                    <p class="mt-1.5 text-[10px] font-bold leading-4 text-neo-ink/70">Tidak ada batas total karakter pada Input Cepat. Tempel satu baris untuk setiap stok; server tetap memvalidasi format dan link tiap baris.</p>
 
                                     @error('stock_items', 'stockAdjustment')
                                         <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
