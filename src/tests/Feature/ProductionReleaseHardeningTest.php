@@ -220,11 +220,42 @@ class ProductionReleaseHardeningTest extends TestCase
             ->expectsOutputToContain('OK queue depth 1')
             ->assertSuccessful();
 
-        DB::table('jobs')->update(['created_at' => now()->subMinutes(3)->timestamp]);
+        DB::table('jobs')->update([
+            'created_at' => now()->subMinutes(3)->timestamp,
+            'available_at' => now()->subMinutes(3)->timestamp,
+        ]);
 
         $this->artisan('ops:check-queue-depth --max=50 --max-oldest-age=120')
             ->expectsOutputToContain('exceeds thresholds max 50, max oldest age 120s')
             ->assertFailed();
+    }
+
+    public function test_queue_depth_monitor_ignores_retry_backoff_and_in_flight_jobs(): void
+    {
+        $stuckTimestamp = now()->subMinutes(10)->timestamp;
+
+        DB::table('jobs')->insert([
+            [
+                'queue' => 'default',
+                'payload' => '{}',
+                'attempts' => 1,
+                'reserved_at' => null,
+                'available_at' => now()->addMinutes(5)->timestamp,
+                'created_at' => $stuckTimestamp,
+            ],
+            [
+                'queue' => 'default',
+                'payload' => '{}',
+                'attempts' => 1,
+                'reserved_at' => now()->timestamp,
+                'available_at' => $stuckTimestamp,
+                'created_at' => $stuckTimestamp,
+            ],
+        ]);
+
+        $this->artisan('ops:check-queue-depth --max=50 --max-oldest-age=120')
+            ->expectsOutputToContain('OK queue depth 0 (oldest age 0s)')
+            ->assertSuccessful();
     }
 
     public function test_telegram_webhook_check_is_secret_safe_and_fails_on_pending_updates(): void

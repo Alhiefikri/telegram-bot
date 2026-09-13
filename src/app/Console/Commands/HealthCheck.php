@@ -73,10 +73,13 @@ class HealthCheck extends Command
         if ($this->option('queue-depth')) {
             try {
                 foreach ($this->operationalQueues() as $queue) {
-                    $query = DB::table('jobs')->where('queue', $queue);
+                    $query = DB::table('jobs')
+                        ->where('queue', $queue)
+                        ->whereNull('reserved_at')
+                        ->where('available_at', '<=', now()->timestamp);
                     $count = (int) $query->count();
-                    $oldestCreatedAt = $count > 0 ? $query->min('created_at') : null;
-                    $oldestAge = $oldestCreatedAt === null ? 0 : max(0, now()->timestamp - (int) $oldestCreatedAt);
+                    $oldestAvailableAt = $count > 0 ? $query->min('available_at') : null;
+                    $oldestAge = $oldestAvailableAt === null ? 0 : max(0, now()->timestamp - (int) $oldestAvailableAt);
 
                     $this->info("Queue {$queue}: depth={$count} oldest_age={$oldestAge}s");
                 }

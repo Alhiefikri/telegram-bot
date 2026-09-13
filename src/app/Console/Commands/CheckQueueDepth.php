@@ -9,11 +9,11 @@ use Throwable;
 class CheckQueueDepth extends Command
 {
     protected $signature = 'ops:check-queue-depth
-        {--max=0 : Maximum acceptable queued job count}
-        {--max-oldest-age=0 : Maximum age in seconds for the oldest queued job; zero requires an empty queue}
+        {--max=0 : Maximum acceptable runnable queued job count}
+        {--max-oldest-age=0 : Maximum seconds the oldest runnable job may wait; zero requires no runnable job}
         {--queue=* : Queue name to include; repeatable. Defaults to all queues}';
 
-    protected $description = 'Alert when queued jobs exceeds the configured threshold.';
+    protected $description = 'Alert when runnable queued jobs (not reserved, due now) exceeds the configured threshold.';
 
     public function handle(): int
     {
@@ -31,14 +31,20 @@ class CheckQueueDepth extends Command
         }
 
         try {
-            $query = DB::table('jobs');
+            // Only work a worker could pick up right now counts as backlog:
+            // reserved jobs are in flight, and delayed or retry-backoff jobs
+            // are intentionally sleeping, so their original created_at age
+            // must not be mistaken for an unprocessed queue.
+            $query = DB::table('jobs')
+                ->whereNull('reserved_at')
+                ->where('available_at', '<=', now()->timestamp);
 
             if ($queues !== []) {
                 $query->whereIn('queue', $queues);
             }
 
             $count = $query->count();
-            $oldestCreatedAt = $count > 0 ? $query->min('created_at') : null;
+            $oldestAvailableAt = $count > 0 ? $query->min('available_at') : null;
         } catch (Throwable $e) {
             $this->error('ALERT queue depth check could not query database: '.$e->getMessage());
 
@@ -47,7 +53,7 @@ class CheckQueueDepth extends Command
 
         $scope = $queues === [] ? 'all queues' : 'queues '.implode(',', $queues);
 
-        $oldestAge = $oldestCreatedAt === null ? 0 : max(0, now()->timestamp - (int) $oldestCreatedAt);
+        $oldestAge = $oldestAvailableAt === null ? 0 : max(0, now()->timestamp - (int) $oldestAvailableAt);
 
         if ($count > $max || $oldestAge > $maxOldestAge) {
             $this->error("ALERT queue depth {$count} (oldest age {$oldestAge}s) exceeds thresholds max {$max}, max oldest age {$maxOldestAge}s for {$scope}.");

@@ -9,6 +9,7 @@ use App\Providers\AppServiceProvider;
 use App\Services\Telegram\TelegramBotClient;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -123,6 +124,25 @@ class FoundationInfrastructureTest extends TestCase
                 $table->unsignedInteger('created_at');
             });
         }
+
+        DB::table('jobs')->insert([
+            [
+                'queue' => 'default',
+                'payload' => '{}',
+                'attempts' => 1,
+                'reserved_at' => null,
+                'available_at' => now()->addMinutes(5)->timestamp,
+                'created_at' => now()->subMinutes(10)->timestamp,
+            ],
+            [
+                'queue' => 'default',
+                'payload' => '{}',
+                'attempts' => 1,
+                'reserved_at' => now()->timestamp,
+                'available_at' => now()->subMinutes(10)->timestamp,
+                'created_at' => now()->subMinutes(10)->timestamp,
+            ],
+        ]);
 
         $this->artisan('ops:health --queue-depth')
             ->expectsOutput('Queue payments: depth=0 oldest_age=0s')
