@@ -164,9 +164,11 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(318, '/start', ['id' => 999], 999))->assertOk();
 
         $home = $this->homeRequest(999);
-        $button = $home->data()['reply_markup']['inline_keyboard'][4][0] ?? [];
-        $this->assertSame('📊 Statistik', $button['text'] ?? null);
-        $this->assertSame('statistik_harian', $button['callback_data'] ?? null);
+        $button = collect($home->data()['reply_markup']['inline_keyboard'])
+            ->flatten(1)
+            ->firstWhere('callback_data', 'statistik_harian');
+        $this->assertNotNull($button, 'The admin home keyboard must expose the statistics shortcut.');
+        $this->assertSame('📊 Statistik', $button['text']);
 
         $this->postTelegramWebhook(
             $this->callbackUpdate(319, 'home-stats', (string) $button['callback_data'], ['id' => 999], 999),
