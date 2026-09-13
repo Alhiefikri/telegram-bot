@@ -13,7 +13,6 @@ use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\StoreBalance\StoreBalanceActivityDetail;
 use App\Services\StoreBalance\StoreBalanceActivityItem;
 use App\Services\StoreBalance\StoreBalanceActivityPage;
-use App\Services\StoreBalance\StoreBalanceActivityService;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
@@ -38,7 +37,6 @@ class TelegramMenuIntents
         private TelegramWelcomeBanner $banner,
         private TelegramHtmlCaption $captions,
         private StoreBalanceLedger $balances,
-        private StoreBalanceActivityService $activities,
         private TelegramBalanceActivityToken $activityTokens,
         private StoreBalanceFundingPolicyManager $fundingPolicies,
     ) {}
@@ -137,9 +135,8 @@ class TelegramMenuIntents
     public function balanceSurface(Customer $customer): TelegramNavigationSurface
     {
         $balance = $this->balances->snapshot($customer);
-        $page = $balance->isAvailable() ? $this->activities->firstPage($customer) : null;
 
-        return $this->renderBalanceSurface($customer, $balance, $page);
+        return $this->renderBalanceSurface($customer, $balance, null);
     }
 
     public function balanceActivitySurface(
@@ -280,9 +277,28 @@ class TelegramMenuIntents
             );
         }
 
+        if ($page === null) {
+            return new TelegramNavigationSurface(
+                TelegramNavigationScreen::Balance,
+                $this->locale->code($customer),
+                $this->captions->html(implode("\n", $lines)),
+                ['inline_keyboard' => [
+                    [[
+                        'text' => $this->locale->translate($customer, 'balance.add'),
+                        'callback_data' => 'balance:add',
+                    ]],
+                    [[
+                        'text' => $this->locale->translate($customer, 'balance.activity.view'),
+                        'callback_data' => 'balance:activity',
+                    ]],
+                    $this->navigationRow($customer),
+                ]],
+            );
+        }
+
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'balance.activity.title');
-        if ($page === null || $page->isEmpty()) {
+        if ($page->isEmpty()) {
             $lines[] = $this->locale->translate($customer, 'balance.activity.empty');
         } else {
             foreach ($page->items as $index => $item) {
@@ -305,42 +321,40 @@ class TelegramMenuIntents
             'text' => $this->locale->translate($customer, 'balance.add'),
             'callback_data' => 'balance:add',
         ]], $this->navigationRow($customer)];
-        if ($page !== null) {
-            foreach ($page->items as $item) {
-                $keyboard[] = [[
-                    'text' => $this->locale->translate($customer, 'balance.activity.detail_button', [
-                        'reference' => $item->reference,
-                    ]),
-                    'callback_data' => 'balance:a:d:'.$this->activityTokens->detailToken(
-                        $customer->id,
-                        $item->type,
-                        $item->id,
-                    ),
-                ]];
-            }
+        foreach ($page->items as $item) {
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'balance.activity.detail_button', [
+                    'reference' => $item->reference,
+                ]),
+                'callback_data' => 'balance:a:d:'.$this->activityTokens->detailToken(
+                    $customer->id,
+                    $item->type,
+                    $item->id,
+                ),
+            ]];
+        }
 
-            $paging = [];
-            if ($page->hasNewer && $page->newerCursor !== null) {
-                $paging[] = [
-                    'text' => $this->locale->translate($customer, 'balance.activity.newer'),
-                    'callback_data' => 'balance:a:n:'.$this->activityTokens->cursorToken(
-                        $customer->id,
-                        $page->newerCursor,
-                    ),
-                ];
-            }
-            if ($page->hasOlder && $page->olderCursor !== null) {
-                $paging[] = [
-                    'text' => $this->locale->translate($customer, 'balance.activity.older'),
-                    'callback_data' => 'balance:a:o:'.$this->activityTokens->cursorToken(
-                        $customer->id,
-                        $page->olderCursor,
-                    ),
-                ];
-            }
-            if ($paging !== []) {
-                $keyboard[] = $paging;
-            }
+        $paging = [];
+        if ($page->hasNewer && $page->newerCursor !== null) {
+            $paging[] = [
+                'text' => $this->locale->translate($customer, 'balance.activity.newer'),
+                'callback_data' => 'balance:a:n:'.$this->activityTokens->cursorToken(
+                    $customer->id,
+                    $page->newerCursor,
+                ),
+            ];
+        }
+        if ($page->hasOlder && $page->olderCursor !== null) {
+            $paging[] = [
+                'text' => $this->locale->translate($customer, 'balance.activity.older'),
+                'callback_data' => 'balance:a:o:'.$this->activityTokens->cursorToken(
+                    $customer->id,
+                    $page->olderCursor,
+                ),
+            ];
+        }
+        if ($paging !== []) {
+            $keyboard[] = $paging;
         }
 
         return new TelegramNavigationSurface(

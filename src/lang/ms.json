@@ -29,6 +29,7 @@
   "balance.title": "💰 Baki Saya",
   "balance.available": "Baki tersedia: :balance",
   "balance.add": "➕ Tambah Baki",
+  "balance.activity.view": "📋 Lihat aktiviti",
   "balance.activity.title": "Aktiviti terkini",
   "balance.activity.empty": "Belum ada aktiviti Baki.",
   "balance.activity.unavailable": "Aktiviti disembunyikan sementara semasa baki disahkan.",

@@ -95,6 +95,8 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
             ->assertSuccessful();
         $effect->refresh();
         $this->assertSame('sent', $effect->state->value);
+        $instructionMessageId = (int) $effect->telegram_message_id;
+        $this->assertGreaterThan(0, $instructionMessageId);
         $photo = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->last()[0];
         $caption = (string) $this->telegramRequestField($photo, 'caption');
         $this->assertStringContainsString('Balance credit after payment confirmation: Rp5.000', $caption);
@@ -109,6 +111,12 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
             'status' => 'SUCCESS',
             'signature' => 'top-up-signature',
         ])->assertOk();
+        $this->artisan('queue:work database --queue=notifications --once --tries=1')
+            ->assertSuccessful();
+        $this->assertTrue(Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/deleteMessage')
+            && (string) ($request['chat_id'] ?? '') === '46201'
+            && (string) ($request['message_id'] ?? '') === (string) $instructionMessageId)->isNotEmpty());
+        $this->assertNotNull($effect->fresh()->telegram_message_deleted_at);
 
         $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
         $this->assertSame(1, $statusCalls);

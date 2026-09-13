@@ -109,11 +109,20 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->assertSame($root->message_id, (int) $edit['message_id']);
         $this->assertStringContainsString('💰 Saldo Saya', $this->editCopy($edit));
         $this->assertStringContainsString('Saldo tersedia: Rp 25.000', $this->editCopy($edit));
+        $this->assertStringNotContainsString('Aktivitas terbaru', $this->editCopy($edit));
         $keyboard = $edit['reply_markup']['inline_keyboard'];
         $this->assertSame('balance:add', $keyboard[0][0]['callback_data']);
-        $this->assertSame(['menu:back', 'menu:home'], array_column($keyboard[1], 'callback_data'));
+        $this->assertSame('balance:activity', $keyboard[1][0]['callback_data']);
+        $this->assertSame(['menu:back', 'menu:home'], array_column($keyboard[2], 'callback_data'));
 
-        $this->postTelegramWebhook($this->callbackUpdate(45413, 'balance-add', 'balance:add', [], 45411, 'private', $root->message_id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(45413, 'balance-activity', 'balance:activity', [], 45411, 'private', $root->message_id))->assertOk();
+
+        $activityEdit = $this->lastCanonicalEdit(45411);
+        $this->assertSame($root->message_id, (int) $activityEdit['message_id']);
+        $this->assertStringContainsString('Aktivitas terbaru', $this->editCopy($activityEdit));
+        $this->assertStringContainsString('Referensi: #1', $this->editCopy($activityEdit));
+
+        $this->postTelegramWebhook($this->callbackUpdate(45414, 'balance-add', 'balance:add', [], 45411, 'private', $root->message_id))->assertOk();
 
         $addEdit = $this->lastCanonicalEdit(45411);
         $this->assertSame($root->message_id, (int) $addEdit['message_id']);
@@ -137,7 +146,8 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
             && ($request['callback_query_id'] ?? null) === 'balance-add');
 
-        $this->postTelegramWebhook($this->callbackUpdate(45414, 'balance-preset', $presetRows[0][0]['callback_data'], [], 45411, 'private', $root->message_id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(45415, 'balance-preset', $presetRows[0][0]['callback_data'], [], 45411, 'private', $root->message_id))->assertOk();
+
         $confirmation = $this->lastCanonicalEdit(45411);
         $this->assertStringContainsString('Saldo yang dikreditkan: Rp 5.000', $this->editCopy($confirmation));
         $this->assertStringContainsString('Biaya layanan dan total pembayaran akhir ditentukan setelah konfirmasi.', $this->editCopy($confirmation));
@@ -150,19 +160,19 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         ]);
         $this->assertSame(1, StoreBalanceFundingIntent::query()->count());
         $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::TopUpCredit)->count());
-        $this->assertSame(3, $this->editCount(45411), 'Preset selection must edit the canonical message.');
+        $this->assertSame(4, $this->editCount(45411), 'Preset selection must edit the canonical message.');
         $this->assertSame(1, $this->routineMessageCount(45411), 'Preset selection must not send a second message.');
         $nonce = StoreBalanceFundingIntent::query()->sole()->nonce;
-        $this->postTelegramWebhook($this->callbackUpdate(45415, 'balance-preset-replay', $presetRows[0][0]['callback_data'], [], 45411, 'private', $root->message_id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(45416, 'balance-preset-replay', $presetRows[0][0]['callback_data'], [], 45411, 'private', $root->message_id))->assertOk();
         $this->assertSame(1, StoreBalanceFundingIntent::query()->count());
         $this->assertSame($nonce, StoreBalanceFundingIntent::query()->sole()->nonce);
-        $this->assertSame(4, $this->editCount(45411), 'Repeated preset selection must reuse the canonical confirmation.');
+        $this->assertSame(5, $this->editCount(45411), 'Repeated preset selection must reuse the canonical confirmation.');
         $this->assertSame(1, $this->routineMessageCount(45411));
 
-        $this->postTelegramWebhook($this->callbackUpdate(45416, 'balance-back', 'menu:back', [], 45411, 'private', $root->message_id))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(45417, 'balance-back', 'menu:back', [], 45411, 'private', $root->message_id))->assertOk();
         $this->assertSame($root->message_id, (int) $this->lastCanonicalEdit(45411)['message_id']);
         $this->assertSame(TelegramNavigationScreen::Home, $root->fresh()->screen);
-        $this->assertSame(5, $this->editCount(45411), 'Back must reuse the canonical message.');
+        $this->assertSame(6, $this->editCount(45411), 'Back must reuse the canonical message.');
         $this->assertSame(1, $this->routineMessageCount(45411));
     }
 

@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Enums\StoreBalanceTopUpStatus;
+use App\Jobs\DeleteStoreBalanceTopUpInstruction;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
@@ -109,6 +110,13 @@ final class BalanceTopUpInstructionDeliveryPipeline
                     'delivery_method' => 'sendPhoto',
                 ],
             );
+            $topUp->refresh();
+            if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
+                DeleteStoreBalanceTopUpInstruction::dispatch(
+                    (string) $topUp->getKey(),
+                    now()->toISOString(),
+                )->onQueue('notifications');
+            }
         } catch (Throwable $exception) {
             if ($this->ledger->isAmbiguous($exception)) {
                 $this->ledger->finalizeUnknown(

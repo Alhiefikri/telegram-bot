@@ -29,6 +29,7 @@
   "balance.title": "💰 Saldo Saya",
   "balance.available": "Saldo tersedia: :balance",
   "balance.add": "➕ Tambah Saldo",
+  "balance.activity.view": "📋 Lihat aktivitas",
   "balance.activity.title": "Aktivitas terbaru",
   "balance.activity.empty": "Belum ada aktivitas Saldo.",
   "balance.activity.unavailable": "Aktivitas disembunyikan sementara saat saldo sedang diverifikasi.",

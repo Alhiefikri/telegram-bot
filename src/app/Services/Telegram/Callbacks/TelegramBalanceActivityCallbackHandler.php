@@ -17,6 +17,8 @@ use App\Services\Telegram\TelegramNavigationSurface;
 
 final class TelegramBalanceActivityCallbackHandler implements TelegramCallbackHandler
 {
+    private const OPEN = 'balance:activity';
+
     private const OLDER_PREFIX = 'balance:a:o:';
 
     private const NEWER_PREFIX = 'balance:a:n:';
@@ -46,7 +48,8 @@ final class TelegramBalanceActivityCallbackHandler implements TelegramCallbackHa
 
     public function supports(TelegramCallbackContext $context): bool
     {
-        return $this->tokenFor($context->data, self::OLDER_PREFIX) !== null
+        return $context->data === self::OPEN
+            || $this->tokenFor($context->data, self::OLDER_PREFIX) !== null
             || $this->tokenFor($context->data, self::NEWER_PREFIX) !== null
             || $this->tokenFor($context->data, self::DETAIL_PREFIX) !== null;
     }
@@ -81,6 +84,13 @@ final class TelegramBalanceActivityCallbackHandler implements TelegramCallbackHa
 
     private function surfaceFor(TelegramCallbackContext $context): TelegramNavigationSurface
     {
+        if ($context->data === self::OPEN) {
+            return $this->menu->balanceActivitySurface(
+                $context->customer,
+                $this->activities->firstPage($context->customer),
+            );
+        }
+
         $data = $context->data;
         foreach ([self::OLDER_PREFIX, self::NEWER_PREFIX] as $prefix) {
             $token = $this->tokenFor($data, $prefix);

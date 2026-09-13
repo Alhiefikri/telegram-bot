@@ -95,10 +95,12 @@ it, to a job, or to a family adapter.
 `StoreBalanceTopUpOutbound` is the family boundary for Store Balance top-up
 instructions and receipts. It owns source eligibility, deterministic effect
 identity, materialization and dispatch handoff, plus safe navigation matches
-for sent instruction and receipt messages. Interactive callbacks consume these
-safe outcomes; they do not inspect `TelegramOutboundEffectState` or query
-Store Balance effects themselves. Delivery-state transitions remain owned by
-the shared ledger protocol.
+for sent instruction and receipt messages. `StoreBalanceTopUpInstructionCleaner`
+owns the separate post-settlement deletion claim for a sent instruction
+message. Interactive callbacks consume these safe outcomes; they do not
+inspect `TelegramOutboundEffectState` or query Store Balance effects
+themselves. Delivery-state transitions remain owned by the shared ledger
+protocol.
 
 The review service and review projection are a narrow adapter for operator
 actions across families. They reuse the ledger protocol and do not introduce a
@@ -112,7 +114,7 @@ transport details, and synchronization of its own read projection:
 | Family | Adapter responsibility | Queue boundary |
 | --- | --- | --- |
 | Checkout instructions | Provider-specific instruction rendering and customer Order notification projection | telegram-outbound |
-| Store Balance top-up | Instruction and receipt eligibility, deterministic handoff, and callback navigation matching | telegram-outbound |
+| Store Balance top-up | Instruction and receipt eligibility, deterministic handoff, callback navigation matching, and post-settlement instruction cleanup | telegram-outbound / notifications |
 | Store Balance top-up payment proof | Manual-rail customer payment proof forwarded to the admin chat with operator approve/reject actions and admin projection | notifications |
 | Receipt credentials | Ordered chunk rendering, credential delivery projection, and completion cleanup | telegram-outbound / notifications |
 | Admin Order notifications | Pending, paid, and expired admin projections | telegram-outbound / notifications |
@@ -148,14 +150,18 @@ effect; telegram:recover-outbound can find it.
 Store Balance settlement is a deferred-materialization exception. The
 `StoreBalanceTopUpService` transaction commits the authoritative top-up and
 ledger state, then emits `StoreBalanceTopUpSettled`. The after-commit
-`MaterializeStoreBalanceTopUpReceipt` listener reloads the committed source
-and invokes `StoreBalanceTopUpOutbound::handoffReceipt`; it does not own
-effect identity or delivery policy. Interactive confirmation and top-up
-action callbacks invoke `handoffInstructions` only after the KlikQRIS
-lifecycle returns both `isPayable()` and a non-null `payable()` value. If the
-listener handoff is missed, the same family discovers and repairs the missing
-receipt (and instruction) effect during recovery without running Telegram work
-under financial locks.
+`MaterializeStoreBalanceTopUpReceipt` listener reloads the committed source,
+invokes `StoreBalanceTopUpOutbound::handoffReceipt`, and queues
+`DeleteStoreBalanceTopUpInstruction` on the `notifications` queue. That cleanup
+job deletes a previously sent QR instruction through
+`StoreBalanceTopUpInstructionCleaner`; a delivery race also queues the same
+cleanup after an instruction send observes that settlement already committed.
+The listener does not own effect identity or delivery policy. Interactive
+confirmation and top-up action callbacks invoke `handoffInstructions` only
+after the KlikQRIS lifecycle returns both `isPayable()` and a non-null
+`payable()` value. If the listener handoff is missed, the same family discovers
+and repairs the missing receipt (and instruction) effect during recovery without
+running Telegram work under financial locks.
 
 The dispatch path is deliberately split into three concerns:
 
@@ -324,8 +330,8 @@ marker. It never claims or redispatches the already-sent effect.
 10. It redispatches recoverable Admin Broadcast handoffs through the same locked
    broadcast queue boundary.
 11. Non-ledger cleanup work, such as deleting old customer-facing checkout
-   messages, remains a separate cleanup job and is not treated as delivery
-   claim authority.
+   messages or settled Store Balance QR instructions, remains a separate
+   cleanup job and is not treated as delivery claim authority.
 
 The command reports the number of dispatches and the number of leases moved to
 unknown. It must not turn unknown into pending or silently retry a delivery

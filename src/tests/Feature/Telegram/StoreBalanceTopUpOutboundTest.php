@@ -6,12 +6,14 @@ use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Events\StoreBalanceTopUpSettled;
+use App\Jobs\DeleteStoreBalanceTopUpInstruction;
 use App\Jobs\SendStoreBalanceTopUpInstructions;
 use App\Jobs\SendStoreBalanceTopUpReceipt;
 use App\Models\Customer;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Telegram\StoreBalanceTopUpInstructionCleaner;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\StoreBalanceTopUpOutboundOutcome;
 use Illuminate\Http\Client\ConnectionException;
@@ -83,6 +85,38 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
             $secondEffect->effect_key,
         );
         $this->assertSame(1, TelegramOutboundEffect::query()->count());
+    }
+
+    public function test_paid_top_up_instruction_cleanup_only_deletes_once(): void
+    {
+        Queue::fake();
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/deleteMessage' => Http::response(['ok' => true]),
+        ]);
+        $topUp = $this->makeTopUp();
+        app(StoreBalanceTopUpOutbound::class)->handoffInstructions($topUp);
+        $effect = TelegramOutboundEffect::query()->sole();
+        $effect->forceFill([
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_message_id' => '704',
+            'sent_at' => now(),
+        ])->save();
+        $topUp->forceFill([
+            'status' => StoreBalanceTopUpStatus::Paid,
+            'paid_at' => now(),
+            'settled_at' => now(),
+        ])->save();
+
+        $cleaner = app(StoreBalanceTopUpInstructionCleaner::class);
+        $cleaner->deleteInstruction($topUp);
+        $cleaner->deleteInstruction($topUp->fresh());
+
+        $deletes = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/deleteMessage'));
+        $this->assertCount(1, $deletes);
+        $this->assertSame('704', (string) ($deletes->first()[0]['message_id'] ?? ''));
+        $this->assertNotNull($effect->fresh()->telegram_message_deleted_at);
+        $this->assertNull($effect->fresh()->telegram_message_deletion_started_at);
+        $this->assertNull($effect->fresh()->telegram_message_deletion_token);
     }
 
     public function test_non_payable_top_up_is_not_handed_off(): void
@@ -354,6 +388,10 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
             ->where('effect_type', TelegramOutboundEffectType::BalanceTopUpReceipt->value)
             ->count());
         Queue::assertPushed(SendStoreBalanceTopUpReceipt::class);
+        Queue::assertPushed(
+            DeleteStoreBalanceTopUpInstruction::class,
+            fn (DeleteStoreBalanceTopUpInstruction $job): bool => $job->topUpId === (string) $topUp->getKey(),
+        );
     }
 
     public function test_ambiguous_instruction_effect_is_left_for_review_without_a_blind_handoff(): void

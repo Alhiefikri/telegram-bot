@@ -29,6 +29,7 @@
   "balance.title": "💰 My Balance",
   "balance.available": "Available balance: :balance",
   "balance.add": "➕ Add Balance",
+  "balance.activity.view": "📋 View activity",
   "balance.activity.title": "Recent activity",
   "balance.activity.empty": "No Store Balance activity yet.",
   "balance.activity.unavailable": "Activity is temporarily hidden while we verify the balance.",

@@ -196,7 +196,7 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(
             46312,
             'activity-open',
-            'balance',
+            'balance:activity',
             [],
             46311,
             'private',
