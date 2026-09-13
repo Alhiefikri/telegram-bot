@@ -32,33 +32,63 @@ class TelegramWelcomeBanner
         ?string $preferredReference = null,
         array $options = self::OPTIONS,
         ?int $preferredBannerVersion = null,
+        bool $removeLegacyReplyKeyboard = false,
     ): TelegramWelcomeBannerSend {
         $active = $this->activeSetting();
         $activeVersion = $active === null ? null : (int) $active->telegram_welcome_banner_version;
+        $replyMarkup = $removeLegacyReplyKeyboard ? ['remove_keyboard' => true] : $keyboard;
+
+        // Telegram stores reply keyboards at chat level. Send the migration
+        // removal with the root message, then restore its inline controls by
+        // editing that same message so the chat still has one root.
 
         // Telegram only allows 1024 parsed characters on a media caption.
         // Longer navigation screens are delivered as a text message so the
         // canonical message never truncates customer-relevant content.
         if (! $this->captions->fitsMediaCaption($caption, $options)) {
-            return $this->textResult(
-                $this->bot->sendMessage($chatId, $caption, $keyboard, $options),
+            $sent = $this->textResult(
+                $this->bot->sendMessage($chatId, $caption, $replyMarkup, $options),
                 $activeVersion,
             );
-        }
-
-        if ($active !== null) {
-            return $this->sendActiveBanner(
+        } elseif ($active !== null) {
+            $sent = $this->sendActiveBanner(
                 $active,
                 $chatId,
                 $caption,
-                $keyboard,
+                $replyMarkup,
                 $preferredReference,
                 $preferredBannerVersion,
                 $options,
             );
+        } else {
+            $sent = $this->sendFallbackBanner($chatId, $caption, $replyMarkup, $preferredReference, $options);
         }
 
-        return $this->sendFallbackBanner($chatId, $caption, $keyboard, $preferredReference, $options);
+        if ($removeLegacyReplyKeyboard) {
+            $this->restoreInlineReplyMarkup($chatId, $sent, $caption, $keyboard, $options);
+        }
+
+        return $sent;
+    }
+
+    /**
+     * @param  array<string, mixed>  $keyboard
+     * @param  array<string, mixed>  $options
+     */
+    private function restoreInlineReplyMarkup(
+        string $chatId,
+        TelegramWelcomeBannerSend $sent,
+        string $caption,
+        array $keyboard,
+        array $options,
+    ): void {
+        if ($sent->mediaKind === TelegramNavigationMediaKind::Photo) {
+            $this->bot->editMessageCaption($chatId, $sent->messageId, $caption, $keyboard, $options);
+
+            return;
+        }
+
+        $this->bot->editMessageText($chatId, $sent->messageId, $caption, $keyboard, $options);
     }
 
     /**

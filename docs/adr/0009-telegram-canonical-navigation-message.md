@@ -49,6 +49,9 @@ the group home exposes Browse Products, group catalog navigation edits the
 originating group message, and financial or identity actions are denied before
 any handler runs. The persistent reply keyboard (and its `☰ Menu` / main-menu
 text aliases) is removed rather than retained alongside the inline navigation.
+Legacy product labels remain accepted as migration entrypoints: they open the
+catalog at the chat tail, remove the stale keyboard, and restore inline controls
+on that same root message.
 
 ## Consequences
 

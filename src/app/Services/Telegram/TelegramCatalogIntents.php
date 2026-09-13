@@ -40,13 +40,29 @@ class TelegramCatalogIntents
         private StoreBalanceLedger $storeBalance,
     ) {}
 
-    public function sendCategoryCatalog(Customer $customer, string $chatId, ?int $messageId = null): void
-    {
-        $this->sendCatalogPage($customer, $chatId, messageId: $messageId);
+    public function sendCategoryCatalog(
+        Customer $customer,
+        string $chatId,
+        ?int $messageId = null,
+        bool $establishFreshRoot = false,
+    ): void {
+        $this->sendCatalogPage(
+            $customer,
+            $chatId,
+            messageId: $messageId,
+            establishFreshRoot: $establishFreshRoot,
+        );
     }
 
-    public function sendCatalogPage(Customer $customer, string $chatId, int $page = 1, ?string $search = null, ?string $category = null, ?int $messageId = null): void
-    {
+    public function sendCatalogPage(
+        Customer $customer,
+        string $chatId,
+        int $page = 1,
+        ?string $search = null,
+        ?string $category = null,
+        ?int $messageId = null,
+        bool $establishFreshRoot = false,
+    ): void {
         $requestedPage = max(1, $page);
         $result = $this->browse->browsePublic(CatalogBrowseQuery::fromValues(
             search: $search,
@@ -56,7 +72,7 @@ class TelegramCatalogIntents
         ));
 
         if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
-            $this->sendStaleCatalog($customer, $chatId, $messageId);
+            $this->sendStaleCatalog($customer, $chatId, $messageId, $establishFreshRoot);
 
             return;
         }
@@ -66,7 +82,20 @@ class TelegramCatalogIntents
             $result->pagination->currentPage,
             $this->familyIdsFromResult($result),
         );
-        $this->sendBrowseResult($customer, $chatId, $result, 'catalog.header', 'catalog', null, $search, null, null, $originToken, $messageId);
+        $this->sendBrowseResult(
+            $customer,
+            $chatId,
+            $result,
+            'catalog.header',
+            'catalog',
+            null,
+            $search,
+            null,
+            null,
+            $originToken,
+            $messageId,
+            establishFreshRoot: $establishFreshRoot,
+        );
     }
 
     public function sendCategoryPicker(Customer $customer, string $chatId, ?int $messageId = null): void
@@ -773,6 +802,7 @@ class TelegramCatalogIntents
         ?string $categoryDescription = null,
         ?string $originToken = null,
         ?int $messageId = null,
+        bool $establishFreshRoot = false,
     ): void {
         $maintenance = $this->maintenance->current();
         $title = $this->locale->translate(
@@ -812,7 +842,14 @@ class TelegramCatalogIntents
             if ($maintenance->active) {
                 $message .= "\n\n".$this->maintenanceNotice($customer, $maintenance);
             }
-            $this->sendCatalogMessage($customer, $chatId, $message, ['inline_keyboard' => $this->browseNavigationKeyboard($customer, $mode)], $messageId);
+            $this->sendCatalogMessage(
+                $customer,
+                $chatId,
+                $message,
+                ['inline_keyboard' => $this->browseNavigationKeyboard($customer, $mode)],
+                $messageId,
+                establishFreshRoot: $establishFreshRoot,
+            );
 
             return;
         }
@@ -860,7 +897,14 @@ class TelegramCatalogIntents
         }
         $keyboard = [...$keyboard, ...$this->browseNavigationKeyboard($customer, $mode, includeEmptyFallback: false)];
 
-        $this->sendCatalogMessage($customer, $chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard], $messageId);
+        $this->sendCatalogMessage(
+            $customer,
+            $chatId,
+            implode("\n", $lines),
+            ['inline_keyboard' => $keyboard],
+            $messageId,
+            establishFreshRoot: $establishFreshRoot,
+        );
     }
 
     /**
@@ -875,7 +919,25 @@ class TelegramCatalogIntents
         array $replyMarkup = [],
         ?int $messageId = null,
         array $options = [],
+        bool $establishFreshRoot = false,
     ): void {
+        if ($establishFreshRoot && $messageId === null) {
+            $this->roots->establish(
+                $customer,
+                $chatId,
+                new TelegramNavigationSurface(
+                    TelegramNavigationScreen::Catalog,
+                    $this->locale->code($customer),
+                    $text,
+                    $replyMarkup,
+                    $options,
+                ),
+                removeLegacyReplyKeyboard: true,
+            );
+
+            return;
+        }
+
         $root = $messageId === null
             ? $this->roots->currentForChat($customer, $chatId)
             : $this->roots->match($customer, $chatId, $messageId);
@@ -1099,14 +1161,18 @@ class TelegramCatalogIntents
         };
     }
 
-    private function sendStaleCatalog(Customer $customer, string $chatId, ?int $messageId = null): void
-    {
+    private function sendStaleCatalog(
+        Customer $customer,
+        string $chatId,
+        ?int $messageId = null,
+        bool $establishFreshRoot = false,
+    ): void {
         $this->sendCatalogMessage($customer, $chatId, $this->locale->translate($customer, 'catalog.family.stale'), [
             'inline_keyboard' => [[[
                 'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
                 'callback_data' => 'family:back:menu',
             ]]],
-        ], $messageId);
+        ], $messageId, [], $establishFreshRoot);
     }
 
     /** @param  array<string, mixed>|null  $navigation */

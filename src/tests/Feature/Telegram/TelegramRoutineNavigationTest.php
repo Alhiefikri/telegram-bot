@@ -229,6 +229,51 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->assertSame($currentMessageId, $current->fresh()->message_id);
     }
 
+    public function test_legacy_reply_keyboard_browse_products_opens_at_chat_tail(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 45425, 'locale' => 'en']);
+        Product::factory()->create([
+            'name' => 'Legacy Keyboard Product',
+            'is_active' => true,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(45425, '/start', [], 45425))->assertOk();
+        $root = TelegramNavigationRoot::query()->sole();
+
+        // This is the text Telegram sends for the old persistent reply keyboard.
+        $this->postTelegramWebhook($this->messageUpdate(45426, '🛍️ Browse Products', [], 45425))->assertOk();
+
+        $catalogMessages = Http::recorded(fn (Request $request): bool => (
+            str_ends_with($request->url(), '/sendMessage')
+            || str_ends_with($request->url(), '/sendPhoto')
+        )
+            && (string) ($request['chat_id'] ?? '') === '45425'
+            && str_contains(
+                (string) ($request['text'] ?? $this->telegramRequestField($request, 'caption')),
+                'Legacy Keyboard Product',
+            ));
+
+        $this->assertCount(1, $catalogMessages, 'The legacy keyboard action must create a visible tail message.');
+        $catalogRequest = $catalogMessages->sole()[0];
+        $replyMarkup = $this->telegramRequestField($catalogRequest, 'reply_markup');
+        if (is_string($replyMarkup)) {
+            $replyMarkup = json_decode($replyMarkup, true, 512, JSON_THROW_ON_ERROR);
+        }
+        $this->assertSame(['remove_keyboard' => true], $replyMarkup);
+        $this->assertSame(2, $this->routineMessageCount(45425));
+        $current = $root->fresh();
+        $this->assertSame(TelegramNavigationScreen::Catalog, $current->screen);
+        $this->assertNotSame($root->message_id, $current->message_id);
+        $oldRootEdits = Http::recorded(fn (Request $request): bool => (
+            (str_ends_with($request->url(), '/editMessageCaption') || str_ends_with($request->url(), '/editMessageText'))
+            && (string) ($request['message_id'] ?? '') === (string) $root->message_id
+        ));
+        $this->assertCount(0, $oldRootEdits, 'The old root must not be silently edited.');
+    }
+
     public function test_definitively_missing_root_is_replaced_once_for_navigation(): void
     {
         $this->fakeCanonicalTelegram(Http::response([

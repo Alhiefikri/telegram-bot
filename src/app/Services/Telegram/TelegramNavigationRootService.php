@@ -78,7 +78,7 @@ class TelegramNavigationRootService
         return $root;
     }
 
-    public function establish(Customer $customer, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRoot
+    public function establish(Customer $customer, string $chatId, TelegramNavigationSurface $surface, bool $removeLegacyReplyKeyboard = false): TelegramNavigationRoot
     {
         $chatId = trim($chatId);
         $current = $this->current($customer);
@@ -92,6 +92,7 @@ class TelegramNavigationRootService
             preferredReference: $preferredReference,
             options: $surface->options,
             preferredBannerVersion: $preferredBannerVersion,
+            removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
         );
 
         return $this->persistRoot($customer, $chatId, $surface, $sent);
