@@ -17,45 +17,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci-base-images:
-    name: Ensure self-hosted CI base images
-    runs-on: [self-hosted, Linux, X64, ci]
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish missing CI base mirrors from the trusted runner cache
-        run: |
-          set -euo pipefail
-          repository="ghcr.io/alhiefikri/telegram-bot-ci-base"
-          while read -r source target; do
-            [ -n "$source" ] || continue
-            destination="$repository:$target"
-            if docker manifest inspect "$destination" >/dev/null 2>&1; then
-              echo "CI base mirror already exists: $destination"
-              continue
-            fi
-            docker image inspect "$source" >/dev/null
-            docker tag "$source" "$destination"
-            docker push "$destination"
-          done <<'IMAGES'
-          ubuntu:24.04 ubuntu-24.04
-          postgres:16-alpine postgres-16-alpine
-          composer:2 composer-2
-          node:24-slim node-24-slim
-          php:8.4-fpm php-8.4-fpm
-          IMAGES
   workflow-security:
     name: Workflow validation and dependency audit
-    runs-on: [self-hosted, Linux, X64, ci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -80,20 +44,14 @@ jobs:
 
   application-tests:
     name: Application, browser, and PostgreSQL tests
-    runs-on: [self-hosted, Linux, X64, ci]
-    needs: [ci-base-images, workflow-security]
+    runs-on: ubuntu-24.04
+    needs: [workflow-security]
     container:
-      image: ghcr.io/alhiefikri/telegram-bot-ci-base:ubuntu-24.04
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      image: ubuntu:24.04
     timeout-minutes: 45
     services:
       postgres:
-        image: ghcr.io/alhiefikri/telegram-bot-ci-base:postgres-16-alpine
-        credentials:
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        image: postgres:16-alpine
         env:
           POSTGRES_DB: telegram_bot_ci_test
           POSTGRES_USER: telegram_bot_ci
@@ -139,6 +97,7 @@ jobs:
       - name: Set up PHP once for all test lanes
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         env:
+          # setup-php installs inside the job container instead of a runner tool cache.
           runner: self-hosted
         with:
           php-version: '8.4'
@@ -282,16 +241,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Restore self-hosted workspace ownership
-        if: always()
-        working-directory: .
-        run: |
-          host_owner="$(stat -c '%u:%g' "$RUNNER_TEMP")"
-          chown -R "$host_owner" "$GITHUB_WORKSPACE"
-
   docker-build:
     name: Build, verify, and publish production image
-    runs-on: [self-hosted, Linux, X64, ci]
+    runs-on: ubuntu-24.04
     needs: application-tests
     timeout-minutes: 35
     permissions:

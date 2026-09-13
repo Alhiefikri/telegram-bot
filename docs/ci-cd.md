@@ -11,45 +11,24 @@ Project ini memakai satu branch utama untuk integrasi dan sumber rilis:
 
 Deploy production tidak otomatis dari push karena bot commerce ini punya database, queue, scheduler, Telegram webhook, dan payment flow. Release dilakukan manual dari `main` setelah CI hijau.
 
-## Self-hosted runner
+## Runners
 
-CI jobs target `[self-hosted, Linux, X64, ci]`, while production deploy and
-recovery jobs target `[self-hosted, Linux, X64, deploy]`; no job uses a
-GitHub-hosted runner. The repository must remain private because pull request
-code executes on persistent runner infrastructure. Keep exactly one eligible
-runner per label unless job-level isolation is introduced. Extra labels prevent
-CI jobs from falling back to the deploy runner when one machine is offline.
+CI jobs run on GitHub-hosted `ubuntu-24.04` runners, and production deploy and
+recovery jobs use the same image. No job runs on the production VPS, so CI work
+never consumes the store's CPU, memory, or bandwidth.
 
-The runner host must provide Docker and outbound HTTPS access. PHP test jobs run
-inside `ubuntu:24.04` job containers so `setup-php` has its supported Linux
-environment independent of the host distribution. The PostgreSQL service is
-reached through its `postgres` service-network alias from that job container.
-Container jobs explicitly use Bash because Ubuntu job containers otherwise
-default to `sh`, which rejects `set -o pipefail`. Their final `always()` step
-restores the workspace to the host runner UID/GID obtained from `RUNNER_TEMP`;
-without that boundary, a later host job cannot clean root-owned checkout files.
-The runner must block host sleep only while a workflow job is active. Configure
-the runner's job-started/job-completed hooks to acquire and release a
-`systemd-inhibit --what=sleep --mode=block` lock; suspending or rebooting this
-single workstation leaves every remaining job queued.
+PHP test jobs run inside an `ubuntu:24.04` job container so `setup-php` has its
+supported Linux environment. The PostgreSQL service is reached through its
+`postgres` service-network alias from that job container. Container jobs
+explicitly use Bash because Ubuntu job containers otherwise default to `sh`,
+which rejects `set -o pipefail`.
 
-Do not enable `setup-node`'s GitHub Actions npm cache on this persistent runner.
-Uploading the local npm cache over the runner's slower uplink costs more time
-than `npm ci` saves. The production image uses the fixed Buildx builder
-`telegram-bot-production` with `keep-state: true`, retaining BuildKit state
-locally instead of uploading a `mode=max` cache after every build.
-BuildKit uses explicit public resolvers (`1.1.1.1`, then `8.8.8.8`) because
-parallel Composer downloads exhausted the workstation router's DNS resolver and
-produced repeated `curl error 6` failures for `api.github.com`.
-CI does not pull runtime bases directly from Docker Hub. The
-`Ensure self-hosted CI base images` job publishes missing trusted images already
-present in the runner cache to the private
-`ghcr.io/alhiefikri/telegram-bot-ci-base` package. Job/service containers use
-`GITHUB_TOKEN` credentials, and the production Dockerfile uses the same GHCR
-mirrors. Base upgrades are intentional tag changes; the mirror job never
-overwrites an existing tag.
-The workflow-level token must retain `packages: read`; the mirror publisher and
-production image job elevate only their own job to `packages: write`.
+The test lanes deliberately run `npm ci` without the `setup-node` npm cache.
+The production image builds from public Docker Hub bases (`composer:2`,
+`node:24-slim`, `php:8.4-fpm`) with the fixed Buildx builder
+`telegram-bot-production`; BuildKit uses explicit public resolvers (`1.1.1.1`,
+then `8.8.8.8`). The workflow-level token must retain `packages: read`; the
+production image job elevates only itself to `packages: write`.
 
 ## Workflows
 
@@ -154,7 +133,7 @@ Expected values include `allowed_actions: selected`, `sha_pinning_required: true
 Protect `main` with these settings:
 
 - Require a pull request before merging, with at least one approval.
-- Require the current successful CI check names: `Ensure self-hosted CI base images`, `Workflow validation and dependency audit`, `Application, browser, and PostgreSQL tests`, and `Build, verify, and publish production image`.
+- Require the current successful CI check names: `Workflow validation and dependency audit`, `Application, browser, and PostgreSQL tests`, and `Build, verify, and publish production image`.
 - Require branches to be up to date before merging.
 - Require all review conversations to be resolved.
 - Do not allow force pushes or branch deletion.

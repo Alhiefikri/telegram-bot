@@ -19,7 +19,7 @@ jobs:
   recover:
     name: Recover and verify supported failed Telegram update jobs
     if: inputs.confirm == 'RECOVER_TELEGRAM_UPDATES'
-    runs-on: [self-hosted, Linux, X64, deploy]
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
     env:

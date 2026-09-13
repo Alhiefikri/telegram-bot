@@ -915,18 +915,18 @@ SH);
         $this->assertStringContainsString('cache-binary: false', $ci);
         $this->assertStringContainsString('buildkitd-config-inline:', $ci);
         $this->assertStringContainsString('nameservers = ["1.1.1.1", "8.8.8.8"]', $ci);
-        $this->assertStringContainsString('name: Ensure self-hosted CI base images', $ci);
-        $this->assertStringContainsString('ghcr.io/alhiefikri/telegram-bot-ci-base:ubuntu-24.04', $ci);
-        $this->assertStringContainsString('credentials:', $ci);
-        $this->assertStringContainsString('needs: [ci-base-images, workflow-security]', $ci);
+        $this->assertStringNotContainsString('runs-on: [self-hosted', $ci);
+        $this->assertSame(3, substr_count($ci, 'runs-on: ubuntu-24.04'));
+        $this->assertStringContainsString('image: ubuntu:24.04', $ci);
+        $this->assertStringContainsString('needs: [workflow-security]', $ci);
         $this->assertStringContainsString('needs: application-tests', $ci);
         $this->assertStringContainsString('for push_attempt in 1 2 3', $ci);
         $this->assertStringContainsString('GHCR push failed after 3 bounded attempts.', $ci);
         $this->assertStringContainsString("permissions:\n  contents: read\n  packages: read", $ci);
         $dockerfile = file_get_contents(base_path('../Dockerfile'));
-        $this->assertStringContainsString('FROM ghcr.io/alhiefikri/telegram-bot-ci-base:composer-2 AS vendor', $dockerfile);
-        $this->assertStringContainsString('FROM ghcr.io/alhiefikri/telegram-bot-ci-base:node-24-slim AS assets', $dockerfile);
-        $this->assertStringContainsString('FROM ghcr.io/alhiefikri/telegram-bot-ci-base:php-8.4-fpm AS runtime', $dockerfile);
+        $this->assertStringContainsString('FROM composer:2 AS vendor', $dockerfile);
+        $this->assertStringContainsString('FROM node:24-slim AS assets', $dockerfile);
+        $this->assertStringContainsString('FROM php:8.4-fpm AS runtime', $dockerfile);
 
         $dependabot = file_get_contents(base_path('../.github/dependabot.yml'));
         foreach (['github-actions', 'composer', 'npm'] as $ecosystem) {
@@ -941,7 +941,7 @@ SH);
         $concurrencyGate = file_get_contents(base_path('../scripts/concurrency-deploy-gate.sh'));
 
         $this->assertStringContainsString('name: Application, browser, and PostgreSQL tests', $workflow);
-        $this->assertStringContainsString('image: ghcr.io/alhiefikri/telegram-bot-ci-base:postgres-16-alpine', $workflow);
+        $this->assertStringContainsString('image: postgres:16-alpine', $workflow);
         $this->assertStringContainsString('--health-cmd "pg_isready -U telegram_bot_ci -d telegram_bot_ci_test"', $workflow);
         $this->assertStringContainsString('DB_CONNECTION: pgsql', $workflow);
         $this->assertStringContainsString('POSTGRES_PASSWORD: ci-only-not-production', $workflow);
