@@ -148,6 +148,29 @@ class StorefrontSameOriginReturnUrlTest extends TestCase
         }
     }
 
+    public function test_family_urls_do_not_preserve_legacy_family_paths_as_return_context(): void
+    {
+        $canonical = route('storefront.product-families.show', ['productFamily' => 'origin-family']);
+        $legacy = '/produk-keluarga/old-family';
+
+        $this->assertSame(
+            $canonical,
+            $this->urls()->familyReturnUrl($this->requestFrom($legacy), 'origin-family'),
+        );
+        $this->assertSame(
+            $canonical,
+            $this->urls()->familyUrl('origin-family', $legacy),
+        );
+    }
+
+    public function test_checkout_source_and_label_recognize_the_canonical_family_path(): void
+    {
+        $familyUrl = route('storefront.product-families.show', ['productFamily' => 'origin-family']);
+
+        $this->assertSame('family_direct_checkout_page', $this->urls()->checkoutPageSource($familyUrl));
+        $this->assertSame('Kembali ke pilihan', $this->urls()->checkoutReturnLabel($familyUrl));
+    }
+
     public function test_generated_from_parameters_never_carry_non_same_origin_return_urls(): void
     {
         $product = Product::factory()->create(['name' => 'Origin Parameter Product', 'stock' => 2, 'reserved_stock' => 0]);

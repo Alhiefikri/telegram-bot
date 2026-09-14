@@ -98,8 +98,11 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
             'reserved_stock' => 0,
         ]);
 
-        $response = $this->get(route('storefront.product-families.show', ['productFamily' => $family->slug]));
+        $canonical = route('storefront.product-families.show', ['productFamily' => $family->slug]);
+        $response = $this->get($canonical);
         $response->assertOk()
+            ->assertSee('<link rel="canonical" href="'.$canonical.'">', false)
+            ->assertSee('<meta property="og:url" content="'.$canonical.'">', false)
             ->assertSee('<title>CapCut — Pilihan Produk | Lhie Store</title>', false)
             ->assertSee('Pilih paket CapCut sesuai kebutuhan.')
             ->assertSee('Individual 30 Hari')
@@ -399,6 +402,10 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertSame($canonical.'?from='.rawurlencode($returnUrl), $legacy->headers->get('Location'));
         $this->assertStringNotContainsString('utm_source', (string) $legacy->headers->get('Location'));
 
+        $this->get('/produk-keluarga/old-netflix?from='.rawurlencode('https://evil.example/phish').'&utm_source=legacy')
+            ->assertStatus(301)
+            ->assertRedirect($canonical);
+
         ProductFamilySlugRedirect::query()->create([
             'old_slug' => 'netflix-legacy',
             'product_family_id' => $family->id,
@@ -430,6 +437,50 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->get('/produk-keluarga/deleted-family')->assertNotFound();
     }
 
+    public function test_canonical_family_route_requires_a_public_current_slug(): void
+    {
+        $public = ProductFamily::factory()->create(['slug' => 'public-family']);
+        Product::factory()->create([
+            'product_family_id' => $public->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $private = ProductFamily::factory()->create(['slug' => 'private-current-family']);
+        Product::factory()->create([
+            'product_family_id' => $private->id,
+            'is_active' => false,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        ProductFamilySlugRedirect::query()->create([
+            'old_slug' => $private->slug,
+            'product_family_id' => $public->id,
+        ]);
+
+        $this->get('/pilihan/'.$private->slug)->assertNotFound();
+        $this->get('/produk-keluarga/'.$private->slug)->assertNotFound();
+        $this->get('/pilihan/'.$public->slug)->assertOk();
+    }
+
+    public function test_canonical_family_page_drops_legacy_family_return_context(): void
+    {
+        $family = ProductFamily::factory()->create([
+            'slug' => 'canonical-family',
+            'name' => 'Canonical Family',
+        ]);
+        Product::factory()->create([
+            'product_family_id' => $family->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $canonical = route('storefront.product-families.show', ['productFamily' => $family->slug]);
+
+        $this->get($canonical.'?from='.rawurlencode('/produk-keluarga/legacy-family'))
+            ->assertOk()
+            ->assertSee('href="'.$canonical.'"', false)
+            ->assertDontSee('/produk-keluarga/');
+    }
+
     private function manualPaymentModeIsActive(): void
     {
         ManualPaymentSetting::query()->create([
@@ -456,6 +507,7 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $response = $this->get(route('storefront.sitemap'));
         $response->assertOk()
             ->assertSee(route('storefront.product-families.show', ['productFamily' => $family->slug]), false)
-            ->assertSee(route('storefront.products.show', ['product' => $product]), false);
+            ->assertSee(route('storefront.products.show', ['product' => $product]), false)
+            ->assertDontSee('/produk-keluarga/', false);
     }
 }

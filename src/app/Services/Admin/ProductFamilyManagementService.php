@@ -4,6 +4,7 @@ namespace App\Services\Admin;
 
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\ProductFamilySlugRedirect;
 use App\Models\User;
 use App\Services\AuditLogger;
 use Illuminate\Database\QueryException;
@@ -212,7 +213,10 @@ final class ProductFamilyManagementService
         $slug = $base;
         $suffix = 2;
 
-        while (ProductFamily::withTrashed()->where('slug', $slug)->exists()) {
+        while (
+            ProductFamily::withTrashed()->where('slug', $slug)->exists()
+            || ProductFamilySlugRedirect::query()->where('old_slug', $slug)->exists()
+        ) {
             $slug = "{$base}-{$suffix}";
             $suffix++;
         }

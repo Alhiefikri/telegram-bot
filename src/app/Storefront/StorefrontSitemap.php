@@ -7,6 +7,8 @@ use App\Models\ProductFamily;
 
 final class StorefrontSitemap
 {
+    public function __construct(private readonly StorefrontUrl $urls) {}
+
     public const MAX_URLS = 1_000;
 
     /**
@@ -39,7 +41,7 @@ final class StorefrontSitemap
             ->limit($familyLimit)
             ->get() as $family) {
             $entries[] = [
-                'loc' => route('storefront.product-families.show', ['productFamily' => $family->slug]),
+                'loc' => $this->urls->familyUrl($family->slug),
                 'lastmod' => $family->updated_at?->toAtomString(),
             ];
         }

@@ -80,7 +80,7 @@ final class ProductFamilySlugManager
                 return $locked;
             }, 5);
         } catch (QueryException $exception) {
-            if ((string) $exception->getCode() === '23000') {
+            if (in_array((string) $exception->getCode(), ['23000', '23505'], true)) {
                 throw new RuntimeException('Family slug is already assigned to another family.', 0, $exception);
             }
 

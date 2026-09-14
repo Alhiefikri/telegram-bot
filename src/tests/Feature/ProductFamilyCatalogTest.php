@@ -14,6 +14,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\ProductFamilySlugRedirect;
 use App\Models\ProductStockItem;
 use App\Models\ProductWaitlistSubscription;
 use App\Models\User;
@@ -729,4 +730,25 @@ class ProductFamilyCatalogTest extends TestCase
             ->assertStatus(301)
             ->assertRedirect(route('storefront.product-families.show', ['productFamily' => 'new-family']));
     }
+    public function test_new_family_creation_skips_reserved_slug_aliases(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $target = ProductFamily::factory()->create(['slug' => 'existing-family']);
+        ProductFamilySlugRedirect::query()->create([
+            'old_slug' => 'reserved-family',
+            'product_family_id' => $target->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.product-families.store'), [
+                'name' => 'Reserved Family',
+                'description' => null,
+                'sort_order' => 0,
+            ])
+            ->assertRedirect();
+
+        $created = ProductFamily::query()->where('name', 'Reserved Family')->sole();
+        $this->assertSame('reserved-family-2', $created->slug);
+    }
+
 }

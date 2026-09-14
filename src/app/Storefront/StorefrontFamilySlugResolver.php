@@ -23,14 +23,20 @@ final class StorefrontFamilySlugResolver
 
     public function resolvePublic(string $slug): ?ProductFamily
     {
-        $current = $this->current($slug);
-        if ($current instanceof ProductFamily) {
-            return $current;
-        }
-
         $normalized = $this->normalize($slug);
         if ($normalized === '') {
             return null;
+        }
+
+        /*
+         * A current slug owns the public address even when its family is
+         * private or deleted. Never let a colliding alias hijack that address.
+         */
+        $currentOwner = ProductFamily::withTrashed()
+            ->where('slug', $normalized)
+            ->first();
+        if ($currentOwner instanceof ProductFamily) {
+            return $this->current($normalized);
         }
 
         return ProductFamilySlugRedirect::query()
