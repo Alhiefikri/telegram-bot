@@ -110,6 +110,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             $effects->sole()->template_version,
         );
         $this->assertSame('invoice_caption', $effects->sole()->outcome_metadata['unit_role']);
+        $this->assertTrue($effects->sole()->outcome_metadata['contains_credentials']);
 
         $photoRequests = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
         $this->assertCount(1, $photoRequests);
@@ -193,6 +194,15 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             $this->assertStringNotContainsString($value, $effectJson);
         }
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertCount(
+            1,
+            Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/pinChatMessage')),
+        );
+        $pinRequest = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/pinChatMessage'))->sole()[0];
+        $this->assertSame((string) $order->customer->telegram_id, (string) $pinRequest['chat_id']);
+        $this->assertSame('834001', (string) $pinRequest['message_id']);
+        $this->assertTrue(filter_var($pinRequest['disable_notification'], FILTER_VALIDATE_BOOLEAN));
+        $this->assertNotNull($order->fresh()->telegram_credential_pinned_at);
     }
 
     /** @return iterable<string, array{string, CredentialAccessMethod}> */

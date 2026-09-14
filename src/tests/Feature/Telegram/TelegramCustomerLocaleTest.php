@@ -271,7 +271,7 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Ada masalah dengan pesanan, bayaran atau log masuk akaun?', $messages[0]);
         $this->assertStringContainsString('👤 Akaun Saya', $messages[1]);
         $this->assertStringContainsString('Tiada pesanan lagi', $messages[2]);
-        $this->assertStringContainsString('Tiada sejarah pesanan', $messages[3]);
+        $this->assertStringContainsString('Tiada pesanan berjaya lagi.', $messages[3]);
         $this->assertStringContainsString('Apakah produk yang anda cari?', $messages[4]);
         $this->assertStringNotContainsString('Saya tidak memahami perintah itu', $messages->implode("\n"));
     }
@@ -284,8 +284,8 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(41032, '/history', ['id' => 41032], 41032))->assertOk();
 
         $copy = $this->visibleCopy($this->customerPayload('/sendMessage', 41032));
-        $this->assertStringContainsString('No order history', $copy);
-        $this->assertStringNotContainsString('Riwayat masih kosong', $copy);
+        $this->assertStringContainsString('No successful orders yet.', $copy);
+        $this->assertStringNotContainsString('Belum ada pesanan berhasil.', $copy);
         $this->assertStringNotContainsString('I did not understand that command', $copy);
     }
 

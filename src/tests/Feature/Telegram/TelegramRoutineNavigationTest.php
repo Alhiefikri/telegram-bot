@@ -55,7 +55,7 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
             ['menu:home', '👤 My Profile', '🛍️ Browse Products'],
             ['menu:language', '🌐 Choose your language', 'locale:en'],
             ['locale:en', '👤 My Profile', '🛍️ Browse Products'],
-            ['menu:orders', '📦 Recent Order History', 'INV-NAV-45401'],
+            ['menu:orders', '📦 Successful Orders', 'INV-NAV-45401'],
             ['menu:support', '💬 Support', '⬅️ Back'],
         ];
 
@@ -305,7 +305,11 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->assertSame(2, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->count());
         $this->assertSame(0, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->count());
         $replacement = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->last()[0];
-        $this->assertStringContainsString('INV-NAV-45431', (string) $this->telegramRequestField($replacement, 'caption'));
+        $replyMarkup = $this->telegramRequestField($replacement, 'reply_markup');
+        if (is_string($replyMarkup)) {
+            $replyMarkup = json_decode($replyMarkup, true, 512, JSON_THROW_ON_ERROR);
+        }
+        $this->assertStringContainsString('INV-NAV-45431', json_encode($replyMarkup, JSON_THROW_ON_ERROR));
     }
 
     public function test_ambiguous_edit_keeps_the_previous_screen_and_sends_nothing(): void
@@ -516,7 +520,7 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
             'indonesian' => ['id', [
                 '💰 Saldo Saya',
                 'Saldo tersedia: Rp 0',
-                '📦 Riwayat Pesanan Terakhir',
+                '📦 Pesanan Berhasil',
                 'Ada kendala order, pembayaran, atau login akun?',
                 '⬅️ Kembali',
                 '🏠 Beranda',
@@ -528,7 +532,7 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
             'english' => ['en', [
                 '💰 My Balance',
                 'Available balance: Rp 0',
-                '📦 Recent Order History',
+                '📦 Successful Orders',
                 'Need help with an order, payment, or account login?',
                 '⬅️ Back',
                 '🏠 Home',
@@ -540,7 +544,7 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
             'malay' => ['ms', [
                 '💰 Baki Saya',
                 'Baki tersedia: Rp 0',
-                '📦 Sejarah Pesanan Terkini',
+                '📦 Pesanan Berjaya',
                 'Ada masalah dengan pesanan, bayaran atau log masuk akaun?',
                 '⬅️ Kembali',
                 '🏠 Utama',
@@ -604,9 +608,19 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(45512, 'orders-bounded', 'menu:orders', [], 45511, 'private', $messageId))->assertOk();
 
         $this->assertCount(1, $orderQueries, 'The Orders screen must read its history with one bounded query.');
-        $caption = $this->editCopy($this->lastCanonicalEdit(45511));
-        $this->assertStringContainsString('INV-BOUND-45511-5', $caption);
-        $this->assertSame(5, substr_count($caption, 'INV-BOUND-'));
+        $edit = $this->lastCanonicalEdit(45511);
+        $this->assertSame('📦 Successful Orders', $this->editCopy($edit));
+        $orderCallbacks = array_values(array_filter(
+            array_map(fn (array $row) => $row[0]['callback_data'] ?? null, $edit['reply_markup']['inline_keyboard']),
+            fn ($callback): bool => is_string($callback) && str_starts_with($callback, 'order:'),
+        ));
+        $this->assertSame([
+            'order:INV-BOUND-45511-5',
+            'order:INV-BOUND-45511-4',
+            'order:INV-BOUND-45511-3',
+            'order:INV-BOUND-45511-2',
+            'order:INV-BOUND-45511-1',
+        ], $orderCallbacks);
         $this->assertSame(1, $this->routineMessageCount(45511));
     }
 

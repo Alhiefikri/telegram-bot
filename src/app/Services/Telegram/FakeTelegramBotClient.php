@@ -176,6 +176,20 @@ class FakeTelegramBotClient extends TelegramBotClient
         $this->record('deleteMessage');
     }
 
+    public function pinChatMessage(
+        int|string $chatId,
+        int|string $messageId,
+        bool $disableNotification = true,
+    ): array {
+        $this->record('pinChatMessage', [
+            'chat_id' => $chatId,
+            'message_id' => $messageId,
+            'disable_notification' => $disableNotification,
+        ]);
+
+        return ['ok' => true, 'result' => true];
+    }
+
     private function record(string $operation, array $metadata = []): void
     {
         $callIndex = count($this->calls);

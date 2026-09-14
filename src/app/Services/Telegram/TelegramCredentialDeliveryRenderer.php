@@ -314,6 +314,7 @@ final class TelegramCredentialDeliveryRenderer
                 text: $accountText,
                 entities: $entities,
                 replyMarkup: $replyMarkup,
+                containsCredentials: true,
             ),
         ];
 
@@ -329,6 +330,7 @@ final class TelegramCredentialDeliveryRenderer
             $blocks[] = new TelegramMessageUnit(
                 text: $tokenText,
                 entities: $this->credentialFormatter->codeEntitiesForFields($tokenText, $tokenFields),
+                containsCredentials: true,
             );
         }
 

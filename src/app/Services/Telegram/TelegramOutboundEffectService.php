@@ -238,6 +238,7 @@ class TelegramOutboundEffectService
         'receipt_chunk_count',
         'product_count',
         'account_count',
+        'contains_credentials',
         'caption_length_bucket',
         'continuation_length_bucket',
         'has_photo',
@@ -2102,8 +2103,10 @@ class TelegramOutboundEffectService
 
         $first = null;
         for ($sequence = 1; $sequence <= $unitCount; $sequence++) {
+            $unit = $textFallback ? $plan->textUnit($sequence) : $plan->photoUnit($sequence);
             $metadata = [
                 ...$planMetadata,
+                'contains_credentials' => $unit->containsCredentials(),
                 'delivery_context' => $explicit ? 'explicit_resend' : 'receipt',
                 'unit_role' => $textFallback || $sequence > 1 ? 'receipt_chunk' : 'invoice_caption',
                 'receipt_chunk_index' => $sequence - 1,
@@ -2746,7 +2749,7 @@ class TelegramOutboundEffectService
             ], true)
                 && ((is_int($value) && $value >= 0) || (is_string($value) && ctype_digit($value)))) {
                 $safe[$key] = (int) $value;
-            } elseif (in_array($key, ['attachment_present', 'late_evidence', 'has_photo', 'has_header', 'has_footer', 'txt_available'], true)
+            } elseif (in_array($key, ['attachment_present', 'late_evidence', 'has_photo', 'has_header', 'has_footer', 'txt_available', 'contains_credentials'], true)
                 && is_bool($value)) {
                 $safe[$key] = $value;
             } elseif ($key === 'exception' && is_string($value)

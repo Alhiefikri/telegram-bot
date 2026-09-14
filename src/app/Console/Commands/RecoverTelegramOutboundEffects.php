@@ -37,6 +37,7 @@ class RecoverTelegramOutboundEffects extends Command
         $staleLeases = $recovery->recoverExpiredLeases(now());
         $recovery->reconcileCompletedReceiptProjections((int) $this->option('chunk'));
         $recovery->reconcileMissingReceiptActionPanels((int) $this->option('chunk'));
+        $recovery->reconcileMissingCredentialPins((int) $this->option('chunk'));
         $recovery->reconcileSentManualPaymentProofProjections((int) $this->option('chunk'));
         $recovery->reconcileSentSalesProofProjections((int) $this->option('chunk'));
         $recovery->reconcileSentAdminBroadcastProjections((int) $this->option('chunk'));

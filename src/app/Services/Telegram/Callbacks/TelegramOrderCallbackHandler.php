@@ -12,6 +12,7 @@ use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramOrderIntents;
 
 class TelegramOrderCallbackHandler implements TelegramCallbackHandler
@@ -21,6 +22,7 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
         private TelegramOrderIntents $orders,
+        private TelegramNavigationPresenter $navigation,
         private CustomerPendingOrderCancellation $cancellation,
     ) {}
 
@@ -37,6 +39,7 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
     public function supports(TelegramCallbackContext $context): bool
     {
         return $context->data === 'status'
+            || $context->data === 'orders:open'
             || preg_match('/^order:([^\s:]+)$/', $context->data) === 1
             || preg_match('/^buyer:cancel-pending:([0-9a-fA-F-]+)$/', $context->data) === 1
             || str_starts_with($context->data, 'txt:');
@@ -46,6 +49,18 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
     {
         if (str_starts_with($context->data, 'txt:')) {
             return false;
+        }
+
+        if ($context->data === 'orders:open') {
+            $this->session->forgetWithLock($context->customer);
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->navigation->presentOrEstablish(
+                $context->customer,
+                $context->chatId,
+                $this->orders->orderHistorySurface($context->customer),
+            );
+
+            return true;
         }
 
         if ($context->data === 'status') {

@@ -292,6 +292,7 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
     {
         Queue::fake();
         [$order] = $this->paidOrder(withCredential: true, locale: 'en');
+        $this->fakeTelegramHttp();
         $receipt = app(TelegramOutboundEffectService::class)->recordReceipt($order);
         $this->assertNotNull($receipt);
         TelegramOutboundEffect::query()

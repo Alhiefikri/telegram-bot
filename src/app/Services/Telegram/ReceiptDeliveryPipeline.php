@@ -26,6 +26,7 @@ final class ReceiptDeliveryPipeline
         private readonly TelegramReceiptNotifier $notifier,
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramOutboundEffectService $outboundEffects,
+        private readonly TelegramCredentialPinService $credentialPins,
     ) {}
 
     public function deliver(
@@ -75,9 +76,9 @@ final class ReceiptDeliveryPipeline
                 (string) $messageId,
             );
             if ($finalized !== null) {
+                $this->credentialPins->pin($order, $finalized);
                 $this->synchronizeSentProjection($finalized, $order->id);
                 $this->materializeCompletedActionPanel($finalized);
-
                 if ($dispatchNext) {
                     $next = $this->ledger->nextReceiptEffect(
                         $finalized->effect_group_key,
@@ -88,7 +89,8 @@ final class ReceiptDeliveryPipeline
                     }
                 }
 
-                if ($this->isExplicitReceiptEffect($finalized) && $this->receiptGroupComplete($finalized)) {
+                if ($this->isExplicitReceiptEffect($finalized)
+                    && $this->ledger->isReceiptGroupComplete($finalized->effect_group_key)) {
                     $this->dispatchReceiptCleanup($order->id);
                 }
             }
@@ -274,6 +276,11 @@ final class ReceiptDeliveryPipeline
             });
 
         return $repairedOrderIds;
+    }
+
+    public function reconcileMissingCredentialPins(int $chunk = 100): int
+    {
+        return $this->credentialPins->reconcileMissingPins($chunk);
     }
 
     private function receiptIsEligible(Order $order): bool

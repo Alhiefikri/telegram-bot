@@ -677,11 +677,13 @@ class TelegramReceiptNotifier
         $text = '';
         $entities = [];
         $rows = [];
+        $containsCredentials = false;
 
         foreach ($blocks as $block) {
             $prefix = $text === '' ? '' : $text."\n";
             $entityOffset = $this->utf16Length($prefix);
             $text = $prefix.$block->text();
+            $containsCredentials = $containsCredentials || $block->containsCredentials();
 
             foreach ($block->entities() as $entity) {
                 $entities[] = [
@@ -700,6 +702,7 @@ class TelegramReceiptNotifier
             text: $text,
             entities: $entities,
             replyMarkup: $rows === [] ? [] : ['inline_keyboard' => $rows],
+            containsCredentials: $containsCredentials,
         );
     }
 

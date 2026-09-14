@@ -266,7 +266,20 @@ class TelegramMessageRouter
 
         if (in_array($text, self::ORDER_HISTORY_COMMANDS, true)) {
             $this->session->forgetWithLock($customer);
-            $this->navigation->presentOrSend($customer, $chatId, $this->orders->orderHistorySurface($customer), $isPrivateChat);
+            if ($isPrivateChat) {
+                $this->navigation->presentOrEstablish(
+                    $customer,
+                    $chatId,
+                    $this->orders->orderHistorySurface($customer),
+                );
+            } else {
+                $this->navigation->presentOrSend(
+                    $customer,
+                    $chatId,
+                    $this->orders->orderHistorySurface($customer),
+                    false,
+                );
+            }
 
             return;
         }

@@ -24,11 +24,16 @@ use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Support\PaymentProvider;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
 class TelegramOrderIntents
 {
+    private const ORDER_HISTORY_PAGE_SIZE = 10;
+
+    private const ORDER_HISTORY_CURSOR_PATTERN = '/\Aorders:(older|newer):([0-9]{14}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\z/D';
+
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramOutboundEffectService $outboundEffects,
@@ -52,18 +57,34 @@ class TelegramOrderIntents
 
     public function sendLatestOrderStatus(Customer $customer, string $chatId): void
     {
-        $order = $customer->orders()->latest()->first();
+        $order = $customer->orders()
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->first();
         if (! $order) {
             $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'order.status.empty'));
 
             return;
         }
 
-        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'order.status.message', [
-            'invoice' => $order->invoice_number,
-            'order_status' => $this->locale->orderStatus($customer, $order->order_status),
-            'payment_status' => $this->locale->paymentStatus($customer, $order->payment_status),
-        ]));
+        $this->bot->sendMessage(
+            $chatId,
+            $this->locale->translate($customer, 'order.status.message', [
+                'invoice' => $order->invoice_number,
+                'order_status' => $this->locale->orderStatus($customer, $order->order_status),
+                'payment_status' => $this->locale->paymentStatus($customer, $order->payment_status),
+            ]),
+            ['inline_keyboard' => [
+                [[
+                    'text' => $this->locale->translate($customer, 'order.status.history_button'),
+                    'callback_data' => 'orders:open',
+                ]],
+                [[
+                    'text' => $this->locale->translate($customer, 'order.status.detail_button'),
+                    'callback_data' => 'order:'.$order->invoice_number,
+                ]],
+            ]],
+        );
     }
 
     /**
@@ -71,49 +92,149 @@ class TelegramOrderIntents
      * customer-owned message; the callback and menu adapters never re-run the
      * order query themselves.
      */
-    public function orderHistorySurface(Customer $customer): TelegramNavigationSurface
+    public function orderHistorySurface(Customer $customer, ?string $cursor = null): TelegramNavigationSurface
     {
-        $orders = $customer->orders()->latest()->limit(5)->get();
+        $historyCursor = $this->decodeHistoryCursor($cursor);
+        $ordersQuery = $customer->orders()
+            ->select([
+                'id',
+                'invoice_number',
+                'order_status',
+                'payment_status',
+                'created_at',
+                'telegram_receipt_sent_at',
+            ])
+            ->where('payment_status', PaymentStatus::Paid)
+            ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+
+        if ($historyCursor !== null) {
+            $operator = $historyCursor['direction'] === 'older' ? '<' : '>';
+            $ordersQuery->where(function ($query) use ($historyCursor, $operator): void {
+                $query->where('created_at', $operator, $historyCursor['created_at'])
+                    ->orWhere(function ($query) use ($historyCursor, $operator): void {
+                        $query->where('created_at', $historyCursor['created_at'])
+                            ->where('id', $operator, $historyCursor['id']);
+                    });
+            });
+        }
+
+        $orders = $ordersQuery
+            ->take(self::ORDER_HISTORY_PAGE_SIZE + 1)
+            ->get();
+        $hasMore = $orders->count() > self::ORDER_HISTORY_PAGE_SIZE;
+        if ($hasMore) {
+            $orders = $orders->take(self::ORDER_HISTORY_PAGE_SIZE);
+        }
+
+        $hasNewer = $historyCursor !== null
+            && $historyCursor['direction'] === 'older';
+        $hasOlder = $hasMore
+            || ($historyCursor !== null && $historyCursor['direction'] === 'newer');
+
         if ($orders->isEmpty()) {
+            $keyboard = [[
+                [
+                    'text' => $this->locale->translate($customer, 'order.history.browse_button'),
+                    'callback_data' => 'katalog',
+                ],
+            ]];
+            if ($historyCursor !== null) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'order.history.previous'),
+                    'callback_data' => 'orders:open',
+                ]];
+            }
+            $keyboard[] = $this->menu->navigationRow($customer);
+
             return new TelegramNavigationSurface(
                 TelegramNavigationScreen::Orders,
                 $this->locale->code($customer),
                 $this->locale->translate($customer, 'order.history.empty'),
-                ['inline_keyboard' => [
-                    [[
-                        'text' => $this->locale->translate($customer, 'order.history.browse_button'),
-                        'callback_data' => 'katalog',
-                    ]],
-                    $this->menu->navigationRow($customer),
-                ]],
+                ['inline_keyboard' => $keyboard],
             );
         }
 
-        $lines = [
-            $this->locale->translate($customer, 'order.history.title'),
-            '━━━━━━━━━━━━━━',
-            $this->locale->translate($customer, 'order.history.instruction'),
-        ];
         $keyboard = [];
-        foreach ($orders as $i => $order) {
-            $lines[] = ($i + 1).'. '.$order->invoice_number
-                .' · '.$this->locale->orderStatus($customer, $order->order_status)
-                .' / '.$this->locale->paymentStatus($customer, $order->payment_status)
-                .' · Rp '.number_format($order->total_amount, 0, ',', '.')
-                .' · '.$this->locale->formatShortDate($customer, $order->created_at);
+        foreach ($orders as $order) {
             $keyboard[] = [[
-                'text' => $this->locale->translate($customer, 'order.history.detail_button').$order->invoice_number,
+                'text' => $this->locale->translate($customer, 'order.history.item_button', [
+                    'invoice' => $order->invoice_number,
+                    'status' => $this->historyButtonStatus($customer, $order),
+                ]),
                 'callback_data' => 'order:'.$order->invoice_number,
             ]];
+        }
+
+        $pagination = [];
+        if ($hasNewer) {
+            $pagination[] = [
+                'text' => $this->locale->translate($customer, 'order.history.previous'),
+                'callback_data' => $this->historyCursor('newer', $orders->first()),
+            ];
+        }
+        if ($hasOlder) {
+            $pagination[] = [
+                'text' => $this->locale->translate($customer, 'order.history.next'),
+                'callback_data' => $this->historyCursor('older', $orders->last()),
+            ];
+        }
+        if ($pagination !== []) {
+            $keyboard[] = $pagination;
         }
         $keyboard[] = $this->menu->navigationRow($customer);
 
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::Orders,
             $this->locale->code($customer),
-            implode("\n", $lines),
+            $this->locale->translate($customer, 'order.history.title'),
             ['inline_keyboard' => $keyboard],
         );
+    }
+
+    private function historyCursor(string $direction, Order $order): string
+    {
+        $cursor = 'orders:'.$direction.':'.$order->created_at->format('YmdHis').':'.$order->getKey();
+        if (strlen($cursor) > 64) {
+            throw new \LogicException('Order history callback data exceeded Telegram limit.');
+        }
+
+        return $cursor;
+    }
+
+    /** @return array{direction: string, created_at: Carbon, id: string}|null */
+    private function decodeHistoryCursor(?string $cursor): ?array
+    {
+        if ($cursor === null
+            || preg_match(self::ORDER_HISTORY_CURSOR_PATTERN, $cursor, $matches) !== 1) {
+            return null;
+        }
+
+        try {
+            $createdAt = Carbon::createFromFormat('YmdHis', $matches[2], config('app.timezone'));
+        } catch (Throwable) {
+            return null;
+        }
+        if (! $createdAt instanceof Carbon) {
+            return null;
+        }
+
+        return [
+            'direction' => $matches[1],
+            'created_at' => $createdAt,
+            'id' => $matches[3],
+        ];
+    }
+
+    private function historyButtonStatus(Customer $customer, Order $order): string
+    {
+        if ($order->payment_status === PaymentStatus::Paid
+            && ($order->order_status === OrderStatus::Completed || $order->telegram_receipt_sent_at !== null)) {
+            return $this->locale->translate($customer, 'order.history.delivered');
+        }
+
+        return $this->locale->orderStatus($customer, $order->order_status);
     }
 
     public function sendOrderDetail(Customer $customer, string $chatId, string $invoice): void

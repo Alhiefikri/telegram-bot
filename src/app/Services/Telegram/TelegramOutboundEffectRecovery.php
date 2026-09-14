@@ -42,6 +42,15 @@ final class TelegramOutboundEffectRecovery
     }
 
     /**
+     * Pin credential-bearing receipt messages whose delivery worker completed
+     * before the Telegram pin side effect.
+     */
+    public function reconcileMissingCredentialPins(int $chunk = 100): int
+    {
+        return $this->receipts->reconcileMissingCredentialPins($chunk);
+    }
+
+    /**
      * Recover missing committed Store Balance top-up outbound effects.
      */
     public function recoverMissingStoreBalanceTopUpEffects(int $chunk = 100): int

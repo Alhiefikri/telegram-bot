@@ -13,6 +13,7 @@ use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\TelegramNavigationRoot;
 use App\Services\CartService;
 use App\Services\OrderLifecycle;
 use App\Services\OrderLifecycleResult;
@@ -39,31 +40,146 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage') && str_contains($r['text'], $order->invoice_number));
     }
 
-    public function test_riwayat_lists_latest_customer_orders_with_detail_buttons(): void
+    public function test_status_history_button_opens_the_recent_order_screen(): void
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
-        $old = Order::factory()->create(['customer_id' => $customer->id, 'invoice_number' => 'INV-OLD', 'created_at' => now()->subDay()]);
-        $new = Order::factory()->create(['customer_id' => $customer->id, 'invoice_number' => 'INV-NEW', 'order_status' => OrderStatus::Completed, 'payment_status' => PaymentStatus::Paid, 'created_at' => now()]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-STATUS-HISTORY',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(117, '/status'))->assertOk();
+        $status = $this->sentMessageRequestContaining($order->invoice_number);
+        $historyCallback = $status['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            118,
+            'cb-status-history',
+            $historyCallback,
+        ))->assertOk();
+
+        $this->assertDatabaseHas('telegram_navigation_roots', [
+            'customer_id' => $customer->id,
+            'screen' => 'orders',
+        ]);
+        $history = $this->sentMessageRequestContaining('Pesanan Berhasil');
+        $this->assertSame('📦 Pesanan Berhasil', $history['text']);
+        $this->assertSame('order:'.$order->invoice_number, $history['reply_markup']['inline_keyboard'][0][0]['callback_data']);
+        $this->assertStringNotContainsString($order->invoice_number, (string) $history['text']);
+    }
+
+    public function test_riwayat_lists_latest_successful_orders_as_compact_buttons(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $old = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-OLD',
+            'order_status' => OrderStatus::Cancelled,
+            'payment_status' => PaymentStatus::Failed,
+            'created_at' => now()->subDay(),
+        ]);
+        $new = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-NEW',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'created_at' => now(),
+        ]);
 
         $this->postTelegramWebhook($this->messageUpdate(201, '/riwayat'))->assertOk();
 
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Riwayat Pesanan')
-            && strpos($r['text'], $new->invoice_number) < strpos($r['text'], $old->invoice_number)
-            && str_contains($r['text'], 'Selesai / Dibayar')
-            && str_contains(json_encode($r->data()), 'order:'.$new->invoice_number));
+        $request = $this->sentMessageRequestContaining('Pesanan Berhasil');
+        $this->assertSame('📦 Pesanan Berhasil', $request['text']);
+        $this->assertStringNotContainsString($new->invoice_number, (string) $request['text']);
+        $this->assertStringNotContainsString($old->invoice_number, (string) $request['text']);
+
+        $keyboard = json_encode($request['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('order:'.$new->invoice_number, $keyboard);
+        $this->assertStringContainsString('Terkirim', $keyboard);
+        $this->assertStringNotContainsString('order:'.$old->invoice_number, $keyboard);
     }
 
-    public function test_riwayat_fallback_when_no_orders(): void
+    public function test_riwayat_paginates_successful_orders_with_stable_compact_buttons(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+
+        for ($index = 1; $index <= 11; $index++) {
+            Order::factory()->create([
+                'customer_id' => $customer->id,
+                'invoice_number' => 'INV-PAGE-'.str_pad((string) $index, 2, '0', STR_PAD_LEFT),
+                'order_status' => OrderStatus::Completed,
+                'payment_status' => PaymentStatus::Paid,
+                'created_at' => now()->subMinutes(11 - $index),
+            ]);
+        }
+
+        $this->postTelegramWebhook($this->messageUpdate(206, '/riwayat'))->assertOk();
+
+        $request = $this->sentMessageRequestContaining('Pesanan Berhasil');
+        $keyboard = $request['reply_markup']['inline_keyboard'];
+        $orderCallbacks = array_values(array_filter(
+            array_map(fn (array $row) => $row[0]['callback_data'] ?? null, $keyboard),
+            fn ($callback): bool => is_string($callback) && str_starts_with($callback, 'order:'),
+        ));
+        $expectedCallbacks = [];
+        for ($index = 11; $index >= 2; $index--) {
+            $expectedCallbacks[] = 'order:INV-PAGE-'.str_pad((string) $index, 2, '0', STR_PAD_LEFT);
+        }
+        $this->assertSame($expectedCallbacks, $orderCallbacks);
+        $this->assertSame('📦 Pesanan Berhasil', $request['text']);
+        $this->assertStringNotContainsString('INV-PAGE-01', (string) $request['text']);
+        $this->assertMatchesRegularExpression(
+            '/\Aorders:older:[0-9]{14}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/',
+            $keyboard[10][0]['callback_data'],
+        );
+        $this->assertLessThanOrEqual(64, strlen($keyboard[10][0]['callback_data']));
+
+        Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-PAGE-12',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'created_at' => now()->addMinute(),
+        ]);
+
+        $root = TelegramNavigationRoot::query()->where('customer_id', $customer->id)->firstOrFail();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            207,
+            'cb-page-2',
+            $keyboard[10][0]['callback_data'],
+            [],
+            12345,
+            'private',
+            $root->message_id,
+        ))->assertOk();
+
+        $pageTwo = Http::recorded(fn (Request $recorded): bool => str_ends_with($recorded->url(), '/editMessageText'))
+            ->last()[0];
+        $this->assertSame('📦 Pesanan Berhasil', $pageTwo['text']);
+        $pageTwoKeyboard = $pageTwo['reply_markup']['inline_keyboard'];
+        $pageTwoCallbacks = array_values(array_filter(
+            array_map(fn (array $row) => $row[0]['callback_data'] ?? null, $pageTwoKeyboard),
+            fn ($callback): bool => is_string($callback) && str_starts_with($callback, 'order:'),
+        ));
+        $this->assertSame(['order:INV-PAGE-01'], $pageTwoCallbacks);
+        $this->assertStringNotContainsString('order:INV-PAGE-02', json_encode($pageTwoKeyboard, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('order:INV-PAGE-12', json_encode($pageTwoKeyboard, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_riwayat_fallback_when_no_successful_orders(): void
     {
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $this->postTelegramWebhook($this->messageUpdate(202, '/riwayat'))->assertOk();
 
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Riwayat masih kosong')
-            && str_contains($r['text'], 'Yuk lihat produk dulu'));
+        $request = $this->sentMessageRequestContaining('Belum ada pesanan berhasil.');
+        $this->assertSame('📦 Belum ada pesanan berhasil.', $request['text']);
+        $this->assertSame('🛍️ Lihat Produk', $request['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
     }
 
     #[DataProvider('emptyOrderLocaleCases')]
@@ -92,14 +208,24 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
-        $own = Order::factory()->create(['customer_id' => $customer->id, 'invoice_number' => 'INV-OWN']);
-        Order::factory()->create(['invoice_number' => 'INV-OTHER']);
+        $own = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-OWN',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $other = Order::factory()->create([
+            'invoice_number' => 'INV-OTHER',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
 
         $this->postTelegramWebhook($this->messageUpdate(203, '/riwayat'))->assertOk();
 
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], $own->invoice_number)
-            && ! str_contains($r['text'], 'INV-OTHER'));
+        $request = $this->sentMessageRequestContaining('Pesanan Berhasil');
+        $keyboard = json_encode($request['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('order:'.$own->invoice_number, $keyboard);
+        $this->assertStringNotContainsString('order:'.$other->invoice_number, $keyboard);
     }
 
     public function test_order_without_invoice_sends_usage_instruction(): void
@@ -426,7 +552,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     }
 
     #[DataProvider('customerLocaleCases')]
-    public function test_history_alias_localizes_labels_statuses_buttons_and_dates(array $copy): void
+    public function test_history_alias_localizes_compact_buttons(array $copy): void
     {
         config()->set('app.timezone', 'Asia/Jakarta');
         $this->fakeTelegramHttp();
@@ -434,23 +560,21 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
         $order = Order::factory()->create([
             'customer_id' => $customer->id,
             'invoice_number' => 'INV-HISTORY-'.strtoupper($copy['locale']),
-            'order_status' => OrderStatus::PendingPayment,
-            'payment_status' => PaymentStatus::Pending,
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
             'created_at' => CarbonImmutable::parse('2026-05-04 15:30:00', 'Asia/Jakarta'),
         ]);
 
         $this->postTelegramWebhook($this->messageUpdate(302, $copy['historyCommand']))->assertOk();
 
-        $request = $this->sentMessageRequestContaining($order->invoice_number);
+        $request = $this->sentMessageRequestContaining($copy['historyTitle']);
         $text = (string) $request['text'];
+        $button = $request['reply_markup']['inline_keyboard'][0][0] ?? [];
         $this->assertStringContainsString($copy['historyTitle'], $text);
-        $this->assertStringContainsString($copy['orderPending'].' / '.$copy['paymentPending'], $text);
-        $this->assertStringContainsString($copy['shortDate'], $text);
-        $this->assertSame($copy['detailButton'].' '.$order->invoice_number, $request['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
-        $this->assertSame('order:'.$order->invoice_number, $request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null);
-        $this->assertStringNotContainsString('pending_payment', $text);
+        $this->assertSame('📦 '.$order->invoice_number.' · '.$copy['historyDelivered'], $button['text'] ?? null);
+        $this->assertSame('order:'.$order->invoice_number, $button['callback_data'] ?? null);
+        $this->assertStringNotContainsString($order->invoice_number, $text);
         $this->assertStringNotContainsString($copy['otherHistoryTitle'], $text);
-        $this->assertStringNotContainsString($copy['otherShortDate'], $text);
     }
 
     #[DataProvider('customerLocaleCases')]
@@ -811,8 +935,8 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
                 'historyCommand' => '/riwayat',
                 'status' => 'Belum ada pesanan nih',
                 'otherStatus' => 'You do not have any orders yet',
-                'history' => 'Riwayat masih kosong',
-                'otherHistory' => 'No order history',
+                'history' => 'Belum ada pesanan berhasil.',
+                'otherHistory' => 'No successful orders yet.',
                 'browse' => '🛍️ Lihat Produk',
             ]],
             'English' => [[
@@ -820,8 +944,8 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
                 'historyCommand' => '/history',
                 'status' => 'You do not have any orders yet',
                 'otherStatus' => 'Belum ada pesanan nih',
-                'history' => 'No order history',
-                'otherHistory' => 'Riwayat masih kosong',
+                'history' => 'No successful orders yet.',
+                'otherHistory' => 'Belum ada pesanan berhasil.',
                 'browse' => '🛍️ Browse Products',
             ]],
             'Malay' => [[
@@ -829,8 +953,8 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
                 'historyCommand' => '/sejarah',
                 'status' => 'Tiada pesanan lagi',
                 'otherStatus' => 'You do not have any orders yet',
-                'history' => 'Tiada sejarah pesanan',
-                'otherHistory' => 'No order history',
+                'history' => 'Tiada pesanan berjaya lagi.',
+                'otherHistory' => 'No successful orders yet.',
                 'browse' => '🛍️ Lihat Produk',
             ]],
         ];
@@ -849,11 +973,9 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
                 'paymentStatusLabel' => 'Pembayaran:',
                 'orderPending' => 'Menunggu pembayaran',
                 'paymentPending' => 'Menunggu pembayaran',
-                'historyTitle' => 'Riwayat Pesanan Terakhir',
-                'otherHistoryTitle' => 'Recent Order History',
-                'detailButton' => '🧾 Detail',
-                'shortDate' => '04 Mei 2026',
-                'otherShortDate' => '04 May 2026',
+                'historyTitle' => 'Pesanan Berhasil',
+                'otherHistoryTitle' => 'Successful Orders',
+                'historyDelivered' => 'Terkirim',
                 'orderTitle' => 'Detail Pesanan',
                 'otherOrderTitle' => 'Order Details',
                 'orderCompleted' => 'Selesai',
@@ -885,11 +1007,9 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
                 'paymentStatusLabel' => 'Payment:',
                 'orderPending' => 'Awaiting payment',
                 'paymentPending' => 'Awaiting payment',
-                'historyTitle' => 'Recent Order History',
-                'otherHistoryTitle' => 'Riwayat Pesanan Terakhir',
-                'detailButton' => '🧾 Details',
-                'shortDate' => '04 May 2026',
-                'otherShortDate' => '04 Mei 2026',
+                'historyTitle' => 'Successful Orders',
+                'otherHistoryTitle' => 'Pesanan Berhasil',
+                'historyDelivered' => 'Delivered',
                 'orderTitle' => 'Order Details',
                 'otherOrderTitle' => 'Detail Pesanan',
                 'orderCompleted' => 'Completed',
@@ -921,11 +1041,9 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
                 'paymentStatusLabel' => 'Bayaran:',
                 'orderPending' => 'Menunggu bayaran',
                 'paymentPending' => 'Menunggu bayaran',
-                'historyTitle' => 'Sejarah Pesanan Terkini',
-                'otherHistoryTitle' => 'Recent Order History',
-                'detailButton' => '🧾 Butiran',
-                'shortDate' => '04 Mei 2026',
-                'otherShortDate' => '04 May 2026',
+                'historyTitle' => 'Pesanan Berjaya',
+                'otherHistoryTitle' => 'Successful Orders',
+                'historyDelivered' => 'Dihantar',
                 'orderTitle' => 'Butiran Pesanan',
                 'otherOrderTitle' => 'Order Details',
                 'orderCompleted' => 'Selesai',

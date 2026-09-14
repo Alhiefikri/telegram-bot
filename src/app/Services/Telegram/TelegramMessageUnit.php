@@ -18,6 +18,7 @@ readonly class TelegramMessageUnit
         private string $text,
         private array $entities = [],
         private array $replyMarkup = [],
+        private bool $containsCredentials = false,
     ) {}
 
     public function text(): string
@@ -35,6 +36,11 @@ readonly class TelegramMessageUnit
     public function replyMarkup(): array
     {
         return $this->replyMarkup;
+    }
+
+    public function containsCredentials(): bool
+    {
+        return $this->containsCredentials;
     }
 
     public function characterLength(): int
@@ -59,13 +65,14 @@ readonly class TelegramMessageUnit
         throw new LogicException('Telegram message units cannot be unserialized.');
     }
 
-    /** @return array{character_length: int, entity_count: int, has_reply_markup: bool} */
+    /** @return array{character_length: int, entity_count: int, has_reply_markup: bool, contains_credentials: bool} */
     public function __debugInfo(): array
     {
         return [
             'character_length' => $this->characterLength(),
             'entity_count' => count($this->entities),
             'has_reply_markup' => $this->replyMarkup !== [],
+            'contains_credentials' => $this->containsCredentials,
         ];
     }
 }

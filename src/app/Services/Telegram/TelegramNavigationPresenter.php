@@ -73,6 +73,19 @@ final class TelegramNavigationPresenter
         $this->bot->sendMessage($chatId, $surface->caption, $surface->keyboard, $surface->options);
     }
 
+    /**
+     * Routine navigation that guarantees a canonical root for subsequent
+     * callbacks, creating it when this chat has not established one yet.
+     */
+    public function presentOrEstablish(Customer $customer, string $chatId, TelegramNavigationSurface $surface): void
+    {
+        if ($this->presentOnCurrentRoot($customer, $chatId, $surface) !== null) {
+            return;
+        }
+
+        $this->roots->establishText($customer, $chatId, $surface);
+    }
+
     public function feedback(Customer $customer, TelegramNavigationRenderOutcome $outcome): ?string
     {
         return match ($outcome) {

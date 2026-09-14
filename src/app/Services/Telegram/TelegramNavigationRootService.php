@@ -30,6 +30,7 @@ class TelegramNavigationRootService
         private TelegramBotClient $bot,
         private TelegramWelcomeBanner $banner,
         private TelegramHtmlCaption $captions,
+        private TelegramOutboundResponseValidator $responseValidator,
     ) {}
 
     private function current(Customer $customer): ?TelegramNavigationRoot
@@ -96,6 +97,19 @@ class TelegramNavigationRootService
         );
 
         return $this->persistRoot($customer, $chatId, $surface, $sent);
+    }
+
+    public function establishText(Customer $customer, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRoot
+    {
+        $response = $this->bot->sendMessage($chatId, $surface->caption, $surface->keyboard, $surface->options);
+        $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram navigation');
+        $sent = new TelegramWelcomeBannerSend(
+            $messageId,
+            TelegramNavigationMediaKind::Text,
+            null,
+        );
+
+        return $this->persistRoot($customer, trim($chatId), $surface, $sent);
     }
 
     public function render(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRenderOutcome
