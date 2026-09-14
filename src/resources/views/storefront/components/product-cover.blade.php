@@ -3,6 +3,7 @@
     $presentation = $presentation ?? $storefront->productPresentation($product);
     $coverTheme = $presentation->cover->theme;
     $imageUrl = $presentation->cover->imageUrl;
+    $coverIcon = trim((string) ($presentation->cover->icon ?? ''));
     $isAvailable = $isAvailable ?? $presentation->isAvailable;
     $isPopular = $isPopular ?? false;
     $priority = $priority ?? false;
@@ -18,9 +19,13 @@
             <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" loading="{{ $imageLoading }}" fetchpriority="{{ $fetchPriority }}" decoding="async" class="absolute inset-0 h-full w-full object-cover object-center">
         @else
             <div class="relative z-10 flex flex-col items-center justify-center space-y-4 text-center">
-                <div class="{{ $coverTheme['accent'] }}">
-                    {!! $coverTheme['logo'] ?? '<svg class="w-12 h-12" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="4"/></svg>' !!}
-                </div>
+                @if ($coverIcon !== '')
+                    <div class="{{ $coverTheme['accent'] }} text-5xl leading-none" aria-hidden="true">{{ $coverIcon }}</div>
+                @else
+                    <div class="{{ $coverTheme['accent'] }}">
+                        {!! $coverTheme['logo'] ?? '<svg class="w-12 h-12" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="4"/></svg>' !!}
+                    </div>
+                @endif
                 <div class="{{ $coverTheme['accent'] }} text-[8px] font-black uppercase tracking-widest opacity-80">{{ $coverTheme['desc'] }}</div>
             </div>
         @endif
@@ -39,9 +44,13 @@
             <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" loading="{{ $imageLoading }}" fetchpriority="{{ $fetchPriority }}" decoding="async" class="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-[1.07]">
         @else
             <div class="relative z-10 flex flex-col items-center justify-center space-y-3 p-4 text-center transition-transform duration-500 ease-out group-hover:scale-[1.05]">
-                <div class="{{ $coverTheme['accent'] }} rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-[var(--sf-ink)] shadow-[5px_5px_0_var(--sf-shadow)]">
-                    {!! $coverTheme['logo'] !!}
-                </div>
+                @if ($coverIcon !== '')
+                    <div class="{{ $coverTheme['accent'] }} rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-5 py-4 text-5xl leading-none text-[var(--sf-ink)] shadow-[5px_5px_0_var(--sf-shadow)]" aria-hidden="true">{{ $coverIcon }}</div>
+                @else
+                    <div class="{{ $coverTheme['accent'] }} rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-[var(--sf-ink)] shadow-[5px_5px_0_var(--sf-shadow)]">
+                        {!! $coverTheme['logo'] !!}
+                    </div>
+                @endif
                 <div class="{{ $coverTheme['accent'] }} rounded-full border-2 border-[var(--sf-border)] bg-white px-2 py-1 text-[8px] font-black uppercase tracking-widest text-[var(--sf-ink)]">{{ $coverTheme['desc'] }}</div>
             </div>
             <div class="absolute bottom-2 left-3 text-[7px] font-black uppercase tracking-widest text-[var(--sf-muted)] opacity-70">LHIE STORE</div>

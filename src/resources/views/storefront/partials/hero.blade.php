@@ -53,6 +53,8 @@
                                     <span class="relative flex aspect-square w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--sf-border)] bg-[var(--sf-accent-soft)]">
                                         @if ($featured->cover->imageUrl)
                                             <img src="{{ $featured->cover->imageUrl }}" alt="" width="80" height="80" loading="eager" decoding="async" class="absolute inset-0 h-full w-full object-cover">
+                                        @elseif (trim((string) ($featured->cover->icon ?? '')) !== '')
+                                            <span class="font-display text-3xl font-black text-[var(--sf-accent)]" aria-hidden="true">{{ $featured->cover->icon }}</span>
                                         @else
                                             <span class="font-display text-3xl font-black text-[var(--sf-accent)]" aria-hidden="true">{{ mb_substr($featured->name, 0, 1) }}</span>
                                         @endif

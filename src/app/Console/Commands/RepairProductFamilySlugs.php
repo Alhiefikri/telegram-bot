@@ -29,8 +29,10 @@ final class RepairProductFamilySlugs extends Command
 
         $gemini = $this->familyNamedLike('gemini');
         $geminiSlugOwner = ProductFamily::withTrashed()->where('slug', 'gemini')->first();
-        $geminiRepairSlug = $this->geminiRepairSlug($netflix, $gemini, $geminiSlugOwner);
         $netflixNeedsRepair = (string) $netflix->slug !== 'netflix';
+        $geminiRepairSlug = $netflixNeedsRepair
+            ? $this->geminiRepairSlug($netflix, $gemini, $geminiSlugOwner)
+            : null;
 
         $this->line(sprintf('Netflix candidate: name=%s slug=%s', $netflix->name, $netflix->slug));
         if ($gemini instanceof ProductFamily) {
@@ -113,7 +115,9 @@ final class RepairProductFamilySlugs extends Command
             throw new RuntimeException(sprintf('Ambiguous family name %s; inspect candidates before repair.', $normalizedName));
         }
 
-        return $matches->first();
+        $family = $matches->first();
+
+        return $family instanceof ProductFamily && $this->isPublicFamily($family) ? $family : null;
     }
 
     private function familyNamedLike(string $normalizedPrefix): ?ProductFamily
@@ -131,7 +135,14 @@ final class RepairProductFamilySlugs extends Command
             throw new RuntimeException(sprintf('Ambiguous family name %s; inspect candidates before repair.', $normalizedPrefix));
         }
 
-        return $matches->first();
+        $family = $matches->first();
+
+        return $family instanceof ProductFamily && $this->isPublicFamily($family) ? $family : null;
+    }
+
+    private function isPublicFamily(ProductFamily $family): bool
+    {
+        return $family->products()->publicVisible()->exists();
     }
 
     private function geminiRepairSlug(

@@ -68,6 +68,90 @@ final class RepairProductFamilySlugsTest extends TestCase
         $this->assertSame(1, ProductFamilySlugRedirect::query()->where('old_slug', 'gemini')->count());
     }
 
+    public function test_canonical_netflix_and_gemini_slugs_are_not_mutated_by_repair_audit(): void
+    {
+        $netflix = ProductFamily::factory()->create([
+            'name' => 'Netflix',
+            'slug' => 'netflix',
+        ]);
+        $gemini = ProductFamily::factory()->create([
+            'name' => 'Gemini AI',
+            'slug' => 'gemini',
+        ]);
+        Product::factory()->create([
+            'product_family_id' => $netflix->id,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'product_family_id' => $gemini->id,
+            'is_active' => true,
+        ]);
+        $apply = Artisan::call('storefront:repair-family-slugs', ['--apply' => true]);
+        $this->assertSame(0, $apply, Artisan::output());
+
+        $this->assertSame('netflix', $netflix->fresh()->slug);
+        $this->assertSame('gemini', $gemini->fresh()->slug);
+        $this->assertDatabaseCount('product_family_slug_redirects', 0);
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    public function test_private_gemini_family_is_not_guessed_during_netflix_repair(): void
+    {
+        $netflix = ProductFamily::factory()->create([
+            'name' => 'Netflix',
+            'slug' => 'legacy-netflix',
+        ]);
+        $gemini = ProductFamily::factory()->create([
+            'name' => 'Gemini AI',
+            'slug' => 'gemini',
+        ]);
+        Product::factory()->create([
+            'product_family_id' => $netflix->id,
+            'is_active' => true,
+        ]);
+
+        try {
+            Artisan::call('storefront:repair-family-slugs', ['--apply' => true]);
+            $this->fail('Private Gemini family should block the repair.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('current Gemini record', $exception->getMessage());
+        }
+
+        $this->assertSame('legacy-netflix', $netflix->fresh()->slug);
+        $this->assertSame('gemini', $gemini->fresh()->slug);
+        $this->assertDatabaseCount('product_family_slug_redirects', 0);
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    public function test_deleted_gemini_family_is_not_guessed_during_netflix_repair(): void
+    {
+        $netflix = ProductFamily::factory()->create([
+            'name' => 'Netflix',
+            'slug' => 'legacy-netflix',
+        ]);
+        $gemini = ProductFamily::factory()->create([
+            'name' => 'Gemini AI',
+            'slug' => 'gemini',
+        ]);
+        Product::factory()->create([
+            'product_family_id' => $netflix->id,
+            'is_active' => true,
+        ]);
+        $gemini->delete();
+
+        try {
+            Artisan::call('storefront:repair-family-slugs', ['--apply' => true]);
+            $this->fail('Deleted Gemini family should block the repair.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('current Gemini record', $exception->getMessage());
+        }
+
+        $this->assertSame('legacy-netflix', $netflix->fresh()->slug);
+        $this->assertSoftDeleted('product_families', ['id' => $gemini->id]);
+        $this->assertDatabaseCount('product_family_slug_redirects', 0);
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
     public function test_actual_gemini_owner_gets_a_unique_name_derived_slug_before_netflix_repair(): void
     {
         $netflix = ProductFamily::factory()->create([
@@ -77,6 +161,14 @@ final class RepairProductFamilySlugsTest extends TestCase
         $gemini = ProductFamily::factory()->create([
             'name' => 'Gemini AI',
             'slug' => 'gemini',
+        ]);
+        Product::factory()->create([
+            'product_family_id' => $netflix->id,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'product_family_id' => $gemini->id,
+            'is_active' => true,
         ]);
 
         $apply = Artisan::call('storefront:repair-family-slugs', ['--apply' => true]);

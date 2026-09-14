@@ -10,6 +10,7 @@ final readonly class StorefrontProductCoverPresentation
     public function __construct(
         public array $theme,
         public ?string $imageUrl,
+        public ?string $icon = null,
         public string $emptyStampTitle = 'STOK HABIS',
         public string $emptyStampSubtitle = 'Restock segera',
     ) {}

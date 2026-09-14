@@ -196,6 +196,26 @@ class StorefrontLandingPageTest extends TestCase
         $this->get('/cara-loginoutlook')->assertRedirect('/gpt/panduan-login-akun');
     }
 
+    public function test_storefront_product_cover_uses_database_icon_for_an_arbitrary_product_name(): void
+    {
+        Product::factory()->create([
+            'name' => 'Produk Dinamis',
+            'icon' => '🧩',
+            'image_path' => null,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Produk Dinamis')
+            ->assertSee('🧩')
+            ->assertSee('PRODUK DIGITAL')
+            ->assertDontSee('NETFLIX STREAM')
+            ->assertDontSee('GEMINI / GOOGLE');
+    }
+
     public function test_empty_catalog_renders_customer_facing_state(): void
     {
         $this->get('/')

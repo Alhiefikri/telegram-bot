@@ -229,9 +229,7 @@ test("customer checkout: keeps the mobile sticky action aligned with the canonic
     expect(metrics.paddingBottom).toBeGreaterThanOrEqual(metrics.height - 1);
     expect(metrics.documentWidth).toBeLessThanOrEqual(390);
 
-    await page.evaluate(() => {
-      window.scrollTo(0, document.documentElement.scrollHeight);
-    });
+    await scrollCheckoutToSettledBottom(page);
     const bottomMetrics = await page.evaluate(() => {
       const sticky = document.querySelector("[data-checkout-sticky-action]");
       const form = document.querySelector("#checkout-form");
@@ -3960,6 +3958,75 @@ async function expectStorefrontPageCheckout(page) {
   await expect(page.locator('[role="dialog"]')).toHaveCount(0);
   expect(page.url()).not.toContain("checkout=1");
 }
+
+async function scrollCheckoutToSettledBottom(page) {
+  await page.waitForFunction(() => {
+    const fontsReady = !document.fonts || document.fonts.status === "loaded";
+    const imagesReady = Array.from(document.images).every(
+      (image) => image.complete
+    );
+
+    return fontsReady && imagesReady;
+  });
+
+  await page.evaluate(async () => {
+    document.documentElement.style.scrollBehavior = "auto";
+    document.body.style.scrollBehavior = "auto";
+    const scrollingElement =
+      document.scrollingElement ?? document.documentElement;
+    const nextFrame = () =>
+      new Promise((resolve) => window.requestAnimationFrame(resolve));
+    let previousHeight = -1;
+    let stableFrames = 0;
+
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      scrollingElement.scrollTop = scrollingElement.scrollHeight;
+      await nextFrame();
+
+      const maxScrollTop = Math.max(
+        0,
+        scrollingElement.scrollHeight - scrollingElement.clientHeight
+      );
+      const sticky = document.querySelector("[data-checkout-sticky-action]");
+      const form = document.querySelector("#checkout-form");
+      const stickyRect = sticky?.getBoundingClientRect();
+      const formRect = form?.getBoundingClientRect();
+      const atBottom = Math.abs(scrollingElement.scrollTop - maxScrollTop) <= 1;
+      const formIsUncovered =
+        stickyRect && formRect ? formRect.bottom <= stickyRect.top + 1 : false;
+      const heightIsStable = scrollingElement.scrollHeight === previousHeight;
+
+      if (atBottom && formIsUncovered && heightIsStable) {
+        stableFrames += 1;
+        if (stableFrames >= 2) {
+          return;
+        }
+      } else {
+        stableFrames = 0;
+      }
+
+      previousHeight = scrollingElement.scrollHeight;
+    }
+
+    throw new Error(
+      `Checkout did not settle at the bottom: ${JSON.stringify({
+        scrollTop: scrollingElement.scrollTop,
+        maxScrollTop: Math.max(
+          0,
+          scrollingElement.scrollHeight - scrollingElement.clientHeight
+        ),
+        documentHeight: scrollingElement.scrollHeight,
+        stickyTop: document
+          .querySelector("[data-checkout-sticky-action]")
+          ?.getBoundingClientRect().top,
+        formBottom: document
+          .querySelector("#checkout-form")
+          ?.getBoundingClientRect().bottom,
+      })}`
+    );
+  });
+}
+
 async function expectStorefrontCheckoutRecovery(page) {
   await page.waitForLoadState("domcontentloaded");
   await expect(page).toHaveURL(/\/shop\/checkout(?:\/products\/\d+)?(?:\?|$)/);
