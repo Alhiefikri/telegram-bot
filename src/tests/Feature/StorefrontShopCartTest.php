@@ -445,6 +445,10 @@ class StorefrontShopCartTest extends TestCase
         $this->assertStringNotContainsString('id="checkout-quantity"', $html);
         $this->assertStringNotContainsString('name="quantity"', $html);
         $this->assertStringNotContainsString('role="dialog"', $html);
+        $this->assertSame(1, substr_count($html, 'data-checkout-sticky-action'));
+        $this->assertSame(1, substr_count($html, 'form="checkout-form"'));
+        $this->assertSame(1, substr_count($html, 'name="cart_snapshot"'));
+        $this->assertSame(1, substr_count($html, 'data-checkout-submit'));
     }
 
     private function checkoutSnapshot(string $sessionKey): string

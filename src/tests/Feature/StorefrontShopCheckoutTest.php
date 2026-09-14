@@ -447,6 +447,25 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertStringContainsString('data-checkout-sticky-submit', $html);
         $this->assertStringContainsString('data-checkout-sticky-total', $html);
         $this->assertMatchesRegularExpression('/data-checkout-sticky-submit[^>]*disabled/', $html);
+        $this->assertStringContainsString('storefront-checkout-page', $html);
+        $this->assertStringContainsString('aria-controls="checkout-form"', $html);
+        $this->assertMatchesRegularExpression('/data-checkout-sticky-payment[^>]*>[^<]*QR Manual[^<]*<\/strong>/', $html);
+        $this->assertMatchesRegularExpression('/data-checkout-sticky-amount-label[^>]*>Subtotal review \(IDR\)<\/span>/', $html);
+        $this->assertMatchesRegularExpression('/data-checkout-sticky-total[^>]*>Rp45\.000<\/strong>/', $html);
+        $this->assertSame(1, substr_count($html, 'data-checkout-submit'));
+        $this->assertSame(1, substr_count($html, 'form="checkout-form"'));
+        foreach ([
+            'product_id',
+            'quantity',
+            'buyer_name',
+            'email',
+            'payment_method',
+            'support_contact_channel',
+            'support_contact_value',
+            'terms_accepted',
+        ] as $field) {
+            $this->assertSame(1, substr_count($html, 'name="'.$field.'"'), $field.' must remain canonical.');
+        }
     }
 
     public function test_landing_catalog_renders_page_checkout_and_empty_stock_state(): void

@@ -110,6 +110,7 @@ test("customer checkout: keeps canonical checkout usable without JavaScript", as
       page.getByRole("heading", { name: "Review produk sebelum bayar." })
     ).toBeVisible();
     await expect(page.locator("#checkout-form")).toBeVisible();
+    await expect(page.locator("[data-checkout-sticky-action]")).toBeHidden();
     await expect(
       page.locator('#checkout-form input[name="product_id"]')
     ).toHaveValue(/^\d+$/);
@@ -143,6 +144,133 @@ test("customer checkout: keeps canonical checkout usable without JavaScript", as
     ).toBeVisible();
   } finally {
     await context.close();
+  }
+});
+
+test("customer checkout: keeps the mobile sticky action aligned with the canonical checkout", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await runArtisan([
+    "tinker",
+    "--execute",
+    `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => true]);`,
+  ]);
+
+  try {
+    await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const sticky = page.locator("[data-checkout-sticky-action]");
+    const stickySubmit = sticky.locator("[data-checkout-sticky-submit]");
+    const inFlowSubmit = page.locator(
+      "#checkout-form [data-checkout-submit]:visible"
+    );
+
+    await expect(sticky).toBeVisible();
+    await expect(sticky).toHaveCSS("position", "fixed");
+    await expect(sticky).toHaveAttribute(
+      "aria-labelledby",
+      "checkout-sticky-title"
+    );
+    await expect(stickySubmit).toHaveAttribute("form", "checkout-form");
+    await expect(stickySubmit).toHaveAttribute(
+      "aria-controls",
+      "checkout-form"
+    );
+    await expect(sticky).toContainText("QR Manual");
+    await expect(sticky).toContainText("Subtotal review (IDR)");
+    await expect(sticky.locator("[data-checkout-sticky-total]")).toHaveText(
+      /Rp\s*88\.000/
+    );
+    await expect(stickySubmit).toBeDisabled();
+    await expect(stickySubmit).toHaveText(await inFlowSubmit.innerText());
+
+    await page
+      .getByRole("textbox", { name: "Nama pembeli" })
+      .fill("Sticky Buyer");
+    await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
+    await expect(stickySubmit).toBeEnabled();
+    await expect(stickySubmit).toHaveText(await inFlowSubmit.innerText());
+
+    await page.locator("#checkout-payment-disclosure summary").click();
+    await page.getByText("Bayar dengan Binance Pay", { exact: true }).click();
+    await expect(sticky).toContainText("Binance Pay");
+    await expect(sticky).toContainText("Total dasar USDT / estimasi");
+    await expect(sticky.locator("[data-checkout-sticky-total]")).toHaveText(
+      "2.5 USDT"
+    );
+    await expect(stickySubmit).toHaveText(await inFlowSubmit.innerText());
+    await expect(stickySubmit).toBeEnabled();
+
+    const metrics = await page.evaluate(() => {
+      const sticky = document.querySelector("[data-checkout-sticky-action]");
+      const main = document.querySelector("main");
+      const stickyRect = sticky?.getBoundingClientRect();
+      const mainStyle = main ? getComputedStyle(main) : null;
+
+      return {
+        position: sticky ? getComputedStyle(sticky).position : "",
+        bottom: stickyRect?.bottom ?? 0,
+        height: stickyRect?.height ?? 0,
+        paddingBottom: mainStyle
+          ? Number.parseFloat(mainStyle.paddingBottom)
+          : 0,
+        documentWidth: Math.max(
+          document.documentElement.scrollWidth,
+          document.body.scrollWidth
+        ),
+      };
+    });
+
+    expect(metrics.position).toBe("fixed");
+    expect(Math.abs(metrics.bottom - 844)).toBeLessThanOrEqual(1);
+    expect(metrics.paddingBottom).toBeGreaterThanOrEqual(metrics.height - 1);
+    expect(metrics.documentWidth).toBeLessThanOrEqual(390);
+
+    await page.evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    });
+    const bottomMetrics = await page.evaluate(() => {
+      const sticky = document.querySelector("[data-checkout-sticky-action]");
+      const form = document.querySelector("#checkout-form");
+      const stickyTop = sticky?.getBoundingClientRect().top ?? 0;
+      const formBottom = form?.getBoundingClientRect().bottom ?? 0;
+
+      return { stickyTop, formBottom };
+    });
+    expect(bottomMetrics.formBottom).toBeLessThanOrEqual(
+      bottomMetrics.stickyTop + 1
+    );
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(sticky).toBeHidden();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(sticky).toBeVisible();
+
+    let checkoutRequests = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname.endsWith("/shop/checkout")
+      ) {
+        checkoutRequests += 1;
+      }
+    });
+    await Promise.all([
+      page.waitForURL(/\/shop\/orders\/\d+/, {
+        waitUntil: "domcontentloaded",
+      }),
+      stickySubmit.click(),
+    ]);
+    expect(checkoutRequests).toBe(1);
+  } finally {
+    await runArtisan([
+      "tinker",
+      "--execute",
+      `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => false]);`,
+    ]);
   }
 });
 
@@ -187,7 +315,10 @@ test("customer checkout: switches payment copy and CTA without JavaScript", asyn
         .locator("#checkout-form")
         .getByRole("button", { name: /Buat invoice QR Manual/ })
     ).toBeHidden();
-    await page.getByText("Bayar via QR Manual", { exact: true }).click();
+    await page
+      .locator("[data-checkout-selected-option]")
+      .getByText("Bayar via QR Manual", { exact: true })
+      .click();
     await expect(page.getByRole("radio", { name: /QR Manual/ })).toBeChecked();
     await expect(
       page

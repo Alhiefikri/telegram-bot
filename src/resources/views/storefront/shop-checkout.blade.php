@@ -4,10 +4,10 @@
     @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
 <body class="relative overflow-x-hidden text-[var(--sf-ink)] antialiased selection:bg-[var(--sf-ink)] selection:text-white motion-reduce:animate-none">
-    <div class="storefront-shell relative z-10 flex min-h-screen flex-col justify-between overflow-x-hidden">
+    <div class="storefront-shell storefront-checkout-page relative z-10 flex min-h-screen flex-col justify-between overflow-x-hidden">
         @include('storefront.partials.header')
 
-        <main class="flex-grow pb-[calc(7rem+env(safe-area-inset-bottom))] pt-4 sm:pt-12 lg:pb-16">
+        <main class="flex-grow pb-[calc(7rem+env(safe-area-inset-bottom,0px))] pt-4 sm:pt-12 md:pb-16">
             <section class="mx-auto max-w-5xl px-4 sm:px-6">
                 @php
                     $checkoutValidationMessages = $errors->getMessages();
@@ -188,6 +188,16 @@
                                             : 'Buat invoice USDT BSC & lanjut bayar',
                                     ];
                                 };
+                                $selectedOptionCopy = $selectedPaymentOption === null
+                                    ? null
+                                    : $paymentCopy($selectedPaymentOption);
+                                $checkoutStickyPaymentLabel = $selectedPaymentOption['label'] ?? 'Metode pembayaran belum tersedia';
+                                $checkoutStickyAmountLabel = $selectedOptionCopy['amount_label'] ?? 'Total review (IDR)';
+                                $checkoutStickyAmountValue = ($selectedOptionCopy['amount_kind'] ?? 'idr') === 'usdt'
+                                    ? ($cartUsdtSubtotal === null ? '—' : $storefront->usdt($cartUsdtSubtotal))
+                                    : $storefront->idr($cartSubtotal);
+                                $checkoutStickySubmitLabel = $selectedOptionCopy['submit_label']
+                                    ?? ($checkoutPaymentOptions === [] ? 'Checkout belum tersedia' : 'Lanjut bayar');
                                 $checkoutBlockedReason = match (true) {
                                     $checkoutUnavailableNotice !== null => $checkoutUnavailableNotice,
                                     $cartHasConflicts => $checkoutSource === 'direct'
@@ -197,7 +207,6 @@
                                     default => 'Metode pembayaran belum tersedia untuk checkout ini. Coba lagi nanti atau hubungi support.',
                                 };
                             @endphp
-
                             <form id="checkout-form" method="POST" action="{{ $checkoutSubmitUrl }}" class="neo-panel grid grid-cols-1 min-w-0 gap-4 bg-[var(--sf-surface)] p-4 sm:p-5">
                                 @csrf
                                 @if ($checkoutSource === 'direct' && $checkoutProduct)
@@ -261,7 +270,6 @@
                                         </div>
                                     @else
                                         @php
-                                            $selectedOptionCopy = $paymentCopy($selectedPaymentOption);
                                             $selectedOptionId = 'checkout-payment-option-'.$selectedPaymentOption['value'];
                                         @endphp
                                         <div data-checkout-payment-option data-checkout-selected-option data-payment-value="{{ $selectedPaymentOption['value'] }}" data-payment-label="{{ $selectedPaymentOption['label'] }}" data-payment-description="{{ $selectedPaymentOption['description'] }}" data-payment-provider="{{ $selectedPaymentOption['provider'] ?? '' }}" data-payment-amount-kind="{{ $selectedOptionCopy['amount_kind'] }}" data-payment-amount-label="{{ $selectedOptionCopy['amount_label'] }}" data-payment-amount-help="{{ $selectedOptionCopy['amount_help'] }}" data-payment-submit-label="{{ $selectedOptionCopy['submit_label'] }}" class="grid min-w-0 gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[3px_3px_0_var(--sf-shadow)]">
@@ -387,13 +395,15 @@
                                     <button type="submit" data-checkout-submit disabled aria-disabled="true" aria-describedby="checkout-submit-disabled-help" class="neo-button neo-button-stable inline-flex min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Checkout belum tersedia</button>
                                 @endif
                             </form>
-                            <div class="storefront-sticky-action sticky bottom-0 z-40 items-center justify-between gap-3 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-checkout-sticky-action aria-label="Aksi checkout">
-                                <div class="min-w-0">
-                                    <span class="block text-[10px] font-black uppercase tracking-[0.14em] text-[var(--sf-muted)]">Total review</span>
-                                    <strong class="block truncate text-sm font-black text-[var(--sf-ink)]" data-checkout-sticky-total>{{ $storefront->idr($cartSubtotal) }}</strong>
+                            <div class="storefront-sticky-action fixed inset-x-0 bottom-0 z-40 items-center justify-between gap-3 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-checkout-sticky-action role="region" aria-labelledby="checkout-sticky-title">
+                                <div class="min-w-0 flex-1">
+                                    <span id="checkout-sticky-title" class="block text-[10px] font-black uppercase tracking-[0.14em] text-[var(--sf-muted)]">Ringkasan pembayaran</span>
+                                    <strong class="block break-words text-xs font-black leading-5 text-[var(--sf-ink)]" data-checkout-sticky-payment>{{ $checkoutStickyPaymentLabel }}</strong>
+                                    <span class="block break-words text-[11px] font-bold leading-4 text-[var(--sf-muted)]" data-checkout-sticky-amount-label>{{ $checkoutStickyAmountLabel }}</span>
+                                    <strong class="block break-words text-sm font-black leading-5 text-[var(--sf-ink)]" data-checkout-sticky-total>{{ $checkoutStickyAmountValue }}</strong>
                                 </div>
-                                <button type="submit" form="checkout-form" data-checkout-sticky-submit class="neo-button neo-button-stable inline-flex min-h-12 min-w-0 max-w-[68%] items-center justify-center break-words bg-[var(--sf-accent)] px-4 text-center text-xs leading-4 text-white sm:px-5 sm:text-sm" @if (! $checkoutCanSubmit || ! $termsAccepted) disabled aria-disabled="true" @endif>
-                                    Lanjut bayar
+                                <button type="submit" form="checkout-form" aria-controls="checkout-form" data-checkout-sticky-submit class="neo-button neo-button-stable inline-flex min-h-12 max-w-[60%] shrink-0 items-center justify-center break-words bg-[var(--sf-accent)] px-3 text-center text-xs leading-4 text-white sm:max-w-[68%] sm:px-5 sm:text-sm" @if (! $checkoutCanSubmit || ! $termsAccepted) disabled aria-disabled="true" @endif>
+                                    {{ $checkoutStickySubmitLabel }}
                                 </button>
                             </div>
                         @endif

@@ -1229,8 +1229,39 @@ function initCheckoutReview() {
     "[data-checkout-quantity-announcement]"
   );
   const checkoutForm = document.querySelector("#checkout-form");
+  const checkoutMain = document.querySelector(".storefront-checkout-page main");
+  const stickyAction = document.querySelector("[data-checkout-sticky-action]");
   const stickySubmit = document.querySelector("[data-checkout-sticky-submit]");
+  const stickyPayment = document.querySelector(
+    "[data-checkout-sticky-payment]"
+  );
+  const stickyAmountLabel = document.querySelector(
+    "[data-checkout-sticky-amount-label]"
+  );
   const stickyTotal = document.querySelector("[data-checkout-sticky-total]");
+  const stickyDefaultSubmitLabel =
+    stickySubmit?.textContent?.trim() || "Lanjut bayar";
+  const stickyDefaultPaymentLabel =
+    stickyPayment?.textContent?.trim() || "Metode pembayaran belum tersedia";
+  const stickyDefaultAmountLabel =
+    stickyAmountLabel?.textContent?.trim() || "Total review (IDR)";
+
+  const syncStickyOffset = () => {
+    if (!checkoutMain || !stickyAction) {
+      return;
+    }
+
+    const stickyHeight = stickyAction.getBoundingClientRect().height;
+    if (
+      stickyHeight === 0 ||
+      !window.matchMedia("(max-width: 767px)").matches
+    ) {
+      checkoutMain.style.removeProperty("padding-bottom");
+      return;
+    }
+
+    checkoutMain.style.paddingBottom = `${stickyHeight}px`;
+  };
 
   const selectedPaymentOption = () => {
     if (!paymentRoot) {
@@ -1259,6 +1290,7 @@ function initCheckoutReview() {
 
   const syncSticky = () => {
     if (!stickySubmit) {
+      syncStickyOffset();
       return;
     }
 
@@ -1267,18 +1299,53 @@ function initCheckoutReview() {
     const canonicalSubmit = option?.querySelector("[data-checkout-submit]");
     const formIsValid = checkoutForm?.checkValidity() ?? false;
     const providerIsReady = canonicalSubmit ? !canonicalSubmit.disabled : false;
+    const paymentLabel =
+      option
+        ?.querySelector("[data-checkout-selected-payment-label]")
+        ?.textContent?.trim() ||
+      option?.getAttribute("data-payment-label") ||
+      stickyDefaultPaymentLabel;
+    const amountLabel =
+      option
+        ?.querySelector("[data-checkout-payment-amount-label]")
+        ?.textContent?.trim() ||
+      option?.getAttribute("data-payment-amount-label") ||
+      stickyDefaultAmountLabel;
+    const amountValue =
+      option
+        ?.querySelector("[data-checkout-payment-amount-value]")
+        ?.textContent?.trim() ||
+      idrTotal?.textContent?.trim() ||
+      "—";
+    const stickyIsDisabled = !formIsValid || !providerIsReady;
 
+    if (stickyPayment) {
+      stickyPayment.textContent = paymentLabel;
+    }
+    if (stickyAmountLabel) {
+      stickyAmountLabel.textContent = amountLabel;
+    }
     if (stickyTotal) {
-      stickyTotal.textContent = idrTotal?.textContent || "—";
+      stickyTotal.textContent = amountValue;
     }
 
     stickySubmit.textContent =
-      option?.getAttribute("data-payment-submit-label") || "Lanjut bayar";
-    stickySubmit.disabled = !formIsValid || !providerIsReady;
+      option?.getAttribute("data-payment-submit-label") ||
+      stickyDefaultSubmitLabel;
+    stickySubmit.disabled = stickyIsDisabled;
     stickySubmit.setAttribute(
       "aria-disabled",
-      stickySubmit.disabled ? "true" : "false"
+      stickyIsDisabled ? "true" : "false"
     );
+
+    const disabledDescription =
+      canonicalSubmit?.getAttribute("aria-describedby");
+    if (stickyIsDisabled && disabledDescription) {
+      stickySubmit.setAttribute("aria-describedby", disabledDescription);
+    } else if (!stickyIsDisabled) {
+      stickySubmit.removeAttribute("aria-describedby");
+    }
+    syncStickyOffset();
   };
 
   const refreshPayment = () => {
@@ -1440,6 +1507,13 @@ function initCheckoutReview() {
   quantityInput?.addEventListener("change", () => refreshQuantity(true));
   checkoutForm?.addEventListener("input", syncSticky);
   checkoutForm?.addEventListener("change", syncSticky);
+  if (stickyAction) {
+    window.addEventListener("resize", syncStickyOffset);
+    if (typeof ResizeObserver !== "undefined") {
+      const stickyResizeObserver = new ResizeObserver(syncStickyOffset);
+      stickyResizeObserver.observe(stickyAction);
+    }
+  }
 
   refreshQuantity(false);
   refreshPayment();

@@ -1137,6 +1137,19 @@
       display: none !important;
     }
   }
+  .storefront-checkout-page .storefront-sticky-action {
+    display: none;
+  }
+
+  .js-enabled .storefront-checkout-page .storefront-sticky-action {
+    display: flex;
+  }
+
+  @media (min-width: 768px) {
+    .storefront-checkout-page .storefront-sticky-action {
+      display: none !important;
+    }
+  }
 }
 
 @keyframes neo-pulse {
