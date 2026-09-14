@@ -981,12 +981,21 @@
    * Storefront presentation overrides stay inside the public shell. Admin
    * surfaces continue to use the original neo-* rules above.
    */
+  .storefront-shell {
+    background: var(--sf-paper);
+    color: var(--sf-ink);
+  }
+
   .storefront-shell .neo-panel,
   .storefront-shell .neo-panel-tight,
   .storefront-shell .neo-panel-pop {
     border: 1px solid var(--sf-border);
-    border-radius: 1rem;
-    box-shadow: 0 12px 30px rgb(18 35 63 / 0.08);
+    border-radius: 0.875rem;
+    box-shadow: 0 10px 24px rgb(18 35 63 / 0.08);
+  }
+
+  .storefront-shell .neo-panel-tight {
+    border-radius: 0.75rem;
   }
 
   .storefront-shell .neo-button {
@@ -1025,6 +1034,7 @@
   .storefront-shell .neo-filter-active,
   .storefront-shell .neo-filter-inactive {
     border-width: 1px;
+    border-radius: 0.75rem;
     box-shadow: 0 3px 8px rgb(18 35 63 / 0.08);
   }
 
@@ -1032,15 +1042,59 @@
     border-width: 1px;
     box-shadow: 0 3px 8px rgb(18 35 63 / 0.08);
   }
+
+  .storefront-shell .neo-hover {
+    transition:
+      transform 180ms ease,
+      box-shadow 180ms ease;
+  }
+
+  .storefront-shell .neo-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 28px rgb(18 35 63 / 0.12);
+  }
+
+  .storefront-shell .hover-rubber-band:hover,
+  .storefront-shell .hover-tilt-shake:hover,
+  .storefront-shell .neo-spin-slow {
+    animation: none;
+  }
+
+  .storefront-shell .brand-spark-icon {
+    border: 1px solid var(--sf-border);
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 12px rgb(18 35 63 / 0.12);
+    transform: none;
+  }
+
   .storefront-shell [class~="border-[3px]"],
   .storefront-shell [class~="border-2"] {
     border-width: 1px;
   }
+
   .storefront-shell .bg-grid-pattern {
     background-image: none !important;
   }
+
   .storefront-shell [class*="shadow-["] {
-    box-shadow: 0 12px 30px rgb(18 35 63 / 0.08);
+    box-shadow: 0 10px 24px rgb(18 35 63 / 0.08);
+  }
+
+  .storefront-shell .faq-item:has(.faq-toggle[aria-expanded="true"]) {
+    background: var(--sf-surface-warm);
+    box-shadow: 0 10px 24px rgb(18 35 63 / 0.08);
+    transform: none;
+  }
+
+  .storefront-shell :where(a, button, input, select, textarea):focus-visible {
+    outline: 3px solid var(--sf-accent);
+    outline-offset: 3px;
+  }
+
+  .storefront-shell .scroll-progress {
+    height: 3px;
+    border-bottom: 0;
+    background: var(--sf-accent);
   }
 
   .storefront-sticky-action {
