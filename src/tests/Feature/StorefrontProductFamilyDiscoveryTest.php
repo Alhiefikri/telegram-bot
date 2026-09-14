@@ -342,12 +342,14 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
             'access_duration' => '30 hari',
             'region' => 'Global',
             'account_type' => 'Private',
+            'device_limit' => '1 perangkat',
             'included_items' => "Akun siap pakai\nPanduan login",
             'limitations' => 'Tidak untuk dijual kembali',
             'fulfillment_expectation' => 'Dikirim setelah pembayaran terverifikasi.',
             'warranty_policy' => 'Garansi login 7 hari.',
             'support_policy' => 'Support pada jam operasional.',
             'price_amount' => 99000,
+            'usdt_price_amount' => 1_250_000,
             'stock' => 3,
             'reserved_stock' => 0,
         ]);
@@ -361,10 +363,14 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
 
         $pricePosition = strpos($cardHtml, 'Rp99.000');
         $durationChipPosition = strpos($cardHtml, 'Durasi 30 hari');
+        $usdtPricePosition = strpos($cardHtml, '1.25 USDT');
         preg_match('/>\s*Beli(?: sekarang)?\s*</', $cardHtml, $buyMatch, PREG_OFFSET_CAPTURE);
         $summaryPosition = strpos($cardHtml, 'Baca detail lengkap');
         $teaserPosition = strpos($cardHtml, 'Baris pertama penawaran.');
         $merchandisingPosition = strpos($cardHtml, 'Region');
+        $deviceLimitPosition = strpos($cardHtml, 'Batas perangkat / seat');
+        $fullDescriptionPosition = strpos($cardHtml, 'Baris panjang kedua yang memuat detail panjang');
+        $detailPosition = strpos($cardHtml, 'Detail <span aria-hidden="true">→</span>');
 
         $this->assertNotFalse($pricePosition, 'Option card should show the price.');
         $this->assertNotFalse($durationChipPosition, 'Option card should show the duration as a decision fact.');
@@ -372,6 +378,12 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertNotFalse($summaryPosition, 'Option card should keep details in a disclosure.');
         $this->assertNotFalse($teaserPosition, 'Option card should keep the description reachable.');
         $this->assertNotFalse($merchandisingPosition, 'Option card should keep merchandising reachable.');
+        $this->assertNotFalse($usdtPricePosition, 'Option card should show the honest USDT price when configured.');
+        $this->assertNotFalse($deviceLimitPosition, 'Option card should keep the device limit reachable.');
+        $this->assertNotFalse($fullDescriptionPosition, 'Option disclosure should keep the full description reachable.');
+        $this->assertNotFalse($detailPosition, 'Available option should expose Product detail separately from purchase actions.');
+        $this->assertStringNotContainsString('role="dialog"', $html, 'Family options should remain a document flow without a modal.');
+        $this->assertStringContainsString('Opsi', $cardHtml, 'Option cards should use public option language.');
         $this->assertLessThan($buyPosition, $pricePosition, 'Price should appear above the Beli action.');
         $this->assertLessThan($buyPosition, $durationChipPosition, 'Duration should appear above the Beli action.');
         $this->assertLessThan($summaryPosition, $buyPosition, 'Beli should appear above the details disclosure.');
@@ -381,6 +393,9 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertSame(1, preg_match('/<details data-family-option-details/', $cardHtml), 'Disclosure should be a native details element.');
         $this->assertSame(0, preg_match('/<details data-family-option-details[^>]*\bopen\b/', $cardHtml), 'Details should start collapsed.');
         $this->assertStringContainsString('Tersedia', $cardHtml, 'Availability should stay visible on the card.');
+        $this->assertLessThan($buyPosition, $usdtPricePosition, 'USDT price should appear above the Beli action.');
+        $this->assertLessThan($deviceLimitPosition, $summaryPosition, 'Device limit should remain inside the details disclosure.');
+        $this->assertLessThan($fullDescriptionPosition, $summaryPosition, 'Full description should remain inside the details disclosure.');
         $this->assertStringContainsString('href="'.route('storefront.shop.checkout.product', ['product' => $product]).'?from=', $cardHtml, 'Beli should point at the direct checkout review.');
     }
 
