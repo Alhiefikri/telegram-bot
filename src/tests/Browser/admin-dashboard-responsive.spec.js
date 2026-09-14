@@ -2778,17 +2778,21 @@ test("keeps tabs, cards, and the stock modal usable at Telegram mini app width",
   ).toBeVisible();
 
   await page.goto(`${baseUrl}/admin?tab=produk`);
-  await expect(page.locator("#product-1")).toBeVisible();
-  await expectOneColumn(
-    page.locator("#product-1"),
-    page.locator('article[id^="product-"]').filter({
-      hasText: "Browser QA Produk B",
-    })
+  let productCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
   );
+  const productBCard = await getAdminProductCard(page, "Browser QA Produk B");
+  await expectOneColumn(productCard, productBCard);
   await expectNoDocumentOverflow(page);
   await submitProductFromMiniAppModal(page);
+  productCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
+  );
 
-  const productCard = page.locator("#product-1");
   const productActions = productCard.locator("[data-product-actions]").first();
   const primaryAction = productActions
     .locator("[data-product-primary-action]")
@@ -3062,8 +3066,11 @@ test("traps keyboard focus in the stock modal and restores its opener", async ({
 }) => {
   await login(page);
   await page.goto(`${baseUrl}/admin?tab=produk`);
-
-  const productCard = page.locator("#product-1");
+  const productCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
+  );
   const opener = productCard.getByRole("button", { name: /Stok/i });
   await opener.click();
 
@@ -3089,8 +3096,11 @@ test("keeps structured Account Input reviewed, bounded, and private in page memo
   await page.setViewportSize({ width: 390, height: 900 });
   await login(page);
   await page.goto(`${baseUrl}/admin?tab=produk`);
-
-  const productCard = page.locator("#product-1");
+  const productCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
+  );
   const opener = productCard.getByRole("button", { name: /Stok/i });
   await opener.click();
 
@@ -3347,7 +3357,7 @@ async function expectClickedDashboardControlsToWork(page, navigationName) {
   await expect(
     page.getByRole("heading", { name: /Produk Saya/ })
   ).toBeVisible();
-  await expect(page.locator("#product-1")).toBeVisible();
+  await getAdminProductCard(page, "Browser QA Produk A");
 
   await nav.getByRole("button", { name: "Pesanan", exact: true }).click();
   await expect(
@@ -3413,17 +3423,11 @@ test("saves product name and icon edits from the admin modal", async ({
   await page.setViewportSize({ width: 1280, height: 900 });
   await login(page);
   await page.goto(`${baseUrl}/admin?tab=produk`);
-
-  const productCard = page
-    .locator("article[id^='product-']")
-    .filter({ hasText: "Browser QA Produk A" })
-    .first();
-  const familyGroup = page
-    .locator('[id^="admin-product-family-group-"]')
-    .filter({ hasText: "Browser QA Product Family" })
-    .first();
-  await familyGroup.getByRole("button", { name: "Lihat product" }).click();
-  await expect(productCard).toBeVisible();
+  const productCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
+  );
   await productCard.getByRole("button", { name: "Ubah", exact: true }).click();
 
   const productModal = page.getByRole("dialog", { name: "Edit produk" });
@@ -3532,16 +3536,49 @@ async function expectStoreLinkCopyAndShare(page) {
     .poll(() => page.evaluate(() => window.__copiedText))
     .toBe(visibleStoreUrl);
 }
-
-async function exerciseProductManagementModals(page) {
-  const productCard = page.locator("#product-1");
-  const familyGroup = page
+async function getAdminProductCard(page, productName, groupName = null) {
+  const familyGroups = page
     .locator('[id^="admin-product-family-group-"]')
-    .filter({ has: productCard })
-    .first();
-  await familyGroup.getByRole("button", { name: "Lihat product" }).click();
-  await expect(productCard).toBeVisible();
+    .filter(groupName ? { hasText: groupName } : {});
 
+  for (let index = 0; index < (await familyGroups.count()); index += 1) {
+    const familyGroup = familyGroups.nth(index);
+    const productCard = groupName
+      ? familyGroup.locator('article[id^="product-"]').first()
+      : familyGroup
+          .locator('article[id^="product-"]')
+          .filter({ hasText: productName })
+          .first();
+
+    if (!(await productCard.count())) {
+      continue;
+    }
+
+    if (!(await productCard.isVisible())) {
+      const expandButton = familyGroup.getByRole("button", {
+        name: "Lihat product",
+        exact: true,
+      });
+      await expandButton.click();
+    }
+
+    await expect(productCard).toBeVisible();
+    return productCard;
+  }
+
+  const productCard = page
+    .locator('article[id^="product-"]')
+    .filter({ hasText: productName })
+    .first();
+  await expect(productCard).toBeVisible();
+  return productCard;
+}
+async function exerciseProductManagementModals(page) {
+  const productCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
+  );
   await page.getByRole("button", { name: /Tambah Produk/i }).click();
   const productModal = page.getByRole("dialog", { name: /Tambah produk/i });
   await expect(productModal).toBeVisible();
