@@ -31,6 +31,17 @@ final class TelegramStoreStatsReport
     }
 
     /**
+     * Read one customer's successful paid transaction totals without loading
+     * the customer's payment history into memory.
+     *
+     * @return array{IDR: int, USDT: int}
+     */
+    public function customerTransactionTotals(Customer $customer): array
+    {
+        return $this->receiptReport->customerTransactionTotals((int) $customer->getKey());
+    }
+
+    /**
      * @return array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}
      */
     public function today(?Carbon $reportEndAt = null): array

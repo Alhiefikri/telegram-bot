@@ -73,6 +73,37 @@ class PaymentReceiptReport
             ->count();
     }
 
+    /**
+     * Sum canonical paid Payment amounts for one Customer's successful Orders.
+     *
+     * The aggregate intentionally uses the Payment amount, not the net receipt
+     * projection: this is the customer's transaction value, while provider fees
+     * belong to store earnings. IDR and USDT are returned in their persisted
+     * integer units (rupiah and micro-USDT).
+     *
+     * @return array{IDR: int, USDT: int}
+     */
+    public function customerTransactionTotals(int $customerId): array
+    {
+        $currency = "UPPER(COALESCE(NULLIF(TRIM(canonical_payments.currency), ''), 'IDR'))";
+        $amount = 'CASE WHEN canonical_payments.amount > 0 THEN canonical_payments.amount ELSE 0 END';
+        $totals = $this->canonicalPaidPaymentsQuery(null, null, false)
+            ->join('orders as transaction_orders', 'transaction_orders.id', '=', 'canonical_payments.order_id')
+            ->where('transaction_orders.customer_id', $customerId)
+            ->whereIn('transaction_orders.order_status', [
+                OrderStatus::Processing->value,
+                OrderStatus::Completed->value,
+            ])
+            ->selectRaw("COALESCE(SUM(CASE WHEN {$currency} = 'IDR' THEN {$amount} ELSE 0 END), 0) AS idr_total")
+            ->selectRaw("COALESCE(SUM(CASE WHEN {$currency} = 'USDT' THEN {$amount} ELSE 0 END), 0) AS usdt_total")
+            ->first();
+
+        return [
+            'IDR' => (int) ($totals?->idr_total ?? 0),
+            'USDT' => (int) ($totals?->usdt_total ?? 0),
+        ];
+    }
+
     public function canonicalPaidOrderItemQuantity(?Carbon $start = null, ?Carbon $end = null, bool $includeEnd = false): int
     {
         $canonicalOrderIds = $this->canonicalPaidPaymentsQuery($start, $end, $includeEnd)

@@ -11,7 +11,7 @@
   "welcome.greeting.night": "Good evening",
   "welcome.missing_value": "Not set",
   "welcome.balance_unavailable": "Temporarily unavailable",
-  "welcome.profile": "🆔 Telegram ID: :telegram_id\n🔗 Username: :username\n💰 My Balance: :balance",
+  "welcome.profile": "🆔 Telegram ID: :telegram_id\n🔗 Username: :username\n💳 Total Transactions: :transactions\n💰 My Balance: :balance",
   "welcome.activity": "👥 Telegram users: :bot_users\n🧾 Successful orders: :successful_orders",
   "welcome.caption": ":greeting, :first_name — Welcome to LHIE STORE\n━━━━━━━━━━━━━━\n👤 My Profile\n:profile\n\n📊 Store Activity\n:activity\n\nWhat would you like to do? Choose a button below.",
   "welcome.group_caption": ":greeting — Welcome to LHIE STORE\n━━━━━━━━━━━━━━\nA simple, fast way to shop for digital products directly from Telegram.\n\n📊 Store Activity\n:activity\n\n🛍️ Browse products\n💳 Pay by QRIS / transfer\n📦 Check your orders anytime\n⚡ Accounts are delivered automatically after payment is confirmed\n\nWhere would you like to start?",

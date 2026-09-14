@@ -20,6 +20,7 @@ use App\Services\StoreBalance\StoreBalanceSnapshot;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPresentation;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
+use App\Support\Money;
 
 class TelegramMenuIntents
 {
@@ -723,8 +724,8 @@ class TelegramMenuIntents
     }
 
     /**
-     * The Customer Store Balance is read fresh from its own projection and is
-     * never part of the shared bounded-staleness global metrics cache.
+     * Customer-owned Store Balance and transaction totals are read fresh and
+     * never included in the shared bounded-staleness global metrics cache.
      *
      * @return array<string, string|int>
      */
@@ -732,18 +733,28 @@ class TelegramMenuIntents
     {
         $metrics = $this->statsReport->startMetrics();
         $balance = $this->balances->snapshot($customer);
+        $transactionTotals = $this->statsReport->customerTransactionTotals($customer);
 
         return [
             'greeting' => implode(' ', $this->timeAwareGreeting($customer)),
             'first_name' => $this->welcomeName($customer),
             'telegram_id' => (string) $customer->telegram_id,
             'username' => $this->displayUsername($customer),
+            'transactions' => $this->formatTransactionTotals($transactionTotals),
             'balance' => $balance->isAvailable()
                 ? $this->locale->idr($balance->balance())
                 : $this->locale->translate($customer, 'welcome.balance_unavailable'),
             'bot_users' => $metrics['bot_users'],
             'successful_orders' => $metrics['successful_orders'],
         ];
+    }
+
+    /**
+     * @param  array{IDR: int, USDT: int}  $totals
+     */
+    private function formatTransactionTotals(array $totals): string
+    {
+        return $this->locale->idr($totals['IDR']).' / '.Money::usdt($totals['USDT']);
     }
 
     public function sendAccountSummary(Customer $customer, string $chatId): void

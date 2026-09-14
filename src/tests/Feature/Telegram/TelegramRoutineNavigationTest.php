@@ -87,6 +87,61 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->assertSame(TelegramNavigationScreen::Support, $stored->screen);
     }
 
+    public function test_home_profile_shows_customer_transaction_totals_in_the_same_quote(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create([
+            'telegram_id' => 45521,
+            'locale' => 'id',
+            'first_name' => 'Total Buyer',
+            'username' => 'total_buyer',
+        ]);
+
+        $idrOrder = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-TOTAL-IDR-45521',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'currency' => 'IDR',
+            'total_amount' => 125_000,
+        ]);
+        Payment::factory()->for($idrOrder)->create([
+            'amount' => 125_000,
+            'currency' => 'IDR',
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+
+        $usdtOrder = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-TOTAL-USDT-45521',
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'currency' => 'USDT',
+            'total_amount' => 2_500_000,
+        ]);
+        Payment::factory()->for($usdtOrder)->create([
+            'amount' => 2_500_000,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(45521, '/start', [
+            'id' => 45521,
+            'first_name' => 'Total Buyer',
+            'username' => 'total_buyer',
+        ], 45521))->assertOk();
+
+        $request = Http::recorded(
+            fn (Request $recorded): bool => str_ends_with($recorded->url(), '/sendPhoto'),
+        )->sole()[0];
+        $caption = (string) $this->telegramRequestField($request, 'caption');
+
+        $this->assertStringContainsString(
+            "<blockquote>🆔 ID Telegram: 45521\n🔗 Username: @total_buyer\n💳 Total Transaksi: Rp 125.000 / 2.5 USDT\n💰 Saldo Saya: Rp 0</blockquote>",
+            $caption,
+        );
+    }
+
     public function test_balance_screen_shows_fresh_store_balance_and_add_balance_action(): void
     {
         $this->fakeCanonicalTelegram();

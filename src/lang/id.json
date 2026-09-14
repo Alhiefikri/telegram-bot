@@ -11,7 +11,7 @@
   "welcome.greeting.night": "Selamat malam",
   "welcome.missing_value": "Belum diatur",
   "welcome.balance_unavailable": "Saldo sementara tidak tersedia",
-  "welcome.profile": "🆔 ID Telegram: :telegram_id\n🔗 Username: :username\n💰 Saldo Saya: :balance",
+  "welcome.profile": "🆔 ID Telegram: :telegram_id\n🔗 Username: :username\n💳 Total Transaksi: :transactions\n💰 Saldo Saya: :balance",
   "welcome.activity": "👥 Pengguna Telegram: :bot_users\n🧾 Pesanan berhasil: :successful_orders",
   "welcome.caption": ":greeting, :first_name — selamat datang di LHIE STORE\n━━━━━━━━━━━━━━\n👤 Profil Saya\n:profile\n\n📊 Aktivitas Toko\n:activity\n\nMau ngapain dulu? Pilih tombol di bawah ya.",
   "welcome.group_caption": ":greeting — selamat datang di LHIE STORE\n━━━━━━━━━━━━━━\nTempat belanja produk digital yang simpel, cepat, dan langsung dari Telegram.\n\n📊 Aktivitas Toko\n:activity\n\n🛍️ Lihat produk\n💳 Bayar via QRIS / transfer\n📦 Cek pesanan kapan aja\n⚡ Akun dikirim otomatis setelah pembayaran beres\n\nMau mulai dari mana nih?",

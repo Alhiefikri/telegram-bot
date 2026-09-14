@@ -11,7 +11,7 @@
   "welcome.greeting.night": "Selamat malam",
   "welcome.missing_value": "Belum ditetapkan",
   "welcome.balance_unavailable": "Baki tidak tersedia buat sementara",
-  "welcome.profile": "🆔 ID Telegram: :telegram_id\n🔗 Nama pengguna: :username\n💰 Baki Saya: :balance",
+  "welcome.profile": "🆔 ID Telegram: :telegram_id\n🔗 Nama pengguna: :username\n💳 Jumlah Transaksi: :transactions\n💰 Baki Saya: :balance",
   "welcome.activity": "👥 Pengguna Telegram: :bot_users\n🧾 Pesanan berjaya: :successful_orders",
   "welcome.caption": ":greeting, :first_name — selamat datang ke LHIE STORE\n━━━━━━━━━━━━━━\n👤 Profil Saya\n:profile\n\n📊 Aktiviti Kedai\n:activity\n\nApa yang anda mahu lakukan? Pilih butang di bawah.",
   "welcome.group_caption": ":greeting — selamat datang ke LHIE STORE\n━━━━━━━━━━━━━━\nCara mudah dan pantas untuk membeli produk digital terus dari Telegram.\n\n📊 Aktiviti Kedai\n:activity\n\n🛍️ Lihat produk\n💳 Bayar melalui QRIS / pindahan bank\n📦 Semak pesanan bila-bila masa\n⚡ Akaun dihantar secara automatik selepas bayaran disahkan\n\nAnda mahu mula dari mana?",
