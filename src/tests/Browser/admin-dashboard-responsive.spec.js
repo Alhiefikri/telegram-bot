@@ -125,7 +125,9 @@ test("customer checkout: keeps canonical checkout usable without JavaScript", as
     await terms.focus();
     await page.keyboard.press("Space");
     await expect(terms).toBeChecked();
-    const submit = page.getByRole("button", { name: /Buat invoice/ });
+    const submit = page
+      .locator("#checkout-form")
+      .getByRole("button", { name: /Buat invoice/ });
     await submit.focus();
     await expect(submit).toBeFocused();
     await Promise.all([
@@ -176,18 +178,26 @@ test("customer checkout: switches payment copy and CTA without JavaScript", asyn
       )
     ).toContainText("Total dasar USDT / estimasi");
     await expect(
-      page.getByRole("button", { name: /Buat invoice Binance Pay/ })
+      page
+        .locator("#checkout-form")
+        .getByRole("button", { name: /Buat invoice Binance Pay/ })
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: /Buat invoice QR Manual/ })
+      page
+        .locator("#checkout-form")
+        .getByRole("button", { name: /Buat invoice QR Manual/ })
     ).toBeHidden();
     await page.getByText("Bayar via QR Manual", { exact: true }).click();
     await expect(page.getByRole("radio", { name: /QR Manual/ })).toBeChecked();
     await expect(
-      page.getByRole("button", { name: /Buat invoice QR Manual/ })
+      page
+        .locator("#checkout-form")
+        .getByRole("button", { name: /Buat invoice QR Manual/ })
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: /Buat invoice Binance Pay/ })
+      page
+        .locator("#checkout-form")
+        .getByRole("button", { name: /Buat invoice Binance Pay/ })
     ).toBeHidden();
   } finally {
     await context.close();
@@ -316,9 +326,7 @@ test("customer checkout: asserts deterministic catalog checkout invoice navigati
       .filter({ hasText: "Browser QA Product Family" });
     await expect(familyCard).toBeVisible();
     await familyCard.click();
-    await expect(page).toHaveURL(
-      /\/produk-keluarga\/browser-responsive-family/
-    );
+    await expect(page).toHaveURL(/\/pilihan\/browser-responsive-family/);
     const familyOption = page
       .locator("#family-options article")
       .filter({ hasText: "QA option" });
@@ -334,7 +342,7 @@ test("customer checkout: asserts deterministic catalog checkout invoice navigati
       flowStart,
       [
         /^GET \/shop$/,
-        /^GET \/produk-keluarga\/browser-responsive-family$/,
+        /^GET \/pilihan\/browser-responsive-family$/,
         /^GET \/shop\/checkout\/products\/\d+$/,
         /^GET \/shop\/orders\/(?:\d+|[0-9a-f-]{36})$/i,
       ],
@@ -398,7 +406,7 @@ test("customer checkout: completes direct purchases from home, shop, Family, and
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
     familyCard.click(),
   ]);
-  await expect(page).toHaveURL(/\/produk-keluarga\/browser-responsive-family/);
+  await expect(page).toHaveURL(/\/pilihan\/browser-responsive-family/);
   await expect(page.locator('[role="dialog"]')).toHaveCount(0);
 
   const familyOption = page
@@ -486,7 +494,10 @@ test("customer checkout: restores direct and Cart validation failures on canonic
   await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
   await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    page.getByRole("button", { name: /Buat invoice/ }).click(),
+    page
+      .locator("#checkout-form")
+      .getByRole("button", { name: /Buat invoice/ })
+      .click(),
   ]);
   await expect(page).toHaveURL(directCheckoutUrl);
   await expect(page.locator("#checkout-error-summary")).toBeFocused();
@@ -511,7 +522,10 @@ test("customer checkout: restores direct and Cart validation failures on canonic
   await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
   await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    page.getByRole("button", { name: /Buat invoice/ }).click(),
+    page
+      .locator("#checkout-form")
+      .getByRole("button", { name: /Buat invoice/ })
+      .click(),
   ]);
   await expect(page).toHaveURL(cartCheckoutUrl);
   await expect(page.locator("#checkout-error-summary")).toBeFocused();
@@ -553,7 +567,10 @@ test("customer checkout: restores provider and stock failures on canonical pages
   try {
     await Promise.all([
       page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-      page.getByRole("button", { name: /Buat invoice/ }).click(),
+      page
+        .locator("#checkout-form")
+        .getByRole("button", { name: /Buat invoice/ })
+        .click(),
     ]);
     await expect(page).toHaveURL(/\/shop\/checkout\/products\/\d+(?:\?|$)/);
     expect(new URL(page.url()).pathname).toBe(
@@ -589,7 +606,10 @@ test("customer checkout: restores provider and stock failures on canonical pages
   try {
     await Promise.all([
       page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-      page.getByRole("button", { name: /Buat invoice/ }).click(),
+      page
+        .locator("#checkout-form")
+        .getByRole("button", { name: /Buat invoice/ })
+        .click(),
     ]);
     await expect(page).toHaveURL(/\/shop\/checkout\/products\/\d+(?:\?|$)/);
     expect(new URL(page.url()).pathname).toBe(
@@ -641,7 +661,7 @@ test("customer checkout: restores Product and Family context through browser bac
     .locator("a.family-card")
     .filter({ hasText: "Browser QA Product Family" });
   await familyCard.click();
-  await expect(page).toHaveURL(/\/produk-keluarga\/browser-responsive-family/);
+  await expect(page).toHaveURL(/\/pilihan\/browser-responsive-family/);
   const familyUrl = page.url();
   const familyCheckoutLink = page
     .locator("#family-options article")
@@ -685,9 +705,7 @@ test("customer checkout: proves direct and Family review geometry across require
     await expect(familyCard).toBeVisible();
     await familyCard.click({ force: true, noWaitAfter: true });
     await page.waitForLoadState("domcontentloaded");
-    await expect(page).toHaveURL(
-      /\/produk-keluarga\/browser-responsive-family/
-    );
+    await expect(page).toHaveURL(/\/pilihan\/browser-responsive-family/);
     const familyOption = page
       .locator("#family-options article")
       .filter({ hasText: "QA option" });
@@ -808,9 +826,7 @@ test("customer checkout: keeps checkout back links source-aware at mobile widths
       .locator("a.family-card")
       .filter({ hasText: "Browser QA Product Family" });
     await familyCard.click();
-    await expect(page).toHaveURL(
-      /\/produk-keluarga\/browser-responsive-family/
-    );
+    await expect(page).toHaveURL(/\/pilihan\/browser-responsive-family/);
     const canonicalFamilyUrl = new URL(page.url());
     canonicalFamilyUrl.search = "";
     const familyUrl = canonicalFamilyUrl.toString();
@@ -862,9 +878,7 @@ test("customer checkout: keeps Family option decisions above long details at mob
       .filter({ hasText: "Browser QA Product Family" });
     await expect(familyCard).toHaveCount(1);
     await familyCard.click();
-    await expect(page).toHaveURL(
-      /\/produk-keluarga\/browser-responsive-family/
-    );
+    await expect(page).toHaveURL(/\/pilihan\/browser-responsive-family/);
 
     const optionCard = page
       .locator("#family-options article")
@@ -970,7 +984,9 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
 
   const buyerName = page.getByRole("textbox", { name: "Nama pembeli" });
   const terms = page.getByRole("checkbox", { name: /Saya menyetujui/ });
-  const submit = page.getByRole("button", { name: /Buat invoice/ });
+  const submit = page
+    .locator("#checkout-form")
+    .getByRole("button", { name: /Buat invoice/ });
   await buyerName.focus();
   await page.keyboard.type("Keyboard Buyer");
   await terms.focus();
@@ -1008,7 +1024,9 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
       .locator('label[for="checkout-payment-option-binance_pay_id"]')
       .click();
     await expect(
-      page.getByRole("button", { name: /Buat invoice Binance Pay/ })
+      page
+        .locator("#checkout-form")
+        .getByRole("button", { name: /Buat invoice Binance Pay/ })
     ).toBeVisible();
     await page
       .getByText("Tambahkan email atau kontak bantuan", { exact: true })
@@ -3339,7 +3357,10 @@ async function completeManualCheckout(page, buyerName) {
   await expectStorefrontPageCheckout(page);
   await page.getByRole("textbox", { name: "Nama pembeli" }).fill(buyerName);
   await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
-  await page.getByRole("button", { name: /Buat invoice/ }).click();
+  await page
+    .locator("#checkout-form")
+    .getByRole("button", { name: /Buat invoice/ })
+    .click();
   await expect(page).toHaveURL(/\/shop\/orders\/\d+/);
   await expect(
     page.getByRole("heading", { name: "Order pembayaran manual dibuat" })

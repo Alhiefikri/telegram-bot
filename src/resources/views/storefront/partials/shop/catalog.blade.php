@@ -1,10 +1,10 @@
-<section id="products" class="relative border-y-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] py-8 sm:py-10">
+<section id="products" class="relative border-y border-[var(--sf-border)] bg-[var(--sf-surface)] py-8 sm:py-10">
     <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-70"></div>
 
     <div class="relative z-10 mx-auto max-w-7xl px-4 sm:px-6">
         <div class="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,25rem)] lg:items-end">
             <div>
-                <div class="mb-2 inline-flex min-h-11 items-center gap-2 rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
+                <div class="mb-2 inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[0_4px_12px_rgb(18_35_63_/_0.08)]">
                     <span>Katalog aktif · {{ $catalogPage->totalProductCount() }} item katalog</span>
                 </div>
                 <h2 class="text-balance font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-3xl">
@@ -35,17 +35,17 @@
             </form>
         </div>
 
-        <div class="mb-5 flex flex-col gap-3 border-y-[3px] border-dashed border-[var(--sf-border)] py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div class="mb-5 flex flex-col gap-3 border-y border-dashed border-[var(--sf-border)] py-4 lg:flex-row lg:items-center lg:justify-between">
             @if ($catalogPage->hasPublicCategories)
                 <nav class="flex flex-wrap gap-2" aria-label="Filter kategori produk">
                     <a href="{{ $catalogPage->allCategoryUrl }}" @class([
-                        'category-btn inline-flex min-h-11 items-center justify-center rounded-full border-[3px] px-4 py-2 text-center text-xs font-black transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
+                        'category-btn inline-flex min-h-11 items-center justify-center rounded-full border px-4 py-2 text-center text-xs font-black transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
                         'neo-filter-active' => $catalogPage->selectedCategory === null,
                         'neo-filter-inactive hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)]' => $catalogPage->selectedCategory !== null,
                     ]) data-filter="all" @if ($catalogPage->selectedCategory === null) aria-current="page" @endif aria-controls="storefront-product-grid">Semua</a>
                     @foreach ($catalogPage->categoryFilters as $category)
                         <a href="{{ $category->url }}" @class([
-                            'category-btn inline-flex min-h-11 items-center justify-center rounded-full border-[3px] px-4 py-2 text-center text-xs font-black transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
+                            'category-btn inline-flex min-h-11 items-center justify-center rounded-full border px-4 py-2 text-center text-xs font-black transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
                             'neo-filter-active' => $category->isActive,
                             'neo-filter-inactive hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)]' => ! $category->isActive,
                         ]) data-filter="{{ $category->id }}" @if ($category->isActive) aria-current="page" @endif aria-controls="storefront-product-grid">{{ $category->name }}</a>
@@ -79,6 +79,13 @@
             </form>
         </div>
 
+        <div class="mb-3 flex items-end justify-between gap-3">
+            <div>
+                <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Katalog aktif</p>
+                <h3 class="mt-1 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)]">Tersedia sekarang</h3>
+            </div>
+            <span class="text-xs font-bold text-[var(--sf-muted)]">{{ $catalogPage->totalProductCount() }} item</span>
+        </div>
         <div id="storefront-product-grid" @class([
             'storefront-popular-card storefront-product-grid p-0 sm:p-1',
             'storefront-product-grid--single mx-auto max-w-xs' => $catalogPage->productCount() === 1,

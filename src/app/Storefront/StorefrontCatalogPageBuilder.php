@@ -104,7 +104,7 @@ class StorefrontCatalogPageBuilder
             emptyProductsTitle: $isShop ? $copy['shop']['empty_title'] : $copy['catalog']['empty_title'],
             emptyProductsBody: $isShop ? $copy['shop']['empty_body'] : $copy['catalog']['empty_body'],
             checkoutMaintenance: $maintenance,
-            popularEmptyMessage: $isShop ? null : $copy['hero']['popular_empty'],
+            popularEmptyMessage: null,
             selectedCategory: $query->category,
             selectedSort: $query->sort,
             currentPage: $query->page,

@@ -51,7 +51,7 @@ class StorefrontCatalogPageBuilderTest extends TestCase
         $this->assertSame(url('/#products'), $page->searchAction);
         $this->assertSame(url('/#products'), $page->clearSearchUrl);
         $this->assertSame('Katalog publik sedang disiapkan.', $page->emptyProductsTitle);
-        $this->assertSame('Belum ada data penjualan berbayar selesai untuk menampilkan label produk terlaris.', $page->popularEmptyMessage);
+        $this->assertNull($page->popularEmptyMessage);
     }
 
     public function test_shop_context_exposes_catalog_empty_state_inputs(): void

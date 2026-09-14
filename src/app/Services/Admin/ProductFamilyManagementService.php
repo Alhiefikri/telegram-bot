@@ -18,10 +18,11 @@ final class ProductFamilyManagementService
     public function __construct(
         private readonly AuditLogger $auditLogger,
         private readonly ProductFamilyCategoryCoherence $coherence,
+        private readonly ProductFamilySlugManager $slugs,
     ) {}
 
     /**
-     * @param  array{name: string, description: ?string, sort_order: int, image_path?: ?string, telegram_image_path?: ?string}  $attributes
+     * @param  array{name: string, description: ?string, sort_order: int, slug?: ?string, image_path?: ?string, telegram_image_path?: ?string}  $attributes
      */
     public function create(array $attributes, User $user, ?string $ip = null): ProductFamily
     {
@@ -58,12 +59,16 @@ final class ProductFamilyManagementService
     }
 
     /**
-     * @param  array{name: string, description: ?string, sort_order: int, image_path?: ?string, telegram_image_path?: ?string}  $attributes
+     * @param  array{name: string, description: ?string, sort_order: int, slug?: ?string, image_path?: ?string, telegram_image_path?: ?string}  $attributes
      */
     public function update(ProductFamily $family, array $attributes, User $user, ?string $ip = null): ProductFamily
     {
         return DB::transaction(function () use ($family, $attributes, $user, $ip): ProductFamily {
             $locked = ProductFamily::query()->whereKey($family->getKey())->lockForUpdate()->firstOrFail();
+            $requestedSlug = array_key_exists('slug', $attributes) && is_string($attributes['slug'])
+                ? trim($attributes['slug'])
+                : null;
+            $slugChanged = $requestedSlug !== null && Str::slug($requestedSlug) !== (string) $locked->slug;
             $oldValues = [];
             $newValues = [];
 
@@ -85,7 +90,7 @@ final class ProductFamilyManagementService
                 $newValues[$field] = $newValue;
             }
 
-            if ($newValues === []) {
+            if ($newValues === [] && ! $slugChanged) {
                 return $locked;
             }
 
@@ -100,6 +105,9 @@ final class ProductFamilyManagementService
                 $user,
                 $ip,
             );
+            if ($slugChanged) {
+                $locked = $this->slugs->rename($locked, $requestedSlug, $user, $ip);
+            }
 
             return $locked;
         }, 5);

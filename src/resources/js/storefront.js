@@ -1228,10 +1228,13 @@ function initCheckoutReview() {
   const quantityAnnouncement = document.querySelector(
     "[data-checkout-quantity-announcement]"
   );
+  const checkoutForm = document.querySelector("#checkout-form");
+  const stickySubmit = document.querySelector("[data-checkout-sticky-submit]");
+  const stickyTotal = document.querySelector("[data-checkout-sticky-total]");
 
-  const refreshPayment = () => {
+  const selectedPaymentOption = () => {
     if (!paymentRoot) {
-      return;
+      return null;
     }
 
     const options = Array.from(
@@ -1245,12 +1248,49 @@ function initCheckoutReview() {
       paymentRoot
         .querySelector("[data-checkout-selected-option]")
         ?.getAttribute("data-payment-value");
-    const option = options.find(
-      (candidate) =>
-        candidate.getAttribute("data-payment-value") === selectedValue
+
+    return (
+      options.find(
+        (candidate) =>
+          candidate.getAttribute("data-payment-value") === selectedValue
+      ) || null
     );
+  };
+
+  const syncSticky = () => {
+    if (!stickySubmit) {
+      return;
+    }
+
+    const option = selectedPaymentOption();
+    const idrTotal = document.querySelector("[data-checkout-order-subtotal]");
+    const canonicalSubmit = option?.querySelector("[data-checkout-submit]");
+    const formIsValid = checkoutForm?.checkValidity() ?? false;
+    const providerIsReady = canonicalSubmit ? !canonicalSubmit.disabled : false;
+
+    if (stickyTotal) {
+      stickyTotal.textContent = idrTotal?.textContent || "—";
+    }
+
+    stickySubmit.textContent =
+      option?.getAttribute("data-payment-submit-label") || "Lanjut bayar";
+    stickySubmit.disabled = !formIsValid || !providerIsReady;
+    stickySubmit.setAttribute(
+      "aria-disabled",
+      stickySubmit.disabled ? "true" : "false"
+    );
+  };
+
+  const refreshPayment = () => {
+    if (!paymentRoot) {
+      syncSticky();
+      return;
+    }
+
+    const option = selectedPaymentOption();
 
     if (!option) {
+      syncSticky();
       return;
     }
 
@@ -1332,6 +1372,7 @@ function initCheckoutReview() {
     if (requiresSakurupiahContact && contactDetails) {
       contactDetails.open = true;
     }
+    syncSticky();
   };
 
   const refreshQuantity = (announce = false) => {
@@ -1397,9 +1438,12 @@ function initCheckoutReview() {
       input.addEventListener("change", refreshPayment);
     });
   quantityInput?.addEventListener("change", () => refreshQuantity(true));
+  checkoutForm?.addEventListener("input", syncSticky);
+  checkoutForm?.addEventListener("change", syncSticky);
 
   refreshQuantity(false);
   refreshPayment();
+  syncSticky();
 }
 
 export default function initStorefront() {

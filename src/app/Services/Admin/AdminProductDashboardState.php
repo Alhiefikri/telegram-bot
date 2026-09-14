@@ -106,6 +106,7 @@ class AdminProductDashboardState
                 'familyFormAction' => $isFamilyEdit ? ($editingFamily['update_url'] ?? $familyManagement['createUrl']) : $familyManagement['createUrl'],
                 'familyFormMethod' => $isFamilyEdit ? 'PATCH' : '',
                 'familyId' => old('family_id', $editingFamily['id'] ?? null),
+                'familySlug' => old('slug', $editingFamily['slug'] ?? ''),
                 'familyName' => old('name', $editingFamily['name'] ?? ''),
                 'familyDescription' => old('description', $editingFamily['description'] ?? ''),
                 'familySortOrder' => old('sort_order', $editingFamily['sort_order'] ?? 0),

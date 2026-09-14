@@ -113,17 +113,22 @@ class StorefrontLandingPageTest extends TestCase
             ->assertDontSee('https://stale-ngrok.example.test/build/assets/', false);
     }
 
-    public function test_storefront_exposes_light_warung_ai_landing_design_hooks(): void
+    public function test_storefront_exposes_soft_storefront_design_hooks(): void
     {
-        $this->get('/')
-            ->assertOk()
-            ->assertSee('storefront-shell', false)
-            ->assertSee('storefront-hero-card', false)
-            ->assertSee('storefront-popular-card', false)
-            ->assertSee('hero-preview-panel', false)
-            ->assertSee('motion-safe:animate-storefront-reveal', false)
-            ->assertSee('motion-reduce:animate-none', false)
-            ->assertDontSee('bg-[#09090b]', false);
+        $response = $this->get('/');
+        $response->assertOk();
+        $html = (string) $response->getContent();
+
+        foreach ([
+            'storefront-shell',
+            'storefront-hero-card',
+            'storefront-popular-card',
+            'motion-safe:animate-storefront-reveal',
+            'motion-reduce:animate-none',
+        ] as $needle) {
+            $this->assertTrue(str_contains($html, $needle), "Missing storefront hook: {$needle}");
+        }
+        $this->assertFalse(str_contains($html, 'bg-[#09090b]'), 'Legacy dark background token leaked into Storefront.');
     }
 
     public function test_homepage_uses_a_catalog_first_hierarchy_without_duplicate_marketing_sections(): void
@@ -197,7 +202,7 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('Katalog publik sedang disiapkan')
             ->assertSee('Kategori akan segera hadir')
             ->assertSee('Cek kembali katalog saat stok produk yang Anda cari tersedia.')
-            ->assertSee('Belum ada data penjualan berbayar selesai untuk menampilkan label produk terlaris.');
+            ->assertDontSee('Belum ada data penjualan berbayar selesai untuk menampilkan label produk terlaris.');
     }
 
     public function test_active_products_render_while_inactive_and_deleted_products_stay_hidden(): void

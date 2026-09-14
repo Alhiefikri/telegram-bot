@@ -11,6 +11,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\ProductFamilySlugRedirect;
 use App\Models\ProductWaitlistSubscription;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -58,7 +59,7 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
             ->assertSee('Netflix')
             ->assertSee('Spotify Standalone')
             ->assertSee('data-family-id="'.$family->id.'"', false)
-            ->assertSee('2 pilihan produk')
+            ->assertSee('2 pilihan')
             ->assertSee('1 tersedia');
 
         $search = $this->get(route('storefront.shop.index', ['q' => 'Netflix Individual', 'category' => 'streaming', 'sort' => 'price_asc', 'page' => 1]));
@@ -103,8 +104,9 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
             ->assertSee('Pilih paket CapCut sesuai kebutuhan.')
             ->assertSee('Individual 30 Hari')
             ->assertSee('Team 30 Hari')
-            ->assertSee('SKU #'.$first->id)
-            ->assertSee('SKU #'.$later->id)
+            ->assertDontSee('Product Family')
+            ->assertDontSee('Pilih SKU')
+            ->assertDontSee('SKU #')
             ->assertSee('1 tersedia')
             ->assertSee('Stok habis')
             ->assertSee('data-product-id="'.$first->id.'"', false)
@@ -356,7 +358,7 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
 
         $pricePosition = strpos($cardHtml, 'Rp99.000');
         $durationChipPosition = strpos($cardHtml, 'Durasi 30 hari');
-        preg_match('/>\s*Beli\s*</', $cardHtml, $buyMatch, PREG_OFFSET_CAPTURE);
+        preg_match('/>\s*Beli(?: sekarang)?\s*</', $cardHtml, $buyMatch, PREG_OFFSET_CAPTURE);
         $summaryPosition = strpos($cardHtml, 'Baca detail lengkap');
         $teaserPosition = strpos($cardHtml, 'Baris pertama penawaran.');
         $merchandisingPosition = strpos($cardHtml, 'Region');
@@ -377,6 +379,55 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertSame(0, preg_match('/<details data-family-option-details[^>]*\bopen\b/', $cardHtml), 'Details should start collapsed.');
         $this->assertStringContainsString('Tersedia', $cardHtml, 'Availability should stay visible on the card.');
         $this->assertStringContainsString('href="'.route('storefront.shop.checkout.product', ['product' => $product]).'?from=', $cardHtml, 'Beli should point at the direct checkout review.');
+    }
+
+    public function test_canonical_family_path_and_legacy_slug_aliases_redirect_safely(): void
+    {
+        $family = ProductFamily::factory()->create(['slug' => 'old-netflix', 'name' => 'Netflix']);
+        Product::factory()->create([
+            'product_family_id' => $family->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $canonical = route('storefront.product-families.show', ['productFamily' => $family->slug]);
+        $this->assertSame('/pilihan/old-netflix', parse_url($canonical, PHP_URL_PATH));
+
+        $returnUrl = '/shop?q=netflix&sort=price_asc';
+        $legacy = $this->get('/produk-keluarga/old-netflix?from='.rawurlencode($returnUrl).'&utm_source=legacy');
+        $legacy->assertStatus(301);
+        $this->assertSame($canonical.'?from='.rawurlencode($returnUrl), $legacy->headers->get('Location'));
+        $this->assertStringNotContainsString('utm_source', (string) $legacy->headers->get('Location'));
+
+        ProductFamilySlugRedirect::query()->create([
+            'old_slug' => 'netflix-legacy',
+            'product_family_id' => $family->id,
+        ]);
+        $this->get('/produk-keluarga/netflix-legacy')
+            ->assertStatus(301)
+            ->assertRedirect($canonical);
+    }
+
+    public function test_legacy_family_path_returns_not_found_for_unknown_private_or_deleted_families(): void
+    {
+        $private = ProductFamily::factory()->create(['slug' => 'private-family']);
+        Product::factory()->create([
+            'product_family_id' => $private->id,
+            'is_active' => false,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $deleted = ProductFamily::factory()->create(['slug' => 'deleted-family']);
+        Product::factory()->create([
+            'product_family_id' => $deleted->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $deleted->delete();
+
+        $this->get('/produk-keluarga/does-not-exist')->assertNotFound();
+        $this->get('/produk-keluarga/private-family')->assertNotFound();
+        $this->get('/produk-keluarga/deleted-family')->assertNotFound();
     }
 
     private function manualPaymentModeIsActive(): void

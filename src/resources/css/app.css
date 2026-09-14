@@ -29,26 +29,26 @@
   --color-neo-purple: #8758de;
   --color-neo-red: #ef4444;
 
-  --color-sf-paper: #f4f7fb;
-  --color-sf-surface: #fffdf8;
-  --color-sf-surface-warm: #eaf3ff;
-  --color-sf-ink: #0b1220;
-  --color-sf-muted: #58606e;
-  --color-sf-border: #0b1220;
-  --color-sf-accent: #005cff;
-  --color-sf-accent-deep: #0047c7;
-  --color-sf-accent-soft: #dcebff;
-  --color-sf-yellow: #ffe45c;
-  --color-sf-blue: #2d9cff;
-  --color-sf-green: #35d486;
-  --color-sf-lilac: #bda7ff;
-  --color-sf-success: #107a48;
-  --color-sf-warning: #9a5b00;
-  --color-sf-shadow: #0b1220;
+  --color-sf-paper: #f5f8fc;
+  --color-sf-surface: #ffffff;
+  --color-sf-surface-warm: #eef5ff;
+  --color-sf-ink: #12233f;
+  --color-sf-muted: #66758c;
+  --color-sf-border: #d8e2ef;
+  --color-sf-accent: #2563eb;
+  --color-sf-accent-deep: #1d4ed8;
+  --color-sf-accent-soft: #dbeafe;
+  --color-sf-yellow: #f6c945;
+  --color-sf-blue: #2563eb;
+  --color-sf-green: #15803d;
+  --color-sf-lilac: #e9d5ff;
+  --color-sf-success: #166534;
+  --color-sf-warning: #92400e;
+  --color-sf-shadow: rgb(18 35 63 / 0.12);
   --color-sf-violet: #7c5cff;
-  --color-sf-violet-soft: #efe9ff;
-  --color-sf-lime: #d6f75b;
-  --color-sf-pink: #ff5fa2;
+  --color-sf-violet-soft: #f3e8ff;
+  --color-sf-lime: #d9f99d;
+  --color-sf-pink: #f9a8d4;
 
   --color-neo-admin-paper: #fff6cf;
   --color-neo-admin-paper-desktop: #fff4bd;
@@ -193,7 +193,7 @@
     --sf-accent: var(--color-sf-accent);
     --sf-accent-deep: var(--color-sf-accent-deep);
     --sf-accent-soft: var(--color-sf-accent-soft);
-    --sf-accent-rgb: 0 92 255;
+    --sf-accent-rgb: 37 99 235;
     --sf-yellow: var(--color-sf-yellow);
     --sf-blue: var(--color-sf-blue);
     --sf-green: var(--color-sf-green);
@@ -206,7 +206,7 @@
     --sf-violet-soft: var(--color-sf-violet-soft);
     --sf-lime: var(--color-sf-lime);
     --sf-pink: var(--color-sf-pink);
-    --sf-grid: rgba(11, 18, 32, 0.06);
+    --sf-grid: rgba(18, 35, 63, 0.05);
   }
 
   html {
@@ -526,32 +526,7 @@
   }
 
   .storefront-shell {
-    background:
-      radial-gradient(
-        circle at 12% 8%,
-        rgba(255, 228, 92, 0.45) 0 1.05rem,
-        transparent 1.1rem
-      ),
-      radial-gradient(
-        circle at 92% 14%,
-        rgb(var(--sf-accent-rgb) / 0.13) 0 1.45rem,
-        transparent 1.5rem
-      ),
-      radial-gradient(
-        circle at 6% 52%,
-        rgb(var(--sf-violet-rgb) / 0.14) 0 1.2rem,
-        transparent 1.25rem
-      ),
-      linear-gradient(var(--sf-grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--sf-grid) 1px, transparent 1px),
-      var(--sf-paper);
-    background-size:
-      auto,
-      auto,
-      auto,
-      24px 24px,
-      24px 24px,
-      auto;
+    background: var(--sf-paper);
   }
 
   .storefront-product-grid {
@@ -595,28 +570,7 @@
   }
 
   .storefront-shell::before {
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    content: "";
-    opacity: 0.4;
-    background-image:
-      radial-gradient(
-        circle at 75% 30%,
-        rgb(var(--sf-accent-rgb) / 0.09),
-        transparent 18rem
-      ),
-      radial-gradient(
-        circle at 18% 74%,
-        rgba(53, 212, 134, 0.08),
-        transparent 14rem
-      ),
-      radial-gradient(
-        circle at 62% 86%,
-        rgb(var(--sf-violet-rgb) / 0.1),
-        transparent 16rem
-      );
+    display: none;
   }
 
   .bg-grid-pattern {
@@ -1023,6 +977,85 @@
   .footer-dark .brand-wordmark > span:last-child {
     color: #fffdf8;
   }
+  /*
+   * Storefront presentation overrides stay inside the public shell. Admin
+   * surfaces continue to use the original neo-* rules above.
+   */
+  .storefront-shell .neo-panel,
+  .storefront-shell .neo-panel-tight,
+  .storefront-shell .neo-panel-pop {
+    border: 1px solid var(--sf-border);
+    border-radius: 1rem;
+    box-shadow: 0 12px 30px rgb(18 35 63 / 0.08);
+  }
+
+  .storefront-shell .neo-button {
+    border: 1px solid var(--sf-border);
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 12px rgb(18 35 63 / 0.1);
+    transition:
+      transform 150ms ease,
+      box-shadow 150ms ease,
+      background-color 150ms ease,
+      color 150ms ease;
+  }
+
+  .storefront-shell .neo-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgb(18 35 63 / 0.14);
+  }
+
+  .storefront-shell .neo-button:active {
+    transform: translateY(0);
+    box-shadow: 0 3px 8px rgb(18 35 63 / 0.1);
+  }
+
+  .storefront-shell .neo-button-stable:hover,
+  .storefront-shell .neo-button-stable:active {
+    transform: none;
+    box-shadow: 0 4px 12px rgb(18 35 63 / 0.1);
+  }
+
+  .storefront-shell .neo-input {
+    border: 1px solid var(--sf-border);
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 12px rgb(18 35 63 / 0.06);
+  }
+
+  .storefront-shell .neo-filter-active,
+  .storefront-shell .neo-filter-inactive {
+    border-width: 1px;
+    box-shadow: 0 3px 8px rgb(18 35 63 / 0.08);
+  }
+
+  .storefront-shell .neo-chip {
+    border-width: 1px;
+    box-shadow: 0 3px 8px rgb(18 35 63 / 0.08);
+  }
+  .storefront-shell [class~="border-[3px]"],
+  .storefront-shell [class~="border-2"] {
+    border-width: 1px;
+  }
+  .storefront-shell .bg-grid-pattern {
+    background-image: none !important;
+  }
+  .storefront-shell [class*="shadow-["] {
+    box-shadow: 0 12px 30px rgb(18 35 63 / 0.08);
+  }
+
+  .storefront-sticky-action {
+    display: none;
+  }
+
+  .js-enabled .storefront-sticky-action {
+    display: flex;
+  }
+
+  @media (min-width: 768px) {
+    .storefront-sticky-action {
+      display: none !important;
+    }
+  }
 }
 
 @keyframes neo-pulse {
@@ -1107,6 +1140,12 @@
 
   .neo-sheen::after {
     display: none !important;
+  }
+  .storefront-shell .neo-button:hover,
+  .storefront-shell .neo-button:active,
+  .storefront-shell .neo-hover:hover {
+    transform: none !important;
+    transition: none !important;
   }
 
   .scroll-progress {

@@ -432,6 +432,23 @@ class StorefrontShopCheckoutTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_checkout_mobile_sticky_action_reuses_the_canonical_checkout_form(): void
+    {
+        $this->manualPaymentModeIsActive();
+        $product = $this->availableProduct(['name' => 'Sticky checkout product', 'price_amount' => 45000, 'stock' => 2]);
+
+        $html = $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertSame(1, substr_count($html, 'data-checkout-sticky-action'));
+        $this->assertStringContainsString('id="checkout-form"', $html);
+        $this->assertStringContainsString('form="checkout-form"', $html);
+        $this->assertStringContainsString('data-checkout-sticky-submit', $html);
+        $this->assertStringContainsString('data-checkout-sticky-total', $html);
+        $this->assertMatchesRegularExpression('/data-checkout-sticky-submit[^>]*disabled/', $html);
+    }
+
     public function test_landing_catalog_renders_page_checkout_and_empty_stock_state(): void
     {
         $this->manualPaymentModeIsActive();

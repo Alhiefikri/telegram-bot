@@ -7,7 +7,7 @@
     <div class="storefront-shell relative z-10 flex min-h-screen flex-col justify-between overflow-x-hidden">
         @include('storefront.partials.header')
 
-        <main class="flex-grow pb-16 pt-4 sm:pt-12">
+        <main class="flex-grow pb-[calc(7rem+env(safe-area-inset-bottom))] pt-4 sm:pt-12 lg:pb-16">
             <section class="mx-auto max-w-5xl px-4 sm:px-6">
                 @php
                     $checkoutValidationMessages = $errors->getMessages();
@@ -387,6 +387,15 @@
                                     <button type="submit" data-checkout-submit disabled aria-disabled="true" aria-describedby="checkout-submit-disabled-help" class="neo-button neo-button-stable inline-flex min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Checkout belum tersedia</button>
                                 @endif
                             </form>
+                            <div class="storefront-sticky-action sticky bottom-0 z-40 items-center justify-between gap-3 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-checkout-sticky-action aria-label="Aksi checkout">
+                                <div class="min-w-0">
+                                    <span class="block text-[10px] font-black uppercase tracking-[0.14em] text-[var(--sf-muted)]">Total review</span>
+                                    <strong class="block truncate text-sm font-black text-[var(--sf-ink)]" data-checkout-sticky-total>{{ $storefront->idr($cartSubtotal) }}</strong>
+                                </div>
+                                <button type="submit" form="checkout-form" data-checkout-sticky-submit class="neo-button neo-button-stable inline-flex min-h-12 min-w-0 max-w-[68%] items-center justify-center break-words bg-[var(--sf-accent)] px-4 text-center text-xs leading-4 text-white sm:px-5 sm:text-sm" @if (! $checkoutCanSubmit || ! $termsAccepted) disabled aria-disabled="true" @endif>
+                                    Lanjut bayar
+                                </button>
+                            </div>
                         @endif
                     </div>
 

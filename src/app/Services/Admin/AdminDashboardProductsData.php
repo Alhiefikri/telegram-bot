@@ -316,6 +316,7 @@ final class AdminDashboardProductsData
             'delete_confirmation' => $this->familyDeleteConfirmation($family),
             'edit_payload' => [
                 'id' => $family->id,
+                'slug' => $family->slug,
                 'name' => $family->name,
                 'description' => $family->description,
                 'sortOrder' => $family->sortOrder,
@@ -380,6 +381,7 @@ final class AdminDashboardProductsData
                 'is_available' => $family->isAvailable,
                 'edit_payload' => [
                     'id' => $family->id,
+                    'slug' => $family->slug,
                     'name' => $family->name,
                     'description' => $family->description,
                     'sortOrder' => $family->sortOrder,

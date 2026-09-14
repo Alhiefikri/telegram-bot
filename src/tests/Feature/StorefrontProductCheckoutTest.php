@@ -94,6 +94,8 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('Stok: 8')
             ->assertSee(route('storefront.shop.checkout.product', $product), false)
             ->assertSee('Beli sekarang')
+            ->assertSee('data-product-sticky-action', false)
+            ->assertSee('data-product-sticky-submit', false)
             ->assertSee('name="product_id" value="'.$product->id.'"', false)
             ->assertSee('Tambah ke keranjang')
             ->assertSee(route('storefront.order-access.create'), false)

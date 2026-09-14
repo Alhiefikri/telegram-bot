@@ -699,4 +699,34 @@ class ProductFamilyCatalogTest extends TestCase
             ->assertSessionHasErrors('confirm_delete', null, 'productFamilyDelete');
         $this->assertDatabaseHas('product_families', ['id' => $family->id, 'deleted_at' => null]);
     }
+
+    public function test_family_update_slug_writes_durable_alias_for_legacy_public_url(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $family = ProductFamily::factory()->create(['name' => 'Old Family', 'slug' => 'old-family']);
+        Product::factory()->create([
+            'product_family_id' => $family->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.product-families.update', $family), [
+                'name' => 'Old Family',
+                'slug' => 'new-family',
+                'description' => null,
+                'sort_order' => 0,
+            ])
+            ->assertRedirect();
+
+        $family->refresh();
+        $this->assertSame('new-family', $family->slug);
+        $this->assertDatabaseHas('product_family_slug_redirects', [
+            'old_slug' => 'old-family',
+            'product_family_id' => $family->id,
+        ]);
+        $this->get('/produk-keluarga/old-family')
+            ->assertStatus(301)
+            ->assertRedirect(route('storefront.product-families.show', ['productFamily' => 'new-family']));
+    }
 }

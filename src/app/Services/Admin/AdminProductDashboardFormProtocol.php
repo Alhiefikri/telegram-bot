@@ -121,6 +121,20 @@ class AdminProductDashboardFormProtocol
             ->withInput([
                 'family_id' => $family->id,
                 'name' => $request->input('name'),
+                'slug' => $request->input('slug'),
+                'description' => $request->input('description'),
+                'sort_order' => $request->input('sort_order'),
+            ]);
+    }
+
+    public function productFamilyUpdateBusinessValidationError(Request $request, ProductFamily $family, string $field, string $message): RedirectResponse
+    {
+        return $this->productFamilyManagementRedirect('edit', $family->id)
+            ->withErrors([$field => $message], self::PRODUCT_FAMILY_UPDATE_BAG)
+            ->withInput([
+                'family_id' => $family->id,
+                'name' => $request->input('name'),
+                'slug' => $request->input('slug'),
                 'description' => $request->input('description'),
                 'sort_order' => $request->input('sort_order'),
             ]);

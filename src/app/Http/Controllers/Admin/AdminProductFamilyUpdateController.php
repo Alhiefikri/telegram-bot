@@ -25,6 +25,7 @@ class AdminProductFamilyUpdateController extends Controller
         try {
             $family = $families->update($productFamily, [
                 'name' => $validated['name'],
+                'slug' => $validated['slug'] ?? null,
                 'description' => $validated['description'] ?? null,
                 'sort_order' => (int) $validated['sort_order'],
                 ...($newImagePath === null ? [] : ['image_path' => $newImagePath]),
@@ -36,6 +37,10 @@ class AdminProductFamilyUpdateController extends Controller
             }
             if ($newTelegramImagePath !== null) {
                 $images->deleteManagedImage($newTelegramImagePath);
+            }
+
+            if ($exception instanceof \RuntimeException) {
+                return $forms->productFamilyUpdateBusinessValidationError($request, $productFamily, 'slug', $exception->getMessage());
             }
 
             throw $exception;

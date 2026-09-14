@@ -67,7 +67,7 @@ class StorefrontUrl
     {
         $path = $this->localPath($returnUrl);
 
-        return is_string($path) && str_starts_with($path, '/produk-keluarga/')
+        return is_string($path) && $this->isFamilyPath($path)
             ? 'family_direct_checkout_page'
             : 'direct_checkout_page';
     }
@@ -82,7 +82,7 @@ class StorefrontUrl
         $path = $this->localPath($returnUrl);
 
         return match (true) {
-            is_string($path) && str_starts_with($path, '/produk-keluarga/') => 'Kembali ke pilihan',
+            is_string($path) && $this->isFamilyPath($path) => 'Kembali ke pilihan',
             is_string($path) && str_starts_with($path, '/shop/cart') => 'Kembali ke keranjang',
             is_string($path) && str_starts_with($path, '/produk/') => 'Kembali ke produk',
             default => 'Kembali ke katalog',
@@ -94,6 +94,11 @@ class StorefrontUrl
         return is_string($url) && $this->isLocalUrl($url)
             ? parse_url($url, PHP_URL_PATH)
             : null;
+    }
+
+    private function isFamilyPath(string $path): bool
+    {
+        return str_starts_with($path, '/pilihan/') || str_starts_with($path, '/produk-keluarga/');
     }
 
     public function waitlistUrlForId(int $productId): string

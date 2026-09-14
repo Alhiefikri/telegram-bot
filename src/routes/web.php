@@ -46,6 +46,7 @@ use App\Http\Controllers\StorefrontOrderAccessController;
 use App\Http\Controllers\StorefrontPolicyController;
 use App\Http\Controllers\StorefrontProductController;
 use App\Http\Controllers\StorefrontProductFamilyController;
+use App\Http\Controllers\StorefrontLegacyProductFamilyRedirectController;
 use App\Http\Controllers\StorefrontRobotsController;
 use App\Http\Controllers\StorefrontShopBinanceOrderIdController;
 use App\Http\Controllers\StorefrontShopBscTxHashController;
@@ -71,7 +72,8 @@ Route::redirect('/panduan-login-akun', '/gpt/panduan-login-akun');
 Route::get('/privasi', [StorefrontPolicyController::class, 'privacy'])->name('storefront.policies.privacy');
 Route::get('/syarat-ketentuan', [StorefrontPolicyController::class, 'terms'])->name('storefront.policies.terms');
 Route::get('/refund', [StorefrontPolicyController::class, 'refund'])->name('storefront.policies.refund');
-Route::get('/produk-keluarga/{productFamily:slug}', StorefrontProductFamilyController::class)->name('storefront.product-families.show');
+Route::get('/pilihan/{productFamily:slug}', StorefrontProductFamilyController::class)->name('storefront.product-families.show');
+Route::get('/produk-keluarga/{slug}', StorefrontLegacyProductFamilyRedirectController::class)->name('storefront.product-families.legacy');
 Route::get('/pemulihan-pesanan', [StorefrontPolicyController::class, 'recovery'])->name('storefront.policies.recovery');
 Route::get('/produk/{product}', StorefrontProductController::class)->name('storefront.products.show');
 Route::post('/produk/{product}/waitlist', [StorefrontWaitlistController::class, 'store'])
