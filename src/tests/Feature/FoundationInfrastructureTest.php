@@ -219,6 +219,18 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('cp /opt/lhiestore-public-binance.jpeg public/binance.jpeg', $entrypoint);
     }
 
+    public function test_production_entrypoint_syncs_the_product_placeholder_to_the_public_volume(): void
+    {
+        $dockerfile = file_get_contents(base_path('../Dockerfile'));
+        $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
+        $asset = base_path('public/assets/product-placeholder.svg');
+
+        $this->assertFileIsReadable($asset);
+        $this->assertStringContainsString('COPY src/public/assets/product-placeholder.svg /opt/lhiestore-public-product-placeholder.svg', $dockerfile);
+        $this->assertStringContainsString('cp /opt/lhiestore-public-product-placeholder.svg public/assets/product-placeholder.svg', $entrypoint);
+        $this->assertStringStartsWith('<svg', trim((string) file_get_contents($asset)));
+    }
+
     public function test_production_deploy_workflow_uses_existing_compose_project_name(): void
     {
         $workflow = file_get_contents(base_path('../.github/workflows/deploy-production.yml'));
