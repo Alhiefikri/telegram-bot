@@ -3449,11 +3449,11 @@ test("saves product name and icon edits from the admin modal", async ({
   await expect(
     page.getByText("Produk Browser QA Produk A Edited berhasil diperbarui.")
   ).toBeVisible();
-  await expect(
-    page
-      .locator("article:visible")
-      .filter({ hasText: "Browser QA Produk A Edited" })
-  ).toBeVisible();
+  await getAdminProductCard(
+    page,
+    "Browser QA Produk A Edited",
+    "Browser QA Product Family"
+  );
 });
 
 async function submitProductFromMiniAppModal(page) {
