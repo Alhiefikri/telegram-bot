@@ -363,6 +363,7 @@ disclosures, consent, and one in-flow submit action. It has one document scroll,
 dialog, no nested checkout scroll container, and no modal transport/runtime state.
 
 The #477 Storefront presentation keeps catalog data and checkout ownership unchanged while the `storefront-shell` scope supplies soft paper/surface/ink roles, a shared search header, direct mobile Cart access, compact DB-backed featured entries, and reduced-motion-safe motion. Available Product detail and checkout pages may expose mobile sticky actions that reuse the canonical checkout form; JavaScript-disabled users retain the in-flow controls.
+Storefront Product cards and detail covers read the optional Product `icon` and custom image from the database/Admin product record. Runtime presentation uses a neutral generic fallback when both are absent; it does not map product names to brand-specific cover content. The separate ChatGPT login guide remains informational content, not catalog data.
 
 The final Storefront release matrix covers `320x568`, `390x844`, `768x900`,
 `1280x900`, `1440x900`, and `1920x1080`. Public browser evidence keeps
