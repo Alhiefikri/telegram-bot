@@ -59,7 +59,7 @@ final class StoreBalanceHomeTest extends TelegramBotTestSupport
         $this->assertStringContainsString('👥 Telegram users: 2', $caption);
         $this->assertStringContainsString('🧾 Successful orders: 1', $caption);
         $this->assertStringContainsString(
-            "<blockquote>🆔 Telegram ID: 45301\n🔗 Username: @ayu_store\n💰 My Balance: Rp 25.000</blockquote>",
+            "<blockquote>🆔 Telegram ID: 45301\n🔗 Username: @ayu_store\n💳 Total Transactions: Rp 10.000 / 0 USDT\n💰 My Balance: Rp 25.000</blockquote>",
             $caption,
         );
         $this->assertStringContainsString(
@@ -146,7 +146,8 @@ final class StoreBalanceHomeTest extends TelegramBotTestSupport
 
         $caption = (string) $this->telegramRequestField($this->homeRequest(45321), 'caption');
         $this->assertStringContainsString('My Balance: Temporarily unavailable', $caption);
-        $this->assertStringNotContainsString('Rp', $caption);
+        $this->assertStringNotContainsString('My Balance: Rp', $caption);
+        $this->assertStringNotContainsString('Rp 10.000', $caption);
     }
 
     public function test_missing_username_uses_the_localized_missing_value(): void
