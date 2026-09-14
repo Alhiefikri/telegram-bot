@@ -627,16 +627,18 @@ class StorefrontShopCatalogTest extends TestCase
 
     public function test_landing_renders_single_catalog_grid(): void
     {
+        $shopUrl = route('storefront.shop.index');
         $category = Category::factory()->create(['name' => 'AI Tools', 'sort_order' => 1, 'is_active' => true]);
         Product::factory()->create(['category_id' => $category->id, 'name' => 'Claude Pro Ready', 'stock' => 3, 'reserved_stock' => 0, 'is_active' => true]);
         Product::factory()->create(['category_id' => $category->id, 'name' => 'ChatGPT Plus Ready', 'stock' => 2, 'reserved_stock' => 0, 'is_active' => true]);
         Product::factory()->create(['category_id' => $category->id, 'name' => 'ChatGPT Team Restock', 'stock' => 1, 'reserved_stock' => 1, 'is_active' => true]);
+        app(StorefrontResponseCache::class)->invalidate();
 
         $this->get(route('storefront.home'))
             ->assertOk()
             ->assertSee('Lhie Store | Akun Premium &amp; Produk Digital', false)
             ->assertSee('Pilih produk digital sesuai kebutuhan.')
-            ->assertSee('href="#products"', false)
+            ->assertSee('href="'.$shopUrl.'"', false)
             ->assertSee('Katalog aktif · 3 item katalog')
             ->assertSee('class="category-btn', false)
             ->assertSee('data-filter="'.$category->id.'"', false)
@@ -736,12 +738,13 @@ class StorefrontShopCatalogTest extends TestCase
 
     public function test_landing_catalog_behavior_remains_unchanged(): void
     {
+        $shopUrl = route('storefront.shop.index');
         $product = Product::factory()->create(['name' => 'Landing Catalog Product', 'stock' => 2, 'reserved_stock' => 0]);
 
         $this->get(route('storefront.home'))
             ->assertOk()
             ->assertSee('Pilih produk digital sesuai kebutuhan.')
-            ->assertSee('href="#products"', false)
+            ->assertSee('href="'.$shopUrl.'"', false)
             ->assertSee('label for="storefront-search" class="sr-only">Cari produk</label>', false)
             ->assertSee('input id="storefront-search"', false)
             ->assertSee('stroke-width="3" aria-hidden="true"', false)

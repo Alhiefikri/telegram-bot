@@ -58,7 +58,7 @@
         <span class="text-xs font-bold text-[var(--sf-muted)]">{{ $catalogPage->productCount() }} item</span>
     </div>
     <div id="storefront-product-grid" @class([
-        'storefront-popular-card storefront-product-grid',
+        'storefront-catalog-card storefront-product-grid',
         'storefront-product-grid--single mx-auto max-w-xs' => $catalogPage->productCount() === 1,
     ])>
         @forelse ($catalogPage->entries() as $entry)
@@ -78,17 +78,17 @@
         @endforelse
     </div>
     @if ($catalogPage->popularProducts->isNotEmpty())
-        <div class="mt-10 border-t border-[var(--sf-border)] pt-8">
+        <section id="popular-products" class="mt-10 border-t border-[var(--sf-border)] pt-8" aria-labelledby="popular-products-title">
             <div class="mb-4">
                 <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Berdasarkan pesanan selesai</p>
-                <h3 class="mt-1 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)]">Paling banyak dibeli</h3>
+                <h3 id="popular-products-title" class="mt-1 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)]">Paling banyak dibeli</h3>
             </div>
             <div class="storefront-product-grid">
                 @foreach ($catalogPage->popularProducts as $catalogProduct)
                     @include('storefront.components.product-card', ['catalogProduct' => $catalogProduct])
                 @endforeach
             </div>
-        </div>
+        </section>
     @endif
     </div>
 </section>

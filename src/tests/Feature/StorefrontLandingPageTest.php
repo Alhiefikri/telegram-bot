@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Category;
 use App\Models\ManualPaymentSetting;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -64,13 +65,13 @@ class StorefrontLandingPageTest extends TestCase
         $heroHtml = $this->htmlBetween($html, '<section class="storefront-hero-card', '</section>');
 
         $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Produk', 'Desktop product nav should send customers to the catalog grid.');
+        $this->assertHtmlContainsLink($heroHtml, $shopUrl, 'Lihat Produk', 'Hero primary CTA should send customers to the catalog.');
         $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Katalog Web', 'Desktop header should expose the website checkout path.');
         $this->assertHtmlContainsLink($headerHtml, $accessUrl, 'Akses Pesanan', 'Desktop header should expose repeat order access.');
 
         $this->assertHtmlContainsLink($mobileMenuHtml, $shopUrl, 'Katalog Web', 'Mobile menu should expose the website checkout path.');
         $this->assertHtmlContainsLink($mobileMenuHtml, $accessUrl, 'Akses Pesanan', 'Mobile menu should expose repeat order access.');
 
-        $this->assertHtmlContainsLink($heroHtml, '#products', 'Lihat Produk', 'Hero primary CTA should send customers to the catalog.');
         $this->assertHtmlContainsLink($heroHtml, '#cara-beli', 'Cara beli', 'Hero secondary CTA should explain the web checkout flow.');
     }
 
@@ -122,8 +123,7 @@ class StorefrontLandingPageTest extends TestCase
         foreach ([
             'storefront-shell',
             'storefront-hero-card',
-            'storefront-popular-card',
-            'motion-safe:animate-storefront-reveal',
+            'storefront-catalog-card',
             'motion-reduce:animate-none',
         ] as $needle) {
             $this->assertTrue(str_contains($html, $needle), "Missing storefront hook: {$needle}");
@@ -133,6 +133,7 @@ class StorefrontLandingPageTest extends TestCase
 
     public function test_homepage_uses_a_catalog_first_hierarchy_without_duplicate_marketing_sections(): void
     {
+        $shopUrl = route('storefront.shop.index');
         $html = $this->get('/')->assertOk()->getContent();
         $heroStart = strpos($html, '<section class="storefront-hero-card');
         $catalogStart = strpos($html, '<section id="products"');
@@ -146,7 +147,7 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertSame(1, substr_count($html, 'id="cara-beli"'));
         $this->assertSame(1, substr_count($html, 'id="faq"'));
         $this->assertSame(1, substr_count($html, 'id="support"'));
-        $this->assertSame(1, substr_count($heroHtml, 'href="#products"'));
+        $this->assertSame(1, substr_count($heroHtml, 'href="'.$shopUrl.'"'));
         $this->assertSame(1, substr_count($heroHtml, 'href="#cara-beli"'));
         $this->assertStringNotContainsString('id="featured-offer"', $html);
         $this->assertStringNotContainsString('id="features"', $html);
@@ -203,6 +204,37 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('Kategori akan segera hadir')
             ->assertSee('Cek kembali katalog saat stok produk yang Anda cari tersedia.')
             ->assertDontSee('Belum ada data penjualan berbayar selesai untuk menampilkan label produk terlaris.');
+    }
+
+    public function test_empty_popularity_keeps_available_catalog_and_hides_popularity_section(): void
+    {
+        $family = ProductFamily::factory()->create([
+            'name' => 'Streaming Family',
+            'slug' => 'streaming-family',
+        ]);
+        Product::factory()->create([
+            'product_family_id' => $family->id,
+            'name' => 'Streaming Family Option',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
+            'name' => 'Standalone Available Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $html = $this->get('/')
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('Tersedia sekarang', $html);
+        $this->assertStringContainsString('Streaming Family', $html);
+        $this->assertStringContainsString('Standalone Available Product', $html);
+        $this->assertStringNotContainsString('Paling banyak dibeli', $html);
+        $this->assertStringNotContainsString('id="popular-products"', $html);
     }
 
     public function test_active_products_render_while_inactive_and_deleted_products_stay_hidden(): void

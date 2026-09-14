@@ -30,7 +30,7 @@
                     @foreach ($featuredEntries as $entry)
                         @if ($entry->isFamily())
                             @php($featured = $entry->family)
-                            <li class="min-w-0">
+                            <li class="min-w-0 {{ $loop->iteration > 1 ? 'hidden sm:block' : '' }}">
                                 <a href="{{ $featured->familyUrl }}" aria-label="Lihat pilihan {{ $featured->name }}" class="group flex min-w-0 items-center gap-3 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 transition-colors hover:bg-[var(--sf-surface)] focus-visible:outline focus-visible:outline-3 focus-visible:outline-[var(--sf-accent)]">
                                     <span class="relative flex aspect-square w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--sf-border)] bg-[var(--sf-accent-soft)]">
                                         @if ($featured->imageUrl)
@@ -48,7 +48,7 @@
                             </li>
                         @else
                             @php($featured = $entry->product->presentation)
-                            <li class="min-w-0">
+                            <li class="min-w-0 {{ $loop->iteration > 1 ? 'hidden sm:block' : '' }}">
                                 <a href="{{ $featured->productUrl }}" aria-label="Lihat detail {{ $featured->name }}" class="group flex min-w-0 items-center gap-3 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 transition-colors hover:bg-[var(--sf-surface)] focus-visible:outline focus-visible:outline-3 focus-visible:outline-[var(--sf-accent)]">
                                     <span class="relative flex aspect-square w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--sf-border)] bg-[var(--sf-accent-soft)]">
                                         @if ($featured->cover->imageUrl)

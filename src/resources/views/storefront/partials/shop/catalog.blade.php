@@ -87,7 +87,7 @@
             <span class="text-xs font-bold text-[var(--sf-muted)]">{{ $catalogPage->totalProductCount() }} item</span>
         </div>
         <div id="storefront-product-grid" @class([
-            'storefront-popular-card storefront-product-grid p-0 sm:p-1',
+            'storefront-catalog-card storefront-product-grid p-0 sm:p-1',
             'storefront-product-grid--single mx-auto max-w-xs' => $catalogPage->productCount() === 1,
         ])>
             @forelse ($catalogPage->entries() as $entry)

@@ -9,6 +9,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Storefront\StorefrontCatalogPageBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\StorefrontProductScenarios;
@@ -177,6 +178,31 @@ class StorefrontCatalogPageBuilderTest extends TestCase
             'Delta Ready' => false,
             'Echo Empty' => false,
         ], $page->products->mapWithKeys(fn ($entry) => [$entry->presentation->name => $entry->isPopular])->all());
+    }
+
+    public function test_empty_popularity_keeps_available_family_and_standalone_discovery_entries(): void
+    {
+        $family = ProductFamily::factory()->create([
+            'name' => 'Family Discovery',
+            'slug' => 'family-discovery',
+        ]);
+        $this->availableProduct([
+            'product_family_id' => $family->id,
+            'name' => 'Family Discovery Option',
+        ]);
+        $this->availableProduct(['name' => 'Standalone Discovery']);
+
+        $page = app(StorefrontCatalogPageBuilder::class)->home(null);
+
+        $this->assertTrue($page->popularProducts->isEmpty());
+        $this->assertSame(
+            ['Family Discovery', 'Standalone Discovery'],
+            $page->entries()->map(
+                fn ($entry): string => $entry->isFamily()
+                    ? $entry->family->name
+                    : $entry->product->presentation->name,
+            )->all(),
+        );
     }
 
     public function test_storefront_controller_normalizes_array_search_parameters(): void

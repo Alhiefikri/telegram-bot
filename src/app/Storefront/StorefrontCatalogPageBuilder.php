@@ -58,6 +58,7 @@ class StorefrontCatalogPageBuilder
         $listing = $this->publicProducts($query, paginate: $isShop);
         $catalogProducts = $this->catalogProducts($listing['standaloneReadModels']);
         $catalogEntries = $this->catalogEntries($listing['entries'], $catalogProducts);
+        $popularProducts = $isShop ? collect() : $this->orderedPopularProducts($catalogProducts);
         $copy = config('storefront');
         $brand = $this->storefront->brand();
         $catalogReturnUrl = $isShop
@@ -90,7 +91,7 @@ class StorefrontCatalogPageBuilder
             hasPublicCategories: $categories->isNotEmpty(),
             categoryFilters: $this->categoryFilters($categories, $query, $isShop),
             products: $catalogProducts,
-            popularProducts: $this->orderedPopularProducts($catalogProducts),
+            popularProducts: $popularProducts,
             search: $query->search,
             searchMaxLength: StorefrontCatalogSearch::MAX_LENGTH,
             searchAction: $isShop
