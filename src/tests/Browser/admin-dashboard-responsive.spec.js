@@ -257,6 +257,96 @@ test("customer checkout: keeps storefront card actions separate and keyboard rea
   ).toEqual([]);
 });
 
+test("customer checkout: keeps Product detail purchase actions reachable on mobile", async ({
+  page,
+  browser,
+}) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+
+  const productCard = page.locator("article.product-card").filter({
+    hasText: "Browser QA Produk A",
+  });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    productCard.getByRole("link", { name: "Detail", exact: true }).click(),
+  ]);
+
+  const sticky = page.locator("[data-product-sticky-action]");
+  await expect(sticky).toBeVisible();
+  await expect(sticky.locator("[data-product-sticky-submit]")).toHaveAttribute(
+    "href",
+    /\/shop\/checkout\/products\/\d+/
+  );
+  await expect(sticky.locator("[data-product-sticky-cart]")).toHaveAttribute(
+    "action",
+    /\/shop\/cart\/items$/
+  );
+  await expect(
+    page.locator('img[alt="Browser QA Produk A"]').first()
+  ).toHaveAttribute("loading", "eager");
+
+  const metrics = await sticky.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const content = document.querySelector(".storefront-product-content");
+    const contentStyle = content ? getComputedStyle(content) : null;
+
+    return {
+      bottom: rect.bottom,
+      height: rect.height,
+      position: getComputedStyle(element).position,
+      paddingBottom: contentStyle
+        ? Number.parseFloat(contentStyle.paddingBottom)
+        : 0,
+      documentWidth: Math.max(
+        document.documentElement.scrollWidth,
+        document.body.scrollWidth
+      ),
+      actionSizes: Array.from(element.querySelectorAll("a[href], button")).map(
+        (action) => {
+          const actionRect = action.getBoundingClientRect();
+          return { width: actionRect.width, height: actionRect.height };
+        }
+      ),
+    };
+  });
+
+  expect(metrics.position).toBe("fixed");
+  expect(Math.abs(metrics.bottom - 568)).toBeLessThanOrEqual(1);
+  expect(metrics.height).toBeGreaterThanOrEqual(44);
+  expect(metrics.paddingBottom).toBeGreaterThanOrEqual(metrics.height - 1);
+  expect(metrics.documentWidth).toBeLessThanOrEqual(320);
+  expect(
+    metrics.actionSizes.every(
+      ({ width, height }) => width >= 44 && height >= 44
+    )
+  ).toBe(true);
+
+  const noJsContext = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: { width: 320, height: 568 },
+  });
+  const noJsPage = await noJsContext.newPage();
+
+  try {
+    await noJsPage.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    const detailHref = await noJsPage
+      .locator("article.product-card")
+      .filter({ hasText: "Browser QA Produk A" })
+      .getByRole("link", { name: "Detail", exact: true })
+      .first()
+      .getAttribute("href");
+
+    await noJsPage.goto(new URL(detailHref, baseUrl).toString(), {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(noJsPage.locator("#product-checkout-cta")).toBeVisible();
+    await expect(noJsPage.locator("[data-product-sticky-action]")).toBeHidden();
+  } finally {
+    await noJsContext.close();
+  }
+});
+
 test("customer checkout: asserts deterministic catalog checkout invoice navigation without duplicates", async ({
   page,
 }) => {

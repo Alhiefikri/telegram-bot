@@ -4,11 +4,11 @@
     @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
 <body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)]">
-    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden">
+    <div class="storefront-shell storefront-product-page relative z-10 flex min-h-screen flex-col justify-between overflow-x-hidden">
         @include('storefront.partials.header')
 
             @include('storefront.partials.checkout-maintenance', ['maintenance' => $checkoutMaintenance])
-        <main class="flex-grow pb-[calc(8rem+env(safe-area-inset-bottom))] pt-12 lg:pb-20">
+        <main class="storefront-product-content flex-grow pt-12">
             @include('storefront.partials.breadcrumbs', ['metadata' => $metadata])
             <section class="mx-auto max-w-5xl px-5 sm:px-6">
                 <a href="{{ $returnUrl }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]">
@@ -30,30 +30,35 @@
                     <div class="neo-panel overflow-hidden bg-[var(--sf-surface)]">
                         @include('storefront.components.product-cover', [
                             'product' => $product,
+                            'presentation' => $presentation,
                             'isAvailable' => $isAvailable,
                             'isPopular' => false,
+                            'priority' => true,
                         ])
                     </div>
 
-                    <article class="neo-panel relative overflow-hidden bg-[var(--sf-surface)] p-5 sm:p-7">
+                    <article class="neo-panel relative overflow-hidden bg-[var(--sf-surface)] p-5 sm:p-7" aria-labelledby="product-title">
                         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-40"></div>
                         <div class="relative z-10">
-                            <div class="mb-5 flex flex-wrap items-center gap-2">
+                            <h1 id="product-title" class="font-display text-3xl font-black leading-tight tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $presentation->name }}</h1>
+                            @if ($presentation->familyOptionLabel !== null)
+                                <p class="mt-2 text-sm font-bold text-[var(--sf-muted)]">
+                                    <span class="font-black uppercase tracking-wider text-[10px]">Pilihan</span>
+                                    <span class="mx-1" aria-hidden="true">·</span>
+                                    {{ $presentation->familyOptionLabel }}
+                                </p>
+                            @endif
+
+                            <div class="mt-5 flex flex-wrap items-center gap-2">
                                 <x-storefront.badge class="font-display text-sm normal-case">
-                                    {{ $storefront->idr($product->price_amount) }}
+                                    {{ $storefront->idr($presentation->priceAmount) }}
                                 </x-storefront.badge>
                                 <x-storefront.badge :tone="$isAvailable ? 'surface' : 'danger'" class="text-xs normal-case">
-                                    {{ $isAvailable ? 'Stok: '.$stock : 'Stok habis' }}
+                                    {{ $isAvailable ? 'Stok: '.$presentation->stockAvailable : 'Stok habis' }}
                                 </x-storefront.badge>
                             </div>
 
-                            <h1 class="font-display text-3xl font-black leading-tight tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $product->name }}</h1>
-                            @if (trim($presentation->description) !== '')
-                                <p class="mt-4 max-w-2xl whitespace-pre-line break-words text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ $presentation->description }}</p>
-                            @else
-                                <p class="mt-4 max-w-xl text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ $presentation->descriptionSnippet }}</p>
-                            @endif
-                            <div class="mt-6 flex flex-col gap-3 sm:flex-row">
+                            <div id="product-primary-actions" class="mt-6 flex flex-col gap-3 sm:flex-row">
                                 @if ($presentation->isBuyable)
                                     <x-storefront.button
                                         :href="$checkoutUrl"
@@ -91,6 +96,12 @@
                                     Akses Pesanan
                                 </x-storefront.button>
                             </div>
+
+                            @if (trim($presentation->description) !== '')
+                                <p class="mt-5 max-w-2xl whitespace-pre-line break-words text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ $presentation->description }}</p>
+                            @else
+                                <p class="mt-5 max-w-xl text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ $presentation->descriptionSnippet }}</p>
+                            @endif
 
                             @if ($presentation->merchandising->hasDetails())
                                 <section class="mt-6 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4" aria-labelledby="product-merchandising-title">
@@ -214,12 +225,20 @@
             </section>
         </main>
         @if ($presentation->isBuyable)
-            <div class="storefront-sticky-action fixed inset-x-0 bottom-0 z-40 items-center justify-between gap-3 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-product-sticky-action>
-                <div class="min-w-0">
+            <div class="storefront-sticky-action fixed inset-x-0 bottom-0 z-40 items-center justify-between gap-3 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-product-sticky-action role="region" aria-label="Aksi pembelian produk">
+                <div class="min-w-0 flex-1">
                     <span class="block text-[10px] font-black uppercase tracking-[0.14em] text-[var(--sf-muted)]">Siap dibeli</span>
-                    <strong class="block truncate text-sm font-black text-[var(--sf-ink)]">{{ $storefront->idr($product->price_amount) }}</strong>
+                    <strong class="block truncate text-sm font-black text-[var(--sf-ink)]">{{ $storefront->idr($presentation->priceAmount) }}</strong>
                 </div>
-                <a href="{{ $checkoutUrl }}" class="neo-button inline-flex min-h-12 shrink-0 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white" data-product-sticky-submit>Beli sekarang</a>
+                <div class="flex shrink-0 items-center gap-2">
+                    <a href="{{ $checkoutUrl }}" class="neo-button inline-flex min-h-11 items-center justify-center whitespace-nowrap bg-[var(--sf-accent)] px-3 text-xs font-black text-white" data-product-sticky-submit aria-label="Beli {{ $presentation->name }} sekarang">Beli sekarang</a>
+                    <form method="POST" action="{{ route('storefront.shop.cart.items.store') }}" class="shrink-0" data-product-sticky-cart>
+                        @csrf
+                        <input type="hidden" name="product_id" value="{{ $product->id }}">
+                        <input type="hidden" name="quantity" value="1">
+                        <button type="submit" class="neo-button inline-flex min-h-11 items-center justify-center whitespace-nowrap bg-[var(--sf-surface)] px-3 text-[11px] font-black text-[var(--sf-ink)] hover:bg-[var(--sf-yellow)]" aria-label="Tambah {{ $presentation->name }} ke keranjang">+ Keranjang</button>
+                    </form>
+                </div>
             </div>
         @endif
 

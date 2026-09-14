@@ -87,7 +87,7 @@ class StorefrontProductCheckoutTest extends TestCase
             'reserved_stock' => 0,
         ]);
 
-        $this->get(route('storefront.products.show', $product))
+        $html = $this->get(route('storefront.products.show', $product))
             ->assertOk()
             ->assertSee('CapCut Pro')
             ->assertSee('Rp60.000')
@@ -96,13 +96,26 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('Beli sekarang')
             ->assertSee('data-product-sticky-action', false)
             ->assertSee('data-product-sticky-submit', false)
+            ->assertSee('data-product-sticky-cart', false)
             ->assertSee('name="product_id" value="'.$product->id.'"', false)
             ->assertSee('Tambah ke keranjang')
             ->assertSee(route('storefront.order-access.create'), false)
             ->assertSee('Akses Pesanan')
             ->assertDontSee('data-checkout-product=', false)
             ->assertDontSee('data-product=', false)
-            ->assertDontSee('Checkout via Telegram Admin');
+            ->assertDontSee('Checkout via Telegram Admin')
+            ->getContent();
+
+        $this->assertSame(1, substr_count($html, 'data-product-sticky-action'));
+        $this->assertSame(1, substr_count($html, 'data-product-sticky-cart'));
+        $this->assertStringContainsString(
+            'action="'.route('storefront.shop.cart.items.store').'"',
+            $html,
+        );
+        $this->assertStringContainsString(
+            'aria-label="Beli CapCut Pro sekarang"',
+            $html,
+        );
 
         $this->assertNoCheckoutSideEffects();
     }
@@ -217,6 +230,9 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertDontSee(route('storefront.shop.checkout.product', ['product' => $product]), false)
             ->assertDontSee('data-checkout-product=', false)
             ->assertDontSee('data-product=', false)
+            ->assertDontSee('data-product-sticky-action', false)
+            ->assertDontSee('data-product-sticky-submit', false)
+            ->assertDontSee('data-product-sticky-cart', false)
             ->assertDontSee('Checkout via Telegram Admin');
     }
 
