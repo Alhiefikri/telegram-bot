@@ -364,6 +364,17 @@ dialog, no nested checkout scroll container, and no modal transport/runtime stat
 
 The #477 Storefront presentation keeps catalog data and checkout ownership unchanged while the `storefront-shell` scope supplies soft paper/surface/ink roles, a shared search header, direct mobile Cart access, compact DB-backed featured entries, and reduced-motion-safe motion. Available Product detail and checkout pages may expose mobile sticky actions that reuse the canonical checkout form; JavaScript-disabled users retain the in-flow controls.
 
+The final Storefront release matrix covers `320x568`, `390x844`, `768x900`,
+`1280x900`, `1440x900`, and `1920x1080`. Public browser evidence keeps
+`/pilihan/{slug}` canonical, treats `/produk-keluarga/{slug}` as redirect-only
+(including durable aliases), rejects invalid canonical and legacy slugs with
+404, preserves only safe same-origin return context, and verifies sitemap,
+JSON-LD, Open Graph, breadcrumb, and placeholder-asset URLs without the
+retired public family path or internal catalog labels. Product detail evidence
+covers available direct review, unavailable waitlist, no-image fallback,
+keyboard/Escape navigation, reduced motion, 200% zoom, and JavaScript-disabled
+links/forms without horizontal overflow or sticky-action overlap.
+
 Every public purchase entry point uses this contract: homepage and `/shop` Product cards
 link `Beli sekarang` to the canonical direct review; Product detail uses
 `#product-checkout-cta`; Product Family options use `Beli sekarang` directly to the same review; Cart

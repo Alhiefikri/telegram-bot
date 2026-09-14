@@ -1344,6 +1344,362 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
   expect(retiredRequests).toEqual([]);
 });
 
+test("customer checkout: proves final public URL, SEO, and fallback asset contracts", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+
+  const familyCard = page
+    .locator("a.family-card")
+    .filter({ hasText: "Browser QA Product Family" })
+    .first();
+  const familyHref = await familyCard.getAttribute("href");
+  expect(familyHref).not.toBeNull();
+
+  const canonicalFamilyUrl = new URL(familyHref ?? "", baseUrl);
+  canonicalFamilyUrl.search = "";
+  canonicalFamilyUrl.hash = "";
+  const canonicalFamily = canonicalFamilyUrl.toString();
+  const currentSlug = canonicalFamilyUrl.pathname.split("/").at(-1);
+  expect(currentSlug).toBe("browser-responsive-family");
+
+  const safeFrom = "/shop?q=release";
+  const legacyResponse = await page.request.get(
+    `${baseUrl}/produk-keluarga/${currentSlug}?from=${encodeURIComponent(
+      safeFrom
+    )}&utm_source=legacy`,
+    { failOnStatusCode: false, maxRedirects: 0 }
+  );
+  expect(legacyResponse.status()).toBe(301);
+  const legacyLocation = new URL(
+    legacyResponse.headers().location ?? "",
+    baseUrl
+  );
+  expect(legacyLocation.pathname).toBe(canonicalFamilyUrl.pathname);
+  expect(legacyLocation.searchParams.get("from")).toBe(safeFrom);
+  expect(legacyLocation.searchParams.has("utm_source")).toBe(false);
+
+  const unsafeLegacyResponse = await page.request.get(
+    `${baseUrl}/produk-keluarga/${currentSlug}?from=${encodeURIComponent(
+      "https://evil.example/phish"
+    )}`,
+    { failOnStatusCode: false, maxRedirects: 0 }
+  );
+  expect(unsafeLegacyResponse.status()).toBe(301);
+  expect(
+    new URL(unsafeLegacyResponse.headers().location ?? "", baseUrl).toString()
+  ).toBe(canonicalFamily);
+
+  const aliasResponse = await page.request.get(
+    `${baseUrl}/produk-keluarga/browser-responsive-legacy`,
+    { failOnStatusCode: false, maxRedirects: 0 }
+  );
+  expect(aliasResponse.status()).toBe(301);
+  expect(
+    new URL(aliasResponse.headers().location ?? "", baseUrl).toString()
+  ).toBe(canonicalFamily);
+
+  const invalidLegacyResponse = await page.request.get(
+    `${baseUrl}/produk-keluarga/browser-responsive-missing`,
+    { failOnStatusCode: false, maxRedirects: 0 }
+  );
+  expect(invalidLegacyResponse.status()).toBe(404);
+  const invalidCanonicalResponse = await page.request.get(
+    `${baseUrl}/pilihan/browser-responsive-missing`,
+    { failOnStatusCode: false, maxRedirects: 0 }
+  );
+  expect(invalidCanonicalResponse.status()).toBe(404);
+
+  const canonicalResponse = await page.request.get(canonicalFamily, {
+    failOnStatusCode: false,
+    maxRedirects: 0,
+  });
+  expect(canonicalResponse.status()).toBe(200);
+
+  await page.goto(canonicalFamily, { waitUntil: "domcontentloaded" });
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    "href",
+    canonicalFamily
+  );
+  await expect(page.locator('meta[property="og:url"]')).toHaveAttribute(
+    "content",
+    canonicalFamily
+  );
+  const familyJsonLd = await page
+    .locator('script[type="application/ld+json"]')
+    .evaluateAll((scripts) =>
+      scripts.map((script) => JSON.parse(script.textContent || "{}"))
+    );
+  const collectionPage = familyJsonLd.find(
+    (document) => document["@type"] === "CollectionPage"
+  );
+  const breadcrumbList = familyJsonLd.find(
+    (document) => document["@type"] === "BreadcrumbList"
+  );
+  expect(collectionPage).toEqual(
+    expect.objectContaining({ url: canonicalFamily })
+  );
+  expect(breadcrumbList?.itemListElement?.at(-1)?.item).toBe(canonicalFamily);
+
+  const familyHtml = await page.content();
+  const familyHtmlWithoutFixtureName = familyHtml.replaceAll(
+    "Browser QA Product Family",
+    ""
+  );
+  for (const prohibitedLabel of [
+    "Produk Keluarga",
+    "Product Family",
+    "Pilih SKU",
+    "SKU #",
+  ]) {
+    expect(familyHtmlWithoutFixtureName).not.toContain(prohibitedLabel);
+  }
+  expect(familyHtml).not.toContain("/produk-keluarga/");
+
+  const sitemapResponse = await page.request.get(`${baseUrl}/sitemap.xml`, {
+    failOnStatusCode: false,
+    maxRedirects: 0,
+  });
+  expect(sitemapResponse.status()).toBe(200);
+  expect(sitemapResponse.headers()["content-type"]).toMatch(/application\/xml/);
+  const sitemapXml = await sitemapResponse.text();
+  expect(sitemapXml).toContain(canonicalFamily);
+  expect(sitemapXml).not.toContain("/produk-keluarga/");
+
+  const placeholderResponse = await page.request.get(
+    `${baseUrl}/assets/product-placeholder.svg`,
+    { failOnStatusCode: false, maxRedirects: 0 }
+  );
+  expect(placeholderResponse.status()).toBe(200);
+  expect(placeholderResponse.headers()["content-type"]).toMatch(
+    /^image\/svg\+xml/
+  );
+  expect((await placeholderResponse.body()).byteLength).toBeGreaterThan(0);
+
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  const noImageCard = page
+    .locator("article.product-card")
+    .filter({ hasText: "Browser QA No Image Product" })
+    .first();
+  const noImageHref = await noImageCard
+    .locator('a[href*="/produk/"]')
+    .first()
+    .getAttribute("href");
+  expect(noImageHref).not.toBeNull();
+  await page.goto(new URL(noImageHref ?? "", baseUrl).toString(), {
+    waitUntil: "domcontentloaded",
+  });
+  const noImage = page
+    .locator('img[alt="Browser QA No Image Product"]')
+    .first();
+  await expect(noImage).toBeVisible();
+  const fallbackUrl = new URL(
+    (await noImage.getAttribute("src")) ?? "",
+    baseUrl
+  );
+  expect(fallbackUrl.pathname).toBe("/assets/product-placeholder.svg");
+  await expect(noImage).toHaveAttribute("loading", "eager");
+});
+
+test("customer checkout: proves the Storefront release matrix at required viewports", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+
+  let productHref;
+  let familyHref;
+  for (const viewport of customerCheckoutViewports) {
+    await page.setViewportSize(viewport);
+    await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#header-search")).toBeVisible();
+    await expect(
+      page.locator('header a[href*="/shop/cart"]:visible')
+    ).toHaveCount(1);
+    await expectNoDocumentOverflow(page);
+    await expect(page.locator("#storefront-promise-title")).toBeVisible();
+    if (viewport.width === 320) {
+      await expect(
+        page.getByRole("link", { name: "Lihat Produk", exact: true })
+      ).toBeVisible();
+    }
+
+    const menuButton = page.getByRole("button", {
+      name: "Buka menu navigasi",
+    });
+    if (viewport.width < 1024) {
+      await expect(menuButton).toBeVisible();
+    } else {
+      await expect(menuButton).toBeHidden();
+    }
+
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+    await expectNoDocumentOverflow(page);
+    const catalogHeading = page.locator("#products").getByRole("heading", {
+      name: "Pilih akun, cek stok, lanjut checkout.",
+    });
+    await expect(catalogHeading).toBeVisible();
+    if (viewport.width === 390) {
+      const headingTop = await catalogHeading.evaluate(
+        (element) => element.getBoundingClientRect().top + window.scrollY
+      );
+      expect(headingTop).toBeLessThanOrEqual(720);
+    }
+
+    const productCard = page
+      .locator("article.product-card")
+      .filter({ hasText: "Browser QA Produk A" })
+      .first();
+    productHref ??= await productCard
+      .locator('a[href*="/produk/"]')
+      .first()
+      .getAttribute("href");
+    familyHref ??= await page
+      .locator("a.family-card")
+      .filter({ hasText: "Browser QA Product Family" })
+      .first()
+      .getAttribute("href");
+
+    const familyUrl = new URL(familyHref ?? "", baseUrl);
+    familyUrl.search = "";
+    familyUrl.hash = "";
+    await page.goto(familyUrl.toString(), { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#family-options")).toBeVisible();
+    await expect(
+      page.locator("#family-options article").filter({ hasText: "QA option" })
+    ).toBeVisible();
+    await expect(
+      page.locator("#family-options a", { hasText: "Beli sekarang" }).first()
+    ).toBeVisible();
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    await expectNoDocumentOverflow(page);
+
+    const productUrl = new URL(productHref ?? "", baseUrl);
+    productUrl.search = "";
+    productUrl.hash = "";
+    await page.goto(productUrl.toString(), { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#product-title")).toBeVisible();
+    await expect(page.locator("#product-checkout-cta")).toBeVisible();
+    await expectNoDocumentOverflow(page);
+
+    const sticky = page.locator("[data-product-sticky-action]");
+    if (viewport.width < 768) {
+      await expect(sticky).toBeVisible();
+      const stickyMetrics = await sticky.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const content = document.querySelector(".storefront-product-content");
+        const contentStyle = content ? getComputedStyle(content) : null;
+        const actions = Array.from(
+          element.querySelectorAll("a[href], button")
+        ).map((action) => {
+          const actionRect = action.getBoundingClientRect();
+          return {
+            width: actionRect.width,
+            height: actionRect.height,
+          };
+        });
+
+        return {
+          bottom: rect.bottom,
+          height: rect.height,
+          paddingBottom: contentStyle
+            ? Number.parseFloat(contentStyle.paddingBottom)
+            : 0,
+          actions,
+        };
+      });
+      expect(
+        Math.abs(stickyMetrics.bottom - viewport.height)
+      ).toBeLessThanOrEqual(1);
+      expect(stickyMetrics.height).toBeGreaterThanOrEqual(44);
+      expect(stickyMetrics.paddingBottom).toBeGreaterThanOrEqual(
+        stickyMetrics.height - 1
+      );
+      expect(
+        stickyMetrics.actions.every(
+          ({ width, height }) => width >= 44 && height >= 44
+        )
+      ).toBe(true);
+    } else {
+      await expect(sticky).toBeHidden();
+    }
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  const menuButton = page.getByRole("button", {
+    name: "Buka menu navigasi",
+  });
+  await menuButton.focus();
+  await page.keyboard.press("Enter");
+  const menu = page.getByLabel("Menu navigasi Lhie Store");
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(menuButton).toBeFocused();
+
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  await navigateToCheckoutFromProductCard(page, "Browser QA Produk A");
+  await expectStorefrontPageCheckout(page);
+  await expect(page.locator('input[name="product_id"]')).toHaveValue(/^\d+$/);
+});
+
+test("customer checkout: proves unavailable waitlist and no-JavaScript form fallback", async ({
+  browser,
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+
+  const unavailableCard = page
+    .locator("article.product-card")
+    .filter({ hasText: "Browser QA Sold Out Product" })
+    .first();
+  await expect(unavailableCard).toBeVisible();
+  await expect(unavailableCard.getByText("Stok habis")).toBeVisible();
+  await expect(
+    unavailableCard.locator('a[href*="/shop/checkout/products/"]')
+  ).toHaveCount(0);
+  const unavailableDetailHref = await unavailableCard
+    .locator('a[href*="/produk/"]')
+    .first()
+    .getAttribute("href");
+  expect(unavailableDetailHref).not.toBeNull();
+
+  const noJsContext = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: { width: 320, height: 568 },
+  });
+  const noJsPage = await noJsContext.newPage();
+  try {
+    await noJsPage.goto(
+      new URL(unavailableDetailHref ?? "", baseUrl).toString(),
+      {
+        waitUntil: "domcontentloaded",
+      }
+    );
+    await expect(noJsPage.locator("#product-checkout-cta")).toHaveCount(0);
+    await expect(noJsPage.locator("#waitlist")).toBeVisible();
+    await expect(
+      noJsPage.getByRole("button", { name: "Kirim permintaan" })
+    ).toBeVisible();
+    await noJsPage
+      .getByLabel("Alamat email")
+      .fill("release-waitlist@example.test");
+    await Promise.all([
+      noJsPage.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      noJsPage.getByRole("button", { name: "Kirim permintaan" }).click(),
+    ]);
+    await expect(noJsPage).toHaveURL(/\/produk\/\d+#waitlist$/);
+    await expect(noJsPage.locator("body")).toContainText(
+      "Jika alamat email valid"
+    );
+  } finally {
+    await noJsContext.close();
+  }
+});
+
 test("announces terminal QRIS status and exposes buyer next steps", async ({
   page,
 }) => {
@@ -4074,6 +4430,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\ProductFamilySlugRedirect;
 use App\Models\ProductStockItem;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
@@ -4186,6 +4543,33 @@ $longCheckoutProduct = Product::factory()->create([
     'reserved_stock' => 0,
     'is_active' => true,
 ]);
+$unavailableProduct = Product::factory()->create([
+    'category_id' => $otherCategory->id,
+    'name' => 'Browser QA Sold Out Product',
+    'description' => 'Unavailable Product fixture for waitlist browser evidence.',
+    'image_path' => null,
+    'price_amount' => 91000,
+    'stock' => 0,
+    'reserved_stock' => 0,
+    'is_active' => true,
+]);
+
+$noImageProduct = Product::factory()->create([
+    'category_id' => $otherCategory->id,
+    'name' => 'Browser QA No Image Product',
+    'description' => 'No-image Product fixture for fallback asset browser evidence.',
+    'image_path' => null,
+    'price_amount' => 52000,
+    'stock' => 2,
+    'reserved_stock' => 0,
+    'is_active' => true,
+]);
+
+ProductFamilySlugRedirect::query()->updateOrCreate(
+    ['old_slug' => 'browser-responsive-legacy'],
+    ['product_family_id' => $family->id],
+);
+
 
 $customer = Customer::factory()->create([
     'first_name' => 'Browser',
