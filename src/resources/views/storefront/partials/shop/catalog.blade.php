@@ -2,7 +2,7 @@
     <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-70"></div>
 
     <div class="relative z-10 mx-auto max-w-7xl px-4 sm:px-6">
-        <div class="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,25rem)] lg:items-end">
+        <div class="reveal-item mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,25rem)] lg:items-end">
             <div>
                 <div class="mb-2 inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[0_4px_12px_rgb(18_35_63_/_0.08)]">
                     <span>Katalog aktif · {{ $catalogPage->totalProductCount() }} item katalog</span>
