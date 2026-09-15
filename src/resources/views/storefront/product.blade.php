@@ -91,10 +91,6 @@
                                         {{ $presentation->checkoutReadiness->notice }}
                                     </p>
                                 @endif
-
-                                <x-storefront.button :href="route('storefront.order-access.create')" variant="secondary" class="flex-1">
-                                    Akses Pesanan
-                                </x-storefront.button>
                             </div>
 
                             @if (trim($presentation->description) !== '')
@@ -104,7 +100,7 @@
                             @endif
 
                             @if ($presentation->merchandising->hasDetails())
-                                <section class="mt-6 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4" aria-labelledby="product-merchandising-title">
+                                <section class="reveal-item mt-6 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4" aria-labelledby="product-merchandising-title">
                                     <h2 id="product-merchandising-title" class="font-display text-lg font-black text-[var(--sf-ink)]">Detail produk</h2>
                                     <dl class="mt-3 grid gap-3 text-sm font-bold sm:grid-cols-2">
                                         @if ($presentation->merchandising->productType)
@@ -204,7 +200,7 @@
                             ])
 
                             @if ($presentation->canJoinWaitlist)
-                                <section id="waitlist" class="mt-6 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4" aria-labelledby="waitlist-title">
+                                <section id="waitlist" class="reveal-item mt-6 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4" aria-labelledby="waitlist-title">
                                     <h2 id="waitlist-title" class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $copy['waitlist']['title'] }}</h2>
                                     <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $copy['waitlist']['body'] }}</p>
                                     <form method="POST" action="{{ $presentation->waitlistUrl }}" class="mt-4 grid gap-3">
@@ -230,15 +226,7 @@
                     <span class="block text-[10px] font-black uppercase tracking-[0.14em] text-[var(--sf-muted)]">Siap dibeli</span>
                     <strong class="block truncate text-sm font-black text-[var(--sf-ink)]">{{ $storefront->idr($presentation->priceAmount) }}</strong>
                 </div>
-                <div class="flex shrink-0 items-center gap-2">
-                    <a href="{{ $checkoutUrl }}" class="neo-button inline-flex min-h-11 items-center justify-center whitespace-nowrap bg-[var(--sf-accent)] px-3 text-xs font-black text-white" data-product-sticky-submit aria-label="Beli {{ $presentation->name }} sekarang">Beli sekarang</a>
-                    <form method="POST" action="{{ route('storefront.shop.cart.items.store') }}" class="shrink-0" data-product-sticky-cart>
-                        @csrf
-                        <input type="hidden" name="product_id" value="{{ $product->id }}">
-                        <input type="hidden" name="quantity" value="1">
-                        <button type="submit" class="neo-button inline-flex min-h-11 items-center justify-center whitespace-nowrap bg-[var(--sf-surface)] px-3 text-[11px] font-black text-[var(--sf-ink)] hover:bg-[var(--sf-yellow)]" aria-label="Tambah {{ $presentation->name }} ke keranjang">+ Keranjang</button>
-                    </form>
-                </div>
+                <a href="{{ $checkoutUrl }}" class="neo-button inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap bg-[var(--sf-accent)] px-4 text-xs font-black text-white" data-product-sticky-submit aria-label="Beli {{ $presentation->name }} sekarang">Beli sekarang</a>
             </div>
         @endif
 

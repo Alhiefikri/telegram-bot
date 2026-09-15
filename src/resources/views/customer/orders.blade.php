@@ -2,9 +2,9 @@
 <html lang="{{ $metadata->htmlLocale() }}" class="bg-[var(--sf-paper)]">
 <head>@include('storefront.partials.head', ['metadata' => $metadata])</head>
 <body class="text-[var(--sf-ink)]">
-<div class="storefront-shell min-h-screen">
+<div class="storefront-shell flex min-h-screen flex-col">
     <div class="pt-4">@include('storefront.partials.header')</div>
-    <main class="mx-auto max-w-4xl px-5 pb-24 pt-12">
+    <main class="mx-auto w-full max-w-4xl flex-1 px-5 pb-24 pt-12">
         <div class="flex flex-wrap items-end justify-between gap-4">
             <div>
                 <p class="text-xs font-black uppercase tracking-[.18em] text-[var(--sf-accent)]">Akun pelanggan</p>
@@ -92,6 +92,7 @@
             <nav class="mt-8" aria-label="Paginasi pesanan">{{ $orders->links() }}</nav>
         @endif
     </main>
+    @include('storefront.partials.footer')
 </div>
 </body>
 </html>

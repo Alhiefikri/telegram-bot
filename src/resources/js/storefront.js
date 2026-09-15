@@ -62,6 +62,7 @@ function toggleMobileMenu(
   const shouldOpen = forceClosed === null ? isClosed : !forceClosed;
 
   if (shouldOpen) {
+    menu.inert = false;
     menu.classList.remove("hidden");
     backdrop?.classList.remove("hidden");
     menu.setAttribute("aria-hidden", "false");
@@ -69,6 +70,9 @@ function toggleMobileMenu(
     document.body.classList.add("overflow-hidden");
 
     window.requestAnimationFrame(() => {
+      if (menu.getAttribute("aria-hidden") !== "false") {
+        return;
+      }
       menu.classList.remove("-translate-x-full");
       menu.classList.add("translate-x-0");
       backdrop?.classList.remove("opacity-0");
@@ -86,12 +90,15 @@ function toggleMobileMenu(
   backdrop?.classList.add("opacity-0");
   backdrop?.classList.remove("opacity-100");
   menu.setAttribute("aria-hidden", "true");
+  menu.inert = true;
   menuButton?.setAttribute("aria-expanded", "false");
   document.body.classList.remove("overflow-hidden");
 
   window.setTimeout(() => {
-    menu.classList.add("hidden");
-    backdrop?.classList.add("hidden");
+    if (menu.getAttribute("aria-hidden") === "true") {
+      menu.classList.add("hidden");
+      backdrop?.classList.add("hidden");
+    }
   }, 250);
 
   iconTop?.classList.remove("rotate-45", "translate-y-[9px]");
@@ -182,6 +189,14 @@ function initMobileMenu() {
   closeButton?.addEventListener("click", () => closeMenu());
   backdrop?.addEventListener("click", () => closeMenu());
 
+  window
+    .matchMedia("(min-width: 1024px)")
+    .addEventListener("change", (event) => {
+      if (event.matches) {
+        closeMenu(false);
+      }
+    });
+
   mobileMenu.querySelectorAll("a").forEach((link) => {
     link.addEventListener("click", () => closeMenu(false));
   });
@@ -245,6 +260,59 @@ function initScrollProgress() {
 
   window.addEventListener("scroll", requestUpdate, { passive: true });
   window.addEventListener("resize", requestUpdate, { passive: true });
+  update();
+}
+
+function initMediaFrames() {
+  const frames = document.querySelectorAll("[data-media-frame]");
+
+  if (!frames.length) {
+    return;
+  }
+
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    return;
+  }
+
+  frames.forEach((frame) => {
+    const image = frame.querySelector("img");
+
+    if (!image) {
+      return;
+    }
+
+    const settle = () => frame.classList.remove("is-loading");
+
+    if (image.complete) {
+      return;
+    }
+
+    frame.classList.add("is-loading");
+    image.addEventListener("load", settle, { once: true });
+    image.addEventListener("error", settle, { once: true });
+  });
+}
+
+function initHeaderElevation() {
+  const header = document.querySelector("[data-storefront-header]");
+
+  if (!header) {
+    return;
+  }
+
+  let ticking = false;
+  const update = () => {
+    ticking = false;
+    header.classList.toggle("is-scrolled", window.scrollY > 8);
+  };
+  const requestUpdate = () => {
+    if (!ticking) {
+      ticking = true;
+      window.requestAnimationFrame(update);
+    }
+  };
+
+  window.addEventListener("scroll", requestUpdate, { passive: true });
   update();
 }
 
@@ -1528,6 +1596,8 @@ export default function initStorefront() {
     initCatalogFilterFocus();
     initCheckoutReview();
     initScrollProgress();
+    initHeaderElevation();
+    initMediaFrames();
     initVerifiedPurchaseActivity();
     initRevealStagger();
     initFaqAccordion();

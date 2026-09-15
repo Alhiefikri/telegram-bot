@@ -53,7 +53,7 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringNotContainsString('line-through', $html);
         $this->assertStringContainsString('Stok: 8', $html);
         $this->assertStringContainsString('Beli sekarang', $html);
-        $this->assertStringContainsString('+ Keranjang', $html);
+        $this->assertStringContainsString('aria-label="Tambahkan CapCut Pro ke keranjang"', $html);
         $this->assertStringNotContainsString('Bayar via QR Manual', $html);
         $this->assertStringNotContainsString('Beli lewat Telegram', $html);
         $this->assertStringNotContainsString('&amp;quot;', $html);
@@ -96,7 +96,7 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertSee('Beli sekarang')
             ->assertSee('data-product-sticky-action', false)
             ->assertSee('data-product-sticky-submit', false)
-            ->assertSee('data-product-sticky-cart', false)
+            ->assertDontSee('data-product-sticky-cart', false)
             ->assertSee('name="product_id" value="'.$product->id.'"', false)
             ->assertSee('Tambah ke keranjang')
             ->assertSee(route('storefront.order-access.create'), false)
@@ -107,7 +107,7 @@ class StorefrontProductCheckoutTest extends TestCase
             ->getContent();
 
         $this->assertSame(1, substr_count($html, 'data-product-sticky-action'));
-        $this->assertSame(1, substr_count($html, 'data-product-sticky-cart'));
+        $this->assertSame(0, substr_count($html, 'data-product-sticky-cart'));
         $this->assertStringContainsString(
             'action="'.route('storefront.shop.cart.items.store').'"',
             $html,
@@ -483,7 +483,8 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $this->assertStringNotContainsString('role="dialog"', $html);
+        $mainHtml = substr($html, strpos($html, '<main'));
+        $this->assertStringNotContainsString('role="dialog"', $mainHtml);
         $this->assertStringNotContainsString('data-storefront-checkout-scroll', $html);
         $this->assertStringContainsString('Tambahkan email atau kontak bantuan', $html);
         $this->assertStringContainsString('data-checkout-quantity-announcement', $html);

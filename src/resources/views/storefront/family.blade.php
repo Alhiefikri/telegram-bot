@@ -61,7 +61,7 @@
                             $hasSupportingDetails = trim((string) $presentation->description) !== ''
                                 || $presentation->merchandising->hasDetails();
                         @endphp
-                        <article id="family-option-{{ $presentation->id }}" aria-labelledby="family-option-title-{{ $presentation->id }}" data-product-id="{{ $presentation->id }}" class="neo-panel relative overflow-hidden bg-[var(--sf-surface)] p-5 sm:p-6">
+                        <article id="family-option-{{ $presentation->id }}" aria-labelledby="family-option-title-{{ $presentation->id }}" data-product-id="{{ $presentation->id }}" class="neo-panel reveal-item relative overflow-hidden bg-[var(--sf-surface)] p-5 sm:p-6">
                             <div class="flex items-start justify-between gap-4">
                                 <div class="min-w-0">
                                     <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Opsi</p>
@@ -111,11 +111,6 @@
                                         <a href="{{ $productUrl }}#waitlist" class="inline-flex min-h-12 flex-1 items-center justify-center rounded-[0.7rem] border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 text-sm font-black hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">Beri tahu saat tersedia</a>
                                     @endif
                                 </div>
-                                @if ($presentation->isAvailable)
-                                    <a href="{{ $productUrl }}" aria-label="Lihat detail {{ $optionLabel }}" class="inline-flex min-h-11 items-center gap-1 self-start rounded-sm text-sm font-black text-[var(--sf-accent)] underline decoration-2 underline-offset-4 hover:text-[var(--sf-accent-deep)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">
-                                        Detail <span aria-hidden="true">→</span>
-                                    </a>
-                                @endif
                             </div>
 
                             @if ($hasSupportingDetails)

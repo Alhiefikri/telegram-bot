@@ -381,8 +381,10 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertNotFalse($usdtPricePosition, 'Option card should show the honest USDT price when configured.');
         $this->assertNotFalse($deviceLimitPosition, 'Option card should keep the device limit reachable.');
         $this->assertNotFalse($fullDescriptionPosition, 'Option disclosure should keep the full description reachable.');
-        $this->assertNotFalse($detailPosition, 'Available option should expose Product detail separately from purchase actions.');
-        $this->assertStringNotContainsString('role="dialog"', $html, 'Family options should remain a document flow without a modal.');
+        $this->assertFalse($detailPosition, 'Available options should not expose a second visible detail action next to Beli.');
+        $this->assertStringContainsString('href="'.route('storefront.products.show', ['product' => $product]).'?from=', $cardHtml, 'The option name should remain the detail entry point.');
+        $familyMainHtml = substr($html, strpos($html, '<main'));
+        $this->assertStringNotContainsString('role="dialog"', $familyMainHtml, 'Family options should remain a document flow without a modal.');
         $this->assertStringContainsString('Opsi', $cardHtml, 'Option cards should use public option language.');
         $this->assertLessThan($buyPosition, $pricePosition, 'Price should appear above the Beli action.');
         $this->assertLessThan($buyPosition, $durationChipPosition, 'Duration should appear above the Beli action.');

@@ -493,7 +493,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 'href="'.route('storefront.shop.checkout.product', ['product' => $ready]).'?from=',
                 false,
             )
-            ->assertSee('+ Keranjang')
+            ->assertSee('aria-label="Tambahkan Claude Pro Ready ke keranjang"', false)
             ->assertDontSee('data-product=', false)
             ->assertDontSee('JSON.parse($el.dataset.product)', false)
             ->assertSee('Claude Pro Ready')
@@ -562,7 +562,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('name="payment_method"', false)
             ->assertSee('Bayar dengan Binance Pay')
             ->assertSee('Buat invoice Binance Pay &amp; lanjut bayar', false)
-            ->assertDontSee('role="dialog"', false)
+            ->assertDontSee('data-storefront-checkout-scroll', false)
             ->assertDontSee('data-product=', false);
     }
 

@@ -27,6 +27,19 @@ use Tests\TestCase;
 class CustomerAccountTest extends TestCase
 {
     use RefreshDatabase;
+    public function test_account_landing_uses_marketplace_auth_copy_and_shared_footer(): void
+    {
+        $html = $this->get(route('customer.account'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('Daftar atau masuk tanpa password.', $html);
+        $this->assertStringContainsString('Kirim link daftar / masuk', $html);
+        $this->assertStringContainsString('Daftar / Masuk', $html);
+        $this->assertStringContainsString('<footer', $html);
+        $this->assertStringContainsString('Katalog Lengkap', $html);
+    }
+
 
     public function test_login_request_is_generic_stores_only_a_token_hash_and_emails_fragment_link(): void
     {

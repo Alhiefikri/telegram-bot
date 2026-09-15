@@ -44,7 +44,7 @@ class StorefrontLandingPageTest extends TestCase
 
         $mobileMenuHtml = $this->htmlBetween($response->getContent(), '<div id="mobile-menu"', '</header>');
 
-        foreach (['Cara Beli', 'Panduan', 'FAQ', 'Katalog Web', 'Akses Pesanan'] as $customerLinkText) {
+        foreach (['Cara Beli', 'Kategori', 'Trending', 'Panduan', 'FAQ', 'Katalog Web', 'Akses Pesanan', 'Daftar / Masuk'] as $customerLinkText) {
             $this->assertStringContainsString($customerLinkText, $mobileMenuHtml);
         }
 
@@ -59,6 +59,8 @@ class StorefrontLandingPageTest extends TestCase
     {
         $shopUrl = route('storefront.shop.index');
         $accessUrl = route('storefront.order-access.create');
+        $accountUrl = route('customer.account');
+        $homeUrl = route('storefront.home');
         $html = $this->get('/')->assertOk()->getContent();
         $headerHtml = $this->htmlBetween($html, '<header', '</header>');
         $mobileMenuHtml = $this->htmlBetween($html, '<div id="mobile-menu"', '</header>');
@@ -67,6 +69,9 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Produk', 'Desktop product nav should send customers to the catalog grid.');
         $this->assertHtmlContainsLink($heroHtml, $shopUrl, 'Lihat Produk', 'Hero primary CTA should send customers to the catalog.');
         $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Katalog Web', 'Desktop header should expose the website checkout path.');
+        $this->assertHtmlContainsLink($headerHtml, $homeUrl.'#kategori', 'Kategori', 'Desktop header should expose category browsing.');
+        $this->assertHtmlContainsLink($headerHtml, $homeUrl.'#trending', 'Trending', 'Desktop header should expose trending products.');
+        $this->assertHtmlContainsLink($headerHtml, $accountUrl, 'Daftar / Masuk', 'Desktop header should expose customer account access.');
         $this->assertHtmlContainsLink($headerHtml, $accessUrl, 'Akses Pesanan', 'Desktop header should expose repeat order access.');
 
         $this->assertHtmlContainsLink($mobileMenuHtml, $shopUrl, 'Katalog Web', 'Mobile menu should expose the website checkout path.');
@@ -250,11 +255,11 @@ class StorefrontLandingPageTest extends TestCase
             ->assertOk()
             ->getContent();
 
+        $this->assertStringNotContainsString('Trending sekarang', $html);
+        $this->assertStringNotContainsString('id="trending"', $html);
         $this->assertStringContainsString('Tersedia sekarang', $html);
         $this->assertStringContainsString('Streaming Family', $html);
         $this->assertStringContainsString('Standalone Available Product', $html);
-        $this->assertStringNotContainsString('Paling banyak dibeli', $html);
-        $this->assertStringNotContainsString('id="popular-products"', $html);
     }
 
     public function test_active_products_render_while_inactive_and_deleted_products_stay_hidden(): void
@@ -345,7 +350,7 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee(route('storefront.products.show', $product), false)
             ->assertSee(route('storefront.shop.checkout.product', $product), false)
             ->assertSee('Beli sekarang')
-            ->assertSee('+ Keranjang')
+            ->assertSee('aria-label="Tambahkan Claude Pro Bulanan ke keranjang"', false)
             ->assertDontSee('data-product=', false)
             ->assertDontSee('Produk Nonaktif Rahasia')
             ->assertDontSee('claude-user@example.test')
@@ -382,6 +387,8 @@ class StorefrontLandingPageTest extends TestCase
 
         $this->get('/')
             ->assertOk()
+            ->assertSee('id="kategori"', false)
+            ->assertSee('Belanja berdasarkan kategori')
             ->assertSee('aria-label="Filter kategori produk"', false)
             ->assertSee('aria-controls="storefront-product-grid"', false)
             ->assertSeeInOrder([

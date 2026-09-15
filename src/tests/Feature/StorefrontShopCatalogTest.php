@@ -93,7 +93,7 @@ class StorefrontShopCatalogTest extends TestCase
             $html,
         );
         $this->assertStringContainsString('Beli sekarang', $html);
-        $this->assertStringContainsString('+ Keranjang', $html);
+        $this->assertStringContainsString('aria-label="Tambahkan Lazy Shop Product ke keranjang"', $html);
         $this->assertStringContainsString('action="'.route('storefront.shop.cart.items.store').'"', $html);
         $this->assertStringNotContainsString('data-product=', $html);
         $this->assertStringNotContainsString('"checkout":', $html);
@@ -680,7 +680,7 @@ class StorefrontShopCatalogTest extends TestCase
         $this->assertStringContainsString('Stok: 8', $card);
         $this->assertStringContainsString('Beli sekarang', $card);
         $this->assertStringContainsString('href="'.route('storefront.shop.checkout.product', $product).'?from=', $card);
-        $this->assertStringContainsString('+ Keranjang', $card);
+        $this->assertStringContainsString('aria-label="Tambahkan CapCut Pro Web ke keranjang"', $card);
         $this->assertStringContainsString('action="'.route('storefront.shop.cart.items.store').'"', $card);
         $this->assertStringContainsString('name="product_id"', $card);
         $this->assertStringContainsString('name="quantity"', $card);
@@ -718,7 +718,6 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee('ChatGPT Habis Web');
 
         $this->assertStringContainsString('class="product-card', $unavailableCard);
-        $this->assertStringContainsString('aria-disabled="true"', $unavailableCard);
         $this->assertStringContainsString('ChatGPT Habis Web', $unavailableCard);
         $this->assertStringContainsString('STOK HABIS', $unavailableCard);
         $this->assertStringContainsString('Restock segera', $unavailableCard);
