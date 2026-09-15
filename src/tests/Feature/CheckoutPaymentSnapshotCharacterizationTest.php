@@ -6,7 +6,6 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
-use App\Exceptions\InvalidCheckout;
 use App\Models\BscPaymentReceiver;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -241,44 +240,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         $this->assertSame(0, $rpc->callsUnderCheckoutTransaction);
     }
 
-    public function test_bsc_allocation_failure_rolls_back_receiver_payment_and_effect_state(): void
-    {
-        $this->configureBscRail();
-        config()->set('services.bsc.max_unique_amount_candidates', 1);
-        $receiver = $this->activeBscReceiver('0x3333333333333333333333333333333333333333');
-        Payment::factory()->create([
-            'provider' => 'manual',
-            'method' => 'USDT_BEP20',
-            'amount' => 2_500_000,
-            'currency' => 'USDT',
-            'status' => PaymentStatus::Pending,
-        ]);
-        $product = Product::factory()->create([
-            'price_amount' => 25_000,
-            'usdt_price_amount' => 2_500_000,
-            'stock' => 2,
-            'reserved_stock' => 0,
-        ]);
-        $cart = $this->cartForProduct($product);
-        $ordersBefore = Order::query()->count();
-        $paymentsBefore = Payment::query()->count();
-
-        try {
-            app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::usdtBep20());
-            $this->fail('Expected the exhausted BSC amount window to reject checkout.');
-        } catch (InvalidCheckout $exception) {
-            $this->assertStringContainsString('No unique BSC payment amount', $exception->getMessage());
-        }
-
-        $this->assertSame($ordersBefore, Order::query()->count());
-        $this->assertSame($paymentsBefore, Payment::query()->count());
-        $this->assertSame(0, InventoryMovement::query()->count());
-        $this->assertSame(0, TelegramOutboundEffect::query()->count());
-        $this->assertNull($receiver->fresh()->last_assigned_at);
-        $this->assertSame(0, Order::query()->where('cart_id', $cart->id)->count());
-        $this->assertSame(0, $product->fresh()->reserved_stock);
-    }
-
     public function test_duplicate_checkout_key_reuses_one_order_payment_reservation_and_effect(): void
     {
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
@@ -418,7 +379,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         config()->set('services.bsc.chain_id', 56);
         config()->set('services.bsc.usdt_contract', self::BSC_CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
-        config()->set('services.bsc.max_unique_amount_candidates', 1_000);
 
         $rpc = new class implements BscRpcClientInterface
         {
@@ -463,7 +423,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'bsc_payment_enabled' => true,
-            'bsc_unique_amount_increment_micro' => 100,
             'is_active' => true,
         ]);
 

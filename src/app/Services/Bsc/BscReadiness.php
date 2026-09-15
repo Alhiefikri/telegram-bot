@@ -13,7 +13,7 @@ final class BscReadiness
 {
     public const APPROVED_USDT_CONTRACT = '0x55d398326f99059ff775485246999027b3197955';
 
-    private const CACHE_VERSION_KEY = 'bsc.readiness.version';
+    private const CACHE_VERSION_KEY = 'bsc.readiness.v2.version';
 
     private const CACHE_KEY_PREFIX = 'bsc.readiness';
 
@@ -137,15 +137,6 @@ final class BscReadiness
                 $invalid['BSC_RPC'] = 'Readiness RPC BSC gagal.';
             }
 
-            if ($invalid === []) {
-                try {
-                    $this->assertTransferLogScanningSupported($contract);
-                } catch (BscRpcException $exception) {
-                    $invalid['BSC_ETH_GET_LOGS'] = 'BSC RPC tidak mendukung eth_getLogs: '.$exception->getMessage();
-                } catch (Throwable) {
-                    $invalid['BSC_ETH_GET_LOGS'] = 'BSC RPC tidak dapat memverifikasi dukungan eth_getLogs.';
-                }
-            }
         }
 
         return new BscReadinessReport(
@@ -192,19 +183,6 @@ final class BscReadiness
         if ($activeReceiverCount < 1 || $activeReceiverCount !== $report->activeReceiverCount) {
             throw new InvalidCheckout('BSC payment rail receiving addresses changed. Try again.');
         }
-    }
-
-    private function assertTransferLogScanningSupported(string $contract): void
-    {
-        // readiness-only callers use lightweight fakes. Production's client
-        // resolves the latest block before calling eth_getLogs, so this probe
-        // does not require archive access from public RPC endpoints. A legacy
-        // metadata-only fake is treated as compatible for old unit seams.
-        if (! method_exists($this->rpc, 'transferLogs')) {
-            return;
-        }
-
-        $this->rpc->{'transferLogs'}($contract, 'latest', 'latest', self::READINESS_PROBE_RECEIVER);
     }
 
     private function cacheSeconds(): int

@@ -25,11 +25,12 @@ final class BscDashboardData
             'min_confirmations' => $setting?->bscMinConfirmations() ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
             'require_finalized_block' => (bool) $setting?->bsc_require_finalized_block,
             'confirmation_grace_minutes' => $setting?->bscConfirmationGraceMinutes() ?? ManualPaymentSetting::DEFAULT_BSC_CONFIRMATION_GRACE_MINUTES,
-            'unique_amount_increment_micro' => $setting?->bscUniqueAmountIncrementMicro() ?? ManualPaymentSetting::DEFAULT_BSC_UNIQUE_AMOUNT_INCREMENT_MICRO,
             'hash_attempt_limit' => $setting?->bscHashAttemptLimit() ?? ManualPaymentSetting::DEFAULT_BSC_HASH_ATTEMPT_LIMIT,
             'readiness' => [
                 'ready' => $report->isReady(),
-                'label' => $report->isReady() ? 'Siap' : ($report->enabled ? 'Belum siap' : 'Nonaktif'),
+                'label' => $report->isReady()
+                    ? 'Siap (TX Hash)'
+                    : ($report->enabled ? 'Belum siap' : 'Nonaktif'),
                 'message' => $report->configurationMessage(),
                 'missing' => $report->missing,
                 'invalid' => array_values($report->invalid),

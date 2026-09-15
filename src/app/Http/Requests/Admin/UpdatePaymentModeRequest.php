@@ -44,7 +44,6 @@ class UpdatePaymentModeRequest extends FormRequest
             'bsc_min_confirmations' => ['sometimes', 'integer', 'min:3', 'max:100'],
             'bsc_require_finalized_block' => ['sometimes', 'boolean'],
             'bsc_confirmation_grace_minutes' => ['sometimes', 'integer', 'min:0', 'max:60'],
-            'bsc_unique_amount_increment_micro' => ['sometimes', 'integer', 'min:1', 'max:1000000'],
             'bsc_hash_attempt_limit' => ['sometimes', 'integer', 'min:1', 'max:20'],
         ];
     }
@@ -70,7 +69,6 @@ class UpdatePaymentModeRequest extends FormRequest
             'bsc_min_confirmations.min' => 'Minimum konfirmasi BSC minimal 3.',
             'bsc_min_confirmations.max' => 'Minimum konfirmasi BSC maksimal 100.',
             'bsc_confirmation_grace_minutes.max' => 'Grace konfirmasi BSC maksimal 60 menit.',
-            'bsc_unique_amount_increment_micro.min' => 'Increment nominal unik BSC harus lebih besar dari 0.',
             'bsc_hash_attempt_limit.min' => 'Batas percobaan hash BSC minimal 1.',
         ];
     }

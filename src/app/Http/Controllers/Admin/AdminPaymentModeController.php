@@ -96,7 +96,6 @@ class AdminPaymentModeController extends Controller
                     'bsc_min_confirmations',
                     'bsc_require_finalized_block',
                     'bsc_confirmation_grace_minutes',
-                    'bsc_unique_amount_increment_micro',
                     'bsc_hash_attempt_limit',
                 ] as $bscField) {
                     if (array_key_exists($bscField, $validated)) {
@@ -161,7 +160,6 @@ class AdminPaymentModeController extends Controller
             'bsc_min_confirmations' => $setting->bscMinConfirmations(),
             'bsc_require_finalized_block' => (bool) $setting->bsc_require_finalized_block,
             'bsc_confirmation_grace_minutes' => $setting->bscConfirmationGraceMinutes(),
-            'bsc_unique_amount_increment_micro' => $setting->bscUniqueAmountIncrementMicro(),
             'bsc_hash_attempt_limit' => $setting->bscHashAttemptLimit(),
         ];
     }

@@ -26,7 +26,6 @@ use Illuminate\Database\Eloquent\Model;
     'bsc_min_confirmations',
     'bsc_require_finalized_block',
     'bsc_confirmation_grace_minutes',
-    'bsc_unique_amount_increment_micro',
     'bsc_hash_attempt_limit',
 ])]
 class ManualPaymentSetting extends Model
@@ -40,8 +39,6 @@ class ManualPaymentSetting extends Model
     public const DEFAULT_BSC_MIN_CONFIRMATIONS = 3;
 
     public const DEFAULT_BSC_CONFIRMATION_GRACE_MINUTES = 3;
-
-    public const DEFAULT_BSC_UNIQUE_AMOUNT_INCREMENT_MICRO = 100;
 
     public const DEFAULT_BSC_HASH_ATTEMPT_LIMIT = 5;
 
@@ -57,7 +54,6 @@ class ManualPaymentSetting extends Model
             'bsc_payment_ttl_minutes' => 'integer',
             'bsc_min_confirmations' => 'integer',
             'bsc_confirmation_grace_minutes' => 'integer',
-            'bsc_unique_amount_increment_micro' => 'integer',
             'bsc_hash_attempt_limit' => 'integer',
         ];
     }
@@ -90,11 +86,6 @@ class ManualPaymentSetting extends Model
     public function bscConfirmationGraceMinutes(): int
     {
         return max(0, (int) ($this->bsc_confirmation_grace_minutes ?? self::DEFAULT_BSC_CONFIRMATION_GRACE_MINUTES));
-    }
-
-    public function bscUniqueAmountIncrementMicro(): int
-    {
-        return max(1, (int) ($this->bsc_unique_amount_increment_micro ?: self::DEFAULT_BSC_UNIQUE_AMOUNT_INCREMENT_MICRO));
     }
 
     public function bscHashAttemptLimit(): int

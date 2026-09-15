@@ -17,7 +17,7 @@ final class ReconcileBscPayments extends Command
 {
     protected $signature = 'bsc:reconcile {--chunk=100}';
 
-    protected $description = 'Verify pending USDT BEP20 Payments from bounded BSC receipt and Transfer-log reads.';
+    protected $description = 'Verify pending USDT BEP20 Payments from customer-submitted transaction hashes.';
 
     public function handle(
         BscPaymentVerification $verification,
@@ -63,13 +63,29 @@ final class ReconcileBscPayments extends Command
                     $pending
                         ->where('status', PaymentStatus::Pending->value)
                         ->whereHas('bscDetail', function ($detail): void {
-                            $detail->whereNotIn('verification_status', [
-                                'confirmed',
-                                'expired',
-                                'manual_review',
-                                'mismatch',
-                                'transaction_already_used',
-                            ]);
+                            $detail
+                                ->whereNotNull('current_tx_hash')
+                                ->whereNotIn('verification_status', [
+                                    'confirmed',
+                                    'expired',
+                                    'manual_review',
+                                    'mismatch',
+                                    'transaction_already_used',
+                                ])
+                                ->where(function ($retry): void {
+                                    $retry
+                                        ->whereNull('last_verified_at')
+                                        ->orWhere(function ($recent): void {
+                                            $recent
+                                                ->where('verification_status', '!=', 'provider_error')
+                                                ->where('last_verified_at', '<=', now()->subMinute());
+                                        })
+                                        ->orWhere(function ($providerError): void {
+                                            $providerError
+                                                ->where('verification_status', 'provider_error')
+                                                ->where('last_verified_at', '<=', now()->subMinutes(5));
+                                        });
+                                });
                         });
                 })->orWhere(function ($terminal): void {
                     $terminal
@@ -77,6 +93,7 @@ final class ReconcileBscPayments extends Command
                         ->where('created_at', '>=', now()->subHours(max(1, (int) config('services.bsc.late_payment_lookback_hours', 72))))
                         ->whereHas('bscDetail', function ($detail): void {
                             $detail
+                                ->whereNotNull('current_tx_hash')
                                 ->whereIn('verification_status', [
                                     'tx_submitted',
                                     'confirming',

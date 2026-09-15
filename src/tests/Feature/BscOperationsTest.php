@@ -18,9 +18,12 @@ use App\Models\PaymentBscDetail;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\Bsc\BscOperationalAlertNotifier;
+use App\Services\Bsc\BscOperationalMetrics;
 use App\Services\Bsc\BscPaymentVerification;
 use App\Services\Bsc\BscReadinessReport;
 use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscVerificationOutcome;
+use App\Services\Bsc\BscVerificationResult;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
@@ -181,6 +184,30 @@ class BscOperationsTest extends TestCase
             ->expectsOutputToContain('bsc:reconcile completed');
     }
 
+    public function test_bsc_reconciliation_skips_unsubmitted_and_recent_provider_errors(): void
+    {
+        $unsubmitted = $this->bscPayment();
+        $providerError = $this->bscPayment(1_000_100, '0x'.str_repeat('a', 64));
+        $lastVerifiedAt = now()->subMinute();
+        $providerError->bscDetail()->update([
+            'verification_status' => PaymentBscDetail::STATUS_PROVIDER_ERROR,
+            'last_verified_at' => $lastVerifiedAt,
+        ]);
+
+        $this->artisan('bsc:reconcile', ['--chunk' => 100])
+            ->assertSuccessful()
+            ->expectsOutputToContain('waiting=0');
+
+        $this->assertSame(
+            PaymentBscDetail::STATUS_AWAITING_TRANSFER,
+            $unsubmitted->fresh()->bscDetail->verification_status,
+        );
+        $this->assertSame(
+            $lastVerifiedAt->format('Y-m-d H:i:s'),
+            $providerError->fresh()->bscDetail->last_verified_at?->format('Y-m-d H:i:s'),
+        );
+    }
+
     public function test_cancelled_bsc_order_releases_reservation_and_verification_job_is_a_no_op(): void
     {
         Queue::fake();
@@ -208,9 +235,10 @@ class BscOperationsTest extends TestCase
 
     public function test_bsc_health_fails_when_pending_verification_backlog_exceeds_threshold(): void
     {
-        $this->bscPayment();
-        $this->bscPayment(1_000_100);
+        $this->bscPayment(1_000_000, '0x'.str_repeat('a', 64));
+        $this->bscPayment(1_000_100, '0x'.str_repeat('b', 64));
         config()->set('services.bsc.pending_backlog_alert_threshold', 1);
+        $this->assertSame(2, app(BscOperationalMetrics::class)->pendingVerification()['pending']);
 
         $this->artisan('ops:health', ['--bsc' => true])
             ->assertFailed()
@@ -256,6 +284,42 @@ class BscOperationsTest extends TestCase
         $this->assertCount(2, $bot->calls);
     }
 
+    public function test_verification_alert_is_once_per_active_state_and_reopens_after_recovery_or_hash_change(): void
+    {
+        Cache::flush();
+        ManualPaymentSetting::current()->update(['admin_telegram_chat_id' => '123456']);
+
+        $bot = new FakeTelegramBotClient;
+        $notifier = new BscOperationalAlertNotifier(new TelegramAdminAccess, $bot);
+        $hash = '0x'.str_repeat('a', 64);
+        $payment = $this->bscPayment(1_000_000, $hash);
+        $payment->bscDetail()->update([
+            'verification_status' => PaymentBscDetail::STATUS_PROVIDER_ERROR,
+            'last_verified_at' => now(),
+        ]);
+        $providerError = BscVerificationResult::of(BscVerificationOutcome::ProviderError);
+
+        $notifier->notifyVerification($payment, $providerError);
+        $notifier->notifyVerification($payment->fresh(['order', 'bscDetail']), $providerError);
+
+        $this->assertCount(1, $bot->calls);
+
+        $notifier->notifyVerification(
+            $payment->fresh(['order', 'bscDetail']),
+            BscVerificationResult::of(BscVerificationOutcome::Confirming),
+        );
+        $notifier->notifyVerification($payment->fresh(['order', 'bscDetail']), $providerError);
+        $this->assertCount(2, $bot->calls);
+
+        $payment->bscDetail()->update([
+            'current_tx_hash' => '0x'.str_repeat('b', 64),
+            'tx_submission_version' => 2,
+        ]);
+        $notifier->notifyVerification($payment->fresh(['order', 'bscDetail']), $providerError);
+
+        $this->assertCount(3, $bot->calls);
+    }
+
     public function test_admin_order_detail_shows_only_sanitized_bsc_evidence_and_safe_explorer_link(): void
     {
         $payment = $this->bscPayment();
@@ -292,7 +356,7 @@ class BscOperationsTest extends TestCase
             ->assertSee('3');
     }
 
-    private function bscPayment(int $amount = 1_000_000): Payment
+    private function bscPayment(int $amount = 1_000_000, ?string $hash = null): Payment
     {
         $receiver = BscPaymentReceiver::factory()->manuallyVerified()->active()->create([
             'token_contract' => self::CONTRACT,
@@ -318,7 +382,12 @@ class BscOperationsTest extends TestCase
             'base_amount_micro' => $amount,
             'payable_amount_micro' => $amount,
             'expected_token_units' => (string) $amount.'000000000000',
-            'verification_status' => PaymentBscDetail::STATUS_AWAITING_TRANSFER,
+            'current_tx_hash' => $hash,
+            'tx_submission_version' => $hash === null ? 0 : 1,
+            'tx_attempts' => $hash === null ? 0 : 1,
+            'verification_status' => $hash === null
+                ? PaymentBscDetail::STATUS_AWAITING_TRANSFER
+                : PaymentBscDetail::STATUS_TX_SUBMITTED,
         ]);
 
         return $payment->fresh(['order', 'bscDetail']);

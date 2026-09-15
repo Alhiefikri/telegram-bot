@@ -111,53 +111,6 @@ final class BscRpcClient implements BscVerificationRpcClientInterface
         return $result;
     }
 
-    /** @return list<array<string, mixed>> */
-    public function transferLogs(
-        string $contract,
-        string|int $fromBlock,
-        string|int $toBlock,
-        ?string $receiver = null,
-    ): array {
-        $contract = $this->normalizeAddress($contract, 'token contract');
-
-        if ($this->isLatestBlockAlias($fromBlock) || $this->isLatestBlockAlias($toBlock)) {
-            $latestBlock = $this->latestBlockNumber();
-            $fromBlock = $this->isLatestBlockAlias($fromBlock) ? $latestBlock : $fromBlock;
-            $toBlock = $this->isLatestBlockAlias($toBlock) ? $latestBlock : $toBlock;
-        }
-
-        $fromNumber = $this->numericBlock($fromBlock);
-        $toNumber = $this->numericBlock($toBlock);
-        $maxBlocks = max(1, (int) config('services.bsc.max_scan_blocks', 10_000));
-        if ($fromNumber === null || $toNumber === null || $fromNumber < 0 || $toNumber < $fromNumber || ($toNumber - $fromNumber + 1) > $maxBlocks) {
-            throw new BscRpcException('BSC log scan range exceeds the configured bounded window.', retryable: false);
-        }
-
-        $topics = [self::TRANSFER_TOPIC];
-        if ($receiver !== null) {
-            $receiver = $this->normalizeAddress($receiver, 'receiving address');
-            $topics[] = null;
-            $topics[] = '0x'.str_pad(substr($receiver, 2), 64, '0', STR_PAD_LEFT);
-        }
-
-        $result = $this->call('eth_getLogs', [[
-            'address' => $contract,
-            'fromBlock' => $this->blockParameter($fromBlock),
-            'toBlock' => $this->blockParameter($toBlock),
-            'topics' => $topics,
-        ]]);
-        if (! is_array($result)) {
-            throw new BscRpcException('BSC RPC returned an invalid Transfer-log result.');
-        }
-
-        $maxLogs = max(1, (int) config('services.bsc.max_scan_logs', 1_000));
-        if (count($result) > $maxLogs) {
-            throw new BscRpcException('BSC Transfer-log result exceeds the configured bounded result window.', retryable: false);
-        }
-
-        return array_values(array_filter($result, static fn (mixed $log): bool => is_array($log)));
-    }
-
     private function call(string $method, array $params = []): mixed
     {
         $rpcUrl = trim((string) config('services.bsc.rpc_url'));
@@ -235,48 +188,6 @@ final class BscRpcClient implements BscVerificationRpcClientInterface
         }
 
         return $value;
-    }
-
-    private function isLatestBlockAlias(string|int $blockNumber): bool
-    {
-        return is_string($blockNumber) && strtolower(trim($blockNumber)) === 'latest';
-    }
-
-    private function latestBlockNumber(): int
-    {
-        return $this->hexQuantityToInt((string) $this->call('eth_blockNumber'));
-    }
-
-    private function numericBlock(string|int $blockNumber): ?int
-    {
-        if (is_int($blockNumber)) {
-            return $blockNumber >= 0 ? $blockNumber : null;
-        }
-
-        $value = strtolower(trim($blockNumber));
-        if (preg_match('/^0x[0-9a-f]+$/', $value) !== 1) {
-            return null;
-        }
-
-        $hex = ltrim(substr($value, 2), '0');
-        if ($hex === '') {
-            return 0;
-        }
-        if (strlen($hex) > 16) {
-            return null;
-        }
-
-        return hexdec($hex);
-    }
-
-    private function normalizeAddress(string $address, string $label): string
-    {
-        $normalized = strtolower(trim($address));
-        if (preg_match('/^0x[0-9a-f]{40}$/', $normalized) !== 1) {
-            throw new BscRpcException('BSC '.$label.' is not a valid EVM address.', retryable: false);
-        }
-
-        return $normalized;
     }
 
     private function hexQuantityToInt(string $value): int

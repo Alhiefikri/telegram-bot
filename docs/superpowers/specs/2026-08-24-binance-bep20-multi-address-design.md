@@ -1,6 +1,6 @@
 # Binance Multi-Rail Checkout: Binance Pay ID + USDT BEP20 (BSC)
 
-**Status:** Implementation-ready spec
+**Status:** Implementation-ready spec, revised to transaction-hash verification
 
 **Date:** 2026-08-24
 
@@ -18,10 +18,10 @@ The selector is a pre-checkout interaction. Canceling it creates no Order, Payme
 
 `BINANCE_PAY_ID` remains the existing Binance Pay rail. `USDT_BEP20` is a new payment method whose source of truth is the BNB Smart Chain, not Binance Pay account history. Both rails continue to use the existing Order lifecycle, inventory reservation, payment claim, receipt, and fulfillment boundaries.
 
-The BSC rail uses a hybrid automatic verification flow:
+The BSC rail uses customer-submitted transaction-hash verification:
 
-- a background scanner can find an exact matching token transfer by receiver, token contract, and unique amount;
-- the customer can submit a BSC transaction hash for immediate targeted lookup;
+- the customer submits a BSC transaction hash for targeted lookup;
+- the verifier reads the authoritative transaction receipt and inclusion block;
 - neither a transaction hash nor an explorer link is accepted without authoritative RPC validation;
 - payment is claimed only after the transfer satisfies the configured confirmation/finality policy.
 
@@ -57,9 +57,9 @@ The existing term **Binance Payment Verification** remains reserved for the Bina
 - Show a second selector with a working Cancel action before checkout side effects.
 - Support several BSC receiving addresses and distribute new Payments across them.
 - Snapshot the selected address and token/network contract on every BSC Payment.
-- Generate an exact, unique BSC payable amount so amount-only background matching is possible.
-- Let a customer submit a BSC transaction hash for immediate verification.
-- Automatically confirm only an exact, successful, sufficiently confirmed USDT transfer.
+- Charge the exact catalog USDT amount; `payments.amount`, `base_amount_micro`, and `payable_amount_micro` are equal for new BSC Payments.
+- Require a customer-submitted BSC transaction hash for verification.
+- Automatically confirm only an exact, successful, sufficiently confirmed USDT transfer in that submitted receipt.
 - Preserve the current OrderLifecycle and manual-review boundaries.
 - Make expiry, cancellation, late payment, duplicate transaction, RPC failure, and chain mismatch safe and explicit.
 - Keep all existing Binance Pay ID tests and behavior valid.
@@ -87,14 +87,14 @@ These are the working decisions for this spec. They are intentionally visible so
 | Provider column | `manual` | Matches the existing manual/customer-initiated crypto boundary; `method` remains authoritative. |
 | Address management | Owner-managed database pool with direct Owner confirmation | Address rotation and audit must not require a deploy; a valid typed address is saved as an active destination after Owner re-authentication. |
 | Address assignment | Least-recently-assigned, locked in checkout transaction | Distributes traffic and is deterministic under concurrency. |
-| Unique amount increment | `0.0001` USDT (`100` micro-USDT) | Gives a useful human-readable reference space while retaining integer arithmetic. |
-| Unique scope | Global across pending BSC Payments | Avoids ambiguity even when several addresses are active. |
+| Amount identity | Exact catalog amount in micro-USDT | Avoids artificial price changes; TX hash identifies the transaction. |
+| Verification input | Customer-submitted TX hash | Eliminates background receiver/amount scans and their RPC load. |
 | BSC TTL | 30 minutes | Matches the requested customer copy. |
 | Automatic threshold | Exactly 3 confirmations by default; finalized-block data is an optional reorg-safety check | Preserves the requested confirmation UX without adding an invisible extra wait. |
 | Hash attempts | Five valid submissions per Payment; invalid format does not consume an attempt | Limits abuse while allowing correction of a copied hash. |
 | Technical grace | Three minutes only for a transfer included before the original deadline | Confirmation latency does not become a new payment window. |
 
-These decisions are now resolved for ticketing. The implementation may improve internal names, but must not change the customer-visible rail choices, database-backed activation, Owner-confirmed address management, 30-minute deadline, or three-confirmation default without reopening this spec.
+These decisions are now resolved for ticketing. The implementation may improve internal names, but must not change the customer-visible rail choices, database-backed activation, Owner-confirmed address management, 30-minute deadline, three-confirmation default, or required TX-hash submission without reopening this spec.
 
 ## Activation and operator configuration
 
@@ -108,9 +108,9 @@ ENV contains only the BSC authority endpoint:
 BSC_RPC_URL=https://<rpc-provider-endpoint>
 ```
 
-`BSC_RPC_URL` is an HTTP JSON-RPC endpoint used to read BSC state/history. A public BNB Chain endpoint is acceptable for development and direct TX-hash lookup; production automatic amount scanning requires an endpoint that supports `eth_getLogs`. The URL and any provider credential remain server-side.
+`BSC_RPC_URL` is an HTTP JSON-RPC endpoint used for direct customer-submitted TX-hash lookup. The URL and any provider credential remain server-side.
 
-The application pins BSC Mainnet (`chain_id=56`), the approved USDT contract, 18 token decimals, the safe explorer host, and bounded RPC/scan limits. These values are not operator environment settings. A receiving address is stored in the database and must not be hardcoded or exposed as an environment variable.
+The application pins BSC Mainnet (`chain_id=56`), the approved USDT contract, 18 token decimals, and the safe explorer host. These values are not operator environment settings. A receiving address is stored in the database and must not be hardcoded or exposed as an environment variable.
 
 The v1 verifier reuses the existing `services.binance.verification_queue`/`binance-verification` queue. Do not add a second BSC worker or a new queue ENV in this feature slice. A separate queue is a later capacity decision, not a prerequisite for activation.
 
@@ -145,13 +145,13 @@ Binance selected
 Rail selector shown (no Order yet)
     ├─ Cancel → return to previous payment choices
     ├─ Binance Pay ID → existing Binance Pay checkout
-    └─ USDT BEP20 → BSC address + unique amount checkout
+    └─ USDT BEP20 → BSC address + exact catalog amount checkout
                          ↓
                     Order + Payment created
                          ↓
                     Payment instructions delivered
                          ↓
-                    scanner and/or hash verification
+                    submitted TX-hash verification
                          ↓
                     OrderLifecycle payment claim
 ```
@@ -186,7 +186,7 @@ The BSC instruction message contains:
 💵 Harga produk: 0.0200 USDT
 
 Kirim tepat:
-0.0201 USDT
+0.0200 USDT
 
 Ke address:
 0x...
@@ -287,8 +287,8 @@ Use a rail-specific `payment_bsc_details` one-to-one record rather than reading 
 | `chain_id` | Immutable `56` snapshot. |
 | `token_contract` | Immutable approved contract snapshot. |
 | `token_decimals` | Immutable validated decimals snapshot. |
-| `base_amount_micro` | Catalog USDT amount before unique reference increment. |
-| `payable_amount_micro` | Final amount; must equal `payments.amount`. |
+| `base_amount_micro` | Exact catalog USDT amount in micro-USDT; equal to `payments.amount` for new BSC Payments. |
+| `payable_amount_micro` | Same exact catalog amount; retained as a separate snapshot column for historical compatibility. |
 | `expected_token_units` | Exact integer token units, stored as a decimal string or sufficiently wide numeric value. |
 | `verification_status` | BSC-specific state machine below. |
 | `tx_submission_version` | Monotonic version for stale job protection. |
@@ -301,33 +301,26 @@ Use a rail-specific `payment_bsc_details` one-to-one record rather than reading 
 | `current_from_address` | Sanitized sender address. |
 | `evidence_payload` | Sanitized fields only; never store arbitrary RPC responses. |
 
-If multiple candidate hashes must be retained, add `payment_bsc_transfer_evidence` with a globally unique `tx_hash`. A submitted hash must not overwrite historical confirmed/mismatch evidence.
+Each submitted hash attempt is retained in `payment_bsc_transfer_evidence` when authoritative evidence exists. The table uses a globally unique `tx_hash`; a submitted hash must not overwrite historical confirmed/mismatch evidence.
 
 On a successful claim, `payments.provider_reference` may be populated with the validated TX hash for existing reporting compatibility. It must never be populated from unvalidated customer input.
 
-### Amount arithmetic and uniqueness
+### Amount arithmetic
 
-The existing `payments.amount` convention is integer micro-USDT. BSC continues using that convention for customer-facing amounts. Conversion to token base units is integer-only:
+The existing `payments.amount` convention is integer micro-USDT. BSC uses the exact catalog amount for customer-facing checkout; no uniqueness increment or pending-amount index is needed because the customer-submitted TX hash identifies the transaction. Conversion to token base units is integer-only:
 
 ```text
 expected_token_units = payable_amount_micro × 10^(token_decimals - 6)
 ```
 
-The implementation must reject unsupported decimals rather than use floating point.
+The implementation must reject unsupported decimals rather than use floating point. For every new BSC Payment:
 
-Allocator algorithm:
+1. read the catalog USDT amount in micro-USDT;
+2. persist that amount as `payments.amount`, `base_amount_micro`, and `payable_amount_micro`;
+3. derive and persist `expected_token_units` from the snapshotted token decimals;
+4. require the customer to submit a transaction hash before authoritative verification.
 
-1. Read the catalog USDT amount in micro-USDT.
-2. Start with the exact base amount.
-3. If the candidate is occupied by a pending automatic `USDT_BEP20` Payment, increment by `100` micro-USDT (`0.0001` USDT).
-4. Continue to the lowest free candidate within a bounded allocation window.
-5. Persist the candidate as `payments.amount` and the base amount in BSC detail.
-6. Enforce a database partial unique index for pending automatic BSC amounts.
-7. Let the existing checkout retry path handle a concurrent unique conflict; never silently reuse an ambiguous amount.
-
-The uniqueness scope is global across all BSC receiver records, including inactive and pending records. An address is still part of the verification predicate, but global uniqueness makes scanner matching, customer support, and manual review safer.
-
-The allocator must not alter Binance Pay ID amount semantics. In particular, an Order ID Binance Pay Payment remains exact-price as required by the current design.
+These rules do not alter Binance Pay ID amount semantics. In particular, an Order ID Binance Pay Payment remains exact-price as required by the current design.
 
 ### Checkout transaction invariants
 
@@ -337,14 +330,14 @@ For a BSC checkout, all of the following happen in the existing checkout transac
 2. lock the cart and checkout-maintenance boundary in the existing order;
 3. validate the product's USDT price;
 4. lock/select one active BSC receiver;
-5. allocate a unique BSC amount;
+5. snapshot the exact catalog amount as `payments.amount`, `base_amount_micro`, and `payable_amount_micro`;
 6. create Order and Payment;
 7. create BSC detail with immutable snapshots;
 8. reserve inventory and allocate credentials;
 9. materialize checkout and admin outbound effects;
 10. mark the cart checked out.
 
-If receiver readiness or amount allocation fails, the transaction rolls back. No Order, Payment, stock reservation, or customer instruction is left behind.
+If receiver readiness or snapshot creation fails, the transaction rolls back. No Order, Payment, stock reservation, or customer instruction is left behind.
 
 ## BSC verification protocol
 
@@ -358,7 +351,7 @@ The verifier uses a server-side BSC RPC/indexer adapter. It must never trust:
 - a client-side “success” flag;
 - an arbitrary token that shares the `USDT` symbol.
 
-The production configuration pins BSC Mainnet chain ID `56` and an approved USDT contract. BNB Chain documents BSC Mainnet as chain ID 56 and notes that BSC is EVM-compatible. Its RPC documentation also warns that some public endpoints disable `eth_getLogs`; scanner readiness must therefore require a provider that supports the required log queries, or a separately configured indexed source. See the [BSC wallet configuration](https://docs.bnbchain.org/bnb-smart-chain/developers/wallet-configuration/), [BSC JSON-RPC endpoint guidance](https://docs.bnbchain.org/bnb-smart-chain/developers/json_rpc/json-rpc-endpoint/), and [BSC finality guidance](https://docs.bnbchain.org/bnb-smart-chain/introduction/).
+The production configuration pins BSC Mainnet chain ID `56` and an approved USDT contract. BNB Chain documents BSC Mainnet as chain ID 56 and notes that BSC is EVM-compatible. Readiness validates the RPC metadata needed for direct receipt verification; it does not require historical log scanning. See the [BSC wallet configuration](https://docs.bnbchain.org/bnb-smart-chain/developers/wallet-configuration/), [BSC JSON-RPC endpoint guidance](https://docs.bnbchain.org/bnb-smart-chain/developers/json_rpc/json-rpc-endpoint/), and [BSC finality guidance](https://docs.bnbchain.org/bnb-smart-chain/introduction/).
 
 The initial approved BSC USDT contract should be configured as `0x55d398326f99059fF775485246999027B3197955`, matching the Binance-published common token address list. The application must still call and validate the contract's `decimals()` metadata during readiness; token name/symbol alone is not sufficient. See [Binance Common Token Addresses](https://www.binance.com/en-JP/skills/detail/binance-web3/binance-agentic-wallet).
 
@@ -369,8 +362,7 @@ The adapter must support:
 - `eth_chainId`;
 - `eth_call` for token metadata such as `decimals()`;
 - `eth_getTransactionReceipt` for submitted hashes;
-- `eth_getBlockByNumber` for block timestamps and the latest/finalized head;
-- `eth_getLogs` for exact `Transfer` event scanning, or an explicitly configured indexed equivalent.
+- `eth_getBlockByNumber` for inclusion timestamps and the latest/finalized head.
 
 Each operation has a bounded timeout, retry policy, and sanitized failure classification. RPC credentials, if a managed provider requires them, remain server-side.
 
@@ -414,17 +406,11 @@ The channel adapter validates only the hash shape, then calls a domain submissio
 
 The request/webhook path must not perform an unbounded RPC call. If the queue dispatch fails, the durable submission state remains and reconciliation can recover it.
 
-### Scanner path
+### Reconciliation path
 
-The scheduled BSC reconciler finds pending BSC Payments within their window and queries the approved token contract for transfers to each snapshotted receiver. It filters by:
+The scheduled BSC reconciler processes only pending or late-payment BSC Payments with a stored customer-submitted TX hash. It dispatches the same targeted receipt verification used by interactive status refreshes and applies a bounded retry cadence to provider failures. Payments without a hash remain `awaiting_transfer` and are not sent to the RPC boundary.
 
-- receiver address;
-- token contract;
-- block range derived from Payment creation/deadline;
-- exact expected token units;
-- successful receipt and confirmation policy.
-
-If no hash was submitted and exactly one candidate matches, the scanner can claim it. If zero candidates are found, the Payment remains `not_found`/`awaiting_transfer`. If multiple candidates match, the Payment becomes `manual_review`; it must not guess.
+The reconciler does not query receiver history, call `eth_getLogs`, infer transaction hashes, or match by amount alone. A new hash submission increments `tx_submission_version`, so stale jobs cannot persist evidence for a replacement hash.
 
 ### Single claim
 
@@ -452,18 +438,18 @@ Repeated jobs, browser refreshes, Telegram retries, and duplicate hashes must pr
 
 | State | Meaning | Automatic action |
 | --- | --- | --- |
-| `awaiting_transfer` | No candidate has been observed. | Scanner continues while window is open. |
+| `awaiting_transfer` | No customer hash has been submitted. | Remain idle until the customer submits a hash. |
 | `tx_submitted` | A hash is stored for lookup. | Targeted verifier is queued. |
 | `confirming` | Exact transfer found but below threshold. | Retry until threshold/grace. |
 | `confirmed` | Exact transfer passed all predicates. | Claim through OrderLifecycle. |
 | `not_found` | Latest bounded lookup found no valid transfer. | Remain pending/reconcile. |
 | `mismatch` | Evidence exists but amount/address/token/time is wrong. | Do not auto-claim; escalate. |
 | `transaction_already_used` | Hash is already tied to another Payment. | Do not auto-claim; escalate. |
-| `provider_error` | RPC/indexer failed or timed out. | Retry with bounded backoff. |
+| `provider_error` | RPC failed or timed out while checking a submitted hash. | Retry with bounded cadence; keep the Payment pending. |
 | `manual_review` | Ambiguous/multiple/late evidence needs an Owner decision. | Existing manual review boundary. |
 | `expired` | Automatic window and any technical grace are closed. | Order expiry releases reservation. |
 
-RPC outage is not `mismatch` and must never release an otherwise eligible Order. It is `Payment Verification Pending` until the bounded retry/reconciliation policy is exhausted.
+RPC outage is not `mismatch` and must never release an otherwise eligible Order. It is `Payment Verification Pending` until the bounded retry/reconciliation policy recovers or an owner resolves the case.
 
 ## Expiry, cancellation, and late payment
 
@@ -499,10 +485,9 @@ Add a BSC-specific readiness/configuration surface without changing historical B
 - `bsc_min_confirmations`, default `3`, production minimum `3`;
 - `bsc_require_finalized_block`, default `false`; when enabled it is an additional safety gate, not the default customer-visible threshold;
 - `bsc_confirmation_grace_minutes`, default `3`;
-- `bsc_unique_amount_increment_micro`, default `100`;
 - `bsc_hash_attempt_limit`, default `5`;
 - `BSC_RPC_URL`, the server-side RPC authority endpoint;
-- BSC network identity, approved token contract, token decimals, explorer host, and RPC/scan limits, pinned in application configuration;
+- BSC network identity, approved token contract, token decimals, and explorer host, pinned in application configuration;
 - existing `BINANCE_VERIFICATION_QUEUE`, reused by BSC verification jobs in v1.
 
 BSC is considered ready only when it is enabled, the approved RPC responds, chain ID is 56, the token contract is reachable, decimals are valid, and at least one active BSC Receiving Address exists.
@@ -519,7 +504,7 @@ The admin dashboard needs:
 - re-authentication state for receiver mutations;
 - readiness status and last RPC health result;
 - active receiver count;
-- pending BSC Payment count;
+- pending BSC verification count for Payments with submitted hashes;
 - link to BSC Payment review evidence.
 
 Destination addresses are public payment data, but their mutation is financially sensitive. Restrict mutation to the Owner role used for payment-provider control; do not reuse the broader Owner/Admin `canManagePaymentSettings()` predicate for receiver destination changes.
@@ -549,13 +534,13 @@ Expected seams:
 
 - `UsdtBep20CheckoutIntent` — BSC checkout intent and readiness.
 - `BscPaymentReceiverPool` — locked address selection and immutable snapshot creation.
-- `BscUniquePaymentAmount` — exact integer amount allocation.
+- `BscTokenAmount` — exact integer token-unit conversion for the catalog amount.
 - `BscRpcClient` — bounded JSON-RPC transport.
 - `BscTokenTransferReader` — receipt/log decoding into sanitized typed evidence.
-- `BscPaymentVerification` — status, submission, retry, candidate matching, and single claim.
+- `BscPaymentVerification` — submitted-hash status, receipt validation, retry, and single claim.
 - `BscVerificationQueue` — queue transport only.
 - `VerifyBscPayment` — thin job adapter.
-- `ReconcileBscPayments` — bounded scanner/reconciliation command.
+- `ReconcileBscPayments` — bounded submitted-hash reconciliation command.
 
 These services must not send Telegram messages or render Blade copy. They return typed outcomes and evidence DTOs, following ADR-0003.
 
@@ -649,7 +634,7 @@ The implementation should be delivered in small, independently testable slices:
 - Add the `USDT_BEP20` method contract.
 - Add BSC receiver and Payment-detail migrations/models/factories.
 - Add readiness configuration, Owner-only receiver management, and re-authentication.
-- Add integer amount conversion/allocator with partial unique index.
+- Add integer amount conversion with an exact catalog-amount invariant.
 - Add Storefront cache invalidation/versioning for committed BSC setting and receiver mutations.
 - Add schema/concurrency tests.
 
@@ -658,7 +643,7 @@ The implementation should be delivered in small, independently testable slices:
 - Implement bounded RPC transport and typed RPC errors.
 - Implement receipt/log decoding and exact predicate.
 - Implement hash submission/versioning and the verification queue job.
-- Implement reconciliation scanner and scheduler command.
+- Implement reconciliation for submitted transaction hashes and scheduler cadence.
 - Implement atomic OrderLifecycle claim and PaymentEvent evidence.
 - Reuse the existing Binance verification queue and worker in v1; do not add a new supervisor process.
 
@@ -702,34 +687,32 @@ The implementation should be delivered in small, independently testable slices:
 - Crafted requests with unavailable/invalid rails fail at the checkout boundary with zero new side effects.
 - Duplicate checkout submissions remain idempotent.
 
-### Receiver and amount allocation
+### Receiver and amount snapshots
 
 - Invalid or duplicate receivers cannot be saved; valid distinct addresses can be saved directly as active receivers by the Owner.
-- Two concurrent BSC checkouts receive safe distinct amounts and valid receiver snapshots.
+- Two concurrent BSC checkouts may use the same exact catalog amount and still receive valid receiver snapshots.
 - Receiver selection is distributed according to the documented cursor policy.
-- Pending BSC amount uniqueness is enforced by both allocator and database index.
-- Allocation exhaustion rolls back the entire checkout.
+- New BSC amount snapshots equal `payments.amount`; no pending-amount uniqueness index or allocation exhaustion exists.
 - Deactivating a receiver does not change existing Payment instructions.
 - Existing Binance Pay amount allocation/index behavior remains unchanged.
 
 ### On-chain verification
 
-- Exact successful BSC USDT transfer is confirmed only after 3 confirmations.
-- Exact transfer with a submitted hash and exact transfer found by scanner both claim successfully.
+- Exact successful BSC USDT transfer from a submitted hash is confirmed only after 3 confirmations.
 - Wrong chain, wrong contract, wrong receiver, wrong amount, failed receipt, and wrong time never auto-claim.
 - ERC20/TRC20/native BNB transfers never satisfy the BSC predicate.
 - A pending transaction transitions to `confirming` without fulfillment.
 - Repeated hash submission is idempotent; invalid hashes do not consume attempts.
 - A fourth/sixth valid hash according to the configured limit is rejected without an RPC call.
 - Reused TX hash cannot pay a second Payment.
-- Multiple matching candidates become manual review rather than an arbitrary claim.
-- RPC timeout/error remains Payment Verification Pending and is recovered by reconciliation.
+- Multiple matching transfers in one submitted receipt become manual review rather than an arbitrary claim.
+- RPC timeout/error remains Payment Verification Pending and is recovered by bounded reconciliation.
 - A reorg/disappearing receipt cannot leave a false Paid transition.
 
 ### Lifecycle and expiry
 
 - Confirmed BSC transfer calls `OrderLifecycle` and delivers stock exactly once.
-- Browser polling, Telegram callbacks, scanner jobs, and queue retries cannot duplicate fulfillment.
+- Browser polling, Telegram callbacks, reconciler jobs, and queue retries cannot duplicate fulfillment.
 - Transfer included before expiry but confirmed during technical grace can complete.
 - Transfer included after expiry becomes Late Payment/manual review.
 - Expired pending BSC Orders release reservations after grace.

@@ -5,7 +5,7 @@ namespace Database\Factories;
 use App\Models\BscPaymentReceiver;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
-use App\Services\Bsc\BscUniquePaymentAmount;
+use App\Services\Bsc\BscTokenAmount;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /** @extends Factory<PaymentBscDetail> */
@@ -27,7 +27,7 @@ class PaymentBscDetailFactory extends Factory
                 'token_decimals' => $receiver->token_decimals,
                 'base_amount_micro' => $amount,
                 'payable_amount_micro' => $amount,
-                'expected_token_units' => app(BscUniquePaymentAmount::class)->expectedTokenUnits($amount, (int) $receiver->token_decimals),
+                'expected_token_units' => app(BscTokenAmount::class)->expectedTokenUnits($amount, (int) $receiver->token_decimals),
             ])->save();
         });
     }
@@ -57,7 +57,7 @@ class PaymentBscDetailFactory extends Factory
             'confirmation_grace_minutes' => 3,
             'base_amount_micro' => 1_000_000,
             'payable_amount_micro' => 1_000_000,
-            'expected_token_units' => app(BscUniquePaymentAmount::class)->expectedTokenUnits(1_000_000, 18),
+            'expected_token_units' => app(BscTokenAmount::class)->expectedTokenUnits(1_000_000, 18),
             'verification_status' => PaymentBscDetail::STATUS_AWAITING_TRANSFER,
             'verification_grace_until' => null,
             'last_verified_at' => null,
@@ -75,7 +75,7 @@ class PaymentBscDetailFactory extends Factory
             'payment_id' => $payment->getKey(),
             'base_amount_micro' => $payment->amount,
             'payable_amount_micro' => $payment->amount,
-            'expected_token_units' => app(BscUniquePaymentAmount::class)->expectedTokenUnits((int) $payment->amount, 18),
+            'expected_token_units' => app(BscTokenAmount::class)->expectedTokenUnits((int) $payment->amount, 18),
         ]);
     }
 }

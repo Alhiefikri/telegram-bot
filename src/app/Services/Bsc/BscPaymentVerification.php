@@ -58,7 +58,7 @@ final class BscPaymentVerification
     }
 
     /**
-     * Queue a bounded scanner lookup for interactive status refreshes. The
+     * Queue a targeted receipt lookup for interactive status refreshes. The
      * caller receives only persisted state; authoritative RPC reads remain in
      * VerifyBscPayment on the shared verification queue.
      */
@@ -68,12 +68,12 @@ final class BscPaymentVerification
         if ($payment->status !== PaymentStatus::Pending
             || $payment->provider !== 'manual'
             || $payment->method !== 'USDT_BEP20'
-            || $payment->bscDetail === null) {
+            || $payment->bscDetail === null
+            || ! filled($payment->bscDetail->current_tx_hash)) {
             return false;
         }
 
         if (! in_array($payment->bscDetail->verification_status, [
-            PaymentBscDetail::STATUS_AWAITING_TRANSFER,
             PaymentBscDetail::STATUS_TX_SUBMITTED,
             PaymentBscDetail::STATUS_CONFIRMING,
             PaymentBscDetail::STATUS_NOT_FOUND,
@@ -82,7 +82,7 @@ final class BscPaymentVerification
             return false;
         }
 
-        $this->queue->dispatchForScan($payment);
+        $this->queue->dispatchForHash($payment);
 
         return true;
     }
@@ -249,9 +249,11 @@ final class BscPaymentVerification
                 || $payment->order?->order_status !== OrderStatus::PendingPayment)
             && ! in_array($payment->status, [PaymentStatus::Refunded], true)
             && $detail !== null) {
-            $result = $lateHash !== null
-                ? $this->verifyLateCandidate($payment, $detail, $lateHash, $submissionVersion)
-                : $this->scanForLateTransfer($payment, $detail, $submissionVersion);
+            if ($lateHash === null) {
+                return BscVerificationResult::of(BscVerificationOutcome::OrderNotPending, retryable: false);
+            }
+
+            $result = $this->verifyLateCandidate($payment, $detail, $lateHash, $submissionVersion);
 
             return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
         }
@@ -307,6 +309,13 @@ final class BscPaymentVerification
                 BscVerificationResult::of(BscVerificationOutcome::Expired, retryable: false),
             );
         }
+        if ($hash === null) {
+            return $this->staleIfSubmissionChanged(
+                $detail,
+                $submissionVersion,
+                BscVerificationResult::of(BscVerificationOutcome::AwaitingTransfer, retryable: true),
+            );
+        }
 
         try {
             $chainId = $this->rpc->chainId();
@@ -316,13 +325,7 @@ final class BscPaymentVerification
                 return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
             }
 
-            if ($hash !== null) {
-                $result = $this->verifySubmittedHash($payment, $detail, $hash, $submissionVersion);
-
-                return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
-            }
-
-            $result = $this->scanForTransfer($payment, $detail, $submissionVersion);
+            $result = $this->verifySubmittedHash($payment, $detail, $hash, $submissionVersion);
 
             return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
         } catch (BscRpcException $exception) {
@@ -710,235 +713,6 @@ final class BscPaymentVerification
             $receipt,
             $submissionVersion,
         );
-    }
-
-    private function scanForTransfer(
-        Payment $payment,
-        PaymentBscDetail $detail,
-        int $submissionVersion,
-    ): BscVerificationResult {
-        $latest = $this->rpc->blockByNumber('latest');
-        $latestNumber = $this->blockNumber($latest['number'] ?? null);
-        if ($latestNumber === null) {
-            throw new BscRpcException('BSC RPC returned an invalid latest block.');
-        }
-
-        $maxBlocks = max(1, (int) config('services.bsc.max_scan_blocks', 10_000));
-        $fromBlock = max(0, $latestNumber - $maxBlocks + 1);
-        $logs = $this->rpc->transferLogs(
-            (string) $detail->token_contract,
-            $fromBlock,
-            $latestNumber,
-            (string) $detail->receiver_address,
-        );
-
-        $hashes = $this->scanCandidateHashes($payment, $detail, $logs, allowLateTransferWindow: false);
-
-        if (! $this->submissionIsCurrent($detail->payment_id, $submissionVersion)) {
-            return BscVerificationResult::of(BscVerificationOutcome::StaleSubmission, retryable: false);
-        }
-
-        if ($hashes === []) {
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_NOT_FOUND, $submissionVersion, null, [
-                'reason' => 'no_transfer_candidate',
-                'scanned_from_block' => $fromBlock,
-                'scanned_to_block' => $latestNumber,
-            ]);
-
-            return BscVerificationResult::of(BscVerificationOutcome::NotFound, retryable: true);
-        }
-
-        if (count($hashes) > 1) {
-            return $this->flagForManualReview(
-                payment: $payment,
-                detail: $detail,
-                submissionVersion: $submissionVersion,
-                outcome: BscVerificationOutcome::ManualReview,
-                detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
-                reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
-                hash: null,
-                evidence: null,
-                metadata: [
-                    'reason' => 'multiple_transfer_candidates',
-                    'candidate_count' => count($hashes),
-                    'scanned_from_block' => $fromBlock,
-                    'scanned_to_block' => $latestNumber,
-                ],
-            );
-        }
-
-        $hash = (string) $hashes[0];
-
-        return $this->verifySubmittedHash($payment, $detail, $hash, $submissionVersion);
-    }
-
-    /**
-     * Reduce raw Transfer-log hashes to candidates that match this Payment
-     * before ambiguity is evaluated. Amount is encoded in the receipt log
-     * data, while the payment window is established from the block facts.
-     *
-     * @param  list<array<string, mixed>>  $logs
-     * @return list<string>
-     */
-    private function scanCandidateHashes(
-        Payment $payment,
-        PaymentBscDetail $detail,
-        array $logs,
-        bool $allowLateTransferWindow,
-    ): array {
-        $hashes = collect($logs)
-            ->map(fn (mixed $log): ?string => is_array($log)
-                ? BscTransactionHash::normalize((string) ($log['transactionHash'] ?? ''))
-                : null)
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        $eligible = [];
-        foreach ($hashes as $hash) {
-            $receipt = $this->rpc->transactionReceipt($hash);
-            if ($receipt === null) {
-                continue;
-            }
-
-            $inspection = $this->reader->inspectReceipt(
-                receipt: $receipt,
-                expectedContract: (string) $detail->token_contract,
-                expectedReceiver: (string) $detail->receiver_address,
-                expectedAmountUnits: (string) $detail->expected_token_units,
-                submittedHash: $hash,
-            );
-            if (! $inspection->successfulReceipt() || $inspection->exactTransfers === []) {
-                continue;
-            }
-
-            $evidence = $inspection->exactTransfers[0];
-            $block = $this->rpc->blockByNumber($evidence->blockNumber);
-            $blockNumber = $this->blockNumber($block['number'] ?? null);
-            $blockTimestamp = $this->blockTimestamp($block['timestamp'] ?? null);
-            if ($block === null || $blockNumber === null || $blockTimestamp === null) {
-                throw new BscRpcException('BSC RPC returned incomplete scan candidate block facts.');
-            }
-
-            $receiptBlockHash = BscTransactionHash::normalize((string) ($receipt['blockHash'] ?? ''));
-            $blockHash = BscTransactionHash::normalize((string) ($block['hash'] ?? ''));
-            if ($blockNumber !== $evidence->blockNumber
-                || ($receiptBlockHash !== null && $blockHash !== null && ! hash_equals($receiptBlockHash, $blockHash))) {
-                continue;
-            }
-
-            if (! $this->candidateWithinPaymentWindow($payment, $blockTimestamp, $allowLateTransferWindow)) {
-                continue;
-            }
-
-            $eligible[] = $hash;
-        }
-
-        return array_values(array_unique($eligible));
-    }
-
-    private function candidateWithinPaymentWindow(
-        Payment $payment,
-        Carbon $blockTimestamp,
-        bool $allowLateTransferWindow,
-    ): bool {
-        $createdAt = $payment->created_at;
-        if ($createdAt === null || $blockTimestamp->timestamp < $createdAt->timestamp || $blockTimestamp->isFuture()) {
-            return false;
-        }
-
-        if ($allowLateTransferWindow) {
-            return true;
-        }
-
-        $deadline = $this->deadline($payment, $payment->order);
-
-        return $deadline !== null && $blockTimestamp->timestamp <= $deadline->timestamp;
-    }
-
-    private function scanForLateTransfer(
-        Payment $payment,
-        PaymentBscDetail $detail,
-        int $submissionVersion,
-    ): BscVerificationResult {
-        try {
-            if (! $this->validConfiguredSnapshot($detail)) {
-                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, null, [
-                    'reason' => 'late_scan_invalid_bsc_snapshot',
-                ]);
-
-                return BscVerificationResult::of(BscVerificationOutcome::NotConfigured, retryable: false);
-            }
-            if ($this->rpc->chainId() !== 56 || (int) $detail->chain_id !== 56) {
-                return $this->mismatch($payment, $detail, $submissionVersion, null, null, 'late_scan_wrong_chain');
-            }
-
-            $latest = $this->rpc->blockByNumber('latest');
-            $latestNumber = $this->blockNumber($latest['number'] ?? null);
-            if ($latestNumber === null) {
-                throw new BscRpcException('BSC RPC returned an invalid latest block.');
-            }
-
-            $maxBlocks = max(1, (int) config('services.bsc.max_scan_blocks', 10_000));
-            $fromBlock = max(0, $latestNumber - $maxBlocks + 1);
-            $logs = $this->rpc->transferLogs(
-                (string) $detail->token_contract,
-                $fromBlock,
-                $latestNumber,
-                (string) $detail->receiver_address,
-            );
-            $hashes = $this->scanCandidateHashes($payment, $detail, $logs, allowLateTransferWindow: true);
-
-            if (! $this->submissionIsCurrent($detail->payment_id, $submissionVersion)) {
-                return BscVerificationResult::of(BscVerificationOutcome::StaleSubmission, retryable: false);
-            }
-
-            if ($hashes === []) {
-                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_EXPIRED, $submissionVersion, null, [
-                    'reason' => 'no_late_transfer_candidate',
-                    'scanned_from_block' => $fromBlock,
-                    'scanned_to_block' => $latestNumber,
-                ]);
-
-                return BscVerificationResult::of(BscVerificationOutcome::NotFound, retryable: true);
-            }
-
-            if (count($hashes) > 1) {
-                return $this->flagForManualReview(
-                    payment: $payment,
-                    detail: $detail,
-                    submissionVersion: $submissionVersion,
-                    outcome: BscVerificationOutcome::ManualReview,
-                    detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
-                    reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
-                    hash: null,
-                    evidence: null,
-                    metadata: [
-                        'reason' => 'multiple_late_transfer_candidates',
-                        'candidate_count' => count($hashes),
-                        'scanned_from_block' => $fromBlock,
-                        'scanned_to_block' => $latestNumber,
-                    ],
-                );
-            }
-
-            return $this->verifyLateCandidate($payment, $detail, (string) $hashes[0], $submissionVersion);
-        } catch (BscRpcException $exception) {
-            report($exception);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, null, [
-                'reason' => 'late_scan_rpc_error',
-            ]);
-
-            return BscVerificationResult::of(BscVerificationOutcome::ProviderError, retryable: $exception->retryable);
-        } catch (Throwable $exception) {
-            report($exception);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, null, [
-                'reason' => 'late_scan_verification_error',
-            ]);
-
-            return BscVerificationResult::of(BscVerificationOutcome::ProviderError, retryable: false);
-        }
     }
 
     /** @param array<string, mixed> $receipt */

@@ -14,7 +14,7 @@ final class BscVerificationQueue
             ->onQueue($this->queue());
     }
 
-    public function dispatchForScan(Payment $payment): void
+    public function dispatchForHash(Payment $payment): void
     {
         $payment->loadMissing('bscDetail');
 

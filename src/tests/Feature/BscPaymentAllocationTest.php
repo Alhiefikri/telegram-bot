@@ -3,24 +3,19 @@
 namespace Tests\Feature;
 
 use App\Enums\BscReceiverVerificationStatus;
-use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidCheckout;
 use App\Models\BscPaymentReceiver;
 use App\Models\Cart;
 use App\Models\CartItem;
-use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\Product;
 use App\Services\Bsc\BscRpcClientInterface;
-use App\Services\Bsc\BscUniquePaymentAmount;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
-use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class BscPaymentAllocationTest extends TestCase
@@ -37,7 +32,6 @@ class BscPaymentAllocationTest extends TestCase
         config()->set('services.bsc.chain_id', 56);
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
-        config()->set('services.bsc.max_unique_amount_candidates', 1_000);
 
         app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface
         {
@@ -66,7 +60,6 @@ class BscPaymentAllocationTest extends TestCase
             'payment_mode' => 'manual',
             'is_active' => true,
             'bsc_payment_enabled' => true,
-            'bsc_unique_amount_increment_micro' => 100,
         ]);
     }
 
@@ -117,68 +110,32 @@ class BscPaymentAllocationTest extends TestCase
         $this->assertSame(2_500_000, $detail->payable_amount_micro);
     }
 
-    public function test_allocator_uses_exact_base_then_configured_integer_increment(): void
+    public function test_multiple_pending_bsc_checkouts_keep_the_exact_catalog_amount(): void
     {
-        $base = 1_000_000;
-        $this->pendingBscPayment($base);
-        $this->pendingBscPayment($base + 100);
-
-        $this->assertSame(
-            $base + 200,
-            app(BscUniquePaymentAmount::class)->allocate($base),
-        );
-        $this->pendingBscPayment($base + 200);
-        $this->assertSame(
-            $base + 300,
-            app(BscUniquePaymentAmount::class)->allocate($base, 100, 4),
-        );
-
-        $paid = $this->pendingBscPayment($base + 300);
-        $paid->forceFill(['status' => PaymentStatus::Paid])->save();
-        $this->assertSame($base + 300, app(BscUniquePaymentAmount::class)->allocate($base, 100, 4));
-    }
-
-    public function test_pending_bsc_amount_index_is_partial_and_database_enforced(): void
-    {
-        $indexNames = collect(DB::select("PRAGMA index_list('payments')"))
-            ->map(fn (object $index): string => (string) $index->name)
-            ->all();
-        $this->assertContains('payments_pending_bsc_amount_unique', $indexNames);
-
-        $amount = 900_000;
-        $paid = $this->pendingBscPayment($amount);
-        $paid->forceFill(['status' => PaymentStatus::Paid])->save();
-        $this->pendingBscPayment($amount);
-
-        $this->expectException(QueryException::class);
-        $this->pendingBscPayment($amount);
-    }
-
-    public function test_allocation_exhaustion_rolls_back_receiver_assignment_and_checkout_side_effects(): void
-    {
-        config()->set('services.bsc.max_unique_amount_candidates', 2);
-        $receiver = $this->activeReceiver('0x2222222222222222222222222222222222222222');
-        $this->pendingBscPayment(1_000_000);
-        $this->pendingBscPayment(1_000_100);
+        $this->activeReceiver('0x2222222222222222222222222222222222222222');
         $product = Product::factory()->create([
-            'stock' => 1,
+            'stock' => 2,
             'reserved_stock' => 0,
             'usdt_price_amount' => 1_000_000,
         ]);
-        $cart = $this->cartForProduct($product);
 
-        try {
-            app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::usdtBep20());
-            $this->fail('Expected BSC amount allocation to exhaust its bounded window.');
-        } catch (InvalidCheckout $exception) {
-            $this->assertStringContainsString('No unique BSC payment amount', $exception->getMessage());
-        }
+        $first = app(OrderCheckoutService::class)->checkout(
+            $this->cartForProduct($product),
+            CheckoutPaymentIntents::usdtBep20(),
+        );
+        $second = app(OrderCheckoutService::class)->checkout(
+            $this->cartForProduct($product),
+            CheckoutPaymentIntents::usdtBep20(),
+        );
 
-        $this->assertDatabaseMissing('orders', ['cart_id' => $cart->id]);
-        $this->assertDatabaseMissing('payments', ['order_id' => $cart->id]);
-        $this->assertSame(0, InventoryMovement::query()->count());
-        $this->assertNull($receiver->fresh()->last_assigned_at);
-        $this->assertSame(2, Payment::query()->where('method', 'USDT_BEP20')->count());
+        $payments = Payment::query()->whereIn('order_id', [$first->id, $second->id])->get();
+
+        $this->assertCount(2, $payments);
+        $this->assertSame([1_000_000, 1_000_000], $payments->pluck('amount')->sort()->values()->all());
+        $this->assertSame(
+            [1_000_000, 1_000_000],
+            PaymentBscDetail::query()->whereIn('payment_id', $payments->pluck('id'))->pluck('payable_amount_micro')->sort()->values()->all(),
+        );
     }
 
     public function test_pending_or_rejected_receiver_can_never_be_assigned(): void
@@ -244,17 +201,6 @@ class BscPaymentAllocationTest extends TestCase
                 'address' => $address,
                 'token_contract' => self::CONTRACT,
             ]);
-    }
-
-    private function pendingBscPayment(int $amount): Payment
-    {
-        return Payment::factory()->create([
-            'provider' => 'manual',
-            'method' => 'USDT_BEP20',
-            'amount' => $amount,
-            'currency' => 'USDT',
-            'status' => PaymentStatus::Pending,
-        ]);
     }
 
     private function cartForProduct(Product $product): Cart

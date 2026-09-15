@@ -62,8 +62,16 @@ final class TelegramBscVerifyIntents
             return;
         }
 
+        $payment->loadMissing('bscDetail');
+        if (! filled($payment->bscDetail?->current_tx_hash)) {
+            $this->bot->answerCallbackQuery($callbackQueryId);
+            $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.bsc.hash_prompt'));
+
+            return;
+        }
+
         try {
-            $this->queue->dispatchForScan($payment);
+            $this->queue->dispatchForHash($payment);
         } catch (Throwable $exception) {
             report($exception);
             $this->bot->answerCallbackQuery($callbackQueryId);

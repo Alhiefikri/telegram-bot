@@ -99,7 +99,7 @@ class HealthCheck extends Command
                     $healthy = false;
                     $this->error('BSC: failed - '.$report->configurationMessage());
                 } else {
-                    $this->info("BSC: ready active_receivers={$report->activeReceiverCount} chain={$report->rpcChainId} decimals={$report->tokenDecimals}");
+                    $this->info("BSC: ready active_receivers={$report->activeReceiverCount} chain={$report->rpcChainId} decimals={$report->tokenDecimals} verification=tx_hash");
                 }
 
                 $backlog = $bscMetrics->pendingVerification();

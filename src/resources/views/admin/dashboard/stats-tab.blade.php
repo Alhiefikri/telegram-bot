@@ -402,7 +402,7 @@
                 >
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
-                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Binance USDT BEP20</p>
+                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">USDT BEP20 (BSC)</p>
                             <h2 class="mt-1 font-display text-base font-bold text-neo-ink">BSC Receiving Address</h2>
                         </div>
                         <x-admin-dashboard.badge :tone="($bsc['readiness']['ready'] ?? false) ? 'emerald' : 'amber'" dot>
@@ -449,10 +449,6 @@
                                 <label class="block text-xs font-bold text-neo-ink">
                                     Hash attempts
                                     <x-admin-dashboard.input class="mt-1" min="1" max="20" name="bsc_hash_attempt_limit" type="number" :value="$bsc['hash_attempt_limit']" />
-                                </label>
-                                <label class="block text-xs font-bold text-neo-ink sm:col-span-2">
-                                    Unique amount increment (micro-USDT)
-                                    <x-admin-dashboard.input class="mt-1" min="1" max="1000000" name="bsc_unique_amount_increment_micro" type="number" :value="$bsc['unique_amount_increment_micro']" />
                                 </label>
                             </div>
                             <input type="hidden" name="bsc_require_finalized_block" value="0">

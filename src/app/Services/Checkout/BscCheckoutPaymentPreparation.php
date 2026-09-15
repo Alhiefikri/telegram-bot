@@ -8,7 +8,7 @@ use App\Models\PaymentBscDetail;
 use App\Services\Bsc\BscPaymentReceiverPool;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Bsc\BscReadinessReport;
-use App\Services\Bsc\BscUniquePaymentAmount;
+use App\Services\Bsc\BscTokenAmount;
 use App\Services\Checkout\PaymentPlan\BscCheckoutPaymentSnapshot;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Collection;
@@ -24,7 +24,7 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
     public function __construct(
         private BscReadiness $readiness,
         private BscPaymentReceiverPool $receiverPool,
-        private BscUniquePaymentAmount $uniqueAmount,
+        private BscTokenAmount $tokenAmount,
     ) {}
 
     public function preflight(CheckoutPaymentPreflightContext $context): CheckoutPaymentPreflight
@@ -53,22 +53,17 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
         );
         $receiver = $this->receiverPool->selectSnapshot();
 
-        $payableAmount = $this->uniqueAmount->allocate(
-            $baseAmount,
-            setting: $context->lockedSetting,
-        );
-
         $snapshot = new BscCheckoutPaymentSnapshot(
             provider: PaymentProvider::MANUAL,
             method: self::METHOD,
             paymentCurrency: self::PAYMENT_CURRENCY,
-            amount: $payableAmount,
+            amount: $baseAmount,
             expiresAt: $expiresAt,
             receiver: $receiver,
             baseAmountMicro: $baseAmount,
-            payableAmountMicro: $payableAmount,
-            expectedTokenUnits: $this->uniqueAmount->expectedTokenUnits(
-                $payableAmount,
+            payableAmountMicro: $baseAmount,
+            expectedTokenUnits: $this->tokenAmount->expectedTokenUnits(
+                $baseAmount,
                 $receiver->tokenDecimals,
             ),
             verificationStatus: PaymentBscDetail::STATUS_AWAITING_TRANSFER,
@@ -85,7 +80,7 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
             provider: PaymentProvider::MANUAL,
             method: self::METHOD,
             paymentCurrency: self::PAYMENT_CURRENCY,
-            amount: $payableAmount,
+            amount: $baseAmount,
             paymentExpiresAt: $expiresAt,
             railSnapshot: $snapshot,
             postCreationBehavior: CheckoutPostCreationBehavior::BscInstructions,
