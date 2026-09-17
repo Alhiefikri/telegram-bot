@@ -18,6 +18,7 @@ use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
+use App\Services\Sakurupiah\SakurupiahQrisImage;
 use App\Support\DogfoodTiming;
 use App\Support\PakasirCheckoutFlow;
 use InvalidArgumentException;
@@ -36,6 +37,7 @@ class TelegramCheckoutIntents
         private TelegramKlikQrisRecoveryEscalator $klikQrisAlerts,
         private KlikQrisQrisImage $klikQrisImages,
         private SakurupiahInvoiceLifecycleService $sakurupiah,
+        private SakurupiahQrisImage $sakurupiahImages,
         private PaymentProviderResolver $providerResolver,
         private BscReadiness $bscReadiness,
     ) {}
@@ -157,6 +159,26 @@ class TelegramCheckoutIntents
         $payable = $result->payable();
         if ($payable === null) {
             return $this->sendSakurupiahRetryState($chatId, $order, $result->outcome(), $locale);
+        }
+
+        if ($payable->isQrisImage()) {
+            try {
+                $imageContents = $this->sakurupiahImages->contents($payable);
+
+                return $this->sendPaymentInstruction(
+                    $chatId,
+                    $this->paymentInstructions->sakurupiahQrisImage($order, $payable, $imageContents, $locale),
+                );
+            } catch (Throwable) {
+                if (! $payable->isHosted()) {
+                    return $this->sendSakurupiahRetryState(
+                        $chatId,
+                        $order,
+                        SakurupiahInvoiceOutcome::ProviderPresentationPending,
+                        $locale,
+                    );
+                }
+            }
         }
 
         if ($payable->isHosted()) {

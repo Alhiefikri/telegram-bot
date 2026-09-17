@@ -11,9 +11,12 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 
 /**
- * The payload contains only a provider-issued QRIS EMV payload with a valid
- * terminal CRC, or an allowlisted hosted checkout URL. Provider QR strings
- * that fail the QRIS integrity boundary fall back to hosted presentation.
+ * The payload contains exactly one provider presentation: a provider-issued
+ * QRIS EMV payload with a valid terminal CRC, an allowlisted provider QR image
+ * URL, or an allowlisted hosted checkout URL. Sakurupiah returns `qr` as a
+ * provider-hosted QR image URL for the approved channel, so that value is
+ * carried as an image presentation instead of being rejected as an invalid
+ * EMV payload.
  */
 final readonly class SakurupiahPayableInvoice
 {
@@ -25,6 +28,7 @@ final readonly class SakurupiahPayableInvoice
         private int $providerFee,
         private CarbonImmutable $effectiveExpiresAt,
         private ?string $qrisPayload,
+        private ?string $qrisImageUrl,
         private ?string $checkoutUrl,
     ) {}
 
@@ -77,12 +81,19 @@ final readonly class SakurupiahPayableInvoice
         }
 
         $qrisPayload = $invoice->qrPayload();
+        $qrisImageUrl = null;
         $checkoutUrl = $invoice->checkoutUrl();
         if ($qrisPayload !== null && self::isValidQrisPayload($qrisPayload, $invoice->totalValue())) {
             $checkoutUrl = null;
+        } elseif ($qrisPayload !== null && self::isAllowedProviderUrl($qrisPayload, $environment)) {
+            $qrisImageUrl = $qrisPayload;
+            $qrisPayload = null;
+            if ($checkoutUrl !== null && ! self::isAllowedProviderUrl($checkoutUrl, $environment)) {
+                $checkoutUrl = null;
+            }
         } else {
             $qrisPayload = null;
-            if ($checkoutUrl === null || ! self::isAllowedHostedUrl($checkoutUrl, $environment)) {
+            if ($checkoutUrl === null || ! self::isAllowedProviderUrl($checkoutUrl, $environment)) {
                 throw new SakurupiahInvoiceIntegrityException('qris_presentation');
             }
         }
@@ -95,6 +106,7 @@ final readonly class SakurupiahPayableInvoice
             providerFee: $fee,
             effectiveExpiresAt: $effectiveExpiresAt,
             qrisPayload: $qrisPayload,
+            qrisImageUrl: $qrisImageUrl,
             checkoutUrl: $checkoutUrl,
         );
     }
@@ -159,18 +171,34 @@ final readonly class SakurupiahPayableInvoice
 
         $mode = $snapshot['mode'] ?? null;
         $qrisPayload = $snapshot['qris_payload'] ?? null;
+        $qrisImageUrl = $snapshot['qris_image_url'] ?? null;
         $checkoutUrl = $snapshot['checkout_url'] ?? null;
         if ($mode === 'qris') {
             if (! is_string($qrisPayload)
                 || ! self::isValidQrisPayload($qrisPayload, $total)
+                || $qrisImageUrl !== null
                 || $checkoutUrl !== null) {
                 throw new SakurupiahInvoiceIntegrityException('qris_presentation');
+            }
+        } elseif ($mode === 'qris_image') {
+            if (! is_string($qrisImageUrl)
+                || $qrisImageUrl === ''
+                || $qrisPayload !== null
+                || ! self::isAllowedProviderUrl($qrisImageUrl, $environment)) {
+                throw new SakurupiahInvoiceIntegrityException('qris_image_presentation');
+            }
+            if ($checkoutUrl !== null
+                && (! is_string($checkoutUrl)
+                    || $checkoutUrl === ''
+                    || ! self::isAllowedProviderUrl($checkoutUrl, $environment))) {
+                throw new SakurupiahInvoiceIntegrityException('hosted_presentation');
             }
         } elseif ($mode === 'hosted') {
             if (! is_string($checkoutUrl)
                 || $checkoutUrl === ''
                 || $qrisPayload !== null
-                || ! self::isAllowedHostedUrl($checkoutUrl, $environment)) {
+                || $qrisImageUrl !== null
+                || ! self::isAllowedProviderUrl($checkoutUrl, $environment)) {
                 throw new SakurupiahInvoiceIntegrityException('hosted_presentation');
             }
         } else {
@@ -185,7 +213,8 @@ final readonly class SakurupiahPayableInvoice
             providerFee: $fee,
             effectiveExpiresAt: $effectiveExpiresAt,
             qrisPayload: $mode === 'qris' ? $qrisPayload : null,
-            checkoutUrl: $mode === 'hosted' ? $checkoutUrl : null,
+            qrisImageUrl: $mode === 'qris_image' ? $qrisImageUrl : null,
+            checkoutUrl: in_array($mode, ['qris_image', 'hosted'], true) ? $checkoutUrl : null,
         );
     }
 
@@ -229,6 +258,11 @@ final readonly class SakurupiahPayableInvoice
         return $this->qrisPayload;
     }
 
+    public function qrisImageUrl(): ?string
+    {
+        return $this->qrisImageUrl;
+    }
+
     public function checkoutUrl(): ?string
     {
         return $this->checkoutUrl;
@@ -239,17 +273,23 @@ final readonly class SakurupiahPayableInvoice
         return $this->qrisPayload !== null;
     }
 
+    public function isQrisImage(): bool
+    {
+        return $this->qrisImageUrl !== null;
+    }
+
     public function isHosted(): bool
     {
         return $this->checkoutUrl !== null;
     }
 
-    /** @return array{mode: 'qris'|'hosted', qris_payload: ?string, checkout_url: ?string, effective_expires_at: string} */
+    /** @return array{mode: 'qris'|'qris_image'|'hosted', qris_payload: ?string, qris_image_url: ?string, checkout_url: ?string, effective_expires_at: string} */
     public function persistenceSnapshot(): array
     {
         return [
-            'mode' => $this->isDirectQris() ? 'qris' : 'hosted',
+            'mode' => $this->isDirectQris() ? 'qris' : ($this->isQrisImage() ? 'qris_image' : 'hosted'),
             'qris_payload' => $this->qrisPayload,
+            'qris_image_url' => $this->qrisImageUrl,
             'checkout_url' => $this->checkoutUrl,
             'effective_expires_at' => $this->effectiveExpiresAt->toIso8601String(),
         ];
@@ -266,7 +306,13 @@ final readonly class SakurupiahPayableInvoice
         }
     }
 
-    private static function isAllowedHostedUrl(string $url, SakurupiahEnvironment $environment): bool
+    /**
+     * Shared URL boundary for every provider-issued presentation value,
+     * including the QR image URL. Only HTTPS URLs on the exact environment
+     * host allowlist are usable; userinfo, custom ports, and fragments are
+     * rejected.
+     */
+    public static function isAllowedProviderUrl(string $url, SakurupiahEnvironment $environment): bool
     {
         $parts = parse_url($url);
         if (! is_array($parts)

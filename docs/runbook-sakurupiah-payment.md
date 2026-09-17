@@ -265,6 +265,36 @@ provider portal cannot render a QR. Keep the Payment pending and request a
 valid redacted QRISC sandbox fixture or an approved non-tokenized hosted
 presentation from Sakurupiah.
 
+### Provider QR presentation (current contract)
+
+For the approved `QRISC` channel the provider returns `qr` as an HTTPS URL to a
+provider-hosted QR image (verified `image/png`), not as an EMVCo payload. A
+successful create is presented to the customer through exactly one of these
+modes:
+
+- **Direct QR** — `qr` is a valid EMV payload (terminal CRC and exact total
+  verified) and is rendered locally.
+- **QR image** — `qr` is an HTTPS URL on the configured environment allowlist;
+  Telegram fetches it server-side (no redirects, bounded size, image signature
+  required) and sends it as a photo, and the storefront serves it through the
+  signed `…/qris` route. A policy-compliant `checkout_url` is kept alongside it
+  and appears as the website button.
+- **Hosted** — no usable QR; the allowlisted `checkout_url` is shown as the
+  website button.
+
+An unvalidated `qr` string is never rendered as a QR image. When no mode yields
+a usable presentation the Payment stays pending with
+`provider_create_state=provider_qris_unusable`, `provider_create_last_error=provider_presentation_unusable`,
+and the safe `provider_presentation_pending` outcome; the customer receives
+retry copy without QR, total, or provider data.
+
+A provider create rejected at the application level is recorded as
+`outcome_unknown` with `provider_create_last_error` naming the exception and the
+provider application status (for example
+`App\Services\Sakurupiah\SakurupiahApplicationException|application_status:400`).
+The create is never repeated blindly; investigate the recorded status and the
+merchant/provider configuration before retrying a new checkout.
+
 ### Raw sandbox create diagnostic
 
 A subsequent fresh sandbox create probe at amount `200` captured only response

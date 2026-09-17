@@ -483,7 +483,7 @@ final class SakurupiahInvoiceLifecycleService
                 self::STATE_PROVIDER_TOTAL_INVALID,
                 'provider_fee_payer_invalid',
             ),
-            'qris_presentation', 'hosted_presentation' => $this->assessment(
+            'qris_presentation', 'qris_image_presentation', 'hosted_presentation' => $this->assessment(
                 SakurupiahInvoiceOutcome::ProviderPresentationPending,
                 self::STATE_PROVIDER_QRIS_UNUSABLE,
                 'provider_presentation_unusable',
@@ -801,7 +801,7 @@ final class SakurupiahInvoiceLifecycleService
                 );
             } catch (SakurupiahInvoiceIntegrityException $exception) {
                 return SakurupiahInvoiceLifecycleResult::state(
-                    in_array($exception->reason, ['qris_presentation', 'hosted_presentation', 'presentation_snapshot'], true)
+                    in_array($exception->reason, ['qris_presentation', 'qris_image_presentation', 'hosted_presentation', 'presentation_snapshot'], true)
                         ? SakurupiahInvoiceOutcome::ProviderPresentationPending
                         : SakurupiahInvoiceOutcome::ProviderTotalPending,
                 );
@@ -956,8 +956,22 @@ final class SakurupiahInvoiceLifecycleService
         return SakurupiahPayloadSanitizer::sanitize(array_replace_recursive($existing, $observed));
     }
 
+    /**
+     * Persist a safe, non-secret provider failure code. The provider
+     * application status is recorded because a rejected create must stay
+     * diagnosable without re-running it; provider messages, payloads,
+     * credentials, and identifiers are never persisted here.
+     */
     private function exceptionCode(Throwable $exception): string
     {
+        if ($exception instanceof SakurupiahApplicationException) {
+            return substr($exception::class.'|application_status:'.$exception->providerStatus, 0, 500);
+        }
+
+        if ($exception instanceof SakurupiahProviderException && $exception->httpStatus !== null) {
+            return substr($exception::class.'|http_status:'.$exception->httpStatus, 0, 500);
+        }
+
         return substr($exception::class, 0, 500);
     }
 

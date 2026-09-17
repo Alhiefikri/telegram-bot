@@ -320,6 +320,20 @@ class TelegramPaymentInstructionRenderer
         );
     }
 
+    public function sakurupiahQrisImage(Order $order, SakurupiahPayableInvoice $payable, string $photoContents, string $locale = 'id'): TelegramPaymentInstruction
+    {
+        if (! $payable->isQrisImage()) {
+            throw new \RuntimeException('Sakurupiah invoice has no provider QR image.');
+        }
+
+        return new TelegramPaymentInstruction(
+            photoContents: $photoContents,
+            filename: 'sakurupiah-'.$order->invoice_number.'.png',
+            captionLines: $this->sakurupiahLines($order, $payable, $locale),
+            replyMarkup: $this->sakurupiahPaymentActions($order, $payable->checkoutUrl(), $locale),
+        );
+    }
+
     /** @return array{text: string, reply_markup: array<string, mixed>} */
     public function sakurupiahHosted(Order $order, SakurupiahPayableInvoice $payable, string $locale = 'id'): array
     {
@@ -349,7 +363,7 @@ class TelegramPaymentInstructionRenderer
             $this->text($locale, 'payment.qris_fee_store'),
             '',
             $this->text($locale, 'payment.sakurupiah.exact_amount'),
-            $payable->isDirectQris()
+            $payable->isDirectQris() || $payable->isQrisImage()
                 ? $this->text($locale, 'payment.sakurupiah.scan')
                 : $this->text($locale, 'payment.sakurupiah.hosted'),
             '',

@@ -97,7 +97,63 @@ should bypass its guardrail.
 The QRISC presentation gate remains unqualified. Production remains **NOT
 ACTIVATED**.
 
+## 2026-09-17 — QR image presentation fix
+
+A live sandbox probe of the approved `QRISC` channel clarified the provider
+presentation contract: the create response `qr` field is an HTTPS URL to a
+provider-hosted QR **image** (fetched `200 image/png`, valid PNG signature,
+~4.6 kB), while `checkout_url` is an HTML payment page. The field is not an
+EMVCo payload, which is why the EMV-only validator rejected it and the customer
+surface depended entirely on the hosted URL.
+
+The application now resolves three presentation modes in order — validated EMV
+payload, allowlisted provider QR image URL, allowlisted hosted URL. For the QR
+image mode:
+
+- Telegram downloads the image server-side through `SakurupiahQrisImage`
+  (HTTPS plus exact host allowlist, no redirects, 2 MB cap, PNG/JPEG signature)
+  and sends it as a photo with the scan copy and the usual Check/Cancel actions;
+  a policy-compliant `checkout_url` is added as the website button.
+- The storefront serves the image through the existing signed `…/qris` route
+  and never exposes the provider URL in the page.
+- If the image cannot be downloaded and no hosted URL is available, the Payment
+  keeps the safe `provider_presentation_pending` retry copy without provider
+  data.
+
+Provider application rejections are now diagnosable: `provider_create_last_error`
+records the exception plus the provider application status
+(`...|application_status:<status>`); messages, payloads, credentials, and
+identifiers are still never persisted.
+
+The same investigation found a shared download defect: under
+`laravel/framework` v13.24.0, passing `stream => true` together with a `sink`
+resource through `withOptions()` leaves the sink empty, so the provider image
+download (both the new Sakurupiah fetcher and the pre-existing KlikQRIS
+`KlikQrisQrisImage`) failed against real HTTP while fake/stub downloads still
+succeeded. Both fetchers now attach the sink through the fluent `sink()` call;
+no `stream` option is used, and the existing redirect, content-length, progress,
+and PNG/JPEG boundary checks are unchanged. A live provider fetch now writes
+the full image (4,604 bytes, PNG signature) into the sink. This removes the
+KlikQRIS dependency on its base64 recovery path for the normal QR delivery.
+
+Focused verification after the change: `php artisan test --filter='Sakurupiah'`
+— 159 passed, 3 skipped; adjacent KlikQRIS, storefront invoice, and Telegram
+renderer suites — 71 passed.
+
+Separately, the 2026-09-16 production checkout on the active `QRISC` rail was
+rejected by the provider with a non-200 application status
+(`outcome_unknown`, no provider reference, no presentation), so its Telegram
+instruction was the safe retry copy with no QR and no payment link. No code
+change can substitute for a rejected create; after deployment the recorded
+application status identifies the merchant/provider condition to correct.
+Selection of Sakurupiah for new checkout remains Owner-controlled and this
+evidence record does not change the production activation status.
+
 ## Presentation contract correction
+
+> Superseded by the 2026-09-17 QR image presentation entry below. The provider
+> `qr` field is a QR image URL for `QRISC`; it is not rendered as opaque content
+> and its URL is validated against the environment host allowlist before use.
 
 The rejection above exposed an application contract mismatch. Sakurupiah's
 official create documentation defines `qr` only as a QRIS response string; it

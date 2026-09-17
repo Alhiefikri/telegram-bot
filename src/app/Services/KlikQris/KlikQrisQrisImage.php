@@ -61,10 +61,9 @@ class KlikQrisQrisImage
         try {
             $response = Http::timeout(4)
                 ->connectTimeout(2)
+                ->sink($sink)
                 ->withOptions([
                     'allow_redirects' => false,
-                    'stream' => true,
-                    'sink' => $sink,
                     'on_headers' => function ($response): void {
                         $contentLength = $response->getHeaderLine('Content-Length');
                         if ($contentLength !== '' && ctype_digit($contentLength) && (int) $contentLength > self::MAX_BYTES) {

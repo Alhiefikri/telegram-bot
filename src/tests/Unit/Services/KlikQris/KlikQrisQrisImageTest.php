@@ -139,15 +139,21 @@ class KlikQrisQrisImageTest extends TestCase
         $sink = null;
         Http::shouldReceive('timeout')->once()->with(4)->andReturn($pending);
         $pending->shouldReceive('connectTimeout')->once()->with(2)->andReturnSelf();
+        $pending->shouldReceive('sink')
+            ->once()
+            ->with(Mockery::on(function ($value) use (&$sink): bool {
+                $sink = $value;
+
+                return is_resource($value);
+            }))
+            ->andReturnSelf();
         $pending->shouldReceive('withOptions')
             ->once()
-            ->with(Mockery::on(function (array $options) use (&$sink, $assertOptions): bool {
-                $sink = $options['sink'] ?? null;
-
+            ->with(Mockery::on(function (array $options) use ($assertOptions): bool {
                 if ($assertOptions) {
                     $this->assertFalse($options['allow_redirects'] ?? true);
-                    $this->assertTrue($options['stream'] ?? false);
-                    $this->assertIsResource($sink);
+                    $this->assertArrayNotHasKey('stream', $options);
+                    $this->assertArrayNotHasKey('sink', $options);
                     $this->assertIsCallable($options['on_headers'] ?? null);
                     $this->assertIsCallable($options['progress'] ?? null);
                 }

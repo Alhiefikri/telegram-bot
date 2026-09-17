@@ -70,20 +70,37 @@ readiness harus memilih tepat QRISC dan menolak channel set yang ambigu.
 ### Presentation contract
 
 The official create response documents `qr` as a provider-issued QRIS string
-and `checkout_url` as the buyer redirect. It does not define `qr` as an EMV
-payload or require merchant-side CRC/currency/amount parsing. The application
-therefore treats a non-empty `qr` value as opaque provider presentation content
-and renders that exact value as a QR image after the invoice identity,
-amount/fee, status, and expiry gates pass.
+and `checkout_url` as the buyer redirect. For the approved `QRISC` channel the
+merchant sandbox returns `qr` as an HTTPS **provider-hosted QR image URL**
+(verified `image/png`), not as an EMVCo payload. The application resolves the
+presentation in this order after the invoice identity, amount/fee, status, and
+expiry gates pass:
 
-When `qr` is absent, `checkout_url` is accepted only with HTTPS and an exact
-environment allowlisted host. Provider-documented query parameters are allowed,
-but userinfo, custom ports, and fragments remain rejected. The complete URL is
-kept only in the encrypted `provider_presentation` snapshot and must never be
-copied to `provider_payload`, logs, events, or other plaintext diagnostics.
+1. **Direct QR** — `qr` is a valid EMV payload (starts `000201`, terminal CRC
+   verified, tag 54 amount equals the provider total). The QR image is rendered
+   locally; the hosted URL is not used.
+2. **QR image** — `qr` is an HTTPS URL on the exact environment host allowlist.
+   The complete URL is stored only in the encrypted `provider_presentation`
+   snapshot. Telegram downloads it server-side through `SakurupiahQrisImage`
+   (no redirects, bounded size, PNG/JPEG signature required) and sends it as a
+   photo with the scan copy; the storefront serves it through the signed
+   `…/qris` route. A provider `checkout_url` that also passes the URL policy is
+   kept alongside the image and exposed as the website button; if it is absent
+   or fails the policy, the image presentation stays payable.
+3. **Hosted** — no usable QR; `checkout_url` is accepted only with HTTPS and an
+   exact environment host allowlisted host. Provider-documented query
+   parameters are allowed, but userinfo, custom ports, fragments, and
+   non-allowlisted hosts remain rejected. The complete URL is kept only in the
+   encrypted `provider_presentation` snapshot and must never be copied to
+   `provider_payload`, logs, events, or other plaintext diagnostics.
 
-The modes remain exclusive: a response containing `qr` uses direct QR
-presentation; hosted presentation is considered only when `qr` is absent.
+When none of the three yields a usable presentation, the Payment stays pending
+with the safe `provider_presentation_pending` outcome and the customer receives
+retry copy without QR, total, or provider data.
+
+The application never renders an unvalidated `qr` string as a scannable QR
+image: arbitrary opaque content is not payable because a QR that does not
+encode a valid payload cannot be scanned.
 
 ## Peta ownership repository
 

@@ -107,7 +107,7 @@ class StorefrontShopOrderPresenter
             'isBscPayment' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'USDT_BEP20',
             'isManualQris' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'QR_MANUAL',
             'isSakurupiah' => $isSakurupiah,
-            'isHostedSakurupiah' => $isSakurupiah && $invoice->isPendingPayment() && filled($invoice->hostedPaymentUrl),
+            'isHostedSakurupiah' => $isSakurupiah && $invoice->isPendingPayment() && filled($invoice->hostedPaymentUrl) && ! filled($invoice->qrisImageSource),
             'isHostedPakasir' => $invoice->payment?->provider === 'pakasir' && $invoice->payment?->method === 'hosted',
             'qrisFeePayer' => $isSakurupiah ? 'store' : config('services.pakasir.qris_fee.payer', 'customer'),
             'binanceVerificationMode' => $invoice->binanceVerificationStatus?->mode ?? 'amount_unique',

@@ -407,6 +407,67 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
     }
 
+    public function test_qris_image_presentation_delivers_the_provider_photo_and_checkout_link(): void
+    {
+        $imageUrl = 'https://sakurupiah.id/qris/trx-qr-image.png';
+        $checkoutUrl = 'https://sakurupiah.id/pay/invoice?token=redacted';
+        $this->fakeTelegramHttp([
+            $imageUrl => Http::response("\x89PNG\r\n\x1A\n".'provider-qr-image', 200, ['Content-Type' => 'image/png']),
+        ]);
+        [$order, $payment] = $this->payment([
+            'invoice_number' => 'INV-SAK-TELEGRAM-QR-IMAGE',
+            'provider_presentation' => [
+                'mode' => 'qris_image',
+                'qris_image_url' => $imageUrl,
+                'checkout_url' => $checkoutUrl,
+            ],
+        ]);
+
+        $effect = app(TelegramOutboundEffectService::class)->recordCheckoutInstructions($order, $payment);
+        (new SendSakurupiahCheckoutInstructions($order->id, null, $effect?->id))
+            ->handle(app(TelegramCheckoutIntents::class));
+
+        $sendPhotos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $sendPhotos);
+        $body = str_replace('\\/', '/', $sendPhotos->first()[0]->body());
+        $this->assertStringContainsString("\x89PNG\r\n\x1A\n", $body);
+        $this->assertStringContainsString('INV-SAK-TELEGRAM-QR-IMAGE', $body);
+        $this->assertStringContainsString('Rp20.450', $body);
+        $this->assertStringContainsString('Check Payment', $body);
+        $this->assertStringContainsString('Pay via Website', $body);
+        $this->assertStringContainsString($checkoutUrl, $body);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
+    }
+
+    public function test_qris_image_download_failure_falls_back_to_the_checkout_link_message(): void
+    {
+        $checkoutUrl = 'https://sakurupiah.id/pay/invoice?token=redacted';
+        $this->fakeTelegramHttp([
+            'https://sakurupiah.id/qris/*' => Http::response('provider-image-unavailable', 503),
+        ]);
+        [$order, $payment] = $this->payment([
+            'invoice_number' => 'INV-SAK-TELEGRAM-QR-IMAGE-FALLBACK',
+            'provider_presentation' => [
+                'mode' => 'qris_image',
+                'qris_image_url' => 'https://sakurupiah.id/qris/trx-qr-image-fallback.png',
+                'checkout_url' => $checkoutUrl,
+            ],
+        ]);
+
+        $effect = app(TelegramOutboundEffectService::class)->recordCheckoutInstructions($order, $payment);
+        (new SendSakurupiahCheckoutInstructions($order->id, null, $effect?->id))
+            ->handle(app(TelegramCheckoutIntents::class));
+
+        $this->assertCount(0, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto')));
+        $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertCount(1, $sendMessages);
+        $body = str_replace('\\/', '/', $sendMessages->first()[0]->body());
+        $this->assertStringContainsString('INV-SAK-TELEGRAM-QR-IMAGE-FALLBACK', $body);
+        $this->assertStringContainsString('Pay via Website', $body);
+        $this->assertStringContainsString($checkoutUrl, $body);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
+    }
+
     /** @return array{0: Order, 1: Payment} */
     private function payment(array $attributes = []): array
     {

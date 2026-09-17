@@ -18,6 +18,7 @@ use App\Services\Sakurupiah\SakurupiahTransactionStatus;
 use App\Storefront\StorefrontShopSignedInvoice;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
@@ -110,6 +111,41 @@ class SakurupiahStorefrontTest extends TestCase
         $this->assertStringContainsString('Bayar via Website', $html);
         $this->assertStringNotContainsString(self::DIRECT_QRIS, $html);
         $this->assertStringNotContainsString('secret-provider-value', $html);
+    }
+
+    public function test_qr_image_invoice_is_payable_and_served_through_the_signed_endpoint(): void
+    {
+        $imageUrl = 'https://sakurupiah.id/qris/trx-storefront-qr-image.png';
+        Http::fake([
+            $imageUrl => Http::response("\x89PNG\r\n\x1A\n".'provider-qr-image', 200, ['Content-Type' => 'image/png']),
+        ]);
+        [$order] = $this->payment([
+            'invoice_number' => 'INV-SAK-STOREFRONT-QR-IMAGE',
+            'provider_presentation' => [
+                'mode' => 'qris_image',
+                'qris_image_url' => $imageUrl,
+                'checkout_url' => null,
+            ],
+        ]);
+
+        $invoice = app(StorefrontShopSignedInvoice::class)->read($order);
+
+        $this->assertTrue($invoice->isQrisPayable);
+        $this->assertNotNull($invoice->qrisImageSource);
+        $this->assertStringContainsString('/qris', $invoice->qrisImageSource);
+        $this->assertNull($invoice->hostedPaymentUrl);
+
+        $html = $this->get($invoice->redirectUrl)->assertOk()->getContent();
+        $this->assertStringContainsString('data-native-qris-crop="top-square"', $html);
+        $this->assertStringNotContainsString($imageUrl, $html);
+        $this->assertStringNotContainsString('secret-provider-value', $html);
+
+        $image = $this->get($invoice->qrisImageSource)
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png')
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Referrer-Policy', 'no-referrer');
+        $this->assertSame("\x89PNG\r\n\x1A\n", substr($image->getContent(), 0, 8));
     }
 
     public function test_conflicting_presentation_modes_fail_closed(): void

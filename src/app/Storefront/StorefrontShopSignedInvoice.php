@@ -196,7 +196,7 @@ class StorefrontShopSignedInvoice
             return $klikPayable->qrisUrl();
         }
 
-        if ($sakurupiahPayable?->isDirectQris()) {
+        if ($sakurupiahPayable?->isDirectQris() || $sakurupiahPayable?->isQrisImage()) {
             return $this->invoiceUrls->qrisImage($order);
         }
 

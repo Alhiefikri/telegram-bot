@@ -414,3 +414,29 @@ dropping a valid QR.
 This closes neither the QRISC presentation gate nor production qualification;
 request a complete EMV QR payload or an approved non-tokenized hosted
 presentation from Sakurupiah.
+
+## 2026-09-17 — Create `qr` field is a provider QR image URL
+
+A live sandbox probe of the approved `QRISC` channel (same merchant sandbox
+credential, amount `200`, unique merchant reference) resolved the presentation
+ambiguity recorded above. The create `data[0]` carried both documented fields:
+
+- `qr` — an HTTPS URL on `sakurupiah.id` whose path ends in a file-like
+  segment. Fetched directly, it returned HTTP `200`, `Content-Type:
+  image/png`, a valid PNG signature, and roughly 4.6 kB of image data. It is a
+  provider-hosted QR image asset, not an EMVCo payload: it does not start with
+  `000201` and has no terminal CRC.
+- `checkout_url` — an HTTPS `sakurupiah.id` URL with a query string. Fetched
+  directly, it returned HTTP `200`, `Content-Type: text/html`, i.e. the hosted
+  payment page.
+
+No presentation values are recorded here. This narrows the earlier open
+question: for `QRISC` the API hands the merchant a hosted QR image plus a
+hosted payment page. The application now consumes the image URL through the
+environment URL allowlist (downloaded server-side with redirects refused, a
+2 MB cap, and an image-signature check) instead of requiring an EMV payload,
+and keeps the hosted URL as a secondary link when it also passes the policy.
+
+EMV support remains only an opportunistic path for a provider payload that
+happens to validate; the rejection of arbitrary opaque `qr` content as a
+scannable QR is intentional and unchanged.

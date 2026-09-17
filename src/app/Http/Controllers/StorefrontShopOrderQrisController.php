@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisQrisImage;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
+use App\Services\Sakurupiah\SakurupiahQrisImage;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 use App\Support\PaymentProvider;
 use Illuminate\Http\Response;
@@ -20,6 +21,7 @@ class StorefrontShopOrderQrisController extends Controller
         KlikQrisNativeQrisService $klikQris,
         KlikQrisQrisImage $images,
         SakurupiahInvoiceLifecycleService $sakurupiah,
+        SakurupiahQrisImage $sakurupiahImages,
         TelegramQrCodeRenderer $qrCodes,
     ): Response {
         $payment = $order->payments()->latest('created_at')->first();
@@ -45,27 +47,39 @@ class StorefrontShopOrderQrisController extends Controller
                 $contents = $images->contents($recoveredPayable, preferFallback: true);
             }
 
-            return $this->pngResponse($contents);
+            return $this->imageResponse($contents);
         }
 
         if (strtolower((string) $payment?->provider) === PaymentProvider::SAKURUPIAH) {
             $payable = $sakurupiah->classify($payment)->payable();
-            abort_unless($payable?->isDirectQris() === true, 404);
+            abort_unless($payable !== null, 404);
 
-            try {
-                return $this->pngResponse($qrCodes->png((string) $payable->qrisPayload()));
-            } catch (InvalidArgumentException) {
-                abort(404);
+            if ($payable->isDirectQris()) {
+                try {
+                    return $this->imageResponse($qrCodes->png((string) $payable->qrisPayload()));
+                } catch (InvalidArgumentException) {
+                    abort(404);
+                }
             }
+
+            if ($payable->isQrisImage()) {
+                try {
+                    return $this->imageResponse($sakurupiahImages->contents($payable));
+                } catch (InvalidArgumentException) {
+                    abort(404);
+                }
+            }
+
+            abort(404);
         }
 
         abort(404);
     }
 
-    private function pngResponse(string $contents): Response
+    private function imageResponse(string $contents): Response
     {
         return response($contents)
-            ->header('Content-Type', 'image/png')
+            ->header('Content-Type', str_starts_with($contents, "\xFF\xD8\xFF") ? 'image/jpeg' : 'image/png')
             ->header('Cache-Control', 'no-store, private')
             ->header('Referrer-Policy', 'no-referrer');
     }

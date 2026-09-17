@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\Sakurupiah\SakurupiahAmount;
+use App\Services\Sakurupiah\SakurupiahApplicationException;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahCreatePreRequestException;
 use App\Services\Sakurupiah\SakurupiahFee;
@@ -191,6 +192,108 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         );
     }
 
+    public function test_provider_qr_image_url_becomes_payable_and_survives_snapshot_rehydration(): void
+    {
+        $payment = $this->payment(['merchant_ref' => 'INV-411-QR-IMAGE']);
+        $imageUrl = 'https://sakurupiah.id/qris/trx-411-qr-image.png';
+        $invoice = new SakurupiahInvoice(
+            trxId: 'trx-411-qr-image',
+            merchantRef: (string) $payment->merchant_ref,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+            status: SakurupiahTransactionStatus::Pending,
+            total: 12084,
+            amount: 12000,
+            fee: SakurupiahFee::from(84),
+            createdAt: CarbonImmutable::now()->subMinute(),
+            expiresAt: CarbonImmutable::now()->addDay(),
+            qr: $imageUrl,
+        );
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->once()->andReturn($invoice);
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
+
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $result->outcome());
+        $payable = $result->payable();
+        $this->assertNotNull($payable);
+        $this->assertTrue($payable->isQrisImage());
+        $this->assertSame($imageUrl, $payable->qrisImageUrl());
+        $this->assertFalse($payable->isDirectQris());
+        $this->assertNull($payable->qrisPayload());
+        $this->assertNull($payable->checkoutUrl());
+
+        $fresh = $payment->fresh();
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $fresh->provider_create_state);
+        $this->assertSame('qris_image', $fresh->provider_presentation['mode']);
+        $this->assertStringNotContainsString(
+            'sakurupiah.id/qris',
+            (string) $fresh->getRawOriginal('provider_presentation'),
+        );
+
+        $classified = app(SakurupiahInvoiceLifecycleService::class)->classify($fresh);
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $classified->outcome());
+        $this->assertTrue($classified->payable()?->isQrisImage());
+        $this->assertSame($imageUrl, $classified->payable()?->qrisImageUrl());
+    }
+
+    public function test_non_allowlisted_provider_qr_image_url_is_never_payable(): void
+    {
+        $payment = $this->payment(['merchant_ref' => 'INV-411-BAD-QR-IMAGE']);
+        $invoice = new SakurupiahInvoice(
+            trxId: 'trx-411-bad-qr-image',
+            merchantRef: (string) $payment->merchant_ref,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+            status: SakurupiahTransactionStatus::Pending,
+            total: 12084,
+            amount: 12000,
+            fee: SakurupiahFee::from(84),
+            createdAt: CarbonImmutable::now()->subMinute(),
+            expiresAt: CarbonImmutable::now()->addDay(),
+            qr: 'https://cdn.example.test/qris/trx-411-bad-qr-image.png',
+        );
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->once()->andReturn($invoice);
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
+
+        $this->assertSame(SakurupiahInvoiceOutcome::ProviderPresentationPending, $result->outcome());
+        $this->assertNull($result->payable());
+        $this->assertNull($payment->fresh()->provider_presentation);
+    }
+
+    public function test_qr_image_presentation_keeps_the_allowlisted_checkout_link(): void
+    {
+        $payment = $this->payment(['merchant_ref' => 'INV-411-QR-IMAGE-LINK']);
+        $imageUrl = 'https://sakurupiah.id/qris/trx-411-qr-image-link.png';
+        $checkoutUrl = 'https://sakurupiah.id/pay/invoice?source=provider';
+        $invoice = new SakurupiahInvoice(
+            trxId: 'trx-411-qr-image-link',
+            merchantRef: (string) $payment->merchant_ref,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+            status: SakurupiahTransactionStatus::Pending,
+            total: 12084,
+            amount: 12000,
+            fee: SakurupiahFee::from(84),
+            createdAt: CarbonImmutable::now()->subMinute(),
+            expiresAt: CarbonImmutable::now()->addDay(),
+            qr: $imageUrl,
+            checkoutUrl: $checkoutUrl,
+        );
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->once()->andReturn($invoice);
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
+
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $result->outcome());
+        $this->assertTrue($result->payable()?->isQrisImage());
+        $this->assertSame($imageUrl, $result->payable()?->qrisImageUrl());
+        $this->assertSame($checkoutUrl, $result->payable()?->checkoutUrl());
+        $this->assertSame('qris_image', $payment->fresh()->provider_presentation['mode']);
+    }
+
     public function test_http_create_response_is_parsed_and_sent_once_after_local_payment_exists(): void
     {
         $this->travelTo('2026-09-02 07:00:00');
@@ -239,6 +342,27 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->assertSame(SakurupiahInvoiceOutcome::RecoveryPending, $second->outcome());
         $this->assertSame(1, $attempts);
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED, $payment->fresh()->provider_create_state);
+    }
+
+    public function test_provider_application_rejection_persists_the_safe_application_status(): void
+    {
+        $payment = $this->payment();
+        Http::fake(fn () => Http::response([
+            'status' => '400',
+            'message' => 'provider-secret-message',
+        ], 200));
+
+        $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
+
+        $this->assertSame(SakurupiahInvoiceOutcome::RecoveryPending, $result->outcome());
+        $fresh = $payment->fresh();
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN, $fresh->provider_create_state);
+        $this->assertSame(
+            SakurupiahApplicationException::class.'|application_status:400',
+            $fresh->provider_create_last_error,
+        );
+        $this->assertStringNotContainsString('provider-secret-message', (string) $fresh->provider_create_last_error);
+        Http::assertSentCount(1);
     }
 
     public function test_create_5xx_is_recovery_pending_and_not_retried(): void
