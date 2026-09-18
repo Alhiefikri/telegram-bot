@@ -371,18 +371,18 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 
         $this->assertLocalizedCopy(
             $this->customerPayload('/sendMessage', 41061),
-            ['💎 Pilih metode pembayaran Binance', 'Pay with Binance Pay ID', '❌ Batal'],
-            ['Choose a Binance payment method', 'Bayar dengan Binance Pay ID'],
+            ['💎 Pilih metode pembayaran USDT', 'Bayar dengan Binance Pay ID', '❌ Batal'],
+            ['Choose a USDT payment method', 'Pay with Binance Pay ID'],
         );
         $this->assertLocalizedCopy(
             $this->customerPayload('/sendMessage', 41062),
-            ['💎 Choose a Binance payment method', 'Pay with Binance Pay ID', '❌ Cancel'],
-            ['Pilih metode pembayaran Binance', 'Bayar dengan Binance Pay ID'],
+            ['💎 Choose a USDT payment method', 'Pay with Binance Pay ID', '❌ Cancel'],
+            ['Pilih metode pembayaran USDT', 'Bayar dengan Binance Pay ID'],
         );
         $this->assertLocalizedCopy(
             $this->customerPayload('/sendMessage', 41063),
-            ['💎 Pilih kaedah bayaran Binance', 'Bayar dengan Binance Pay ID', '❌ Batal'],
-            ['Choose a Binance payment method', 'Pay with Binance Pay ID'],
+            ['💎 Pilih kaedah bayaran USDT', 'Bayar dengan Binance Pay ID', '❌ Batal'],
+            ['Choose a USDT payment method', 'Pay with Binance Pay ID'],
         );
 
     }

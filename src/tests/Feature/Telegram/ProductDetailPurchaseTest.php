@@ -1112,7 +1112,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         ))->assertOk();
 
         $record = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'Binance'))
+            && str_contains((string) json_encode($request['reply_markup'] ?? null), 'checkout:binance:rail:'))
             ->last();
         $this->assertNotNull($record);
         $data = $record[0]->data();

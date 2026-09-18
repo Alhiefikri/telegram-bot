@@ -512,9 +512,11 @@ class TelegramPaymentInstructionRendererTest extends TestCase
     #[DataProvider('bscInstructionLocales')]
     public function test_bsc_instruction_renders_the_exact_snapshotted_payable_amount(
         string $locale,
-        string $productTotalLabel,
+        string $title,
         string $sendExactlyLabel,
+        string $validityLabel,
     ): void {
+        $this->travelTo(CarbonImmutable::parse('2026-07-04 16:00:00', 'Asia/Jakarta'));
         $expiresAt = CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta');
         $order = $this->orderWithItems($expiresAt);
         $receiver = BscPaymentReceiver::factory()->verified()->active()->create([
@@ -546,18 +548,21 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         ]);
 
         $instruction = $this->renderer()->bsc($order, $payment, $locale);
+        $text = $instruction['text'];
 
-        $this->assertStringContainsString($productTotalLabel.': 2.5 USDT', $instruction['text']);
-        $this->assertStringContainsString($sendExactlyLabel."\n2.5001 USDT", $instruction['text']);
-        $this->assertStringNotContainsString($sendExactlyLabel."\n2.5 USDT", $instruction['text']);
+        $this->assertStringContainsString($title, $text);
+        $this->assertStringContainsString($sendExactlyLabel."\n2.5001 USDT", $text);
+        $this->assertStringNotContainsString($sendExactlyLabel."\n2.5 USDT", $text);
+        $this->assertStringNotContainsString('2.5 USDT', $text);
+        $this->assertStringContainsString($validityLabel, $text);
     }
 
     public static function bscInstructionLocales(): array
     {
         return [
-            'english' => ['en', '💵 Product total', 'Send exactly:'],
-            'indonesian' => ['id', '💵 Harga produk', 'Kirim tepat:'],
-            'malay' => ['ms', '💵 Jumlah produk', 'Hantar tepat:'],
+            'english' => ['en', '💎 USDT BEP20 Payment', 'Send exactly:', 'Valid for 30 minutes'],
+            'indonesian' => ['id', '💎 Pembayaran USDT BEP20', 'Kirim tepat:', 'Valid 30 menit'],
+            'malay' => ['ms', '💎 Bayaran USDT BEP20', 'Hantar tepat:', 'Sah selama 30 minit'],
         ];
     }
 

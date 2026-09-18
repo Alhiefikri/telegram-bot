@@ -123,15 +123,14 @@ class TelegramPaymentInstructionRenderer
         );
         $deadline = $payment->expired_at ?? $order->expires_at;
         $amount = $this->formatUsdt((int) $detail->payable_amount_micro);
-        $baseAmount = $this->formatUsdt((int) $detail->base_amount_micro);
 
         $text = $this->text($locale, 'payment.bsc.instructions', [
             'invoice' => $order->invoice_number,
             'items' => $this->orderItemsSummary($order),
-            'product_total' => $baseAmount,
             'amount' => $amount,
             'address' => $detail->receiver_address,
             'deadline' => $deadline ? $this->formatDate($deadline, $locale) : $this->text($locale, 'payment.bsc.deadline_default'),
+            'ttl' => $this->bscWindowMinutes($payment, $deadline),
             'confirmations' => $minimumConfirmations,
             'current_confirmations' => $confirmations,
         ]);
@@ -508,6 +507,19 @@ class TelegramPaymentInstructionRenderer
     private function formatUsdt(int $amount): string
     {
         return rtrim(rtrim(number_format($amount / 1_000_000, 6, '.', ''), '0'), '.');
+    }
+
+    /**
+     * Report the payment window from the snapshot itself so the copy always
+     * matches the configured TTL captured at checkout.
+     */
+    private function bscWindowMinutes(Payment $payment, ?CarbonInterface $deadline): int
+    {
+        if (! $deadline instanceof CarbonInterface || $payment->created_at === null) {
+            return ManualPaymentSetting::DEFAULT_BSC_PAYMENT_TTL_MINUTES;
+        }
+
+        return max(1, (int) round(abs($deadline->diffInSeconds($payment->created_at)) / 60));
     }
 
     private function orderItemsSummary(Order $order): string
