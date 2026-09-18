@@ -36,7 +36,7 @@
                         <span class="line-clamp-2 break-words">{{ $presentation->name }}</span>
                     </a>
                 </h3>
-                <p class="mt-2 hidden text-xs font-medium leading-5 text-[var(--sf-muted)] sm:line-clamp-2">
+                <p class="product-card-description mt-2 hidden text-xs font-medium leading-5 text-[var(--sf-muted)] sm:line-clamp-2">
                     {{ $presentation->descriptionSnippet }}
                 </p>
             </div>

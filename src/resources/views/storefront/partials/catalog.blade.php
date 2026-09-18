@@ -74,21 +74,27 @@
         @endif
     @endif
     @if ($catalogPage->popularProducts->isNotEmpty())
-        <section id="trending" class="reveal-item mb-10 border-y border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-8 sm:px-6" aria-labelledby="trending-title">
-            <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                    <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-accent)]">Dipilih dari pesanan selesai</p>
-                    <h3 id="trending-title" class="mt-1 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)]">Trending sekarang</h3>
+        <section id="trending" class="storefront-trending-panel reveal-item mx-auto mb-10 max-w-7xl overflow-hidden rounded-2xl border border-[var(--sf-trend-border)] bg-[var(--sf-trend-panel)] text-[var(--sf-trend-text)]" aria-labelledby="trending-title">
+            <div class="storefront-trending-header flex items-center justify-between gap-3 border-b border-[var(--sf-trend-border)] px-3 py-2.5 sm:px-4">
+                <div class="flex min-w-0 items-center gap-2.5">
+                    <span class="storefront-trending-header__icon grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--sf-trend-accent)] text-[var(--sf-trend-panel)]" aria-hidden="true">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17 9 12l3 3 7-8"/><path d="M15 7h4v4"/></svg>
+                    </span>
+                    <div class="min-w-0">
+                        <p class="truncate text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--sf-trend-muted)]">Paling laku hari ini</p>
+                        <h3 id="trending-title" class="truncate font-display text-sm font-black tracking-tight text-[var(--sf-trend-text)] sm:text-base">Best sellers today</h3>
+                    </div>
                 </div>
-                <span class="text-xs font-bold text-[var(--sf-muted)]">Produk yang paling sering dibeli</span>
+                <span class="shrink-0 text-[10px] font-semibold text-[var(--sf-trend-muted)] sm:text-xs">Geser untuk melihat lainnya</span>
             </div>
-            <div @class([
-                'storefront-trending-grid mx-auto grid gap-4',
-                'grid-cols-1 max-w-xs' => $catalogPage->popularProducts->count() === 1,
-                'sm:grid-cols-2 lg:grid-cols-3 max-w-5xl' => $catalogPage->popularProducts->count() > 1,
-            ])>
+            <div class="storefront-trending-grid" role="list" aria-label="Produk trending">
                 @foreach ($catalogPage->popularProducts as $catalogProduct)
-                    @include('storefront.components.product-card', ['catalogProduct' => $catalogProduct])
+                    <div role="listitem">
+                        @include('storefront.components.trending-card', [
+                            'catalogProduct' => $catalogProduct,
+                            'rank' => $loop->iteration,
+                        ])
+                    </div>
                 @endforeach
             </div>
         </section>

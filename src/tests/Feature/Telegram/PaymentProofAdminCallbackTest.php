@@ -207,9 +207,10 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertNotNull($order->payments()->firstOrFail()->fresh()->payment_proof_submitted_at);
     }
 
-    public function test_pending_manual_proof_keeps_original_deadline_and_releases_stock_after_expiry(): void
+    public function test_pending_manual_proof_holds_stock_until_admin_rejects_after_original_deadline(): void
     {
         $this->fakeTelegramHttp();
+        config()->set('services.telegram.admin_user_id', '999');
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'qris_payment_ttl_minutes' => 1, 'is_active' => true]);
 
         $startedAt = now()->startOfMinute();
@@ -218,10 +219,12 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         try {
             $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
-            $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+            $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+            app(StockAdjustmentService::class)->adjust($product, 1, 'manual payment hold regression', null, null, ['buyer@example.test | password']);
             $cart = app(CartService::class)->activeCartFor($customer);
             app(CartService::class)->addItem($cart, $product, 1);
             $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+            $stockItem = ProductStockItem::query()->where('product_id', $product->id)->sole();
 
             $this->postTelegramWebhook($this->paymentPhotoUpdate(206, $order->invoice_number, ['username' => 'buyer']))->assertOk();
 
@@ -231,10 +234,57 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             Carbon::setTestNow($startedAt->copy()->addMinutes(2));
             $this->artisan('orders:expire-pending')->assertSuccessful();
 
-            $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
-            $this->assertSame(PaymentStatus::Expired, $order->payments()->sole()->fresh()->status);
+            $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+            $this->assertSame(PaymentStatus::Pending, $order->payments()->sole()->fresh()->status);
+            $this->assertSame(1, $product->fresh()->reserved_stock);
+            $this->assertSame($stockItem->id, $stockItem->fresh()->order_item_id);
+            $this->assertSame(0, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count());
+
+            $this->postTelegramWebhook($this->callbackUpdate(207, 'reject-after-deadline', 'admin:reject-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+            $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+            $this->assertSame(PaymentStatus::Failed, $order->payments()->sole()->fresh()->status);
             $this->assertSame(0, $product->fresh()->reserved_stock);
+            $this->assertNull($stockItem->fresh()->order_item_id);
             $this->assertSame(1, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count());
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_pending_manual_proof_holds_credential_until_admin_approves_after_original_deadline(): void
+    {
+        $this->fakeTelegramHttp();
+        config()->set('services.telegram.admin_user_id', '999');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'qris_payment_ttl_minutes' => 1, 'is_active' => true]);
+
+        $startedAt = now()->startOfMinute();
+        Carbon::setTestNow($startedAt);
+
+        try {
+            $customer = Customer::factory()->create(['telegram_id' => 12345, 'username' => 'buyer', 'locale' => 'id']);
+            $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+            app(StockAdjustmentService::class)->adjust($product, 1, 'manual payment approval regression', null, null, ['buyer@example.test | password']);
+            $cart = app(CartService::class)->activeCartFor($customer);
+            app(CartService::class)->addItem($cart, $product, 1);
+            $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+            $stockItem = ProductStockItem::query()->where('product_id', $product->id)->sole();
+
+            $this->postTelegramWebhook($this->paymentPhotoUpdate(208, $order->invoice_number, ['username' => 'buyer']))->assertOk();
+
+            Carbon::setTestNow($startedAt->copy()->addMinutes(2));
+            $this->artisan('orders:expire-pending')->assertSuccessful();
+            $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+
+            $this->postTelegramWebhook($this->callbackUpdate(209, 'approve-after-deadline', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+
+            $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+            $this->assertSame(PaymentStatus::Paid, $order->payments()->sole()->fresh()->status);
+            $this->assertSame(0, $product->fresh()->reserved_stock);
+            $this->assertSame(0, $product->fresh()->stock);
+            $this->assertSame($stockItem->id, $stockItem->fresh()->order_item_id);
+            $this->assertSame(1, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Sale)->count());
+            $this->assertSame(0, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count());
         } finally {
             Carbon::setTestNow();
         }

@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
 use Tests\TestCase;
 
 class StorefrontLandingPageTest extends TestCase
@@ -117,6 +118,29 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('href="/build/assets/', false)
             ->assertSee('src="/build/assets/', false)
             ->assertDontSee('https://stale-ngrok.example.test/build/assets/', false);
+    }
+
+    public function test_homepage_cache_key_changes_when_vite_manifest_changes(): void
+    {
+        $manifestPath = public_path('build/manifest.json');
+        $originalManifest = File::get($manifestPath);
+        $manifest = json_decode($originalManifest, true, 512, JSON_THROW_ON_ERROR);
+        $cacheKey = new \ReflectionMethod(\App\Storefront\StorefrontResponseCache::class, 'key');
+        $cacheKey->setAccessible(true);
+        $cache = app(\App\Storefront\StorefrontResponseCache::class);
+
+        try {
+            $before = $cacheKey->invoke($cache, 1, 1, '');
+
+            $manifest['resources/css/app.css']['file'] = 'assets/app-cache-bust.css';
+            File::put($manifestPath, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+
+            $after = $cacheKey->invoke($cache, 1, 1, '');
+
+            $this->assertNotSame($before, $after);
+        } finally {
+            File::put($manifestPath, $originalManifest);
+        }
     }
 
     public function test_storefront_exposes_soft_storefront_design_hooks(): void

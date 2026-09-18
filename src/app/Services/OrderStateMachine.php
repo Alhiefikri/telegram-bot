@@ -21,6 +21,7 @@ use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class OrderStateMachine implements OrderLifecycle
@@ -207,6 +208,7 @@ class OrderStateMachine implements OrderLifecycle
     public function applyPendingExpiry(Order $order): OrderLifecycleResult
     {
         $order->loadMissing('payments');
+
         if ($order->payments->contains(fn (Payment $payment): bool => $payment->provider === 'manual'
             && $payment->method === 'BINANCE_PAY_ID'
             && $payment->binance_auto_verification_enabled
@@ -392,7 +394,7 @@ class OrderStateMachine implements OrderLifecycle
         );
     }
 
-    private function applyReleaseTransition(Order $order, $payments, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue): OrderLifecycleResult
+    private function applyReleaseTransition(Order $order, Collection $payments, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $mustBeDue): OrderLifecycleResult
     {
         if ($order->order_status === $orderStatus) {
             $fresh = $order->fresh(['payments']);
@@ -409,6 +411,14 @@ class OrderStateMachine implements OrderLifecycle
         }
 
         if ($mustBeDue && $order->expires_at && $order->expires_at->isFuture()) {
+            return new OrderLifecycleResult(
+                order: null,
+                payment: $payments->first(),
+                newlyApplied: false,
+            );
+        }
+
+        if ($mustBeDue && $this->hasPendingManualPaymentProof($payments)) {
             return new OrderLifecycleResult(
                 order: null,
                 payment: $payments->first(),
@@ -473,6 +483,14 @@ class OrderStateMachine implements OrderLifecycle
             payment: $released->payments->first(),
             newlyApplied: true,
         );
+    }
+
+    private function hasPendingManualPaymentProof(Collection $payments): bool
+    {
+        return $payments->contains(fn (Payment $payment): bool => $payment->provider === 'manual'
+            && $payment->method === 'QR_MANUAL'
+            && $payment->status === PaymentStatus::Pending
+            && $payment->payment_proof_submitted_at !== null);
     }
 
     private function canTransitionManualOrder(Order $order, ?Payment $payment): bool

@@ -207,6 +207,13 @@
     --sf-lime: var(--color-sf-lime);
     --sf-pink: var(--color-sf-pink);
     --sf-grid: rgba(18, 35, 63, 0.05);
+    --sf-trend-panel: #101827;
+    --sf-trend-card: #151f31;
+    --sf-trend-border: #2a3850;
+    --sf-trend-card-border: #30405b;
+    --sf-trend-text: #f5f7fb;
+    --sf-trend-muted: #9aa8bd;
+    --sf-trend-accent: #f4b62d;
   }
 
   html {
@@ -560,6 +567,178 @@
   .storefront-product-grid--single {
     grid-template-columns: minmax(0, 1fr);
     max-width: 20rem;
+  }
+
+  .storefront-trending-panel {
+    box-shadow: 0 18px 38px rgb(5 10 20 / 0.2);
+  }
+
+  .storefront-trending-header__icon {
+    box-shadow: 0 5px 12px rgb(244 182 45 / 0.2);
+  }
+
+  .storefront-trending-grid {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding: 0.75rem 0.75rem 0.9rem;
+    scrollbar-color: var(--sf-trend-border) transparent;
+    scrollbar-width: thin;
+  }
+
+  .storefront-trending-grid > [role="listitem"] {
+    min-width: 0;
+    flex: 0 0 9.5rem;
+  }
+
+  .trending-product-card {
+    height: 100%;
+  }
+
+  .trending-product-card > a {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--sf-trend-card-border);
+    border-radius: 0.75rem;
+    background: var(--sf-trend-card);
+    color: var(--sf-trend-text);
+    box-shadow: 0 8px 18px rgb(3 8 18 / 0.18);
+    transition:
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      transform 160ms ease;
+  }
+
+  .trending-product-card > a:hover {
+    border-color: rgb(244 182 45 / 0.65);
+    box-shadow: 0 12px 24px rgb(3 8 18 / 0.28);
+    transform: translateY(-2px);
+  }
+
+  .trending-product-card__media {
+    overflow: hidden;
+    border-bottom: 1px solid var(--sf-trend-card-border);
+    background: #0f1726;
+  }
+
+  .trending-product-card .storefront-media-frame {
+    aspect-ratio: 1.15;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .trending-product-card .storefront-media-frame > span:not(.sr-only) {
+    display: none;
+  }
+  .trending-product-card
+    .storefront-media-frame
+    > div[class*="left-2.5"]
+    > span {
+    display: none;
+  }
+
+  .trending-product-card .storefront-media-frame .bg-grid-pattern {
+    opacity: 0.04;
+  }
+
+  .trending-product-card .storefront-media-frame img {
+    transition: transform 220ms ease;
+  }
+
+  .trending-product-card:hover .storefront-media-frame img {
+    transform: scale(1.04);
+  }
+
+  .trending-product-card__rank {
+    position: absolute;
+    left: 0.45rem;
+    top: 0.45rem;
+    z-index: 15;
+    display: inline-flex;
+    min-width: 1.5rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.35rem;
+    background: var(--sf-trend-accent);
+    padding: 0.2rem 0.35rem;
+    color: #192132;
+    font-size: 0.6rem;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .trending-product-card__body {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.55rem 0.65rem 0.65rem;
+  }
+
+  .trending-product-card__eyebrow {
+    overflow: hidden;
+    color: var(--sf-trend-muted);
+    font-size: 0.52rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .trending-product-card__name {
+    display: -webkit-box;
+    min-height: 2.1rem;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    color: var(--sf-trend-text);
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1.35;
+  }
+
+  .trending-product-card__meta {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.4rem;
+    margin-top: auto;
+    padding-top: 0.35rem;
+  }
+
+  .trending-product-card__price {
+    overflow: hidden;
+    color: #78b4ff;
+    font-size: 0.76rem;
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .trending-product-card__stock,
+  .trending-product-card__sold {
+    overflow: hidden;
+    color: var(--sf-trend-muted);
+    font-size: 0.52rem;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .trending-product-card__stock {
+    max-width: 4.25rem;
+    text-align: right;
+  }
+
+  .trending-product-card__sold {
+    border-top: 1px solid rgb(48 64 91 / 0.75);
+    padding-top: 0.35rem;
   }
 
   .storefront-shell::before {

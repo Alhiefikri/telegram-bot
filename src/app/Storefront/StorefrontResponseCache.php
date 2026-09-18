@@ -108,6 +108,7 @@ class StorefrontResponseCache
             'storefront_telegram_bot_url' => config('storefront.links.telegram_bot_url'),
             'product_placeholder' => config('storefront.product_placeholder'),
             'design_version' => self::DESIGN_VERSION,
+            'vite_manifest' => $this->viteManifestFingerprint(),
         ];
 
         return 'storefront.response.v'.$version.'.'.hash('sha256', json_encode($context, JSON_THROW_ON_ERROR));

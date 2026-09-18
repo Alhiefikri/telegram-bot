@@ -8,9 +8,12 @@ FROM node:24-slim AS assets
 
 WORKDIR /app
 COPY src/package.json src/package-lock.json ./
-RUN npm ci
+RUN npm ci --include=optional \
+    && npm install --no-save --ignore-scripts --include=optional \
+        @rolldown/binding-linux-x64-gnu@$(node -p "require('rolldown/package.json').version")
 COPY src/resources ./resources
 COPY src/vite.config.js ./
+COPY --from=vendor /app/vendor ./vendor
 RUN npm run build
 
 FROM php:8.4-fpm AS runtime

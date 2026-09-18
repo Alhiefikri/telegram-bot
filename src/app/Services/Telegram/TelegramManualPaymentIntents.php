@@ -98,8 +98,9 @@ class TelegramManualPaymentIntents
                     : 'automatic_verification_required'];
             }
 
-            // Proof is review evidence, not payment completion. Keep the
-            // original deadlines so unattended review cannot hold stock forever.
+            // Proof is review evidence, not payment completion. A QR Manual
+            // proof now keeps its pending reservation until the owner decides;
+            // other manual payment rails retain their existing deadline rules.
             $payment->update([
                 'payment_proof_file_id' => $photoFileId,
                 'payment_proof_submitted_at' => now(),
