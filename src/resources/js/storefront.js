@@ -1271,6 +1271,140 @@ function formatCheckoutUsdt(microAmount) {
   return `${(amount / 1_000_000).toFixed(6).replace(/\.?0+$/, "")} USDT`;
 }
 
+function initFamilyQuickBuy() {
+  const root = document.querySelector("[data-family-quick-buy]");
+  if (!root) {
+    return;
+  }
+
+  const options = Array.from(document.querySelectorAll("[data-family-option]"));
+  const quantityInput = root.querySelector("[data-family-quantity]");
+  const quantitySteps = root.querySelectorAll("[data-family-quantity-step]");
+  const selectedName = root.querySelector("[data-family-selected-name]");
+  const selectedPrice = root.querySelector("[data-family-selected-price]");
+  const checkoutLink = root.querySelector("[data-family-checkout]");
+
+  if (!options.length || !quantityInput || !checkoutLink) {
+    return;
+  }
+
+  const money = (amount) =>
+    new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
+      maximumFractionDigits: 0,
+    }).format(amount);
+
+  const isAvailable = (option) => {
+    const input = option.querySelector("[data-family-select]");
+    return !input?.disabled && Number(option.dataset.familyOptionStock) > 0;
+  };
+
+  const selectedOption = () =>
+    options.find((option) => {
+      const input = option.querySelector("[data-family-select]");
+      return input?.checked && isAvailable(option);
+    }) || options.find(isAvailable);
+
+  const sync = (option) => {
+    if (!option) {
+      return;
+    }
+
+    const input = option.querySelector("[data-family-select]");
+    if (input && !input.checked && !input.disabled) {
+      input.checked = true;
+    }
+
+    const stock = Math.max(
+      1,
+      Math.min(20, Number(option.dataset.familyOptionStock) || 1)
+    );
+    const quantity = Math.max(
+      1,
+      Math.min(stock, Number(quantityInput.value) || 1)
+    );
+    const checkoutUrl = new URL(
+      option.dataset.familyCheckoutUrl || checkoutLink.href,
+      window.location.href
+    );
+
+    quantityInput.max = String(stock);
+    quantityInput.value = String(quantity);
+    checkoutUrl.searchParams.set("quantity", String(quantity));
+    checkoutLink.href = checkoutUrl.toString();
+
+    if (selectedName) {
+      selectedName.textContent = option.dataset.familyOptionName || "";
+    }
+    if (selectedPrice) {
+      selectedPrice.textContent = money(
+        Number(option.dataset.familyOptionPrice) || 0
+      );
+    }
+
+    options.forEach((candidate) => {
+      const selected = candidate === option;
+      candidate.toggleAttribute("data-family-selected", selected);
+      candidate.classList.toggle("family-option-selected", selected);
+    });
+  };
+
+  const selectOption = (option) => {
+    const input = option.querySelector("[data-family-select]");
+    if (!input || input.disabled) {
+      return;
+    }
+
+    input.checked = true;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+
+  const isInteractiveTarget = (target) =>
+    target instanceof Element &&
+    Boolean(
+      target.closest(
+        "a, button, input, select, textarea, summary, [data-family-option-details]"
+      )
+    );
+
+  options.forEach((option) => {
+    const input = option.querySelector("[data-family-select]");
+    input?.addEventListener("change", () => sync(option));
+    option.addEventListener("click", (event) => {
+      if (!isInteractiveTarget(event.target)) {
+        selectOption(option);
+      }
+    });
+    option.addEventListener("keydown", (event) => {
+      if (
+        isInteractiveTarget(event.target) ||
+        !["Enter", " "].includes(event.key)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      selectOption(option);
+    });
+  });
+
+  quantitySteps.forEach((button) => {
+    button.addEventListener("click", () => {
+      const step = Number(button.dataset.familyQuantityStep) || 0;
+      const max = Number(quantityInput.max) || 20;
+      quantityInput.value = String(
+        Math.max(1, Math.min(max, (Number(quantityInput.value) || 1) + step))
+      );
+      sync(selectedOption());
+    });
+  });
+
+  quantityInput.addEventListener("input", () => sync(selectedOption()));
+  quantityInput.addEventListener("change", () => sync(selectedOption()));
+  sync(selectedOption());
+}
+
 function initCheckoutReview() {
   const errorSummary = document.querySelector("[data-checkout-error-summary]");
 
@@ -1281,6 +1415,9 @@ function initCheckoutReview() {
   }
 
   const quantityInput = document.querySelector("[data-checkout-quantity]");
+  const quantitySteps = document.querySelectorAll(
+    "[data-checkout-quantity-step]"
+  );
   const paymentRoot = document.querySelector("[data-checkout-payment]");
   const contactDetails = document.querySelector(
     "[data-checkout-contact-details]"
@@ -1572,6 +1709,25 @@ function initCheckoutReview() {
     .forEach((input) => {
       input.addEventListener("change", refreshPayment);
     });
+  quantitySteps.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!quantityInput) {
+        return;
+      }
+
+      const step = Number(button.dataset.checkoutQuantityStep) || 0;
+      const min = Number(quantityInput.min) || 1;
+      const max = Number(quantityInput.max) || 20;
+      quantityInput.value = String(
+        Math.max(
+          min,
+          Math.min(max, (Number(quantityInput.value) || min) + step)
+        )
+      );
+      refreshQuantity(true);
+    });
+  });
+  quantityInput?.addEventListener("input", () => refreshQuantity());
   quantityInput?.addEventListener("change", () => refreshQuantity(true));
   checkoutForm?.addEventListener("input", syncSticky);
   checkoutForm?.addEventListener("change", syncSticky);
@@ -1588,12 +1744,26 @@ function initCheckoutReview() {
   syncSticky();
 }
 
+function initInvoiceFollowupDetails() {
+  const details = document.querySelector("[data-invoice-followup-details]");
+  if (!details) {
+    return;
+  }
+
+  document.querySelectorAll('a[href="#invoice-support"]').forEach((link) => {
+    link.addEventListener("click", () => {
+      details.open = true;
+    });
+  });
+}
+
 export default function initStorefront() {
   const boot = () => {
     document.body.classList.add("js-enabled");
 
     initMobileMenu();
     initCatalogFilterFocus();
+    initFamilyQuickBuy();
     initCheckoutReview();
     initScrollProgress();
     initHeaderElevation();
@@ -1601,6 +1771,7 @@ export default function initStorefront() {
     initVerifiedPurchaseActivity();
     initRevealStagger();
     initFaqAccordion();
+    initInvoiceFollowupDetails();
     initPaymentActions();
     initSupportFunnelEvents();
     initPaymentCountdowns();

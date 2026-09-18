@@ -64,10 +64,10 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee($expectedQrDataUri, false)
             ->assertSee('Pembayaran QRIS')
             ->assertSeeInOrder([
+                $expectedQrDataUri,
                 'Total bayar QRIS',
                 'Rp121.200',
                 'Batas bayar',
-                $expectedQrDataUri,
                 'Cek status pembayaran',
                 'Ringkasan invoice',
             ], false)

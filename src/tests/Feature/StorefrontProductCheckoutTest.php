@@ -487,6 +487,11 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringNotContainsString('role="dialog"', $mainHtml);
         $this->assertStringNotContainsString('data-storefront-checkout-scroll', $html);
         $this->assertStringContainsString('Tambahkan email atau kontak bantuan', $html);
+        $this->assertStringContainsString('checkout-item-media', $html);
+        $this->assertStringContainsString('checkout-payment-column', $html);
+        $this->assertStringContainsString('Buat invoice QRIS &amp; lanjut bayar', $html);
+        $this->assertStringNotContainsString('QR Manual', $html);
+        $this->assertStringNotContainsString('KlikQRIS', $html);
         $this->assertStringContainsString('data-checkout-quantity-announcement', $html);
         $this->assertStringContainsString('aria-live="polite"', $html);
         $this->assertSame(
@@ -499,8 +504,8 @@ class StorefrontProductCheckoutTest extends TestCase
 
         $this->assertTrue(
             strpos($html, 'Produk yang dipilih') < strpos($html, 'Nama pembeli')
-                && strpos($html, 'Nama pembeli') < strpos($html, 'Metode pembayaran dipilih')
-                && strpos($html, 'Metode pembayaran dipilih') < strpos($html, 'Tambahkan email atau kontak bantuan'),
+                && strpos($html, 'Nama pembeli') < strpos($html, 'Tambahkan email atau kontak bantuan')
+                && strpos($html, 'Tambahkan email atau kontak bantuan') < strpos($html, 'Metode pembayaran dipilih'),
         );
     }
 
@@ -548,7 +553,7 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertSame(2, substr_count($html, 'data-checkout-payment-copy'));
         $this->assertStringContainsString('data-payment-value="qris"', $html);
         $this->assertStringContainsString('Subtotal review (IDR)', $html);
-        $this->assertStringContainsString('Buat invoice QR Manual &amp; lanjut bayar', $html);
+        $this->assertStringContainsString('Buat invoice QRIS &amp; lanjut bayar', $html);
         $this->assertStringContainsString('data-payment-value="binance_pay_id"', $html);
         $this->assertStringContainsString('Total dasar USDT / estimasi', $html);
         $this->assertStringContainsString('Buat invoice Binance Pay &amp; lanjut bayar', $html);

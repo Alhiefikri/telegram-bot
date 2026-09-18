@@ -15,6 +15,7 @@ final readonly class StorefrontCartItemPresentation
         public ?int $availableStock,
         public bool $isAvailable,
         public ?string $conflictMessage,
+        public ?string $imageUrl = null,
     ) {}
 
     public function hasConflict(): bool

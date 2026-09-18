@@ -449,11 +449,11 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertMatchesRegularExpression('/data-checkout-sticky-submit[^>]*disabled/', $html);
         $this->assertStringContainsString('storefront-checkout-page', $html);
         $this->assertStringContainsString('aria-controls="checkout-form"', $html);
-        $this->assertMatchesRegularExpression('/data-checkout-sticky-payment[^>]*>[^<]*QR Manual[^<]*<\/strong>/', $html);
+        $this->assertMatchesRegularExpression('/data-checkout-sticky-payment[^>]*>[^<]*QRIS[^<]*<\/strong>/', $html);
         $this->assertMatchesRegularExpression('/data-checkout-sticky-amount-label[^>]*>Subtotal review \(IDR\)<\/span>/', $html);
         $this->assertMatchesRegularExpression('/data-checkout-sticky-total[^>]*>Rp45\.000<\/strong>/', $html);
         $this->assertSame(1, substr_count($html, 'data-checkout-submit'));
-        $this->assertSame(1, substr_count($html, 'form="checkout-form"'));
+        $this->assertSame(3, substr_count($html, 'form="checkout-form"'));
         foreach ([
             'product_id',
             'quantity',
@@ -536,7 +536,7 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('action="'.route('storefront.shop.checkout').'?from=', false)
             ->assertSee('method="POST"', false)
             ->assertSee('name="payment_method" value="qris"', false)
-            ->assertSee('Buat invoice QR Manual &amp; lanjut bayar', false);
+            ->assertSee('Buat invoice QRIS &amp; lanjut bayar', false);
     }
 
     public function test_page_checkout_renders_accessible_native_payment_controls(): void
