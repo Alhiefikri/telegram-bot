@@ -89,9 +89,11 @@ class ProductionConfigurationValidator
             throw new RuntimeException('Dogfood runtime flags are not allowed in production.');
         }
 
-        $bscRpcUrl = (string) $this->config->get('services.bsc.rpc_url', '');
-        if (! blank($bscRpcUrl) && ! str_starts_with($bscRpcUrl, 'https://')) {
-            throw new RuntimeException('BSC_RPC_URL must use HTTPS in production.');
+        foreach ((array) $this->config->get('services.bsc.rpc_urls', []) as $bscRpcUrl) {
+            $bscRpcUrl = trim((string) $bscRpcUrl);
+            if ($bscRpcUrl !== '' && ! str_starts_with($bscRpcUrl, 'https://')) {
+                throw new RuntimeException('BSC RPC endpoints must use HTTPS in production.');
+            }
         }
         if ((int) $this->config->get('services.bsc.chain_id', 56) !== 56) {
             throw new RuntimeException('BSC_CHAIN_ID must be 56 in production.');

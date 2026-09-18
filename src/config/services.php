@@ -47,10 +47,15 @@ return [
     ],
 
     'bsc' => [
-        // The RPC endpoint is the only BSC environment value because it may
-        // contain provider credentials. Network identity and operational
-        // limits are pinned here.
-        'rpc_url' => env('BSC_RPC_URL'),
+        // Public BSC endpoints are pinned fallbacks: they carry no credentials
+        // and keep receipt verification alive when one provider is degraded.
+        // BSC_RPC_URL remains the optional override for private or credentialed
+        // providers, and always takes priority over the pinned fallbacks.
+        'rpc_urls' => array_values(array_unique(array_filter([
+            trim((string) env('BSC_RPC_URL')),
+            'https://bsc-dataseed.binance.org',
+            'https://bsc.publicnode.com',
+        ], fn ($url): bool => is_string($url) && trim($url) !== ''))),
         'chain_id' => 56,
         'usdt_contract' => BscReadiness::APPROVED_USDT_CONTRACT,
         'explorer_base_url' => 'https://bscscan.com',

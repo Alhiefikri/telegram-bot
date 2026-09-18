@@ -92,12 +92,12 @@ final class BscReadiness
         $rpcChainId = null;
         $tokenDecimals = null;
 
-        $rpcUrl = trim((string) config('services.bsc.rpc_url'));
+        $rpcUrls = (array) config('services.bsc.rpc_urls', []);
         $configuredChainId = (int) config('services.bsc.chain_id', 56);
         $contract = strtolower(trim((string) config('services.bsc.usdt_contract')));
         $expectedDecimals = (int) config('services.bsc.expected_token_decimals', 18);
 
-        if ($rpcUrl === '') {
+        if ($rpcUrls === []) {
             $missing[] = 'BSC_RPC_URL';
         }
         if ($configuredChainId !== 56) {
@@ -211,7 +211,7 @@ final class BscReadiness
             'setting_updated_at' => $this->settingUpdatedAt($setting),
             'setting_active' => (bool) $setting?->is_active,
             'enabled' => (bool) $setting?->bsc_payment_enabled,
-            'rpc_url' => trim((string) config('services.bsc.rpc_url')),
+            'rpc_urls' => (array) config('services.bsc.rpc_urls', []),
             'chain_id' => (int) config('services.bsc.chain_id', 56),
             'contract' => strtolower(trim((string) config('services.bsc.usdt_contract'))),
             'expected_decimals' => (int) config('services.bsc.expected_token_decimals', 18),

@@ -4,6 +4,8 @@ namespace App\Services\Bsc;
 
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Throwable;
 
@@ -111,13 +113,44 @@ final class BscRpcClient implements BscVerificationRpcClientInterface
         return $result;
     }
 
+    /**
+     * Try every configured endpoint in priority order. Endpoint-specific
+     * failures (transport, HTTP, malformed or error responses) fall through to
+     * the next endpoint so one degraded provider cannot disable the rail. A
+     * successful response is authoritative and never re-queried elsewhere.
+     */
     private function call(string $method, array $params = []): mixed
     {
-        $rpcUrl = trim((string) config('services.bsc.rpc_url'));
-        if ($rpcUrl === '') {
-            throw new BscRpcException('BSC_RPC_URL is not configured.');
+        $failure = null;
+        foreach ($this->endpoints() as $endpoint) {
+            try {
+                return $this->callEndpoint($endpoint, $method, $params);
+            } catch (BscRpcException $exception) {
+                $failure = $exception;
+            }
         }
 
+        throw $failure ?? new BscRpcException('BSC RPC endpoints are not configured.');
+    }
+
+    /**
+     * Configured endpoints in priority order: the BSC_RPC_URL override first,
+     * then the pinned public fallbacks.
+     *
+     * @return list<string>
+     */
+    private function endpoints(): array
+    {
+        $endpoints = config('services.bsc.rpc_urls', []);
+
+        return array_values(array_filter(array_map(
+            fn ($url): string => is_string($url) ? trim($url) : '',
+            is_array($endpoints) ? $endpoints : [],
+        ), fn (string $url): bool => $url !== ''));
+    }
+
+    private function callEndpoint(string $rpcUrl, string $method, array $params): mixed
+    {
         try {
             $response = $this->request()->post($rpcUrl, [
                 'jsonrpc' => '2.0',
@@ -125,6 +158,9 @@ final class BscRpcClient implements BscVerificationRpcClientInterface
                 'method' => $method,
                 'params' => $params,
             ]);
+        } catch (RequestException $exception) {
+            // The retrying client converts a failed response into an exception.
+            throw $this->httpFailure($exception->response);
         } catch (ConnectionException $exception) {
             throw new BscRpcException('BSC RPC request failed.', retryable: true, previous: $exception);
         } catch (Throwable $exception) {
@@ -132,10 +168,7 @@ final class BscRpcClient implements BscVerificationRpcClientInterface
         }
 
         if ($response->failed()) {
-            throw new BscRpcException(
-                'BSC RPC returned HTTP '.$response->status().'.',
-                retryable: $response->serverError() || $response->status() === 429,
-            );
+            throw $this->httpFailure($response);
         }
 
         $payload = $response->json();
@@ -153,6 +186,14 @@ final class BscRpcClient implements BscVerificationRpcClientInterface
         }
 
         return $payload['result'];
+    }
+
+    private function httpFailure(Response $response): BscRpcException
+    {
+        return new BscRpcException(
+            'BSC RPC returned HTTP '.$response->status().'.',
+            retryable: $response->serverError() || $response->status() === 429,
+        );
     }
 
     private function request(): PendingRequest

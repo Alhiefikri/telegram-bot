@@ -527,7 +527,7 @@ class ProductionConcurrencyTest extends TestCase
     {
         $this->requireConcurrencyLane();
         config()->set('services.bsc', array_merge(config('services.bsc'), [
-            'rpc_url' => 'https://bsc-rpc.test',
+            'rpc_urls' => ['https://bsc-rpc.test'],
             'chain_id' => 56,
             'usdt_contract' => '0x55d398326f99059ff775485246999027b3197955',
             'expected_token_decimals' => 18,

@@ -161,7 +161,7 @@ final class StorefrontCatalogDiscoveryBoundaryTest extends TestCase
 
     private function configureBscReadiness(): StorefrontCatalogBoundaryRpc
     {
-        config()->set('services.bsc.rpc_url', 'https://bsc-rpc.test');
+        config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
         config()->set('services.bsc.chain_id', 56);
         config()->set('services.bsc.usdt_contract', self::BSC_CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);

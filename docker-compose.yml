@@ -44,6 +44,8 @@ x-app-environment: &app-environment
   BINANCE_PAY_UID: ${BINANCE_PAY_UID:-}
   BINANCE_API_KEY: ${BINANCE_API_KEY:-}
   BINANCE_API_SECRET: ${BINANCE_API_SECRET:-}
+  # Optional BSC provider override; the public endpoints pinned in the
+  # application are used as ordered fallbacks when this is empty.
   BSC_RPC_URL: ${BSC_RPC_URL:-}
   PAKASIR_SLUG: ${PAKASIR_SLUG:-}
   PAKASIR_API_KEY: ${PAKASIR_API_KEY:-}

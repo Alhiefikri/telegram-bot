@@ -4,13 +4,15 @@ This runbook covers activation and rollback of the BSC Binance Payment Rail. It 
 
 ## Deployment-time configuration
 
-Keep BSC disabled until the database configuration and receiving address are ready. The only BSC value that belongs in the VPS `.env` is the server-side RPC authority:
+Keep BSC disabled until the database configuration and receiving address are ready. The application ships pinned public BNB Smart Chain endpoints as ordered fallbacks, so no RPC environment value is required to bring the rail up:
 
 ```env
 BSC_RPC_URL=https://provider.example/
 ```
 
-The RPC URL may contain provider credentials and must remain server-side. It must use HTTPS in production. The BSC checkout and verification path uses chain metadata, transaction receipts, and block facts for customer-submitted TX hashes. The URL must never be placed in a Payment, audit log, Telegram message, browser response, or release artifact.
+`BSC_RPC_URL` is the optional override for a private or credentialed provider and always takes priority over the pinned public endpoints in `src/config/services.php`. Leave it unset to use the pinned endpoints, and set it only when pointing the rail at a private provider. An override may contain provider credentials and must remain server-side; every endpoint must use HTTPS in production. No RPC URL may be placed in a Payment, audit log, Telegram message, browser response, or release artifact.
+
+The client tries each configured endpoint in order and falls through on transport, HTTP, or malformed-response failures, so one degraded provider cannot disable receipt verification. A valid response is authoritative and is never re-queried against another endpoint. The BSC checkout and verification path uses chain metadata, transaction receipts, and block facts for customer-submitted TX hashes.
 
 The application pins BNB Smart Chain Mainnet (`chain_id=56`), the approved USDT contract, 18 token decimals, BscScan's safe explorer host, and the RPC safety limits in application configuration. Receiving addresses are database records, not environment variables, and are never hardcoded into the application.
 

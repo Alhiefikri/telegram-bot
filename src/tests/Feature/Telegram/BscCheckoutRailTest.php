@@ -34,7 +34,7 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
     {
         parent::setUp();
         config()->set('services.binance.pay_id', '987654321');
-        config()->set('services.bsc.rpc_url', 'https://bsc-rpc.test');
+        config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
         config()->set('services.bsc.chain_id', 56);
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
@@ -215,8 +215,9 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
                 continue;
             }
             $data = $request->data();
-            if (str_contains((string) ($data['text'] ?? ''), 'Binance')) {
-                $latest = $data['reply_markup'] ?? null;
+            $markup = $data['reply_markup'] ?? null;
+            if (str_contains((string) json_encode($markup), 'checkout:binance:rail:')) {
+                $latest = $markup;
             }
         }
 

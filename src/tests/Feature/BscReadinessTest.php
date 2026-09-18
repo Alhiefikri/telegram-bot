@@ -40,7 +40,7 @@ final class BscReadinessTest extends TestCase
     {
         parent::setUp();
 
-        config()->set('services.bsc.rpc_url', 'https://bsc-rpc.test');
+        config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
         config()->set('services.bsc.chain_id', 56);
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);

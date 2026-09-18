@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services\Bsc;
 
 use App\Services\Bsc\BscRpcClient;
+use App\Services\Bsc\BscRpcException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -11,7 +12,7 @@ class BscRpcClientTest extends TestCase
 {
     public function test_it_reads_chain_contract_code_and_token_decimals(): void
     {
-        config()->set('services.bsc.rpc_url', 'https://bsc-rpc.test');
+        config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
 
         Http::fakeSequence()
             ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x38'])
@@ -27,7 +28,7 @@ class BscRpcClientTest extends TestCase
 
     public function test_it_uses_the_erc1271_magic_value_and_abi_encodes_the_signature(): void
     {
-        config()->set('services.bsc.rpc_url', 'https://bsc-rpc.test');
+        config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
         $contract = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
         $hash = '0x'.str_repeat('11', 32);
         $signature = '0x'.str_repeat('22', 65);
@@ -51,5 +52,69 @@ class BscRpcClientTest extends TestCase
             return data_get($request->data(), 'params.0.to') === $contract
                 && $data === $expected;
         });
+    }
+
+    public function test_it_falls_over_to_the_next_endpoint_when_the_first_one_is_degraded(): void
+    {
+        config()->set('services.bsc.rpc_urls', ['https://bsc-primary.test', 'https://bsc-fallback.test']);
+
+        Http::fake([
+            'https://bsc-primary.test' => Http::response('', 503),
+            'https://bsc-fallback.test' => Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x38']),
+        ]);
+
+        $this->assertSame(56, (new BscRpcClient)->chainId());
+    }
+
+    public function test_it_stops_at_the_first_endpoint_that_answers(): void
+    {
+        config()->set('services.bsc.rpc_urls', ['https://bsc-primary.test', 'https://bsc-fallback.test']);
+
+        Http::fake([
+            'https://bsc-primary.test' => Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x38']),
+            'https://bsc-fallback.test' => Http::response('', 500),
+        ]);
+
+        $this->assertSame(56, (new BscRpcClient)->chainId());
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'bsc-fallback.test'));
+    }
+
+    public function test_it_reports_the_last_endpoint_failure_when_every_endpoint_is_unavailable(): void
+    {
+        config()->set('services.bsc.rpc_urls', ['https://bsc-primary.test', 'https://bsc-fallback.test']);
+
+        Http::fake([
+            'https://bsc-primary.test' => Http::response('', 500),
+            'https://bsc-fallback.test' => Http::response('', 429),
+        ]);
+
+        try {
+            (new BscRpcClient)->chainId();
+            $this->fail('Expected the RPC client to fail when every endpoint is unavailable.');
+        } catch (BscRpcException $exception) {
+            $this->assertTrue($exception->retryable);
+            $this->assertStringContainsString('429', $exception->getMessage());
+        }
+    }
+
+    public function test_an_empty_endpoint_list_is_reported_as_not_configured(): void
+    {
+        config()->set('services.bsc.rpc_urls', []);
+
+        $this->expectException(BscRpcException::class);
+        $this->expectExceptionMessage('BSC RPC endpoints are not configured.');
+
+        (new BscRpcClient)->chainId();
+    }
+
+    public function test_the_application_ships_pinned_https_public_endpoints(): void
+    {
+        $urls = (array) config('services.bsc.rpc_urls');
+
+        $this->assertContains('https://bsc-dataseed.binance.org', $urls);
+        $this->assertContains('https://bsc.publicnode.com', $urls);
+        foreach ($urls as $url) {
+            $this->assertStringStartsWith('https://', (string) $url);
+        }
     }
 }

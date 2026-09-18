@@ -30,7 +30,7 @@ final class BscPaymentVerification
 
     public function enabled(): bool
     {
-        return filled(config('services.bsc.rpc_url'))
+        return (array) config('services.bsc.rpc_urls', []) !== []
             && (int) config('services.bsc.chain_id', 56) === 56
             && strtolower(trim((string) config('services.bsc.usdt_contract'))) === BscReadiness::APPROVED_USDT_CONTRACT;
     }
