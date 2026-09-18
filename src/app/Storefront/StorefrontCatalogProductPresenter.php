@@ -34,8 +34,9 @@ final class StorefrontCatalogProductPresenter
             stockLabel: $isAvailable ? 'Stok: '.$product->availableStock : 'Stok kosong',
             soldLabel: 'Terjual: '.$product->soldQuantity,
             cover: new StorefrontProductCoverPresentation(
-                theme: StorefrontProductPresentationNormalizer::coverForName($product->name),
+                theme: StorefrontProductPresentationNormalizer::defaultCoverTheme(),
                 imageUrl: $this->imageUrl($product),
+                icon: $product->icon,
             ),
             productUrl: $this->urls->productUrlForId($product->id),
             checkoutUrl: $this->urls->checkoutProductUrlForId($product->id),
@@ -46,10 +47,11 @@ final class StorefrontCatalogProductPresenter
         );
     }
 
-    private function imageUrl(CatalogProductReadModel $product): string
+    private function imageUrl(CatalogProductReadModel $product): ?string
     {
-        return StorefrontProductPresentationNormalizer::publicStorageUrl($product->imagePath)
-            ?? StorefrontProductPresentationNormalizer::publicStorageUrl($product->imageUrl)
-            ?? $this->placeholder->imageUrl();
+        $imageUrl = StorefrontProductPresentationNormalizer::publicStorageUrl($product->imagePath)
+            ?? StorefrontProductPresentationNormalizer::publicStorageUrl($product->imageUrl);
+
+        return $imageUrl ?? (trim((string) $product->icon) === '' ? $this->placeholder->imageUrl() : null);
     }
 }

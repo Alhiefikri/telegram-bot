@@ -93,8 +93,9 @@ class StorefrontProductPresenter
             cardActionLabel: $cardActionLabel,
             productUrl: route('storefront.products.show', $product),
             cover: new StorefrontProductCoverPresentation(
-                theme: StorefrontProductPresentationNormalizer::coverForName($product->name),
-                imageUrl: StorefrontProductPresentationNormalizer::publicStorageUrl($product->image_path) ?? $this->defaultProductImageUrl(),
+                theme: StorefrontProductPresentationNormalizer::defaultCoverTheme(),
+                imageUrl: $this->imageUrl($product),
+                icon: $product->icon,
             ),
             checkoutChoices: $checkoutChoices,
             checkoutReadiness: $checkoutReadiness,
@@ -118,9 +119,16 @@ class StorefrontProductPresenter
             ->sum('quantity');
     }
 
-    private function defaultProductImageUrl(): string
+    private function imageUrl(Product $product): ?string
     {
-        return $this->placeholder->imageUrl();
+        $imageUrl = StorefrontProductPresentationNormalizer::publicStorageUrl($product->image_path);
+
+        return $imageUrl ?? $this->defaultProductImageUrl($product->icon);
+    }
+
+    private function defaultProductImageUrl(?string $icon = null): ?string
+    {
+        return trim((string) $icon) === '' ? $this->placeholder->imageUrl() : null;
     }
 
     /**

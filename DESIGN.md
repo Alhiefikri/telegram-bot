@@ -21,6 +21,20 @@ Storefront surfaces can be expressive and memorable, but transaction clarity win
 
 Avoid drifting back to older directions that no longer match the site: orange Warung AI storefront styling, Filament admin assumptions, generic SaaS dark gradients, or sterile premium minimalism.
 
+### Marketplace storefront refinement
+
+The marketplace storefront uses a softer blue-and-yellow treatment than the legacy neo-brutal reference below. Its current tokens and scoped overrides in `src/resources/css/app.css` take precedence over the older storefront token and primitive tables; admin styling is unchanged.
+
+- The homepage hero pairs a blue promise panel and yellow primary CTA with a light, live catalog preview. Never invent sales or availability claims for decoration.
+- Product and family artwork is square. Fallback covers retain the configured product icon/theme; family covers use a monogram when no image exists.
+- Cards prioritize product name, price, stock, and the purchase action. Compact cart buttons keep a 44px touch target and a product-specific accessible name. Sold-out products retain working detail and waitlist links.
+- Desktop catalog columns expand into available space when there are fewer entries; small screens retain a compact two-column layout where space permits.
+- Keep the shared header sticky without making its ancestors scroll containers: use horizontal clipping rather than hidden overflow. Anchor targets must clear the header.
+- The mobile menu is a keyboard-managed dialog. Closed drawers are inert; reopening during a close animation must not hide the reopened drawer, and switching to desktop must release the mobile scroll lock.
+- Motion stays incidental: short fades (280–520ms), small lifts (≤3px), and tactile presses. Cards lift and their artwork zooms slightly on hover, covers shimmer until the image loads, catalog blocks fade up once on scroll, and the sticky mobile buy bar slides in.
+- Never animate reading or payment surfaces: no moving price, countdown, or copy targets, and no looping motion outside the product covers, scroll progress, and cart badge ring. Every new animation is disabled under `prefers-reduced-motion`.
+
+
 ## Color tokens
 
 ### Storefront tokens

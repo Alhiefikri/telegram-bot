@@ -36,6 +36,7 @@
             <h3 class="mb-4 font-display text-sm font-black uppercase tracking-[0.14em] text-[var(--sf-yellow)]">Bantuan</h3>
             <ul class="space-y-3 text-sm font-semibold text-white/70">
                 <li><a href="{{ route('storefront.order-access.create') }}" class="font-black text-[var(--sf-yellow)] transition-colors hover:text-white">Akses Pesanan</a></li>
+                <li><a href="{{ route('customer.account') }}" class="font-black text-[var(--sf-yellow)] transition-colors hover:text-white">Daftar / Masuk</a></li>
                 <li><a href="{{ route('storefront.policies.recovery') }}" class="transition-colors hover:text-[var(--sf-yellow)]">Pemulihan Pesanan</a></li>
                 <li><a href="{{ route('storefront.guides.index') }}" class="transition-colors hover:text-[var(--sf-yellow)]">Pusat Panduan</a></li>
                 <li><span>Simpan invoice dan recovery key</span></li>

@@ -109,6 +109,13 @@ class BinancePaymentRailSelectionTest extends TestCase
         $this->assertSame('USDT_BEP20', $payment->method);
         $this->assertSame(1, PaymentBscDetail::query()->where('payment_id', $payment->id)->count());
         $this->assertSame(1, $payment->bscDetail()->count());
+
+        $this->get((string) $response->headers->get('Location'))
+            ->assertOk()
+            ->assertSee('Jalur pembayaran')
+            ->assertDontSee('Jalur pembayaran Binance')
+            ->assertSee('Total produk')
+            ->assertSee('Kirim tepat');
     }
 
     public function test_disabled_bsc_rail_has_no_checkout_side_effects(): void

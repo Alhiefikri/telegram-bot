@@ -110,6 +110,11 @@ if [ -r /opt/lhiestore-public-binance.jpeg ]; then
     cp /opt/lhiestore-public-binance.jpeg public/binance.jpeg
 fi
 
+if [ -r /opt/lhiestore-public-product-placeholder.svg ]; then
+    mkdir -p public/assets
+    cp /opt/lhiestore-public-product-placeholder.svg public/assets/product-placeholder.svg
+fi
+
 
 
 if [ "${APP_AUTO_MIGRATE:-false}" = "true" ]; then

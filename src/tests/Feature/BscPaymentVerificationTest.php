@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\Bsc\BscPaymentVerification;
 use App\Services\Bsc\BscRpcClient;
+use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Bsc\BscRpcException;
 use App\Services\Bsc\BscVerificationOutcome;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
@@ -45,7 +46,6 @@ class BscPaymentVerificationTest extends TestCase
         config()->set('services.bsc.chain_id', 56);
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
-        config()->set('services.bsc.max_scan_blocks', 10_000);
 
         $this->rpc = new class implements BscVerificationRpcClientInterface
         {
@@ -59,12 +59,7 @@ class BscPaymentVerificationTest extends TestCase
             /** @var array<string, array<string, mixed>|null> */
             public array $blocks = [];
 
-            /** @var list<array<string, mixed>> */
-            public array $logs = [];
-
             public ?\Closure $onReceipt = null;
-
-            public ?\Closure $onTransferLogs = null;
 
             public function chainId(): int
             {
@@ -115,19 +110,9 @@ class BscPaymentVerificationTest extends TestCase
 
                 return $this->blocks[(string) $blockNumber] ?? null;
             }
-
-            public function transferLogs(string $contract, string|int $fromBlock, string|int $toBlock, ?string $receiver = null): array
-            {
-                $this->calls++;
-
-                if ($this->onTransferLogs !== null) {
-                    ($this->onTransferLogs)();
-                }
-
-                return $this->logs;
-            }
         };
         app()->instance(BscVerificationRpcClientInterface::class, $this->rpc);
+        app()->instance(BscRpcClientInterface::class, $this->rpc);
 
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
@@ -199,6 +184,34 @@ class BscPaymentVerificationTest extends TestCase
         app(BscPaymentVerification::class)->submitTransactionHash($second->order_id, $hash);
 
         $this->assertDatabaseCount('manual_fulfillment_reviews', 1);
+    }
+
+    public function test_submitted_hash_from_another_bsc_wallet_is_verified_from_receipt(): void
+    {
+        $payment = $this->payment();
+        $hash = '0x'.str_repeat('b', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+
+        $result = app(BscPaymentVerification::class)->verify($payment, $hash);
+
+        $this->assertSame(BscVerificationOutcome::Confirmed, $result->outcome);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(
+            '0x2222222222222222222222222222222222222222',
+            $payment->fresh()->bscDetail->current_from_address,
+        );
+    }
+
+    public function test_no_hash_verification_waits_without_rpc_work(): void
+    {
+        $payment = $this->payment();
+        $beforeCalls = $this->rpc->calls;
+
+        $result = app(BscPaymentVerification::class)->verify($payment);
+
+        $this->assertSame(BscVerificationOutcome::AwaitingTransfer, $result->outcome);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame($beforeCalls, $this->rpc->calls);
     }
 
     public function test_exact_transfer_stays_confirming_until_three_confirmations_then_claims_once(): void
@@ -373,33 +386,6 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame(1, PaymentEvent::query()->where('provider', 'bsc')->count());
     }
 
-    public function test_reconciliation_finds_a_late_transfer_without_a_submitted_hash_and_uses_manual_review(): void
-    {
-        $payment = $this->payment();
-        $hash = '0x'.str_repeat('8', 64);
-        $this->configureReceipt($payment, $hash, latestBlock: 102);
-        $lateDeadline = now()->subMinute();
-        $payment->update(['expired_at' => $lateDeadline]);
-        $payment->order()->update([
-            'expires_at' => $lateDeadline,
-            'order_status' => OrderStatus::Expired,
-            'payment_status' => PaymentStatus::Expired,
-        ]);
-        $payment->update(['status' => PaymentStatus::Expired]);
-        $this->rpc->blocks['100'] = $this->block(100, now()->subSeconds(10), '0x'.str_repeat('e', 64));
-        $this->rpc->logs = [['transactionHash' => $hash]];
-
-        $result = app(BscPaymentVerification::class)->verify($payment->fresh());
-
-        $this->assertSame(BscVerificationOutcome::ManualReview, $result->outcome);
-        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Expired, $payment->fresh()->order->order_status);
-        $this->assertDatabaseHas('manual_fulfillment_reviews', [
-            'payment_id' => $payment->id,
-            'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
-        ]);
-    }
-
     public function test_a_globally_reused_transaction_cannot_claim_a_second_payment(): void
     {
         $first = $this->payment();
@@ -436,7 +422,7 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertDatabaseCount('manual_fulfillment_reviews', 1);
     }
 
-    public function test_multiple_matching_transfer_logs_create_one_ambiguous_manual_review(): void
+    public function test_multiple_matching_transfers_in_submitted_receipt_create_one_ambiguous_manual_review(): void
     {
         $payment = $this->payment();
         $hash = '0x'.str_repeat('a', 64);
@@ -519,95 +505,12 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame(OrderStatus::Cancelled, $rejectPayment->fresh()->order->order_status);
     }
 
-    public function test_scanner_uses_bounded_transfer_logs_without_customer_hash(): void
-    {
-        $payment = $this->payment();
-        $hash = '0x'.str_repeat('d', 64);
-        $this->configureReceipt($payment, $hash, latestBlock: 102);
-        $this->rpc->logs = [['transactionHash' => $hash]];
-
-        $result = app(BscPaymentVerification::class)->verify($payment);
-
-        $this->assertSame(BscVerificationOutcome::Confirmed, $result->outcome);
-        $this->assertSame($hash, $payment->fresh()->bscDetail()->firstOrFail()->current_tx_hash);
-    }
-
-    public function test_scanner_ignores_wrong_amount_candidate_when_exact_transfer_exists(): void
-    {
-        $payment = $this->payment();
-        $exactHash = '0x'.str_repeat('1', 64);
-        $wrongAmountHash = '0x'.str_repeat('2', 64);
-        $this->configureReceipt($payment, $exactHash, latestBlock: 102);
-        $this->configureReceipt($payment, $wrongAmountHash, amountUnits: '1000000000000000001', latestBlock: 102);
-        $this->rpc->logs = [
-            ['transactionHash' => $wrongAmountHash],
-            ['transactionHash' => $exactHash],
-        ];
-
-        $result = app(BscPaymentVerification::class)->verify($payment->fresh());
-
-        $this->assertSame(BscVerificationOutcome::Confirmed, $result->outcome);
-        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame($exactHash, $payment->fresh()->provider_reference);
-    }
-
-    public function test_scanner_ignores_out_of_window_candidate_when_exact_transfer_exists(): void
-    {
-        $payment = $this->payment();
-        $exactHash = '0x'.str_repeat('3', 64);
-        $oldHash = '0x'.str_repeat('4', 64);
-        $this->configureReceipt($payment, $exactHash, latestBlock: 102);
-        $this->configureReceipt(
-            $payment,
-            $oldHash,
-            latestBlock: 102,
-            blockNumber: 99,
-            blockTimestamp: now()->subMinutes(2),
-        );
-        $this->rpc->logs = [
-            ['transactionHash' => $oldHash],
-            ['transactionHash' => $exactHash],
-        ];
-
-        $result = app(BscPaymentVerification::class)->verify($payment->fresh());
-
-        $this->assertSame(BscVerificationOutcome::Confirmed, $result->outcome);
-        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame($exactHash, $payment->fresh()->provider_reference);
-    }
-
-    public function test_scan_returns_stale_submission_when_hash_is_replaced_during_log_read(): void
-    {
-        Queue::fake([VerifyBscPayment::class]);
-        $payment = $this->payment();
-        $oldHash = '0x'.str_repeat('5', 64);
-        $newHash = '0x'.str_repeat('6', 64);
-        $this->configureReceipt($payment, $oldHash, latestBlock: 102);
-        $this->rpc->logs = [['transactionHash' => $oldHash]];
-        $replaced = false;
-        $this->rpc->onTransferLogs = function () use (&$replaced, $payment, $newHash): void {
-            if (! $replaced) {
-                $replaced = true;
-                app(BscPaymentVerification::class)->submitTransactionHash($payment->order_id, $newHash);
-            }
-        };
-
-        $result = app(BscPaymentVerification::class)->verify($payment->fresh());
-
-        $this->assertSame(BscVerificationOutcome::StaleSubmission, $result->outcome);
-        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
-        $detail = $payment->fresh()->bscDetail()->firstOrFail();
-        $this->assertSame($newHash, $detail->current_tx_hash);
-        $this->assertSame(1, $detail->tx_submission_version);
-        $this->assertSame(0, $payment->fresh()->bscTransferEvidence()->count());
-        $this->assertSame(0, PaymentEvent::query()->where('provider', 'bsc')->count());
-    }
-
-    public function test_scan_queue_carries_the_submission_version_seen_at_dispatch(): void
+    public function test_hash_queue_carries_the_submission_version_seen_at_dispatch(): void
     {
         Queue::fake([VerifyBscPayment::class]);
         $payment = $this->payment();
         $payment->bscDetail()->update([
+            'current_tx_hash' => '0x'.str_repeat('1', 64),
             'tx_submission_version' => 2,
             'tx_attempts' => 2,
             'verification_status' => PaymentBscDetail::STATUS_TX_SUBMITTED,

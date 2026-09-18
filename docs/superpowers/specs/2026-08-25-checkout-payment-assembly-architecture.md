@@ -13,9 +13,9 @@ OrderCheckoutService currently owns two different kinds of work:
 1. the shared checkout transaction: Cart, Order, OrderItem, lock ordering,
    Inventory Ledger, credential allocation, idempotency, and Telegram Outbound
    Effect materialization;
-2. rail-specific Payment assembly: Binance fields, unique Binance amount,
-   BSC readiness, BSC receiver selection, BSC unique amount, and
-   PaymentBscDetail persistence.
+2. rail-specific Payment assembly: Binance fields and unique Binance amount,
+   BSC readiness, BSC receiver selection, exact catalog amount/token-unit
+   snapshot, and PaymentBscDetail persistence.
 
 The shared checkout transaction is valuable depth. The rail-specific assembly
 is the leakage to remove.
@@ -36,8 +36,8 @@ The preparation module has two phases:
 
 ~~~text
 preflight()  → before checkout locks; may perform BSC readiness work
-prepare()    → after checkout locks; may allocate a receiver/unique amount,
-               but may not perform RPC or other external I/O
+prepare()    → after checkout locks; may allocate a receiver and snapshot the
+               exact catalog amount, but may not perform RPC or other external I/O
 ~~~
 
 OrderCheckoutService consumes the resulting immutable CheckoutPaymentPlan. It
@@ -61,7 +61,7 @@ The current code has five payment rails and a growing number of rail-specific
 rules. OrderCheckoutService currently:
 
 - injects BinancePayClient, BinanceUniquePaymentAmount,
-  BscPaymentReceiverPool, BscUniquePaymentAmount, and BscReadiness;
+  BscPaymentReceiverPool, BscTokenAmount, and BscReadiness;
 - calls method_exists($paymentIntent, 'verificationMode');
 - checks BINANCE_PAY_ID and USDT_BEP20 directly;
 - writes Binance-specific Payment fields;
@@ -491,8 +491,7 @@ prepare owns:
 
 - locked readiness snapshot validation;
 - BSC receiver selection;
-- unique integer amount allocation;
-- expected token-unit calculation;
+- exact catalog amount snapshot;
 - the complete PaymentBscDetail snapshot plan;
 - BSC initial verification status.
 
@@ -532,7 +531,7 @@ transaction attempt.
 | Stale BSC setting/readiness snapshot | InvalidCheckout | Transaction rolls back |
 | Missing USDT price | Existing InvalidCheckout | Transaction rolls back |
 | Insufficient numeric or credential stock | Existing stock exception | Transaction rolls back |
-| Unique amount exhausted | Existing allocation failure | Receiver/amount allocation rolls back |
+| Invalid BSC snapshot or receiver readiness | Existing checkout failure | Transaction rolls back |
 | Duplicate checkout_key | Existing Order reused | No duplicate Payment/effect |
 | Database unique conflict | Existing bounded transaction retry | No partial commit |
 | Provider HTTP/RPC failure during preparation | Fail before external send | No Payment/effect commit |
@@ -546,7 +545,7 @@ populated plan. A plan is either complete or absent.
 Use constructor injection for preparation adapters and the resolver. Keep
 external transports behind the existing adapters:
 
-- BscReadiness, BscPaymentReceiverPool, and BscUniquePaymentAmount move behind
+- BscReadiness, BscPaymentReceiverPool, and BscTokenAmount move behind
   the BSC preparation adapter;
 - BinancePayClient and BinanceUniquePaymentAmount move behind the Binance
   preparation adapter;
@@ -635,7 +634,7 @@ Move the newest, highest-friction rail logic first:
 - BSC readiness report handoff;
 - locked BSC snapshot validation;
 - receiver selection;
-- unique amount allocation;
+- exact catalog amount/token-unit snapshot;
 - PaymentBscDetail plan;
 - Binance mode, receiver, unique amount, and verification field plan.
 
@@ -725,10 +724,9 @@ Preserve and update:
 
 Required races:
 
-- two BSC checkouts receive distinct unique amounts;
+- two BSC checkouts may use the same exact catalog amount;
 - two BSC checkouts receive valid receiver snapshots;
-- allocation exhaustion rolls back Order, Payment, receiver assignment, and
-  effects;
+- no BSC amount-allocation exhaustion path exists;
 - provider switch racing checkout preserves one valid setting snapshot;
 - duplicate checkout requests create one Order and one Payment;
 - checkout racing stock mutation preserves Inventory Ledger invariants.

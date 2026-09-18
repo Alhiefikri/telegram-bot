@@ -522,7 +522,6 @@ class BscReceiverConfigurationTest extends TestCase
                 'bsc_min_confirmations' => 3,
                 'bsc_require_finalized_block' => '1',
                 'bsc_confirmation_grace_minutes' => 3,
-                'bsc_unique_amount_increment_micro' => 100,
                 'bsc_hash_attempt_limit' => 5,
             ])
             ->assertRedirect('/admin?tab=stats#admin-payment-settings');

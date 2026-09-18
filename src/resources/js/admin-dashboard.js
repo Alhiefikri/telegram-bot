@@ -48,6 +48,7 @@ const emptyProductFamilyForm = () => ({
   familyFormMode: "create",
   familyFormMethod: "",
   familyId: null,
+  familySlug: "",
   familyName: "",
   familyDescription: "",
   familySortOrder: 0,
@@ -1135,12 +1136,12 @@ export default function adminDashboard(initialState = {}) {
         familyFormAction: family.updateUrl,
         familyFormMethod: "PATCH",
         familyId: family.id,
+        familySlug: family.slug ?? "",
         familyName: family.name,
         familyDescription: family.description ?? "",
         familySortOrder: family.sortOrder ?? 0,
         familyImageUrl: family.imageUrl ?? "",
         telegramFamilyImageUrl: family.telegramImageUrl ?? "",
-        telegramFamilyImageFileName: EMPTY_IMAGE_FILE_NAME,
       });
       this.$nextTick(() => this.$refs.familyName?.focus());
     },

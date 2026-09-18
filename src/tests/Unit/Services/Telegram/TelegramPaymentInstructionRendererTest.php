@@ -2,9 +2,12 @@
 
 namespace Tests\Unit\Services\Telegram;
 
+use App\Enums\PaymentStatus;
+use App\Models\BscPaymentReceiver;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirQrisTransaction;
@@ -504,6 +507,58 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertStringContainsString('safe QRIS payment display', $retry);
         $this->assertStringContainsString('Do not pay', $retry);
         $this->assertStringNotContainsString('provider-secret', $retry);
+    }
+
+    #[DataProvider('bscInstructionLocales')]
+    public function test_bsc_instruction_renders_the_exact_snapshotted_payable_amount(
+        string $locale,
+        string $productTotalLabel,
+        string $sendExactlyLabel,
+    ): void {
+        $expiresAt = CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta');
+        $order = $this->orderWithItems($expiresAt);
+        $receiver = BscPaymentReceiver::factory()->verified()->active()->create([
+            'address' => '0x1111111111111111111111111111111111111111',
+            'token_contract' => '0x55d398326f99059ff775485246999027b3197955',
+        ]);
+        $payment = Payment::factory()->for($order)->create([
+            'provider' => 'manual',
+            'method' => 'USDT_BEP20',
+            'amount' => 2_500_100,
+            'currency' => 'USDT',
+            'status' => PaymentStatus::Pending,
+            'expired_at' => $expiresAt,
+        ]);
+        PaymentBscDetail::query()->create([
+            'payment_id' => $payment->id,
+            'receiver_id' => $receiver->id,
+            'receiver_address' => $receiver->address_normalized,
+            'chain_id' => 56,
+            'token_contract' => $receiver->token_contract,
+            'token_decimals' => 18,
+            'required_confirmations' => 3,
+            'requires_finalized_block' => false,
+            'confirmation_grace_minutes' => 3,
+            'base_amount_micro' => 2_500_000,
+            'payable_amount_micro' => 2_500_100,
+            'expected_token_units' => '2500100000000000000',
+            'verification_status' => PaymentBscDetail::STATUS_AWAITING_TRANSFER,
+        ]);
+
+        $instruction = $this->renderer()->bsc($order, $payment, $locale);
+
+        $this->assertStringContainsString($productTotalLabel.': 2.5 USDT', $instruction['text']);
+        $this->assertStringContainsString($sendExactlyLabel."\n2.5001 USDT", $instruction['text']);
+        $this->assertStringNotContainsString($sendExactlyLabel."\n2.5 USDT", $instruction['text']);
+    }
+
+    public static function bscInstructionLocales(): array
+    {
+        return [
+            'english' => ['en', '💵 Product total', 'Send exactly:'],
+            'indonesian' => ['id', '💵 Harga produk', 'Kirim tepat:'],
+            'malay' => ['ms', '💵 Jumlah produk', 'Hantar tepat:'],
+        ];
     }
 
     public function test_binance_instruction_uses_malay_copy_and_preserves_amount_and_receiver(): void

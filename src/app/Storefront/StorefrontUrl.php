@@ -58,7 +58,7 @@ class StorefrontUrl
     {
         $from = $request->query('from');
 
-        return is_string($from) && $this->isLocalUrl($from)
+        return is_string($from) && $this->isSafeReturnUrl($from)
             ? $from
             : $this->productUrl($product);
     }
@@ -67,7 +67,7 @@ class StorefrontUrl
     {
         $path = $this->localPath($returnUrl);
 
-        return is_string($path) && str_starts_with($path, '/produk-keluarga/')
+        return is_string($path) && $this->isFamilyPath($path)
             ? 'family_direct_checkout_page'
             : 'direct_checkout_page';
     }
@@ -82,7 +82,7 @@ class StorefrontUrl
         $path = $this->localPath($returnUrl);
 
         return match (true) {
-            is_string($path) && str_starts_with($path, '/produk-keluarga/') => 'Kembali ke pilihan',
+            is_string($path) && $this->isFamilyPath($path) => 'Kembali ke pilihan',
             is_string($path) && str_starts_with($path, '/shop/cart') => 'Kembali ke keranjang',
             is_string($path) && str_starts_with($path, '/produk/') => 'Kembali ke produk',
             default => 'Kembali ke katalog',
@@ -96,6 +96,11 @@ class StorefrontUrl
             : null;
     }
 
+    private function isFamilyPath(string $path): bool
+    {
+        return str_starts_with($path, '/pilihan/') || str_starts_with($path, '/produk-keluarga/');
+    }
+
     public function waitlistUrlForId(int $productId): string
     {
         return route('storefront.waitlist.store', ['product' => $productId]);
@@ -106,7 +111,7 @@ class StorefrontUrl
      */
     private function localReturnParameters(?string $returnUrl): array
     {
-        return is_string($returnUrl) && $this->isLocalUrl($returnUrl)
+        return is_string($returnUrl) && $this->isSafeReturnUrl($returnUrl)
             ? ['from' => $returnUrl]
             : [];
     }
@@ -115,7 +120,7 @@ class StorefrontUrl
     {
         $url = route('storefront.product-families.show', ['productFamily' => $slug]);
 
-        if ($returnUrl === null || $returnUrl === '' || ! $this->isLocalUrl($returnUrl)) {
+        if (! $this->isSafeReturnUrl($returnUrl)) {
             return $url;
         }
 
@@ -126,11 +131,27 @@ class StorefrontUrl
     {
         $from = $request->query('from');
 
-        if (is_string($from) && $this->isLocalUrl($from)) {
+        if (is_string($from) && $this->isSafeReturnUrl($from)) {
             return $from;
         }
 
         return $this->familyUrl($slug);
+    }
+
+    private function isSafeReturnUrl(?string $url): bool
+    {
+        if (! is_string($url) || ! $this->isLocalUrl($url)) {
+            return false;
+        }
+
+        $path = parse_url($url, PHP_URL_PATH);
+
+        return ! is_string($path) || ! $this->isLegacyFamilyPath($path);
+    }
+
+    private function isLegacyFamilyPath(string $path): bool
+    {
+        return str_starts_with($path, '/produk-keluarga/');
     }
 
     public function checkoutRecoveryUrl(mixed $productId, ?string $returnUrl = null): string
@@ -154,7 +175,7 @@ class StorefrontUrl
     {
         $from = $request->query('from');
 
-        if (is_string($from) && $this->isLocalUrl($from)) {
+        if (is_string($from) && $this->isSafeReturnUrl($from)) {
             return $from;
         }
 

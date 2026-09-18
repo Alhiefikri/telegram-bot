@@ -17,6 +17,10 @@ final class BscOperationalAlertNotifier
 
     private const READINESS_LOCK_SECONDS = 30;
 
+    private const VERIFICATION_STATE_PREFIX = 'bsc.owner-alert.verification-state.';
+
+    private const VERIFICATION_LOCK_SECONDS = 30;
+
     public function __construct(
         private readonly TelegramAdminAccess $adminAccess,
         private readonly TelegramBotClient $bot,
@@ -65,21 +69,71 @@ final class BscOperationalAlertNotifier
 
     public function notifyVerification(Payment $payment, BscVerificationResult $result): void
     {
-        if (! in_array($result->outcome, [
+        $actionable = in_array($result->outcome, [
             BscVerificationOutcome::ProviderError,
             BscVerificationOutcome::Mismatch,
             BscVerificationOutcome::TransactionAlreadyUsed,
             BscVerificationOutcome::ManualReview,
-        ], true)) {
+        ], true);
+        $stateKey = self::VERIFICATION_STATE_PREFIX.$payment->id;
+
+        if (! $actionable) {
+            $this->clearVerificationIncident($stateKey);
+
             return;
         }
 
-        $payment->loadMissing('order');
-        $invoice = (string) ($payment->order?->invoice_number ?? $payment->id);
-        $this->sendOnce(
-            'verification:'.$payment->id.':'.$result->outcome->value,
-            "⚠️ BSC payment perlu perhatian\n━━━━━━━━━━━━━━\nInvoice: {$invoice}\nOutcome: {$result->outcome->value}\nPayment ID: ".hash('sha256', (string) $payment->id),
-        );
+        $payment->loadMissing(['order', 'bscDetail']);
+        $submissionVersion = (int) ($payment->bscDetail?->tx_submission_version ?? 0);
+        $hash = strtolower(trim((string) ($payment->bscDetail?->current_tx_hash ?? '')));
+        $fingerprint = hash('sha256', implode('|', [
+            $result->outcome->value,
+            (string) $submissionVersion,
+            $hash,
+        ]));
+        $lock = Cache::lock($stateKey.':lock', self::VERIFICATION_LOCK_SECONDS);
+        if (! $lock->get()) {
+            return;
+        }
+
+        try {
+            $active = Cache::get($stateKey);
+            if (is_string($active) && hash_equals($active, $fingerprint)) {
+                return;
+            }
+
+            Cache::forever($stateKey, $fingerprint);
+            $chatId = $this->adminAccess->adminChatId();
+            if ($chatId === null) {
+                Log::warning('BSC owner alert has no Telegram target.', [
+                    'alert_key' => 'verification:'.$payment->id,
+                ]);
+
+                return;
+            }
+
+            $invoice = (string) ($payment->order?->invoice_number ?? $payment->id);
+            $this->sendToChat(
+                $chatId,
+                "⚠️ BSC payment perlu perhatian\n━━━━━━━━━━━━━━\nInvoice: {$invoice}\nOutcome: {$result->outcome->value}\nPayment ID: ".hash('sha256', (string) $payment->id),
+            );
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function clearVerificationIncident(string $stateKey): void
+    {
+        $lock = Cache::lock($stateKey.':lock', self::VERIFICATION_LOCK_SECONDS);
+        if (! $lock->get()) {
+            return;
+        }
+
+        try {
+            Cache::forget($stateKey);
+        } finally {
+            $lock->release();
+        }
     }
 
     private function sendOnce(string $key, string $message): void

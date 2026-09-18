@@ -523,7 +523,7 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame(2, Payment::query()->where('amount', 2_000_000)->count());
     }
 
-    public function test_concurrent_bsc_checkouts_allocate_distinct_pending_amounts(): void
+    public function test_concurrent_bsc_checkouts_allow_the_same_pending_amount(): void
     {
         $this->requireConcurrencyLane();
         config()->set('services.bsc', array_merge(config('services.bsc'), [
@@ -557,7 +557,6 @@ class ProductionConcurrencyTest extends TestCase
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'bsc_payment_enabled' => true,
-            'bsc_unique_amount_increment_micro' => 100,
             'is_active' => true,
         ]);
         BscPaymentReceiver::factory()->verified()->active()->create([
@@ -582,7 +581,7 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame([], $this->failedResultClasses($results));
         $payments = Payment::query()->where('method', 'USDT_BEP20')->orderBy('amount')->get();
         $this->assertCount(2, $payments);
-        $this->assertSame([2_000_000, 2_000_100], $payments->pluck('amount')->all());
+        $this->assertSame([2_000_000, 2_000_000], $payments->pluck('amount')->all());
         $this->assertCount(2, PaymentBscDetail::query()->whereIn('payment_id', $payments->pluck('id'))->get());
     }
 

@@ -310,6 +310,7 @@ jobs:
             php artisan --version
             test -f vendor/autoload.php
             test -f public/build/manifest.json
+            test -s public/assets/product-placeholder.svg
             test -x /usr/local/bin/docker-entrypoint-laravel
             test -x /usr/local/bin/docker-scheduler-laravel
           '

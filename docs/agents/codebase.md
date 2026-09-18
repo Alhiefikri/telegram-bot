@@ -343,8 +343,8 @@ remain independent.
 
 Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):
 
-- public catalog: `/`, `/shop`, `/produk-keluarga/{productFamily:slug}`, and `/produk/{product}`;
-- family discovery is built by `StorefrontFamilyPageBuilder` from the shared credential-free `CatalogBrowse` projection. `/produk-keluarga/{slug}` is canonical/indexable discovery; `/produk/{product}` remains the SKU-specific detail and waitlist contract;
+- public catalog: `/`, `/shop`, `/pilihan/{productFamily:slug}`, and `/produk/{product}`;
+- family discovery is built by `StorefrontFamilyPageBuilder` from the shared credential-free `CatalogBrowse` projection. `/pilihan/{slug}` is canonical/indexable discovery; `/produk-keluarga/{slug}` is a 301 legacy redirect backed by durable slug aliases; `/produk/{product}` remains the product detail and waitlist contract;
 - guest cart: `GET /shop/cart`, `POST /shop/cart/items`, `PATCH /shop/cart/items/{product}`, and `DELETE /shop/cart/items/{product}`;
 - canonical direct Product checkout review: `GET /shop/checkout/products/{product}` (`storefront.shop.checkout.product`), with bounded `quantity` and safe same-origin return context;
 - shared Cart checkout review: `GET /shop/checkout` (`storefront.shop.checkout.start`);
@@ -362,9 +362,23 @@ summary, quantity or read-only Cart items, buyer name, selected payment method, 
 disclosures, consent, and one in-flow submit action. It has one document scroll, no checkout
 dialog, no nested checkout scroll container, and no modal transport/runtime state.
 
+The #477 Storefront presentation keeps catalog data and checkout ownership unchanged while the `storefront-shell` scope supplies soft paper/surface/ink roles, a shared search header, direct mobile Cart access, compact DB-backed featured entries, and reduced-motion-safe motion. Available Product detail and checkout pages may expose mobile sticky actions that reuse the canonical checkout form; JavaScript-disabled users retain the in-flow controls.
+Storefront Product cards and detail covers read the optional Product `icon` and custom image from the database/Admin product record. Runtime presentation uses a neutral generic fallback when both are absent; it does not map product names to brand-specific cover content. The separate ChatGPT login guide remains informational content, not catalog data.
+
+The final Storefront release matrix covers `320x568`, `390x844`, `768x900`,
+`1280x900`, `1440x900`, and `1920x1080`. Public browser evidence keeps
+`/pilihan/{slug}` canonical, treats `/produk-keluarga/{slug}` as redirect-only
+(including durable aliases), rejects invalid canonical and legacy slugs with
+404, preserves only safe same-origin return context, and verifies sitemap,
+JSON-LD, Open Graph, breadcrumb, and placeholder-asset URLs without the
+retired public family path or internal catalog labels. Product detail evidence
+covers available direct review, unavailable waitlist, no-image fallback,
+keyboard/Escape navigation, reduced motion, 200% zoom, and JavaScript-disabled
+links/forms without horizontal overflow or sticky-action overlap.
+
 Every public purchase entry point uses this contract: homepage and `/shop` Product cards
 link `Beli sekarang` to the canonical direct review; Product detail uses
-`#product-checkout-cta`; Product Family options use `Beli` directly to the same review; Cart
+`#product-checkout-cta`; Product Family options use `Beli sekarang` directly to the same review; Cart
 uses `Lanjut checkout` to the shared Cart review. No entry point uses
 `/produk/{product}?checkout=1`, `data-modal-url`, or the retired Product modal endpoint.
 
@@ -408,6 +422,8 @@ Untuk stok, `AdminProductAccountStockController` menerima JSON Account Input (1�
 Adapter presentation tidak memiliki aturan cutoff sendiri. `StorefrontShopCheckout` hanya melakukan preflight non-authoritative sebelum membuat Customer/cart; guard service tetap wajib. `StorefrontResponseCache` memasukkan maintenance `version` ke cache identity sehingga request pertama setelah perubahan nyata tidak memakai HTML lama, sedangkan no-op mempertahankan identity. `StorefrontCatalogPageBuilder`/presenter dan view partial menampilkan notice serta mengganti CTA; `TelegramMenuIntents`, `TelegramCatalogIntents`, `TelegramCartIntents`, dan callback handlers mempertahankan browsing/stock/cart, sementara `TelegramCheckoutMaintenanceCallbackHandler` menyediakan Cek Status. Status callback terdaftar sekali setelah privacy/community gate dan tidak mengirim broadcast.
 
 Entry point test terfokus adalah `tests/Feature/StorefrontShopCartTest.php` (guest Cart session isolation, expiry, stale snapshot, multi-item checkout, duplicate submit, maintenance rejection, and mixed fulfillment), `tests/Feature/StorefrontShopCheckoutTest.php` (direct checkout and payment rails), `tests/Feature/StorefrontProductCheckoutTest.php` (canonical Product review, page cutover, unavailable state, and recovery), `tests/Feature/CheckoutMaintenanceTest.php` (mutation, zero-side-effect rejection, existing native QRIS/status refresh, lifecycle continuation), `tests/Feature/PakasirWebhookTest.php` (authoritative callback, reconciliation, receipt/Sales Proof Post), `tests/Feature/Telegram/CheckoutMaintenanceTest.php`, and `tests/Feature/CheckoutMaintenancePostgresConcurrencyTest.php`. Browser customer evidence is in `tests/Browser/admin-dashboard-responsive.spec.js`; `npm run test:browser:customer` selects the `customer checkout:` cases covering home/shop/Product detail/Product Family, Cart, signed manual invoice, JavaScript-disabled form submission, failure recovery, browser back, keyboard/disclosures, reduced motion, zoom/reflow, and the 320×568, 390×844, 768×900, 1280×900, 1440×900, and 1920×1080 viewport matrix. Lane PostgreSQL dijalankan oleh `composer test:concurrency-gate`; race test mencakup kedua checkout locks/reservation hanya bila perubahan menyentuh boundary tersebut.
+
+Issue #477 release evidence is the focused Storefront feature suite, the responsive customer browser suite, `npm run build`, the slug-repair dry run, and an HTTP 200 smoke check for `/assets/product-placeholder.svg`. Production mutation and deployment remain owned by the approved GitHub Actions release from `main`.
 
 ### 4.4 Buyer history dan KlikQRIS reporting
 
@@ -518,11 +534,11 @@ Binance API key harus read-only dan dibatasi IP. History provider dibaca oleh `B
 
 ### 5.6 USDT BEP20 (BSC)
 
-USDT BEP20 memakai `provider=manual`, `method=USDT_BEP20`, dan authority BNB Smart Chain. [`BscPaymentVerification`](../../src/app/Services/Bsc/BscPaymentVerification.php) adalah pemilik receipt/log validation, exact transfer predicate, confirmation/grace decision, sanitized evidence, late-payment detection, and single claim. It calls `OrderLifecycle`; it does not send Telegram copy or update stock directly.
+USDT BEP20 memakai `provider=manual`, `method=USDT_BEP20`, dan authority BNB Smart Chain. [`BscPaymentVerification`](../../src/app/Services/Bsc/BscPaymentVerification.php) adalah pemilik verifikasi TX hash customer melalui receipt logs, exact transfer predicate, confirmation/grace decision, sanitized evidence, late-payment detection, and single claim. Nominal checkout adalah nominal katalog yang sama dengan `payments.amount`; tidak ada nominal unik untuk membedakan Payment. Verifier memanggil `OrderLifecycle`; ia tidak mengirim copy Telegram atau mengubah stock secara langsung.
 
 `BscConfirmationGrace` is the expiry guard. It accepts a grace timestamp only when matching successful evidence is stored with an inclusion block between Payment creation and the original deadline. `orders:expire-pending` therefore cannot be bypassed by a fabricated future timestamp. If a terminal Order later receives an exact transfer, BSC records evidence, marks the financially valid Payment paid through `OrderLifecycle`, creates `ManualFulfillmentReview`, and leaves the Order terminal.
 
-`BscReadiness` checks the database activation flag, approved chain/token metadata, RPC response, bounded `eth_getLogs` support, and active receiver count. Receiver management is Owner-only: the submitted address is normalized and stored as an active `manual_verified` destination after re-authentication, without a wallet-signature challenge. Multiple distinct addresses are supported and the existing least-recently-assigned pool distributes new Payments across them. The BSC RPC endpoint is the only environment authority; chain/token identity, explorer, and operational limits are pinned in application configuration. Its short-lived result is shared across customer surfaces and invalidated after committed BSC setting/receiver mutations. [`BscCheckoutPaymentPreparation`](../../src/app/Services/Checkout/BscCheckoutPaymentPreparation.php) runs `preflight()` before checkout locks, then `prepare()` revalidates only the locked setting/configuration/receiver snapshot, selects the receiver, allocates the unique amount, calculates expected token units, and builds the `PaymentBscDetail` snapshot. `prepare()` performs no BSC RPC or other external I/O; `OrderCheckoutService` consumes only the resulting plan. `bsc:reconcile` uses the existing `binance-verification` queue and also checks late-payment candidates, readiness, and backlog alerts. `ops:health --bsc` is the release/operations health surface; receiver destinations remain database-managed and Storefront availability is version-invalidated after committed setting/receiver mutations.
+`BscReadiness` checks the database activation flag, approved chain/token metadata, RPC response, and active receiver count. Receiver management is Owner-only: the submitted address is normalized and stored as an active `manual_verified` destination after re-authentication, without a wallet-signature challenge. Multiple distinct addresses are supported and the existing least-recently-assigned pool distributes new Payments across them. The BSC RPC endpoint is the only environment authority; chain/token identity, explorer, and operational limits are pinned in application configuration. Its short-lived result is shared across customer surfaces and invalidated after committed BSC setting/receiver mutations. Reconciliation skips Payments without a submitted TX hash and applies bounded retry cadence to submitted hashes.
 
 ### 5.7 Sakurupiah QRIS
 

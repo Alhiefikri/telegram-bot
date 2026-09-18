@@ -48,7 +48,7 @@ final class CheckBscReadiness extends Command
             }
 
             // BSC is disabled by default. Disabled is a safe deployment state;
-            // an explicitly enabled but unready rail is a release failure.
+            // an explicitly enabled but checkout-unready rail is a release failure.
             return ! $report->enabled || $report->isReady()
                 ? self::SUCCESS
                 : self::FAILURE;

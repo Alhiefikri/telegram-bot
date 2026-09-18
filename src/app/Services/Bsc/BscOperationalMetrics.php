@@ -15,13 +15,15 @@ final class BscOperationalMetrics
                 ->where('provider', 'manual')
                 ->where('method', 'USDT_BEP20')
                 ->where('status', PaymentStatus::Pending->value)
-                ->whereHas('bscDetail', fn ($detail) => $detail->whereNotIn('verification_status', [
-                    'confirmed',
-                    'expired',
-                    'manual_review',
-                    'mismatch',
-                    'transaction_already_used',
-                ]));
+                ->whereHas('bscDetail', fn ($detail) => $detail
+                    ->whereNotNull('current_tx_hash')
+                    ->whereNotIn('verification_status', [
+                        'confirmed',
+                        'expired',
+                        'manual_review',
+                        'mismatch',
+                        'transaction_already_used',
+                    ]));
 
             $count = (int) $query->count();
             $oldest = $count > 0 ? $query->min('created_at') : null;

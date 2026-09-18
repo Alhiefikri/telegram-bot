@@ -60,7 +60,10 @@ final readonly class BscCheckoutPaymentSnapshot extends AbstractCheckoutPaymentS
             throw new InvalidArgumentException('BSC receiver snapshot contains an invalid address.');
         }
 
-        if ($this->baseAmountMicro < 0 || $this->payableAmountMicro < 0 || $this->amount !== $this->payableAmountMicro) {
+        if ($this->baseAmountMicro < 0
+            || $this->payableAmountMicro < 0
+            || $this->baseAmountMicro !== $this->payableAmountMicro
+            || $this->amount !== $this->payableAmountMicro) {
             throw new InvalidArgumentException('BSC payment amounts are inconsistent.');
         }
 

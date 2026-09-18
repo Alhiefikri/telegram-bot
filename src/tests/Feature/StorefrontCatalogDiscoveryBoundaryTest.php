@@ -54,17 +54,6 @@ final class StorefrontCatalogBoundaryRpc implements BscVerificationRpcClientInte
     {
         return null;
     }
-
-    public function transferLogs(
-        string $contract,
-        string|int $fromBlock,
-        string|int $toBlock,
-        ?string $receiver = null,
-    ): array {
-        $this->calls++;
-
-        return [];
-    }
 }
 
 final class StorefrontCatalogDiscoveryBoundaryTest extends TestCase

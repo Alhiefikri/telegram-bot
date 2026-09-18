@@ -3,7 +3,10 @@
 namespace App\Http\Requests\Admin;
 
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
+use App\Models\ProductFamily;
+use App\Models\ProductFamilySlugRedirect;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
 
 abstract class AdminProductFamilyFormRequest extends FormRequest
 {
@@ -23,6 +26,43 @@ abstract class AdminProductFamilyFormRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:160'],
+            'slug' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:160',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! is_string($value) || trim($value) === '') {
+                        return;
+                    }
+
+                    $normalized = Str::slug($value);
+                    if ($normalized === '') {
+                        $fail('Slug harus berisi huruf atau angka.');
+
+                        return;
+                    }
+
+                    $family = $this->route('productFamily');
+                    if (! $family instanceof ProductFamily) {
+                        return;
+                    }
+
+                    if (ProductFamily::withTrashed()
+                        ->where('slug', $normalized)
+                        ->whereKeyNot($family->getKey())
+                        ->exists()) {
+                        $fail('Slug sudah digunakan family lain.');
+                    }
+
+                    if (ProductFamilySlugRedirect::query()
+                        ->where('old_slug', $normalized)
+                        ->where('product_family_id', '!=', $family->getKey())
+                        ->exists()) {
+                        $fail('Slug masih menjadi alamat lama family lain.');
+                    }
+                },
+            ],
             'description' => ['nullable', 'string', 'max:1000'],
             'sort_order' => ['required', 'integer', 'min:0', 'max:999999'],
             'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120', 'dimensions:max_width=6000,max_height=6000'],

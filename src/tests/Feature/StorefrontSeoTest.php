@@ -6,6 +6,7 @@ use App\Models\Category;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
@@ -91,6 +92,31 @@ class StorefrontSeoTest extends TestCase
         $this->assertStringContainsString('<nav aria-label="Breadcrumb"', $shopHtml);
         $this->assertStringContainsString('>Beranda<', $shopHtml);
         $this->assertStringContainsString('aria-current="page"', $shopHtml);
+    }
+
+    public function test_family_metadata_uses_only_the_canonical_choice_url(): void
+    {
+        $family = ProductFamily::factory()->create([
+            'slug' => 'seo-family',
+            'name' => 'SEO Family',
+        ]);
+        Product::factory()->create([
+            'product_family_id' => $family->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $canonical = route('storefront.product-families.show', ['productFamily' => $family->slug]);
+
+        $html = (string) $this->get($canonical)->assertOk()->getContent();
+        $documents = $this->jsonLdDocuments($html);
+        $collection = collect($documents)->firstWhere('@type', 'CollectionPage');
+        $breadcrumbs = collect($documents)->firstWhere('@type', 'BreadcrumbList');
+
+        $this->assertIsArray($collection);
+        $this->assertSame($canonical, $collection['url']);
+        $this->assertIsArray($breadcrumbs);
+        $this->assertSame($canonical, $breadcrumbs['itemListElement'][2]['item']);
+        $this->assertStringNotContainsString('/produk-keluarga/', $html);
     }
 
     public function test_sitemap_contains_only_bounded_public_canonical_urls(): void

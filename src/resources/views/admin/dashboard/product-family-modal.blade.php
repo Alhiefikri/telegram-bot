@@ -28,7 +28,7 @@
                 <div class="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <p class="font-display text-sm font-black uppercase text-neo-ink" x-text="familyFormMode === 'edit' ? 'Edit Product Family' : 'Tambah Product Family'"></p>
-                        <p class="mt-1 text-[11px] font-bold text-neo-ink/60">Slug dibuat sistem dan tetap stabil saat nama berubah.</p>
+                        <p class="mt-1 text-[11px] font-bold text-neo-ink/60">Slug dibuat sistem saat tambah dan dapat diubah saat edit; alamat lama tetap dialihkan.</p>
                     </div>
                     <button x-cloak x-show="familyFormMode === 'edit'" type="button" class="rounded-lg border-2 border-neo-ink bg-white px-2.5 py-1.5 text-[10px] font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]" x-on:click="resetProductFamilyForm()">Batal edit</button>
                 </div>
@@ -52,6 +52,12 @@
                         @error('sort_order', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                         @error('sort_order', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     </div>
+                </div>
+                <div x-cloak x-show="familyFormMode === 'edit'" class="mt-3">
+                    <x-admin-dashboard.field-label for="product-family-slug">Alamat publik (slug)</x-admin-dashboard.field-label>
+                    <x-admin-dashboard.input id="product-family-slug" name="slug" maxlength="160" placeholder="netflix" class="mt-1.5" x-model="familySlug" x-bind:required="familyFormMode === 'edit'" />
+                    <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Gunakan huruf, angka, dan tanda hubung. Perubahan membuat alamat lama tetap bekerja lewat redirect.</p>
+                    @error('slug', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                 </div>
 
                 <div class="mt-3 rounded-xl border-2 border-neo-ink bg-white p-3 shadow-[2px_2px_0_#111827]">

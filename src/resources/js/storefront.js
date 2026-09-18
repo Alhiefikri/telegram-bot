@@ -62,6 +62,7 @@ function toggleMobileMenu(
   const shouldOpen = forceClosed === null ? isClosed : !forceClosed;
 
   if (shouldOpen) {
+    menu.inert = false;
     menu.classList.remove("hidden");
     backdrop?.classList.remove("hidden");
     menu.setAttribute("aria-hidden", "false");
@@ -69,6 +70,9 @@ function toggleMobileMenu(
     document.body.classList.add("overflow-hidden");
 
     window.requestAnimationFrame(() => {
+      if (menu.getAttribute("aria-hidden") !== "false") {
+        return;
+      }
       menu.classList.remove("-translate-x-full");
       menu.classList.add("translate-x-0");
       backdrop?.classList.remove("opacity-0");
@@ -86,12 +90,15 @@ function toggleMobileMenu(
   backdrop?.classList.add("opacity-0");
   backdrop?.classList.remove("opacity-100");
   menu.setAttribute("aria-hidden", "true");
+  menu.inert = true;
   menuButton?.setAttribute("aria-expanded", "false");
   document.body.classList.remove("overflow-hidden");
 
   window.setTimeout(() => {
-    menu.classList.add("hidden");
-    backdrop?.classList.add("hidden");
+    if (menu.getAttribute("aria-hidden") === "true") {
+      menu.classList.add("hidden");
+      backdrop?.classList.add("hidden");
+    }
   }, 250);
 
   iconTop?.classList.remove("rotate-45", "translate-y-[9px]");
@@ -182,6 +189,14 @@ function initMobileMenu() {
   closeButton?.addEventListener("click", () => closeMenu());
   backdrop?.addEventListener("click", () => closeMenu());
 
+  window
+    .matchMedia("(min-width: 1024px)")
+    .addEventListener("change", (event) => {
+      if (event.matches) {
+        closeMenu(false);
+      }
+    });
+
   mobileMenu.querySelectorAll("a").forEach((link) => {
     link.addEventListener("click", () => closeMenu(false));
   });
@@ -245,6 +260,59 @@ function initScrollProgress() {
 
   window.addEventListener("scroll", requestUpdate, { passive: true });
   window.addEventListener("resize", requestUpdate, { passive: true });
+  update();
+}
+
+function initMediaFrames() {
+  const frames = document.querySelectorAll("[data-media-frame]");
+
+  if (!frames.length) {
+    return;
+  }
+
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    return;
+  }
+
+  frames.forEach((frame) => {
+    const image = frame.querySelector("img");
+
+    if (!image) {
+      return;
+    }
+
+    const settle = () => frame.classList.remove("is-loading");
+
+    if (image.complete) {
+      return;
+    }
+
+    frame.classList.add("is-loading");
+    image.addEventListener("load", settle, { once: true });
+    image.addEventListener("error", settle, { once: true });
+  });
+}
+
+function initHeaderElevation() {
+  const header = document.querySelector("[data-storefront-header]");
+
+  if (!header) {
+    return;
+  }
+
+  let ticking = false;
+  const update = () => {
+    ticking = false;
+    header.classList.toggle("is-scrolled", window.scrollY > 8);
+  };
+  const requestUpdate = () => {
+    if (!ticking) {
+      ticking = true;
+      window.requestAnimationFrame(update);
+    }
+  };
+
+  window.addEventListener("scroll", requestUpdate, { passive: true });
   update();
 }
 
@@ -1203,6 +1271,140 @@ function formatCheckoutUsdt(microAmount) {
   return `${(amount / 1_000_000).toFixed(6).replace(/\.?0+$/, "")} USDT`;
 }
 
+function initFamilyQuickBuy() {
+  const root = document.querySelector("[data-family-quick-buy]");
+  if (!root) {
+    return;
+  }
+
+  const options = Array.from(document.querySelectorAll("[data-family-option]"));
+  const quantityInput = root.querySelector("[data-family-quantity]");
+  const quantitySteps = root.querySelectorAll("[data-family-quantity-step]");
+  const selectedName = root.querySelector("[data-family-selected-name]");
+  const selectedPrice = root.querySelector("[data-family-selected-price]");
+  const checkoutLink = root.querySelector("[data-family-checkout]");
+
+  if (!options.length || !quantityInput || !checkoutLink) {
+    return;
+  }
+
+  const money = (amount) =>
+    new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
+      maximumFractionDigits: 0,
+    }).format(amount);
+
+  const isAvailable = (option) => {
+    const input = option.querySelector("[data-family-select]");
+    return !input?.disabled && Number(option.dataset.familyOptionStock) > 0;
+  };
+
+  const selectedOption = () =>
+    options.find((option) => {
+      const input = option.querySelector("[data-family-select]");
+      return input?.checked && isAvailable(option);
+    }) || options.find(isAvailable);
+
+  const sync = (option) => {
+    if (!option) {
+      return;
+    }
+
+    const input = option.querySelector("[data-family-select]");
+    if (input && !input.checked && !input.disabled) {
+      input.checked = true;
+    }
+
+    const stock = Math.max(
+      1,
+      Math.min(20, Number(option.dataset.familyOptionStock) || 1)
+    );
+    const quantity = Math.max(
+      1,
+      Math.min(stock, Number(quantityInput.value) || 1)
+    );
+    const checkoutUrl = new URL(
+      option.dataset.familyCheckoutUrl || checkoutLink.href,
+      window.location.href
+    );
+
+    quantityInput.max = String(stock);
+    quantityInput.value = String(quantity);
+    checkoutUrl.searchParams.set("quantity", String(quantity));
+    checkoutLink.href = checkoutUrl.toString();
+
+    if (selectedName) {
+      selectedName.textContent = option.dataset.familyOptionName || "";
+    }
+    if (selectedPrice) {
+      selectedPrice.textContent = money(
+        Number(option.dataset.familyOptionPrice) || 0
+      );
+    }
+
+    options.forEach((candidate) => {
+      const selected = candidate === option;
+      candidate.toggleAttribute("data-family-selected", selected);
+      candidate.classList.toggle("family-option-selected", selected);
+    });
+  };
+
+  const selectOption = (option) => {
+    const input = option.querySelector("[data-family-select]");
+    if (!input || input.disabled) {
+      return;
+    }
+
+    input.checked = true;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+
+  const isInteractiveTarget = (target) =>
+    target instanceof Element &&
+    Boolean(
+      target.closest(
+        "a, button, input, select, textarea, summary, [data-family-option-details]"
+      )
+    );
+
+  options.forEach((option) => {
+    const input = option.querySelector("[data-family-select]");
+    input?.addEventListener("change", () => sync(option));
+    option.addEventListener("click", (event) => {
+      if (!isInteractiveTarget(event.target)) {
+        selectOption(option);
+      }
+    });
+    option.addEventListener("keydown", (event) => {
+      if (
+        isInteractiveTarget(event.target) ||
+        !["Enter", " "].includes(event.key)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      selectOption(option);
+    });
+  });
+
+  quantitySteps.forEach((button) => {
+    button.addEventListener("click", () => {
+      const step = Number(button.dataset.familyQuantityStep) || 0;
+      const max = Number(quantityInput.max) || 20;
+      quantityInput.value = String(
+        Math.max(1, Math.min(max, (Number(quantityInput.value) || 1) + step))
+      );
+      sync(selectedOption());
+    });
+  });
+
+  quantityInput.addEventListener("input", () => sync(selectedOption()));
+  quantityInput.addEventListener("change", () => sync(selectedOption()));
+  sync(selectedOption());
+}
+
 function initCheckoutReview() {
   const errorSummary = document.querySelector("[data-checkout-error-summary]");
 
@@ -1213,6 +1415,9 @@ function initCheckoutReview() {
   }
 
   const quantityInput = document.querySelector("[data-checkout-quantity]");
+  const quantitySteps = document.querySelectorAll(
+    "[data-checkout-quantity-step]"
+  );
   const paymentRoot = document.querySelector("[data-checkout-payment]");
   const contactDetails = document.querySelector(
     "[data-checkout-contact-details]"
@@ -1228,10 +1433,44 @@ function initCheckoutReview() {
   const quantityAnnouncement = document.querySelector(
     "[data-checkout-quantity-announcement]"
   );
+  const checkoutForm = document.querySelector("#checkout-form");
+  const checkoutMain = document.querySelector(".storefront-checkout-page main");
+  const stickyAction = document.querySelector("[data-checkout-sticky-action]");
+  const stickySubmit = document.querySelector("[data-checkout-sticky-submit]");
+  const stickyPayment = document.querySelector(
+    "[data-checkout-sticky-payment]"
+  );
+  const stickyAmountLabel = document.querySelector(
+    "[data-checkout-sticky-amount-label]"
+  );
+  const stickyTotal = document.querySelector("[data-checkout-sticky-total]");
+  const stickyDefaultSubmitLabel =
+    stickySubmit?.textContent?.trim() || "Lanjut bayar";
+  const stickyDefaultPaymentLabel =
+    stickyPayment?.textContent?.trim() || "Metode pembayaran belum tersedia";
+  const stickyDefaultAmountLabel =
+    stickyAmountLabel?.textContent?.trim() || "Total review (IDR)";
 
-  const refreshPayment = () => {
-    if (!paymentRoot) {
+  const syncStickyOffset = () => {
+    if (!checkoutMain || !stickyAction) {
       return;
+    }
+
+    const stickyHeight = stickyAction.getBoundingClientRect().height;
+    if (
+      stickyHeight === 0 ||
+      !window.matchMedia("(max-width: 767px)").matches
+    ) {
+      checkoutMain.style.removeProperty("padding-bottom");
+      return;
+    }
+
+    checkoutMain.style.paddingBottom = `${stickyHeight}px`;
+  };
+
+  const selectedPaymentOption = () => {
+    if (!paymentRoot) {
+      return null;
     }
 
     const options = Array.from(
@@ -1245,12 +1484,85 @@ function initCheckoutReview() {
       paymentRoot
         .querySelector("[data-checkout-selected-option]")
         ?.getAttribute("data-payment-value");
-    const option = options.find(
-      (candidate) =>
-        candidate.getAttribute("data-payment-value") === selectedValue
+
+    return (
+      options.find(
+        (candidate) =>
+          candidate.getAttribute("data-payment-value") === selectedValue
+      ) || null
+    );
+  };
+
+  const syncSticky = () => {
+    if (!stickySubmit) {
+      syncStickyOffset();
+      return;
+    }
+
+    const option = selectedPaymentOption();
+    const idrTotal = document.querySelector("[data-checkout-order-subtotal]");
+    const canonicalSubmit = option?.querySelector("[data-checkout-submit]");
+    const formIsValid = checkoutForm?.checkValidity() ?? false;
+    const providerIsReady = canonicalSubmit ? !canonicalSubmit.disabled : false;
+    const paymentLabel =
+      option
+        ?.querySelector("[data-checkout-selected-payment-label]")
+        ?.textContent?.trim() ||
+      option?.getAttribute("data-payment-label") ||
+      stickyDefaultPaymentLabel;
+    const amountLabel =
+      option
+        ?.querySelector("[data-checkout-payment-amount-label]")
+        ?.textContent?.trim() ||
+      option?.getAttribute("data-payment-amount-label") ||
+      stickyDefaultAmountLabel;
+    const amountValue =
+      option
+        ?.querySelector("[data-checkout-payment-amount-value]")
+        ?.textContent?.trim() ||
+      idrTotal?.textContent?.trim() ||
+      "—";
+    const stickyIsDisabled = !formIsValid || !providerIsReady;
+
+    if (stickyPayment) {
+      stickyPayment.textContent = paymentLabel;
+    }
+    if (stickyAmountLabel) {
+      stickyAmountLabel.textContent = amountLabel;
+    }
+    if (stickyTotal) {
+      stickyTotal.textContent = amountValue;
+    }
+
+    stickySubmit.textContent =
+      option?.getAttribute("data-payment-submit-label") ||
+      stickyDefaultSubmitLabel;
+    stickySubmit.disabled = stickyIsDisabled;
+    stickySubmit.setAttribute(
+      "aria-disabled",
+      stickyIsDisabled ? "true" : "false"
     );
 
+    const disabledDescription =
+      canonicalSubmit?.getAttribute("aria-describedby");
+    if (stickyIsDisabled && disabledDescription) {
+      stickySubmit.setAttribute("aria-describedby", disabledDescription);
+    } else if (!stickyIsDisabled) {
+      stickySubmit.removeAttribute("aria-describedby");
+    }
+    syncStickyOffset();
+  };
+
+  const refreshPayment = () => {
+    if (!paymentRoot) {
+      syncSticky();
+      return;
+    }
+
+    const option = selectedPaymentOption();
+
     if (!option) {
+      syncSticky();
       return;
     }
 
@@ -1332,6 +1644,7 @@ function initCheckoutReview() {
     if (requiresSakurupiahContact && contactDetails) {
       contactDetails.open = true;
     }
+    syncSticky();
   };
 
   const refreshQuantity = (announce = false) => {
@@ -1396,10 +1709,52 @@ function initCheckoutReview() {
     .forEach((input) => {
       input.addEventListener("change", refreshPayment);
     });
+  quantitySteps.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!quantityInput) {
+        return;
+      }
+
+      const step = Number(button.dataset.checkoutQuantityStep) || 0;
+      const min = Number(quantityInput.min) || 1;
+      const max = Number(quantityInput.max) || 20;
+      quantityInput.value = String(
+        Math.max(
+          min,
+          Math.min(max, (Number(quantityInput.value) || min) + step)
+        )
+      );
+      refreshQuantity(true);
+    });
+  });
+  quantityInput?.addEventListener("input", () => refreshQuantity());
   quantityInput?.addEventListener("change", () => refreshQuantity(true));
+  checkoutForm?.addEventListener("input", syncSticky);
+  checkoutForm?.addEventListener("change", syncSticky);
+  if (stickyAction) {
+    window.addEventListener("resize", syncStickyOffset);
+    if (typeof ResizeObserver !== "undefined") {
+      const stickyResizeObserver = new ResizeObserver(syncStickyOffset);
+      stickyResizeObserver.observe(stickyAction);
+    }
+  }
 
   refreshQuantity(false);
   refreshPayment();
+  syncSticky();
+}
+
+function initInvoiceFollowupDetails() {
+  const details = document.querySelector("[data-invoice-followup-details]");
+  if (!details) {
+    return;
+  }
+
+  document.querySelectorAll('a[href="#invoice-support"]').forEach((link) => {
+    link.addEventListener("click", () => {
+      details.open = true;
+    });
+  });
 }
 
 export default function initStorefront() {
@@ -1408,11 +1763,15 @@ export default function initStorefront() {
 
     initMobileMenu();
     initCatalogFilterFocus();
+    initFamilyQuickBuy();
     initCheckoutReview();
     initScrollProgress();
+    initHeaderElevation();
+    initMediaFrames();
     initVerifiedPurchaseActivity();
     initRevealStagger();
     initFaqAccordion();
+    initInvoiceFollowupDetails();
     initPaymentActions();
     initSupportFunnelEvents();
     initPaymentCountdowns();

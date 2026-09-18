@@ -19,6 +19,7 @@ class StorefrontCatalogProductPresentationTest extends TestCase
     {
         $product = $this->readModel([
             'name' => 'Canva Premium',
+            'icon' => '🧩',
             'description' => "\n\nDesain premium siap pakai.\nDetail lain.",
             'availableStock' => 3,
             'soldQuantity' => 8,
@@ -44,12 +45,27 @@ class StorefrontCatalogProductPresentationTest extends TestCase
         $this->assertSame('Stok: 3', $presentation->stockLabel);
         $this->assertSame('Terjual: 8', $presentation->soldLabel);
         $this->assertSame('/storage/products/canva.jpg', $presentation->cover->imageUrl);
-        $this->assertSame('CANVA PREMIUM', $presentation->cover->theme['desc']);
+        $this->assertSame('🧩', $presentation->cover->icon);
+        $this->assertSame('PRODUK DIGITAL', $presentation->cover->theme['desc']);
         $this->assertSame('Canva 30 Hari', $presentation->familyOptionLabel);
         $this->assertSame(route('storefront.products.show', ['product' => $product->id]), $presentation->productUrl);
         $this->assertSame(route('storefront.shop.checkout.product', ['product' => $product->id]), $presentation->checkoutUrl);
         $this->assertSame(route('storefront.waitlist.store', ['product' => $product->id]), $presentation->waitlistUrl);
         $this->assertFalse($presentation->canJoinWaitlist);
+    }
+
+    public function test_catalog_presenter_uses_product_icon_before_placeholder_when_no_image_exists(): void
+    {
+        $presentation = app(StorefrontCatalogProductPresenter::class)->present($this->readModel([
+            'name' => 'Produk Dinamis',
+            'icon' => '🧩',
+            'imagePath' => null,
+            'imageUrl' => null,
+        ]));
+
+        $this->assertNull($presentation->cover->imageUrl);
+        $this->assertSame('🧩', $presentation->cover->icon);
+        $this->assertSame('PRODUK DIGITAL', $presentation->cover->theme['desc']);
     }
 
     public function test_catalog_presenter_preserves_unavailable_labels_and_default_image(): void
@@ -179,6 +195,7 @@ class StorefrontCatalogProductPresentationTest extends TestCase
             'imagePath' => '/assets/catalog-product.jpg',
             'imageUrl' => '/assets/catalog-product.jpg',
             'createdAt' => null,
+            'icon' => null,
             'matchesSearch' => false,
         ], $overrides);
 
@@ -207,6 +224,7 @@ class StorefrontCatalogProductPresentationTest extends TestCase
             optionLabel: $values['optionLabel'],
             imagePath: $values['imagePath'],
             imageUrl: $values['imageUrl'],
+            icon: $values['icon'],
             createdAt: $values['createdAt'],
             matchesSearch: $values['matchesSearch'],
         );

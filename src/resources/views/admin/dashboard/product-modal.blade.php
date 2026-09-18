@@ -54,7 +54,7 @@
                                 class="mt-1.5"
                                 x-model="productIcon"
                             />
-                            <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Emoji/karakter ini tampil di katalog Telegram. Kosongkan untuk memakai icon default otomatis.</p>
+                            <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Emoji/karakter ini tampil di katalog Telegram dan Web Storefront. Kosongkan untuk memakai icon default otomatis.</p>
                             @error('icon', 'productCreate')
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror

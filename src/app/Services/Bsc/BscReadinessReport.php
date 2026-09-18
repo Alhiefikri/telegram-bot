@@ -35,7 +35,10 @@ final readonly class BscReadinessReport
         }
 
         $problems = [...$this->missing, ...array_values($this->invalid)];
+        if ($problems !== []) {
+            return implode(' ', $problems);
+        }
 
-        return $problems === [] ? 'BSC siap digunakan.' : implode(' ', $problems);
+        return 'BSC siap digunakan melalui verifikasi TX Hash.';
     }
 }

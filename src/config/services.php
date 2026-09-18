@@ -60,14 +60,11 @@ return [
         'rpc_connect_timeout_seconds' => 2,
         'rpc_max_attempts' => 2,
         'rpc_retry_delay_ms' => 150,
-        'max_scan_blocks' => 10_000,
-        'max_scan_logs' => 1_000,
         'pending_backlog_alert_threshold' => 50,
         'late_payment_lookback_hours' => 72,
         'owner_alert_cooldown_seconds' => 900,
         'readiness_cache_seconds' => 60,
         'ownership_challenge_ttl_minutes' => 10,
-        'max_unique_amount_candidates' => 1000,
     ],
 
     'binance' => [

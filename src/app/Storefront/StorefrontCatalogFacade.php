@@ -52,6 +52,11 @@ final class StorefrontCatalogFacade
         return $this->urls->checkoutProductUrlForId($productId, $returnUrl);
     }
 
+    public function familyUrl(string $slug, ?string $returnUrl = null): string
+    {
+        return $this->urls->familyUrl($slug, $returnUrl);
+    }
+
     /**
      * @return array<string, mixed>
      */

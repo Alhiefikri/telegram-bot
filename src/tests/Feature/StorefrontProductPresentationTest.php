@@ -266,6 +266,7 @@ class StorefrontProductPresentationTest extends TestCase
     {
         $product = $this->availableProduct([
             'name' => 'Canva Premium',
+            'icon' => '🎨',
             'description' => "\n\nDesain premium siap pakai.\nDetail lain.",
             'image_path' => 'products/canva.jpg',
             'stock' => 5,
@@ -277,8 +278,24 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertSame(3, $presentation->stockAvailable);
         $this->assertSame('Desain premium siap pakai.', $presentation->descriptionSnippet);
         $this->assertSame('/storage/products/canva.jpg', $presentation->cover->imageUrl);
-        $this->assertSame('CANVA PREMIUM', $presentation->cover->theme['desc']);
+        $this->assertSame('🎨', $presentation->cover->icon);
+        $this->assertSame('PRODUK DIGITAL', $presentation->cover->theme['desc']);
         $this->assertTrue($presentation->cover->hasImage());
+    }
+
+    public function test_product_icon_is_used_before_placeholder_when_no_custom_image_exists(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Produk Dinamis',
+            'icon' => '🧩',
+            'image_path' => null,
+        ]);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+
+        $this->assertNull($presentation->cover->imageUrl);
+        $this->assertSame('🧩', $presentation->cover->icon);
+        $this->assertSame('PRODUK DIGITAL', $presentation->cover->theme['desc']);
     }
 
     public function test_product_without_custom_image_uses_default_placeholder(): void

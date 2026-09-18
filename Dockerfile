@@ -65,6 +65,7 @@ COPY --from=vendor /app/vendor ./vendor
 COPY --from=assets /app/public/build ./public/build
 COPY --from=assets /app/public/build /opt/lhiestore-public-build
 COPY src/public/binance.jpeg /opt/lhiestore-public-binance.jpeg
+COPY src/public/assets/product-placeholder.svg /opt/lhiestore-public-product-placeholder.svg
 RUN mkdir -p /opt/lhiestore-public-storefront \
     && cp -R public/storefront/. /opt/lhiestore-public-storefront/
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf

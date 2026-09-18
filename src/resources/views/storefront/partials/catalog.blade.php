@@ -1,8 +1,8 @@
-<section id="products" class="relative border-y-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] py-10 sm:py-12">
+<section id="products" class="relative border-y border-[var(--sf-border)] bg-[var(--sf-surface)] py-10 sm:py-12">
     <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-70"></div>
     <div class="relative z-10 mx-auto max-w-7xl px-5 sm:px-6">
-        <div class="mx-auto mb-7 max-w-2xl text-center">
-            <div class="mx-auto mb-3 inline-flex min-h-11 items-center gap-2 rounded-full border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
+        <div class="reveal-item mx-auto mb-7 max-w-2xl text-center">
+            <div class="mx-auto mb-3 inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[0_4px_12px_rgb(18_35_63_/_0.08)]">
                 <span class="neo-spin-slow inline-block" aria-hidden="true">✦</span>
                 <span>Katalog aktif · {{ $catalogPage->productCount() }} item katalog</span>
             </div>
@@ -26,20 +26,44 @@
         </div>
 
     @if ($catalogPage->hasPublicCategories)
-        <nav class="mb-7 flex flex-wrap justify-center gap-2" aria-label="Filter kategori produk">
-            <a href="{{ $catalogPage->allCategoryUrl }}" @class([
-                'category-btn hover-rubber-band inline-flex min-h-11 items-center justify-center rounded-full border-[3px] px-4 py-2 text-xs font-black text-center transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
-                'neo-filter-active' => $catalogPage->selectedCategory === null,
-                'neo-filter-inactive hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)]' => $catalogPage->selectedCategory !== null,
-            ]) data-filter="all" @if ($catalogPage->selectedCategory === null) aria-current="page" @endif aria-controls="storefront-product-grid">Semua</a>
-            @foreach ($catalogPage->categoryFilters as $category)
-                <a href="{{ $category->url }}" @class([
-                    'category-btn hover-rubber-band inline-flex min-h-11 items-center justify-center rounded-full border-[3px] px-4 py-2 text-xs font-black text-center transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
-                    'neo-filter-active' => $category->isActive,
-                    'neo-filter-inactive hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)]' => ! $category->isActive,
-                ]) data-filter="{{ $category->id }}" @if ($category->isActive) aria-current="page" @endif aria-controls="storefront-product-grid">{{ $category->name }}</a>
-            @endforeach
-        </nav>
+        @if ($catalogPage->isHome())
+            <section id="kategori" class="reveal-item mb-10 rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 sm:p-6" aria-labelledby="kategori-title">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                        <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-accent)]">Jelajahi toko</p>
+                        <h3 id="kategori-title" class="mt-1 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)]">Belanja berdasarkan kategori</h3>
+                        <p class="mt-1 max-w-xl text-sm font-semibold leading-6 text-[var(--sf-muted)]">Pilih kebutuhan Anda, lalu lihat produk yang siap dibeli di kategori tersebut.</p>
+                    </div>
+                    <a href="{{ $catalogPage->allCategoryUrl }}" class="inline-flex min-h-11 shrink-0 items-center rounded-lg border border-[var(--sf-border)] bg-white px-4 py-2 text-xs font-black text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-yellow)]">Lihat semua produk</a>
+                </div>
+                <nav class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Filter kategori produk">
+                    @foreach ($catalogPage->categoryFilters as $category)
+                        <a href="{{ $category->url }}" class="category-btn group flex min-h-20 items-center gap-3 rounded-xl border border-[var(--sf-border)] bg-white p-3 transition-all hover:-translate-y-0.5 hover:bg-[var(--sf-yellow)] hover:shadow-[0_8px_18px_rgb(18_35_63_/_0.1)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" data-filter="{{ $category->id }}" @if ($category->isActive) aria-current="page" @endif aria-controls="storefront-product-grid">
+                            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[var(--sf-accent)] font-display text-lg font-black text-white" aria-hidden="true">{{ mb_strtoupper(mb_substr($category->name, 0, 1)) }}</span>
+                            <span class="min-w-0">
+                                <span class="block truncate text-sm font-black text-[var(--sf-ink)]">{{ $category->name }}</span>
+                                <span class="mt-1 block text-xs font-bold text-[var(--sf-accent)]">Jelajahi produk <span aria-hidden="true">→</span></span>
+                            </span>
+                        </a>
+                    @endforeach
+                </nav>
+            </section>
+        @else
+            <nav class="mb-7 flex flex-wrap justify-center gap-2" aria-label="Filter kategori produk">
+                <a href="{{ $catalogPage->allCategoryUrl }}" @class([
+                    'category-btn hover-rubber-band inline-flex min-h-11 items-center justify-center rounded-full border px-4 py-2 text-xs font-black text-center transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
+                    'neo-filter-active' => $catalogPage->selectedCategory === null,
+                    'neo-filter-inactive hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)]' => $catalogPage->selectedCategory !== null,
+                ]) data-filter="all" @if ($catalogPage->selectedCategory === null) aria-current="page" @endif aria-controls="storefront-product-grid">Semua</a>
+                @foreach ($catalogPage->categoryFilters as $category)
+                    <a href="{{ $category->url }}" @class([
+                        'category-btn hover-rubber-band inline-flex min-h-11 items-center justify-center rounded-full border px-4 py-2 text-xs font-black text-center transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
+                        'neo-filter-active' => $category->isActive,
+                        'neo-filter-inactive hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)]' => ! $category->isActive,
+                    ]) data-filter="{{ $category->id }}" @if ($category->isActive) aria-current="page" @endif aria-controls="storefront-product-grid">{{ $category->name }}</a>
+                @endforeach
+            </nav>
+        @endif
     @else
         @if ($catalogPage->entries()->isEmpty())
             <x-storefront.empty-state
@@ -49,13 +73,36 @@
             />
         @endif
     @endif
-
-    @if ($catalogPage->popularProducts->isEmpty() && $catalogPage->popularEmptyMessage)
-        <p class="mb-6 text-center text-sm font-bold text-[var(--sf-muted)]">{{ $catalogPage->popularEmptyMessage }}</p>
+    @if ($catalogPage->popularProducts->isNotEmpty())
+        <section id="trending" class="reveal-item mb-10 border-y border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-8 sm:px-6" aria-labelledby="trending-title">
+            <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                    <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-accent)]">Dipilih dari pesanan selesai</p>
+                    <h3 id="trending-title" class="mt-1 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)]">Trending sekarang</h3>
+                </div>
+                <span class="text-xs font-bold text-[var(--sf-muted)]">Produk yang paling sering dibeli</span>
+            </div>
+            <div @class([
+                'storefront-trending-grid mx-auto grid gap-4',
+                'grid-cols-1 max-w-xs' => $catalogPage->popularProducts->count() === 1,
+                'sm:grid-cols-2 lg:grid-cols-3 max-w-5xl' => $catalogPage->popularProducts->count() > 1,
+            ])>
+                @foreach ($catalogPage->popularProducts as $catalogProduct)
+                    @include('storefront.components.product-card', ['catalogProduct' => $catalogProduct])
+                @endforeach
+            </div>
+        </section>
     @endif
 
+    <div class="mb-3 flex items-end justify-between gap-3">
+        <div>
+            <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Katalog aktif</p>
+            <h3 class="mt-1 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)]">Tersedia sekarang</h3>
+        </div>
+        <span class="text-xs font-bold text-[var(--sf-muted)]">{{ $catalogPage->productCount() }} item</span>
+    </div>
     <div id="storefront-product-grid" @class([
-        'storefront-popular-card storefront-product-grid',
+        'storefront-catalog-card storefront-product-grid',
         'storefront-product-grid--single mx-auto max-w-xs' => $catalogPage->productCount() === 1,
     ])>
         @forelse ($catalogPage->entries() as $entry)

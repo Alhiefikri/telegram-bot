@@ -11,6 +11,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\ProductFamilySlugRedirect;
 use App\Models\ProductWaitlistSubscription;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -58,7 +59,7 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
             ->assertSee('Netflix')
             ->assertSee('Spotify Standalone')
             ->assertSee('data-family-id="'.$family->id.'"', false)
-            ->assertSee('2 pilihan produk')
+            ->assertSee('2 pilihan')
             ->assertSee('1 tersedia');
 
         $search = $this->get(route('storefront.shop.index', ['q' => 'Netflix Individual', 'category' => 'streaming', 'sort' => 'price_asc', 'page' => 1]));
@@ -97,14 +98,18 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
             'reserved_stock' => 0,
         ]);
 
-        $response = $this->get(route('storefront.product-families.show', ['productFamily' => $family->slug]));
+        $canonical = route('storefront.product-families.show', ['productFamily' => $family->slug]);
+        $response = $this->get($canonical);
         $response->assertOk()
+            ->assertSee('<link rel="canonical" href="'.$canonical.'">', false)
+            ->assertSee('<meta property="og:url" content="'.$canonical.'">', false)
             ->assertSee('<title>CapCut — Pilihan Produk | Lhie Store</title>', false)
             ->assertSee('Pilih paket CapCut sesuai kebutuhan.')
             ->assertSee('Individual 30 Hari')
             ->assertSee('Team 30 Hari')
-            ->assertSee('SKU #'.$first->id)
-            ->assertSee('SKU #'.$later->id)
+            ->assertDontSee('Product Family')
+            ->assertDontSee('Pilih SKU')
+            ->assertDontSee('SKU #')
             ->assertSee('1 tersedia')
             ->assertSee('Stok habis')
             ->assertSee('data-product-id="'.$first->id.'"', false)
@@ -337,12 +342,14 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
             'access_duration' => '30 hari',
             'region' => 'Global',
             'account_type' => 'Private',
+            'device_limit' => '1 perangkat',
             'included_items' => "Akun siap pakai\nPanduan login",
             'limitations' => 'Tidak untuk dijual kembali',
             'fulfillment_expectation' => 'Dikirim setelah pembayaran terverifikasi.',
             'warranty_policy' => 'Garansi login 7 hari.',
             'support_policy' => 'Support pada jam operasional.',
             'price_amount' => 99000,
+            'usdt_price_amount' => 1_250_000,
             'stock' => 3,
             'reserved_stock' => 0,
         ]);
@@ -356,10 +363,14 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
 
         $pricePosition = strpos($cardHtml, 'Rp99.000');
         $durationChipPosition = strpos($cardHtml, 'Durasi 30 hari');
-        preg_match('/>\s*Beli\s*</', $cardHtml, $buyMatch, PREG_OFFSET_CAPTURE);
+        $usdtPricePosition = strpos($cardHtml, '1.25 USDT');
+        preg_match('/>\s*Beli(?: sekarang)?\s*</', $cardHtml, $buyMatch, PREG_OFFSET_CAPTURE);
         $summaryPosition = strpos($cardHtml, 'Baca detail lengkap');
         $teaserPosition = strpos($cardHtml, 'Baris pertama penawaran.');
         $merchandisingPosition = strpos($cardHtml, 'Region');
+        $deviceLimitPosition = strpos($cardHtml, 'Batas perangkat / seat');
+        $fullDescriptionPosition = strpos($cardHtml, 'Baris panjang kedua yang memuat detail panjang');
+        $detailPosition = strpos($cardHtml, 'Detail <span aria-hidden="true">→</span>');
 
         $this->assertNotFalse($pricePosition, 'Option card should show the price.');
         $this->assertNotFalse($durationChipPosition, 'Option card should show the duration as a decision fact.');
@@ -367,6 +378,14 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertNotFalse($summaryPosition, 'Option card should keep details in a disclosure.');
         $this->assertNotFalse($teaserPosition, 'Option card should keep the description reachable.');
         $this->assertNotFalse($merchandisingPosition, 'Option card should keep merchandising reachable.');
+        $this->assertNotFalse($usdtPricePosition, 'Option card should show the honest USDT price when configured.');
+        $this->assertNotFalse($deviceLimitPosition, 'Option card should keep the device limit reachable.');
+        $this->assertNotFalse($fullDescriptionPosition, 'Option disclosure should keep the full description reachable.');
+        $this->assertFalse($detailPosition, 'Available options should not expose a second visible detail action next to Beli.');
+        $this->assertStringContainsString('href="'.route('storefront.products.show', ['product' => $product]).'?from=', $cardHtml, 'The option name should remain the detail entry point.');
+        $familyMainHtml = substr($html, strpos($html, '<main'));
+        $this->assertStringNotContainsString('role="dialog"', $familyMainHtml, 'Family options should remain a document flow without a modal.');
+        $this->assertStringContainsString('Opsi', $cardHtml, 'Option cards should use public option language.');
         $this->assertLessThan($buyPosition, $pricePosition, 'Price should appear above the Beli action.');
         $this->assertLessThan($buyPosition, $durationChipPosition, 'Duration should appear above the Beli action.');
         $this->assertLessThan($summaryPosition, $buyPosition, 'Beli should appear above the details disclosure.');
@@ -376,7 +395,107 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertSame(1, preg_match('/<details data-family-option-details/', $cardHtml), 'Disclosure should be a native details element.');
         $this->assertSame(0, preg_match('/<details data-family-option-details[^>]*\bopen\b/', $cardHtml), 'Details should start collapsed.');
         $this->assertStringContainsString('Tersedia', $cardHtml, 'Availability should stay visible on the card.');
+        $this->assertLessThan($buyPosition, $usdtPricePosition, 'USDT price should appear above the Beli action.');
+        $this->assertLessThan($deviceLimitPosition, $summaryPosition, 'Device limit should remain inside the details disclosure.');
+        $this->assertLessThan($fullDescriptionPosition, $summaryPosition, 'Full description should remain inside the details disclosure.');
         $this->assertStringContainsString('href="'.route('storefront.shop.checkout.product', ['product' => $product]).'?from=', $cardHtml, 'Beli should point at the direct checkout review.');
+    }
+
+    public function test_canonical_family_path_and_legacy_slug_aliases_redirect_safely(): void
+    {
+        $family = ProductFamily::factory()->create(['slug' => 'old-netflix', 'name' => 'Netflix']);
+        Product::factory()->create([
+            'product_family_id' => $family->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+
+        $canonical = route('storefront.product-families.show', ['productFamily' => $family->slug]);
+        $this->assertSame('/pilihan/old-netflix', parse_url($canonical, PHP_URL_PATH));
+
+        $returnUrl = '/shop?q=netflix&sort=price_asc';
+        $legacy = $this->get('/produk-keluarga/old-netflix?from='.rawurlencode($returnUrl).'&utm_source=legacy');
+        $legacy->assertStatus(301);
+        $this->assertSame($canonical.'?from='.rawurlencode($returnUrl), $legacy->headers->get('Location'));
+        $this->assertStringNotContainsString('utm_source', (string) $legacy->headers->get('Location'));
+
+        $this->get('/produk-keluarga/old-netflix?from='.rawurlencode('https://evil.example/phish').'&utm_source=legacy')
+            ->assertStatus(301)
+            ->assertRedirect($canonical);
+
+        ProductFamilySlugRedirect::query()->create([
+            'old_slug' => 'netflix-legacy',
+            'product_family_id' => $family->id,
+        ]);
+        $this->get('/produk-keluarga/netflix-legacy')
+            ->assertStatus(301)
+            ->assertRedirect($canonical);
+    }
+
+    public function test_legacy_family_path_returns_not_found_for_unknown_private_or_deleted_families(): void
+    {
+        $private = ProductFamily::factory()->create(['slug' => 'private-family']);
+        Product::factory()->create([
+            'product_family_id' => $private->id,
+            'is_active' => false,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $deleted = ProductFamily::factory()->create(['slug' => 'deleted-family']);
+        Product::factory()->create([
+            'product_family_id' => $deleted->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $deleted->delete();
+
+        $this->get('/produk-keluarga/does-not-exist')->assertNotFound();
+        $this->get('/produk-keluarga/private-family')->assertNotFound();
+        $this->get('/produk-keluarga/deleted-family')->assertNotFound();
+    }
+
+    public function test_canonical_family_route_requires_a_public_current_slug(): void
+    {
+        $public = ProductFamily::factory()->create(['slug' => 'public-family']);
+        Product::factory()->create([
+            'product_family_id' => $public->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $private = ProductFamily::factory()->create(['slug' => 'private-current-family']);
+        Product::factory()->create([
+            'product_family_id' => $private->id,
+            'is_active' => false,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        ProductFamilySlugRedirect::query()->create([
+            'old_slug' => $private->slug,
+            'product_family_id' => $public->id,
+        ]);
+
+        $this->get('/pilihan/'.$private->slug)->assertNotFound();
+        $this->get('/produk-keluarga/'.$private->slug)->assertNotFound();
+        $this->get('/pilihan/'.$public->slug)->assertOk();
+    }
+
+    public function test_canonical_family_page_drops_legacy_family_return_context(): void
+    {
+        $family = ProductFamily::factory()->create([
+            'slug' => 'canonical-family',
+            'name' => 'Canonical Family',
+        ]);
+        Product::factory()->create([
+            'product_family_id' => $family->id,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        $canonical = route('storefront.product-families.show', ['productFamily' => $family->slug]);
+
+        $this->get($canonical.'?from='.rawurlencode('/produk-keluarga/legacy-family'))
+            ->assertOk()
+            ->assertSee('href="'.$canonical.'"', false)
+            ->assertDontSee('/produk-keluarga/');
     }
 
     private function manualPaymentModeIsActive(): void
@@ -405,6 +524,7 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $response = $this->get(route('storefront.sitemap'));
         $response->assertOk()
             ->assertSee(route('storefront.product-families.show', ['productFamily' => $family->slug]), false)
-            ->assertSee(route('storefront.products.show', ['product' => $product]), false);
+            ->assertSee(route('storefront.products.show', ['product' => $product]), false)
+            ->assertDontSee('/produk-keluarga/', false);
     }
 }
