@@ -730,6 +730,7 @@ class ProductFamilyCatalogTest extends TestCase
             ->assertStatus(301)
             ->assertRedirect(route('storefront.product-families.show', ['productFamily' => 'new-family']));
     }
+
     public function test_new_family_creation_skips_reserved_slug_aliases(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
@@ -750,5 +751,4 @@ class ProductFamilyCatalogTest extends TestCase
         $created = ProductFamily::query()->where('name', 'Reserved Family')->sole();
         $this->assertSame('reserved-family-2', $created->slug);
     }
-
 }

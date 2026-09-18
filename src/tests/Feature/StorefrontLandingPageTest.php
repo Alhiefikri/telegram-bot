@@ -7,6 +7,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
+use App\Storefront\StorefrontResponseCache;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -125,9 +126,9 @@ class StorefrontLandingPageTest extends TestCase
         $manifestPath = public_path('build/manifest.json');
         $originalManifest = File::get($manifestPath);
         $manifest = json_decode($originalManifest, true, 512, JSON_THROW_ON_ERROR);
-        $cacheKey = new \ReflectionMethod(\App\Storefront\StorefrontResponseCache::class, 'key');
+        $cacheKey = new \ReflectionMethod(StorefrontResponseCache::class, 'key');
         $cacheKey->setAccessible(true);
-        $cache = app(\App\Storefront\StorefrontResponseCache::class);
+        $cache = app(StorefrontResponseCache::class);
 
         try {
             $before = $cacheKey->invoke($cache, 1, 1, '');
