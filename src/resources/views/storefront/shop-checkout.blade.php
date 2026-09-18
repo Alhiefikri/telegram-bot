@@ -104,7 +104,7 @@
                                                     </div>
                                                     <p class="min-w-0 w-full shrink-0 text-left text-sm font-black leading-6 text-[var(--sf-ink)] sm:w-auto sm:text-right">
                                                         <span class="block text-xs uppercase tracking-wide text-[var(--sf-muted)]">Subtotal review</span>
-                                                        <span data-checkout-item-subtotal>{{ $item->subtotal === null ? '—' : $storefront->idr($item->subtotal) }}</span>
+                                                        <span data-checkout-item-subtotal class="inline-block max-w-full break-words">{{ $item->subtotal === null ? '—' : $storefront->idr($item->subtotal) }}</span>
                                                     </p>
                                                 </div>
                                             </div>
@@ -240,9 +240,9 @@
                                     <div class="grid gap-2">
                                         <label for="checkout-quantity" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">Jumlah</label>
                                         <div class="flex max-w-[13rem] items-center rounded-lg border border-[var(--sf-border)] bg-white">
-                                            <button type="button" data-checkout-quantity-step="-1" class="grid h-12 w-11 place-items-center text-xl font-black text-[var(--sf-muted)]" aria-label="Kurangi jumlah">−</button>
-                                            <input id="checkout-quantity" name="quantity" type="number" min="1" max="{{ $checkoutQuantityMax }}" required value="{{ old('quantity', $checkoutQuantity) }}" data-checkout-quantity data-unit-price="{{ $cartItems->first()?->unitPrice ?? 0 }}" data-unit-usdt-price="{{ $cartItems->first()?->usdtUnitPrice ?? 0 }}" @if($errors->has('quantity')) aria-invalid="true" aria-describedby="checkout-quantity-help checkout-quantity-error checkout-quantity-announcement" @else aria-describedby="checkout-quantity-help checkout-quantity-announcement" @endif class="h-12 w-full border-x border-[var(--sf-border)] bg-transparent px-3 text-center text-base font-black text-[var(--sf-ink)] focus:outline-none @error('quantity') text-[#9f1d2d] @enderror">
-                                            <button type="button" data-checkout-quantity-step="1" class="grid h-12 w-11 place-items-center text-xl font-black text-[var(--sf-muted)]" aria-label="Tambah jumlah">+</button>
+                                            <button type="button" data-checkout-quantity-step="-1" class="grid h-12 w-11 shrink-0 place-items-center text-xl font-black text-[var(--sf-muted)]" aria-label="Kurangi jumlah">−</button>
+                                            <input id="checkout-quantity" name="quantity" type="number" min="1" max="{{ $checkoutQuantityMax }}" required value="{{ old('quantity', $checkoutQuantity) }}" data-checkout-quantity data-unit-price="{{ $cartItems->first()?->unitPrice ?? 0 }}" data-unit-usdt-price="{{ $cartItems->first()?->usdtUnitPrice ?? 0 }}" @if($errors->has('quantity')) aria-invalid="true" aria-describedby="checkout-quantity-help checkout-quantity-error checkout-quantity-announcement" @else aria-describedby="checkout-quantity-help checkout-quantity-announcement" @endif class="h-12 min-w-11 w-full flex-1 border-x border-[var(--sf-border)] bg-transparent px-3 text-center text-base font-black text-[var(--sf-ink)] focus:outline-none @error('quantity') text-[#9f1d2d] @enderror">
+                                            <button type="button" data-checkout-quantity-step="1" class="grid h-12 w-11 shrink-0 place-items-center text-xl font-black text-[var(--sf-muted)]" aria-label="Tambah jumlah">+</button>
                                         </div>
                                         <p id="checkout-quantity-help" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">Maksimal {{ $checkoutQuantityMax }} unit. Total akan diperbarui otomatis.</p>
                                         <p id="checkout-quantity-announcement" data-checkout-quantity-announcement class="sr-only" aria-live="polite" aria-atomic="true"></p>

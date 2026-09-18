@@ -1419,7 +1419,6 @@
 
   .js-enabled
     .storefront-checkout-page
-    #checkout-form
     [data-checkout-selected-option]
     [data-checkout-submit] {
     display: none;
@@ -1432,7 +1431,6 @@
 
     .js-enabled
       .storefront-checkout-page
-      #checkout-form
       [data-checkout-selected-option]
       [data-checkout-submit] {
       display: inline-flex;
