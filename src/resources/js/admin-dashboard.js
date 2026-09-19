@@ -15,6 +15,26 @@ const MODAL_FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
+let productQuantityPriceTierSequence = 0;
+
+const newProductQuantityPriceTier = () => ({
+  _key: `product-tier-${++productQuantityPriceTierSequence}`,
+  minimumQuantity: "",
+  priceAmount: "",
+  usdtPriceAmount: "",
+});
+
+const normalizeProductQuantityPriceTiers = (tiers) =>
+  Array.isArray(tiers)
+    ? tiers.map((tier) => ({
+        _key:
+          tier?._key ?? `product-tier-${++productQuantityPriceTierSequence}`,
+        minimumQuantity: tier?.minimumQuantity ?? tier?.minimum_quantity ?? "",
+        priceAmount: tier?.priceAmount ?? tier?.price_amount ?? "",
+        usdtPriceAmount: tier?.usdtPriceAmount ?? tier?.usdt_price_amount ?? "",
+      }))
+    : [];
+
 const emptyProductForm = () => ({
   productModalMode: "create",
   productFormMethod: "",
@@ -32,6 +52,8 @@ const emptyProductForm = () => ({
   productImageUrl: "",
   telegramProductImageUrl: "",
   telegramProductImageFileName: EMPTY_IMAGE_FILE_NAME,
+  productQuantityPriceTiers: [],
+  productQuantityPriceTierErrors: {},
 });
 
 const emptyCategoryForm = () => ({
@@ -196,6 +218,11 @@ export default function adminDashboard(initialState = {}) {
     productFormAction: initialState.productStoreUrl ?? "",
     ...emptyProductForm(),
     ...(initialState.productForm ?? {}),
+    productQuantityPriceTiers: normalizeProductQuantityPriceTiers(
+      initialState.productForm?.productQuantityPriceTiers ?? []
+    ),
+    productQuantityPriceTierErrors:
+      initialState.productForm?.productQuantityPriceTierErrors ?? {},
     productDeliveryNoteOpen: Boolean(
       initialState.productForm?.productDeliveryNoteOpen
     ),
@@ -258,7 +285,7 @@ export default function adminDashboard(initialState = {}) {
     init() {
       this.$nextTick(() => {
         if (this.productModalOpen) {
-          this.$refs.productName?.focus();
+          this.focusProductModalField();
           return;
         }
 
@@ -1014,6 +1041,44 @@ export default function adminDashboard(initialState = {}) {
         }
       });
     },
+    productQuantityPriceTierError(index, field) {
+      const messages =
+        this.productQuantityPriceTierErrors?.[
+          `quantity_price_tiers.${index}.${field}`
+        ];
+
+      return Array.isArray(messages) ? (messages[0] ?? "") : (messages ?? "");
+    },
+
+    productQuantityPriceTierScheduleError() {
+      const messages =
+        this.productQuantityPriceTierErrors?.quantity_price_tiers;
+
+      return Array.isArray(messages) ? (messages[0] ?? "") : (messages ?? "");
+    },
+
+    addProductQuantityPriceTier() {
+      if (this.productQuantityPriceTiers.length >= 5) {
+        return;
+      }
+
+      this.productQuantityPriceTiers.push(newProductQuantityPriceTier());
+    },
+
+    removeProductQuantityPriceTier(index) {
+      this.productQuantityPriceTiers.splice(index, 1);
+    },
+
+    focusProductModalField() {
+      this.$nextTick(() => {
+        const dialog = document.getElementById("product-modal");
+        const invalidField = dialog?.querySelector(
+          '[aria-invalid="true"]:not([type="hidden"])'
+        );
+
+        (invalidField ?? this.$refs.productName)?.focus();
+      });
+    },
 
     openProductForm() {
       this.productModalOpener = document.activeElement;
@@ -1185,6 +1250,10 @@ export default function adminDashboard(initialState = {}) {
         productIcon: product.icon ?? "",
         productPrice: product.priceAmount,
         productUsdtPrice: product.usdtPriceAmount ?? "",
+        productQuantityPriceTiers: normalizeProductQuantityPriceTiers(
+          product.quantityPriceTiers ?? []
+        ),
+        productQuantityPriceTierErrors: {},
         productCategoryId: product.categoryId ?? "",
         productDescription: product.description,
         productDeliveryNote: product.deliveryNote ?? "",

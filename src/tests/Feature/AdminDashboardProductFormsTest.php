@@ -3,9 +3,11 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Models\AuditLog;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductStockItem;
 use App\Models\StorefrontSetting;
 use App\Models\User;
@@ -188,7 +190,173 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSeeInOrder(['Dipesan', '0'])
 
             ->assertSee('Akses Canva Pro siap pakai.')
+
             ->assertSee('/assets/product-placeholder.svg', false);
+    }
+    public function test_admin_can_create_replace_and_disable_quantity_price_tiers(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->post(route('admin.products.store'), [
+                'name' => 'Tiered Product',
+                'price_amount' => '50000',
+                'usdt_price_amount' => '2',
+                'description' => 'Produk dengan harga bertingkat.',
+                'quantity_price_tiers_present' => '1',
+                'quantity_price_tiers' => [
+                    ['minimum_quantity' => '2', 'price_amount' => '45000', 'usdt_price_amount' => '1.8'],
+                    ['minimum_quantity' => '5', 'price_amount' => '40000', 'usdt_price_amount' => '1.6'],
+                ],
+            ])
+            ->assertRedirect('/admin?tab=produk#product-1');
+
+        $product = Product::query()->where('name', 'Tiered Product')->firstOrFail();
+        $expectedInitialTiers = [
+            ['minimum_quantity' => 2, 'price_amount' => 45000, 'usdt_price_amount' => 1_800_000],
+            ['minimum_quantity' => 5, 'price_amount' => 40000, 'usdt_price_amount' => 1_600_000],
+        ];
+        $this->assertSame(
+            $expectedInitialTiers,
+            $product->quantityPriceTiers()
+                ->get(['minimum_quantity', 'price_amount', 'usdt_price_amount'])
+                ->map(fn ($tier): array => $tier->only(['minimum_quantity', 'price_amount', 'usdt_price_amount']))
+                ->all(),
+        );
+
+        $createdAudit = AuditLog::query()->where('action', 'product.created')->latest('id')->firstOrFail();
+        $this->assertSame($expectedInitialTiers, $createdAudit->new_values['quantity_price_tiers']);
+        $this->assertSame(0, ProductPriceChangeEvent::query()->count());
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'Tiered Product',
+                'price_amount' => '50000',
+                'usdt_price_amount' => '2.000',
+                'description' => 'Produk dengan harga bertingkat.',
+                'is_active' => '1',
+                'quantity_price_tiers_present' => '1',
+                'quantity_price_tiers' => [
+                    ['minimum_quantity' => '3', 'price_amount' => '43000', 'usdt_price_amount' => '1.7'],
+                ],
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $updatedAudit = AuditLog::query()->where('action', 'product.updated')->latest('id')->firstOrFail();
+        $expectedUpdatedTiers = [
+            ['minimum_quantity' => 3, 'price_amount' => 43000, 'usdt_price_amount' => 1_700_000],
+        ];
+        $this->assertSame($expectedInitialTiers, $updatedAudit->old_values['quantity_price_tiers']);
+        $this->assertSame($expectedUpdatedTiers, $updatedAudit->new_values['quantity_price_tiers']);
+        $this->assertSame(0, ProductPriceChangeEvent::query()->count());
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'Tiered Product',
+                'price_amount' => '50000',
+                'usdt_price_amount' => '2',
+                'description' => 'Produk dengan harga dasar.',
+                'is_active' => '1',
+                'quantity_price_tiers_present' => '1',
+                'quantity_price_tiers' => [],
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $this->assertDatabaseCount('product_quantity_price_tiers', 0);
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('quantityPriceTiers', false);
+    }
+
+    public function test_invalid_quantity_price_schedule_preserves_submitted_rows_and_persisted_state(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'Persisted Tiered Product',
+            'description' => 'Jadwal tersimpan.',
+            'price_amount' => 50000,
+            'usdt_price_amount' => 2_000_000,
+        ]);
+        $product->quantityPriceTiers()->createMany([
+            ['minimum_quantity' => 2, 'price_amount' => 45000, 'usdt_price_amount' => 1_800_000],
+        ]);
+
+        $submittedTiers = [
+            ['minimum_quantity' => '2', 'price_amount' => '44000', 'usdt_price_amount' => '1.7'],
+            ['minimum_quantity' => '2', 'price_amount' => '43000', 'usdt_price_amount' => '1.6'],
+        ];
+
+        $this->actingAs($admin)
+            ->followingRedirects()
+            ->from('/admin?tab=produk')
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'Persisted Tiered Product',
+                'price_amount' => '50000',
+                'usdt_price_amount' => '2',
+                'description' => 'Jadwal tersimpan.',
+                'is_active' => '1',
+                'quantity_price_tiers_present' => '1',
+                'quantity_price_tiers' => $submittedTiers,
+            ])
+            ->assertOk()
+            ->assertSee('\u0022productModalOpen\u0022:true', false)
+            ->assertSee('Minimum quantity harus unik dan berurutan naik.')
+            ->assertSee('44000')
+            ->assertSee('1.7')
+            ->assertSee('\u0022productUsdtPrice\u0022:\u00222\u0022', false)
+            ->assertSee('productQuantityPriceTiers', false);
+
+        $this->assertSame(
+            [['minimum_quantity' => 2, 'price_amount' => 45000, 'usdt_price_amount' => 1_800_000]],
+            $product->fresh()->quantityPriceTiers()
+                ->get(['minimum_quantity', 'price_amount', 'usdt_price_amount'])
+                ->map(fn ($tier): array => $tier->only(['minimum_quantity', 'price_amount', 'usdt_price_amount']))
+                ->all(),
+        );
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    public function test_quantity_price_tiers_require_complete_usdt_pairing_and_strict_price_descent(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'USDT Tier Validation',
+            'description' => 'Validasi jadwal.',
+            'price_amount' => 50000,
+            'usdt_price_amount' => 2_000_000,
+        ]);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), [
+                'name' => $product->name,
+                'price_amount' => '50000',
+                'usdt_price_amount' => '2',
+                'description' => $product->description,
+                'is_active' => '1',
+                'quantity_price_tiers_present' => '1',
+                'quantity_price_tiers' => [
+                    ['minimum_quantity' => '2', 'price_amount' => '50000', 'usdt_price_amount' => '1.9'],
+                ],
+            ])
+            ->assertSessionHasErrors('quantity_price_tiers', null, 'productUpdate');
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), [
+                'name' => $product->name,
+                'price_amount' => '50000',
+                'usdt_price_amount' => '2',
+                'description' => $product->description,
+                'is_active' => '1',
+                'quantity_price_tiers_present' => '1',
+                'quantity_price_tiers' => [
+                    ['minimum_quantity' => '2', 'price_amount' => '45000', 'usdt_price_amount' => ''],
+                ],
+            ])
+            ->assertSessionHasErrors('quantity_price_tiers', null, 'productUpdate');
+
+        $this->assertDatabaseCount('product_quantity_price_tiers', 0);
+        $this->assertSame(0, ProductPriceChangeEvent::query()->count());
     }
 
     public function test_admin_can_update_and_clear_optional_product_icon(): void

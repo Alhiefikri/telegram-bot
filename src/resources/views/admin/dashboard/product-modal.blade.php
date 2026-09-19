@@ -23,6 +23,7 @@
                         <input type="hidden" x-bind:name="productFormMethod ? '_method' : ''" x-bind:value="productFormMethod">
                         <input type="hidden" name="product_id" x-bind:value="productId">
                         <input type="hidden" name="is_active" x-bind:value="productIsActive ? 1 : 0">
+                        <input type="hidden" name="quantity_price_tiers_present" value="1">
 
                         <div>
                             <x-admin-dashboard.field-label for="product-name">Nama produk</x-admin-dashboard.field-label>
@@ -108,6 +109,136 @@
                                 @enderror
                             </div>
                         </div>
+                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]" aria-labelledby="product-quantity-price-tiers-title">
+                            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div class="min-w-0">
+                                    <p id="product-quantity-price-tiers-title" class="font-display text-sm font-extrabold text-neo-ink">Harga bertingkat berdasarkan jumlah</p>
+                                    <p class="mt-1 text-[10px] font-extrabold uppercase leading-4 text-neo-ink/60">Opsional, maksimal 5 tingkat. Harga setiap tingkat harus lebih rendah daripada tingkat sebelumnya dan harga dasar.</p>
+                                </div>
+                                <x-admin-dashboard.button
+                                    type="button"
+                                    variant="primary"
+                                    size="sm"
+                                    class="min-h-11 shrink-0 px-3 text-[10px]"
+                                    x-on:click="addProductQuantityPriceTier()"
+                                    x-bind:disabled="productQuantityPriceTiers.length >= 5"
+                                >+ Tambah tingkat harga</x-admin-dashboard.button>
+                            </div>
+
+                            <p
+                                x-show="productQuantityPriceTierScheduleError()"
+                                x-text="productQuantityPriceTierScheduleError()"
+                                id="product-quantity-price-tiers-error"
+                                role="alert"
+                                aria-live="polite"
+                                class="mt-3 rounded-lg border-2 border-neo-red bg-red-50 px-2.5 py-2 text-xs font-black text-neo-red"
+                            ></p>
+                            @error('quantity_price_tiers', 'productCreate')
+                                <x-admin-dashboard.field-error role="alert" aria-live="polite">{{ $message }}</x-admin-dashboard.field-error>
+                            @enderror
+                            @error('quantity_price_tiers', 'productUpdate')
+                                <x-admin-dashboard.field-error role="alert" aria-live="polite">{{ $message }}</x-admin-dashboard.field-error>
+                            @enderror
+
+                            <p x-show="productQuantityPriceTiers.length === 0" class="mt-3 rounded-lg border-2 border-dashed border-neo-ink/40 bg-white/70 px-3 py-2 text-xs font-bold text-neo-ink/65">
+                                Tidak ada tingkat harga. Harga dasar tetap digunakan.
+                            </p>
+
+                            <div id="product-quantity-price-tiers" class="mt-3 space-y-3" x-show="productQuantityPriceTiers.length > 0">
+                                <template x-for="(tier, index) in productQuantityPriceTiers" :key="tier._key">
+                                    <article data-tier-row class="rounded-[0.55rem] border-[3px] border-neo-ink bg-white p-3 shadow-[3px_3px_0_0_#050505]">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <p class="font-display text-xs font-black uppercase text-neo-ink" x-text="`Tingkat #${index + 1}`">Tingkat #1</p>
+                                            <button
+                                                type="button"
+                                                class="min-h-11 shrink-0 rounded-lg border-2 border-neo-ink bg-[#fee648] px-3 py-2 text-[10px] font-black text-neo-ink shadow-[2px_2px_0_0_#050505] transition hover:-translate-y-0.5"
+                                                x-on:click="removeProductQuantityPriceTier(index)"
+                                                x-bind:aria-label="`Hapus tingkat harga #${index + 1}`"
+                                            >Hapus</button>
+                                        </div>
+
+                                        <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                                            <div>
+                                                <label class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink" x-bind:for="'product-quantity-tier-' + index + '-minimum'">Mulai quantity</label>
+                                                <input
+                                                    type="number"
+                                                    min="2"
+                                                    max="20"
+                                                    step="1"
+                                                    inputmode="numeric"
+                                                    class="mt-1.5 min-h-11 w-full rounded-lg border-[3px] border-neo-ink bg-white px-3 text-sm font-bold text-neo-ink shadow-[2px_2px_0_0_#050505] focus:outline-none focus:ring-2 focus:ring-neo-focus"
+                                                    x-bind:id="'product-quantity-tier-' + index + '-minimum'"
+                                                    x-bind:name="'quantity_price_tiers[' + index + '][minimum_quantity]'"
+                                                    x-model="tier.minimumQuantity"
+                                                    x-bind:aria-invalid="productQuantityPriceTierError(index, 'minimum_quantity') ? 'true' : 'false'"
+                                                    x-bind:aria-describedby="productQuantityPriceTierError(index, 'minimum_quantity') ? 'product-quantity-tier-' + index + '-minimum-error' : null"
+                                                    required
+                                                >
+                                                <p
+                                                    x-show="productQuantityPriceTierError(index, 'minimum_quantity')"
+                                                    x-text="productQuantityPriceTierError(index, 'minimum_quantity')"
+                                                    x-bind:id="'product-quantity-tier-' + index + '-minimum-error'"
+                                                    role="alert"
+                                                    aria-live="polite"
+                                                    class="mt-1 text-xs font-black text-neo-red"
+                                                ></p>
+                                            </div>
+
+                                            <div>
+                                                <label class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink" x-bind:for="'product-quantity-tier-' + index + '-idr'">Harga IDR / unit</label>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    step="1"
+                                                    inputmode="numeric"
+                                                    class="mt-1.5 min-h-11 w-full rounded-lg border-[3px] border-neo-ink bg-white px-3 text-sm font-bold text-neo-ink shadow-[2px_2px_0_0_#050505] focus:outline-none focus:ring-2 focus:ring-neo-focus"
+                                                    x-bind:id="'product-quantity-tier-' + index + '-idr'"
+                                                    x-bind:name="'quantity_price_tiers[' + index + '][price_amount]'"
+                                                    x-model="tier.priceAmount"
+                                                    x-bind:aria-invalid="productQuantityPriceTierError(index, 'price_amount') ? 'true' : 'false'"
+                                                    x-bind:aria-describedby="productQuantityPriceTierError(index, 'price_amount') ? 'product-quantity-tier-' + index + '-idr-error' : null"
+                                                    required
+                                                >
+                                                <p
+                                                    x-show="productQuantityPriceTierError(index, 'price_amount')"
+                                                    x-text="productQuantityPriceTierError(index, 'price_amount')"
+                                                    x-bind:id="'product-quantity-tier-' + index + '-idr-error'"
+                                                    role="alert"
+                                                    aria-live="polite"
+                                                    class="mt-1 text-xs font-black text-neo-red"
+                                                ></p>
+                                            </div>
+
+                                            <div>
+                                                <label class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink" x-bind:for="'product-quantity-tier-' + index + '-usdt'">Harga USDT / unit</label>
+                                                <input
+                                                    type="number"
+                                                    min="0.001"
+                                                    step="0.001"
+                                                    inputmode="decimal"
+                                                    placeholder="Opsional"
+                                                    class="mt-1.5 min-h-11 w-full rounded-lg border-[3px] border-neo-ink bg-white px-3 text-sm font-bold text-neo-ink shadow-[2px_2px_0_0_#050505] focus:outline-none focus:ring-2 focus:ring-neo-focus"
+                                                    x-bind:id="'product-quantity-tier-' + index + '-usdt'"
+                                                    x-bind:name="'quantity_price_tiers[' + index + '][usdt_price_amount]'"
+                                                    x-model="tier.usdtPriceAmount"
+                                                    x-bind:required="productUsdtPrice !== ''"
+                                                    x-bind:aria-invalid="productQuantityPriceTierError(index, 'usdt_price_amount') ? 'true' : 'false'"
+                                                    x-bind:aria-describedby="productQuantityPriceTierError(index, 'usdt_price_amount') ? 'product-quantity-tier-' + index + '-usdt-error' : null"
+                                                >
+                                                <p
+                                                    x-show="productQuantityPriceTierError(index, 'usdt_price_amount')"
+                                                    x-text="productQuantityPriceTierError(index, 'usdt_price_amount')"
+                                                    x-bind:id="'product-quantity-tier-' + index + '-usdt-error'"
+                                                    role="alert"
+                                                    aria-live="polite"
+                                                    class="mt-1 text-xs font-black text-neo-red"
+                                                ></p>
+                                            </div>
+                                        </div>
+                                    </article>
+                                </template>
+                            </div>
+                        </x-admin-dashboard.card>
 
                         <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
                             <div class="flex items-start justify-between gap-3">

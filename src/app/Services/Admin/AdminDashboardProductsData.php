@@ -14,6 +14,7 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\Credentials\StructuredCredentialPayload;
+use App\Services\Pricing\ProductQuantityPricing;
 use App\Storefront\StorefrontProductPlaceholder;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -79,8 +80,7 @@ final class AdminDashboardProductsData
                 : ($entry->product === null ? [] : [$entry->product]))
             ->keyBy('id');
         $products = Product::query()
-            ->with(['category:id,name', 'family:id,name,telegram_image_path'])
-            ->select(['id', 'category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'name', 'icon', 'description', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'stock', 'reserved_stock', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'created_at'])
+            ->with(['category:id,name', 'family:id,name,telegram_image_path', 'quantityPriceTiers:id,product_id,minimum_quantity,price_amount,usdt_price_amount'])
             ->withExists('stockItems')
             ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')->whereNull('retired_at')])
             ->whereIn('id', $productIds->all())
@@ -145,6 +145,7 @@ final class AdminDashboardProductsData
                     'category' => $product->category?->name ?? 'Tanpa kategori',
                     'price_amount' => $product->price_amount,
                     'usdt_price_amount' => $this->formatUsdtPrice($product->usdt_price_amount),
+                    'quantity_price_tiers' => $this->quantityPriceTierPayload($product),
                     'price' => Money::idr($product->price_amount),
                     'stock' => $product->stock,
                     'reserved_stock' => $product->reserved_stock,
@@ -199,6 +200,7 @@ final class AdminDashboardProductsData
                         'icon' => $product->icon,
                         'priceAmount' => $product->price_amount,
                         'usdtPriceAmount' => $this->formatUsdtPrice($product->usdt_price_amount),
+                        'quantityPriceTiers' => $this->quantityPriceTierPayload($product),
                         'categoryId' => $product->category_id,
                         'description' => $product->description,
                         'deliveryNote' => $product->delivery_note,
@@ -630,6 +632,24 @@ final class AdminDashboardProductsData
         }
 
         return rtrim(rtrim(number_format($microAmount / 1_000_000, 6, '.', ''), '0'), '.') ?: '0';
+    }
+
+    /**
+     * @return list<array{minimum_quantity:int, price_amount:int, usdt_price_amount:?string}>
+     */
+    private function quantityPriceTierPayload(Product $product): array
+    {
+        return $product->quantityPriceTiers
+            ->take(ProductQuantityPricing::MAX_TIERS)
+            ->map(fn ($tier): array => [
+                'minimum_quantity' => (int) $tier->minimum_quantity,
+                'price_amount' => (int) $tier->price_amount,
+                'usdt_price_amount' => $tier->usdt_price_amount === null
+                    ? null
+                    : $this->formatUsdtPrice((int) $tier->usdt_price_amount),
+            ])
+            ->values()
+            ->all();
     }
 
     /**

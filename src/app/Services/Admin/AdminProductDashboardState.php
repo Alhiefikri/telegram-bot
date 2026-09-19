@@ -67,6 +67,14 @@ class AdminProductDashboardState
 
         $hasProductErrors = $productCreateErrors->count() > 0 || $productUpdateErrors->count() > 0;
         $hasProductUpdateErrors = $productUpdateErrors->count() > 0;
+        $productFormErrors = $hasProductUpdateErrors ? $productUpdateErrors : $productCreateErrors;
+        $productUsdtPrice = old('usdt_price_amount', $editingProduct['usdt_price_amount'] ?? '');
+        if (request()->session()->hasOldInput('usdt_price_amount')) {
+            $productUsdtPrice = $this->formatUsdtPriceInput($productUsdtPrice);
+        }
+
+        $productTierRows = old('quantity_price_tiers', $editingProduct['quantity_price_tiers'] ?? []);
+        $productTierRows = is_array($productTierRows) ? array_values($productTierRows) : [];
         $hasCategoryUpdateErrors = $categoryUpdateErrors->count() > 0;
         $hasFamilyErrors = $familyCreateErrors->count() > 0 || $familyUpdateErrors->count() > 0 || $familyDeleteErrors->count() > 0;
         $isCategoryEdit = $categoryFormMode === 'edit' || $hasCategoryUpdateErrors;
@@ -123,11 +131,13 @@ class AdminProductDashboardState
                 'productName' => old('name', $editingProduct['name'] ?? ''),
                 'productIcon' => old('icon', $editingProduct['icon'] ?? ''),
                 'productPrice' => old('price_amount', $editingProduct['price_amount'] ?? ''),
-                'productUsdtPrice' => old('usdt_price_amount', $editingProduct['usdt_price_amount'] ?? ''),
+                'productUsdtPrice' => $productUsdtPrice,
                 'productCategoryId' => old('category_id', $editingProduct['category_id'] ?? ''),
                 'productDescription' => old('description', $editingProduct['description'] ?? ''),
                 'productDeliveryNote' => old('delivery_note', $editingProduct['delivery_note'] ?? ''),
                 'productUsageGuideTitle' => old('usage_guide_title', $editingProduct['usage_guide_title'] ?? ''),
+                'productQuantityPriceTiers' => $productTierRows,
+                'productQuantityPriceTierErrors' => $productFormErrors->toArray(),
                 'productUsageGuideUrl' => old('usage_guide_url', $editingProduct['usage_guide_url'] ?? ''),
             ],
             'stockModalOpen' => $stockAdjustmentErrors->count() > 0,
@@ -161,5 +171,25 @@ class AdminProductDashboardState
         }
 
         return in_array(strtolower((string) $value), ['1', 'true', 'on', 'yes'], true);
+    }
+
+    private function formatUsdtPriceInput(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+        if (! is_int($value) && ! (is_string($value) && ctype_digit($value))) {
+            return (string) $value;
+        }
+
+        $microAmount = (int) $value;
+        $wholeAmount = intdiv($microAmount, 1_000_000);
+        $fraction = $microAmount % 1_000_000;
+
+        if ($fraction === 0) {
+            return (string) $wholeAmount;
+        }
+
+        return $wholeAmount.'.'.rtrim(str_pad((string) $fraction, 6, '0', STR_PAD_LEFT), '0');
     }
 }

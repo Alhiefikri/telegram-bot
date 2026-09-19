@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\StoreProductRequest;
 use App\Models\Category;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
+use App\Services\Admin\AdminProductQuantityPricing;
 use App\Services\Admin\ProductImageOptimizer;
 use App\Services\AuditLogger;
 use App\Services\Telegram\TelegramProductNotificationService;
@@ -18,7 +19,7 @@ use Throwable;
 
 class AdminProductCreateController extends Controller
 {
-    public function __invoke(StoreProductRequest $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms): RedirectResponse
+    public function __invoke(StoreProductRequest $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms, AdminProductQuantityPricing $tierPricing): RedirectResponse
     {
         $startedAt = DogfoodTiming::now();
         $user = $request->attributes->get('adminUser');
@@ -29,7 +30,7 @@ class AdminProductCreateController extends Controller
         $telegramImagePath = $request->hasFile('telegram_image') ? $images->storeTelegram($request->file('telegram_image')) : null;
 
         try {
-            $product = DB::transaction(function () use ($validated, $imagePath, $telegramImagePath, $auditLogger, $user, $request): Product {
+            $product = DB::transaction(function () use ($validated, $imagePath, $telegramImagePath, $auditLogger, $user, $request, $tierPricing): Product {
                 $categoryId = $validated['category_id'] ?? null;
 
                 if ($categoryId !== null) {
@@ -56,11 +57,16 @@ class AdminProductCreateController extends Controller
                 $product->reserved_stock = 0;
                 $product->save();
 
+                $tierChange = $tierPricing->replace($product, $request->quantityPriceTiers());
+
+                $newValues = $product->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $newValues['quantity_price_tiers'] = $tierChange['after'];
+
                 $auditLogger->log(
                     'product.created',
                     $product,
                     null,
-                    $product->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']),
+                    $newValues,
                     $user,
                     $request->ip(),
                 );

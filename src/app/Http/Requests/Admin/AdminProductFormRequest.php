@@ -2,9 +2,12 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Services\Admin\AdminProductQuantityPricing;
 use Closure;
+use Illuminate\Contracts\Validation\Validator as ValidatorContract;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use InvalidArgumentException;
 
 abstract class AdminProductFormRequest extends FormRequest
 {
@@ -42,6 +45,13 @@ abstract class AdminProductFormRequest extends FormRequest
         }
         $this->merge($normalized);
 
+        if ($this->has('quantity_price_tiers_present')) {
+            $tiers = $this->input('quantity_price_tiers', []);
+            $normalized['quantity_price_tiers'] = is_array($tiers) ? array_values($tiers) : $tiers;
+        }
+
+        $this->merge($normalized);
+
         $value = trim((string) $this->input('usdt_price_amount', ''));
         if ($value === '') {
             return;
@@ -61,6 +71,66 @@ abstract class AdminProductFormRequest extends FormRequest
         }
     }
 
+    public function withValidator(ValidatorContract $validator): void
+    {
+        $validator->after(function (ValidatorContract $validator): void {
+            if (! $this->hasQuantityPriceTiersInput() || $this->hasTierFieldErrors($validator)) {
+                return;
+            }
+
+            try {
+                app(AdminProductQuantityPricing::class)->validateInput(
+                    $this->input('quantity_price_tiers', []),
+                    (int) $this->input('price_amount'),
+                    $this->input('usdt_price_amount') === null ? null : (int) $this->input('usdt_price_amount'),
+                );
+            } catch (InvalidArgumentException $exception) {
+                $validator->errors()->add('quantity_price_tiers', $this->tierValidationMessage($exception));
+            }
+        });
+    }
+
+    public function hasQuantityPriceTiersInput(): bool
+    {
+        return $this->boolean('quantity_price_tiers_present') || $this->has('quantity_price_tiers');
+    }
+
+    /**
+     * @return list<array{minimum_quantity:?int, price_amount:?int, usdt_price_amount:?int}>
+     */
+    public function quantityPriceTiers(): array
+    {
+        return app(AdminProductQuantityPricing::class)->normalizeInput($this->input('quantity_price_tiers', []));
+    }
+
+    private function hasTierFieldErrors(ValidatorContract $validator): bool
+    {
+        foreach (array_keys($validator->errors()->toArray()) as $attribute) {
+            if ($attribute === 'price_amount'
+                || $attribute === 'usdt_price_amount'
+                || $attribute === 'quantity_price_tiers'
+                || str_starts_with($attribute, 'quantity_price_tiers.')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function tierValidationMessage(InvalidArgumentException $exception): string
+    {
+        $message = $exception->getMessage();
+
+        return match (true) {
+            str_contains($message, 'more than five') => 'Jadwal harga maksimal berisi 5 tingkat.',
+            str_contains($message, 'minimum quantities') => 'Minimum quantity harus unik dan berurutan naik.',
+            str_contains($message, 'IDR prices') => 'Harga IDR setiap tingkat harus positif dan turun dari harga sebelumnya.',
+            str_contains($message, 'absent when') => 'Harga USDT tingkat harus dikosongkan jika produk tidak memiliki harga USDT dasar.',
+            str_contains($message, 'USDT prices') => 'Harga USDT setiap tingkat wajib lengkap, positif, dan turun dari harga sebelumnya.',
+            default => 'Jadwal harga bertingkat tidak valid.',
+        };
+    }
+
     /**
      * @return array<string, list<mixed>>
      */
@@ -71,6 +141,12 @@ abstract class AdminProductFormRequest extends FormRequest
             'icon' => ['nullable', 'string', 'max:32'],
             'price_amount' => ['required', 'integer', 'min:0'],
             'usdt_price_amount' => ['nullable', 'integer', 'min:0'],
+            'quantity_price_tiers_present' => ['sometimes', 'boolean'],
+            'quantity_price_tiers' => ['sometimes', 'array', 'max:5'],
+            'quantity_price_tiers.*' => ['array'],
+            'quantity_price_tiers.*.minimum_quantity' => ['required', 'integer', 'between:2,20'],
+            'quantity_price_tiers.*.price_amount' => ['required', 'integer', 'min:1'],
+            'quantity_price_tiers.*.usdt_price_amount' => ['nullable', 'regex:/^\d+(?:\.\d{1,3})?$/', 'gt:0'],
             'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')->whereNull('deleted_at')],
             'description' => ['required', 'string', 'max:1000'],
             'product_type' => ['nullable', 'string', 'max:100'],
@@ -143,6 +219,16 @@ abstract class AdminProductFormRequest extends FormRequest
             'price_amount.required' => 'Harga wajib diisi.',
             'price_amount.integer' => 'Harga harus berupa angka tanpa pemisah.',
             'usdt_price_amount.integer' => 'Harga USDT harus berupa angka dengan maksimal 3 desimal.',
+            'quantity_price_tiers.array' => 'Jadwal harga bertingkat tidak valid.',
+            'quantity_price_tiers.max' => 'Jadwal harga bertingkat maksimal berisi 5 tingkat.',
+            'quantity_price_tiers.*.minimum_quantity.required' => 'Minimum quantity wajib diisi.',
+            'quantity_price_tiers.*.minimum_quantity.integer' => 'Minimum quantity harus berupa angka bulat.',
+            'quantity_price_tiers.*.minimum_quantity.between' => 'Minimum quantity harus antara 2 dan 20.',
+            'quantity_price_tiers.*.price_amount.required' => 'Harga IDR tingkat wajib diisi.',
+            'quantity_price_tiers.*.price_amount.integer' => 'Harga IDR tingkat harus berupa angka bulat.',
+            'quantity_price_tiers.*.price_amount.min' => 'Harga IDR tingkat harus lebih besar dari 0.',
+            'quantity_price_tiers.*.usdt_price_amount.regex' => 'Harga USDT tingkat maksimal memiliki 3 angka desimal.',
+            'quantity_price_tiers.*.usdt_price_amount.gt' => 'Harga USDT tingkat harus lebih besar dari 0.',
             'description.required' => 'Deskripsi singkat wajib diisi.',
             'icon.max' => 'Ikon katalog maksimal 32 karakter.',
             'product_type.max' => 'Tipe produk maksimal 100 karakter.',

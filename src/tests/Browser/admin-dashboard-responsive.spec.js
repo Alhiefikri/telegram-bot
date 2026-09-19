@@ -3508,6 +3508,97 @@ test("saves product name and icon edits from the admin modal", async ({
   );
 });
 
+test("manages quantity price tiers from the product modal at narrow mobile width", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  const productCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
+  );
+  await productCard.getByRole("button", { name: "Ubah", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Edit produk" });
+  const addTierButton = dialog.getByRole("button", {
+    name: "+ Tambah tingkat harga",
+  });
+  await expect(dialog).toBeVisible();
+  await expect(addTierButton).toBeVisible();
+  await expectElementWithinViewport(page, dialog);
+
+  await addTierButton.focus();
+  await page.keyboard.press("Enter");
+  await dialog.locator("#product-quantity-tier-0-minimum").fill("2");
+  await dialog.locator("#product-quantity-tier-0-idr").fill("40000");
+  await dialog.locator("#product-quantity-tier-0-usdt").fill("1.8");
+
+  for (const [index, minimum, idr, usdt] of [
+    [1, "5", "35000", "1.6"],
+    [2, "8", "30000", "1.4"],
+    [3, "10", "25000", "1.2"],
+    [4, "12", "20000", "1.0"],
+  ]) {
+    await addTierButton.click();
+    await dialog
+      .locator(`#product-quantity-tier-${index}-minimum`)
+      .fill(minimum);
+    await dialog.locator(`#product-quantity-tier-${index}-idr`).fill(idr);
+    await dialog.locator(`#product-quantity-tier-${index}-usdt`).fill(usdt);
+  }
+  await expect(addTierButton).toBeDisabled();
+  await dialog.getByRole("button", { name: "Hapus tingkat harga #2" }).click();
+  await expect(dialog.locator("[data-tier-row]")).toHaveCount(4);
+  while (await dialog.locator("[data-tier-row]").count()) {
+    await dialog
+      .locator("[data-tier-row]")
+      .first()
+      .getByRole("button", { name: /Hapus tingkat harga/ })
+      .click();
+  }
+  await expect(dialog.locator("[data-tier-row]")).toHaveCount(0);
+  await expect(
+    dialog.getByText("Tidak ada tingkat harga. Harga dasar tetap digunakan.")
+  ).toBeVisible();
+
+  await addTierButton.click();
+  await dialog.locator("#product-quantity-tier-0-minimum").fill("2");
+  await dialog.locator("#product-quantity-tier-0-idr").fill("40000");
+  await dialog.locator("#product-quantity-tier-0-usdt").fill("1.8");
+
+  await Promise.all([
+    page.waitForURL(/\/admin\?tab=produk/),
+    dialog.getByRole("button", { name: /Simpan/i }).click(),
+  ]);
+  await expect(
+    page.getByText("Produk Browser QA Produk A berhasil diperbarui.")
+  ).toBeVisible();
+
+  const updatedCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
+  );
+  await updatedCard.getByRole("button", { name: "Ubah", exact: true }).click();
+  const reopenedDialog = page.getByRole("dialog", { name: "Edit produk" });
+  await expect(
+    reopenedDialog.locator("#product-quantity-tier-0-minimum")
+  ).toHaveValue("2");
+  await expect(
+    reopenedDialog.locator("#product-quantity-tier-0-idr")
+  ).toHaveValue("40000");
+  await expect(
+    reopenedDialog.locator("#product-quantity-tier-0-usdt")
+  ).toHaveValue("1.8");
+  await expectElementWithinViewport(page, reopenedDialog);
+  await expectNoDocumentOverflow(page);
+});
+
 async function submitProductFromMiniAppModal(page) {
   const productName = `Mini App Produk ${Date.now()}`;
 

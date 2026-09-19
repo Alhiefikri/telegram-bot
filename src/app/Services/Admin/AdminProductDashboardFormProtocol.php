@@ -80,6 +80,8 @@ class AdminProductDashboardFormProtocol
                 'icon' => $request->input('icon'),
                 'price_amount' => $request->input('price_amount'),
                 'usdt_price_amount' => $request->input('usdt_price_amount'),
+                'quantity_price_tiers_present' => $request->input('quantity_price_tiers_present'),
+                'quantity_price_tiers' => $request->input('quantity_price_tiers', []),
                 'description' => $request->input('description'),
                 'product_type' => $request->input('product_type'),
                 'access_duration' => $request->input('access_duration'),

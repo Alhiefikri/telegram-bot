@@ -8,6 +8,7 @@ use App\Http\Requests\Admin\UpdateProductRequest;
 use App\Jobs\SendProductPriceChangeNotifications;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
+use App\Services\Admin\AdminProductQuantityPricing;
 use App\Services\Admin\ProductFamilyCategoryCoherence;
 use App\Services\Admin\ProductImageOptimizer;
 use App\Services\AuditLogger;
@@ -18,7 +19,7 @@ use Throwable;
 
 class AdminProductUpdateController extends Controller
 {
-    public function __invoke(UpdateProductRequest $request, Product $product, AuditLogger $auditLogger, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms, ProductPriceChangeNotificationService $priceNotifications, ProductFamilyCategoryCoherence $coherence): RedirectResponse
+    public function __invoke(UpdateProductRequest $request, Product $product, AuditLogger $auditLogger, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms, ProductPriceChangeNotificationService $priceNotifications, ProductFamilyCategoryCoherence $coherence, AdminProductQuantityPricing $tierPricing): RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
 
@@ -29,11 +30,15 @@ class AdminProductUpdateController extends Controller
         $oldTelegramImagePath = null;
 
         try {
-            $event = DB::transaction(function () use ($product, $validated, $request, $auditLogger, $user, $priceNotifications, $newImagePath, $newTelegramImagePath, &$oldImagePath, &$oldTelegramImagePath, $coherence) {
+            $event = DB::transaction(function () use ($product, $validated, $request, $auditLogger, $user, $priceNotifications, $newImagePath, $newTelegramImagePath, &$oldImagePath, &$oldTelegramImagePath, $coherence, $tierPricing) {
                 $categoryId = $validated['category_id'] ?? null;
 
                 $locked = $coherence->lockForCategoryChange($product, $categoryId);
                 $oldValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $tierAudit = [
+                    'before' => $tierPricing->snapshot($locked),
+                    'after' => [],
+                ];
                 $oldImagePath = $oldValues['image_path'] ?? null;
                 $oldTelegramImagePath = $oldValues['telegram_image_path'] ?? null;
 
@@ -59,8 +64,14 @@ class AdminProductUpdateController extends Controller
                     $locked->telegram_image_path = $newTelegramImagePath;
                 }
                 $locked->save();
-
+                if ($request->hasQuantityPriceTiersInput()) {
+                    $tierAudit = $tierPricing->replace($locked, $request->quantityPriceTiers());
+                } else {
+                    $tierAudit['after'] = $tierPricing->snapshot($locked);
+                }
+                $oldValues['quantity_price_tiers'] = $tierAudit['before'];
                 $newValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $newValues['quantity_price_tiers'] = $tierAudit['after'];
 
                 $auditLogger->log(
                     'product.updated',
