@@ -14,9 +14,11 @@ final readonly class ProductPriceQuote
         public int $quantity,
         public int $baseIdrUnitAmount,
         public int $effectiveIdrUnitAmount,
+        public int $baseIdrSubtotal,
         public int $idrSubtotal,
         public ?int $baseUsdtUnitAmount,
         public ?int $effectiveUsdtUnitAmount,
+        public ?int $baseUsdtSubtotal,
         public ?int $usdtSubtotal,
         public ?int $appliedTierMinimum,
         public ?ProductPriceTierQuote $nextTier,
@@ -26,14 +28,22 @@ final readonly class ProductPriceQuote
             throw new InvalidArgumentException('A Product price quote requires a positive quantity.');
         }
 
+        if ($baseIdrSubtotal < 0 || $idrSubtotal < 0) {
+            throw new InvalidArgumentException('A Product price quote cannot contain negative IDR subtotals.');
+        }
+
         if ($baseUsdtUnitAmount === null
-            && ($effectiveUsdtUnitAmount !== null || $usdtSubtotal !== null)) {
+            && ($effectiveUsdtUnitAmount !== null || $baseUsdtSubtotal !== null || $usdtSubtotal !== null)) {
             throw new InvalidArgumentException('A Product price quote cannot contain USDT amounts without a base USDT price.');
         }
 
         if ($baseUsdtUnitAmount !== null
-            && ($effectiveUsdtUnitAmount === null || $usdtSubtotal === null)) {
+            && ($effectiveUsdtUnitAmount === null || $baseUsdtSubtotal === null || $usdtSubtotal === null)) {
             throw new InvalidArgumentException('A Product price quote with a base USDT price requires a complete USDT quote.');
+        }
+
+        if (($baseUsdtSubtotal ?? 0) < 0 || ($usdtSubtotal ?? 0) < 0) {
+            throw new InvalidArgumentException('A Product price quote cannot contain negative USDT subtotals.');
         }
 
         if ($appliedTierMinimum !== null
@@ -48,6 +58,20 @@ final readonly class ProductPriceQuote
     public function hasAppliedTier(): bool
     {
         return $this->appliedTierMinimum !== null;
+    }
+
+    public function idrSavings(): int
+    {
+        return max(0, $this->baseIdrSubtotal - $this->idrSubtotal);
+    }
+
+    public function usdtSavings(): ?int
+    {
+        if ($this->baseUsdtSubtotal === null || $this->usdtSubtotal === null) {
+            return null;
+        }
+
+        return max(0, $this->baseUsdtSubtotal - $this->usdtSubtotal);
     }
 
     public function tiers(): array

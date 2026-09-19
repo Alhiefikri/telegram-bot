@@ -7,6 +7,8 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\Pricing\ProductPriceQuote;
+use App\Services\Pricing\ProductQuantityPricing;
 use Throwable;
 
 class TelegramCartIntents
@@ -16,6 +18,7 @@ class TelegramCartIntents
         private CartService $carts,
         private TelegramLocale $locale,
         private CheckoutMaintenance $maintenance,
+        private ProductQuantityPricing $pricing,
     ) {}
 
     public function addProductToCart(Customer $customer, string $chatId, int $productId, int $quantity, bool $forceConfirmation = false, bool $sendConfirmation = true): bool
@@ -40,6 +43,7 @@ class TelegramCartIntents
                 return false;
             }
 
+            $quote = $this->pricing->quote($product, $quantity);
             $cart = $this->carts->activeCartFor($customer);
             $existingItem = $cart->cartItems()->where('product_id', $product->id)->first();
             if (! $forceConfirmation && $existingItem && (int) $existingItem->quantity === $quantity) {
@@ -53,18 +57,18 @@ class TelegramCartIntents
                 return true;
             }
 
-            $subtotal = $product->price_amount * $quantity;
             $message = $checkoutMaintenanceActive
                 ? $this->locale->translate($customer, 'cart.added_maintenance', [
                     'product' => $product->name,
                     'quantity' => $quantity,
-                    'subtotal' => number_format($subtotal, 0, ',', '.'),
+                    'subtotal' => number_format($quote->idrSubtotal, 0, ',', '.'),
                 ]).$this->locale->checkoutMaintenanceNote($customer, $maintenance->publicNote)
                 : $this->locale->translate($customer, 'cart.added', [
                     'product' => $product->name,
                     'quantity' => $quantity,
-                    'subtotal' => number_format($subtotal, 0, ',', '.'),
+                    'subtotal' => number_format($quote->idrSubtotal, 0, ',', '.'),
                 ]);
+            $message .= "\n\n".$this->pricingSummary($customer, $product, $quote);
             $this->bot->sendMessage($chatId, $message, [
                 'inline_keyboard' => [[
                     [
@@ -84,6 +88,58 @@ class TelegramCartIntents
             return false;
         }
     }
+
+    private function pricingSummary(Customer $customer, Product $product, ProductPriceQuote $quote): string
+    {
+        $availableStock = max(0, $product->availableStock());
+        $lines = [
+            $this->locale->translate($customer, 'cart.price_summary', [
+                'base' => number_format($quote->baseIdrUnitAmount, 0, ',', '.'),
+                'unit' => number_format($quote->effectiveIdrUnitAmount, 0, ',', '.'),
+            ]),
+        ];
+        foreach ($quote->tiers() as $tier) {
+            if ($tier->minimumQuantity > $availableStock) {
+                continue;
+            }
+            $lines[] = $this->locale->translate(
+                $customer,
+                $quote->appliedTierMinimum === $tier->minimumQuantity
+                    ? 'cart.tier_applied'
+                    : 'cart.tier',
+                [
+                    'minimum' => $tier->minimumQuantity,
+                    'amount' => number_format($tier->priceAmount, 0, ',', '.'),
+                ],
+            );
+        }
+        if ($quote->nextTier !== null
+            && $quote->nextTier->minimumQuantity <= $availableStock) {
+            $nextTierQuantity = $quote->nextTier->minimumQuantity;
+            try {
+                $nextTierQuote = $this->pricing->quote($product, $nextTierQuantity);
+            } catch (Throwable) {
+                $nextTierQuote = null;
+            }
+            if ($nextTierQuote !== null) {
+                $lines[] = $this->locale->translate($customer, 'cart.next_tier', [
+                    'quantity' => $nextTierQuantity - $quote->quantity,
+                ]);
+                $lines[] = $this->locale->translate($customer, 'cart.next_tier_total', [
+                    'quantity' => $nextTierQuantity,
+                    'amount' => number_format($nextTierQuote->idrSubtotal, 0, ',', '.'),
+                ]);
+            }
+        }
+        if ($quote->idrSavings() > 0) {
+            $lines[] = $this->locale->translate($customer, 'cart.savings', [
+                'amount' => number_format($quote->idrSavings(), 0, ',', '.'),
+            ]);
+        }
+
+        return implode("\n", $lines);
+    }
+
 
     private function deleteFreshEmptyCart(?Cart $cart): void
     {

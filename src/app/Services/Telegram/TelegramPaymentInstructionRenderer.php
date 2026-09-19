@@ -140,7 +140,7 @@ class TelegramPaymentInstructionRenderer
             'reply_markup' => [
                 'inline_keyboard' => [
                     [['text' => $this->text($locale, 'payment.bsc.submit_hash'), 'callback_data' => 'bsc:submit:'.$order->id]],
-                    [['text' => $this->text($locale, 'payment.action.check'), 'callback_data' => 'bsc:check:'.$order->id]],
+                    [['text' => $this->text($locale, 'payment.bsc.check_status'), 'callback_data' => 'bsc:check:'.$order->id]],
                     [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
                 ],
             ],

@@ -515,6 +515,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         string $title,
         string $sendExactlyLabel,
         string $validityLabel,
+        string $checkStatusLabel,
     ): void {
         $this->travelTo(CarbonImmutable::parse('2026-07-04 16:00:00', 'Asia/Jakarta'));
         $expiresAt = CarbonImmutable::parse('2026-07-04 16:30:00', 'Asia/Jakarta');
@@ -555,14 +556,15 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertStringNotContainsString($sendExactlyLabel."\n2.5 USDT", $text);
         $this->assertStringNotContainsString('2.5 USDT', $text);
         $this->assertStringContainsString($validityLabel, $text);
+        $this->assertStringContainsString($checkStatusLabel, json_encode($instruction['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
     }
 
     public static function bscInstructionLocales(): array
     {
         return [
-            'english' => ['en', '💎 USDT BEP20 Payment', 'Send exactly:', 'Valid for 30 minutes'],
-            'indonesian' => ['id', '💎 Pembayaran USDT BEP20', 'Kirim tepat:', 'Valid 30 menit'],
-            'malay' => ['ms', '💎 Bayaran USDT BEP20', 'Hantar tepat:', 'Sah selama 30 minit'],
+            'english' => ['en', '💎 USDT BEP20 Payment', 'Send exactly:', 'Valid for 30 minutes', '✅ Check Payment Status'],
+            'indonesian' => ['id', '💎 Pembayaran USDT BEP20', 'Kirim tepat:', 'Valid 30 menit', '✅ Cek Status Pembayaran'],
+            'malay' => ['ms', '💎 Bayaran USDT BEP20', 'Hantar tepat:', 'Sah selama 30 minit', '✅ Semak Status Bayaran'],
         ];
     }
 

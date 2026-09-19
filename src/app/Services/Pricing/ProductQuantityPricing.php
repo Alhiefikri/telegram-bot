@@ -66,14 +66,21 @@ final class ProductQuantityPricing
             ? null
             : ($appliedTier?->usdtPriceAmount ?? $baseUsdtUnitAmount);
 
+        $baseIdrSubtotal = $this->multiply($baseIdrUnitAmount, $quantity, 'IDR');
+        $baseUsdtSubtotal = $baseUsdtUnitAmount === null
+            ? null
+            : $this->multiply($baseUsdtUnitAmount, $quantity, 'USDT');
+
         return new ProductPriceQuote(
             productId: (int) $product->getKey(),
             quantity: $quantity,
             baseIdrUnitAmount: $baseIdrUnitAmount,
             effectiveIdrUnitAmount: $effectiveIdrUnitAmount,
+            baseIdrSubtotal: $baseIdrSubtotal,
             idrSubtotal: $this->multiply($effectiveIdrUnitAmount, $quantity, 'IDR'),
             baseUsdtUnitAmount: $baseUsdtUnitAmount,
             effectiveUsdtUnitAmount: $effectiveUsdtUnitAmount,
+            baseUsdtSubtotal: $baseUsdtSubtotal,
             usdtSubtotal: $effectiveUsdtUnitAmount === null
                 ? null
                 : $this->multiply($effectiveUsdtUnitAmount, $quantity, 'USDT'),

@@ -6,6 +6,7 @@ use App\Enums\CartStatus;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -22,6 +23,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
         private CheckoutMaintenance $maintenance,
+        private ProductQuantityPricing $pricing,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -37,7 +39,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
     public function supports(TelegramCallbackContext $context): bool
     {
         return $context->data === 'batal'
-            || preg_match('/^detail:qty:(-|\+|current|manual|cancel):([1-9][0-9]*):[A-Za-z0-9_-]+$/', $context->data) === 1
+            || preg_match('/^detail:qty:(-|\+|current|manual|cancel|tier):([1-9][0-9]*):[A-Za-z0-9_-]+$/', $context->data) === 1
             || preg_match('/^detail:back:([1-9][0-9]*):[A-Za-z0-9_-]+$/', $context->data) === 1;
     }
 
@@ -51,8 +53,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
 
             return true;
         }
-
-        if (preg_match('/^detail:qty:(-|\+|current|manual|cancel):([1-9][0-9]*):([A-Za-z0-9_-]+)$/', $context->data, $matches) === 1) {
+        if (preg_match('/^detail:qty:(-|\+|current|manual|cancel|tier):([1-9][0-9]*):([A-Za-z0-9_-]+)$/', $context->data, $matches) === 1) {
             $this->handleQuantityAction($context, $matches[1], (int) $matches[2], $matches[3]);
 
             return true;
@@ -97,8 +98,24 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
             $product = Product::query()->withAvailability()->publicVisible()->whereKey($productId)->first();
             $availableStock = $product ? max(0, $product->availableStock()) : 0;
             $selectedQuantity = (int) $selection['quantity'];
+            if (! $product || $availableStock < 1) {
+                $this->session->forget($context->customer);
+                $this->sendUnavailable($context);
+
+                return;
+            }
+
+            try {
+                $quote = $this->pricing->quote($product, min($selectedQuantity, $availableStock));
+            } catch (\InvalidArgumentException) {
+                $this->session->forget($context->customer);
+                $this->sendUnavailable($context);
+
+                return;
+            }
+
             if ($action === 'current') {
-                if (! $product || $availableStock < $selectedQuantity) {
+                if ($availableStock < $selectedQuantity) {
                     $this->session->forget($context->customer);
                     $this->sendUnavailable($context);
 
@@ -106,13 +123,6 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                 }
 
                 $this->bot->answerCallbackQuery($context->callbackQueryId);
-
-                return;
-            }
-
-            if (! $product || $availableStock < 1) {
-                $this->session->forget($context->customer);
-                $this->sendUnavailable($context);
 
                 return;
             }
@@ -194,6 +204,26 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                 return;
             }
 
+            if ($action === 'tier') {
+                $nextTier = $quote->nextTier;
+                if ($nextTier === null || $nextTier->minimumQuantity > $availableStock) {
+                    $this->sendStale($context);
+
+                    return;
+                }
+
+                $next = $this->session->browsing(
+                    $context->customer,
+                    $selection,
+                    $nextTier->minimumQuantity,
+                    $this->locale->code($context->customer),
+                );
+                $this->bot->answerCallbackQuery($context->callbackQueryId);
+                $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $next, $availableStock, $context->messageId);
+
+                return;
+            }
+
             $quantity = $selectedQuantity + ($action === '+' ? 1 : -1);
             if ($quantity < 1) {
                 $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.quantity.minimum'));
@@ -202,6 +232,14 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
             }
             if ($quantity > $availableStock) {
                 $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.quantity.maximum', ['stock' => $availableStock]));
+
+                return;
+            }
+            try {
+                $this->pricing->quote($product, $quantity);
+            } catch (\InvalidArgumentException) {
+                $this->session->forget($context->customer);
+                $this->sendUnavailable($context);
 
                 return;
             }

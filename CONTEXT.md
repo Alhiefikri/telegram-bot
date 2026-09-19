@@ -193,3 +193,7 @@ _Avoid_: Sales report, revenue dashboard, store statistics
 **Canonical Navigation Message**:
 The single bot-owned Telegram message per private Customer chat on which the localized home is shown and where routine navigation (Browse Products, Balance, Orders, Language, Support, Back, Home) is edited in place. Durable transactional artifacts such as QRIS instructions, receipts, delivered credentials, and operational alerts are never used as that message.
 _Avoid_: Menu message, home message, reply keyboard menu, pinned message
+
+**Quantity Price Tier**:
+A Product-owned pricing rule that replaces the base per-unit catalog amount when one Cart Item reaches its minimum quantity; the applicable rule with the greatest reached minimum wins. It may define paired IDR and USDT amounts, applies only to that Product's quantity, and becomes immutable commercial history only through the Order Item snapshot created at checkout.
+_Avoid_: coupon, percentage discount, customer membership tier, Product variant, cart-wide bulk total

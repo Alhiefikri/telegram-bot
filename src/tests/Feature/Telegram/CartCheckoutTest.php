@@ -28,6 +28,7 @@ use App\Services\OrderCheckoutService;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramBinanceRailSelectionSession;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramCartIntents;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramQrCodeRenderer;
@@ -221,9 +222,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
             ->assertOk();
         $selectorPayload = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '12348')->first()[0]->data();
-        $selectorJson = json_encode($selectorPayload, JSON_THROW_ON_ERROR);
-        $this->assertStringContainsString('Balance', $selectorJson);
-        $this->assertStringContainsString('Rp 20.000', $selectorJson);
+        $selectorJson = json_encode($selectorPayload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('Balance · Rp15.000', $selectorJson);
+        $this->assertStringNotContainsString('Rp20.000', $selectorJson);
         $this->assertStringContainsString('checkout:balance', $selectorJson);
         $this->postTelegramWebhook($this->callbackUpdate(31, 'balance-checkout', 'checkout:balance', [], 12348, 'private', 9001))
             ->assertOk();
@@ -245,6 +246,100 @@ class CartCheckoutTest extends TelegramBotTestSupport
         Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
             && str_contains((string) ($request['body'] ?? ''), 'Scan the QR'));
     }
+    public function test_cart_add_confirmation_shows_tiers_and_next_tier_projection(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12349, 'locale' => 'en']);
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 23_000, 'usdt_price_amount' => null],
+        ])->create([
+            'name' => 'Tiered Cart Product',
+            'price_amount' => 25_000,
+            'stock' => 4,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->assertTrue(app(TelegramCartIntents::class)->addProductToCart(
+            $customer,
+            (string) $customer->telegram_id,
+            $product->id,
+            1,
+        ));
+
+        $request = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Tiered Cart Product'))->last();
+        $this->assertNotNull($request);
+        $text = (string) $request[0]->data()['text'];
+        $this->assertStringContainsString('Subtotal: Rp25.000', $text);
+        $this->assertStringContainsString('Base: Rp25.000/unit', $text);
+        $this->assertStringContainsString('Wholesale 2+: Rp23.000/unit', $text);
+        $this->assertStringContainsString('Add 1 more units for the wholesale price.', $text);
+        $this->assertStringContainsString('Total 2 units: Rp46.000', $text);
+    }
+
+    public function test_payment_choice_preview_quotes_mixed_cart_tiers_and_effective_usdt_total(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 12350, 'locale' => 'en']);
+        $first = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 18_000, 'usdt_price_amount' => 3_000_000],
+        ])->create([
+            'name' => 'Mixed First',
+            'price_amount' => 25_000,
+            'usdt_price_amount' => 3_250_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $second = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 3, 'price_amount' => 9_000, 'usdt_price_amount' => 1_800_000],
+        ])->create([
+            'name' => 'Mixed Second',
+            'price_amount' => 10_000,
+            'usdt_price_amount' => 2_000_000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $first, 2);
+        app(CartService::class)->addItem($cart, $second, 3);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            123501,
+            'mixed-payment-preview',
+            'checkout',
+            [],
+            12350,
+            'private',
+            9010,
+        ))->assertOk();
+
+        $request = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '12350')->last();
+        $this->assertNotNull($request);
+        $payload = $request[0]->data();
+        $text = (string) $payload['text'];
+        $keyboard = json_encode($payload['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('Mixed First × 2 · Rp18.000/unit · Rp36.000', $text);
+        $this->assertStringContainsString('Mixed Second × 3 · Rp9.000/unit · Rp27.000', $text);
+        $this->assertStringContainsString('Wholesale 2+: Rp18.000/unit', $text);
+        $this->assertStringContainsString('Wholesale 3+: Rp9.000/unit', $text);
+        $this->assertStringContainsString('Total: Rp63.000', $text);
+        $this->assertStringContainsString('QRIS · Rp63.000', $keyboard);
+        $this->assertStringContainsString('Balance · Rp63.000', $keyboard);
+        $this->assertStringContainsString('USDT · 11.4 USDT', $keyboard);
+        $this->assertStringNotContainsString('checkout.payment_method', $text);
+        $this->assertSame(0, Order::count());
+    }
+
 
     public function test_manual_paid_button_edits_qr_caption_to_proof_instructions_without_new_buyer_message(): void
     {
@@ -644,7 +739,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                 'quantity' => 'Jumlah: 1',
                 'custom' => 'Masukkan jumlah kustom',
                 'subtotal' => 'Subtotal: Rp25.000',
-                'qris' => 'Bayar dengan QRIS · Rp25.000',
+                'qris' => 'QRIS · Rp25.000',
                 'maintenance' => 'Checkout sedang dalam maintenance',
                 'status' => 'Cek Status Checkout',
             ],
@@ -653,7 +748,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                 'quantity' => 'Quantity: 1',
                 'custom' => 'Enter custom quantity',
                 'subtotal' => 'Subtotal: Rp25.000',
-                'qris' => 'Pay with QRIS · Rp25.000',
+                'qris' => 'QRIS · Rp25.000',
                 'maintenance' => 'Checkout is under maintenance',
                 'status' => 'Check Checkout Status',
             ],
@@ -662,7 +757,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                 'quantity' => 'Kuantiti: 1',
                 'custom' => 'Masukkan kuantiti tersuai',
                 'subtotal' => 'Subjumlah: Rp25.000',
-                'qris' => 'Bayar dengan QRIS · Rp25.000',
+                'qris' => 'QRIS · Rp25.000',
                 'maintenance' => 'Checkout sedang diselenggara',
                 'status' => 'Semak Status Checkout',
             ],

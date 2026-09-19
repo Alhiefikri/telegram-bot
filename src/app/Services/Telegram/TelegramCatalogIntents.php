@@ -15,7 +15,10 @@ use App\Services\Admin\ProductImageOptimizer;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
-use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\Pricing\ProductPriceQuote;
+use App\Services\Pricing\ProductPriceTierQuote;
+use App\Services\Pricing\ProductQuantityPricing;
+use InvalidArgumentException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class TelegramCatalogIntents
@@ -37,7 +40,7 @@ class TelegramCatalogIntents
         private TelegramHtmlCaption $captions,
         private TelegramNavigationRootService $roots,
         private ProductImageOptimizer $images,
-        private StoreBalanceLedger $storeBalance,
+        private ProductQuantityPricing $pricing,
     ) {}
 
     public function sendCategoryCatalog(
@@ -443,15 +446,21 @@ class TelegramCatalogIntents
             }
         }
 
+        $quote = $this->safeQuote($product, is_int($quantity) ? $quantity : 1);
         $maintenance = $this->maintenance->current();
-        $selectionCanPay = $selection !== null
+        $selectionCanPay = $quote !== null
+            && $selection !== null
             && $selection['mode'] === 'browsing'
             && is_int($quantity)
             && $quantity >= 1
             && $quantity <= $availableStock;
+        $nextTier = $quote === null ? null : $this->nextReachableTier($quote, $availableStock);
+        $nextTierQuote = $nextTier === null
+            ? null
+            : $this->safeQuote($product, $nextTier->minimumQuantity);
         $binanceAvailable = ! $maintenance->active
-            && $availableStock > 0
-            && $product->usdt_price_amount !== null
+            && $selectionCanPay
+            && $quote->usdtSubtotal !== null
             && $this->checkout->binanceRailSelectable();
         $keyboard = [];
 
@@ -468,10 +477,22 @@ class TelegramCatalogIntents
                 'text' => $this->locale->translate($customer, 'catalog.detail.increase'),
                 'callback_data' => 'detail:qty:+:'.$productId.':'.$token,
             ]];
-            $keyboard[] = [[
-                'text' => $this->locale->translate($customer, 'catalog.detail.custom_quantity'),
-                'callback_data' => 'detail:qty:manual:'.$productId.':'.$token,
-            ]];
+            if ($nextTier !== null) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'catalog.detail.next_tier_button', [
+                        'quantity' => $nextTier->minimumQuantity,
+                    ]),
+                    'callback_data' => 'detail:qty:tier:'.$productId.':'.$token,
+                ], [
+                    'text' => $this->locale->translate($customer, 'catalog.detail.custom_quantity'),
+                    'callback_data' => 'detail:qty:manual:'.$productId.':'.$token,
+                ]];
+            } else {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'catalog.detail.custom_quantity'),
+                    'callback_data' => 'detail:qty:manual:'.$productId.':'.$token,
+                ]];
+            }
 
             if ($maintenance->active) {
                 $keyboard[] = [[
@@ -481,31 +502,25 @@ class TelegramCatalogIntents
             } else {
                 $keyboard[] = [[
                     'text' => $this->locale->translate($customer, 'catalog.detail.pay_qris', [
-                        'amount' => number_format($product->price_amount * $quantity, 0, ',', '.'),
+                        'amount' => number_format($quote->idrSubtotal, 0, ',', '.'),
                     ]),
                     'callback_data' => 'detail:pay:qris:'.$productId.':'.$token,
                     'style' => 'success',
                 ]];
-                $balance = $this->storeBalance->snapshot($customer);
-                $balanceLabel = $balance->isAvailable()
-                    ? $this->locale->idr($balance->balance())
-                    : $this->locale->translate($customer, 'checkout.balance.unavailable');
                 $keyboard[] = [[
                     'text' => $this->locale->translate($customer, 'catalog.detail.pay_balance', [
-                        'amount' => number_format($product->price_amount * $quantity, 0, ',', '.'),
-                        'balance' => $balanceLabel,
+                        'amount' => number_format($quote->idrSubtotal, 0, ',', '.'),
                     ]),
                     'callback_data' => 'detail:pay:balance:'.$productId.':'.$token,
                 ]];
                 if ($binanceAvailable) {
                     $keyboard[] = [[
                         'text' => $this->locale->translate($customer, 'catalog.detail.pay_binance', [
-                            'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount * $quantity),
+                            'amount' => $this->checkout->formatUsdt($quote->usdtSubtotal),
                         ]),
                         'callback_data' => 'detail:pay:binance:'.$productId.':'.$token,
                     ]];
                 }
-
             }
             $keyboard[] = [[
                 'text' => $this->locale->translate($customer, 'catalog.detail.back_products'),
@@ -528,14 +543,31 @@ class TelegramCatalogIntents
             ]];
         }
 
+        $baseIdr = $quote?->baseIdrUnitAmount ?? (int) $product->price_amount;
         $lines = [
             $this->escapeHtml($this->productIcon($product->name, $product->icon).' '.$product->name),
             '━━━━━━━━━━━━━━',
-            $this->locale->translate($customer, 'catalog.price').number_format($product->price_amount, 0, ',', '.'),
+            $this->locale->translate($customer, 'catalog.detail.base_price', [
+                'amount' => number_format($baseIdr, 0, ',', '.'),
+            ]),
         ];
-        if ($binanceAvailable) {
+        if ($quote !== null) {
+            foreach ($this->reachableTiers($quote, $availableStock) as $tier) {
+                $lines[] = $this->locale->translate(
+                    $customer,
+                    $quote->appliedTierMinimum === $tier->minimumQuantity
+                        ? 'catalog.detail.tier_active'
+                        : 'catalog.detail.tier',
+                    [
+                        'minimum' => $tier->minimumQuantity,
+                        'amount' => number_format($tier->priceAmount, 0, ',', '.'),
+                    ],
+                );
+            }
+        }
+        if ($binanceAvailable && $quote->baseUsdtUnitAmount !== null) {
             $lines[] = $this->locale->translate($customer, 'catalog.detail.binance_price', [
-                'amount' => $this->checkout->formatUsdt((int) $product->usdt_price_amount),
+                'amount' => $this->checkout->formatUsdt($quote->baseUsdtUnitAmount),
             ]);
         }
         if ($availableStock > 0) {
@@ -543,11 +575,31 @@ class TelegramCatalogIntents
         } else {
             $lines[] = $this->locale->translate($customer, 'catalog.status.sold_out');
         }
-        if ($quantity !== null) {
+        if ($quantity !== null && $quote !== null) {
             $lines[] = $this->locale->translate($customer, 'catalog.detail.quantity', ['quantity' => $quantity]);
+            if ($quote->hasAppliedTier()) {
+                $lines[] = $this->locale->translate($customer, 'catalog.detail.effective_unit', [
+                    'amount' => number_format($quote->effectiveIdrUnitAmount, 0, ',', '.'),
+                ]);
+            }
             $lines[] = $this->locale->translate($customer, 'catalog.detail.subtotal', [
-                'amount' => number_format($product->price_amount * (int) $quantity, 0, ',', '.'),
+                'amount' => number_format($quote->idrSubtotal, 0, ',', '.'),
             ]);
+            if ($quote->idrSavings() > 0) {
+                $lines[] = $this->locale->translate($customer, 'catalog.detail.savings', [
+                    'amount' => number_format($quote->idrSavings(), 0, ',', '.'),
+                ]);
+            }
+            if ($nextTier !== null && $nextTierQuote !== null) {
+                $lines[] = '';
+                $lines[] = $this->locale->translate($customer, 'catalog.detail.next_tier', [
+                    'quantity' => $nextTier->minimumQuantity - $quantity,
+                ]);
+                $lines[] = $this->locale->translate($customer, 'catalog.detail.next_tier_total', [
+                    'quantity' => $nextTier->minimumQuantity,
+                    'amount' => number_format($nextTierQuote->idrSubtotal, 0, ',', '.'),
+                ]);
+            }
         }
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.details');
@@ -702,6 +754,13 @@ class TelegramCatalogIntents
                     $retry,
                     $this->locale->translate($customer, 'catalog.quantity.over_stock', ['stock' => $availableStock]),
                 );
+
+                return;
+            }
+
+            if ($this->safeQuote($product, (int) $quantity) === null) {
+                $this->session->forget($customer);
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'catalog.selection.unavailable'));
 
                 return;
             }
@@ -1055,6 +1114,34 @@ class TelegramCatalogIntents
 
         return '<blockquote>'.$this->escapeHtml(implode("\n", $lines)).'</blockquote>';
     }
+
+    private function safeQuote(Product $product, int $quantity): ?ProductPriceQuote
+    {
+        try {
+            return $this->pricing->quote($product, $quantity);
+        } catch (InvalidArgumentException) {
+            return null;
+        }
+    }
+
+    /** @return list<ProductPriceTierQuote> */
+    private function reachableTiers(ProductPriceQuote $quote, int $availableStock): array
+    {
+        return array_values(array_filter(
+            $quote->tiers(),
+            static fn (ProductPriceTierQuote $tier): bool => $tier->minimumQuantity <= $availableStock,
+        ));
+    }
+
+    private function nextReachableTier(ProductPriceQuote $quote, int $availableStock): ?ProductPriceTierQuote
+    {
+        $nextTier = $quote->nextTier;
+
+        return $nextTier !== null && $nextTier->minimumQuantity <= $availableStock
+            ? $nextTier
+            : null;
+    }
+
 
     private function escapeHtml(string $value): string
     {

@@ -11,9 +11,11 @@ use InvalidArgumentException;
 /**
  * The single pricing snapshot shared by Order creation and payment assembly.
  *
- * Product and tier reads happen before construction, while checkout Product
- * locks are held. Once built, this value object contains only immutable quote
- * values and cannot observe later catalog changes.
+ * Product and tier reads happen before construction. Checkout constructs this
+ * value after acquiring Product locks; presentation previews may construct an
+ * advisory snapshot from live reads and must revalidate before commerce.
+ * Once built, this value object contains only immutable quote values and
+ * cannot observe later catalog changes.
  */
 final readonly class CheckoutPricingSnapshot
 {

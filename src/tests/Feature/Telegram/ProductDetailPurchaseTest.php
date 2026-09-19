@@ -48,8 +48,8 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertCount(1, $keyboard[3]);
         $this->assertCount(1, $keyboard[4]);
         $this->assertSame('success', $keyboard[2][0]['style'] ?? null);
-        $this->assertSame('💳 Pay with QRIS · Rp10.000', $keyboard[2][0]['text']);
-        $this->assertStringContainsString('Pay with Balance', $keyboard[3][0]['text']);
+        $this->assertSame('💳 QRIS · Rp10.000', $keyboard[2][0]['text']);
+        $this->assertStringContainsString('Balance · Rp10.000', $keyboard[3][0]['text']);
         $this->assertStringStartsWith('detail:pay:balance:', $keyboard[3][0]['callback_data']);
         $this->assertStringContainsString('Price: Rp10.000', (string) $detail['text']);
         $this->assertStringContainsString('Available stock: 3', (string) $detail['text']);
@@ -57,8 +57,8 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Subtotal: Rp10.000', (string) $detail['text']);
         $this->assertStringContainsString('Product details', (string) $detail['text']);
         $this->assertStringNotContainsString('Sold:', (string) $detail['text']);
-        $this->assertStringContainsString('🌏 QRIS Cross-Border:', (string) $detail['text']);
-        $this->assertMatchesRegularExpression('/<blockquote>🌏 QRIS Cross-Border:.*<\/blockquote>/su', (string) $detail['text']);
+        $this->assertStringContainsString('🌏 QRIS Cross-Border', (string) $detail['text']);
+        $this->assertMatchesRegularExpression('/<blockquote>🌏 QRIS Cross-Border.*<\/blockquote>/su', (string) $detail['text']);
         $this->assertStringNotContainsString('checkout.payment_method', json_encode($detail, JSON_THROW_ON_ERROR));
 
         $state = $this->selection($customer);
@@ -80,7 +80,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertNotSame($oldToken, $next['interactionToken']);
         $nextDetail = $this->lastDetailMessage('Detail Product');
         $this->assertStringContainsString('Subtotal: Rp20.000', (string) $nextDetail['text']);
-        $this->assertSame('💳 Pay with QRIS · Rp20.000', $nextDetail['reply_markup']['inline_keyboard'][2][0]['text']);
+        $this->assertSame('💳 QRIS · Rp20.000', $nextDetail['reply_markup']['inline_keyboard'][2][0]['text']);
 
         $messagesBeforeStale = $this->detailMessageCount('Detail Product');
         $this->postTelegramWebhook($this->callbackUpdate(318003, 'stale-increase', 'detail:qty:+:'.$product->id.':'.$oldToken, [], 318001, 'private', 88001))->assertOk();
@@ -90,6 +90,157 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
             && str_contains((string) ($request['text'] ?? ''), 'expired'));
     }
+    public function test_product_detail_renders_reachable_tiers_and_jumps_to_the_next_tier(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 318003, 'locale' => 'en']);
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 23_000, 'usdt_price_amount' => null],
+            ['minimum_quantity' => 10, 'price_amount' => 20_000, 'usdt_price_amount' => null],
+        ])->create([
+            'name' => 'Tiered Detail Product',
+            'price_amount' => 25_000,
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+        $detail = $this->lastDetailMessage('Tiered Detail Product');
+        $keyboard = $detail['reply_markup']['inline_keyboard'];
+        $buttons = collect($keyboard)->flatten(1);
+        $tierButton = $buttons->first(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:qty:tier:'));
+
+        $this->assertStringContainsString('Price: Rp25.000/unit', (string) $detail['text']);
+        $this->assertStringContainsString('Wholesale 2+: Rp23.000/unit', (string) $detail['text']);
+        $this->assertStringNotContainsString('Wholesale 10+', (string) $detail['text']);
+        $this->assertStringContainsString('Add 1 more units for the wholesale price.', (string) $detail['text']);
+        $this->assertStringContainsString('Total 2 units: Rp46.000', (string) $detail['text']);
+        $this->assertNotNull($tierButton);
+        $this->assertSame('🏷 Choose 2', $tierButton['text']);
+        $this->assertSame('detail:qty:tier:'.$product->id.':'.$state['interactionToken'], $tierButton['callback_data']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180031,
+            'tier-jump',
+            $tierButton['callback_data'],
+            [],
+            318003,
+            'private',
+            88003,
+        ))->assertOk();
+
+        $selected = $this->selection($customer);
+        $selectedDetail = $this->lastDetailMessage('Tiered Detail Product');
+        $this->assertSame(2, $selected['quantity']);
+        $this->assertStringContainsString('Wholesale 2+ active', (string) $selectedDetail['text']);
+        $this->assertStringContainsString('Price/unit: Rp23.000', (string) $selectedDetail['text']);
+        $this->assertStringContainsString('Subtotal: Rp46.000', (string) $selectedDetail['text']);
+        $this->assertStringContainsString('You save Rp4.000 from the base price.', (string) $selectedDetail['text']);
+        $this->assertStringNotContainsString('Wholesale 10+', (string) $selectedDetail['text']);
+        $this->assertFalse(collect($selectedDetail['reply_markup']['inline_keyboard'])
+            ->flatten(1)
+            ->contains(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:qty:tier:')));
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+    }
+
+    public function test_stale_tier_callback_has_no_commerce_side_effects(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 318005, 'locale' => 'en']);
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 23_000, 'usdt_price_amount' => null],
+        ])->create([
+            'name' => 'Stale Tier Product',
+            'price_amount' => 25_000,
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+        $product->quantityPriceTiers()->delete();
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180051,
+            'stale-tier',
+            'detail:qty:tier:'.$product->id.':'.$state['interactionToken'],
+            [],
+            318005,
+            'private',
+            88005,
+        ))->assertOk();
+
+        $this->assertSame($state['interactionToken'], $this->selection($customer)['interactionToken']);
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && (string) ($request['callback_query_id'] ?? '') === 'stale-tier'
+            && str_contains((string) ($request['text'] ?? ''), 'expired'));
+    }
+    public function test_tier_threshold_direct_payment_matches_effective_quote(): void
+    {
+        config()->set('services.telegram.payment_mode', 'manual');
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => false,
+            'admin_telegram_chat_id' => '999',
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 318007, 'locale' => 'en']);
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 23_000, 'usdt_price_amount' => null],
+        ])->create([
+            'name' => 'Threshold Payment Product',
+            'price_amount' => 25_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180071,
+            'threshold-increase',
+            'detail:qty:+:'.$product->id.':'.$state['interactionToken'],
+            [],
+            318007,
+            'private',
+            88007,
+        ))->assertOk();
+        $state = $this->selection($customer);
+        $detail = $this->lastDetailMessage('Threshold Payment Product');
+        $buttons = collect($detail['reply_markup']['inline_keyboard'])->flatten(1);
+        $qrisButton = $buttons->first(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:pay:qris:'));
+
+        $this->assertNotNull($qrisButton);
+        $this->assertSame('💳 QRIS · Rp46.000', $qrisButton['text']);
+        $this->postTelegramWebhook($this->callbackUpdate(
+            3180072,
+            'threshold-payment',
+            $qrisButton['callback_data'],
+            [],
+            318007,
+            'private',
+            88007,
+        ))->assertOk();
+
+        $order = Order::query()->sole();
+        $payment = $order->payments()->sole();
+        $item = $order->orderItems()->sole();
+        $this->assertSame(46_000, $order->total_amount);
+        $this->assertSame(46_000, $payment->amount);
+        $this->assertSame(2, $item->quantity_price_tier_minimum);
+        $this->assertSame(23_000, $item->unit_price);
+        $this->assertSame(46_000, $item->subtotal);
+    }
+
+
 
     public function test_quantity_buttons_edit_the_existing_product_detail_message(): void
     {
@@ -139,10 +290,10 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertSame($detailMessageId, (int) $decreaseEdit['message_id']);
         $this->assertStringContainsString('Quantity: 2', (string) $increaseEdit['text']);
         $this->assertStringContainsString('Subtotal: Rp60.000', (string) $increaseEdit['text']);
-        $this->assertSame('💳 Pay with QRIS · Rp60.000', $increaseEdit['reply_markup']['inline_keyboard'][2][0]['text']);
+        $this->assertSame('💳 QRIS · Rp60.000', $increaseEdit['reply_markup']['inline_keyboard'][2][0]['text']);
         $this->assertStringContainsString('Quantity: 1', (string) $decreaseEdit['text']);
         $this->assertStringContainsString('Subtotal: Rp30.000', (string) $decreaseEdit['text']);
-        $this->assertSame('💳 Pay with QRIS · Rp30.000', $decreaseEdit['reply_markup']['inline_keyboard'][2][0]['text']);
+        $this->assertSame('💳 QRIS · Rp30.000', $decreaseEdit['reply_markup']['inline_keyboard'][2][0]['text']);
     }
 
     public function test_current_quantity_callback_revalidates_live_stock_without_side_effects(): void
@@ -407,7 +558,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $buttons = collect($detail['reply_markup']['inline_keyboard'])->flatten(1);
         $qrisButton = $buttons->first(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:pay:qris:'));
         $this->assertNotNull($qrisButton);
-        $this->assertSame('💳 Pay with QRIS · Rp10.000', $qrisButton['text']);
+        $this->assertSame('💳 QRIS · Rp10.000', $qrisButton['text']);
 
         $this->assertSame(0, Cart::count());
         $this->assertSame(0, Order::count());
@@ -478,7 +629,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $buttons = collect($detail['reply_markup']['inline_keyboard'])->flatten(1);
         $qrisButton = $buttons->first(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:pay:qris:'));
         $this->assertNotNull($qrisButton);
-        $this->assertSame('💳 Pay with QRIS · Rp10.000', $qrisButton['text']);
+        $this->assertSame('💳 QRIS · Rp10.000', $qrisButton['text']);
         $this->assertSame(0, Cart::count());
         $this->assertSame(0, Order::count());
         $this->assertSame(0, Payment::count());
@@ -598,7 +749,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $buttons = collect($keyboard)->flatten(1);
         $binance = $buttons->first(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:pay:binance:'));
         $this->assertNotNull($binance);
-        $this->assertStringContainsString('Pay with Binance · 2.5 USDT', (string) $binance['text']);
+        $this->assertStringContainsString('💎 USDT · 2.5 USDT', (string) $binance['text']);
 
         $state = $this->selection($customer);
         $this->chooseBinancePayId($customer, $product, $state, 318032, 88006);

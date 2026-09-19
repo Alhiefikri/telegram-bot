@@ -434,19 +434,19 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertCount(3, $idPaymentButtons);
         $this->assertCount(3, $enPaymentButtons);
         $this->assertCount(3, $msPaymentButtons);
-        $this->assertSame('💳 Bayar dengan QRIS · Rp50.000', $idPaymentButtons[0]['text']);
-        $this->assertStringContainsString('Bayar dengan Saldo', $idPaymentButtons[1]['text']);
-        $this->assertSame('💎 Bayar dengan Binance · 3 USDT', $idPaymentButtons[2]['text']);
-        $this->assertSame('💳 Pay with QRIS · Rp50.000', $enPaymentButtons[0]['text']);
-        $this->assertStringContainsString('Pay with Balance', $enPaymentButtons[1]['text']);
-        $this->assertSame('💎 Pay with Binance · 3 USDT', $enPaymentButtons[2]['text']);
-        $this->assertSame('💳 Bayar dengan QRIS · Rp50.000', $msPaymentButtons[0]['text']);
-        $this->assertStringContainsString('Bayar dengan Baki', $msPaymentButtons[1]['text']);
-        $this->assertSame('💎 Bayar dengan Binance · 3 USDT', $msPaymentButtons[2]['text']);
+        $this->assertSame('💳 QRIS · Rp50.000', $idPaymentButtons[0]['text']);
+        $this->assertSame('💰 Saldo · Rp50.000', $idPaymentButtons[1]['text']);
+        $this->assertSame('💎 USDT · 3 USDT', $idPaymentButtons[2]['text']);
+        $this->assertSame('💳 QRIS · Rp50.000', $enPaymentButtons[0]['text']);
+        $this->assertSame('💰 Balance · Rp50.000', $enPaymentButtons[1]['text']);
+        $this->assertSame('💎 USDT · 3 USDT', $enPaymentButtons[2]['text']);
+        $this->assertSame('💳 QRIS · Rp50.000', $msPaymentButtons[0]['text']);
+        $this->assertSame('💰 Baki · Rp50.000', $msPaymentButtons[1]['text']);
+        $this->assertSame('💎 USDT · 3 USDT', $msPaymentButtons[2]['text']);
         $this->assertStringNotContainsString('checkout.payment_method', json_encode($idPayload, JSON_THROW_ON_ERROR));
-        $this->assertLocalizedCopy($idPayload, ['QRIS Antarnegara saat ini mendukung koneksi dengan:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP'], ['QRIS Cross-Border currently supports connections with:', 'Availability still depends on the payment app/provider']);
-        $this->assertLocalizedCopy($enPayload, ['QRIS Cross-Border currently supports connections with:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China', 'Availability still depends on the payment app/provider'], ['QRIS Antarnegara saat ini mendukung koneksi dengan:', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP']);
-        $this->assertLocalizedCopy($msPayload, ['QRIS Rentas Sempadan kini menyokong sambungan dengan:', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepun', '🇰🇷 Korea Selatan', '🇨🇳 China', 'Ketersediaan masih bergantung pada aplikasi/penyedia pembayaran'], ['QRIS Antarnegara saat ini mendukung koneksi dengan:', 'QRIS Cross-Border currently supports connections with:']);
+        $this->assertLocalizedCopy($idPayload, ['QRIS Antarnegara', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok', 'Tergantung dukungan aplikasi/PJP dan merchant'], ['QRIS Antarnegara tersedia melalui koneksi:', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP']);
+        $this->assertLocalizedCopy($enPayload, ['QRIS Cross-Border', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China', 'Availability depends on the payment app/provider and participating merchant'], ['QRIS Cross-Border currently supports connections with:', 'Availability still depends on the payment app/provider']);
+        $this->assertLocalizedCopy($msPayload, ['QRIS Rentas Sempadan', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepun', '🇰🇷 Korea Selatan', '🇨🇳 China', 'Ketersediaan bergantung pada aplikasi/penyedia pembayaran dan peniaga yang mengambil bahagian'], ['QRIS Rentas Sempadan:', 'Ketersediaan masih bergantung pada aplikasi/penyedia pembayaran']);
     }
 
     public function test_checkout_method_prompt_explains_qris_cross_border_support_in_customer_locale(): void
