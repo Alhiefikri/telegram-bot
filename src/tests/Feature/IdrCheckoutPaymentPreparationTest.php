@@ -10,6 +10,8 @@ use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\CheckoutPaymentPlan;
 use App\Services\Checkout\CheckoutPaymentPreflightContext;
 use App\Services\Checkout\CheckoutPaymentPreparationContext;
+use App\Services\Checkout\CheckoutPricingSnapshot;
+use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\Checkout\CheckoutPaymentPreparationResolver;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\Checkout\KlikQrisCheckoutPaymentPreparation;
@@ -105,12 +107,16 @@ final class IdrCheckoutPaymentPreparationTest extends TestCase
                 requestedMethod: $intent->method(),
             );
 
+            $items = new Collection([(object) ['product_id' => $product->id, 'quantity' => 2]]);
+            $products = new Collection([$product->id => $product]);
+
             return $preparation->prepare(new CheckoutPaymentPreparationContext(
                 cart: Cart::factory()->create(),
-                items: new Collection([(object) ['product_id' => $product->id, 'quantity' => 2]]),
-                products: new Collection([$product->id => $product]),
+                items: $items,
+                products: $products,
                 lockedSetting: $setting,
                 preflight: $preparation->preflight($preflightContext),
+                pricing: CheckoutPricingSnapshot::fromCartItems($items, $products, app(ProductQuantityPricing::class)),
             ));
         } finally {
             $this->travelBack();

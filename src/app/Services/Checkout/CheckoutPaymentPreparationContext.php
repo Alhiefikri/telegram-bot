@@ -18,5 +18,6 @@ final readonly class CheckoutPaymentPreparationContext
         public Collection $products,
         public ?ManualPaymentSetting $lockedSetting,
         public CheckoutPaymentPreflight $preflight,
+        public CheckoutPricingSnapshot $pricing,
     ) {}
 }

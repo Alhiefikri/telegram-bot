@@ -8,7 +8,6 @@ use App\Services\Binance\BinancePayClient;
 use App\Services\Binance\BinanceUniquePaymentAmount;
 use App\Services\Checkout\PaymentPlan\BinancePayCheckoutPaymentSnapshot;
 use App\Support\PaymentProvider;
-use Illuminate\Support\Collection;
 
 final readonly class BinanceCheckoutPaymentPreparation implements CheckoutPaymentPreparation
 {
@@ -43,12 +42,15 @@ final readonly class BinanceCheckoutPaymentPreparation implements CheckoutPaymen
 
         [$receiverType, $receiverValue] = $this->receiverSnapshot();
         $mode = $this->verificationMode($setting);
-        $baseAmount = $this->baseAmount($context->items, $context->products);
+        $usdtAmount = $context->pricing->usdtTotal();
+        if ($usdtAmount === null) {
+            throw new InvalidCheckout('A cart item has no USDT price.');
+        }
         $expiresAt = now()->addMinutes($setting->binancePaymentTtlMinutes());
 
         $amount = $mode === 'amount_unique'
-            ? $this->uniqueAmount->allocate($baseAmount)
-            : $baseAmount;
+            ? $this->uniqueAmount->allocate($usdtAmount)
+            : $usdtAmount;
 
         $snapshot = new BinancePayCheckoutPaymentSnapshot(
             provider: PaymentProvider::MANUAL,
@@ -99,19 +101,4 @@ final readonly class BinanceCheckoutPaymentPreparation implements CheckoutPaymen
             : 'amount_unique';
     }
 
-    /**
-     * @param  Collection<int, object>  $items
-     * @param  Collection<int, object>  $products
-     */
-    private function baseAmount(Collection $items, Collection $products): int
-    {
-        return $items->sum(function ($item) use ($products): int {
-            $price = $products[$item->product_id]->usdt_price_amount;
-            if ($price === null) {
-                throw new InvalidCheckout('A cart item has no USDT price.');
-            }
-
-            return (int) $price * (int) $item->quantity;
-        });
-    }
 }

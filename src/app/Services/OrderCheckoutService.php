@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Services\Checkout\CheckoutPricingSnapshot;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\CheckoutPaymentPlanWriter;
@@ -25,6 +26,8 @@ use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
+use App\Services\Pricing\ProductQuantityPricing;
+use InvalidArgumentException;
 use DateTimeInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +41,7 @@ class OrderCheckoutService
         private readonly PaymentProviderResolver $providerResolver,
         private readonly CheckoutPaymentPreparationResolver $paymentPreparations,
         private readonly CheckoutPaymentPlanWriter $paymentPlanWriter,
+        private readonly ProductQuantityPricing $pricing,
         private readonly CheckoutMaintenance $maintenance,
         private readonly TelegramOutboundEffectService $outboundEffects,
         private readonly StoreBalanceLedger $storeBalance,
@@ -174,36 +178,60 @@ class OrderCheckoutService
 
             $preflight = CheckoutPaymentPreflight::none($preflightContext);
         }
-
-        $total = $items->sum(fn ($item) => $products[$item->product_id]->price_amount * $item->quantity);
+        try {
+            $pricing = CheckoutPricingSnapshot::fromCartItems($items, $products, $this->pricing);
+        } catch (InvalidArgumentException $exception) {
+            throw new InvalidCheckout(
+                'Checkout pricing is not available. Please try again later or contact support.',
+                previous: $exception,
+            );
+        }
         $paymentPlan = $paymentPreparation->prepare(new CheckoutPaymentPreparationContext(
             cart: $lockedCart,
             items: $items,
             products: $products,
             lockedSetting: $activeSetting,
             preflight: $preflight,
+            pricing: $pricing,
         ));
         $isStoreBalance = $paymentPlan->postCreationBehavior() === CheckoutPostCreationBehavior::StoreBalancePaid;
         if ($isStoreBalance) {
             if ($paymentPlan->orderCurrency() !== 'IDR'
                 || $paymentPlan->paymentCurrency() !== 'IDR'
-                || $paymentPlan->amount() !== $total
-                || $paymentPlan->amount() <= 0
+                || $paymentPlan->amount() !== $pricing->idrTotal()
                 || $storeBalanceCustomer === null) {
                 throw new InvalidCheckout('Store Balance checkout requires the complete positive IDR Order total.');
             }
         }
 
-        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'terms_version' => $termsVersion, 'terms_accepted_at' => $termsAcceptedAt, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $total, 'currency' => $paymentPlan->orderCurrency(), 'expires_at' => $paymentPlan->orderExpiresAt()]);
+        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'terms_version' => $termsVersion, 'terms_accepted_at' => $termsAcceptedAt, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $pricing->idrTotal(), 'currency' => $paymentPlan->orderCurrency(), 'expires_at' => $paymentPlan->orderExpiresAt()]);
 
         $payment = $this->paymentPlanWriter->persist($order, $paymentPlan);
 
         foreach ($items as $item) {
             $product = $products[$item->product_id];
-            $usdtUnitPrice = $paymentPlan->paymentCurrency() === 'USDT'
-                ? $product->usdt_price_amount
-                : null;
-            $orderItem = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'family_id' => $product->product_family_id, 'family_name' => $product->family?->name, 'delivery_note' => $product->delivery_note, 'delivery_note_snapshotted' => true, 'usage_guide_title' => $product->usage_guide_title, 'usage_guide_url' => $product->usage_guide_url, 'usage_guide_snapshotted' => true, 'quantity' => $item->quantity, 'unit_price' => $product->price_amount, 'usdt_unit_price' => $usdtUnitPrice, 'subtotal' => $product->price_amount * $item->quantity, 'usdt_subtotal' => $usdtUnitPrice === null ? null : $usdtUnitPrice * $item->quantity]);
+            $quote = $pricing->quoteForItem($item);
+            $isUsdtPayment = $paymentPlan->paymentCurrency() === 'USDT';
+            $usdtUnitPrice = $isUsdtPayment ? $quote->effectiveUsdtUnitAmount : null;
+            $usdtSubtotal = $isUsdtPayment ? $quote->usdtSubtotal : null;
+            $orderItem = OrderItem::create([
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'product_name' => $product->name,
+                'family_id' => $product->product_family_id,
+                'family_name' => $product->family?->name,
+                'delivery_note' => $product->delivery_note,
+                'delivery_note_snapshotted' => true,
+                'usage_guide_title' => $product->usage_guide_title,
+                'usage_guide_url' => $product->usage_guide_url,
+                'usage_guide_snapshotted' => true,
+                'quantity' => $item->quantity,
+                'quantity_price_tier_minimum' => $quote->appliedTierMinimum,
+                'unit_price' => $quote->effectiveIdrUnitAmount,
+                'usdt_unit_price' => $usdtUnitPrice,
+                'subtotal' => $quote->idrSubtotal,
+                'usdt_subtotal' => $usdtSubtotal,
+            ]);
             $this->credentials->allocate($orderItem, $product, $item->quantity);
             $this->inventory->reserveOrderItem($order, $product, $item->quantity);
         }
@@ -213,7 +241,7 @@ class OrderCheckoutService
             // debit and paid lifecycle remain inside this transaction.
             $this->storeBalance->debit(
                 customer: $storeBalanceCustomer,
-                amount: $total,
+                amount: $pricing->idrTotal(),
                 sourceType: 'order',
                 sourceId: (string) $order->getKey(),
                 idempotencyKey: 'order:'.$order->getKey().':debit',

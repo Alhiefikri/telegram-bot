@@ -6,7 +6,6 @@ use App\Exceptions\InvalidCheckout;
 use App\Services\Checkout\PaymentPlan\KlikQrisCheckoutPaymentSnapshot;
 use App\Services\KlikQris\KlikQrisCheckoutSelector;
 use App\Support\PaymentProvider;
-use Illuminate\Support\Collection;
 use RuntimeException;
 
 final readonly class KlikQrisCheckoutPaymentPreparation implements CheckoutPaymentPreparation
@@ -45,7 +44,7 @@ final readonly class KlikQrisCheckoutPaymentPreparation implements CheckoutPayme
 
         $expiresAt = now()->addMinutes((int) config('services.klikqris.qris_ttl_minutes', 15));
 
-        $amount = $this->baseAmount($context->items, $context->products);
+        $amount = $context->pricing->idrTotal();
         $snapshot = new KlikQrisCheckoutPaymentSnapshot(
             provider: PaymentProvider::KLIKQRIS,
             method: self::METHOD,
@@ -67,12 +66,4 @@ final readonly class KlikQrisCheckoutPaymentPreparation implements CheckoutPayme
         );
     }
 
-    /**
-     * @param  Collection<int, object>  $items
-     * @param  Collection<int, object>  $products
-     */
-    private function baseAmount(Collection $items, Collection $products): int
-    {
-        return $items->sum(fn ($item): int => $products[$item->product_id]->price_amount * $item->quantity);
-    }
 }

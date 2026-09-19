@@ -6,6 +6,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
+use App\Exceptions\InvalidCheckout;
 use App\Models\BscPaymentReceiver;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -185,6 +186,246 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         $this->assertSame(2_500_000, $detail->payable_amount_micro);
         $this->assertSame('2500000000000000000', (string) $detail->expected_token_units);
         $this->assertSame(PaymentBscDetail::STATUS_AWAITING_TRANSFER, $detail->verification_status);
+    }
+
+    #[DataProvider('idrRails')]
+    public function test_tier_pricing_is_shared_by_every_qris_checkout_rail(
+        string $rail,
+        string $provider,
+        string $method,
+        string $effectType,
+    ): void {
+        $deadline = CarbonImmutable::parse('2030-04-05 06:07:08', config('app.timezone'));
+        $this->configureIdrRail($rail);
+
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 12_000, 'usdt_price_amount' => null],
+        ])->create([
+            'price_amount' => 15_000,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        $cart = $this->cartForProduct($product, quantity: 2);
+        $minutesBeforeDeadline = match ($rail) {
+            'klikqris' => 15,
+            'sakurupiah' => 60,
+            default => 10,
+        };
+        $this->travelTo($deadline->copy()->subMinutes($minutesBeforeDeadline));
+        $cart->update(['expires_at' => $deadline->copy()->addHour()]);
+
+        try {
+            $order = app(OrderCheckoutService::class)->checkout($cart, $this->idrIntent($rail));
+        } finally {
+            $this->travelBack();
+        }
+
+        $this->assertCheckoutSnapshot(
+            order: $order,
+            product: $product,
+            quantity: 2,
+            provider: $provider,
+            method: $method,
+            paymentCurrency: 'IDR',
+            paymentAmount: 24_000,
+            orderTotal: 24_000,
+            deadline: $deadline,
+            effectType: $effectType,
+        );
+        $item = $order->orderItems->sole();
+        $this->assertSame(2, $item->quantity_price_tier_minimum);
+        $this->assertSame(12_000, $item->unit_price);
+        $this->assertSame(24_000, $item->subtotal);
+        $this->assertNull($item->usdt_unit_price);
+        $this->assertNull($item->usdt_subtotal);
+    }
+
+    public function test_binance_pay_uses_the_tiered_usdt_total(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        config()->set('services.binance.api_key', 'read-only-key');
+        config()->set('services.binance.api_secret', 'read-only-secret');
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'binance_verification_mode' => 'amount_unique',
+            'is_active' => true,
+        ]);
+
+        $deadline = CarbonImmutable::parse('2030-05-06 07:08:09', config('app.timezone'));
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 18_000, 'usdt_price_amount' => 3_000_000],
+        ])->create([
+            'price_amount' => 20_000,
+            'usdt_price_amount' => 3_250_000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+        ]);
+        $cart = $this->cartForProduct($product, quantity: 2);
+        $this->travelTo($deadline->copy()->subMinutes(20));
+        $cart->update(['expires_at' => $deadline->copy()->addHour()]);
+
+        try {
+            $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::binancePayId());
+        } finally {
+            $this->travelBack();
+        }
+
+        $payment = $this->assertCheckoutSnapshot(
+            order: $order,
+            product: $product,
+            quantity: 2,
+            provider: 'manual',
+            method: 'BINANCE_PAY_ID',
+            paymentCurrency: 'USDT',
+            paymentAmount: 6_000_000,
+            orderTotal: 36_000,
+            deadline: $deadline,
+            effectType: TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
+        );
+        $this->assertSame(2, $order->orderItems->sole()->quantity_price_tier_minimum);
+        $this->assertSame(18_000, $order->orderItems->sole()->unit_price);
+        $this->assertSame(36_000, $order->orderItems->sole()->subtotal);
+        $this->assertSame(3_000_000, $order->orderItems->sole()->usdt_unit_price);
+        $this->assertSame(6_000_000, $order->orderItems->sole()->usdt_subtotal);
+        $this->assertSame(6_000_000, $payment->amount);
+    }
+
+    public function test_bsc_uses_the_tiered_usdt_total_and_token_units(): void
+    {
+        $this->configureBscRail();
+        $receiver = $this->activeBscReceiver('0x3333333333333333333333333333333333333333');
+        $deadline = CarbonImmutable::parse('2030-06-07 08:09:10', config('app.timezone'));
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 22_000, 'usdt_price_amount' => 2_300_000],
+        ])->create([
+            'price_amount' => 25_000,
+            'usdt_price_amount' => 2_500_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $cart = $this->cartForProduct($product, quantity: 2);
+        $this->travelTo($deadline->copy()->subMinutes(30));
+        $cart->update(['expires_at' => $deadline->copy()->addHour()]);
+
+        try {
+            $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::usdtBep20());
+        } finally {
+            $this->travelBack();
+        }
+
+        $this->assertCheckoutSnapshot(
+            order: $order,
+            product: $product,
+            quantity: 2,
+            provider: 'manual',
+            method: 'USDT_BEP20',
+            paymentCurrency: 'USDT',
+            paymentAmount: 4_600_000,
+            orderTotal: 44_000,
+            deadline: $deadline,
+            effectType: TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
+        );
+        $detail = $order->payments()->sole()->bscDetail()->sole();
+        $this->assertSame($receiver->id, $detail->receiver_id);
+        $this->assertSame(4_600_000, $detail->payable_amount_micro);
+        $this->assertSame('4600000000000000000', (string) $detail->expected_token_units);
+        $this->assertSame(2, $order->orderItems->sole()->quantity_price_tier_minimum);
+        $this->assertSame(2_300_000, $order->orderItems->sole()->usdt_unit_price);
+        $this->assertSame(4_600_000, $order->orderItems->sole()->usdt_subtotal);
+    }
+
+    public function test_mixed_cart_quotes_each_product_independently(): void
+    {
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
+        $first = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 10, 'price_amount' => 23_000, 'usdt_price_amount' => null],
+        ])->create(['price_amount' => 25_000, 'stock' => 10, 'reserved_stock' => 0]);
+        $second = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 9_000, 'usdt_price_amount' => null],
+        ])->create(['price_amount' => 10_000, 'stock' => 2, 'reserved_stock' => 0]);
+        $customer = Customer::factory()->create(['telegram_id' => 123456]);
+        $cart = Cart::factory()->for($customer)->create();
+        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $first->id, 'quantity' => 10]);
+        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $second->id, 'quantity' => 2]);
+
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+        $items = $order->orderItems()->orderBy('product_id')->get();
+
+        $this->assertSame(248_000, $order->total_amount);
+        $this->assertSame(248_000, $order->payments()->sole()->amount);
+        $this->assertSame([23_000, 9_000], $items->pluck('unit_price')->all());
+        $this->assertSame([230_000, 18_000], $items->pluck('subtotal')->all());
+        $this->assertSame([10, 2], $items->pluck('quantity_price_tier_minimum')->all());
+    }
+
+    public function test_corrupt_tier_schedule_aborts_checkout_before_order_creation(): void
+    {
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
+        $product = Product::factory()->create([
+            'price_amount' => 100_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $now = now();
+        $rows = [];
+        foreach (range(2, 7) as $minimumQuantity) {
+            $rows[] = [
+                'product_id' => $product->id,
+                'minimum_quantity' => $minimumQuantity,
+                'price_amount' => 100_000 - ($minimumQuantity * 1_000),
+                'usdt_price_amount' => null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+        DB::table('product_quantity_price_tiers')->insert($rows);
+
+        try {
+            app(OrderCheckoutService::class)->checkout(
+                $this->cartForProduct($product, quantity: 2),
+                CheckoutPaymentIntents::manualQris(),
+            );
+            $this->fail('Corrupt quantity pricing must abort checkout.');
+        } catch (InvalidCheckout $exception) {
+            $this->assertSame(
+                'Checkout pricing is not available. Please try again later or contact support.',
+                $exception->getMessage(),
+            );
+        }
+
+        $this->assertDatabaseCount('orders', 0);
+    }
+
+    public function test_existing_order_snapshots_ignore_later_product_and_tier_edits(): void
+    {
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 12_000, 'usdt_price_amount' => null],
+        ])->create([
+            'price_amount' => 15_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $order = app(OrderCheckoutService::class)->checkout(
+            $this->cartForProduct($product, quantity: 2),
+            CheckoutPaymentIntents::manualQris(),
+        );
+
+        $product->forceFill(['price_amount' => 30_000])->save();
+        $product->quantityPriceTiers()->delete();
+        $product->quantityPriceTiers()->create([
+            'minimum_quantity' => 2,
+            'price_amount' => 25_000,
+            'usdt_price_amount' => null,
+        ]);
+
+        $fresh = $order->fresh(['orderItems', 'payments']);
+        $this->assertSame(24_000, $fresh->total_amount);
+        $this->assertSame(24_000, $fresh->payments->sole()->amount);
+        $this->assertSame(12_000, $fresh->orderItems->sole()->unit_price);
+        $this->assertSame(24_000, $fresh->orderItems->sole()->subtotal);
+        $this->assertSame(2, $fresh->orderItems->sole()->quantity_price_tier_minimum);
     }
 
     public static function idrRails(): array

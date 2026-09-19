@@ -136,6 +136,51 @@ class OrderCartDomainTest extends TestCase
         $this->assertSame(1, Order::query()->where('checkout_key', 'telegram-balance-910001')->count());
     }
 
+    public function test_store_balance_uses_the_tiered_order_amount_for_debit_and_refund(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 910003, 'locale' => 'en']);
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 12_000, 'usdt_price_amount' => null],
+        ])->create([
+            'price_amount' => 15_000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $cart = $this->cartForCustomer($customer, $product, quantity: 2);
+        app(StoreBalanceLedger::class)->credit(
+            $customer,
+            30_000,
+            StoreBalanceEntryKind::TopUpCredit,
+            'balance_top_up',
+            '910003',
+            'balance_top_up:910003:credit',
+        );
+
+        $order = app(OrderCheckoutService::class)->checkout(
+            $cart,
+            CheckoutPaymentIntents::storeBalance(),
+            'telegram-balance-tiered-910003',
+        );
+        $payment = $order->payments()->sole();
+
+        $this->assertSame(24_000, $order->total_amount);
+        $this->assertSame(24_000, $payment->amount);
+        $this->assertSame(6_000, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(2, $order->orderItems->sole()->quantity_price_tier_minimum);
+        $this->assertSame(12_000, $order->orderItems->sole()->unit_price);
+        $this->assertSame(24_000, $order->orderItems->sole()->subtotal);
+
+        app(OrderStateMachine::class)->applyPaymentRefunded($payment);
+
+        $this->assertSame(30_000, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertDatabaseHas('store_balance_entries', [
+            'kind' => StoreBalanceEntryKind::RefundCredit->value,
+            'source_type' => 'order',
+            'source_id' => (string) $order->id,
+            'amount' => 24_000,
+        ]);
+    }
+
     public function test_store_balance_refund_credits_exact_debit_once_through_order_lifecycle(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 910004, 'locale' => 'en']);

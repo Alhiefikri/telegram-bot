@@ -11,7 +11,6 @@ use App\Services\Bsc\BscReadinessReport;
 use App\Services\Bsc\BscTokenAmount;
 use App\Services\Checkout\PaymentPlan\BscCheckoutPaymentSnapshot;
 use App\Support\PaymentProvider;
-use Illuminate\Support\Collection;
 
 final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPreparation
 {
@@ -46,7 +45,10 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
         $report = $context->preflight->stateAs(BscReadinessReport::class);
         $this->readiness->assertCheckoutSnapshot($report, $context->lockedSetting);
 
-        $baseAmount = $this->baseAmount($context->items, $context->products);
+        $usdtAmount = $context->pricing->usdtTotal();
+        if ($usdtAmount === null) {
+            throw new InvalidCheckout('A cart item has no USDT price.');
+        }
         $expiresAt = now()->addMinutes(
             $context->lockedSetting?->bscPaymentTtlMinutes()
                 ?? ManualPaymentSetting::DEFAULT_BSC_PAYMENT_TTL_MINUTES,
@@ -57,13 +59,13 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
             provider: PaymentProvider::MANUAL,
             method: self::METHOD,
             paymentCurrency: self::PAYMENT_CURRENCY,
-            amount: $baseAmount,
+            amount: $usdtAmount,
             expiresAt: $expiresAt,
             receiver: $receiver,
-            baseAmountMicro: $baseAmount,
-            payableAmountMicro: $baseAmount,
+            baseAmountMicro: $usdtAmount,
+            payableAmountMicro: $usdtAmount,
             expectedTokenUnits: $this->tokenAmount->expectedTokenUnits(
-                $baseAmount,
+                $usdtAmount,
                 $receiver->tokenDecimals,
             ),
             verificationStatus: PaymentBscDetail::STATUS_AWAITING_TRANSFER,
@@ -80,26 +82,11 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
             provider: PaymentProvider::MANUAL,
             method: self::METHOD,
             paymentCurrency: self::PAYMENT_CURRENCY,
-            amount: $baseAmount,
+            amount: $usdtAmount,
             paymentExpiresAt: $expiresAt,
             railSnapshot: $snapshot,
             postCreationBehavior: CheckoutPostCreationBehavior::BscInstructions,
         );
     }
 
-    /**
-     * @param  Collection<int, object>  $items
-     * @param  Collection<int, object>  $products
-     */
-    private function baseAmount(Collection $items, Collection $products): int
-    {
-        return $items->sum(function ($item) use ($products): int {
-            $price = $products[$item->product_id]->usdt_price_amount;
-            if ($price === null) {
-                throw new InvalidCheckout('A cart item has no USDT price.');
-            }
-
-            return (int) $price * (int) $item->quantity;
-        });
-    }
 }

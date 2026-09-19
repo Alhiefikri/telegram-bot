@@ -15,6 +15,8 @@ use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\CheckoutPaymentPreflightContext;
 use App\Services\Checkout\CheckoutPaymentPreparationContext;
+use App\Services\Checkout\CheckoutPricingSnapshot;
+use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\SakurupiahCheckoutIntent;
@@ -176,12 +178,15 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
         config()->set('services.sakurupiah.qris_contract.expiry_hours', 12);
 
         $this->expectException(InvalidCheckout::class);
+        $items = new Collection($cart->cartItems()->get()->all());
+        $products = new Collection([$product->id => $product]);
         $preparation->prepare(new CheckoutPaymentPreparationContext(
             cart: $cart,
-            items: new Collection($cart->cartItems()->get()->all()),
-            products: new Collection([$product->id => $product]),
+            items: $items,
+            products: $products,
             lockedSetting: $setting,
             preflight: $preflight,
+            pricing: CheckoutPricingSnapshot::fromCartItems($items, $products, app(ProductQuantityPricing::class)),
         ));
         Http::assertSentCount(1);
     }

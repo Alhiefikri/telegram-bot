@@ -8,7 +8,6 @@ use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahProviderReadinessReport;
 use App\Support\PaymentProvider;
-use Illuminate\Support\Collection;
 
 final readonly class SakurupiahCheckoutPaymentPreparation implements CheckoutPaymentPreparation
 {
@@ -46,7 +45,7 @@ final readonly class SakurupiahCheckoutPaymentPreparation implements CheckoutPay
             throw new InvalidCheckout('Sakurupiah QRIS checkout is not ready. Try again later or contact support.');
         }
 
-        $amount = $this->baseAmount($context->items, $context->products);
+        $amount = $context->pricing->idrTotal();
         if ($amount < $channel->minimumAmount() || $amount > $channel->maximumAmount()) {
             throw new InvalidCheckout('Sakurupiah QRIS amount is outside the provider limits. Try again later or contact support.');
         }
@@ -78,12 +77,4 @@ final readonly class SakurupiahCheckoutPaymentPreparation implements CheckoutPay
         );
     }
 
-    /**
-     * @param  Collection<int, object>  $items
-     * @param  Collection<int, object>  $products
-     */
-    private function baseAmount(Collection $items, Collection $products): int
-    {
-        return $items->sum(fn ($item): int => $products[$item->product_id]->price_amount * $item->quantity);
-    }
 }

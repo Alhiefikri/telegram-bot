@@ -5,7 +5,6 @@ namespace App\Services\Checkout;
 use App\Models\ManualPaymentSetting;
 use App\Services\Checkout\PaymentPlan\ManualQrisCheckoutPaymentSnapshot;
 use App\Support\PaymentProvider;
-use Illuminate\Support\Collection;
 
 final readonly class ManualQrisCheckoutPaymentPreparation implements CheckoutPaymentPreparation
 {
@@ -32,7 +31,7 @@ final readonly class ManualQrisCheckoutPaymentPreparation implements CheckoutPay
                 ?? ManualPaymentSetting::DEFAULT_QRIS_PAYMENT_TTL_MINUTES,
         );
 
-        $amount = $this->baseAmount($context->items, $context->products);
+        $amount = $context->pricing->idrTotal();
         $snapshot = new ManualQrisCheckoutPaymentSnapshot(
             provider: PaymentProvider::MANUAL,
             method: self::METHOD,
@@ -54,12 +53,4 @@ final readonly class ManualQrisCheckoutPaymentPreparation implements CheckoutPay
         );
     }
 
-    /**
-     * @param  Collection<int, object>  $items
-     * @param  Collection<int, object>  $products
-     */
-    private function baseAmount(Collection $items, Collection $products): int
-    {
-        return $items->sum(fn ($item): int => $products[$item->product_id]->price_amount * $item->quantity);
-    }
 }

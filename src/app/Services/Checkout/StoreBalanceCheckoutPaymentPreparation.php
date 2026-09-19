@@ -5,7 +5,6 @@ namespace App\Services\Checkout;
 use App\Exceptions\InvalidCheckout;
 use App\Services\Checkout\PaymentPlan\StoreBalanceCheckoutPaymentSnapshot;
 use App\Support\PaymentProvider;
-use Illuminate\Support\Collection;
 
 final readonly class StoreBalanceCheckoutPaymentPreparation implements CheckoutPaymentPreparation
 {
@@ -28,7 +27,7 @@ final readonly class StoreBalanceCheckoutPaymentPreparation implements CheckoutP
             requestedMethod: self::METHOD,
         ));
 
-        $amount = $this->baseAmount($context->items, $context->products);
+        $amount = $context->pricing->idrTotal();
         if ($amount <= 0) {
             throw new InvalidCheckout('Store Balance checkout requires a positive IDR total.');
         }
@@ -55,12 +54,4 @@ final readonly class StoreBalanceCheckoutPaymentPreparation implements CheckoutP
         );
     }
 
-    /**
-     * @param  Collection<int, object>  $items
-     * @param  Collection<int, object>  $products
-     */
-    private function baseAmount(Collection $items, Collection $products): int
-    {
-        return $items->sum(fn ($item): int => $products[$item->product_id]->price_amount * $item->quantity);
-    }
 }
