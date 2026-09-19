@@ -6,6 +6,7 @@ use Database\Factories\ProductFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -195,6 +196,14 @@ class Product extends Model
     public function orderItems()
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    /**
+     * @return HasMany<ProductQuantityPriceTier>
+     */
+    public function quantityPriceTiers(): HasMany
+    {
+        return $this->hasMany(ProductQuantityPriceTier::class)->orderBy('minimum_quantity');
     }
 
     public function inventoryMovements()
