@@ -337,7 +337,6 @@ return [
         'welcome_banner_url' => null,
         'start_metrics_cache_seconds' => 60,
         'webhook_rate_limit_per_minute' => 120,
-        'community_gate_cache_seconds' => 15,
         'claim_lease_seconds' => 600,
         'processing_max_attempts' => 3,
         'processing_retry_delay_seconds' => 60,
@@ -359,8 +358,6 @@ return [
         'store_channel_chat_id' => env('DOGFOOD_STORE_CHANNEL_CHAT_ID'),
         'store_channel_username' => env('DOGFOOD_STORE_CHANNEL_USERNAME'),
         'store_channel_link' => env('DOGFOOD_STORE_CHANNEL_LINK'),
-        'store_channel_member_user_id' => env('DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID'),
-        'store_channel_non_member_user_id' => env('DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID'),
         'telegram_callback_query_id' => env('DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID'),
     ],
 

@@ -39,18 +39,17 @@ class AdminStoreChannelTest extends TestCase
             ->assertOk()
             ->assertSee('Telegram Channel')
             ->assertSee('Channel')
-            ->assertSee('Not configured');
+            ->assertSee('Not configured')
+            ->assertDontSee('Community Gate');
 
         $this->post(route('admin.store-channel.update'), [
             'channel_username' => '@lhie_store',
             'channel_link' => 'https://t.me/lhie_store',
-            'community_gate_enabled' => '1',
         ])->assertRedirect('/admin?tab=telegram-channel#admin-section-store-channel');
 
         $this->assertDatabaseHas('store_channel_settings', [
             'channel_username' => null,
             'channel_link' => 'https://t.me/lhie_store',
-            'community_gate_enabled' => true,
             'sales_proof_enabled' => false,
         ]);
     }
@@ -76,7 +75,6 @@ class AdminStoreChannelTest extends TestCase
             'telegram_chat_id' => '-100123',
             'last_test_success' => true,
             'last_test_message_id' => '77',
-            'community_gate_enabled' => false,
             'sales_proof_enabled' => false,
         ]);
     }

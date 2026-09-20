@@ -265,7 +265,6 @@ Dogfood timing logs should use `DOGFOOD_TIMING_LOG_CHANNEL=stderr` for productio
 - `DOGFOOD_TELEGRAM_PHOTO_FILE_ID`: real Telegram `photo.file_id` from the dogfood bot chat for `/payment` proof forwarding.
 - `DOGFOOD_ADMIN_EMAIL`, `DOGFOOD_ADMIN_PASSWORD`: safe dogfood admin account used by the performance script to log in through the real admin form and submit CSRF-protected admin mutations. If unset, the script falls back to `PLAYWRIGHT_ADMIN_EMAIL` and `PLAYWRIGHT_ADMIN_PASSWORD`.
 - `DOGFOOD_STORE_CHANNEL_CHAT_ID`, `DOGFOOD_STORE_CHANNEL_USERNAME`, `DOGFOOD_STORE_CHANNEL_LINK`: disposable Store Channel target where the bot can post.
-- `DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID`, `DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID`: Telegram identities used to measure Community Gate member/non-member paths.
 - `DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID`: fresh callback query ID from a real Telegram tap; it expires quickly, so set it only for that run.
 
 Run `./scripts/dogfood-volume-preflight.sh` before a production-like performance run. It lists Docker volumes for the `telegram-bot-dogfood` Compose project by the `com.docker.compose.project` label and exits non-zero when existing dogfood volumes are present. Existing dogfood volumes can preserve old PostgreSQL roles/databases and make a fresh build look unhealthy for reasons unrelated to current code.

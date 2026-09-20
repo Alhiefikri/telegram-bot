@@ -250,7 +250,6 @@ class AdminCategoryCrudTest extends TestCase
             'api_base_url' => 'https://api.telegram.org',
             'webhook_secret' => 'secret',
             'webhook_fast_callback_ack' => false,
-            'community_gate_cache_seconds' => 15,
             'default_payment_method' => 'BRIVA',
         ]);
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1]])]);

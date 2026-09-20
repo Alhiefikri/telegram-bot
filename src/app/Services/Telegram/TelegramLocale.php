@@ -12,6 +12,8 @@ class TelegramLocale
 {
     public const DEFAULT_LOCALE = 'en';
 
+    public const DEFAULT_CUSTOMER_LOCALE = 'id';
+
     public const STORE_CHANNEL_LOCALE = 'en';
 
     public function __construct(private TelegramTranslationCatalog $catalog) {}

@@ -126,7 +126,7 @@ class StartMetricsTest extends TelegramBotTestSupport
         $request = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->first()[0];
         $caption = (string) $this->telegramRequestField($request, 'caption');
 
-        $this->assertStringContainsString('Successful orders: 0', $caption);
+        $this->assertStringContainsString('Pesanan berhasil: 0', $caption);
         $this->assertStringNotContainsString('Group Name', $caption);
         $this->assertStringNotContainsString('@group_user', $caption);
     }

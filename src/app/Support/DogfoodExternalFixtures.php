@@ -6,8 +6,6 @@ class DogfoodExternalFixtures
 {
     public const MANUAL_PAYMENT_PROOF = 'manual_payment_proof';
 
-    public const STORE_CHANNEL_MEMBER_GATE = 'store_channel_member_gate';
-
     public const STORE_CHANNEL_SEND = 'store_channel_send';
 
     public const SALES_PROOF_POST = 'sales_proof_post';
@@ -23,8 +21,6 @@ class DogfoodExternalFixtures
         'store_channel_chat_id' => 'DOGFOOD_STORE_CHANNEL_CHAT_ID',
         'store_channel_username' => 'DOGFOOD_STORE_CHANNEL_USERNAME',
         'store_channel_link' => 'DOGFOOD_STORE_CHANNEL_LINK',
-        'store_channel_member_user_id' => 'DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID',
-        'store_channel_non_member_user_id' => 'DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID',
         'telegram_callback_query_id' => 'DOGFOOD_TELEGRAM_CALLBACK_QUERY_ID',
     ];
 
@@ -39,8 +35,6 @@ class DogfoodExternalFixtures
             'store_channel_chat_id' => config('services.dogfood_fixtures.store_channel_chat_id'),
             'store_channel_username' => config('services.dogfood_fixtures.store_channel_username'),
             'store_channel_link' => config('services.dogfood_fixtures.store_channel_link'),
-            'store_channel_member_user_id' => config('services.dogfood_fixtures.store_channel_member_user_id'),
-            'store_channel_non_member_user_id' => config('services.dogfood_fixtures.store_channel_non_member_user_id'),
             'telegram_callback_query_id' => config('services.dogfood_fixtures.telegram_callback_query_id'),
         ]);
     }
@@ -49,7 +43,6 @@ class DogfoodExternalFixtures
     {
         return match ($scenario) {
             self::MANUAL_PAYMENT_PROOF => $this->missing(['telegram_photo_file_id']),
-            self::STORE_CHANNEL_MEMBER_GATE => $this->missing(['store_channel_chat_id', 'store_channel_username', 'store_channel_link', 'store_channel_member_user_id', 'store_channel_non_member_user_id']),
             self::STORE_CHANNEL_SEND, self::SALES_PROOF_POST => $this->missing(['store_channel_chat_id', 'store_channel_username', 'store_channel_link']),
             self::CALLBACK_ANSWER => $this->missing(['telegram_callback_query_id']),
             self::ADMIN_AUTHENTICATED_SESSION => $this->missing(['admin_email', 'admin_password']),
@@ -101,16 +94,6 @@ class DogfoodExternalFixtures
         return $value === '' ? null : $value;
     }
 
-    public function storeChannelMemberUserId(): int
-    {
-        return (int) $this->string('store_channel_member_user_id');
-    }
-
-    public function storeChannelNonMemberUserId(): int
-    {
-        return (int) $this->string('store_channel_non_member_user_id');
-    }
-
     public function telegramCallbackQueryId(): string
     {
         return $this->string('telegram_callback_query_id');
@@ -125,8 +108,6 @@ class DogfoodExternalFixtures
             'store_channel_chat_id' => $this->redactedValue('store_channel_chat_id'),
             'store_channel_username_configured' => $this->string('store_channel_username') !== '',
             'store_channel_link_configured' => $this->string('store_channel_link') !== '',
-            'store_channel_member_user_id' => $this->redactedValue('store_channel_member_user_id'),
-            'store_channel_non_member_user_id' => $this->redactedValue('store_channel_non_member_user_id'),
             'telegram_callback_query_id' => $this->redactedValue('telegram_callback_query_id'),
         ];
     }

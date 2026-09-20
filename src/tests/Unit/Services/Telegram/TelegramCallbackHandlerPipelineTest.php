@@ -10,7 +10,6 @@ use App\Services\Telegram\Callbacks\TelegramCartCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCatalogCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCheckoutCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCheckoutMaintenanceCallbackHandler;
-use App\Services\Telegram\Callbacks\TelegramCommunityGateVerifyCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramLocaleCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramOrderCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramPaymentProofCallbackHandler;
@@ -65,10 +64,10 @@ class TelegramCallbackHandlerPipelineTest extends TestCase
         $calls = [];
         $pipeline = new TelegramCallbackHandlerPipeline([
             new RecordingTelegramCallbackHandler('before', true, true, $calls, TelegramCallbackStage::BeforePrivacy),
-            new RecordingTelegramCallbackHandler('after', true, true, $calls, TelegramCallbackStage::AfterCommunityGate),
+            new RecordingTelegramCallbackHandler('after', true, true, $calls, TelegramCallbackStage::Customer),
         ]);
 
-        $handled = $pipeline->dispatch($this->context('checkout'), TelegramCallbackStage::AfterCommunityGate);
+        $handled = $pipeline->dispatch($this->context('checkout'), TelegramCallbackStage::Customer);
 
         $this->assertTrue($handled);
         $this->assertSame([
@@ -101,16 +100,15 @@ class TelegramCallbackHandlerPipelineTest extends TestCase
     {
         return [
             'locale' => [TelegramLocaleCallbackHandler::class, 'locale:en', TelegramCallbackStage::BeforePrivacy, false],
-            'community gate verify' => [TelegramCommunityGateVerifyCallbackHandler::class, 'community_gate:verify', TelegramCallbackStage::BeforePrivacy, false],
             'admin payment' => [TelegramAdminPaymentCallbackHandler::class, 'admin:approve-payment:11111111-1111-1111-1111-111111111111', TelegramCallbackStage::BeforePrivacy, false],
-            'broadcast' => [TelegramBroadcastCallbackHandler::class, 'broadcast:send', TelegramCallbackStage::BeforeCommunityGate, false],
-            'admin stats' => [TelegramAdminStatsCallbackHandler::class, 'statistik_harian', TelegramCallbackStage::BeforeCommunityGate, false],
-            'catalog' => [TelegramCatalogCallbackHandler::class, 'product:1', TelegramCallbackStage::AfterCommunityGate, true],
-            'order' => [TelegramOrderCallbackHandler::class, 'order:INV-123', TelegramCallbackStage::AfterCommunityGate, false],
-            'cart' => [TelegramCartCallbackHandler::class, 'detail:qty:+:1:token', TelegramCallbackStage::AfterCommunityGate, false],
-            'checkout' => [TelegramCheckoutCallbackHandler::class, 'checkout', TelegramCallbackStage::AfterCommunityGate, false],
-            'checkout maintenance status' => [TelegramCheckoutMaintenanceCallbackHandler::class, 'checkout-maintenance:status', TelegramCallbackStage::AfterCommunityGate, false],
-            'payment proof' => [TelegramPaymentProofCallbackHandler::class, 'payment-proof:INV-123', TelegramCallbackStage::AfterCommunityGate, false],
+            'broadcast' => [TelegramBroadcastCallbackHandler::class, 'broadcast:send', TelegramCallbackStage::Privileged, false],
+            'admin stats' => [TelegramAdminStatsCallbackHandler::class, 'statistik_harian', TelegramCallbackStage::Privileged, false],
+            'catalog' => [TelegramCatalogCallbackHandler::class, 'product:1', TelegramCallbackStage::Customer, true],
+            'order' => [TelegramOrderCallbackHandler::class, 'order:INV-123', TelegramCallbackStage::Customer, false],
+            'cart' => [TelegramCartCallbackHandler::class, 'detail:qty:+:1:token', TelegramCallbackStage::Customer, false],
+            'checkout' => [TelegramCheckoutCallbackHandler::class, 'checkout', TelegramCallbackStage::Customer, false],
+            'checkout maintenance status' => [TelegramCheckoutMaintenanceCallbackHandler::class, 'checkout-maintenance:status', TelegramCallbackStage::Customer, false],
+            'payment proof' => [TelegramPaymentProofCallbackHandler::class, 'payment-proof:INV-123', TelegramCallbackStage::Customer, false],
         ];
     }
 
@@ -130,7 +128,7 @@ class RecordingTelegramCallbackHandler implements TelegramCallbackHandler
         private bool $supports,
         private bool $handles,
         private array &$calls,
-        private TelegramCallbackStage $stage = TelegramCallbackStage::AfterCommunityGate,
+        private TelegramCallbackStage $stage = TelegramCallbackStage::Customer,
         private bool $allowsNonPrivate = false,
     ) {}
 

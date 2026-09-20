@@ -28,12 +28,11 @@ class AdminStoreChannelController extends Controller
                 ->where('singleton_key', StoreChannelSetting::SINGLETON_KEY)
                 ->lockForUpdate()
                 ->first() ?? new StoreChannelSetting(['singleton_key' => StoreChannelSetting::SINGLETON_KEY]);
-            $old = $setting->exists ? $setting->only(['channel_username', 'channel_link', 'community_gate_enabled', 'sales_proof_enabled']) : [];
+            $old = $setting->exists ? $setting->only(['channel_username', 'channel_link', 'sales_proof_enabled']) : [];
             $oldChannelUsername = $setting->channel_username;
             $oldChannelLink = $setting->channel_link;
             $setting->channel_username = $data['channel_username'] ?? null;
             $setting->channel_link = $data['channel_link'] ?? null;
-            $setting->community_gate_enabled = (bool) ($data['community_gate_enabled'] ?? false);
             $setting->sales_proof_enabled = (bool) ($data['sales_proof_enabled'] ?? false);
 
             if ($oldChannelUsername !== $setting->channel_username || $oldChannelLink !== $setting->channel_link) {
@@ -49,7 +48,7 @@ class AdminStoreChannelController extends Controller
             return [$setting, $old];
         }, 5);
 
-        $auditLogger->log('store_channel.updated', $setting, $old, $setting->only(['channel_username', 'channel_link', 'community_gate_enabled', 'sales_proof_enabled']), $user, $request->ip());
+        $auditLogger->log('store_channel.updated', $setting, $old, $setting->only(['channel_username', 'channel_link', 'sales_proof_enabled']), $user, $request->ip());
 
         return $redirector->storeChannel()->with('status', 'Pengaturan Telegram Channel disimpan. Jalankan Test Channel untuk validasi akses bot.');
     }

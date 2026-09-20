@@ -8,6 +8,7 @@ use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
+use App\Models\StoreChannelSetting;
 use App\Models\TelegramNavigationRoot;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\StoreBalance\StoreBalanceActivityDetail;
@@ -96,11 +97,13 @@ class TelegramMenuIntents
 
     public function homeSurface(Customer $customer, string $chatId): TelegramNavigationSurface
     {
+        $channelUrl = $this->storeChannelUrl();
+
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::Home,
             $this->locale->code($customer),
-            $this->privateCaption($customer),
-            $this->homeKeyboard($customer, $chatId),
+            $this->privateCaption($customer, $channelUrl !== null),
+            $this->homeKeyboard($customer, $chatId, $channelUrl),
         );
     }
 
@@ -648,7 +651,7 @@ class TelegramMenuIntents
     /**
      * @return array<string, mixed>
      */
-    private function homeKeyboard(Customer $customer, string $chatId): array
+    private function homeKeyboard(Customer $customer, string $chatId, ?string $channelUrl): array
     {
         $keyboard = ['inline_keyboard' => [
             [
@@ -664,6 +667,12 @@ class TelegramMenuIntents
             ],
         ]];
 
+        if ($channelUrl !== null) {
+            $keyboard['inline_keyboard'][] = [[
+                'text' => $this->locale->translate($customer, 'menu.channel'),
+                'url' => $channelUrl,
+            ]];
+        }
         if ($this->adminAccess->isAdmin($customer, $chatId)) {
             $adminButton = $this->adminDashboardInlineButton('🛠️ Admin Dashboard');
             if ($adminButton !== null) {
@@ -690,7 +699,7 @@ class TelegramMenuIntents
         ]];
     }
 
-    private function privateCaption(Customer $customer): string
+    private function privateCaption(Customer $customer, bool $showChannelInvitation): string
     {
         $replacements = $this->welcomeReplacements($customer);
         $profile = $this->locale->translate($customer, 'welcome.profile', $replacements);
@@ -701,9 +710,17 @@ class TelegramMenuIntents
                 ...$replacements,
                 'profile' => $profile,
                 'activity' => $activity,
+                'channel_invitation' => $showChannelInvitation
+                    ? "\n\n".$this->locale->translate($customer, 'welcome.channel_invitation')
+                    : '',
             ]).$this->maintenanceNotice($customer),
             [$profile, $activity],
         );
+    }
+
+    private function storeChannelUrl(): ?string
+    {
+        return StoreChannelSetting::current()->publicUrl();
     }
 
     private function groupCaption(Customer $customer): string

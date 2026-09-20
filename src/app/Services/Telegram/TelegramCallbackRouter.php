@@ -9,8 +9,6 @@ class TelegramCallbackRouter
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramCallbackHandlerPipeline $handlers,
-        private TelegramIntentSession $session,
-        private TelegramCommunityGate $communityGate,
         private TelegramChatPrivacyGuard $chatPrivacy,
         private TelegramLocale $locale,
     ) {}
@@ -29,18 +27,11 @@ class TelegramCallbackRouter
             return;
         }
 
-        if ($this->handlers->dispatch($context, TelegramCallbackStage::BeforeCommunityGate)) {
+        if ($this->handlers->dispatch($context, TelegramCallbackStage::Privileged)) {
             return;
         }
 
-        if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
-            $this->session->forgetWithLock($customer);
-            $this->bot->answerCallbackQuery($id, $this->locale->translate($customer, 'callback.community_gate_required'));
-
-            return;
-        }
-
-        if ($this->handlers->dispatch($context, TelegramCallbackStage::AfterCommunityGate)) {
+        if ($this->handlers->dispatch($context, TelegramCallbackStage::Customer)) {
             return;
         }
 

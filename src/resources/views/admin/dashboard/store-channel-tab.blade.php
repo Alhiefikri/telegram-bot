@@ -66,9 +66,6 @@
                         <x-admin-dashboard.field-label for="store-channel-link">Link channel publik</x-admin-dashboard.field-label>
                         <x-admin-dashboard.input id="store-channel-link" name="channel_link" value="{{ old('channel_link', $storeChannel['setting']->channel_link) }}" placeholder="https://t.me/lhie_store" />
                         <x-admin-dashboard.telegram-status :details="$storeChannel['details']" />
-                        <x-admin-dashboard.checkbox name="community_gate_enabled" :checked="old('community_gate_enabled', $storeChannel['setting']->community_gate_enabled)">
-                            Community Gate
-                        </x-admin-dashboard.checkbox>
                         <x-admin-dashboard.checkbox name="sales_proof_enabled" :checked="old('sales_proof_enabled', $storeChannel['setting']->sales_proof_enabled)">
                             Sales Proof Post
                         </x-admin-dashboard.checkbox>

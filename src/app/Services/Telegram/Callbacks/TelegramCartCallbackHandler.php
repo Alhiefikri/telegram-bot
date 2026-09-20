@@ -28,7 +28,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
 
     public function stage(): TelegramCallbackStage
     {
-        return TelegramCallbackStage::AfterCommunityGate;
+        return TelegramCallbackStage::Customer;
     }
 
     public function allowsNonPrivateChat(TelegramCallbackContext $context): bool

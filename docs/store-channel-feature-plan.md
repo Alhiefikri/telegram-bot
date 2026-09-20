@@ -2,6 +2,8 @@
 
 This plan captures the domain decisions and implementation slices for adding a Store Channel to LhieStore.
 
+> **Status:** Partially superseded on 2026-09-20. Community Gate, membership checks, join prompts, and the admin gate toggle were retired. Store Bot access is unconditional; `/start` now promotes the Store Channel through an optional CTA. Sales Proof Post and channel publishing decisions below remain active.
+
 ## Locked decisions
 
 - There is one **Store Bot**: `lhiestore_bot`.

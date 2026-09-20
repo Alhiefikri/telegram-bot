@@ -12,8 +12,6 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
-use App\Models\StoreChannelSetting;
-use App\Models\TelegramCommunityGatePrompt;
 use App\Services\Telegram\TelegramFamilyCallbackToken;
 use App\Services\Telegram\TelegramIntentSession;
 use Illuminate\Http\Client\Request;
@@ -556,7 +554,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'expired'));
     }
 
-    public function test_first_time_product_and_family_start_targets_survive_language_selection(): void
+    public function test_first_time_product_and_family_start_targets_open_immediately_in_indonesian(): void
     {
         $this->fakeTelegramHttp();
         $product = Product::factory()->create(['name' => 'Deep Linked Product', 'stock' => 2, 'reserved_stock' => 0]);
@@ -570,63 +568,14 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         ]);
 
         $this->postTelegramWebhook($this->messageUpdate(41050, '/start product_'.$product->id, [], 41006))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(41051, 'choose-id', 'locale:id', [], 41006, 'private', 123456))->assertOk();
         $deepLink = $this->lastMessageContaining('Deep Linked Product');
-        $this->assertSame(123456, (int) ($deepLink['message_id'] ?? 0), 'Deep link navigation must stay on the canonical message.');
         $this->assertStringContainsString('Detail produk', (string) $deepLink['text']);
+        $this->assertDatabaseHas('customers', ['telegram_id' => 41006, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->messageUpdate(41052, '/start family_'.$family->id, [], 41007))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(41053, 'choose-en', 'locale:en', [], 41007, 'private', 123456))->assertOk();
-        $familyOptions = $this->lastMessageContaining('Choose an option for Deep Linked Family');
+        $familyOptions = $this->lastMessageContaining('Pilih opsi Deep Linked Family');
         $this->assertStringContainsString('Option A', (string) $familyOptions['text']);
-        $this->assertSame(123456, (int) ($familyOptions['message_id'] ?? 0), 'Deep link navigation must stay on the canonical message.');
-    }
-
-    public function test_family_start_target_survives_community_gate_verification(): void
-    {
-        StoreChannelSetting::create([
-            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
-            'telegram_chat_id' => '-100123',
-            'channel_username' => '@store_channel',
-            'community_gate_enabled' => true,
-            'last_test_success' => true,
-        ]);
-        $family = ProductFamily::factory()->create(['name' => 'Gated Family', 'slug' => 'gated-family']);
-        Product::factory()->create([
-            'name' => 'Gated Option',
-            'product_family_id' => $family->id,
-            'family_option_label' => 'Gated Package',
-            'stock' => 1,
-            'reserved_stock' => 0,
-        ]);
-        $statuses = ['left', 'member'];
-        Http::preventStrayRequests();
-        Http::fake(['https://api.telegram.org/*' => function (Request $request) use (&$statuses) {
-            if (str_ends_with($request->url(), '/getChatMember')) {
-                return Http::response(['ok' => true, 'result' => ['status' => array_shift($statuses) ?? 'member']]);
-            }
-            if (str_ends_with($request->url(), '/sendPhoto')) {
-                return Http::response(['ok' => true, 'result' => ['message_id' => 701, 'photo' => [['file_id' => 'gated-photo']]]]);
-            }
-            if (str_ends_with($request->url(), '/sendMessage')) {
-                return Http::response(['ok' => true, 'result' => ['message_id' => random_int(702, 900)]]);
-            }
-            if (str_ends_with($request->url(), '/deleteMessage')) {
-                return Http::response(['ok' => true]);
-            }
-
-            return Http::response(['ok' => true]);
-        }]);
-        $this->postTelegramWebhook($this->messageUpdate(41060, '/start family_'.$family->id, [], 41008))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(41061, 'gated-locale', 'locale:id', [], 41008, 'private', 701))->assertOk();
-        $this->assertSame(1, TelegramCommunityGatePrompt::count());
-        $this->postTelegramWebhook($this->callbackUpdate(41062, 'gated-verify', 'community_gate:verify', [], 41008))->assertOk();
-
-        $options = $this->lastMessageContaining('Gated Package');
-        $this->assertStringContainsString('Gated Family', (string) $options['text']);
-        $this->assertStringNotContainsString('Welcome to LHIE STORE', (string) $options['text']);
-        $this->assertSame(0, Cart::count());
-        $this->assertSame(0, Order::count());
+        $this->assertDatabaseHas('customers', ['telegram_id' => 41007, 'locale' => 'id']);
     }
 
     public function test_search_pagination_token_is_rejected_after_leaving_search_context(): void

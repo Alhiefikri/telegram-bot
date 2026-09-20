@@ -23,7 +23,7 @@ final class TelegramCheckoutMaintenanceCallbackHandler implements TelegramCallba
 
     public function stage(): TelegramCallbackStage
     {
-        return TelegramCallbackStage::AfterCommunityGate;
+        return TelegramCallbackStage::Customer;
     }
 
     public function allowsNonPrivateChat(TelegramCallbackContext $context): bool

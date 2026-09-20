@@ -154,7 +154,7 @@ OrderItem/InventoryMovement/Product` untuk refund.
 
 ### Store Channel dan Sales Proof Post
 
-`StoreChannelSetting` menyimpan konfigurasi Store Channel, Community Gate, dan Sales Proof Post. `SalesProofPost` dipublish setelah payment paid dan inventory sale tercatat; publikasi dilakukan job sehingga OrderLifecycle tidak mengirim pesan Telegram langsung.
+`StoreChannelSetting` menyimpan target Store Channel dan konfigurasi Sales Proof Post. Home `/start` menampilkan CTA channel opsional ketika username/link tersedia; membership channel tidak menjadi syarat akses Store Bot. `SalesProofPost` dipublish setelah payment paid dan inventory sale tercatat; publikasi dilakukan job sehingga OrderLifecycle tidak mengirim pesan Telegram langsung.
 The shared public-safe invoice image is owned by
 [`PaidInvoiceRenderer`](../../src/app/Services/PaidInvoice/PaidInvoiceRenderer.php)
 and accepts only the immutable
@@ -226,13 +226,12 @@ POST /api/webhook/telegram
 `TelegramWebhookIngress` memeriksa secret header, `update_id`, dan bentuk update yang didukung. Payload diperkecil sebelum disimpan. Duplicate update tidak membuat pekerjaan bisnis kedua; update yang belum diproses diklaim oleh processor job.
 `TelegramUpdateProcessor` serializes message and callback routing per Telegram chat with a distributed cache lock. The critical section includes selection/query-session transitions and inline message edits, so parallel workers cannot apply out-of-order UI state for one chat; transport ambiguity is never converted into a blind send fallback.
 
-`TelegramMessageRouter` menangani command/text/menu. `TelegramCallbackRouter` menjalankan urutan guard:
+`TelegramMessageRouter` menangani command/text/menu. Customer Telegram baru langsung memakai locale Indonesia dan membuka home `/start`; picker bahasa tetap tersedia dari tombol Bahasa. `TelegramCallbackRouter` menjalankan urutan:
 
 1. callback handler stage `BeforePrivacy`;
 2. `TelegramChatPrivacyGuard` — sebagian besar aksi customer harus private chat;
-3. `BeforeCommunityGate`;
-4. `TelegramCommunityGate` — bila aktif dan Telegram tidak bisa membuktikan membership, akses gagal tertutup;
-5. `AfterCommunityGate` handlers.
+3. stage `Privileged` untuk aksi admin/operator;
+4. stage `Customer` untuk navigasi dan aksi pembeli.
 
 Handler callback didaftarkan terpusat di [`AppServiceProvider`](../../src/app/Providers/AppServiceProvider.php). Tambah handler baru ke pipeline dan tentukan stage-nya; jangan membuat router kedua.
 
@@ -426,7 +425,7 @@ Untuk stok, `AdminProductAccountStockController` menerima JSON Account Input (1�
 
 `CheckoutPricingSnapshot` (`src/app/Services/Checkout/CheckoutPricingSnapshot.php`) is created after Cart Item/Product and provider-setting locks. It resolves each locked Product's ordered tier schedule through `ProductQuantityPricing`, quotes each Cart Item once, and retains immutable per-Product IDR/USDT subtotals plus aggregate totals. Manual QRIS, KlikQRIS, Sakurupiah, Store Balance, Binance Pay, and BSC preparation consume those totals; Order and Order Item persistence consume the same snapshot. Product tier replacement must retain the existing Product lock so checkout observes a complete old or new schedule.
 
-Adapter presentation tidak memiliki aturan cutoff sendiri. `StorefrontShopCheckout` hanya melakukan preflight non-authoritative sebelum membuat Customer/cart; guard service tetap wajib. `StorefrontResponseCache` memasukkan maintenance `version` ke cache identity sehingga request pertama setelah perubahan nyata tidak memakai HTML lama, sedangkan no-op mempertahankan identity. `StorefrontCatalogPageBuilder`/presenter dan view partial menampilkan notice serta mengganti CTA; `TelegramMenuIntents`, `TelegramCatalogIntents`, `TelegramCartIntents`, dan callback handlers mempertahankan browsing/stock/cart, sementara `TelegramCheckoutMaintenanceCallbackHandler` menyediakan Cek Status. Status callback terdaftar sekali setelah privacy/community gate dan tidak mengirim broadcast.
+Adapter presentation tidak memiliki aturan cutoff sendiri. `StorefrontShopCheckout` hanya melakukan preflight non-authoritative sebelum membuat Customer/cart; guard service tetap wajib. `StorefrontResponseCache` memasukkan maintenance `version` ke cache identity sehingga request pertama setelah perubahan nyata tidak memakai HTML lama, sedangkan no-op mempertahankan identity. `StorefrontCatalogPageBuilder`/presenter dan view partial menampilkan notice serta mengganti CTA; `TelegramMenuIntents`, `TelegramCatalogIntents`, `TelegramCartIntents`, dan callback handlers mempertahankan browsing/stock/cart, sementara `TelegramCheckoutMaintenanceCallbackHandler` menyediakan Cek Status. Status callback terdaftar sekali pada stage customer setelah privacy guard dan tidak mengirim broadcast.
 
 Entry point test terfokus adalah `tests/Feature/StorefrontShopCartTest.php` (guest Cart session isolation, expiry, stale snapshot, multi-item checkout, duplicate submit, maintenance rejection, and mixed fulfillment), `tests/Feature/StorefrontShopCheckoutTest.php` (direct checkout and payment rails), `tests/Feature/StorefrontProductCheckoutTest.php` (canonical Product review, page cutover, unavailable state, and recovery), `tests/Feature/CheckoutMaintenanceTest.php` (mutation, zero-side-effect rejection, existing native QRIS/status refresh, lifecycle continuation), `tests/Feature/PakasirWebhookTest.php` (authoritative callback, reconciliation, receipt/Sales Proof Post), `tests/Feature/Telegram/CheckoutMaintenanceTest.php`, and `tests/Feature/CheckoutMaintenancePostgresConcurrencyTest.php`. Browser customer evidence is in `tests/Browser/admin-dashboard-responsive.spec.js`; `npm run test:browser:customer` selects the `customer checkout:` cases covering home/shop/Product detail/Product Family, Cart, signed manual invoice, JavaScript-disabled form submission, failure recovery, browser back, keyboard/disclosures, reduced motion, zoom/reflow, and the 320×568, 390×844, 768×900, 1280×900, 1440×900, and 1920×1080 viewport matrix. Lane PostgreSQL dijalankan oleh `composer test:concurrency-gate`; race test mencakup kedua checkout locks/reservation hanya bila perubahan menyentuh boundary tersebut.
 
@@ -723,7 +722,7 @@ that directory.
 
 Gunakan test boundary yang sesuai:
 
-- `tests/Feature/Telegram/` — command, callback, checkout, payment instructions, privacy/community gate, webhook.
+- `tests/Feature/Telegram/` — command, callback, checkout, payment instructions, privacy, onboarding, dan webhook.
 - `tests/Feature/Storefront/` dan `Storefront*Test.php` — catalog, guest checkout, signed invoice, recovery key, payment refresh.
 - `tests/Feature/*Payment*Test.php`, `KlikQris*Test.php`, `Pakasir*Test.php`, `Binance*Test.php` — provider contract/lifecycle/reconciliation.
 - `tests/Feature/OrderCartDomainTest.php` — cart/order/inventory transition.

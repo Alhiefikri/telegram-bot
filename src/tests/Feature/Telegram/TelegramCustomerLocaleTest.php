@@ -16,7 +16,7 @@ use Tests\Support\TelegramBotTestSupport;
 
 class TelegramCustomerLocaleTest extends TelegramBotTestSupport
 {
-    public function test_first_time_picker_edits_the_same_banner_into_localized_home(): void
+    public function test_first_start_opens_indonesian_home_and_language_remains_changeable(): void
     {
         config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
         $this->fakeTelegramHttp();
@@ -24,52 +24,57 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_username' => 'store_support', 'is_active' => true]);
         $this->postTelegramWebhook($this->messageUpdate(41101, '/start', ['id' => 41101, 'first_name' => 'Maya', 'username' => 'maya'], 41101))->assertOk();
 
-        $pickerRequests = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+        $homeRequests = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
             && (string) ($request['chat_id'] ?? '') === '41101');
-        $this->assertCount(1, $pickerRequests);
-        $picker = $pickerRequests->first()[0]->data();
-        $this->assertSame('🌐 Choose your language', $picker['caption']);
+        $this->assertCount(1, $homeRequests);
+        $home = $homeRequests->first()[0]->data();
+        $this->assertStringContainsString('selamat datang di LHIE STORE', $home['caption']);
+        $this->assertStringContainsString('Maya', $home['caption']);
+        $this->assertStringContainsString('🌐 Bahasa', json_encode($home['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+        $this->assertStringNotContainsString('Choose your language', $home['caption']);
+        $this->assertDatabaseHas('customers', ['telegram_id' => 41101, 'locale' => 'id']);
+
+        $root = TelegramNavigationRoot::query()->sole();
+        $this->assertSame('home', $root->screen->value);
+        $this->assertSame('id', $root->locale);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            41102,
+            'open-language',
+            'menu:language',
+            ['id' => 41101, 'first_name' => 'Maya', 'username' => 'maya'],
+            41101,
+            'private',
+            $root->message_id,
+        ))->assertOk();
+
+        $picker = Http::recorded(fn ($request) => str_ends_with($request->url(), '/editMessageCaption')
+            && (string) ($request['chat_id'] ?? '') === '41101')->last()[0]->data();
+        $this->assertSame('🌐 Pilih bahasa', $picker['caption']);
         $this->assertSame([
             ['text' => '🇮🇩 Bahasa Indonesia', 'callback_data' => 'locale:id'],
             ['text' => '🇬🇧 English', 'callback_data' => 'locale:en'],
             ['text' => '🇲🇾 Bahasa Melayu', 'callback_data' => 'locale:ms'],
         ], $picker['reply_markup']['inline_keyboard'][0]);
-        $this->assertArrayNotHasKey('keyboard', $picker['reply_markup']);
-
-        $rootBeforeLocale = TelegramNavigationRoot::query()->sole();
-        $this->assertSame('picker', $rootBeforeLocale->screen->value);
-        $this->assertNull($rootBeforeLocale->locale);
 
         $this->postTelegramWebhook($this->callbackUpdate(
-            41102,
+            41103,
             'locale-ms',
             'locale:ms',
             ['id' => 41101, 'first_name' => 'Maya', 'username' => 'maya'],
             41101,
             'private',
-            $rootBeforeLocale->message_id,
+            $root->message_id,
         ))->assertOk();
 
         $this->assertDatabaseHas('customers', ['telegram_id' => 41101, 'locale' => 'ms']);
-        $edits = Http::recorded(fn ($request) => str_ends_with($request->url(), '/editMessageCaption')
-            && (string) ($request['chat_id'] ?? '') === '41101');
-        $this->assertCount(1, $edits);
-        $home = $edits->first()[0]->data();
-        $this->assertStringContainsString('selamat datang ke LHIE STORE', $home['caption']);
-        $this->assertStringContainsString('Lihat Produk', json_encode($home['reply_markup'], JSON_THROW_ON_ERROR));
-        $this->assertStringContainsString('Sokongan', json_encode($home['reply_markup'], JSON_THROW_ON_ERROR));
-        $this->assertStringContainsString('Maya', $home['caption']);
-        $this->assertStringNotContainsString('Welcome to LHIE STORE', $home['caption']);
-        $this->assertStringNotContainsString('selamat datang di LHIE STORE', $home['caption']);
-        $this->assertArrayNotHasKey('keyboard', $home['reply_markup']);
-        $this->assertSame(0, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && (string) ($request['chat_id'] ?? '') === '41101')->count());
-
-        $rootAfterLocale = $rootBeforeLocale->fresh();
-        $this->assertSame($rootBeforeLocale->message_id, $rootAfterLocale->message_id);
-        $this->assertSame('home', $rootAfterLocale->screen->value);
-        $this->assertSame('ms', $rootAfterLocale->locale);
-        $this->assertSame('photo', $rootAfterLocale->media_kind->value);
+        $localizedHome = Http::recorded(fn ($request) => str_ends_with($request->url(), '/editMessageCaption')
+            && (string) ($request['chat_id'] ?? '') === '41101')->last()[0]->data();
+        $this->assertStringContainsString('selamat datang ke LHIE STORE', $localizedHome['caption']);
+        $this->assertStringContainsString('Sokongan', json_encode($localizedHome['reply_markup'], JSON_THROW_ON_ERROR));
+        $this->assertSame($root->message_id, $root->fresh()->message_id);
+        $this->assertSame('home', $root->fresh()->screen->value);
+        $this->assertSame('ms', $root->fresh()->locale);
     }
 
     public function test_malay_support_and_account_copy_preserve_customer_authored_values(): void
@@ -142,7 +147,7 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertSame('Awaiting payment', $locale->paymentStatus($customer, PaymentStatus::Pending));
     }
 
-    public function test_null_customer_locale_order_status_uses_english_catalog_fallback(): void
+    public function test_null_customer_locale_is_normalized_to_indonesian_when_routed(): void
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 41124, 'locale' => null]);
@@ -155,10 +160,10 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(41124, '/status', ['id' => 41124], 41124))->assertOk();
 
         $copy = $this->visibleCopy($this->customerPayload('/sendMessage', 41124));
-        $this->assertStringContainsString('Order status', $copy);
-        $this->assertStringContainsString('Awaiting payment', $copy);
-        $this->assertStringNotContainsString('Status pesanan', $copy);
-        $this->assertStringNotContainsString('Menunggu pembayaran', $copy);
+        $this->assertStringContainsString('Status pesanan', $copy);
+        $this->assertStringContainsString('Menunggu pembayaran', $copy);
+        $this->assertStringNotContainsString('Order status', $copy);
+        $this->assertDatabaseHas('customers', ['telegram_id' => 41124, 'locale' => 'id']);
     }
 
     public function test_menu_command_opens_the_localized_canonical_home(): void

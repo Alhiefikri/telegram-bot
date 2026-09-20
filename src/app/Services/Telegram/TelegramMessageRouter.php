@@ -30,7 +30,6 @@ class TelegramMessageRouter
         private TelegramAdminAccess $adminAccess,
         private TelegramAdminStatsIntents $adminStats,
         private TelegramBroadcastIntents $broadcasts,
-        private TelegramCommunityGate $communityGate,
         private TelegramChatPrivacyGuard $chatPrivacy,
         private TelegramLocale $locale,
         private TelegramNavigationPresenter $navigation,
@@ -58,19 +57,8 @@ class TelegramMessageRouter
                 $this->startIntents->put($customer, $startIntent);
             }
             if (! $isPrivateChat) {
-                if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
-                    return;
-                }
                 $this->menu->sendWelcome($customer, $chatId, false);
 
-                return;
-            }
-            if ($customer->locale === null) {
-                $this->menu->sendLanguagePicker($chatId, $customer);
-
-                return;
-            }
-            if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
                 return;
             }
             $pendingIntent = $this->startIntents->pull($customer);
@@ -85,12 +73,6 @@ class TelegramMessageRouter
         if (in_array($text, ['/language', '/bahasa', '🌐 Language', '🌐 Bahasa'], true)) {
             $this->catalogQueries->forget($customer);
             $this->menu->sendLanguagePicker($chatId, $customer, $isPrivateChat);
-
-            return;
-        }
-
-        if (! $this->communityGate->ensureAllowedOrPrompt($customer, $chatId)) {
-            $this->session->forgetWithLock($customer);
 
             return;
         }
@@ -160,12 +142,6 @@ class TelegramMessageRouter
 
             if (! $isPrivateChat) {
                 $this->menu->sendWelcome($customer, $chatId, false);
-
-                return;
-            }
-
-            if ($customer->locale === null) {
-                $this->menu->sendLanguagePicker($chatId, $customer);
 
                 return;
             }

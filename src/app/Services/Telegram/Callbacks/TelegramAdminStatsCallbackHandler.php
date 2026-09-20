@@ -21,7 +21,7 @@ class TelegramAdminStatsCallbackHandler implements TelegramCallbackHandler
 
     public function stage(): TelegramCallbackStage
     {
-        return TelegramCallbackStage::BeforeCommunityGate;
+        return TelegramCallbackStage::Privileged;
     }
 
     public function allowsNonPrivateChat(TelegramCallbackContext $context): bool

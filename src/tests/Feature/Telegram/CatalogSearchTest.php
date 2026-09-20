@@ -12,6 +12,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
+use App\Models\StoreChannelSetting;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramProductNotificationService;
@@ -23,31 +24,42 @@ use Tests\Support\TelegramBotTestSupport;
 
 class CatalogSearchTest extends TelegramBotTestSupport
 {
-    public function test_start_creates_customer_and_shows_language_picker_before_welcome(): void
+    public function test_first_start_opens_indonesian_home_with_optional_channel_action(): void
     {
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'channel_link' => 'https://t.me/lhie_store',
+        ]);
         $this->fakeTelegramHttp();
 
         $this->postTelegramWebhook($this->messageUpdate(11, '/start', ['first_name' => 'Ali', 'username' => 'ali']))->assertOk();
 
-        $this->assertDatabaseHas('customers', ['telegram_id' => 12345, 'first_name' => 'Ali', 'username' => 'ali']);
-        Http::assertSent(function ($r): bool {
-            $replyMarkup = $this->telegramRequestField($r, 'reply_markup');
+        $this->assertDatabaseHas('customers', [
+            'telegram_id' => 12345,
+            'first_name' => 'Ali',
+            'username' => 'ali',
+            'locale' => 'id',
+        ]);
+        Http::assertSent(function ($request): bool {
+            $replyMarkup = $this->telegramRequestField($request, 'reply_markup');
             if (is_string($replyMarkup)) {
                 $replyMarkup = json_decode($replyMarkup, true);
             }
+            $rows = is_array($replyMarkup) ? ($replyMarkup['inline_keyboard'] ?? []) : [];
+            $channelButton = $rows[array_key_last($rows)][0] ?? [];
 
-            return str_ends_with($r->url(), '/sendPhoto')
-                && str_contains((string) $this->telegramRequestField($r, 'caption'), 'Choose your language')
-                && is_array($replyMarkup)
-                && count($replyMarkup['inline_keyboard'] ?? []) === 1
-                && count($replyMarkup['inline_keyboard'][0] ?? []) === 3
-                && ($replyMarkup['inline_keyboard'][0][0]['text'] ?? null) === '🇮🇩 Bahasa Indonesia'
-                && ($replyMarkup['inline_keyboard'][0][1]['text'] ?? null) === '🇬🇧 English'
-                && ($replyMarkup['inline_keyboard'][0][2]['text'] ?? null) === '🇲🇾 Bahasa Melayu'
-                && ($replyMarkup['inline_keyboard'][0][0]['callback_data'] ?? null) === 'locale:id'
-                && ($replyMarkup['inline_keyboard'][0][1]['callback_data'] ?? null) === 'locale:en'
-                && ($replyMarkup['inline_keyboard'][0][2]['callback_data'] ?? null) === 'locale:ms';
+            return str_ends_with($request->url(), '/sendPhoto')
+                && str_contains((string) $this->telegramRequestField($request, 'caption'), 'selamat datang di LHIE STORE')
+                && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Promo, update stok, dan bukti transaksi terbaru')
+                && ($rows[0][0]['callback_data'] ?? null) === 'katalog'
+                && ($channelButton['text'] ?? null) === '📢 Ikuti Channel LhieStore'
+                && ($channelButton['url'] ?? null) === 'https://t.me/lhie_store';
         });
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/getChatMember'));
+        Http::assertNotSent(fn ($request): bool => str_contains(
+            (string) ($this->telegramRequestField($request, 'caption') ?? ''),
+            'Choose your language',
+        ));
     }
 
     public function test_start_with_sales_proof_deep_link_shows_welcome_instead_of_command_fallback(): void
@@ -771,7 +783,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(129, '/cari NETFLIX'))->assertOk();
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Available stock: 5')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Stok tersedia: 5')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
@@ -797,7 +809,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(131, '/cari netflix'))->assertOk();
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium')
-            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Available stock: 0')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Stok tersedia: 0')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
@@ -1054,7 +1066,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Netflix Premium')
-            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Available stock: 5')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Stok tersedia: 5')
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 

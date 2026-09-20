@@ -7,23 +7,17 @@ use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
-use App\Services\Telegram\TelegramCatalogIntents;
-use App\Services\Telegram\TelegramCommunityGate;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationRootService;
-use App\Services\Telegram\TelegramStartIntentSession;
 
 class TelegramLocaleCallbackHandler implements TelegramCallbackHandler
 {
     public function __construct(
         private TelegramBotClient $bot,
-        private TelegramCommunityGate $communityGate,
-        private TelegramCatalogIntents $catalog,
         private TelegramMenuIntents $menu,
         private TelegramIntentSession $session,
-        private TelegramStartIntentSession $startIntents,
         private TelegramLocale $locale,
         private TelegramNavigationRootService $roots,
     ) {}
@@ -64,24 +58,10 @@ class TelegramLocaleCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
-        $this->communityGate->clearPrompt($context->customer);
         $this->session->forgetWithLock($context->customer);
         if ($context->customer->locale !== $locale) {
             $context->customer->update(['locale' => $locale]);
             $context->customer->refresh();
-        }
-
-        if (! $this->communityGate->ensureAllowedOrPrompt($context->customer, $context->chatId)) {
-            $this->bot->answerCallbackQuery($context->callbackQueryId);
-
-            return true;
-        }
-
-        $pendingIntent = $this->startIntents->pull($context->customer);
-        if ($pendingIntent !== null && $this->catalog->openStartIntent($context->customer, $context->chatId, $pendingIntent)) {
-            $this->bot->answerCallbackQuery($context->callbackQueryId);
-
-            return true;
         }
 
         $outcome = $this->menu->renderHome($root, $context->customer, $context->chatId);

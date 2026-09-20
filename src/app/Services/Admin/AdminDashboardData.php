@@ -226,7 +226,7 @@ final class AdminDashboardData
             $setting->last_test_success === false => ['label' => 'Test failed', 'hint' => $lastTestError ?: 'Periksa akses bot ke channel.', 'tone' => 'rose'],
             default => ['label' => 'Needs test', 'hint' => 'Jalankan Test Channel untuk resolve chat ID dan cek izin post.', 'tone' => 'amber'],
         };
-        $channelFeaturesEnabled = (bool) ($setting->community_gate_enabled || $setting->sales_proof_enabled);
+        $channelFeaturesEnabled = (bool) $setting->sales_proof_enabled;
 
         $canManage = (bool) $user->role?->canManagePaymentSettings();
 

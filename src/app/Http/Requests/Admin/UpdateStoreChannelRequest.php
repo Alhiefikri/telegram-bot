@@ -26,7 +26,6 @@ class UpdateStoreChannelRequest extends FormRequest
         return [
             'channel_username' => ['nullable', 'string', 'max:255'],
             'channel_link' => ['nullable', 'string', 'max:255'],
-            'community_gate_enabled' => ['nullable', 'boolean'],
             'sales_proof_enabled' => ['nullable', 'boolean'],
         ];
     }

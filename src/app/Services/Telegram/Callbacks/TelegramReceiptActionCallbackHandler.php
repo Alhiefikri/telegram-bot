@@ -40,7 +40,7 @@ final class TelegramReceiptActionCallbackHandler implements TelegramCallbackHand
 
     public function stage(): TelegramCallbackStage
     {
-        return TelegramCallbackStage::AfterCommunityGate;
+        return TelegramCallbackStage::Customer;
     }
 
     public function allowsNonPrivateChat(TelegramCallbackContext $context): bool

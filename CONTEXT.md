@@ -76,12 +76,8 @@ An order-level Telegram or WhatsApp contact supplied during Web Storefront check
 _Avoid_: Owner contact, login contact
 
 **Store Channel**:
-The Telegram channel customers must join before using the Store Bot, and where sales proof and owner announcements are published.
-_Avoid_: Community, group
-
-**Community Gate**:
-The access rule that blocks store flows unless the customer is currently a member of the Store Channel.
-_Avoid_: One-time verification
+The optional Telegram channel promoted from the Store Bot home, where sales proof, stock updates, promotions, and owner announcements are published. Store Bot access never depends on channel membership.
+_Avoid_: Community, group, access gate
 
 **Paid Order Proof Event**:
 The moment a public sales proof may be created: after payment is confirmed paid and the inventory sale has been recorded.

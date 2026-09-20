@@ -81,7 +81,7 @@ Record pass/fail for each row in the run report.
 | Telegram webhook | Real test buyer sends `/start`; `telegram_updates` receives the update through the public HTTPS webhook and the queue drains. |
 | Buyer Telegram | `/start`, `/menu`, catalog browse, product detail, `/cari keyword`, add to cart, checkout, `/status` or `/pesanan`, `/batal`, empty-cart checkout/cancel behavior, and payment proof photo forwarding with `/payment INVOICE`. |
 | Admin Telegram | Admin dashboard button visibility, checkout notification to admin, `/broadcast ...` only when scoped to disposable recipients, Store Channel test send, Sales Proof Post publish, and Sales Proof Post retry when in release scope. |
-| Store Channel | Community Gate allows the member identity and blocks/prompts the non-member identity. |
+| Store Channel | `/start` menampilkan CTA channel yang dapat dibuka tanpa membership check; Store Channel test send dan Sales Proof Post tetap memakai target yang sudah diuji. |
 | Pakasir legacy settlement | If the compatibility lane is in release scope, run reconcile/webhook/payment-detail only against an existing historical Payment fixture; never create a new Pakasir checkout. |
 | Final operations | `jobs` queue depth is `0`, `failed_jobs` is `0`, and Docker logs show no unexplained Telegram/Pakasir errors from the run window. |
 

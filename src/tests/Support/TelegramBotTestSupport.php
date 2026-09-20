@@ -21,7 +21,6 @@ abstract class TelegramBotTestSupport extends TestCase
             'webhook_secret' => 'secret',
             'api_base_url' => 'https://api.telegram.org',
             'webhook_fast_callback_ack' => false,
-            'community_gate_cache_seconds' => 15,
             'default_payment_method' => 'BRIVA',
         ]);
         config()->set('services.pakasir', [

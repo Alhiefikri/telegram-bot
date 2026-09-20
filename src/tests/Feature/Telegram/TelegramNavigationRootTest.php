@@ -60,8 +60,8 @@ final class TelegramNavigationRootTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(45106, 'group-message', 'locale:en', ['id' => 45102], -10045102, 'group', $root->message_id))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(45107, 'unsupported-locale', 'locale:xx', [], 45102, 'private', $root->message_id))->assertOk();
 
-        $this->assertNull($customer->fresh()->locale);
-        $this->assertSame(TelegramNavigationScreen::Picker, $root->fresh()->screen);
+        $this->assertSame('id', $customer->fresh()->locale);
+        $this->assertSame(TelegramNavigationScreen::Home, $root->fresh()->screen);
         $this->assertSame(0, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageCaption'))->count());
     }
 
@@ -152,10 +152,11 @@ final class TelegramNavigationRootTest extends TelegramBotTestSupport
 
         $stored = $root->fresh();
         $this->assertSame($messageId, $stored->message_id);
-        // An unproven edit never advances the stored screen; the customer's
-        // own locale choice is not part of that projection.
-        $this->assertSame(TelegramNavigationScreen::Picker, $stored->screen);
-        $this->assertNull($stored->locale);
+        // An unproven edit never advances the stored home projection; the
+        // customer's locale choice is persisted independently.
+        $this->assertSame(TelegramNavigationScreen::Home, $stored->screen);
+        $this->assertSame('id', $stored->locale);
+        $this->assertSame('en', $customer->fresh()->locale);
         $this->assertSame(1, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->count());
         $this->assertSame(1, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageCaption'))->count());
     }

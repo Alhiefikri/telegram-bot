@@ -471,14 +471,13 @@ $authenticatedAdminRunner = function () use (&$adminRunner, $app, $fixtures): Ad
     return $adminRunner;
 };
 
-$configureStoreChannelFixture = function (bool $communityGateEnabled = false, bool $salesProofEnabled = false) use ($fixtures): StoreChannelSetting {
+$configureStoreChannelFixture = function (bool $salesProofEnabled = false) use ($fixtures): StoreChannelSetting {
     return StoreChannelSetting::query()->updateOrCreate(
         ['singleton_key' => StoreChannelSetting::SINGLETON_KEY],
         [
             'channel_username' => $fixtures->storeChannelUsername(),
             'channel_link' => $fixtures->storeChannelLink(),
             'telegram_chat_id' => $fixtures->storeChannelChatId(),
-            'community_gate_enabled' => $communityGateEnabled,
             'sales_proof_enabled' => $salesProofEnabled,
             'last_tested_at' => now(),
             'last_test_success' => true,
@@ -644,22 +643,14 @@ $runFixtureScenario(DogfoodExternalFixtures::MANUAL_PAYMENT_PROOF, 'manual payme
 $runScenario('manual payment proof', 'invalid no photo path', 'text /payment', 1, fn () => $processPayload($messagePayload('/payment')));
 
 $runFixtureScenario(DogfoodExternalFixtures::STORE_CHANNEL_SEND, 'Store Channel', 'test send to disposable channel', 'sendMessage to DOGFOOD_STORE_CHANNEL_CHAT_ID', 1, function () use ($app, $fixtures, $configureStoreChannelFixture) {
-    $configureStoreChannelFixture(false, false);
+    $configureStoreChannelFixture(false);
     $app->make(TelegramBotClient::class)->sendMessage(
         $fixtures->storeChannelChatId(),
         'Dogfood Store Channel test '.date(DATE_ATOM),
     );
 });
-$runFixtureScenario(DogfoodExternalFixtures::STORE_CHANNEL_MEMBER_GATE, 'Store Channel community gate', 'known member can browse catalog', '/katalog from DOGFOOD_STORE_CHANNEL_MEMBER_USER_ID', 1, function () use ($fixtures, $configureStoreChannelFixture, $messagePayload, $processPayload) {
-    $configureStoreChannelFixture(true, false);
-    $processPayload($messagePayload('/katalog', $fixtures->storeChannelMemberUserId(), $fixtures->storeChannelMemberUserId()));
-});
-$runFixtureScenario(DogfoodExternalFixtures::STORE_CHANNEL_MEMBER_GATE, 'Store Channel community gate', 'known non-member is prompted', '/katalog from DOGFOOD_STORE_CHANNEL_NON_MEMBER_USER_ID', 1, function () use ($fixtures, $configureStoreChannelFixture, $messagePayload, $processPayload) {
-    $configureStoreChannelFixture(true, false);
-    $processPayload($messagePayload('/katalog', $fixtures->storeChannelNonMemberUserId(), $fixtures->storeChannelNonMemberUserId()));
-});
 $runFixtureScenario(DogfoodExternalFixtures::SALES_PROOF_POST, 'Sales Proof Post', 'publish paid order proof to Store Channel', 'paid manual order fixture', 1, function () use ($app, $adminUserId, $configureStoreChannelFixture, $makeFixtureCart, $product) {
-    $configureStoreChannelFixture(false, true);
+    $configureStoreChannelFixture(true);
     $cart = $makeFixtureCart((int) $adminUserId, $product);
     $order = $app->make(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
     $payment = $order->payments()->latest()->firstOrFail();
@@ -672,7 +663,7 @@ $runFixtureScenario(DogfoodExternalFixtures::SALES_PROOF_POST, 'Sales Proof Post
     ])];
 });
 $runFixtureScenario(DogfoodExternalFixtures::SALES_PROOF_POST, 'Sales Proof Post', 'manual retry failed proof to Store Channel', 'failed sales proof fixture', 1, function () use ($app, $adminUserId, $configureStoreChannelFixture, $makeFixtureCart, $product) {
-    $configureStoreChannelFixture(false, true);
+    $configureStoreChannelFixture(true);
     $cart = $makeFixtureCart((int) $adminUserId, $product);
     $order = $app->make(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
     $payment = $order->payments()->latest()->firstOrFail();
