@@ -58,6 +58,43 @@
                                 </x-storefront.badge>
                             </div>
 
+                            @if ($presentation->hasReachableQuantityPriceTiers())
+                                @php
+                                    $lowestReachableTier = $presentation->lowestReachableQuantityPriceTier();
+                                    $quantityPriceTiers = $presentation->reachableQuantityPriceTiers;
+                                    $tierHasUsdtPrice = collect($quantityPriceTiers)->contains(static fn ($tier): bool => $tier->usdtPriceAmount !== null);
+                                @endphp
+                                <section class="mt-5 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4" aria-labelledby="product-quantity-pricing-title">
+                                    <p class="text-sm font-black leading-6 text-[var(--sf-ink)]">Harga grosir mulai {{ $storefront->idr($lowestReachableTier?->priceAmount ?? $presentation->priceAmount) }} per unit untuk minimal {{ $lowestReachableTier?->minimumQuantity ?? 2 }} unit.</p>
+                                    <h2 id="product-quantity-pricing-title" class="mt-4 text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-accent)]">Jadwal harga berdasarkan jumlah</h2>
+                                    <div class="mt-2 overflow-x-auto">
+                                        <table class="w-full min-w-[20rem] text-left text-sm">
+                                            <thead class="border-b-2 border-[var(--sf-border)] text-xs uppercase tracking-wide text-[var(--sf-muted)]">
+                                                <tr>
+                                                    <th scope="col" class="px-2 py-2">Jumlah minimum</th>
+                                                    <th scope="col" class="px-2 py-2">Harga satuan (IDR)</th>
+                                                    @if ($tierHasUsdtPrice)
+                                                        <th scope="col" class="px-2 py-2">Harga satuan (USDT)</th>
+                                                    @endif
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-[var(--sf-border)]">
+                                                @foreach ($quantityPriceTiers as $tier)
+                                                    <tr>
+                                                        <th scope="row" class="px-2 py-2 font-black text-[var(--sf-ink)]">Mulai {{ $tier->minimumQuantity }} unit</th>
+                                                        <td class="px-2 py-2 font-bold text-[var(--sf-ink)]">{{ $storefront->idr($tier->priceAmount) }}</td>
+                                                        @if ($tierHasUsdtPrice)
+                                                            <td class="px-2 py-2 font-bold text-[var(--sf-ink)]">{{ $tier->usdtPriceAmount === null ? '—' : $storefront->usdt($tier->usdtPriceAmount) }}</td>
+                                                        @endif
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <p class="mt-3 text-xs font-bold leading-5 text-[var(--sf-muted)]">Harga berlaku sesuai jumlah pembelian dan ketersediaan stok saat checkout.</p>
+                                </section>
+                            @endif
+
                             <div id="product-primary-actions" class="mt-6 flex flex-col gap-3 sm:flex-row">
                                 @if ($presentation->isBuyable)
                                     <x-storefront.button

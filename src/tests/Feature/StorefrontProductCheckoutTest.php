@@ -120,6 +120,37 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertNoCheckoutSideEffects();
     }
 
+    public function test_direct_checkout_review_exposes_bounded_tier_estimates_without_changing_server_inputs(): void
+    {
+        $product = Product::factory()->create([
+            'name' => 'Direct Tier Review',
+            'price_amount' => 25_000,
+            'usdt_price_amount' => 500_000,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        $product->quantityPriceTiers()->createMany([
+            ['minimum_quantity' => 2, 'price_amount' => 24_000, 'usdt_price_amount' => 480_000],
+            ['minimum_quantity' => 4, 'price_amount' => 23_000, 'usdt_price_amount' => 460_000],
+        ]);
+
+        $html = $this->get(route('storefront.shop.checkout.product', [
+            'product' => $product,
+            'quantity' => 2,
+        ]))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('Harga satuan', $html);
+        $this->assertStringContainsString('Rp24.000', $html);
+        $this->assertStringContainsString('Harga grosir diterapkan mulai 2 unit.', $html);
+        $this->assertStringContainsString('data-base-price="25000"', $html);
+        $this->assertStringContainsString('data-base-usdt-price="500000"', $html);
+        $this->assertStringContainsString('data-quantity-price-tiers=', $html);
+        $this->assertStringContainsString('"minimum_quantity":2', $html);
+        $this->assertStringContainsString('"minimum_quantity":4', $html);
+    }
+
     public function test_retired_product_modal_route_returns_not_found(): void
     {
         $product = Product::factory()->create([

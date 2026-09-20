@@ -1647,6 +1647,134 @@ function initCheckoutReview() {
     syncSticky();
   };
 
+  const checkoutBaseIdrPrice = Number.parseInt(
+    quantityInput?.dataset.basePrice || quantityInput?.dataset.unitPrice || "",
+    10
+  );
+  const checkoutBaseUsdtPrice = Number.parseInt(
+    quantityInput?.dataset.baseUsdtPrice ||
+      quantityInput?.dataset.unitUsdtPrice ||
+      "",
+    10
+  );
+  const checkoutTiers = (() => {
+    if (!quantityInput) {
+      return [];
+    }
+
+    let rawTiers;
+    try {
+      rawTiers = JSON.parse(quantityInput.dataset.quantityPriceTiers || "[]");
+    } catch {
+      return [];
+    }
+
+    if (
+      !Array.isArray(rawTiers) ||
+      !Number.isSafeInteger(checkoutBaseIdrPrice)
+    ) {
+      return [];
+    }
+
+    const normalized = rawTiers
+      .map((tier) => ({
+        minimumQuantity: Number.parseInt(tier?.minimum_quantity, 10),
+        priceAmount: Number.parseInt(tier?.price_amount, 10),
+        usdtPriceAmount:
+          tier?.usdt_price_amount === null ||
+          tier?.usdt_price_amount === undefined ||
+          tier?.usdt_price_amount === ""
+            ? null
+            : Number.parseInt(tier.usdt_price_amount, 10),
+      }))
+      .filter(
+        (tier) =>
+          Number.isSafeInteger(tier.minimumQuantity) &&
+          tier.minimumQuantity >= 2 &&
+          tier.minimumQuantity <= 20 &&
+          Number.isSafeInteger(tier.priceAmount) &&
+          tier.priceAmount > 0 &&
+          (tier.usdtPriceAmount === null ||
+            (Number.isSafeInteger(tier.usdtPriceAmount) &&
+              tier.usdtPriceAmount > 0))
+      )
+      .sort((left, right) => left.minimumQuantity - right.minimumQuantity)
+      .slice(0, 5);
+
+    const accepted = [];
+    let previousIdrPrice = checkoutBaseIdrPrice;
+    let previousUsdtPrice = Number.isSafeInteger(checkoutBaseUsdtPrice)
+      ? checkoutBaseUsdtPrice
+      : null;
+
+    normalized.forEach((tier) => {
+      if (tier.priceAmount >= previousIdrPrice) {
+        return;
+      }
+      if (
+        previousUsdtPrice !== null &&
+        (tier.usdtPriceAmount === null ||
+          tier.usdtPriceAmount >= previousUsdtPrice)
+      ) {
+        return;
+      }
+      if (previousUsdtPrice === null && tier.usdtPriceAmount !== null) {
+        return;
+      }
+
+      accepted.push(tier);
+      previousIdrPrice = tier.priceAmount;
+      previousUsdtPrice = tier.usdtPriceAmount;
+    });
+
+    return accepted;
+  })();
+
+  const safeCheckoutSubtotal = (unitPrice, quantity) => {
+    if (
+      !Number.isSafeInteger(unitPrice) ||
+      !Number.isSafeInteger(quantity) ||
+      quantity < 1
+    ) {
+      return null;
+    }
+
+    const subtotal = unitPrice * quantity;
+    return Number.isSafeInteger(subtotal) ? subtotal : null;
+  };
+
+  const checkoutQuoteForQuantity = (quantity) => {
+    let effectiveIdrPrice = Number.isSafeInteger(checkoutBaseIdrPrice)
+      ? checkoutBaseIdrPrice
+      : null;
+    let effectiveUsdtPrice = Number.isSafeInteger(checkoutBaseUsdtPrice)
+      ? checkoutBaseUsdtPrice
+      : null;
+    let appliedTierMinimum = null;
+
+    checkoutTiers.forEach((tier) => {
+      if (tier.minimumQuantity <= quantity) {
+        effectiveIdrPrice = tier.priceAmount;
+        effectiveUsdtPrice = tier.usdtPriceAmount;
+        appliedTierMinimum = tier.minimumQuantity;
+      }
+    });
+
+    return {
+      idrUnitPrice: effectiveIdrPrice,
+      idrSubtotal:
+        effectiveIdrPrice === null
+          ? null
+          : safeCheckoutSubtotal(effectiveIdrPrice, quantity),
+      usdtUnitPrice: effectiveUsdtPrice,
+      usdtSubtotal:
+        effectiveUsdtPrice === null
+          ? null
+          : safeCheckoutSubtotal(effectiveUsdtPrice, quantity),
+      appliedTierMinimum,
+    };
+  };
+
   const refreshQuantity = (announce = false) => {
     if (!quantityInput) {
       return;
@@ -1658,16 +1786,7 @@ function initCheckoutReview() {
       return;
     }
 
-    const unitPrice = Number.parseInt(quantityInput.dataset.unitPrice, 10);
-    const unitUsdtPrice = Number.parseInt(
-      quantityInput.dataset.unitUsdtPrice,
-      10
-    );
-    const subtotal = Number.isInteger(unitPrice) ? unitPrice * quantity : null;
-    const usdtSubtotal =
-      Number.isInteger(unitUsdtPrice) && unitUsdtPrice > 0
-        ? unitUsdtPrice * quantity
-        : null;
+    const quote = checkoutQuoteForQuantity(quantity);
 
     document
       .querySelectorAll("[data-checkout-item-quantity]")
@@ -1675,29 +1794,64 @@ function initCheckoutReview() {
         target.textContent = `Jumlah ${quantity}`;
       });
     document
+      .querySelectorAll("[data-checkout-item-unit-price]")
+      .forEach((target) => {
+        target.textContent =
+          quote.idrUnitPrice === null
+            ? "—"
+            : formatCheckoutIdr(quote.idrUnitPrice);
+      });
+    document
+      .querySelectorAll("[data-checkout-item-unit-usdt-price]")
+      .forEach((target) => {
+        const valueTarget = target.querySelector("span");
+        if (valueTarget) {
+          valueTarget.textContent =
+            quote.usdtUnitPrice === null
+              ? "—"
+              : formatCheckoutUsdt(quote.usdtUnitPrice);
+        }
+        target.classList.toggle("hidden", quote.usdtUnitPrice === null);
+      });
+    document
+      .querySelectorAll("[data-checkout-item-tier-note]")
+      .forEach((target) => {
+        target.textContent =
+          quote.appliedTierMinimum === null
+            ? ""
+            : `Harga grosir diterapkan mulai ${quote.appliedTierMinimum} unit.`;
+        target.classList.toggle("hidden", quote.appliedTierMinimum === null);
+      });
+    document
       .querySelectorAll("[data-checkout-item-subtotal]")
       .forEach((target) => {
         target.textContent =
-          subtotal === null ? "—" : formatCheckoutIdr(subtotal);
+          quote.idrSubtotal === null
+            ? "—"
+            : formatCheckoutIdr(quote.idrSubtotal);
       });
     document
       .querySelectorAll("[data-checkout-order-subtotal]")
       .forEach((target) => {
         target.textContent =
-          subtotal === null ? "—" : formatCheckoutIdr(subtotal);
+          quote.idrSubtotal === null
+            ? "—"
+            : formatCheckoutIdr(quote.idrSubtotal);
       });
     document
       .querySelectorAll("[data-checkout-order-usdt-subtotal]")
       .forEach((target) => {
         target.textContent =
-          usdtSubtotal === null ? "—" : formatCheckoutUsdt(usdtSubtotal);
+          quote.usdtSubtotal === null
+            ? "—"
+            : formatCheckoutUsdt(quote.usdtSubtotal);
       });
 
     if (announce && quantityAnnouncement) {
       const subtotalMessage =
-        subtotal === null
+        quote.idrSubtotal === null
           ? "subtotal review belum tersedia"
-          : `subtotal review ${formatCheckoutIdr(subtotal)}`;
+          : `subtotal review ${formatCheckoutIdr(quote.idrSubtotal)}`;
       quantityAnnouncement.textContent = `Jumlah ${quantity} unit; ${subtotalMessage}.`;
     }
 

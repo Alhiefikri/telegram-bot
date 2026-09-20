@@ -390,6 +390,69 @@ class StorefrontShopCartTest extends TestCase
         $this->assertSame(1, $plainProduct->fresh()->reserved_stock);
     }
 
+    public function test_cart_and_checkout_use_effective_tier_quotes_and_reject_stale_tier_snapshots(): void
+    {
+        Queue::fake();
+        $this->manualPaymentModeIsActive();
+        $product = $this->availableProduct([
+            'name' => 'Tiered Cart Product',
+            'price_amount' => 10_000,
+            'usdt_price_amount' => 1_000_000,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+        $product->quantityPriceTiers()->create([
+            'minimum_quantity' => 2,
+            'price_amount' => 9_000,
+            'usdt_price_amount' => 900_000,
+        ]);
+        $sessionKey = 'tiered-cart-session';
+
+        $this->addToCart($product, quantity: 2, sessionKey: $sessionKey);
+
+        $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->get(route('storefront.shop.cart'))
+            ->assertOk()
+            ->assertSee('Harga satuan efektif:')
+            ->assertSee('Rp9.000')
+            ->assertSee('Subtotal efektif: Rp18.000')
+            ->assertSee('Total USDT / estimasi');
+
+        $staleSnapshot = $this->checkoutSnapshot($sessionKey);
+        $product->quantityPriceTiers()->firstOrFail()->update([
+            'price_amount' => 8_000,
+            'usdt_price_amount' => 800_000,
+        ]);
+
+        $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->post(route('storefront.shop.checkout'), [
+                'cart_snapshot' => $staleSnapshot,
+                'buyer_name' => 'Stale Tier Buyer',
+                'payment_method' => 'qris',
+                'terms_accepted' => '1',
+            ])
+            ->assertRedirect(route('storefront.shop.checkout.start'));
+        $this->assertSame(0, Order::query()->count());
+
+        $freshSnapshot = $this->checkoutSnapshot($sessionKey);
+        $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->post(route('storefront.shop.checkout'), [
+                'cart_snapshot' => $freshSnapshot,
+                'buyer_name' => 'Canonical Tier Buyer',
+                'payment_method' => 'qris',
+                'terms_accepted' => '1',
+                'unit_price' => 1,
+                'subtotal' => 1,
+                'quantity_price_tier_minimum' => 20,
+            ])
+            ->assertRedirect();
+
+        $orderItem = Order::query()->sole()->orderItems()->sole();
+        $this->assertSame(8_000, $orderItem->unit_price);
+        $this->assertSame(16_000, $orderItem->subtotal);
+        $this->assertSame(2, $orderItem->quantity_price_tier_minimum);
+    }
+
     public function test_stale_cart_snapshot_is_rejected_before_order_creation(): void
     {
         Queue::fake();

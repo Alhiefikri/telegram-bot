@@ -11,6 +11,8 @@ use App\Services\Bsc\BscReadiness;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use App\Services\KlikQris\KlikQrisCheckoutSelector;
+use App\Services\Pricing\ProductPriceTierQuote;
+use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Support\PaymentProvider;
 
@@ -36,6 +38,7 @@ class StorefrontProductPresenter
         private readonly KlikQrisCheckoutSelector $klikQrisCheckout,
         private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
         private readonly StorefrontProductPlaceholder $placeholder,
+        private readonly ProductQuantityPricing $pricing,
     ) {}
 
     public function present(
@@ -46,6 +49,17 @@ class StorefrontProductPresenter
         bool $observeExternalReadiness = true,
     ): StorefrontProductPresentation {
         $stockAvailable ??= $product->availableStock();
+        $pricingQuote = $stockAvailable > 0 ? $this->pricing->quote($product, 1) : null;
+        $reachableStock = min(
+            max(0, $stockAvailable),
+            ProductQuantityPricing::MAXIMUM_TIER_QUANTITY,
+        );
+        $reachableQuantityPriceTiers = $reachableStock < 1
+            ? []
+            : array_values(array_filter(
+                $pricingQuote?->tiers() ?? [],
+                static fn (ProductPriceTierQuote $tier): bool => $tier->minimumQuantity <= $reachableStock,
+            ));
         $maintenanceState ??= $this->maintenance->current();
         if ($soldQuantity === null) {
             $attributes = $product->getAttributes();
@@ -106,6 +120,7 @@ class StorefrontProductPresenter
             waitlistUrl: route('storefront.waitlist.store', ['product' => $product->getKey()]),
             waitlistCtaLabel: (string) config('storefront.waitlist.cta', 'Beri tahu saya saat tersedia'),
             familyOptionLabel: $familyOptionLabel,
+            reachableQuantityPriceTiers: $reachableQuantityPriceTiers,
         );
     }
 

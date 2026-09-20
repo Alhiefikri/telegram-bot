@@ -6,7 +6,9 @@ use App\Enums\CartStatus;
 use App\Exceptions\InvalidCartState;
 use App\Models\Cart;
 use App\Models\Customer;
+use App\Models\Product;
 use App\Services\CartService;
+use App\Services\Pricing\ProductQuantityPricing;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Support\Facades\Cache;
@@ -92,13 +94,22 @@ final class StorefrontGuestCart
 
     public function fingerprint(Cart $cart): string
     {
-        $items = $cart->relationLoaded('cartItems')
-            ? $cart->cartItems
-            : $cart->cartItems()->orderBy('product_id')->get();
+        $cart = $this->load($cart);
 
-        return (string) $cart->getKey().'|'.$items
+        return (string) $cart->getKey().'|'.$cart->cartItems
             ->sortBy('product_id')
-            ->map(fn ($item): string => (int) $item->product_id.':'.(int) $item->quantity)
+            ->map(function ($item): string {
+                $pricingFingerprint = hash(
+                    'sha256',
+                    json_encode($this->productPricingState($item->product), JSON_THROW_ON_ERROR),
+                );
+
+                return implode(':', [
+                    (int) $item->product_id,
+                    (int) $item->quantity,
+                    $pricingFingerprint,
+                ]);
+            })
             ->implode(';');
     }
 
@@ -123,6 +134,7 @@ final class StorefrontGuestCart
                     'price_amount' => $product?->price_amount,
                     'usdt_price_amount' => $product?->usdt_price_amount,
                     'currency' => $product?->currency,
+                    'pricing' => $this->productPricingState($product),
                 ];
             })->sortBy('product_id')->values()->all(),
         ];
@@ -175,6 +187,36 @@ final class StorefrontGuestCart
         }
 
         return Customer::query()->find((int) $customerId);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function productPricingState(?Product $product): array
+    {
+        if ($product === null) {
+            return [];
+        }
+
+        return [
+            'updated_at' => $product->updated_at?->toISOString(),
+            'price_amount' => $product->price_amount,
+            'usdt_price_amount' => $product->usdt_price_amount,
+            'currency' => $product->currency,
+            'quantity_price_tiers' => $product->quantityPriceTiers()
+                ->select(['id', 'product_id', 'minimum_quantity', 'price_amount', 'usdt_price_amount', 'updated_at'])
+                ->limit(ProductQuantityPricing::MAX_TIERS + 1)
+                ->get()
+                ->map(static fn ($tier): array => [
+                    'id' => (int) $tier->getKey(),
+                    'product_id' => (int) $tier->product_id,
+                    'minimum_quantity' => (int) $tier->minimum_quantity,
+                    'price_amount' => (int) $tier->price_amount,
+                    'usdt_price_amount' => $tier->usdt_price_amount === null ? null : (int) $tier->usdt_price_amount,
+                    'updated_at' => $tier->updated_at?->toISOString(),
+                ])
+                ->all(),
+        ];
     }
 
     private function lockKey(string $clientKey): string

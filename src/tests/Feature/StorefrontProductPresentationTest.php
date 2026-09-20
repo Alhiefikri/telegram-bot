@@ -56,6 +56,39 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertSame('manual', $presentation->checkoutChoice('website_qris')?->provider);
     }
 
+    public function test_product_detail_exposes_only_quantity_tiers_reachable_with_live_stock(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Reachable Tier Product',
+            'price_amount' => 25_000,
+            'stock' => 5,
+            'reserved_stock' => 1,
+        ]);
+        $product->quantityPriceTiers()->createMany([
+            ['minimum_quantity' => 2, 'price_amount' => 24_000, 'usdt_price_amount' => null],
+            ['minimum_quantity' => 4, 'price_amount' => 23_000, 'usdt_price_amount' => null],
+            ['minimum_quantity' => 5, 'price_amount' => 22_000, 'usdt_price_amount' => null],
+        ]);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+
+        $this->assertSame(
+            [2, 4],
+            array_map(
+                static fn ($tier): int => $tier->minimumQuantity,
+                $presentation->reachableQuantityPriceTiers,
+            ),
+        );
+        $this->assertSame(24_000, $presentation->lowestReachableQuantityPriceTier()?->priceAmount);
+
+        $this->get(route('storefront.products.show', $product))
+            ->assertOk()
+            ->assertSee('Harga grosir mulai Rp24.000 per unit untuk minimal 2 unit.')
+            ->assertSee('Mulai 2 unit')
+            ->assertSee('Mulai 4 unit')
+            ->assertDontSee('Mulai 5 unit');
+    }
+
     public function test_in_stock_product_without_active_payment_setting_is_not_checkout_ready(): void
     {
         ManualPaymentSetting::query()->delete();

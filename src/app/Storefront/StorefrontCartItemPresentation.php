@@ -16,10 +16,17 @@ final readonly class StorefrontCartItemPresentation
         public bool $isAvailable,
         public ?string $conflictMessage,
         public ?string $imageUrl = null,
+        public ?int $usdtSubtotal = null,
+        public ?int $appliedTierMinimum = null,
     ) {}
 
     public function hasConflict(): bool
     {
         return $this->conflictMessage !== null;
+    }
+
+    public function hasAppliedQuantityPriceTier(): bool
+    {
+        return $this->appliedTierMinimum !== null;
     }
 }

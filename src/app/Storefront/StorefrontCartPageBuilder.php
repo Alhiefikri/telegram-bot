@@ -6,6 +6,7 @@ use App\Models\Cart;
 use App\Models\Product;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
+use App\Services\Pricing\ProductQuantityPricing;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Support\Collection;
 
@@ -18,6 +19,7 @@ final class StorefrontCartPageBuilder
         private readonly StorefrontUrl $urls,
         private readonly CheckoutMaintenance $maintenance,
         private readonly StorefrontSeo $seo,
+        private readonly ProductQuantityPricing $pricing,
     ) {}
 
     /**
@@ -29,8 +31,8 @@ final class StorefrontCartPageBuilder
         $maintenance = $this->maintenance->current();
         $items = $this->items($cart);
         $cartSubtotal = $items->sum(fn (StorefrontCartItemPresentation $item): int => $item->subtotal ?? 0);
-        $usdtSubtotal = $items->isNotEmpty() && $items->every(fn (StorefrontCartItemPresentation $item): bool => $item->usdtUnitPrice !== null)
-            ? $items->sum(fn (StorefrontCartItemPresentation $item): int => ($item->usdtUnitPrice ?? 0) * $item->quantity)
+        $usdtSubtotal = $items->isNotEmpty() && $items->every(fn (StorefrontCartItemPresentation $item): bool => $item->usdtSubtotal !== null)
+            ? $items->sum(fn (StorefrontCartItemPresentation $item): int => $item->usdtSubtotal ?? 0)
             : null;
         $paymentOptions = $this->paymentOptions(
             $items,
@@ -155,8 +157,8 @@ final class StorefrontCartPageBuilder
             items: $items,
             itemCount: $items->sum(fn (StorefrontCartItemPresentation $item): int => $item->quantity),
             subtotal: $items->sum(fn (StorefrontCartItemPresentation $item): int => $item->subtotal ?? 0),
-            usdtSubtotal: $items->isNotEmpty() && $items->every(fn (StorefrontCartItemPresentation $item): bool => $item->usdtUnitPrice !== null)
-                ? $items->sum(fn (StorefrontCartItemPresentation $item): int => ($item->usdtUnitPrice ?? 0) * $item->quantity)
+            usdtSubtotal: $items->isNotEmpty() && $items->every(fn (StorefrontCartItemPresentation $item): bool => $item->usdtSubtotal !== null)
+                ? $items->sum(fn (StorefrontCartItemPresentation $item): int => $item->usdtSubtotal ?? 0)
                 : null,
             currency: 'IDR',
             hasConflicts: $hasConflicts,
@@ -206,9 +208,11 @@ final class StorefrontCartPageBuilder
                     unitPrice: null,
                     subtotal: null,
                     usdtUnitPrice: null,
+                    usdtSubtotal: null,
                     availableStock: null,
                     isAvailable: false,
                     conflictMessage: 'Produk ini sudah tidak tersedia. Hapus dari keranjang untuk melanjutkan.',
+                    appliedTierMinimum: null,
                 );
             }
 
@@ -220,19 +224,21 @@ final class StorefrontCartPageBuilder
     {
         $availableStock = $product->availableStock();
         $isPublic = $product->isPublicVisible();
-        $unitPrice = (int) $product->price_amount;
+        $quote = $this->pricing->quote($product, $quantity);
 
         return new StorefrontCartItemPresentation(
             productId: (int) $product->id,
             name: (string) $product->name,
             productUrl: $this->urls->productUrl($product),
             quantity: $quantity,
-            unitPrice: $unitPrice,
-            subtotal: $unitPrice * $quantity,
-            usdtUnitPrice: $product->usdt_price_amount === null ? null : (int) $product->usdt_price_amount,
+            unitPrice: $quote->effectiveIdrUnitAmount,
+            subtotal: $quote->idrSubtotal,
+            usdtUnitPrice: $quote->effectiveUsdtUnitAmount,
+            usdtSubtotal: $quote->usdtSubtotal,
             availableStock: $availableStock,
             isAvailable: $isPublic && $availableStock >= $quantity,
             conflictMessage: $this->conflictMessage($isPublic, $availableStock, $quantity),
+            appliedTierMinimum: $quote->appliedTierMinimum,
             imageUrl: StorefrontProductPresentationNormalizer::publicStorageUrl($product->image_path)
                 ?? StorefrontProductPresentationNormalizer::publicStorageUrl($product->family?->image_path),
         );

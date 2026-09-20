@@ -201,6 +201,30 @@ test("customer checkout: keeps canonical checkout usable without JavaScript", as
   }
 });
 
+test("customer checkout: updates direct tier estimates from bounded safe data", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${baseUrl}${invoiceFixtures.tierProductCheckoutPath}`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  const quantity = page.locator("[data-checkout-quantity]");
+  const unitPrice = page.locator("[data-checkout-item-unit-price]");
+  const itemSubtotal = page.locator("[data-checkout-item-subtotal]");
+  const orderSubtotal = page.locator("[data-checkout-order-subtotal]");
+  const tierNote = page.locator("[data-checkout-item-tier-note]");
+
+  await expect(quantity).toHaveValue("1");
+  await expect(unitPrice).toHaveText(/Rp\s+75\.000/);
+  await quantity.fill("2");
+  await expect(unitPrice).toHaveText(/Rp\s+70\.000/);
+  await expect(itemSubtotal).toHaveText(/Rp\s+140\.000/);
+  await expect(orderSubtotal).toHaveText(/Rp\s+140\.000/);
+  await expect(tierNote).toHaveText("Harga grosir diterapkan mulai 2 unit.");
+  await expect(tierNote).toBeVisible();
+});
+
 test("customer checkout: keeps the mobile sticky action aligned with the canonical checkout", async ({
   page,
 }) => {
@@ -4808,13 +4832,18 @@ Product::factory()->create([
     'reserved_stock' => 1,
     'is_active' => true,
 ]);
-Product::factory()->create([
+$tierProduct = Product::factory()->create([
     'category_id' => $otherCategory->id,
     'name' => 'Browser QA Produk B',
     'price_amount' => 75000,
     'stock' => 6,
     'reserved_stock' => 1,
     'is_active' => true,
+]);
+$tierProduct->quantityPriceTiers()->create([
+    'minimum_quantity' => 2,
+    'price_amount' => 70000,
+    'usdt_price_amount' => null,
 ]);
 
 $longCheckoutProduct = Product::factory()->create([
@@ -5073,6 +5102,7 @@ Payment::factory()->create([
 
 echo json_encode([
     'longProductCheckoutPath' => route('storefront.shop.checkout.product', ['product' => $longCheckoutProduct], false),
+    'tierProductCheckoutPath' => route('storefront.shop.checkout.product', ['product' => $tierProduct], false),
     'pendingWithNativeQris' => [
         'orderId' => $qrisOrder->id,
         'showUrl' => URL::signedRoute('storefront.shop.orders.show', ['order' => $qrisOrder, 'key' => 'browser-recovery-key'], null, false),

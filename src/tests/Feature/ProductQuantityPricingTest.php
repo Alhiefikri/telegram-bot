@@ -8,6 +8,7 @@ use App\Models\ProductQuantityPriceTier;
 use App\Services\Pricing\ProductQuantityPricing;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
@@ -42,6 +43,27 @@ class ProductQuantityPricingTest extends TestCase
         $orderItem = OrderItem::factory()->create(['product_id' => $product->id]);
 
         $this->assertNull($orderItem->fresh()->quantity_price_tier_minimum);
+    }
+
+    public function test_quantity_tier_mutations_invalidate_storefront_response_cache(): void
+    {
+        Cache::put('storefront.response.version', 100, now()->addHour());
+        $product = Product::factory()->create();
+
+        $tier = ProductQuantityPriceTier::factory()->create([
+            'product_id' => $product->id,
+            'minimum_quantity' => 2,
+        ]);
+        $afterCreate = (int) Cache::get('storefront.response.version');
+
+        $tier->update(['price_amount' => 1_000]);
+        $afterUpdate = (int) Cache::get('storefront.response.version');
+
+        $tier->delete();
+
+        $this->assertGreaterThan(100, $afterCreate);
+        $this->assertGreaterThan($afterCreate, $afterUpdate);
+        $this->assertGreaterThan($afterUpdate, (int) Cache::get('storefront.response.version'));
     }
 
     public function test_duplicate_product_thresholds_cannot_persist(): void

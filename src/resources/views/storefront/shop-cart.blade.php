@@ -59,7 +59,7 @@
                                                 @endif
                                             </h2>
                                             <p class="mt-2 text-sm font-semibold text-[var(--sf-muted)]">
-                                                Harga saat ini:
+                                                Harga satuan efektif:
                                                 @if ($item->unitPrice !== null)
                                                     <span class="font-black text-[var(--sf-ink)]">{{ $storefront->idr($item->unitPrice) }}</span>
                                                 @else
@@ -67,13 +67,19 @@
                                                 @endif
                                                 · Mata uang IDR
                                             </p>
+                                            @if ($item->usdtUnitPrice !== null)
+                                                <p class="mt-1 text-xs font-bold text-[var(--sf-muted)]">Harga USDT satuan: <span class="font-black text-[var(--sf-ink)]">{{ $storefront->usdt($item->usdtUnitPrice) }}</span></p>
+                                            @endif
+                                            @if ($item->hasAppliedQuantityPriceTier())
+                                                <p class="mt-1 text-xs font-bold text-[var(--sf-muted)]">Harga grosir diterapkan mulai {{ $item->appliedTierMinimum }} unit.</p>
+                                            @endif
                                             @if ($item->conflictMessage)
                                                 <p role="alert" class="mt-3 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-sm font-black leading-6 text-[var(--sf-ink)]">{{ $item->conflictMessage }}</p>
                                             @elseif ($item->availableStock !== null)
                                                 <p class="mt-2 text-xs font-bold text-[var(--sf-muted)]">Stok tersedia saat ini: {{ $item->availableStock }}</p>
                                             @endif
-                                        </div>
 
+                                        </div>
                                         <div class="flex shrink-0 flex-col gap-3 sm:items-end">
                                             <form method="POST" action="{{ route('storefront.shop.cart.items.update', ['product' => $item->productId]) }}" class="flex items-center gap-2">
                                                 @csrf
@@ -83,8 +89,11 @@
                                                 <button type="submit" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-yellow)] px-3 text-sm font-black text-[var(--sf-ink)]">Perbarui</button>
                                             </form>
                                             <p class="text-right text-sm font-black text-[var(--sf-ink)]">
-                                                Subtotal: {{ $item->subtotal === null ? '—' : $storefront->idr($item->subtotal) }}
+                                                Subtotal efektif: {{ $item->subtotal === null ? '—' : $storefront->idr($item->subtotal) }}
                                             </p>
+                                            @if ($item->usdtSubtotal !== null)
+                                                <p class="text-right text-xs font-bold text-[var(--sf-muted)]">Subtotal USDT: <span class="font-black text-[var(--sf-ink)]">{{ $storefront->usdt($item->usdtSubtotal) }}</span></p>
+                                            @endif
                                             <form method="POST" action="{{ route('storefront.shop.cart.items.destroy', ['product' => $item->productId]) }}">
                                                 @csrf
                                                 @method('DELETE')
@@ -107,6 +116,12 @@
                                     <dt>Subtotal (IDR)</dt>
                                     <dd>{{ $storefront->idr($cartSubtotal) }}</dd>
                                 </div>
+                                @if ($cartUsdtSubtotal !== null)
+                                    <div class="flex items-center justify-between gap-3 font-bold text-[var(--sf-muted)]">
+                                        <dt>Total USDT / estimasi</dt>
+                                        <dd class="font-black text-[var(--sf-ink)]">{{ $storefront->usdt($cartUsdtSubtotal) }}</dd>
+                                    </div>
+                                @endif
                             </dl>
                             @if ($cartHasConflicts)
                                 <p role="alert" class="mt-4 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-sm font-black leading-6 text-[var(--sf-ink)]">Periksa item yang berubah sebelum checkout. Stok tidak disimpan hanya karena item berada di keranjang.</p>
