@@ -97,7 +97,6 @@ class TelegramProductNotificationService
             : $this->skippedResult();
     }
 
-
     /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array,photo_path:?string}> */
     public function stockAddedDeliveries(
         Product $product,

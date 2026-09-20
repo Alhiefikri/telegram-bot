@@ -88,5 +88,4 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
             postCreationBehavior: CheckoutPostCreationBehavior::BscInstructions,
         );
     }
-
 }

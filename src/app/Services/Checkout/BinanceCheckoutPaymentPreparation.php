@@ -100,5 +100,4 @@ final readonly class BinanceCheckoutPaymentPreparation implements CheckoutPaymen
             ? $setting->binance_verification_mode
             : 'amount_unique';
     }
-
 }

@@ -193,6 +193,7 @@ class AdminDashboardProductFormsTest extends TestCase
 
             ->assertSee('/assets/product-placeholder.svg', false);
     }
+
     public function test_admin_can_create_replace_and_disable_quantity_price_tiers(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);

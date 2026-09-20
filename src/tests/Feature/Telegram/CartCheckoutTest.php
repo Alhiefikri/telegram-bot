@@ -27,8 +27,8 @@ use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramBinanceRailSelectionSession;
-use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramCartIntents;
+use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramQrCodeRenderer;
@@ -246,6 +246,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
             && str_contains((string) ($request['body'] ?? ''), 'Scan the QR'));
     }
+
     public function test_cart_add_confirmation_shows_tiers_and_next_tier_projection(): void
     {
         $this->fakeTelegramHttp();
@@ -339,7 +340,6 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('checkout.payment_method', $text);
         $this->assertSame(0, Order::count());
     }
-
 
     public function test_manual_paid_button_edits_qr_caption_to_proof_instructions_without_new_buyer_message(): void
     {

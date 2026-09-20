@@ -47,6 +47,7 @@ use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 
 class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
@@ -739,7 +740,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
     }
 
     /**
-     * @return array{snapshot: CheckoutPricingSnapshot, products: \Illuminate\Support\Collection<int, Product>}|null
+     * @return array{snapshot: CheckoutPricingSnapshot, products: Collection<int, Product>}|null
      */
     private function cartPricing(Cart $cart): ?array
     {
@@ -794,8 +795,6 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             return null;
         }
     }
-
-
 
     private function dispatchCheckoutInstructions(Order $order, Payment $payment): void
     {

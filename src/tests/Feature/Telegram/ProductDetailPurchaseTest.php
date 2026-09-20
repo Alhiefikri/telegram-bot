@@ -90,6 +90,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
             && str_contains((string) ($request['text'] ?? ''), 'expired'));
     }
+
     public function test_product_detail_renders_reachable_tiers_and_jumps_to_the_next_tier(): void
     {
         $this->fakeTelegramHttp();
@@ -181,6 +182,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
             && (string) ($request['callback_query_id'] ?? '') === 'stale-tier'
             && str_contains((string) ($request['text'] ?? ''), 'expired'));
     }
+
     public function test_tier_threshold_direct_payment_matches_effective_quote(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');
@@ -239,8 +241,6 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertSame(23_000, $item->unit_price);
         $this->assertSame(46_000, $item->subtotal);
     }
-
-
 
     public function test_quantity_buttons_edit_the_existing_product_detail_message(): void
     {

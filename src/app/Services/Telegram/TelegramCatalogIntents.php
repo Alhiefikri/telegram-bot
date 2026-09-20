@@ -18,8 +18,8 @@ use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use App\Services\Pricing\ProductPriceQuote;
 use App\Services\Pricing\ProductPriceTierQuote;
 use App\Services\Pricing\ProductQuantityPricing;
-use InvalidArgumentException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use InvalidArgumentException;
 
 class TelegramCatalogIntents
 {
@@ -1141,7 +1141,6 @@ class TelegramCatalogIntents
             ? $nextTier
             : null;
     }
-
 
     private function escapeHtml(string $value): string
     {

@@ -52,5 +52,4 @@ final readonly class ManualQrisCheckoutPaymentPreparation implements CheckoutPay
             postCreationBehavior: CheckoutPostCreationBehavior::ManualQrisInstructions,
         );
     }
-
 }

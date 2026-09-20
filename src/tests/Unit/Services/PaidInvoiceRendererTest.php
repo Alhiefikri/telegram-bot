@@ -47,7 +47,6 @@ class PaidInvoiceRendererTest extends TestCase
         $metadata = $result->metadata;
         $decoded = getimagesizefromstring($result->bytes);
 
-
         $this->assertSame('image/png', $decoded['mime'] ?? null);
         $this->assertSame(PaidInvoiceRenderer::WIDTH, $decoded[0] ?? null);
         $this->assertSame(PaidInvoiceRenderer::HEIGHT, $decoded[1] ?? null);
@@ -85,6 +84,7 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertStringNotContainsString('8581234505', json_encode($metadata));
         $this->assertStringNotContainsString('secret', json_encode($metadata));
     }
+
     public function test_real_order_item_tier_snapshot_reaches_public_invoice_and_sales_proof(): void
     {
         $order = $this->order(

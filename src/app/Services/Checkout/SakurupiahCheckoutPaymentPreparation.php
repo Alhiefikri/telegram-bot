@@ -76,5 +76,4 @@ final readonly class SakurupiahCheckoutPaymentPreparation implements CheckoutPay
             postCreationBehavior: CheckoutPostCreationBehavior::SakurupiahInstructions,
         );
     }
-
 }

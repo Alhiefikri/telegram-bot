@@ -140,7 +140,6 @@ class TelegramCartIntents
         return implode("\n", $lines);
     }
 
-
     private function deleteFreshEmptyCart(?Cart $cart): void
     {
         if ($cart?->wasRecentlyCreated && ! $cart->cartItems()->exists()) {

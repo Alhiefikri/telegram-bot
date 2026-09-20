@@ -55,6 +55,7 @@ final class ProductQuantityPricing
         foreach ($orderedTiers as $tier) {
             if ($quantity >= $tier->minimumQuantity) {
                 $appliedTier = $tier;
+
                 continue;
             }
 

@@ -53,5 +53,4 @@ final readonly class StoreBalanceCheckoutPaymentPreparation implements CheckoutP
             postCreationBehavior: CheckoutPostCreationBehavior::StoreBalancePaid,
         );
     }
-
 }
