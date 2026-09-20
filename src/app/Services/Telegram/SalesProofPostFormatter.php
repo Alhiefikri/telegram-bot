@@ -45,10 +45,12 @@ class SalesProofPostFormatter
             '💵 Subtotal: '.$this->money($presentation->subtotal(), $presentation->currency),
             '💰 Amount paid: '.$this->money($presentation->totalPaid, $presentation->currency),
             '🏆 Successful orders: #'.$successfulPostNumber,
-            '',
-            '━━━━━━━━━━━━━━',
-            '✨ Thank you for choosing Lhie Store.',
         ];
+
+        $bulkLines = $this->bulkPricingLines($presentation);
+        $lines = $bulkLines === []
+            ? [...$lines, '', '━━━━━━━━━━━━━━', '✨ Thank you for choosing Lhie Store.']
+            : [...$lines, ...$bulkLines, '━━━━━━━━━━━━━━', '✨ Thank you for choosing Lhie Store.'];
 
         return $this->boundedCaption($lines);
     }
@@ -97,7 +99,7 @@ class SalesProofPostFormatter
     }
 
     /**
-     * @param  list<array{product_name: string, quantity: int, unit_price?: int, subtotal?: int}>  $items
+     * @param  list<array{product_name: string, quantity: int, unit_price?: int, subtotal?: int, quantity_price_tier_minimum?: ?int}>  $items
      * @return list<string>
      */
     private function itemSummaryLines(array $items): array
@@ -126,7 +128,22 @@ class SalesProofPostFormatter
         return $lines;
     }
 
-    /** @param array{product_name: string, quantity: int, unit_price?: int, subtotal?: int} $item */
+    /** @return list<string> */
+    private function bulkPricingLines(PaidInvoicePresentation $presentation): array
+    {
+        $minimums = $presentation->appliedQuantityPriceTierMinimums();
+        if ($minimums === []) {
+            return [];
+        }
+
+        if (count($presentation->items) === 1 && count($minimums) === 1) {
+            return ['🏷 Bulk pricing applied · '.$minimums[0].'+ units'];
+        }
+
+        return ['🏷 Bulk pricing applied'];
+    }
+
+    /** @param array{product_name: string, quantity: int, unit_price?: int, subtotal?: int, quantity_price_tier_minimum?: ?int} $item */
     private function itemLabel(array $item): string
     {
         $name = $this->cleanText((string) ($item['product_name'] ?? 'Digital product'));

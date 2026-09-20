@@ -41,6 +41,7 @@ final class PaidInvoiceTopUpPresentationAdapter
             items: [[
                 'product_name' => 'Store Balance Top-Up',
                 'quantity' => 1,
+                'quantity_price_tier_minimum' => null,
                 'unit_price' => $amount,
                 'subtotal' => $amount,
             ]],

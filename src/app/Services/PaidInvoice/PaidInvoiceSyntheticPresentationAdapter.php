@@ -56,6 +56,7 @@ final class PaidInvoiceSyntheticPresentationAdapter
             items: [[
                 'product_name' => ((string) $product->name) !== '' ? (string) $product->name : 'Digital product',
                 'quantity' => 1,
+                'quantity_price_tier_minimum' => null,
                 'unit_price' => $amount,
                 'subtotal' => $amount,
             ]],

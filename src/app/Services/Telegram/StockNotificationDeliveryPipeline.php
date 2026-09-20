@@ -10,6 +10,7 @@ use App\Models\InventoryMovement;
 use App\Models\StockNotificationEvent;
 use App\Models\StockNotificationRecipient;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Pricing\ProductPriceTierQuote;
 use App\Services\Admin\ProductImageOptimizer;
 use App\Support\DogfoodTiming;
 use Illuminate\Database\Eloquent\Builder;
@@ -253,6 +254,23 @@ class StockNotificationDeliveryPipeline
             );
             if ($event->recipients_snapshotted_at === null) {
                 if ($movement->type === InventoryMovementType::Adjustment) {
+                    $promotionSnapshotResolved = $event->tier_promotion_snapshotted_at !== null;
+                    $promotedTier = $promotionSnapshotResolved
+                        ? $this->promotedTierFromSnapshot($event)
+                        : $this->notifications->tierPromotionForStock(
+                            $movement->product,
+                            $movement->available_before,
+                            (int) $movement->available_after,
+                        );
+                    if (! $promotionSnapshotResolved) {
+                        $event->forceFill([
+                            'tier_promotion_snapshotted_at' => now(),
+                            'promoted_tier_minimum' => $promotedTier?->minimumQuantity,
+                            'promoted_tier_price_amount' => $promotedTier?->priceAmount,
+                            'promoted_tier_usdt_price_amount' => $promotedTier?->usdtPriceAmount,
+                        ])->save();
+                    }
+
                     $batch = $this->notifications->stockAddedDeliveryBatch(
                         $movement->product,
                         $movement->quantity,
@@ -260,6 +278,8 @@ class StockNotificationDeliveryPipeline
                         $movement->available_after,
                         (int) ($event->materialization_cursor ?? 0),
                         self::RECIPIENT_MATERIALIZATION_BATCH_SIZE,
+                        $promotedTier,
+                        true,
                     );
                     $deliveries = $batch['deliveries'];
                     $event->forceFill([
@@ -291,6 +311,21 @@ class StockNotificationDeliveryPipeline
 
             return $event->fresh() ?? $event;
         }, 5);
+    }
+
+    private function promotedTierFromSnapshot(StockNotificationEvent $event): ?ProductPriceTierQuote
+    {
+        if ($event->promoted_tier_minimum === null || $event->promoted_tier_price_amount === null) {
+            return null;
+        }
+
+        return new ProductPriceTierQuote(
+            (int) $event->promoted_tier_minimum,
+            (int) $event->promoted_tier_price_amount,
+            $event->promoted_tier_usdt_price_amount === null
+                ? null
+                : (int) $event->promoted_tier_usdt_price_amount,
+        );
     }
 
     private function materializeRecipientEffects(int $movementId, int $eventId, int $limit): int

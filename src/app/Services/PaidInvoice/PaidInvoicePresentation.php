@@ -15,7 +15,7 @@ use LogicException;
 final readonly class PaidInvoicePresentation
 {
     /**
-     * @param  list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int}>  $items
+     * @param  list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int, quantity_price_tier_minimum?: ?int}>  $items
      */
     public function __construct(
         public string $invoiceId,
@@ -49,7 +49,7 @@ final readonly class PaidInvoicePresentation
     }
 
     /**
-     * @return list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int}>
+     * @return list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int, quantity_price_tier_minimum?: ?int}>
      */
     public function displayItems(): array
     {
@@ -59,6 +59,22 @@ final readonly class PaidInvoicePresentation
     public function additionalProductCount(): int
     {
         return max(0, count($this->items) - count($this->displayItems()));
+    }
+
+    /** @return list<int> */
+    public function appliedQuantityPriceTierMinimums(): array
+    {
+        $minimums = [];
+        foreach ($this->items as $item) {
+            $minimum = $item['quantity_price_tier_minimum'] ?? null;
+            if ($minimum === null || (int) $minimum < 1) {
+                continue;
+            }
+
+            $minimums[] = (int) $minimum;
+        }
+
+        return array_values(array_unique($minimums));
     }
 
     public function subtotal(): int

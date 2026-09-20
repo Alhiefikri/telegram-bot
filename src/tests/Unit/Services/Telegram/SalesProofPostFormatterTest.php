@@ -67,6 +67,31 @@ class SalesProofPostFormatterTest extends TestCase
         $this->assertStringNotContainsString('284*****24', $caption);
     }
 
+    public function test_real_tier_pricing_line_uses_only_the_immutable_item_snapshot(): void
+    {
+        $presentation = new PaidInvoicePresentation(
+            invoiceId: 'INV-TIER-PROOF',
+            buyerIdentifier: '284*****24',
+            paidAt: CarbonImmutable::parse('2026-08-22 04:00:00 UTC')->setTimezone('Asia/Jakarta'),
+            paymentMethod: 'QRIS',
+            currency: 'IDR',
+            items: [[
+                'product_name' => 'Tiered Product',
+                'quantity' => 10,
+                'unit_price' => 23_000,
+                'subtotal' => 230_000,
+                'quantity_price_tier_minimum' => 10,
+            ]],
+            providerFee: 0,
+            totalPaid: 230_000,
+            buyerName: 'And***',
+        );
+
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 19);
+
+        $this->assertStringContainsString('🏷 Bulk pricing applied · 10+ units', $caption);
+    }
+
     public function test_top_up_caption_is_bounded_and_never_inflates_the_order_counter(): void
     {
         $presentation = new PaidInvoicePresentation(
@@ -98,5 +123,6 @@ class SalesProofPostFormatterTest extends TestCase
         $this->assertStringContainsString('Thank you for topping up at Lhie Store.', $caption);
         $this->assertStringNotContainsString('Successful orders:', $caption);
         $this->assertStringNotContainsString('858*****05', $caption);
+        $this->assertStringNotContainsString('Bulk pricing applied', $caption);
     }
 }

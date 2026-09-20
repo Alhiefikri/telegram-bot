@@ -729,7 +729,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], '🛒 Terjual: 2')
             && str_contains($r['text'], '<blockquote>Desain premium siap pakai.</blockquote>')
             && ($r['parse_mode'] ?? null) === 'HTML'
-            && str_contains($r['text'], '🌏 QRIS Antarnegara:')
+            && str_contains($r['text'], '🌏 QRIS Antarnegara')
             && str_contains($r['text'], 'Jumlah: 1')
             && str_contains($r['text'], 'Subtotal: Rp25.000')
             && str_contains(json_encode($r->data()), 'detail:pay:qris:'.$product->id.':')
@@ -915,6 +915,60 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertNotSame($restockedId['reply_markup'], $restockedEn['reply_markup']);
         $this->assertNotSame($createdEn['text'], $createdMs['text']);
         $this->assertNotSame($restockedEn['text'], $restockedMs['text']);
+    }
+
+    public function test_product_created_notification_promotes_only_the_lowest_reachable_tier(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 7010, 'locale' => 'id']);
+        $product = Product::factory()
+            ->withQuantityPriceTiers([
+                ['minimum_quantity' => 2, 'price_amount' => 45_000, 'usdt_price_amount' => null],
+                ['minimum_quantity' => 5, 'price_amount' => 40_000, 'usdt_price_amount' => null],
+            ])
+            ->create([
+                'name' => 'Tiered Launch Product',
+                'price_amount' => 50_000,
+                'stock' => 5,
+                'reserved_stock' => 0,
+                'is_active' => true,
+            ]);
+
+        app(TelegramProductNotificationService::class)->notifyProductCreated($product);
+
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'Harga grosir mulai 2 unit: Rp45.000/unit')
+            && ! str_contains((string) $request['text'], 'Harga grosir mulai 5 unit'));
+    }
+
+    public function test_restock_notification_promotes_only_a_newly_crossed_tier(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 7011, 'locale' => 'id']);
+        $product = Product::factory()
+            ->withQuantityPriceTiers([
+                ['minimum_quantity' => 2, 'price_amount' => 45_000, 'usdt_price_amount' => null],
+                ['minimum_quantity' => 5, 'price_amount' => 40_000, 'usdt_price_amount' => null],
+            ])
+            ->create([
+                'name' => 'Tiered Restock Product',
+                'price_amount' => 50_000,
+                'stock' => 5,
+                'reserved_stock' => 0,
+                'is_active' => true,
+            ]);
+
+        $notifications = app(TelegramProductNotificationService::class);
+        $notifications->notifyStockAdded($product, 5, 0, 5);
+
+        $product->forceFill(['stock' => 6])->save();
+        $notifications->notifyStockAdded($product, 1, 5, 6);
+
+        $messages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertCount(2, $messages);
+        $this->assertStringContainsString('Harga grosir mulai 2 unit: Rp45.000/unit', (string) ($messages[0][0]['text'] ?? ''));
+        $this->assertStringNotContainsString('Harga grosir', (string) ($messages[1][0]['text'] ?? ''));
     }
 
     public function test_product_restock_notification_has_localized_look_button_and_description(): void

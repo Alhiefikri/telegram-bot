@@ -64,7 +64,7 @@ Customer
 
 Gunakan `Product::publicVisible()`, `availableForPurchase()`, `withAvailability()`, dan `availableStock()` daripada mengulang query visibility/stock di caller. Perubahan stok direkam lewat `InventoryLedger`/`EloquentInventoryLedger` dan menghasilkan `InventoryMovement` bertipe `reservation`, `sale`, `release`, atau `adjustment`.
 
-`ProductStockIntake` adalah pemilik canonical untuk penambahan positif melalui **Input Cepat** dan **Input Akun**. Ia menormalkan seluruh batch sebelum transaksi, mengunci Product, mengklaim idempotency key dan `CredentialIdentity`, membuat `ProductStockItem`, menaikkan numeric stock, membuat satu adjustment movement/audit, lalu menyerahkan restock notification setelah commit. Controller `AdminProductStockController` dan `AdminProductAccountStockController` hanya adapter; mereka tidak boleh mengubah stock atau membuat identity secara langsung.
+`ProductStockIntake` adalah pemilik canonical untuk penambahan positif melalui **Input Cepat** dan **Input Akun**. Ia menormalkan seluruh batch sebelum transaksi, mengunci Product, mengklaim idempotency key dan `CredentialIdentity`, membuat `ProductStockItem`, menaikkan numeric stock, membuat satu adjustment movement/audit, lalu menyerahkan restock notification setelah commit. `StockNotificationDeliveryPipeline` mematerialisasi teks recipient sebelum bounded delivery batches; untuk adjustment ia menyimpan tier terendah yang baru reachable pada `StockNotificationEvent`, sehingga retry/recovery tidak membaca ulang Product/tier yang sudah berubah. Controller `AdminProductStockController` dan `AdminProductAccountStockController` hanya adapter; mereka tidak boleh mengubah stock atau membuat identity secara langsung.
 
 `CredentialIdentity` menyimpan fingerprint HMAC keyed untuk identity yang memang tidak boleh dipakai ulang, saat ini hanya Auth Token eksplisit; email tetap menjadi data akun biasa dan tidak lagi diklaim sebagai identity registry. Fingerprint bukan plaintext. `CredentialIdentityFingerprint` memakai override ENV opsional atau kunci acak persisten di `storage/app/private`; `BackfillCredentialIdentityRegistry` memproses retained Product Stock Items secara bounded dan hanya melaporkan row IDs/counts, lalu menyimpan readiness singleton yang dikunci ke digest fingerprint key hanya setelah full commit tanpa unresolved row. `CredentialIdentityBackfillReadinessService` adalah runtime gate untuk Input Akun; deployment otomatis menjalankan backfill setelah migration, dan `credentials:check-identity-readiness` adalah deployment check. Tidak ada environment feature switch untuk menyalakan atau mematikan Input Akun.
 
@@ -159,11 +159,16 @@ The shared public-safe invoice image is owned by
 [`PaidInvoiceRenderer`](../../src/app/Services/PaidInvoice/PaidInvoiceRenderer.php)
 and accepts only the immutable
 [`PaidInvoicePresentation`](../../src/app/Services/PaidInvoice/PaidInvoicePresentation.php)
-value. `PaidInvoiceOrderPresentationAdapter` reads paid Order snapshots and the
-canonical paid Payment; `PaidInvoiceSyntheticPresentationAdapter` reads one
-selected available Product in memory for Fake Sales Proof. Buyer receipts and
-real/fake Store Channel posts use the same renderer; fake publication never
-creates an Order, Payment, inventory movement, or durable Sales Proof effect.
+`PaidInvoiceOrderPresentationAdapter` reads paid Order snapshots and the
+canonical paid Payment; its immutable item values include the nullable
+`quantity_price_tier_minimum` captured on each Order Item. `SalesProofPostFormatter`
+adds one factual English bulk-pricing line only when that immutable snapshot is
+present. `PaidInvoiceSyntheticPresentationAdapter` and
+`PaidInvoiceTopUpPresentationAdapter` always set the field to null, so Fake
+Sales Proof, base/legacy proof, and Store Balance top-up captions never claim
+bulk pricing. Buyer receipts and real/fake Store Channel posts use the same
+renderer; fake publication never creates an Order, Payment, inventory movement,
+or durable Sales Proof effect.
 `SalesProofStockSignal` owns the optional low-stock line of the public caption:
 it reads mutable Product availability and passes a plain number into the
 formatter, so `PaidInvoicePresentation` keeps only immutable order/payment data

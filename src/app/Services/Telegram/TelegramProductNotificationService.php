@@ -5,7 +5,10 @@ namespace App\Services\Telegram;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
+use App\Services\Pricing\ProductPriceTierQuote;
+use App\Services\Pricing\ProductQuantityPricing;
 use App\Storefront\StorefrontUrl;
+use InvalidArgumentException;
 use Throwable;
 
 class TelegramProductNotificationService
@@ -16,6 +19,7 @@ class TelegramProductNotificationService
         private TelegramAdminAccess $adminAccess,
         private StorefrontUrl $urls,
         private TelegramLocale $locale,
+        private ProductQuantityPricing $pricing,
     ) {}
 
     public function notifyProductCreated(Product $product): array
@@ -29,6 +33,8 @@ class TelegramProductNotificationService
             return $this->skippedResult();
         }
 
+        $promotedTier = $this->promotedTier($product, null, $availableStock);
+
         return $this->broadcast->sendToActiveUsers(
             fn (Customer $customer) => implode("\n", [
                 $this->locale->translate($customer, 'notification.product.created.lead'),
@@ -37,6 +43,7 @@ class TelegramProductNotificationService
                     'amount' => number_format($product->price_amount, 0, ',', '.'),
                 ]),
                 $this->locale->translate($customer, 'notification.product.stock', ['stock' => $availableStock]),
+                ...$this->customerTierLines($customer, $promotedTier),
                 '',
                 $this->locale->translate($customer, 'notification.product.description'),
                 $this->descriptionText($product, $this->locale->code($customer)),
@@ -46,8 +53,12 @@ class TelegramProductNotificationService
         );
     }
 
-    public function notifyStockAdded(Product $product, int $addedQuantity, ?int $availableBefore = null): array
-    {
+    public function notifyStockAdded(
+        Product $product,
+        int $addedQuantity,
+        ?int $availableBefore = null,
+        ?int $availableAfter = null,
+    ): array {
         $product = $product->fresh();
         if (! $product || ! $product->is_active || $addedQuantity < 1) {
             return $this->skippedResult();
@@ -58,9 +69,11 @@ class TelegramProductNotificationService
             return $this->skippedResult();
         }
 
+        $availableAfter ??= $availableStock;
+        $promotedTier = $this->promotedTier($product, $availableBefore, $availableAfter);
         $channelChatId = $this->storeChannelChatId();
         $this->sendStoreChannel(
-            $this->storeChannelRestockMessage($product, $addedQuantity, $availableStock),
+            $this->storeChannelRestockMessage($product, $addedQuantity, $availableStock, $promotedTier),
             $this->storeChannelProductReplyMarkup($product),
         );
 
@@ -73,6 +86,7 @@ class TelegramProductNotificationService
                         'amount' => number_format($product->price_amount, 0, ',', '.'),
                     ]),
                     $this->locale->translate($customer, 'notification.product.stock', ['stock' => $availableStock]),
+                    ...$this->customerTierLines($customer, $promotedTier),
                     '',
                     $this->locale->translate($customer, 'notification.product.description'),
                     $this->descriptionText($product, $this->locale->code($customer)),
@@ -82,6 +96,7 @@ class TelegramProductNotificationService
             )
             : $this->skippedResult();
     }
+
 
     /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array,photo_path:?string}> */
     public function stockAddedDeliveries(
@@ -123,6 +138,8 @@ class TelegramProductNotificationService
         ?int $availableAfter = null,
         int $customerCursor = 0,
         int $limit = 100,
+        ?ProductPriceTierQuote $promotedTier = null,
+        bool $promotedTierResolved = false,
     ): array {
         $product = $product->fresh();
         $customerCursor = max(0, $customerCursor);
@@ -136,6 +153,9 @@ class TelegramProductNotificationService
             return ['deliveries' => [], 'next_cursor' => $customerCursor, 'has_more' => false];
         }
 
+        if (! $promotedTierResolved) {
+            $promotedTier = $this->promotedTier($product, $availableBefore, $availableStock);
+        }
         $channelChatId = $this->storeChannelChatId();
         $deliveries = [];
         if ($customerCursor === 0 && $channelChatId) {
@@ -144,7 +164,7 @@ class TelegramProductNotificationService
                 'recipient_type' => 'store_channel',
                 'telegram_id' => $channelChatId,
                 'locale' => null,
-                'text' => $this->storeChannelRestockMessage($product, $addedQuantity, $availableStock),
+                'text' => $this->storeChannelRestockMessage($product, $addedQuantity, $availableStock, $promotedTier),
                 'reply_markup' => $this->storeChannelProductReplyMarkup($product),
                 'photo_path' => $this->telegramImagePath($product),
             ];
@@ -168,6 +188,7 @@ class TelegramProductNotificationService
                 $availableStock,
                 false,
                 $customerPage->filter(fn (Customer $customer): bool => trim((string) $customer->telegram_id) !== ''),
+                $promotedTier,
             ),
         ];
 
@@ -221,8 +242,13 @@ class TelegramProductNotificationService
      * @param  iterable<Customer>  $customers
      * @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:string,text:string,reply_markup:array,photo_path:?string}>
      */
-    private function renderCustomerDeliveries(Product $product, int $availableStock, bool $created, iterable $customers): array
-    {
+    private function renderCustomerDeliveries(
+        Product $product,
+        int $availableStock,
+        bool $created,
+        iterable $customers,
+        ?ProductPriceTierQuote $promotedTier = null,
+    ): array {
         $deliveries = [];
         foreach ($customers as $customer) {
             $locale = $this->locale->code($customer);
@@ -237,6 +263,7 @@ class TelegramProductNotificationService
                     'amount' => number_format($product->price_amount, 0, ',', '.'),
                 ]),
                 $this->locale->translateLocale($locale, 'notification.product.stock', ['stock' => $availableStock]),
+                ...$this->customerTierLines($customer, $promotedTier),
                 '',
                 $this->locale->translateLocale($locale, 'notification.product.description'),
                 $this->descriptionText($product, $locale),
@@ -256,6 +283,52 @@ class TelegramProductNotificationService
         }
 
         return $deliveries;
+    }
+
+    /** @return list<string> */
+    private function customerTierLines(Customer $customer, ?ProductPriceTierQuote $tier): array
+    {
+        if ($tier === null) {
+            return [];
+        }
+
+        return [$this->locale->translate($customer, 'notification.product.tier', [
+            'minimum' => $tier->minimumQuantity,
+            'amount' => number_format($tier->priceAmount, 0, ',', '.'),
+        ])];
+    }
+
+    public function tierPromotionForStock(Product $product, ?int $availableBefore, int $availableAfter): ?ProductPriceTierQuote
+    {
+        return $this->promotedTier($product, $availableBefore, $availableAfter);
+    }
+
+    private function promotedTier(Product $product, ?int $availableBefore, int $availableAfter): ?ProductPriceTierQuote
+    {
+        if ($availableAfter < 1) {
+            return null;
+        }
+
+        try {
+            $quote = $this->pricing->quote($product, $availableAfter);
+        } catch (InvalidArgumentException $exception) {
+            report($exception);
+
+            return null;
+        }
+
+        $before = $availableBefore === null ? null : max(0, $availableBefore);
+        foreach ($quote->orderedTiers as $tier) {
+            if ($tier->minimumQuantity > $availableAfter) {
+                break;
+            }
+
+            if ($before === null || $before < $tier->minimumQuantity) {
+                return $tier;
+            }
+        }
+
+        return null;
     }
 
     private function descriptionText(Product $product, string $locale): string
@@ -351,8 +424,12 @@ class TelegramProductNotificationService
         }
     }
 
-    private function storeChannelRestockMessage(Product $product, int $addedQuantity, int $availableStock): string
-    {
+    private function storeChannelRestockMessage(
+        Product $product,
+        int $addedQuantity,
+        int $availableStock,
+        ?ProductPriceTierQuote $promotedTier = null,
+    ): string {
         $locale = TelegramLocale::STORE_CHANNEL_LOCALE;
         $unitPrice = $this->locale->translateLocale($locale, 'notification.store_channel.restock.price', [
             'amount' => number_format($product->price_amount, 0, ',', '.'),
@@ -363,7 +440,7 @@ class TelegramProductNotificationService
             ]);
         }
 
-        return implode("\n", [
+        $lines = [
             $this->locale->translateLocale($locale, 'notification.store_channel.restock.title', ['product' => $product->name]),
             $this->locale->translateLocale($locale, 'notification.store_channel.restock.added', [
                 'quantity' => $addedQuantity,
@@ -372,7 +449,19 @@ class TelegramProductNotificationService
                 'stock' => $availableStock,
             ]),
             $unitPrice,
-        ]);
+        ];
+        if ($promotedTier !== null) {
+            $tierLine = $this->locale->translateLocale($locale, 'notification.store_channel.restock.tier', [
+                'minimum' => $promotedTier->minimumQuantity,
+                'amount' => number_format($promotedTier->priceAmount, 0, ',', '.'),
+            ]);
+            if ($promotedTier->usdtPriceAmount !== null) {
+                $tierLine .= ' / '.$this->formatUsdt($promotedTier->usdtPriceAmount).' USDT each';
+            }
+            $lines[] = $tierLine;
+        }
+
+        return implode("\n", $lines);
     }
 
     private function storeChannelSoldOutMessage(Product $product): string

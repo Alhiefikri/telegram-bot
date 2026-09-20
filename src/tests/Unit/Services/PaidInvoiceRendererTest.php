@@ -47,6 +47,7 @@ class PaidInvoiceRendererTest extends TestCase
         $metadata = $result->metadata;
         $decoded = getimagesizefromstring($result->bytes);
 
+
         $this->assertSame('image/png', $decoded['mime'] ?? null);
         $this->assertSame(PaidInvoiceRenderer::WIDTH, $decoded[0] ?? null);
         $this->assertSame(PaidInvoiceRenderer::HEIGHT, $decoded[1] ?? null);
@@ -83,6 +84,31 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertStringNotContainsString('Mutable live product', json_encode($metadata, JSON_UNESCAPED_UNICODE));
         $this->assertStringNotContainsString('8581234505', json_encode($metadata));
         $this->assertStringNotContainsString('secret', json_encode($metadata));
+    }
+    public function test_real_order_item_tier_snapshot_reaches_public_invoice_and_sales_proof(): void
+    {
+        $order = $this->order(
+            customerTelegramId: 8581234505,
+            invoiceNumber: 'INV-TIER-SNAPSHOT',
+            items: [[
+                'product_name' => 'Tiered Product',
+                'quantity' => 2,
+                'quantity_price_tier_minimum' => 2,
+                'unit_price' => 23_000,
+                'subtotal' => 46_000,
+            ]],
+            payment: [
+                'method' => 'qris',
+                'provider_total_payment' => 46_000,
+            ],
+        );
+
+        $presentation = app(PaidInvoiceOrderPresentationAdapter::class)->present($order);
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 19);
+
+        $this->assertSame([2], $presentation->appliedQuantityPriceTierMinimums());
+        $this->assertSame(2, $presentation->items[0]['quantity_price_tier_minimum']);
+        $this->assertStringContainsString('🏷 Bulk pricing applied · 2+ units', $caption);
     }
 
     public function test_real_telegram_order_uses_a_masked_telegram_name_in_caption_and_invoice(): void
@@ -289,6 +315,8 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertSame($presentation->buyerName, $presentation->metadata()['buyer_display']);
         $this->assertSame(1, $presentation->items[0]['quantity']);
         $this->assertSame(1_250_000, $presentation->items[0]['subtotal']);
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 1);
+        $this->assertStringNotContainsString('Bulk pricing applied', $caption);
         $this->assertSame(0, $presentation->providerFee);
         $this->assertSame(1_250_000, $presentation->totalPaid);
 

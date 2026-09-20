@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Services\ProductStockIntake;
 use App\Services\ProductStockIntakeIdempotencyConflict;
 use App\Services\ProductStockIntakeSubmission;
+use App\Services\StockAdjustmentService;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -517,6 +518,56 @@ class ProductStockIntakeTest extends TestCase
         $this->assertSame(20, InventoryMovement::query()->sole()->available_after);
         $this->assertSame(1, AuditLog::query()->count());
         $this->assertSame(1, StockNotificationEvent::query()->count());
+    }
+
+    public function test_restock_notification_text_keeps_its_original_tier_after_catalog_edit_and_retry(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 778]])]);
+        Customer::factory()->create(['telegram_id' => 399031, 'locale' => 'id']);
+        $product = Product::factory()
+            ->withQuantityPriceTiers([
+                ['minimum_quantity' => 2, 'price_amount' => 45_000, 'usdt_price_amount' => null],
+                ['minimum_quantity' => 5, 'price_amount' => 40_000, 'usdt_price_amount' => null],
+            ])
+            ->create([
+                'price_amount' => 50_000,
+                'stock' => 0,
+                'reserved_stock' => 0,
+            ]);
+
+        $result = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product,
+            5,
+            'tier snapshot restock',
+            User::factory()->create(['role' => UserRole::Admin]),
+            '203.0.113.31',
+        );
+        $recipient = StockNotificationRecipient::query()->sole();
+        $event = StockNotificationEvent::query()->sole();
+        $this->assertNotNull($event->tier_promotion_snapshotted_at);
+        $this->assertSame(2, $event->promoted_tier_minimum);
+        $this->assertSame(45_000, $event->promoted_tier_price_amount);
+
+        $this->assertStringContainsString('Harga grosir mulai 2 unit: Rp45.000/unit', $recipient->text);
+        $this->assertStringNotContainsString('Harga grosir mulai 5 unit', $recipient->text);
+
+        $product->quantityPriceTiers()->delete();
+        $product->quantityPriceTiers()->create([
+            'minimum_quantity' => 2,
+            'price_amount' => 30_000,
+            'usdt_price_amount' => null,
+        ]);
+
+        $job = new SendProductStockNotifications($result['movement_id']);
+        $job->handle(app(StockNotificationDeliveryPipeline::class));
+        $job->handle(app(StockNotificationDeliveryPipeline::class));
+
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'Harga grosir mulai 2 unit: Rp45.000/unit')
+            && ! str_contains((string) $request['text'], 'Rp30.000/unit'));
+        $this->assertSame($recipient->text, StockNotificationRecipient::query()->sole()->text);
     }
 
     public function test_invalid_structured_submission_writes_nothing_and_returns_item_indexed_safe_errors(): void
