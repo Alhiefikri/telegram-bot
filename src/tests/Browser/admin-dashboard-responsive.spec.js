@@ -291,6 +291,7 @@ test("customer checkout: keeps the mobile sticky action aligned with the canonic
       return {
         position: sticky ? getComputedStyle(sticky).position : "",
         bottom: stickyRect?.bottom ?? 0,
+        viewportHeight: window.innerHeight,
         height: stickyRect?.height ?? 0,
         paddingBottom: mainStyle
           ? Number.parseFloat(mainStyle.paddingBottom)
@@ -303,7 +304,9 @@ test("customer checkout: keeps the mobile sticky action aligned with the canonic
     });
 
     expect(metrics.position).toBe("fixed");
-    expect(Math.abs(metrics.bottom - 844)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(metrics.bottom - metrics.viewportHeight)
+    ).toBeLessThanOrEqual(1);
     expect(metrics.paddingBottom).toBeGreaterThanOrEqual(metrics.height - 1);
     expect(metrics.documentWidth).toBeLessThanOrEqual(390);
 
