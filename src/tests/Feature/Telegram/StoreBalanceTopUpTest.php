@@ -2,15 +2,21 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceFundingIntentStatus;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendStoreBalanceTopUpInstructions;
 use App\Jobs\SendStoreBalanceTopUpReceipt;
+use App\Models\Cart;
+use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\Order;
+use App\Models\Payment;
+use App\Models\Product;
 use App\Models\StoreBalanceEntry;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
@@ -18,6 +24,8 @@ use App\Models\StoreBalanceTopUpEvent;
 use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUpdate;
+use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\OrderCheckoutService;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\TelegramNavigationRootService;
@@ -34,6 +42,75 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
     private const QRIS_URL = 'https://klikqris.com/storage/sandbox/qris_balance_top_up.png';
 
     private const PNG_BYTES = "\x89PNG\r\n\x1A\nstore-balance-top-up";
+
+    public function test_one_klikqris_top_up_payment_cannot_also_settle_a_same_amount_pending_order(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        KlikQrisSandboxScenarios::selectKlikQrisProvider();
+        $createCalls = 0;
+        $statusCalls = 0;
+        $this->fakeProvider($createCalls, $statusCalls);
+
+        $customer = Customer::factory()->create(['telegram_id' => 46191, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'price_amount' => 5000,
+        ]);
+        $cart = Cart::factory()->create([
+            'customer_id' => $customer->id,
+            'expires_at' => now()->addHour(),
+        ]);
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ]);
+        $order = app(OrderCheckoutService::class)->checkout(
+            $cart,
+            CheckoutPaymentIntents::klikQris(),
+        );
+        $payment = $order->payments()->sole();
+
+        $root = $this->openFundingChooser(46191, 46191);
+        $this->postTelegramUpdate($this->messageUpdate(46193, '/deposit 5000', [], 46191));
+        $intent = StoreBalanceFundingIntent::query()->sole();
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46194,
+            'top-up-confirm-isolation',
+            'balance:confirm:'.$intent->nonce,
+            [],
+            46191,
+            'private',
+            $root->message_id,
+        ));
+        $topUp = StoreBalanceTopUp::query()->sole();
+
+        $this->assertNotSame($payment->merchant_ref, $topUp->merchant_ref);
+        $this->assertStringStartsWith('PAY-', $payment->merchant_ref);
+        $this->assertStringStartsWith('BAL-', $topUp->merchant_ref);
+
+        $this->postJson('/api/webhook/klikqris/sandbox', [
+            'order_id' => $topUp->merchant_ref,
+            'amount' => 5000,
+            'total_amount' => 5016,
+            'status' => 'SUCCESS',
+            'signature' => 'top-up-signature',
+        ])->assertOk();
+
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+        $this->assertSame(1, $statusCalls);
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(5000, CustomerBalanceAccount::query()
+            ->where('customer_id', $customer->id)
+            ->sole()
+            ->balance);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(0, Payment::query()->where('status', PaymentStatus::Paid)->count());
+    }
 
     public function test_confirmation_creates_one_payable_top_up_and_settles_requested_credit_after_provider_success(): void
     {

@@ -2,17 +2,26 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceFundingIntentStatus;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Jobs\ProcessTelegramUpdate;
+use App\Models\Cart;
+use App\Models\CartItem;
 use App\Models\Customer;
+use App\Models\CustomerBalanceAccount;
 use App\Models\ManualPaymentSetting;
+use App\Models\Payment;
+use App\Models\Product;
 use App\Models\StoreBalanceEntry;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUpdate;
+use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\OrderCheckoutService;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramUpdateProcessor;
@@ -115,6 +124,68 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         $this->assertSame(1, TelegramOutboundEffect::query()
             ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
             ->count());
+    }
+
+    public function test_manual_top_up_proof_and_approval_never_settle_a_same_amount_pending_order(): void
+    {
+        $customer = Customer::factory()->create([
+            'telegram_id' => self::BUYER_CHAT_ID,
+            'locale' => 'en',
+        ]);
+        Customer::factory()->create(['telegram_id' => self::ADMIN_CHAT_ID, 'locale' => 'id']);
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'price_amount' => 5000,
+        ]);
+        $cart = Cart::factory()->create([
+            'customer_id' => $customer->id,
+            'expires_at' => now()->addHour(),
+        ]);
+        CartItem::factory()->create([
+            'cart_id' => $cart->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ]);
+        $order = app(OrderCheckoutService::class)->checkout(
+            $cart,
+            CheckoutPaymentIntents::manualQris(),
+        );
+        $payment = $order->payments()->sole();
+
+        $root = $this->openFundingChooser();
+        $topUp = $this->confirmTopUp($root, 46592, 46593);
+        $this->postTelegramUpdate($this->paymentPhotoUpdate(46594, '', [], self::BUYER_CHAT_ID));
+
+        $this->assertNotNull($topUp->fresh()->payment_proof_submitted_at);
+        $this->assertNull($payment->fresh()->payment_proof_submitted_at);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(StoreBalanceTopUpStatus::AwaitingConfirmation, $topUp->fresh()->status);
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+
+        $proof = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
+            ->sole();
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46595,
+            'topup-isolation-approve',
+            'admin:topup-approve:'.$topUp->getKey(),
+            [],
+            self::ADMIN_CHAT_ID,
+            'private',
+            (int) $proof->telegram_message_id,
+        ));
+
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+        $this->assertSame(5000, CustomerBalanceAccount::query()
+            ->where('customer_id', $customer->id)
+            ->sole()
+            ->balance);
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(0, Payment::query()->where('status', PaymentStatus::Paid)->count());
     }
 
     public function test_admin_approval_credits_the_balance_exactly_once_and_sends_the_receipt(): void
