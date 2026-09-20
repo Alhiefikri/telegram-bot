@@ -449,9 +449,9 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertSame('💰 Baki · Rp50.000', $msPaymentButtons[1]['text']);
         $this->assertSame('💎 USDT · 3 USDT', $msPaymentButtons[2]['text']);
         $this->assertStringNotContainsString('checkout.payment_method', json_encode($idPayload, JSON_THROW_ON_ERROR));
-        $this->assertLocalizedCopy($idPayload, ['QRIS Antarnegara', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok', 'Tergantung dukungan aplikasi/PJP dan merchant'], ['QRIS Antarnegara tersedia melalui koneksi:', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP']);
-        $this->assertLocalizedCopy($enPayload, ['QRIS Cross-Border', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China', 'Availability depends on the payment app/provider and participating merchant'], ['QRIS Cross-Border currently supports connections with:', 'Availability still depends on the payment app/provider']);
-        $this->assertLocalizedCopy($msPayload, ['QRIS Rentas Sempadan', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepun', '🇰🇷 Korea Selatan', '🇨🇳 China', 'Ketersediaan bergantung pada aplikasi/penyedia pembayaran dan peniaga yang mengambil bahagian'], ['QRIS Rentas Sempadan:', 'Ketersediaan masih bergantung pada aplikasi/penyedia pembayaran']);
+        $this->assertLocalizedCopy($idPayload, ['🌍 QRIS Antarnegara', 'ID', 'TH', 'MY', 'SG', 'JP', 'KR', 'CN', 'Ketersediaan bergantung pada aplikasi, PJP, dan merchant.'], ['QRIS Antarnegara tersedia melalui koneksi:', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP']);
+        $this->assertLocalizedCopy($enPayload, ['🌍 Cross-Border QRIS', 'ID', 'TH', 'MY', 'SG', 'JP', 'KR', 'CN', 'Availability depends on the payment app, provider, and merchant.'], ['QRIS Cross-Border currently supports connections with:', 'Availability still depends on the payment app/provider']);
+        $this->assertLocalizedCopy($msPayload, ['🌍 QRIS Rentas Sempadan', 'ID', 'TH', 'MY', 'SG', 'JP', 'KR', 'CN', 'Ketersediaan bergantung pada aplikasi bayaran, penyedia pembayaran dan peniaga.'], ['QRIS Rentas Sempadan:', 'Ketersediaan masih bergantung pada aplikasi/penyedia pembayaran']);
     }
 
     public function test_checkout_method_prompt_explains_qris_cross_border_support_in_customer_locale(): void
@@ -501,24 +501,24 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertSame('checkout:binance', $msCheckoutButtons[2]);
         $this->assertLocalizedCopy(
             $idCheckoutPayload,
-            ['Pilih metode pembayaran di bawah.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepang', '🇰🇷 Korea Selatan', '🇨🇳 Tiongkok'],
-            ['Choose a payment method below.', '🇸🇬 Singapore'],
+            ['Pilih metode pembayaran di bawah.', '🌍 QRIS Antarnegara', 'ID', 'TH', 'MY', 'SG', 'JP', 'KR', 'CN'],
+            ['Choose a payment method below.', 'Cross-Border QRIS'],
         );
         $this->assertLocalizedCopy(
             $enCheckoutPayload,
-            ['Choose a payment method below.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapore', '🇯🇵 Japan', '🇰🇷 South Korea', '🇨🇳 China'],
-            ['Pilih metode pembayaran di bawah.', '🇸🇬 Singapura'],
+            ['Choose a payment method below.', '🌍 Cross-Border QRIS', 'ID', 'TH', 'MY', 'SG', 'JP', 'KR', 'CN'],
+            ['Pilih metode pembayaran di bawah.', 'QRIS Antarnegara'],
         );
         $this->assertLocalizedCopy(
             $msCheckoutPayload,
-            ['Pilih kaedah bayaran di bawah.', '🇮🇩 Indonesia', '🇹🇭 Thailand', '🇲🇾 Malaysia', '🇸🇬 Singapura', '🇯🇵 Jepun', '🇰🇷 Korea Selatan', '🇨🇳 China'],
+            ['Pilih kaedah bayaran di bawah.', '🌍 QRIS Rentas Sempadan', 'ID', 'TH', 'MY', 'SG', 'JP', 'KR', 'CN'],
             ['Pilih metode pembayaran di bawah.', 'Choose a payment method below.'],
         );
 
         // The cross-border block is quoted so it reads as one panel on every locale.
         foreach ([$idCheckoutPayload, $enCheckoutPayload, $msCheckoutPayload] as $checkoutPayload) {
             $this->assertSame('HTML', $checkoutPayload['parse_mode'] ?? null);
-            $this->assertStringContainsString('<blockquote>🌏 QRIS', (string) $checkoutPayload['text']);
+            $this->assertMatchesRegularExpression('/<blockquote>🌍 (?:QRIS|Cross-Border)/u', (string) $checkoutPayload['text']);
             $this->assertStringEndsWith('</blockquote>', (string) $checkoutPayload['text']);
         }
     }

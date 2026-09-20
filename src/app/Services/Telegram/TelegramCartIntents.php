@@ -92,26 +92,37 @@ class TelegramCartIntents
     private function pricingSummary(Customer $customer, Product $product, ProductPriceQuote $quote): string
     {
         $availableStock = max(0, $product->availableStock());
+        $showUsdtPricing = $quote->usdtSubtotal !== null;
         $lines = [
-            $this->locale->translate($customer, 'cart.price_summary', [
-                'base' => number_format($quote->baseIdrUnitAmount, 0, ',', '.'),
-                'unit' => number_format($quote->effectiveIdrUnitAmount, 0, ',', '.'),
-            ]),
+            $this->locale->translate(
+                $customer,
+                $showUsdtPricing ? 'cart.price_summary_dual' : 'cart.price_summary',
+                [
+                    'base' => number_format($quote->baseIdrUnitAmount, 0, ',', '.'),
+                    'unit' => number_format($quote->effectiveIdrUnitAmount, 0, ',', '.'),
+                    ...($showUsdtPricing ? [
+                        'base_usdt' => $this->locale->usdt((int) $quote->baseUsdtUnitAmount),
+                        'unit_usdt' => $this->locale->usdt((int) $quote->effectiveUsdtUnitAmount),
+                    ] : []),
+                ],
+            ),
         ];
         foreach ($quote->tiers() as $tier) {
             if ($tier->minimumQuantity > $availableStock) {
                 continue;
             }
-            $lines[] = $this->locale->translate(
-                $customer,
-                $quote->appliedTierMinimum === $tier->minimumQuantity
-                    ? 'cart.tier_applied'
-                    : 'cart.tier',
-                [
-                    'minimum' => $tier->minimumQuantity,
-                    'amount' => number_format($tier->priceAmount, 0, ',', '.'),
-                ],
-            );
+            $active = $quote->appliedTierMinimum === $tier->minimumQuantity;
+            $key = match ([$showUsdtPricing, $active]) {
+                [true, true] => 'cart.tier_applied_dual',
+                [true, false] => 'cart.tier_dual',
+                [false, true] => 'cart.tier_applied',
+                default => 'cart.tier',
+            };
+            $lines[] = $this->locale->translate($customer, $key, [
+                'minimum' => $tier->minimumQuantity,
+                'amount' => number_format($tier->priceAmount, 0, ',', '.'),
+                ...($showUsdtPricing ? ['usdt' => $this->locale->usdt((int) $tier->usdtPriceAmount)] : []),
+            ]);
         }
         if ($quote->nextTier !== null
             && $quote->nextTier->minimumQuantity <= $availableStock) {
@@ -125,15 +136,30 @@ class TelegramCartIntents
                 $lines[] = $this->locale->translate($customer, 'cart.next_tier', [
                     'quantity' => $nextTierQuantity - $quote->quantity,
                 ]);
-                $lines[] = $this->locale->translate($customer, 'cart.next_tier_total', [
-                    'quantity' => $nextTierQuantity,
-                    'amount' => number_format($nextTierQuote->idrSubtotal, 0, ',', '.'),
-                ]);
+                $lines[] = $this->locale->translate(
+                    $customer,
+                    $showUsdtPricing ? 'cart.next_tier_total_dual' : 'cart.next_tier_total',
+                    [
+                        'quantity' => $nextTierQuantity,
+                        'amount' => number_format($nextTierQuote->idrSubtotal, 0, ',', '.'),
+                        ...($showUsdtPricing ? ['usdt' => $this->locale->usdt((int) $nextTierQuote->usdtSubtotal)] : []),
+                    ],
+                );
             }
         }
-        if ($quote->idrSavings() > 0) {
+        $usdtSavings = $quote->usdtSavings();
+        if ($quote->idrSavings() > 0 && $usdtSavings !== null && $usdtSavings > 0) {
+            $lines[] = $this->locale->translate($customer, 'cart.savings_dual', [
+                'idr' => number_format($quote->idrSavings(), 0, ',', '.'),
+                'usdt' => $this->locale->usdt($usdtSavings),
+            ]);
+        } elseif ($quote->idrSavings() > 0) {
             $lines[] = $this->locale->translate($customer, 'cart.savings', [
                 'amount' => number_format($quote->idrSavings(), 0, ',', '.'),
+            ]);
+        } elseif ($usdtSavings !== null && $usdtSavings > 0) {
+            $lines[] = $this->locale->translate($customer, 'cart.savings_usdt', [
+                'amount' => $this->locale->usdt($usdtSavings),
             ]);
         }
 

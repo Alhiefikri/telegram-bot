@@ -147,7 +147,7 @@ class TelegramLocale
 
     public function usdt(int $micro): string
     {
-        return number_format($micro / 1_000_000, 6, '.', '');
+        return rtrim(rtrim(number_format($micro / 1_000_000, 6, '.', ''), '0'), '.');
     }
 
     public function languageKeyboard(): array

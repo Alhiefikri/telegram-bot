@@ -568,23 +568,37 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         /** @var CheckoutPricingSnapshot $snapshot */
         $snapshot = $preview['snapshot'];
         $products = $preview['products'];
+        $showUsdtPricing = $this->checkoutIntents->binanceRailSelectable() && $snapshot->usdtTotal() !== null;
         $summaryLines = [$this->locale->translate($context->customer, 'checkout.payment_method')];
         foreach ($cart->cartItems as $item) {
             $quote = $snapshot->quoteForItem($item);
             $product = $products->get((int) $item->product_id);
-            $summaryLines[] = $this->locale->translate($context->customer, 'checkout.cart_item', [
-                'product' => $product?->name ?? 'Product',
-                'quantity' => (int) $item->quantity,
-                'unit' => number_format($quote->effectiveIdrUnitAmount, 0, ',', '.'),
-                'subtotal' => number_format($quote->idrSubtotal, 0, ',', '.'),
-            ]);
+            $summaryLines[] = $this->locale->translate(
+                $context->customer,
+                $showUsdtPricing ? 'checkout.cart_item_dual' : 'checkout.cart_item',
+                [
+                    'product' => $product?->name ?? 'Product',
+                    'quantity' => (int) $item->quantity,
+                    'unit' => number_format($quote->effectiveIdrUnitAmount, 0, ',', '.'),
+                    'subtotal' => number_format($quote->idrSubtotal, 0, ',', '.'),
+                    ...($showUsdtPricing ? [
+                        'usdt_unit' => $this->checkoutIntents->formatUsdt((int) $quote->effectiveUsdtUnitAmount),
+                        'usdt_subtotal' => $this->checkoutIntents->formatUsdt((int) $quote->usdtSubtotal),
+                    ] : []),
+                ],
+            );
             if ($product instanceof Product) {
                 foreach ($quote->tiers() as $tier) {
                     if ($tier->minimumQuantity <= $product->availableStock()) {
-                        $summaryLines[] = $this->locale->translate($context->customer, 'checkout.cart_tier', [
-                            'minimum' => $tier->minimumQuantity,
-                            'amount' => number_format($tier->priceAmount, 0, ',', '.'),
-                        ]);
+                        $summaryLines[] = $this->locale->translate(
+                            $context->customer,
+                            $showUsdtPricing ? 'checkout.cart_tier_dual' : 'checkout.cart_tier',
+                            [
+                                'minimum' => $tier->minimumQuantity,
+                                'amount' => number_format($tier->priceAmount, 0, ',', '.'),
+                                ...($showUsdtPricing ? ['usdt' => $this->checkoutIntents->formatUsdt((int) $tier->usdtPriceAmount)] : []),
+                            ],
+                        );
                     }
                 }
                 if ($quote->nextTier !== null
@@ -595,22 +609,42 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                         $summaryLines[] = $this->locale->translate($context->customer, 'checkout.cart_next_tier', [
                             'quantity' => $nextTierQuantity - $quote->quantity,
                         ]);
-                        $summaryLines[] = $this->locale->translate($context->customer, 'checkout.cart_next_tier_total', [
-                            'quantity' => $nextTierQuantity,
-                            'amount' => number_format($nextTierQuote->idrSubtotal, 0, ',', '.'),
-                        ]);
+                        $summaryLines[] = $this->locale->translate(
+                            $context->customer,
+                            $showUsdtPricing ? 'checkout.cart_next_tier_total_dual' : 'checkout.cart_next_tier_total',
+                            [
+                                'quantity' => $nextTierQuantity,
+                                'amount' => number_format($nextTierQuote->idrSubtotal, 0, ',', '.'),
+                                ...($showUsdtPricing ? ['usdt' => $this->checkoutIntents->formatUsdt((int) $nextTierQuote->usdtSubtotal)] : []),
+                            ],
+                        );
                     }
                 }
             }
-            if ($quote->idrSavings() > 0) {
+            $usdtSavings = $quote->usdtSavings();
+            if ($quote->idrSavings() > 0 && $usdtSavings !== null && $usdtSavings > 0) {
+                $summaryLines[] = $this->locale->translate($context->customer, 'checkout.cart_savings_dual', [
+                    'idr' => number_format($quote->idrSavings(), 0, ',', '.'),
+                    'usdt' => $this->checkoutIntents->formatUsdt($usdtSavings),
+                ]);
+            } elseif ($quote->idrSavings() > 0) {
                 $summaryLines[] = $this->locale->translate($context->customer, 'checkout.cart_savings', [
                     'amount' => number_format($quote->idrSavings(), 0, ',', '.'),
                 ]);
+            } elseif ($usdtSavings !== null && $usdtSavings > 0) {
+                $summaryLines[] = $this->locale->translate($context->customer, 'checkout.cart_savings_usdt', [
+                    'amount' => $this->checkoutIntents->formatUsdt($usdtSavings),
+                ]);
             }
         }
-        $summaryLines[] = $this->locale->translate($context->customer, 'checkout.cart_total', [
-            'amount' => number_format($snapshot->idrTotal(), 0, ',', '.'),
-        ]);
+        $summaryLines[] = $this->locale->translate(
+            $context->customer,
+            $showUsdtPricing ? 'checkout.cart_total_dual' : 'checkout.cart_total',
+            [
+                'amount' => number_format($snapshot->idrTotal(), 0, ',', '.'),
+                ...($showUsdtPricing ? ['usdt' => $this->checkoutIntents->formatUsdt((int) $snapshot->usdtTotal())] : []),
+            ],
+        );
 
         $qrisButton = [[
             'text' => $this->locale->translate($context->customer, 'checkout.payment.qris', [

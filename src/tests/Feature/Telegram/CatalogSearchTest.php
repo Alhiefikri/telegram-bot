@@ -268,7 +268,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'Netflix Premium')
             && str_contains((string) $request['text'], 'Quantity: 1')
-            && str_contains((string) $request['text'], 'Subtotal: Rp25.000')
+            && str_contains((string) $request['text'], 'Total: Rp25.000')
             && str_contains(json_encode($request->data()), 'Enter custom quantity')
             && str_contains(json_encode($request->data()), 'detail:pay:qris:'.$product->id.':')
             && ! str_contains((string) $request['text'], 'Choose quantity'));
@@ -741,9 +741,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($r['text'], '🛒 Terjual: 2')
             && str_contains($r['text'], '<blockquote>Desain premium siap pakai.</blockquote>')
             && ($r['parse_mode'] ?? null) === 'HTML'
-            && str_contains($r['text'], '🌏 QRIS Antarnegara')
+            && str_contains($r['text'], '🌍 QRIS Antarnegara')
             && str_contains($r['text'], 'Jumlah: 1')
-            && str_contains($r['text'], 'Subtotal: Rp25.000')
+            && str_contains($r['text'], 'Total: Rp25.000')
             && str_contains(json_encode($r->data()), 'detail:pay:qris:'.$product->id.':')
             && ! str_contains($r['text'], 'Pilih jumlah'));
     }

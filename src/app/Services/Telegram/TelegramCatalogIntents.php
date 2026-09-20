@@ -544,31 +544,34 @@ class TelegramCatalogIntents
         }
 
         $baseIdr = $quote?->baseIdrUnitAmount ?? (int) $product->price_amount;
+        $showUsdtPricing = $binanceAvailable && $quote?->baseUsdtUnitAmount !== null;
         $lines = [
             $this->escapeHtml($this->productIcon($product->name, $product->icon).' '.$product->name),
-            '━━━━━━━━━━━━━━',
-            $this->locale->translate($customer, 'catalog.detail.base_price', [
-                'amount' => number_format($baseIdr, 0, ',', '.'),
-            ]),
+            '',
+            $this->locale->translate(
+                $customer,
+                $showUsdtPricing ? 'catalog.detail.base_price_dual' : 'catalog.detail.base_price',
+                [
+                    'amount' => number_format($baseIdr, 0, ',', '.'),
+                    ...($showUsdtPricing ? ['usdt' => $this->checkout->formatUsdt($quote->baseUsdtUnitAmount)] : []),
+                ],
+            ),
         ];
         if ($quote !== null) {
             foreach ($this->reachableTiers($quote, $availableStock) as $tier) {
-                $lines[] = $this->locale->translate(
-                    $customer,
-                    $quote->appliedTierMinimum === $tier->minimumQuantity
-                        ? 'catalog.detail.tier_active'
-                        : 'catalog.detail.tier',
-                    [
-                        'minimum' => $tier->minimumQuantity,
-                        'amount' => number_format($tier->priceAmount, 0, ',', '.'),
-                    ],
-                );
+                $active = $quote->appliedTierMinimum === $tier->minimumQuantity;
+                $key = match ([$showUsdtPricing, $active]) {
+                    [true, true] => 'catalog.detail.tier_active_dual',
+                    [true, false] => 'catalog.detail.tier_dual',
+                    [false, true] => 'catalog.detail.tier_active',
+                    default => 'catalog.detail.tier',
+                };
+                $lines[] = $this->locale->translate($customer, $key, [
+                    'minimum' => $tier->minimumQuantity,
+                    'amount' => number_format($tier->priceAmount, 0, ',', '.'),
+                    ...($showUsdtPricing ? ['usdt' => $this->checkout->formatUsdt((int) $tier->usdtPriceAmount)] : []),
+                ]);
             }
-        }
-        if ($binanceAvailable && $quote->baseUsdtUnitAmount !== null) {
-            $lines[] = $this->locale->translate($customer, 'catalog.detail.binance_price', [
-                'amount' => $this->checkout->formatUsdt($quote->baseUsdtUnitAmount),
-            ]);
         }
         if ($availableStock > 0) {
             $lines[] = $this->locale->translate($customer, 'catalog.stock').$availableStock;
@@ -576,18 +579,39 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->translate($customer, 'catalog.status.sold_out');
         }
         if ($quantity !== null && $quote !== null) {
+            $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'catalog.detail.quantity', ['quantity' => $quantity]);
             if ($quote->hasAppliedTier()) {
-                $lines[] = $this->locale->translate($customer, 'catalog.detail.effective_unit', [
-                    'amount' => number_format($quote->effectiveIdrUnitAmount, 0, ',', '.'),
-                ]);
+                $lines[] = $this->locale->translate(
+                    $customer,
+                    $showUsdtPricing ? 'catalog.detail.effective_unit_dual' : 'catalog.detail.effective_unit',
+                    [
+                        'amount' => number_format($quote->effectiveIdrUnitAmount, 0, ',', '.'),
+                        ...($showUsdtPricing ? ['usdt' => $this->checkout->formatUsdt((int) $quote->effectiveUsdtUnitAmount)] : []),
+                    ],
+                );
             }
-            $lines[] = $this->locale->translate($customer, 'catalog.detail.subtotal', [
-                'amount' => number_format($quote->idrSubtotal, 0, ',', '.'),
-            ]);
-            if ($quote->idrSavings() > 0) {
+            $lines[] = $this->locale->translate(
+                $customer,
+                $showUsdtPricing ? 'catalog.detail.subtotal_dual' : 'catalog.detail.subtotal',
+                [
+                    'amount' => number_format($quote->idrSubtotal, 0, ',', '.'),
+                    ...($showUsdtPricing ? ['usdt' => $this->checkout->formatUsdt((int) $quote->usdtSubtotal)] : []),
+                ],
+            );
+            $usdtSavings = $quote->usdtSavings();
+            if ($quote->idrSavings() > 0 && $usdtSavings !== null && $usdtSavings > 0) {
+                $lines[] = $this->locale->translate($customer, 'catalog.detail.savings_dual', [
+                    'idr' => number_format($quote->idrSavings(), 0, ',', '.'),
+                    'usdt' => $this->checkout->formatUsdt($usdtSavings),
+                ]);
+            } elseif ($quote->idrSavings() > 0) {
                 $lines[] = $this->locale->translate($customer, 'catalog.detail.savings', [
                     'amount' => number_format($quote->idrSavings(), 0, ',', '.'),
+                ]);
+            } elseif ($usdtSavings !== null && $usdtSavings > 0) {
+                $lines[] = $this->locale->translate($customer, 'catalog.detail.savings_usdt', [
+                    'amount' => $this->checkout->formatUsdt($usdtSavings),
                 ]);
             }
             if ($nextTier !== null && $nextTierQuote !== null) {
@@ -595,10 +619,15 @@ class TelegramCatalogIntents
                 $lines[] = $this->locale->translate($customer, 'catalog.detail.next_tier', [
                     'quantity' => $nextTier->minimumQuantity - $quantity,
                 ]);
-                $lines[] = $this->locale->translate($customer, 'catalog.detail.next_tier_total', [
-                    'quantity' => $nextTier->minimumQuantity,
-                    'amount' => number_format($nextTierQuote->idrSubtotal, 0, ',', '.'),
-                ]);
+                $lines[] = $this->locale->translate(
+                    $customer,
+                    $showUsdtPricing ? 'catalog.detail.next_tier_total_dual' : 'catalog.detail.next_tier_total',
+                    [
+                        'quantity' => $nextTier->minimumQuantity,
+                        'amount' => number_format($nextTierQuote->idrSubtotal, 0, ',', '.'),
+                        ...($showUsdtPricing ? ['usdt' => $this->checkout->formatUsdt((int) $nextTierQuote->usdtSubtotal)] : []),
+                    ],
+                );
             }
         }
         $lines[] = '';

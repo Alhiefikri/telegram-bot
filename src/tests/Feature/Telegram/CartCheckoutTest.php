@@ -273,10 +273,10 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertNotNull($request);
         $text = (string) $request[0]->data()['text'];
         $this->assertStringContainsString('Subtotal: Rp25.000', $text);
-        $this->assertStringContainsString('Base: Rp25.000/unit', $text);
+        $this->assertStringContainsString('Base price: Rp25.000/unit', $text);
         $this->assertStringContainsString('Wholesale 2+: Rp23.000/unit', $text);
-        $this->assertStringContainsString('Add 1 more units for the wholesale price.', $text);
-        $this->assertStringContainsString('Total 2 units: Rp46.000', $text);
+        $this->assertStringContainsString('🔥 Add 1 more units to unlock wholesale pricing.', $text);
+        $this->assertStringContainsString('Total for 2 units: Rp46.000', $text);
     }
 
     public function test_payment_choice_preview_quotes_mixed_cart_tiers_and_effective_usdt_total(): void
@@ -329,11 +329,11 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $payload = $request[0]->data();
         $text = (string) $payload['text'];
         $keyboard = json_encode($payload['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
-        $this->assertStringContainsString('Mixed First × 2 · Rp18.000/unit · Rp36.000', $text);
-        $this->assertStringContainsString('Mixed Second × 3 · Rp9.000/unit · Rp27.000', $text);
-        $this->assertStringContainsString('Wholesale 2+: Rp18.000/unit', $text);
-        $this->assertStringContainsString('Wholesale 3+: Rp9.000/unit', $text);
-        $this->assertStringContainsString('Total: Rp63.000', $text);
+        $this->assertStringContainsString('Mixed First × 2 · Rp18.000/unit · 💎 3 USDT/unit · Total Rp36.000 · 💎 6 USDT', $text);
+        $this->assertStringContainsString('Mixed Second × 3 · Rp9.000/unit · 💎 1.8 USDT/unit · Total Rp27.000 · 💎 5.4 USDT', $text);
+        $this->assertStringContainsString('Wholesale 2+: Rp18.000/unit · 💎 3 USDT/unit', $text);
+        $this->assertStringContainsString('Wholesale 3+: Rp9.000/unit · 💎 1.8 USDT/unit', $text);
+        $this->assertStringContainsString('Total: Rp63.000 · 💎 11.4 USDT', $text);
         $this->assertStringContainsString('QRIS · Rp63.000', $keyboard);
         $this->assertStringContainsString('Balance · Rp63.000', $keyboard);
         $this->assertStringContainsString('USDT · 11.4 USDT', $keyboard);
@@ -738,7 +738,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                 'chat_id' => 45201,
                 'quantity' => 'Jumlah: 1',
                 'custom' => 'Masukkan jumlah kustom',
-                'subtotal' => 'Subtotal: Rp25.000',
+                'subtotal' => 'Total: Rp25.000',
                 'qris' => 'QRIS · Rp25.000',
                 'maintenance' => 'Checkout sedang dalam maintenance',
                 'status' => 'Cek Status Checkout',
@@ -747,7 +747,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                 'chat_id' => 45202,
                 'quantity' => 'Quantity: 1',
                 'custom' => 'Enter custom quantity',
-                'subtotal' => 'Subtotal: Rp25.000',
+                'subtotal' => 'Total: Rp25.000',
                 'qris' => 'QRIS · Rp25.000',
                 'maintenance' => 'Checkout is under maintenance',
                 'status' => 'Check Checkout Status',
@@ -756,7 +756,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
                 'chat_id' => 45203,
                 'quantity' => 'Kuantiti: 1',
                 'custom' => 'Masukkan kuantiti tersuai',
-                'subtotal' => 'Subjumlah: Rp25.000',
+                'subtotal' => 'Jumlah: Rp25.000',
                 'qris' => 'QRIS · Rp25.000',
                 'maintenance' => 'Checkout sedang diselenggara',
                 'status' => 'Semak Status Checkout',
