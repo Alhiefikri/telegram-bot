@@ -91,6 +91,42 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'expired'));
     }
 
+    public function test_product_detail_renders_dynamic_replacement_refund_policy_after_description_in_customer_locale(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 318002, 'locale' => 'id']);
+        $product = Product::factory()->create([
+            'name' => 'Policy Detail Product',
+            'description' => 'Deskripsi produk yang dinamis.',
+            'warranty_policy' => "Penggantian maksimal 1 kali dalam 7 hari.\nRefund diproses setelah pemeriksaan admin <support>.",
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+        $indonesian = $this->lastDetailMessage('Policy Detail Product');
+        $indonesianText = (string) $indonesian['text'];
+        $descriptionOffset = strpos($indonesianText, '<blockquote>Deskripsi produk yang dinamis.</blockquote>');
+        $policyOffset = strpos($indonesianText, '<blockquote>⚠️ Kebijakan Penggantian &amp; Pengembalian Dana');
+        $qrisOffset = strpos($indonesianText, '<blockquote>🌍 QRIS Antarnegara');
+
+        $this->assertNotFalse($descriptionOffset);
+        $this->assertNotFalse($policyOffset);
+        $this->assertNotFalse($qrisOffset);
+        $this->assertLessThan($policyOffset, $descriptionOffset);
+        $this->assertLessThan($qrisOffset, $policyOffset);
+        $this->assertStringContainsString('Refund diproses setelah pemeriksaan admin &lt;support&gt;.', $indonesianText);
+
+        $malayCustomer = Customer::factory()->create(['telegram_id' => 318003, 'locale' => 'ms']);
+        $this->openDetail($malayCustomer, $product);
+        $malayText = (string) $this->lastDetailMessage('Policy Detail Product')['text'];
+
+        $this->assertStringContainsString('<blockquote>⚠️ Polisi Penggantian &amp; Bayaran Balik', $malayText);
+        $this->assertStringContainsString('Penggantian maksimal 1 kali dalam 7 hari.', $malayText);
+
+    }
+
     public function test_product_detail_renders_reachable_tiers_and_jumps_to_the_next_tier(): void
     {
         $this->fakeTelegramHttp();

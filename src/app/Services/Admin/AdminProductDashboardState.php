@@ -134,6 +134,7 @@ class AdminProductDashboardState
                 'productUsdtPrice' => $productUsdtPrice,
                 'productCategoryId' => old('category_id', $editingProduct['category_id'] ?? ''),
                 'productDescription' => old('description', $editingProduct['description'] ?? ''),
+                'productWarrantyPolicy' => old('warranty_policy', $editingProduct['warranty_policy'] ?? ''),
                 'productDeliveryNote' => old('delivery_note', $editingProduct['delivery_note'] ?? ''),
                 'productUsageGuideTitle' => old('usage_guide_title', $editingProduct['usage_guide_title'] ?? ''),
                 'productQuantityPriceTiers' => $productTierRows,

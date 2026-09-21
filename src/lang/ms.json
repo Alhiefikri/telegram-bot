@@ -175,6 +175,7 @@
   "catalog.stock": "Stok tersedia: ",
   "catalog.sold": "🛒 Terjual: ",
   "catalog.details": "📝 Butiran produk",
+  "catalog.replacement_refund_policy": "⚠️ Polisi Penggantian & Bayaran Balik",
   "catalog.qris_support": "🌍 QRIS Rentas Sempadan · ID · TH · MY · SG · JP · KR · CN\n📱 Ketersediaan bergantung pada aplikasi bayaran, penyedia pembayaran dan peniaga.",
   "catalog.category.back": "⬅️ Pilih Kategori",
   "catalog.product_button": ":name — (:status: :stock)",

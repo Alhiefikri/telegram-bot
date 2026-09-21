@@ -175,6 +175,7 @@
   "catalog.stock": "Stok tersedia: ",
   "catalog.sold": "🛒 Terjual: ",
   "catalog.details": "📝 Detail produk",
+  "catalog.replacement_refund_policy": "⚠️ Kebijakan Penggantian & Pengembalian Dana",
   "catalog.qris_support": "🌍 QRIS Antarnegara · ID · TH · MY · SG · JP · KR · CN\n📱 Ketersediaan bergantung pada aplikasi, PJP, dan merchant.",
   "catalog.category.back": "⬅️ Pilih Kategori",
   "catalog.product_button": ":name — (:status: :stock)",

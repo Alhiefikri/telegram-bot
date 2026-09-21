@@ -175,6 +175,7 @@
   "catalog.stock": "Available stock: ",
   "catalog.sold": "🛒 Sold: ",
   "catalog.details": "📝 Product details",
+  "catalog.replacement_refund_policy": "⚠️ Replacement & Refund Policy",
   "catalog.qris_support": "🌍 Cross-Border QRIS · ID · TH · MY · SG · JP · KR · CN\n📱 Availability depends on the payment app, provider, and merchant.",
   "catalog.category.back": "⬅️ Choose Category",
   "catalog.product_button": ":name — (:status: :stock)",

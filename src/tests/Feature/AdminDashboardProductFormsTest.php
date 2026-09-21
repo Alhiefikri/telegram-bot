@@ -148,6 +148,7 @@ class AdminDashboardProductFormsTest extends TestCase
                 'price_amount' => '75000',
                 'category_id' => (string) $category->id,
                 'description' => 'Akses Canva Pro siap pakai.',
+                'warranty_policy' => 'Penggantian satu kali dalam 7 hari; refund setelah pemeriksaan admin.',
                 'delivery_note' => "Login menggunakan data akun yang dikirim.\nGanti password setelah berhasil masuk.",
                 'usage_guide_title' => 'Panduan penggunaan Canva Pro',
                 'usage_guide_url' => 'https://docs.example.test/canva/getting-started',
@@ -169,6 +170,7 @@ class AdminDashboardProductFormsTest extends TestCase
         $product = Product::where('name', 'Canva Pro 1 Bulan')->firstOrFail();
         $this->assertSame('Akses Canva Pro siap pakai.', $product->description);
         $this->assertSame('🖌️', $product->icon);
+        $this->assertSame('Penggantian satu kali dalam 7 hari; refund setelah pemeriksaan admin.', $product->warranty_policy);
         $this->assertSame("Login menggunakan data akun yang dikirim.\nGanti password setelah berhasil masuk.", $product->delivery_note);
         $this->assertSame('Panduan penggunaan Canva Pro', $product->usage_guide_title);
         $this->assertSame('https://docs.example.test/canva/getting-started', $product->usage_guide_url);
@@ -190,6 +192,8 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSeeInOrder(['Dipesan', '0'])
 
             ->assertSee('Akses Canva Pro siap pakai.')
+            ->assertSee('Replacement &amp; Refund Policy', false)
+            ->assertSee('productWarrantyPolicy', false)
 
             ->assertSee('/assets/product-placeholder.svg', false);
     }

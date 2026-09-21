@@ -633,6 +633,11 @@ class TelegramCatalogIntents
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.details');
         $lines[] = $this->captions->blockquote($this->descriptionText($customer, $product));
+        $replacementRefundPolicy = $this->replacementRefundPolicyText($customer, $product);
+        if ($replacementRefundPolicy !== null) {
+            $lines[] = '';
+            $lines[] = $this->captions->blockquote($replacementRefundPolicy);
+        }
         if ($maintenance->active) {
             $lines[] = '';
             $lines[] = $this->escapeHtml($this->maintenanceNotice($customer, $maintenance));
@@ -1391,5 +1396,15 @@ class TelegramCatalogIntents
         $description = trim((string) $product->description);
 
         return $description !== '' ? $description : $this->locale->translate($customer, 'catalog.description_missing');
+    }
+
+    private function replacementRefundPolicyText(Customer $customer, Product $product): ?string
+    {
+        $policy = trim((string) $product->warranty_policy);
+        if ($policy === '') {
+            return null;
+        }
+
+        return $this->locale->translate($customer, 'catalog.replacement_refund_policy')."\n".$policy;
     }
 }
