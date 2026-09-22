@@ -10,7 +10,9 @@
 
         <main class="flex-grow pb-16">
             @include('storefront.partials.checkout-maintenance')
-            @include('storefront.partials.shop.checkout-error')
+            @if (!($isPublicHomepage ?? false))
+                @include('storefront.partials.shop.checkout-error')
+            @endif
             @include('storefront.partials.hero')
             @include('storefront.partials.catalog')
             @include('storefront.partials.verified-purchase-activity')

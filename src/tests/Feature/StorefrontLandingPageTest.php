@@ -38,6 +38,30 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('property="og:title"', false)
             ->assertDontSee('/admin/login', false)
             ->assertDontSee("Let's get started");
+
+        $this->assertSame(
+            'max-age=60, public, s-maxage=300, stale-while-revalidate=60',
+            $response->headers->get('Cache-Control'),
+        );
+        $this->assertSame(
+            'public, max-age=300, stale-while-revalidate=60',
+            $response->headers->get('CDN-Cache-Control'),
+        );
+        $this->assertFalse($response->headers->has('Set-Cookie'));
+        $this->assertStringNotContainsString('name="csrf-token"', (string) $response->getContent());
+        $this->assertStringContainsString('/build/assets/storefront-', (string) $response->getContent());
+        $this->assertStringContainsString('/build/assets/storefront-entry-', (string) $response->getContent());
+        $this->assertStringNotContainsString('fonts.googleapis.com', (string) $response->getContent());
+    }
+
+    public function test_search_results_remain_private_and_uncached(): void
+    {
+        $response = $this->get('/?q=chat');
+
+        $response
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private');
+        $this->assertFalse($response->headers->has('CDN-Cache-Control'));
     }
 
     public function test_storefront_mobile_menu_exposes_customer_links_without_admin_ctas(): void

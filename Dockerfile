@@ -44,10 +44,10 @@ RUN groupadd --gid 1000 laravel \
 
 RUN sed -i 's/^user = .*/user = laravel/' /usr/local/etc/php-fpm.d/www.conf \
     && sed -i 's/^group = .*/group = laravel/' /usr/local/etc/php-fpm.d/www.conf \
-    && sed -i 's/^pm.max_children = .*/pm.max_children = 12/' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's/^pm.max_children = .*/pm.max_children = 16/' /usr/local/etc/php-fpm.d/www.conf \
     && sed -i 's/^pm.start_servers = .*/pm.start_servers = 4/' /usr/local/etc/php-fpm.d/www.conf \
     && sed -i 's/^pm.min_spare_servers = .*/pm.min_spare_servers = 4/' /usr/local/etc/php-fpm.d/www.conf \
-    && sed -i 's/^pm.max_spare_servers = .*/pm.max_spare_servers = 8/' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's/^pm.max_spare_servers = .*/pm.max_spare_servers = 10/' /usr/local/etc/php-fpm.d/www.conf \
     && { \
         echo 'expose_php=0'; \
         echo 'display_errors=0'; \

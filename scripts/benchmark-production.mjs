@@ -32,7 +32,7 @@ const env = {
   DOGFOOD_FAKE_TELEGRAM_OUTBOUND: process.env.DOGFOOD_FAKE_TELEGRAM_OUTBOUND ?? 'true',
   DOGFOOD_ADMIN_EMAIL: adminEmail,
   DOGFOOD_ADMIN_PASSWORD: adminPassword,
-  SESSION_DRIVER: process.env.SESSION_DRIVER ?? 'cookie',
+  SESSION_DRIVER: process.env.SESSION_DRIVER ?? 'file',
   WEB_PORT: webPort,
 };
 
@@ -83,7 +83,7 @@ function compose(args, options = {}) {
 
 function timedCommand(name, args, service = 'app') {
   const started = performance.now();
-  const result = spawnSync('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.benchmark.yml', '-p', project, 'exec', '-T', service, ...args], {
+  const result = spawnSync('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.benchmark.yml', '-p', project, 'exec', '-u', 'root', '-T', service, ...args], {
     cwd: rootDir,
     env,
     encoding: 'utf8',
@@ -110,7 +110,7 @@ async function waitForSchedulerHealth() {
   let result;
 
   do {
-    result = spawnSync('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.benchmark.yml', '-p', project, 'exec', '-T', 'scheduler', ...args], {
+    result = spawnSync('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.benchmark.yml', '-p', project, 'exec', '-u', 'root', '-T', 'scheduler', ...args], {
       cwd: rootDir,
       env,
       encoding: 'utf8',
@@ -235,7 +235,7 @@ async function waitForHealth() {
 }
 
 function state() {
-  return JSON.parse(compose(['exec', '-T', 'app', 'php', 'scripts/benchmark-production-state.php']));
+  return JSON.parse(compose(['exec', '-u', 'laravel', '-T', 'app', 'php', 'scripts/benchmark-production-state.php']));
 }
 
 async function waitForQueueEmpty() {
@@ -407,7 +407,7 @@ async function main() {
 
   timedCommand('ops:health --db --queue-schema --queue-depth --supervisor', ['php', 'artisan', 'ops:health', '--db', '--queue-schema', '--queue-depth', '--supervisor']);
   await waitForSchedulerHealth();
-  const fixtures = JSON.parse(compose(['exec', '-T', 'app', 'php', 'scripts/benchmark-production-fixtures.php']));
+  const fixtures = JSON.parse(compose(['exec', '-u', 'laravel', '-T', 'app', 'php', 'scripts/benchmark-production-fixtures.php']));
 
   await timedFetch('health /up', 'GET', '/up');
   await timedFetch('storefront /', 'GET', '/');

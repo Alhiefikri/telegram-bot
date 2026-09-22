@@ -1,7 +1,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+@if (!($isPublicHomepage ?? false))
 <meta name="csrf-token" content="{{ csrf_token() }}">
+@endif
 <title>{{ $metadata->title }}</title>
 <meta name="description" content="{{ $metadata->description }}">
 <meta name="robots" content="{{ $metadata->robots }}">
@@ -31,8 +33,8 @@
 <link rel="icon" type="image/png" sizes="64x64" href="{{ Vite::asset('resources/images/chibi-favicon-64.png') }}">
 <link rel="apple-touch-icon" href="{{ Vite::asset('resources/images/chibi-favicon-256.png') }}">
 @fonts
+@if ($isPublicHomepage ?? false)
+@vite(['resources/css/storefront.css', 'resources/js/storefront-entry.js'])
+@else
 @vite(['resources/css/app.css', 'resources/js/app.js'])
-
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&family=Space+Grotesk:wght@400..700&display=swap" rel="stylesheet">
+@endif

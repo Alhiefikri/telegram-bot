@@ -73,6 +73,18 @@ validate_compose_config() {
 
 compose() {
   validate_compose_config || return 1
+  case "${1:-}" in
+    exec|run)
+      docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env "$1" -u laravel "${@:2}"
+      ;;
+    *)
+      docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env "$@"
+      ;;
+  esac
+}
+
+compose_root() {
+  validate_compose_config || return 1
   docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env "$@"
 }
 
@@ -103,7 +115,7 @@ release_state_value() {
 
 write_release_marker() {
   local release_sha="$1"
-  compose exec -T app sh -c 'printf "%s\n" "$1" > /var/www/html/public/release-sha.txt' \
+  compose exec -T app sh -c 'rm -f /var/www/html/public/release-sha.txt && printf "%s\n" "$1" > /var/www/html/public/release-sha.txt' \
     sh "$release_sha" </dev/null
 }
 
@@ -443,12 +455,13 @@ verify_service_images() {
       return 1
     }
   done
+
 }
 
 wait_for_health() {
   local attempt
   for attempt in $(seq 1 "${RELEASE_HEALTH_ATTEMPTS:-36}"); do
-    if compose exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null; then
+    if compose_root exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null; then
       break
     fi
     [ "$attempt" -lt "${RELEASE_HEALTH_ATTEMPTS:-36}" ] || return 1
@@ -466,7 +479,7 @@ wait_for_health() {
   fi
 
   for attempt in $(seq 1 "${RELEASE_HEALTH_ATTEMPTS:-36}"); do
-    if compose exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null; then
+    if compose_root exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null; then
       return 0
     fi
     [ "$attempt" -lt "${RELEASE_HEALTH_ATTEMPTS:-36}" ] || return 1

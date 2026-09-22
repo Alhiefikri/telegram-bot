@@ -63,12 +63,12 @@ jobs:
           echo "Acquired production mutation lock."
 
           ./scripts/safe-compose-config.sh --project "$COMPOSE_PROJECT_NAME" --env-file .env
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan telegram:recover-failed-updates --dry-run
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -u laravel -T app php artisan telegram:recover-failed-updates --dry-run
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -u laravel -T app php artisan telegram:recover-failed-updates --prune-unrecoverable </dev/null
 
           for attempt in $(seq 1 12); do
-            if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null; then
-              docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0 </dev/null
+            if docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -u laravel -T app php artisan ops:check-failed-jobs --max=0 </dev/null; then
+              docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -u laravel -T app php artisan ops:check-queue-depth --max=0 </dev/null
               echo "Supported failed Telegram update jobs recovered; no failed jobs remain."
               exit 0
             fi
@@ -76,7 +76,7 @@ jobs:
             sleep 5
           done
 
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-failed-jobs --max=0 </dev/null
-          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -T app php artisan ops:check-queue-depth --max=0 </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -u laravel -T app php artisan ops:check-failed-jobs --max=0 </dev/null
+          docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env exec -u laravel -T app php artisan ops:check-queue-depth --max=0 </dev/null
           exit 1
           REMOTE

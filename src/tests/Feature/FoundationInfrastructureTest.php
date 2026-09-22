@@ -47,6 +47,15 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertSame('jobs', config('queue.connections.database.table'));
     }
 
+    public function test_production_compose_keeps_cache_and_sessions_off_postgresql(): void
+    {
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+
+        $this->assertStringContainsString('CACHE_STORE: file', $compose);
+        $this->assertStringContainsString('SESSION_DRIVER: file', $compose);
+        $this->assertStringContainsString('QUEUE_CONNECTION: database', $compose);
+    }
+
     public function test_supervisor_database_workers_isolate_update_outbound_notifications_broadcast_and_stock_queues(): void
     {
         $contents = file_get_contents(base_path('../supervisord.conf'));

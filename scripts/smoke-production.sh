@@ -98,9 +98,9 @@ if [ "${SMOKE_PUBLIC_ONLY:-false}" != "true" ] && [ -n "$PROJECT_NAME" ]; then
   COMPOSE_CONFIG_SCRIPT=${COMPOSE_CONFIG_SCRIPT:-./scripts/safe-compose-config.sh}
   [ -x "$COMPOSE_CONFIG_SCRIPT" ] || fail "safe Compose validator is required for local smoke checks"
   "$COMPOSE_CONFIG_SCRIPT" --project "$PROJECT_NAME" --env-file "$COMPOSE_ENV_FILE"
-  docker compose -p "$PROJECT_NAME" --env-file "$COMPOSE_ENV_FILE" exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null
+  docker compose -p "$PROJECT_NAME" --env-file "$COMPOSE_ENV_FILE" exec -u root -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null
   SCHEDULER_DEADLINE=$((SECONDS + ${SCHEDULER_HEALTH_TIMEOUT:-120}))
-  until docker compose -p "$PROJECT_NAME" --env-file "$COMPOSE_ENV_FILE" exec -T scheduler php artisan ops:health --scheduler-heartbeat="${SCHEDULER_HEARTBEAT_MAX_AGE:-180}" </dev/null; do
+  until docker compose -p "$PROJECT_NAME" --env-file "$COMPOSE_ENV_FILE" exec -u root -T scheduler php artisan ops:health --scheduler-heartbeat="${SCHEDULER_HEARTBEAT_MAX_AGE:-180}" </dev/null; do
     if [ "$SECONDS" -ge "$SCHEDULER_DEADLINE" ]; then
       printf 'Scheduler health check failed for compose project: %s\n' "$PROJECT_NAME" >&2
       exit 1

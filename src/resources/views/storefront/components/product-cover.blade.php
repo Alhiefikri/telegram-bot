@@ -16,7 +16,7 @@
         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-10" aria-hidden="true"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" loading="{{ $imageLoading }}" fetchpriority="{{ $fetchPriority }}" decoding="async" class="absolute inset-0 h-full w-full object-cover object-center">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" width="800" height="800" loading="{{ $imageLoading }}" fetchpriority="{{ $fetchPriority }}" decoding="async" class="absolute inset-0 h-full w-full object-cover object-center">
         @else
             <div class="pointer-events-none absolute h-4/5 w-4/5 rounded-full border border-white/20" aria-hidden="true"></div>
             <div class="relative z-10 flex max-w-full flex-col items-center justify-center gap-5 text-center">
@@ -41,7 +41,7 @@
         <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-10" aria-hidden="true"></div>
 
         @if ($imageUrl)
-            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" loading="{{ $imageLoading }}" fetchpriority="{{ $fetchPriority }}" decoding="async" class="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-[1.07]">
+            <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" width="400" height="400" loading="{{ $imageLoading }}" fetchpriority="{{ $fetchPriority }}" decoding="async" class="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-[1.07]">
         @else
             <div class="pointer-events-none absolute h-4/5 w-4/5 rounded-full border border-white/20" aria-hidden="true"></div>
             <div class="relative z-10 flex h-full w-full max-w-full flex-col items-center justify-center gap-2 px-3 text-center sm:gap-3 {{ $isAvailable ? 'pb-3 pt-10' : 'pb-12 pt-3' }}">

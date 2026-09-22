@@ -19,7 +19,7 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
-    private const DESIGN_VERSION = 18;
+    private const DESIGN_VERSION = 19;
 
     public function __construct(
         private readonly StorefrontCatalogPageBuilder $catalogPages,
@@ -123,7 +123,10 @@ class StorefrontResponseCache
 
     private function render(string $search): string
     {
-        return view('storefront', $this->catalogPages->homeViewData($search))->render();
+        $viewData = $this->catalogPages->homeViewData($search);
+        $viewData['isPublicHomepage'] = true;
+
+        return view('storefront', $viewData)->render();
     }
 
     private function deleteStaticHomepage(): void

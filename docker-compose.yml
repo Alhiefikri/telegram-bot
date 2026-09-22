@@ -23,9 +23,9 @@ x-app-environment: &app-environment
   DB_DATABASE: telegram_bot
   DB_USERNAME: telegram_bot
   DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-  CACHE_STORE: database
+  CACHE_STORE: file
   QUEUE_CONNECTION: database
-  SESSION_DRIVER: database
+  SESSION_DRIVER: file
   FILESYSTEM_DISK: local
   MAIL_MAILER: ${MAIL_MAILER:-log}
   MAIL_SCHEME: ${MAIL_SCHEME:-}
@@ -81,8 +81,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
-    cpus: "1.00"
-    mem_limit: 768m
+    cpus: "1.50"
+    mem_limit: 896m
     logging:
       driver: json-file
       options:
@@ -109,8 +109,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
-    cpus: "0.25"
-    mem_limit: 128m
+    cpus: "0.35"
+    mem_limit: 160m
     logging:
       driver: json-file
       options:
@@ -167,8 +167,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    cpus: "0.75"
-    mem_limit: 768m
+    cpus: "1.00"
+    mem_limit: 896m
     shm_size: 128m
     logging:
       driver: json-file

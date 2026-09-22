@@ -89,6 +89,7 @@ fi
 if [ "$(id -u)" = "0" ]; then
     install -d -o laravel -g laravel -m 0775 storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/private storage/app/public bootstrap/cache public/storefront
     chown -R laravel:laravel storage/logs
+    chown -R laravel:laravel storage/framework/cache storage/framework/sessions storage/framework/views
     chmod -R ug+rwX storage/logs
     chmod 2775 storage/logs
 fi
@@ -125,6 +126,7 @@ fi
 
 if [ "${APP_OPTIMIZE:-true}" = "true" ]; then
     artisan optimize
+    artisan storefront:optimize-images
 fi
 
 if [ "${APP_AUTO_SET_TELEGRAM_WEBHOOK:-false}" = "true" ]; then

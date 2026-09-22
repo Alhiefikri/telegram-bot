@@ -131,11 +131,14 @@ class ProductionReleaseHardeningTest extends TestCase
 
         $this->assertStringContainsString('DOGFOOD_TIMING_LOG_CHANNEL: ${DOGFOOD_TIMING_LOG_CHANNEL:-stderr}', $compose);
         $this->assertStringContainsString('APP_ALLOW_DOGFOOD_RUNTIME: "true"', $compose);
+        $this->assertStringContainsString('APP_AUTO_MIGRATE: "true"', $compose);
         $this->assertStringNotContainsString('DOGFOOD_TIMING_LOG_CHANNEL:', $productionCompose);
         $this->assertStringContainsString('install -d -o laravel -g laravel -m 0775 storage/logs', $entrypoint);
         $this->assertStringContainsString('chown -R laravel:laravel storage/logs', $entrypoint);
+        $this->assertStringContainsString('chown -R laravel:laravel storage/framework/cache storage/framework/sessions storage/framework/views', $entrypoint);
         $this->assertStringContainsString('chmod -R ug+rwX storage/logs', $entrypoint);
         $this->assertStringContainsString('chmod 2775 storage/logs', $entrypoint);
+        $this->assertStringContainsString('artisan storefront:optimize-images', $entrypoint);
         $this->assertStringContainsString("config()->set('logging.default', 'stderr')", $perfScript);
         $this->assertStringContainsString("Log::setDefaultDriver('stderr')", $perfScript);
         $this->assertStringContainsString("config()->set('services.dogfood_timing.log_channel', 'stderr')", $perfScript);
@@ -146,6 +149,8 @@ class ProductionReleaseHardeningTest extends TestCase
         $this->assertStringContainsString("'final_queue_state' => [", $perfScript);
         $this->assertStringNotContainsString('pakasir:reconcile', $perfScript);
         $this->assertStringNotContainsString('pakasir:reconcile', $productionBenchmark);
+        $this->assertStringContainsString("'exec', '-u', 'root', '-T', service", $productionBenchmark);
+        $this->assertStringContainsString("'exec', '-u', 'laravel', '-T', 'app'", $productionBenchmark);
         $this->assertStringContainsString("'log_channel' => env('DOGFOOD_TIMING_LOG_CHANNEL')", $services);
     }
 
@@ -153,9 +158,9 @@ class ProductionReleaseHardeningTest extends TestCase
     {
         $dockerfile = file_get_contents(base_path('../Dockerfile'));
 
-        $this->assertStringContainsString('pm.max_children = 12', $dockerfile);
+        $this->assertStringContainsString('pm.max_children = 16', $dockerfile);
         $this->assertStringContainsString('pm.start_servers = 4', $dockerfile);
-        $this->assertStringContainsString('pm.max_spare_servers = 8', $dockerfile);
+        $this->assertStringContainsString('pm.max_spare_servers = 10', $dockerfile);
     }
 
     public function test_nginx_routes_storefront_homepage_through_php_to_avoid_stale_assets(): void
@@ -164,6 +169,8 @@ class ProductionReleaseHardeningTest extends TestCase
         $entrypoint = file_get_contents(base_path('../docker-entrypoint.sh'));
 
         $this->assertStringContainsString('resolver 127.0.0.11 valid=10s ipv6=off;', $nginx);
+        $this->assertStringContainsString('gzip on;', $nginx);
+        $this->assertStringContainsString('gzip_types', $nginx);
         $this->assertStringContainsString('set $php_upstream app:9000;', $nginx);
         $this->assertStringContainsString('location = /', $nginx);
         $this->assertStringContainsString('fastcgi_pass $php_upstream;', $nginx);
@@ -429,6 +436,8 @@ class ProductionReleaseHardeningTest extends TestCase
         $this->assertStringContainsString('$BASE_URL/admin', $contents);
         $this->assertStringContainsString('--location', $contents);
         $this->assertStringContainsString('scheduler php artisan ops:health --scheduler-heartbeat', $contents);
+        $this->assertStringContainsString('exec -u root -T app php artisan ops:health', $contents);
+        $this->assertStringContainsString('exec -u root -T scheduler php artisan ops:health', $contents);
         $this->assertStringContainsString('SCHEDULER_HEALTH_TIMEOUT', $contents);
         $this->assertStringContainsString('SMOKE_PUBLIC_ONLY', $contents);
     }
@@ -833,8 +842,8 @@ SH);
         $this->assertStringContainsString('flock -n 9', $release);
         $this->assertStringContainsString('-o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6', $contents);
         foreach ([
-            'app health check is non-interactive' => 'compose exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null',
-            'scheduler health check is non-interactive' => 'compose exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
+            'app health check is non-interactive' => 'compose_root exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null',
+            'scheduler health check is non-interactive' => 'compose_root exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
             'failed jobs check consumes the pre-release baseline non-interactively' => 'compose exec -T app php artisan ops:check-failed-jobs --max=0 --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE"',
             'Telegram update recovery is non-interactive' => 'compose exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable </dev/null',
             'Telegram webhook check is non-interactive' => 'compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null',
@@ -856,6 +865,8 @@ SH);
         $this->assertStringContainsString('PREVIOUS_COMMIT="$(git rev-parse HEAD)"', $release);
         $this->assertStringContainsString('PREVIOUS_IMAGE="$(docker inspect', $release);
         $this->assertStringContainsString('compose run --rm --no-deps -e APP_AUTO_MIGRATE=false', $release);
+        $this->assertStringContainsString('exec|run)', $release);
+        $this->assertStringContainsString('"$1" -u laravel', $release);
         $this->assertStringContainsString('2026_08_18_000001_contract_telegram_outbound_effects.php', $release);
         $this->assertStringContainsString('run_expand_migrations', $release);
         $this->assertStringContainsString('run_deferred_telegram_contract', $release);
@@ -989,6 +1000,7 @@ SH);
         $this->assertStringContainsString('php artisan telegram:recover-failed-updates --prune-unrecoverable', $contents);
         $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0', $contents);
         $this->assertStringContainsString('php artisan ops:check-queue-depth --max=0', $contents);
+        $this->assertStringContainsString('exec -u laravel -T app php artisan', $contents);
         $this->assertStringContainsString('-o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6', $contents);
         $this->assertStringNotContainsString('queue:retry all', $contents);
         $this->assertStringNotContainsString('queue:failed', $contents);

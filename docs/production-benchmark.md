@@ -8,7 +8,7 @@ Run the production-like Docker benchmark from the repository root:
 ./scripts/benchmark-production.sh
 ```
 
-The command starts the regular `docker-compose.yml` stack with project name `telegram-bot-dogfood`, recreates containers so Docker and Nginx config changes are represented, waits for `/up`, seeds namespaced benchmark fixtures, exercises HTTP/admin/webhook/handler/command scenarios, writes a report, and exits non-zero when budgets or final queue state fail.
+The command starts the regular `docker-compose.yml` stack with project name `telegram-bot-dogfood`, recreates containers so Docker and Nginx config changes are represented, enables migrations only in the isolated benchmark override, waits for `/up`, seeds namespaced benchmark fixtures, exercises HTTP/admin/webhook/handler/command scenarios, writes a report, and exits non-zero when budgets or final queue state fail.
 
 Reports are written under:
 
@@ -25,7 +25,7 @@ Run the renderer-only production-equivalent benchmark:
 ./scripts/benchmark-paid-invoice.sh
 ```
 
-It builds the PHP 8.4 app image, runs one CLI worker under the app service's 1 CPU / 768 MiB limits, and measures representative and pathological invoice inputs. Each report records wall-time samples, peak RSS delta, PNG bytes, dimensions, and pass/fail status for the 250 ms, 24 MiB, and 300 KB budgets.
+It builds the PHP 8.4 app image, runs one CLI worker under the app service's 1.50 CPU / 896 MiB limits, and measures representative and pathological invoice inputs. Each report records wall-time samples, peak RSS delta, PNG bytes, dimensions, and pass/fail status for the 250 ms, 24 MiB, and 300 KB budgets.
 
 The redacted report is written to:
 
@@ -69,7 +69,7 @@ The benchmark covers:
 - Operational commands: `ops:health --db --queue-schema --queue-depth --supervisor`, scheduler heartbeat health, `orders:expire-pending`, and `ops:check-failed-jobs --max=0`.
 - Final queue depth, failed job count, status counts, p50/p95/max latency, and container memory.
 
-The Docker default uses Laravel's database session driver for admin web sessions. This keeps login/logout and CSRF behavior stateful across the app replicas and matches the production-like Compose stack. The benchmark can override this through an explicit Compose change when comparing another session backend.
+The Docker default uses Laravel's file cache and file session drivers, while the queue remains database-backed for durable worker delivery. Public homepage responses can therefore be cached without writing anonymous cache/session rows to PostgreSQL; stateful admin and checkout flows still use the normal web session and CSRF middleware.
 
 ## Latest Issue 70 Run
 

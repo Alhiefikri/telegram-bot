@@ -25,9 +25,18 @@ final class ProductImageOptimizer
 
     private const WEBP_QUALITY = 84;
 
+    private const PRODUCT_MAX_DIMENSION = 800;
+
+    private const PRODUCT_WEBP_QUALITY = 78;
+
     public function store(UploadedFile $image): string
     {
-        return $this->storeInDirectory($image, self::DIRECTORY);
+        return $this->storeInDirectory(
+            $image,
+            self::DIRECTORY,
+            self::PRODUCT_MAX_DIMENSION,
+            self::PRODUCT_WEBP_QUALITY,
+        );
     }
 
     public function storeTelegram(UploadedFile $image): string
@@ -55,7 +64,12 @@ final class ProductImageOptimizer
         return $this->storeInDirectory($image, self::WELCOME_BANNER_DIRECTORY);
     }
 
-    private function storeInDirectory(UploadedFile $image, string $directory): string
+    private function storeInDirectory(
+        UploadedFile $image,
+        string $directory,
+        int $maxDimension = self::MAX_DIMENSION,
+        int $quality = self::WEBP_QUALITY,
+    ): string
     {
         $source = $this->createImageResource($image);
         $sourceWidth = imagesx($source);
@@ -64,8 +78,8 @@ final class ProductImageOptimizer
         $targetHeight = $sourceHeight;
 
         $largestSide = max($sourceWidth, $sourceHeight);
-        if ($largestSide > self::MAX_DIMENSION) {
-            $scale = self::MAX_DIMENSION / $largestSide;
+        if ($largestSide > $maxDimension) {
+            $scale = $maxDimension / $largestSide;
             $targetWidth = max(1, (int) round($sourceWidth * $scale));
             $targetHeight = max(1, (int) round($sourceHeight * $scale));
         }
@@ -78,7 +92,7 @@ final class ProductImageOptimizer
         $disk->makeDirectory($directory);
 
         $absolutePath = $disk->path($path);
-        if (! imagewebp($target, $absolutePath, self::WEBP_QUALITY)) {
+        if (! imagewebp($target, $absolutePath, $quality)) {
             imagedestroy($target);
             throw new RuntimeException('Failed to encode product image as WebP.');
         }
@@ -177,6 +191,66 @@ final class ProductImageOptimizer
         return is_string($contents) && $contents !== ''
             ? ['contents' => $contents, 'filename' => basename($path)]
             : null;
+    }
+
+    /**
+     * Downscale legacy product images once so existing catalog assets receive
+     * the same mobile-sized output as new uploads.
+     */
+    public function optimizeStoredProductImages(): int
+    {
+        $disk = Storage::disk('public');
+        $marker = storage_path('framework/cache/storefront-images-v1');
+
+        if (is_file($marker)) {
+            return 0;
+        }
+
+        $optimized = 0;
+        foreach ($disk->files(self::DIRECTORY) as $path) {
+            $absolutePath = $disk->path($path);
+            $contents = file_get_contents($absolutePath);
+            $source = $contents === false ? false : imagecreatefromstring($contents);
+
+            if (! $source instanceof \GdImage) {
+                continue;
+            }
+
+            $sourceWidth = imagesx($source);
+            $sourceHeight = imagesy($source);
+            $largestSide = max($sourceWidth, $sourceHeight);
+            if ($largestSide <= self::PRODUCT_MAX_DIMENSION) {
+                imagedestroy($source);
+                continue;
+            }
+
+            $scale = self::PRODUCT_MAX_DIMENSION / $largestSide;
+            $targetWidth = max(1, (int) round($sourceWidth * $scale));
+            $targetHeight = max(1, (int) round($sourceHeight * $scale));
+            $target = $this->resizePreservingTransparency($source, $targetWidth, $targetHeight);
+            $temporaryPath = $absolutePath.'.tmp-'.bin2hex(random_bytes(6));
+            $encoded = imagewebp($target, $temporaryPath, self::PRODUCT_WEBP_QUALITY);
+            imagedestroy($target);
+            imagedestroy($source);
+
+            if (! $encoded || ! rename($temporaryPath, $absolutePath)) {
+                if (is_file($temporaryPath)) {
+                    unlink($temporaryPath);
+                }
+
+                continue;
+            }
+
+            $optimized++;
+        }
+
+        $markerDirectory = dirname($marker);
+        if (! is_dir($markerDirectory)) {
+            mkdir($markerDirectory, 0775, true);
+        }
+        file_put_contents($marker, now()->toIso8601String(), LOCK_EX);
+
+        return $optimized;
     }
 
     private function createImageResource(UploadedFile $image): \GdImage

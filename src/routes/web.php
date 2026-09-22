@@ -65,7 +65,13 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/robots.txt', StorefrontRobotsController::class)->name('storefront.robots');
 Route::get('/sitemap.xml', StorefrontSitemapController::class)->name('storefront.sitemap');
-Route::get('/', StorefrontController::class)->name('storefront.home');
+Route::get('/', StorefrontController::class)
+    ->withoutMiddleware([
+        \Illuminate\Session\Middleware\StartSession::class,
+        \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+        \Illuminate\Foundation\Http\Middleware\PreventRequestForgery::class,
+    ])
+    ->name('storefront.home');
 Route::get('/panduan', [StorefrontLoginGuideController::class, 'index'])->name('storefront.guides.index');
 Route::get('/gpt/panduan-login-akun', [StorefrontLoginGuideController::class, 'show'])->name('storefront.login-guide');
 Route::redirect('/panduan-login-akun', '/gpt/panduan-login-akun');
@@ -86,7 +92,10 @@ Route::get('/waitlist/unsubscribe/{subscription}', [StorefrontWaitlistController
 Route::get('/aktivitas-pembelian-terverifikasi', StorefrontVerifiedPurchaseActivityController::class)
     ->middleware('throttle:storefront-verified-purchase-activity')
     ->name('storefront.verified-purchase-activity');
-Route::post('/storefront/events', StorefrontFunnelEventController::class)->middleware('throttle:120,1')->name('storefront.events.store');
+Route::post('/storefront/events', StorefrontFunnelEventController::class)
+    ->middleware('throttle:120,1')
+    ->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\PreventRequestForgery::class)
+    ->name('storefront.events.store');
 Route::get('/akses-pesanan', [StorefrontOrderAccessController::class, 'create'])->name('storefront.order-access.create');
 Route::post('/akses-pesanan', [StorefrontOrderAccessController::class, 'store'])->middleware('throttle:storefront-order-access')->name('storefront.order-access.store');
 Route::get('/akses-pesanan/{order}', [StorefrontOrderAccessController::class, 'show'])->name('storefront.order-access.show');
