@@ -167,6 +167,7 @@ initialize_credential_identity_fingerprint_key() {
   local replaced=false
   local temporary
 
+  [ "${USE_PERSISTED_CREDENTIAL_FINGERPRINT_KEY:-false}" = "true" ] && return 0
   if grep -Eq '^CREDENTIAL_IDENTITY_FINGERPRINT_KEY=[0-9a-f]{64}$' .env; then
     return 0
   fi
@@ -196,6 +197,24 @@ initialize_credential_identity_fingerprint_key() {
   fi
   mv -f "$temporary" .env
   echo "Initialized CREDENTIAL_IDENTITY_FINGERPRINT_KEY directly on the VPS."
+}
+
+use_persisted_credential_identity_fingerprint_key() {
+  local line temporary
+
+  [ "${USE_PERSISTED_CREDENTIAL_FINGERPRINT_KEY:-false}" = "true" ] || return 0
+  grep -q '^CREDENTIAL_IDENTITY_FINGERPRINT_KEY=' .env || return 0
+
+  umask 077
+  temporary="$(mktemp .env.XXXXXX)"
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      CREDENTIAL_IDENTITY_FINGERPRINT_KEY=*) ;;
+      *) printf '%s\n' "$line" >> "$temporary" ;;
+    esac
+  done < .env
+  mv -f "$temporary" .env
+  echo "Removed CREDENTIAL_IDENTITY_FINGERPRINT_KEY override; using the persisted production key."
 }
 
 
@@ -706,6 +725,7 @@ write_release_state "deploy-started"
 git fetch --prune origin "$DEPLOY_BRANCH"
 git cat-file -e "${DEPLOY_SHA}^{commit}"
 initialize_credential_identity_fingerprint_key
+use_persisted_credential_identity_fingerprint_key
 
 PREVIOUS_COMMIT="$(git rev-parse HEAD)"
 previous_app_container="$(compose ps -q app)"

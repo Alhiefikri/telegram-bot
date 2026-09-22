@@ -28,6 +28,11 @@ on:
         required: false
         default: false
         type: boolean
+      use_persisted_credential_fingerprint_key:
+        description: Remove the CREDENTIAL_IDENTITY_FINGERPRINT_KEY override so production uses its existing persisted identity key.
+        required: false
+        default: false
+        type: boolean
       expected_app_url:
         description: Optional canonical APP_URL override for this deploy; defaults to PRODUCTION_APP_URL variable.
         required: false
@@ -190,6 +195,7 @@ jobs:
           RECOVER_FAILED_TELEGRAM_UPDATES: ${{ inputs.recover_failed_telegram_updates }}
           BOOTSTRAP_LOCAL_ROLLBACK_IMAGE: ${{ inputs.bootstrap_local_rollback_image }}
           INITIALIZE_CREDENTIAL_FINGERPRINT_KEY: ${{ inputs.initialize_credential_fingerprint_key }}
+          USE_PERSISTED_CREDENTIAL_FINGERPRINT_KEY: ${{ inputs.use_persisted_credential_fingerprint_key }}
           RELEASE_ARTIFACT_DIR: ${{ env.RELEASE_ARTIFACT_DIR }}
           APP_IMAGE: ${{ env.APP_IMAGE }}
           EXPECTED_APP_URL: ${{ inputs.expected_app_url || vars.PRODUCTION_APP_URL }}
@@ -200,7 +206,7 @@ jobs:
           : "${EXPECTED_APP_URL:?Set the non-secret production environment variable PRODUCTION_APP_URL to the canonical APP_URL}"
 
           ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" BOOTSTRAP_LOCAL_ROLLBACK_IMAGE="$BOOTSTRAP_LOCAL_ROLLBACK_IMAGE" INITIALIZE_CREDENTIAL_FINGERPRINT_KEY="$INITIALIZE_CREDENTIAL_FINGERPRINT_KEY" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" APP_IMAGE="$APP_IMAGE" EXPECTED_APP_URL="$EXPECTED_APP_URL" \
+            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_BRANCH="$DEPLOY_BRANCH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RECOVER_FAILED_TELEGRAM_UPDATES="$RECOVER_FAILED_TELEGRAM_UPDATES" BOOTSTRAP_LOCAL_ROLLBACK_IMAGE="$BOOTSTRAP_LOCAL_ROLLBACK_IMAGE" INITIALIZE_CREDENTIAL_FINGERPRINT_KEY="$INITIALIZE_CREDENTIAL_FINGERPRINT_KEY" USE_PERSISTED_CREDENTIAL_FINGERPRINT_KEY="$USE_PERSISTED_CREDENTIAL_FINGERPRINT_KEY" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" APP_IMAGE="$APP_IMAGE" EXPECTED_APP_URL="$EXPECTED_APP_URL" \
             'bash -s' < scripts/deploy-production-release.sh
 
       - name: Reconcile remote release state

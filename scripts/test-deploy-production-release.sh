@@ -67,6 +67,7 @@ run_scenario() {
   local recover_failed=false
   local bootstrap_local_rollback=false
   local initialize_fingerprint_key=false
+  local use_persisted_fingerprint_key=false
   local recorded_previous_image="$previous_image"
   local workspace bin artifacts status
   [ "$scenario" = "recovery-failure" ] && recover_failed=true
@@ -75,6 +76,7 @@ run_scenario() {
     recorded_previous_image="$LOCAL_PREVIOUS_IMAGE_ID"
   fi
   [ "$scenario" = "initialize-fingerprint-key" ] && initialize_fingerprint_key=true
+  [ "$scenario" = "use-persisted-fingerprint-key" ] && use_persisted_fingerprint_key=true
   case "$scenario" in
     contract-success|contract-failure|backup-failure) operation=contract ;;
     reconcile-success|reconcile-failure) operation=reconcile ;;
@@ -95,6 +97,9 @@ run_scenario() {
   printf '%s\n' "$scenario" > "$workspace/scenario"
   : > "$workspace/commands.log"
   : > "$workspace/.env"
+  if [ "$scenario" = "use-persisted-fingerprint-key" ]; then
+    printf 'CREDENTIAL_IDENTITY_FINGERPRINT_KEY=%064d\n' 0 > "$workspace/.env"
+  fi
   if [ "$operation" = "reconcile" ]; then
     printf '%s\n' "$PREVIOUS_COMMIT" > "$artifacts/previous-commit.txt"
     printf '%s\n' "$PREVIOUS_IMAGE" > "$artifacts/previous-image.txt"
@@ -228,7 +233,7 @@ SCRIPT
   set +e
   PATH="$bin:$PATH" MOCK_WORKSPACE="$workspace" PRODUCTION_PATH="$workspace" DEPLOY_BRANCH=main \
     DEPLOY_SHA="$CANDIDATE_COMMIT" COMPOSE_PROJECT_NAME=telegram-bot-prod APP_IMAGE="$CANDIDATE_IMAGE" \
-    RELEASE_OPERATION="$operation" RECOVER_FAILED_TELEGRAM_UPDATES="$recover_failed" BOOTSTRAP_LOCAL_ROLLBACK_IMAGE="$bootstrap_local_rollback" INITIALIZE_CREDENTIAL_FINGERPRINT_KEY="$initialize_fingerprint_key" \
+    RELEASE_OPERATION="$operation" RECOVER_FAILED_TELEGRAM_UPDATES="$recover_failed" BOOTSTRAP_LOCAL_ROLLBACK_IMAGE="$bootstrap_local_rollback" INITIALIZE_CREDENTIAL_FINGERPRINT_KEY="$initialize_fingerprint_key" USE_PERSISTED_CREDENTIAL_FINGERPRINT_KEY="$use_persisted_fingerprint_key" \
     RELEASE_ARTIFACT_DIR="$artifacts" RELEASE_HEALTH_ATTEMPTS=1 RELEASE_HEALTH_INTERVAL=0 \
     GPG_RECIPIENT=backup@example.test \
     bash "$RELEASE_SCRIPT" > "$workspace/stdout" 2> "$workspace/stderr"
@@ -285,6 +290,10 @@ SCRIPT
     initialize-fingerprint-key)
       grep -Eq '^CREDENTIAL_IDENTITY_FINGERPRINT_KEY=[0-9a-f]{64}$' "$workspace/.env" || fail "fingerprint key was not initialized safely"
       grep -q 'Initialized CREDENTIAL_IDENTITY_FINGERPRINT_KEY directly on the VPS' "$workspace/stdout" || fail "fingerprint initialization was not explicit"
+      ;;
+    use-persisted-fingerprint-key)
+      ! grep -q '^CREDENTIAL_IDENTITY_FINGERPRINT_KEY=' "$workspace/.env" || fail "fingerprint override was not removed"
+      grep -q 'Removed CREDENTIAL_IDENTITY_FINGERPRINT_KEY override; using the persisted production key.' "$workspace/stdout" || fail "persisted fingerprint selection was not explicit"
       ;;
     identity-backfill-key-failure)
       grep -q '^status=unavailable reason=fingerprint-key-preparation-failed$' "$artifacts/credential-identity-backfill-summary.txt" || fail "backfill startup failure was not classified without raw output"
@@ -347,6 +356,7 @@ run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario identity-backfill-failure 1 credential-identity-backfill-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario identity-backfill-key-failure 1 credential-identity-backfill-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
+run_scenario use-persisted-fingerprint-key 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"
 run_scenario external-smoke-rollback 0 external-smoke-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario queue-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
