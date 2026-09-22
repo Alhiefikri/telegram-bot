@@ -1,8 +1,12 @@
 # Binance Multi-Rail Checkout: Binance Pay ID + USDT BEP20 (BSC)
 
-**Status:** Implementation-ready spec, revised to transaction-hash verification
+**Status:** Implemented; the original hash-only BSC design below is superseded for new checkouts
+
+> **Implementation amendment — 2026-09-22.** New `USDT_BEP20` Payments allocate a unique micro-USDT amount while the checkout payment-setting lock is held, persist `verification_mode=amount_unique`, and are verified by bounded `eth_getLogs` discovery followed by authoritative receipt/block validation. New Telegram and Storefront instructions do not ask for a transaction hash. Existing `verification_mode=transaction_hash` Payments remain supported through the legacy hash endpoint and targeted receipt path. The historical sections below describe the original design decisions and must not override this amendment.
 
 **Date:** 2026-08-24
+
+## Historical design record (superseded for new BSC checkouts)
 
 **Scope:** Store Bot and Web Storefront checkout, payment verification, receiving-address management, expiry, cancellation, and automatic fulfillment.
 

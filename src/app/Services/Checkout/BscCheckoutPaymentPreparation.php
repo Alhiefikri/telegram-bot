@@ -9,6 +9,7 @@ use App\Services\Bsc\BscPaymentReceiverPool;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Bsc\BscReadinessReport;
 use App\Services\Bsc\BscTokenAmount;
+use App\Services\Bsc\BscUniquePaymentAmount;
 use App\Services\Checkout\PaymentPlan\BscCheckoutPaymentSnapshot;
 use App\Support\PaymentProvider;
 
@@ -24,6 +25,7 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
         private BscReadiness $readiness,
         private BscPaymentReceiverPool $receiverPool,
         private BscTokenAmount $tokenAmount,
+        private BscUniquePaymentAmount $uniquePaymentAmount,
     ) {}
 
     public function preflight(CheckoutPaymentPreflightContext $context): CheckoutPaymentPreflight
@@ -49,6 +51,7 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
         if ($usdtAmount === null) {
             throw new InvalidCheckout('A cart item has no USDT price.');
         }
+        $payableAmount = $this->uniquePaymentAmount->allocate($usdtAmount);
         $expiresAt = now()->addMinutes(
             $context->lockedSetting?->bscPaymentTtlMinutes()
                 ?? ManualPaymentSetting::DEFAULT_BSC_PAYMENT_TTL_MINUTES,
@@ -59,13 +62,13 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
             provider: PaymentProvider::MANUAL,
             method: self::METHOD,
             paymentCurrency: self::PAYMENT_CURRENCY,
-            amount: $usdtAmount,
+            amount: $payableAmount,
             expiresAt: $expiresAt,
             receiver: $receiver,
             baseAmountMicro: $usdtAmount,
-            payableAmountMicro: $usdtAmount,
+            payableAmountMicro: $payableAmount,
             expectedTokenUnits: $this->tokenAmount->expectedTokenUnits(
-                $usdtAmount,
+                $payableAmount,
                 $receiver->tokenDecimals,
             ),
             verificationStatus: PaymentBscDetail::STATUS_AWAITING_TRANSFER,
@@ -74,6 +77,7 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
             requiresFinalizedBlock: (bool) ($context->lockedSetting?->bsc_require_finalized_block ?? false),
             confirmationGraceMinutes: $context->lockedSetting?->bscConfirmationGraceMinutes()
                 ?? ManualPaymentSetting::DEFAULT_BSC_CONFIRMATION_GRACE_MINUTES,
+            verificationMode: PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
         );
 
         return new CheckoutPaymentPlan(
@@ -82,7 +86,7 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
             provider: PaymentProvider::MANUAL,
             method: self::METHOD,
             paymentCurrency: self::PAYMENT_CURRENCY,
-            amount: $usdtAmount,
+            amount: $payableAmount,
             paymentExpiresAt: $expiresAt,
             railSnapshot: $snapshot,
             postCreationBehavior: CheckoutPostCreationBehavior::BscInstructions,

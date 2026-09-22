@@ -56,6 +56,50 @@ final class BscTokenTransferReader
 
         return new BscTransferInspection('success', $transfers, $exactTransfers);
     }
+    /**
+     * Decode transfer logs returned by eth_getLogs. Receipt verification still
+     * happens after a candidate hash is discovered; these logs only identify
+     * which transaction should be checked.
+     *
+     * @param list<array<string, mixed>> $logs
+     */
+    public function inspectTransferLogs(
+        array $logs,
+        string $expectedContract,
+        string $expectedReceiver,
+        string $expectedAmountUnits,
+    ): BscTransferInspection {
+        $expectedContract = strtolower(trim($expectedContract));
+        $expectedReceiver = strtolower(trim($expectedReceiver));
+        $transfers = [];
+
+        foreach ($logs as $log) {
+            if (! is_array($log) || (bool) ($log['removed'] ?? false)) {
+                continue;
+            }
+
+            $transactionHash = BscTransactionHash::normalize((string) ($log['transactionHash'] ?? ''));
+            $blockNumber = $this->quantity($log['blockNumber'] ?? null);
+            if ($transactionHash === null || $blockNumber === null) {
+                continue;
+            }
+
+            $evidence = $this->decodeTransfer($log, $transactionHash, $blockNumber);
+            if ($evidence !== null) {
+                $transfers[] = $evidence;
+            }
+        }
+
+        $exactTransfers = array_values(array_filter(
+            $transfers,
+            static fn (BscTransferEvidence $transfer): bool => hash_equals($expectedContract, $transfer->tokenContract)
+                && hash_equals($expectedReceiver, $transfer->receiverAddress)
+                && hash_equals($expectedAmountUnits, $transfer->amountUnits),
+        ));
+
+        return new BscTransferInspection('success', $transfers, $exactTransfers);
+    }
+
 
     /** @param array<string, mixed> $log */
     private function decodeTransfer(array $log, string $transactionHash, int $blockNumber): ?BscTransferEvidence

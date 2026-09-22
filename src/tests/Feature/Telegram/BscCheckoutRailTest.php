@@ -20,6 +20,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Services\Bsc\BscPaymentVerification;
 use App\Services\Bsc\BscRpcClient;
 use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -126,7 +127,8 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'USDT BEP20 Payment')
             && str_contains((string) ($request['text'] ?? ''), '0x1111111111111111111111111111111111111111')
             && str_contains((string) ($request['text'] ?? ''), 'BNB Smart Chain (BEP20) ONLY')
-            && str_contains((string) json_encode($request->data()), 'Submit TX Hash')
+            && str_contains((string) ($request['text'] ?? ''), 'system detects the transfer automatically')
+            && ! str_contains((string) json_encode($request->data()), 'Submit TX Hash')
             && str_contains((string) json_encode($request->data()), 'Check Payment Status'));
     }
 
@@ -140,12 +142,14 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             ]),
         ]);
 
-        $rpc = new class implements BscVerificationRpcClientInterface
+        $rpc = new class implements BscVerificationRpcClientInterface, BscTransferLogRpcClientInterface
         {
             /** @var array<string, array<string, mixed>|null> */
             public array $receipts = [];
 
             /** @var array<string, array<string, mixed>|null> */
+            /** @var list<array<string, mixed>> */
+            public array $logs = [];
             public array $blocks = [];
 
             public function chainId(): int
@@ -177,6 +181,15 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             {
                 return $this->blocks[(string) $blockNumber] ?? null;
             }
+            /** @return list<array<string, mixed>> */
+            public function transferLogs(
+                string $tokenContract,
+                string $receiverAddress,
+                int $fromBlock,
+                int $toBlock,
+            ): array {
+                return $this->logs;
+            }
         };
         app()->instance(BscVerificationRpcClientInterface::class, $rpc);
 
@@ -206,7 +219,7 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
 
         $hash = '0x'.str_repeat('f', 64);
         $blockHash = '0x'.str_repeat('e', 64);
-        $expectedUnits = '2500000000000000000';
+        $expectedUnits = (string) $detail->expected_token_units;
         $rpc->receipts[$hash] = [
             'transactionHash' => $hash,
             'status' => '0x1',
@@ -224,6 +237,10 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
                 'blockHash' => $blockHash,
             ]],
         ];
+        $log = $rpc->receipts[$hash]['logs'][0];
+        $log['transactionHash'] = $hash;
+        $log['blockNumber'] = '0x64';
+        $rpc->logs = [$log];
         $blockTimestamp = $payment->created_at->copy()->addSeconds(20);
         $rpc->blocks['100'] = [
             'number' => '0x64',
@@ -236,14 +253,12 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             'hash' => '0x'.str_repeat('d', 64),
         ];
 
-        $submission = app(BscPaymentVerification::class)->submitTransactionHash($order->id, $hash);
-        $this->assertTrue($submission->accepted());
-
         $verificationJob = null;
+        $this->assertTrue(app(BscPaymentVerification::class)->queueForStatusRefresh($payment->fresh()));
         Queue::assertPushed(VerifyBscPayment::class, function (VerifyBscPayment $job) use (&$verificationJob, $payment): bool {
             $verificationJob = $job;
 
-            return $job->paymentId === $payment->id && $job->submissionVersion === 1;
+            return $job->paymentId === $payment->id && $job->submissionVersion === 0;
         });
         $this->assertNotNull($verificationJob);
         $verificationJob->handle(app(BscPaymentVerification::class));
@@ -337,7 +352,7 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
         $this->assertSame(0, Cart::count());
     }
 
-    public function test_bsc_hash_prompt_rejects_invalid_format_without_an_attempt_and_queues_valid_hashes(): void
+    public function test_bsc_amount_unique_checkout_does_not_prompt_for_or_accept_a_hash(): void
     {
         Queue::fake([VerifyBscPayment::class]);
         $this->fakeTelegramHttp();
@@ -350,15 +365,12 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
         $payment = $order->payments()->with('bscDetail')->sole();
 
         $this->postTelegramWebhook($this->callbackUpdate(9020, 'bsc-submit', 'bsc:submit:'.$order->id, ['id' => 44503], 44503, 'private', 9200))->assertOk();
-        $this->postTelegramWebhook($this->messageUpdate(9021, '0x1234', ['id' => 44503], 44503))->assertOk();
-        $this->assertSame(0, (int) $payment->bscDetail->fresh()->tx_attempts);
+        $this->postTelegramWebhook($this->messageUpdate(9021, '0x'.str_repeat('d', 64), ['id' => 44503], 44503))->assertOk();
 
-        $hash = '0x'.str_repeat('d', 64);
-        $this->postTelegramWebhook($this->messageUpdate(9022, $hash, ['id' => 44503], 44503))->assertOk();
-        $this->assertSame(1, (int) $payment->bscDetail->fresh()->tx_attempts);
-        Queue::assertPushed(VerifyBscPayment::class, fn (VerifyBscPayment $job): bool => $job->paymentId === $payment->id && $job->submissionVersion === 1);
+        $this->assertSame(0, (int) $payment->bscDetail->fresh()->tx_attempts);
+        Queue::assertNotPushed(VerifyBscPayment::class);
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'transaction hash is invalid'));
+            && str_contains((string) ($request['text'] ?? ''), 'no transaction hash is needed'));
     }
 
     /** @return array{nonce: ?string, callbacks: list<string>} */

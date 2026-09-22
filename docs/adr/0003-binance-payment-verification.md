@@ -16,3 +16,7 @@ The Store Bot, Web Storefront, queue, and console use one Binance Payment Verifi
 - Existing Binance queue job names remain thin transport adapters so serialized work can drain during migration.
 - Telegram prompt idempotency remains governed by ADR-0002; the Web Storefront remains a standalone guest surface governed by ADR-0001 and continues using Recovery Key access.
 - The migration is a staged clean cutover: retain observable behavior and adapter coverage, replace implementation-coupled tests, then delete raw cross-channel protocols and duplicated verification paths.
+
+## BSC extension — 2026-09-22
+
+New `USDT_BEP20` Payments use an amount-unique snapshot instead of requiring customer-submitted transaction hashes. Checkout allocates the first free micro-USDT amount while the payment-setting lock is held. Verification uses bounded `eth_getLogs` discovery only to find a candidate transaction, then reuses the authoritative receipt, block-fact, confirmation, idempotent claim, and manual-review boundaries. Historical BSC Payments with `verification_mode=transaction_hash` retain the targeted hash path.

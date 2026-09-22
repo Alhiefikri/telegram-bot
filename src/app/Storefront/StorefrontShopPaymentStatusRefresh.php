@@ -101,6 +101,7 @@ class StorefrontShopPaymentStatusRefresh
                             attempts: $status->attempts,
                             version: $status->version,
                             requiredConfirmations: $status->requiredConfirmations,
+                            verificationMode: $status->verificationMode,
                         );
                 }
 

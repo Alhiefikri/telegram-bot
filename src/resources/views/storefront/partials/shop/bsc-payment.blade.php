@@ -11,7 +11,7 @@
 <x-storefront.panel as="section" class="mt-5" aria-label="{{ __('storefront.invoice.bsc.aria_label', [], $storefrontLocale) }}">
     <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">{{ __('storefront.invoice.bsc.eyebrow', [], $storefrontLocale) }}</p>
     <h2 class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.bsc.title', [], $storefrontLocale) }}</h2>
-    <p class="mt-2 text-base font-semibold leading-7 text-[var(--sf-muted)]">{{ __('storefront.invoice.bsc.description', [], $storefrontLocale) }}</p>
+    <p class="mt-2 text-base font-semibold leading-7 text-[var(--sf-muted)]">{{ __('storefront.invoice.bsc.'.(($bscVerificationAutomatic ?? false) ? 'description_auto' : 'description'), [], $storefrontLocale) }}</p>
 
     <dl class="mt-5 grid gap-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-sm font-bold leading-6 shadow-[4px_4px_0_var(--sf-shadow)]">
         <div>
@@ -60,7 +60,7 @@
         <a href="{{ $bscExplorerUrl }}" target="_blank" rel="noopener noreferrer" class="mt-4 inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 py-2 text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">{{ __('storefront.invoice.bsc.explorer', [], $storefrontLocale) }}</a>
     @endif
 
-    @if ($isPendingPayment && ! $bscClosed)
+    @if ($isPendingPayment && ! $bscClosed && ! ($bscVerificationAutomatic ?? false))
         <form method="POST" action="{{ $bscTxHashUrl }}" class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 text-base font-bold leading-7 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]">
             @csrf
             <label for="bsc-tx-hash" class="font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.bsc.tx_form.label', [], $storefrontLocale) }}</label>
@@ -73,8 +73,10 @@
                 <p class="mt-2 text-sm font-black text-red-700" role="alert">{{ $message }}</p>
             @enderror
         </form>
+    @endif
 
-        <div class="mt-4 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-4" data-shop-payment-status data-payment-kind="bsc" data-status-url="{{ $statusUrl }}" data-redirect-url="{{ $redirectUrl }}" data-terminal="{{ $isTerminal ? 'true' : 'false' }}" data-payment-deadline="{{ $paymentDeadlineTimestamp ?? '' }}" data-poll-ms="{{ $paymentStatusPollIntervalMs ?? 20000 }}" data-poll-max-attempts="{{ $paymentStatusPollMaxAttempts ?? 9 }}" data-poll-max-duration-ms="{{ $paymentStatusPollMaxDurationMs ?? 180000 }}" data-status-copy='@json($statusCopy)'>
+    @if ($isPendingPayment && ! $bscClosed)
+        <div class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-4" data-shop-payment-status data-payment-kind="bsc" data-status-url="{{ $statusUrl }}" data-redirect-url="{{ $redirectUrl }}" data-terminal="{{ $isTerminal ? 'true' : 'false' }}" data-payment-deadline="{{ $paymentDeadlineTimestamp ?? '' }}" data-poll-ms="{{ $paymentStatusPollIntervalMs ?? 20000 }}" data-poll-max-attempts="{{ $paymentStatusPollMaxAttempts ?? 9 }}" data-poll-max-duration-ms="{{ $paymentStatusPollMaxDurationMs ?? 180000 }}" data-status-copy='@json($statusCopy)'>
             <p data-payment-status-title class="font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.bsc.status.check_title', [], $storefrontLocale) }}</p>
             <p data-payment-status-message class="mt-1 text-sm font-bold leading-6 text-[var(--sf-muted)]">{{ __('storefront.invoice.bsc.status.check_message', [], $storefrontLocale) }}</p>
             <p data-payment-status-announcement class="sr-only" aria-live="polite"></p>
@@ -82,6 +84,7 @@
             <div data-payment-status-followup class="hidden"></div>
         </div>
     @endif
+
 
     @if ($canCancel)
         <form method="POST" action="{{ $cancelUrl }}" class="mt-5 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-4 text-base font-bold leading-6 text-[var(--sf-muted)] shadow-[4px_4px_0_var(--sf-shadow)]" onsubmit="return confirm(@js(__('storefront.invoice.bsc.cancel.confirm', [], $storefrontLocale)));">

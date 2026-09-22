@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 use App\Services\Bsc\BscPaymentVerification;
 use App\Services\Bsc\BscTransactionHash;
 use App\Services\Bsc\BscVerificationOutcome;
@@ -40,6 +41,14 @@ final class TelegramBscVerifyIntents
 
             return;
         }
+        $payment->loadMissing('bscDetail');
+        if ($payment->bscDetail?->verification_mode === PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE) {
+            $this->bot->answerCallbackQuery($callbackQueryId);
+            $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.bsc.amount_unique_prompt'));
+
+            return;
+        }
+
 
         $this->session->promptOrder($customer, $order->id);
         $this->bot->answerCallbackQuery($callbackQueryId);
@@ -63,6 +72,23 @@ final class TelegramBscVerifyIntents
         }
 
         $payment->loadMissing('bscDetail');
+        if ($payment->bscDetail?->verification_mode === PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE) {
+            try {
+                $this->queue->dispatch($payment, (int) ($payment->bscDetail->tx_submission_version ?? 0));
+            } catch (Throwable $exception) {
+                report($exception);
+                $this->bot->answerCallbackQuery($callbackQueryId);
+                $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.bsc.provider_error'));
+
+                return;
+            }
+
+            $this->bot->answerCallbackQuery($callbackQueryId, $this->translate($customer, 'payment.bsc.check_requested'));
+            $this->bot->sendMessage($chatId, $this->statusMessage($customer, $order, $payment));
+
+            return;
+        }
+
         if (! filled($payment->bscDetail?->current_tx_hash)) {
             $this->bot->answerCallbackQuery($callbackQueryId);
             $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.bsc.hash_prompt'));
@@ -101,6 +127,13 @@ final class TelegramBscVerifyIntents
         if ($message = $this->guardMessage($customer, $order, $payment)) {
             $this->session->forget($customer);
             $this->bot->sendMessage($chatId, $message);
+
+            return true;
+        }
+        $payment->loadMissing('bscDetail');
+        if ($payment->bscDetail?->verification_mode === PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE) {
+            $this->session->forget($customer);
+            $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.bsc.amount_unique_prompt'));
 
             return true;
         }

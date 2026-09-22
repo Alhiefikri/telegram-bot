@@ -36,6 +36,7 @@ final readonly class BscCheckoutPaymentSnapshot extends AbstractCheckoutPaymentS
         public int $requiredConfirmations = ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
         public bool $requiresFinalizedBlock = false,
         public int $confirmationGraceMinutes = ManualPaymentSetting::DEFAULT_BSC_CONFIRMATION_GRACE_MINUTES,
+        public string $verificationMode = PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
     ) {
         parent::__construct($provider, $method, $paymentCurrency, $amount, $expiresAt);
 
@@ -61,8 +62,7 @@ final readonly class BscCheckoutPaymentSnapshot extends AbstractCheckoutPaymentS
         }
 
         if ($this->baseAmountMicro < 0
-            || $this->payableAmountMicro < 0
-            || $this->baseAmountMicro !== $this->payableAmountMicro
+            || $this->payableAmountMicro < $this->baseAmountMicro
             || $this->amount !== $this->payableAmountMicro) {
             throw new InvalidArgumentException('BSC payment amounts are inconsistent.');
         }
@@ -90,6 +90,13 @@ final readonly class BscCheckoutPaymentSnapshot extends AbstractCheckoutPaymentS
         if (trim($this->verificationStatus) === '') {
             throw new InvalidArgumentException('BSC verification status is required.');
         }
+
+        if (! in_array($this->verificationMode, [
+            PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
+            PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH,
+        ], true)) {
+            throw new InvalidArgumentException('BSC verification mode is invalid.');
+        }
     }
 
     public function persist(Payment $payment): void
@@ -108,6 +115,7 @@ final readonly class BscCheckoutPaymentSnapshot extends AbstractCheckoutPaymentS
             'payable_amount_micro' => $this->payableAmountMicro,
             'expected_token_units' => $this->expectedTokenUnits,
             'verification_status' => $this->verificationStatus,
+            'verification_mode' => $this->verificationMode,
         ]);
     }
 }

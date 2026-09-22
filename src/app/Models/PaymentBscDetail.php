@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'payable_amount_micro',
     'expected_token_units',
     'verification_status',
+    'verification_mode',
     'tx_submission_version',
     'tx_attempts',
     'verification_grace_until',
@@ -34,6 +35,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class PaymentBscDetail extends Model
 {
+    public const VERIFICATION_MODE_AMOUNT_UNIQUE = 'amount_unique';
+
+    public const VERIFICATION_MODE_TRANSACTION_HASH = 'transaction_hash';
+
     public const STATUS_AWAITING_TRANSFER = 'awaiting_transfer';
 
     public const STATUS_TX_SUBMITTED = 'tx_submitted';

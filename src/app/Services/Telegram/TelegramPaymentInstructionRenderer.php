@@ -123,8 +123,11 @@ class TelegramPaymentInstructionRenderer
         );
         $deadline = $payment->expired_at ?? $order->expires_at;
         $amount = $this->formatUsdt((int) $detail->payable_amount_micro);
+        $instructionsKey = $detail->verification_mode === PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE
+            ? 'payment.bsc.instructions_auto'
+            : 'payment.bsc.instructions';
 
-        $text = $this->text($locale, 'payment.bsc.instructions', [
+        $text = $this->text($locale, $instructionsKey, [
             'invoice' => $order->invoice_number,
             'items' => $this->orderItemsSummary($order),
             'amount' => $amount,
@@ -135,14 +138,17 @@ class TelegramPaymentInstructionRenderer
             'current_confirmations' => $confirmations,
         ]);
 
+        $buttons = [];
+        if ($detail->verification_mode !== PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE) {
+            $buttons[] = [['text' => $this->text($locale, 'payment.bsc.submit_hash'), 'callback_data' => 'bsc:submit:'.$order->id]];
+        }
+        $buttons[] = [['text' => $this->text($locale, 'payment.bsc.check_status'), 'callback_data' => 'bsc:check:'.$order->id]];
+        $buttons[] = [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]];
+
         return [
             'text' => $text,
             'reply_markup' => [
-                'inline_keyboard' => [
-                    [['text' => $this->text($locale, 'payment.bsc.submit_hash'), 'callback_data' => 'bsc:submit:'.$order->id]],
-                    [['text' => $this->text($locale, 'payment.bsc.check_status'), 'callback_data' => 'bsc:check:'.$order->id]],
-                    [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
-                ],
+                'inline_keyboard' => $buttons,
             ],
         ];
     }

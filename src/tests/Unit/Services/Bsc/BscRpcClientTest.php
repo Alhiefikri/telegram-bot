@@ -78,6 +78,39 @@ class BscRpcClientTest extends TestCase
         $this->assertSame(56, (new BscRpcClient)->chainId());
         Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'bsc-fallback.test'));
     }
+    public function test_it_filters_transfer_logs_by_token_contract_and_receiver(): void
+    {
+        config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
+        $contract = '0x55d398326f99059ff775485246999027b3197955';
+        $receiver = '0x1111111111111111111111111111111111111111';
+        $log = [
+            'address' => $contract,
+            'transactionHash' => '0x'.str_repeat('a', 64),
+            'blockNumber' => '0x64',
+        ];
+        Http::fake([
+            'https://bsc-rpc.test' => Http::response([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'result' => [$log],
+            ]),
+        ]);
+
+        $this->assertSame([$log], (new BscRpcClient)->transferLogs($contract, $receiver, 100, 120));
+        Http::assertSent(function (Request $request) use ($contract, $receiver): bool {
+            $filter = data_get($request->data(), 'params.0');
+            $receiverTopic = '0x'.str_pad(substr($receiver, 2), 64, '0', STR_PAD_LEFT);
+
+            return data_get($request->data(), 'method') === 'eth_getLogs'
+                && data_get($filter, 'fromBlock') === '0x64'
+                && data_get($filter, 'toBlock') === '0x78'
+                && data_get($filter, 'address') === $contract
+                && data_get($filter, 'topics.0') === BscRpcClient::TRANSFER_TOPIC
+                && data_get($filter, 'topics.1') === null
+                && data_get($filter, 'topics.2') === $receiverTopic;
+        });
+    }
+
 
     public function test_it_reports_the_last_endpoint_failure_when_every_endpoint_is_unavailable(): void
     {

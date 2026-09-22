@@ -6,7 +6,7 @@ namespace App\Services\Bsc;
  * Keeps the readiness-only BscRpcClientInterface source-compatible with
  * existing test doubles while the verifier gains receipt and block access.
  */
-final class BscVerificationRpcClientAdapter implements BscVerificationRpcClientInterface
+final class BscVerificationRpcClientAdapter implements BscVerificationRpcClientInterface, BscTransferLogRpcClientInterface
 {
     public function __construct(private readonly BscRpcClientInterface $client) {}
 
@@ -40,6 +40,20 @@ final class BscVerificationRpcClientAdapter implements BscVerificationRpcClientI
     public function blockByNumber(string|int $blockNumber): ?array
     {
         return $this->callOptional('blockByNumber', [$blockNumber]);
+    }
+    /** @return list<array<string, mixed>> */
+    public function transferLogs(
+        string $tokenContract,
+        string $receiverAddress,
+        int $fromBlock,
+        int $toBlock,
+    ): array {
+        return $this->callOptional('transferLogs', [
+            $tokenContract,
+            $receiverAddress,
+            $fromBlock,
+            $toBlock,
+        ]);
     }
 
     private function callOptional(string $method, array $arguments): mixed

@@ -205,8 +205,8 @@ class BinancePaymentRailSelectionTest extends TestCase
             ->assertSee('BNB Smart Chain (BEP20)')
             ->assertSee('ERC20, TRC20, opBNB')
             ->assertSee('Batas pembayaran:')
-            ->assertSee('Kirim Hash TX BSC')
-            ->assertSee('Cek pembayaran')
+            ->assertSee('Sistem mendeteksi transfer otomatis')
+            ->assertDontSee('Kirim Hash TX BSC')
             ->assertSee('Sisa waktu pembayaran');
     }
 
@@ -364,6 +364,9 @@ class BinancePaymentRailSelectionTest extends TestCase
         ]);
         $order = Order::with('payments.bscDetail')->sole();
         $payment = $order->payments->sole();
+        $payment->bscDetail()->update([
+            'verification_mode' => PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH,
+        ]);
         $url = app(StorefrontInvoiceUrl::class)->bscTxHash($order);
 
         $this->post($url, ['bsc_tx_hash' => 'not-a-hash'])

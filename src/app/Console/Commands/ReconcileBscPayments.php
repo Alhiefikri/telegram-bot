@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\PaymentStatus;
 use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 use App\Services\Bsc\BscOperationalAlertNotifier;
 use App\Services\Bsc\BscOperationalMetrics;
 use App\Services\Bsc\BscPaymentVerification;
@@ -17,7 +18,7 @@ final class ReconcileBscPayments extends Command
 {
     protected $signature = 'bsc:reconcile {--chunk=100}';
 
-    protected $description = 'Verify pending USDT BEP20 Payments from customer-submitted transaction hashes.';
+    protected $description = 'Verify pending USDT BEP20 Payments by unique amount or submitted transaction hash.';
 
     public function handle(
         BscPaymentVerification $verification,
@@ -64,7 +65,15 @@ final class ReconcileBscPayments extends Command
                         ->where('status', PaymentStatus::Pending->value)
                         ->whereHas('bscDetail', function ($detail): void {
                             $detail
-                                ->whereNotNull('current_tx_hash')
+                                ->where(function ($mode): void {
+                                    $mode
+                                        ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE)
+                                        ->orWhere(function ($legacy): void {
+                                            $legacy
+                                                ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH)
+                                                ->whereNotNull('current_tx_hash');
+                                        });
+                                })
                                 ->whereNotIn('verification_status', [
                                     'confirmed',
                                     'expired',
@@ -93,8 +102,18 @@ final class ReconcileBscPayments extends Command
                         ->where('created_at', '>=', now()->subHours(max(1, (int) config('services.bsc.late_payment_lookback_hours', 72))))
                         ->whereHas('bscDetail', function ($detail): void {
                             $detail
-                                ->whereNotNull('current_tx_hash')
+                                ->where(function ($mode): void {
+                                    $mode
+                                        ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE)
+                                        ->orWhere(function ($legacy): void {
+                                            $legacy
+                                                ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH)
+                                                ->whereNotNull('current_tx_hash');
+                                        });
+                                })
                                 ->whereIn('verification_status', [
+                                    'awaiting_transfer',
+                                    'not_found',
                                     'tx_submitted',
                                     'confirming',
                                     'provider_error',

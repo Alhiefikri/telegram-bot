@@ -19,6 +19,7 @@ use App\Services\Bsc\BscPaymentVerification;
 use App\Services\Bsc\BscRpcClient;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Bsc\BscRpcException;
+use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Bsc\BscVerificationOutcome;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\Bsc\BscVerificationSubmissionOutcome;
@@ -47,7 +48,7 @@ class BscPaymentVerificationTest extends TestCase
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
 
-        $this->rpc = new class implements BscVerificationRpcClientInterface
+        $this->rpc = new class implements BscVerificationRpcClientInterface, BscTransferLogRpcClientInterface
         {
             public int $calls = 0;
 
@@ -58,6 +59,8 @@ class BscPaymentVerificationTest extends TestCase
 
             /** @var array<string, array<string, mixed>|null> */
             public array $blocks = [];
+            /** @var list<array<string, mixed>> */
+            public array $logs = [];
 
             public ?\Closure $onReceipt = null;
 
@@ -109,6 +112,17 @@ class BscPaymentVerificationTest extends TestCase
                 $this->calls++;
 
                 return $this->blocks[(string) $blockNumber] ?? null;
+            }
+            /** @return list<array<string, mixed>> */
+            public function transferLogs(
+                string $tokenContract,
+                string $receiverAddress,
+                int $fromBlock,
+                int $toBlock,
+            ): array {
+                $this->calls++;
+
+                return $this->logs;
             }
         };
         app()->instance(BscVerificationRpcClientInterface::class, $this->rpc);
@@ -213,6 +227,30 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertSame($beforeCalls, $this->rpc->calls);
     }
+    public function test_amount_unique_verification_discovers_transfer_without_customer_hash(): void
+    {
+        $payment = $this->payment();
+        $amountUnits = '1000100000000000000';
+        $payment->bscDetail()->update([
+            'verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
+            'payable_amount_micro' => 1_000_100,
+            'expected_token_units' => $amountUnits,
+        ]);
+        $hash = '0x'.str_repeat('c', 64);
+        $this->configureReceipt($payment, $hash, amountUnits: $amountUnits, latestBlock: 102);
+        $receipt = $this->rpc->receipts[$hash];
+        $log = $receipt['logs'][0];
+        $log['transactionHash'] = $hash;
+        $log['blockNumber'] = $receipt['blockNumber'];
+        $this->rpc->logs = [$log];
+
+        $result = app(BscPaymentVerification::class)->verify($payment->fresh());
+
+        $this->assertSame(BscVerificationOutcome::Confirmed, $result->outcome);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame($hash, $payment->fresh()->bscDetail->current_tx_hash);
+    }
+
 
     public function test_exact_transfer_stays_confirming_until_three_confirmations_then_claims_once(): void
     {

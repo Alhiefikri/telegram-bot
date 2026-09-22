@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\BscReceiverVerificationStatus;
+use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidCheckout;
 use App\Models\BscPaymentReceiver;
 use App\Models\Cart;
@@ -63,7 +64,7 @@ class BscPaymentAllocationTest extends TestCase
         ]);
     }
 
-    public function test_bsc_checkout_snapshots_receiver_and_exact_integer_amount(): void
+    public function test_bsc_checkout_snapshots_receiver_and_unique_integer_amount(): void
     {
         $receiver = $this->activeReceiver('0x1111111111111111111111111111111111111111');
         $product = Product::factory()->create([
@@ -94,6 +95,7 @@ class BscPaymentAllocationTest extends TestCase
         $this->assertSame(2_500_000, $detail->payable_amount_micro);
         $this->assertSame('2500000000000000000', (string) $detail->expected_token_units);
         $this->assertSame(PaymentBscDetail::STATUS_AWAITING_TRANSFER, $detail->verification_status);
+        $this->assertSame(PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE, $detail->verification_mode);
 
         $orderItem = $order->orderItems->sole();
         $this->assertSame(2_500_000, $orderItem->usdt_unit_price);
@@ -110,7 +112,7 @@ class BscPaymentAllocationTest extends TestCase
         $this->assertSame(2_500_000, $detail->payable_amount_micro);
     }
 
-    public function test_multiple_pending_bsc_checkouts_keep_the_exact_catalog_amount(): void
+    public function test_multiple_pending_bsc_checkouts_receive_distinct_amounts_from_the_same_catalog_price(): void
     {
         $this->activeReceiver('0x2222222222222222222222222222222222222222');
         $product = Product::factory()->create([
@@ -131,11 +133,36 @@ class BscPaymentAllocationTest extends TestCase
         $payments = Payment::query()->whereIn('order_id', [$first->id, $second->id])->get();
 
         $this->assertCount(2, $payments);
-        $this->assertSame([1_000_000, 1_000_000], $payments->pluck('amount')->sort()->values()->all());
+        $this->assertSame([1_000_000, 1_000_100], $payments->pluck('amount')->sort()->values()->all());
         $this->assertSame(
-            [1_000_000, 1_000_000],
+            [1_000_000, 1_000_100],
             PaymentBscDetail::query()->whereIn('payment_id', $payments->pluck('id'))->pluck('payable_amount_micro')->sort()->values()->all(),
         );
+    }
+
+    public function test_recent_bsc_payments_keep_amounts_reserved_for_late_scans(): void
+    {
+        $this->activeReceiver('0x2222222222222222222222222222222222222222');
+        $product = Product::factory()->create([
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 1_000_000,
+        ]);
+
+        $first = app(OrderCheckoutService::class)->checkout(
+            $this->cartForProduct($product),
+            CheckoutPaymentIntents::usdtBep20(),
+        );
+        $firstPayment = $first->payments()->sole();
+        $firstPayment->forceFill(['status' => PaymentStatus::Expired])->save();
+        $firstPayment->bscDetail()->update(['verification_status' => PaymentBscDetail::STATUS_EXPIRED]);
+
+        $second = app(OrderCheckoutService::class)->checkout(
+            $this->cartForProduct($product),
+            CheckoutPaymentIntents::usdtBep20(),
+        );
+
+        $this->assertSame(1_000_100, $second->payments()->sole()->amount);
     }
 
     public function test_pending_or_rejected_receiver_can_never_be_assigned(): void

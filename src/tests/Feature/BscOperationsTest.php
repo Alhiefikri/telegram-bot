@@ -207,6 +207,22 @@ class BscOperationsTest extends TestCase
             $providerError->fresh()->bscDetail->last_verified_at?->format('Y-m-d H:i:s'),
         );
     }
+    public function test_bsc_reconciliation_includes_amount_unique_payments_without_hashes(): void
+    {
+        $payment = $this->bscPayment();
+        $payment->bscDetail()->update([
+            'verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
+        ]);
+
+        $this->artisan('bsc:reconcile', ['--chunk' => 100])
+            ->assertSuccessful()
+            ->expectsOutputToContain('waiting=1');
+
+        $this->assertSame(
+            PaymentBscDetail::STATUS_PROVIDER_ERROR,
+            $payment->fresh()->bscDetail->verification_status,
+        );
+    }
 
     public function test_cancelled_bsc_order_releases_reservation_and_verification_job_is_a_no_op(): void
     {

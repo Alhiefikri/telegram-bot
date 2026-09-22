@@ -54,6 +54,8 @@ final class BscPaymentVerification
             attempts: (int) ($detail?->tx_attempts ?? 0),
             version: (int) ($detail?->tx_submission_version ?? 0),
             requiredConfirmations: $this->minimumConfirmations($detail),
+            verificationMode: (string) ($detail?->verification_mode
+                ?? PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH),
         );
     }
 
@@ -65,15 +67,16 @@ final class BscPaymentVerification
     public function queueForStatusRefresh(Payment $payment): bool
     {
         $payment->loadMissing('bscDetail');
+        $detail = $payment->bscDetail;
         if ($payment->status !== PaymentStatus::Pending
             || $payment->provider !== 'manual'
             || $payment->method !== 'USDT_BEP20'
-            || $payment->bscDetail === null
-            || ! filled($payment->bscDetail->current_tx_hash)) {
+            || $detail === null) {
             return false;
         }
 
-        if (! in_array($payment->bscDetail->verification_status, [
+        if (! in_array($detail->verification_status, [
+            PaymentBscDetail::STATUS_AWAITING_TRANSFER,
             PaymentBscDetail::STATUS_TX_SUBMITTED,
             PaymentBscDetail::STATUS_CONFIRMING,
             PaymentBscDetail::STATUS_NOT_FOUND,
@@ -82,7 +85,14 @@ final class BscPaymentVerification
             return false;
         }
 
-        $this->queue->dispatchForHash($payment);
+        if ($this->isAmountUnique($detail)) {
+            $this->queue->dispatch($payment, (int) $detail->tx_submission_version);
+        } else {
+            if (! filled($detail->current_tx_hash)) {
+                return false;
+            }
+            $this->queue->dispatchForHash($payment);
+        }
 
         return true;
     }
@@ -115,6 +125,9 @@ final class BscPaymentVerification
             $detail = PaymentBscDetail::query()->whereKey($payment->id)->lockForUpdate()->first();
             if (! $detail) {
                 return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::NotConfigured);
+            }
+            if ($this->isAmountUnique($detail)) {
+                return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::NotConfigured, $payment->fresh());
             }
 
             if ($payment->status === PaymentStatus::Paid) {
@@ -249,6 +262,46 @@ final class BscPaymentVerification
                 || $payment->order?->order_status !== OrderStatus::PendingPayment)
             && ! in_array($payment->status, [PaymentStatus::Refunded], true)
             && $detail !== null) {
+            if ($lateHash === null && $this->isAmountUnique($detail)) {
+                try {
+                    if (! $this->enabled()
+                        || ! $this->validConfiguredSnapshot($detail)
+                        || $this->rpc->chainId() !== (int) $detail->chain_id) {
+                        return BscVerificationResult::of(BscVerificationOutcome::OrderNotPending, retryable: false);
+                    }
+
+                    $inspection = $this->scanAmountUniqueTransfers($payment, $detail);
+                    if ($inspection->exactTransfers === []) {
+                        return BscVerificationResult::of(BscVerificationOutcome::OrderNotPending, retryable: false);
+                    }
+                    if (count($inspection->exactTransfers) !== 1) {
+                        $result = $this->ambiguousAmountUniqueTransfer(
+                            $payment,
+                            $detail,
+                            $submissionVersion,
+                            $inspection,
+                        );
+
+                        return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
+                    }
+
+                    $lateHash = $inspection->exactTransfers[0]->txHash;
+                } catch (BscRpcException $exception) {
+                    report($exception);
+                    $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, null, [
+                        'reason' => 'amount_unique_scan_rpc_error',
+                    ]);
+
+                    return BscVerificationResult::of(BscVerificationOutcome::ProviderError, retryable: $exception->retryable);
+                } catch (Throwable $exception) {
+                    report($exception);
+                    $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, null, [
+                        'reason' => 'amount_unique_scan_error',
+                    ]);
+
+                    return BscVerificationResult::of(BscVerificationOutcome::ProviderError, retryable: false);
+                }
+            }
             if ($lateHash === null) {
                 return BscVerificationResult::of(BscVerificationOutcome::OrderNotPending, retryable: false);
             }
@@ -293,23 +346,24 @@ final class BscPaymentVerification
         }
         if ($submissionVersionBound
             && ((int) $detail->tx_submission_version !== $submissionVersion
-                || $hash === null
-                || $detail->current_tx_hash !== $hash)) {
+                || (! $this->isAmountUnique($detail)
+                    && ($hash === null || $detail->current_tx_hash !== $hash)))) {
             return BscVerificationResult::of(BscVerificationOutcome::StaleSubmission, retryable: false);
         }
 
-        if ($hash === null && $this->automaticWindowClosed($payment, $detail)) {
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_EXPIRED, $submissionVersion, null, [
-                'reason' => 'payment_window_closed',
-            ]);
+        if ($hash === null && ! $this->isAmountUnique($detail)) {
+            if ($this->automaticWindowClosed($payment, $detail)) {
+                $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_EXPIRED, $submissionVersion, null, [
+                    'reason' => 'payment_window_closed',
+                ]);
 
-            return $this->staleIfSubmissionChanged(
-                $detail,
-                $submissionVersion,
-                BscVerificationResult::of(BscVerificationOutcome::Expired, retryable: false),
-            );
-        }
-        if ($hash === null) {
+                return $this->staleIfSubmissionChanged(
+                    $detail,
+                    $submissionVersion,
+                    BscVerificationResult::of(BscVerificationOutcome::Expired, retryable: false),
+                );
+            }
+
             return $this->staleIfSubmissionChanged(
                 $detail,
                 $submissionVersion,
@@ -323,6 +377,49 @@ final class BscPaymentVerification
                 $result = $this->mismatch($payment, $detail, $submissionVersion, $hash, null, 'wrong_chain');
 
                 return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
+            }
+
+            if ($hash === null) {
+                $inspection = $this->scanAmountUniqueTransfers($payment, $detail);
+                if ($inspection->exactTransfers === []) {
+                    if ($this->automaticWindowClosed($payment, $detail)) {
+                        $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_EXPIRED, $submissionVersion, null, [
+                            'reason' => 'payment_window_closed',
+                        ]);
+
+                        return $this->staleIfSubmissionChanged(
+                            $detail,
+                            $submissionVersion,
+                            BscVerificationResult::of(BscVerificationOutcome::Expired, retryable: false),
+                        );
+                    }
+
+                    $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_NOT_FOUND, $submissionVersion, null, [
+                        'reason' => 'amount_unique_transfer_not_found',
+                    ]);
+
+                    return $this->staleIfSubmissionChanged(
+                        $detail,
+                        $submissionVersion,
+                        BscVerificationResult::of(BscVerificationOutcome::NotFound, retryable: true),
+                    );
+                }
+                if (count($inspection->exactTransfers) !== 1) {
+                    $result = $this->ambiguousAmountUniqueTransfer(
+                        $payment,
+                        $detail,
+                        $submissionVersion,
+                        $inspection,
+                    );
+
+                    return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
+                }
+
+                $hash = $inspection->exactTransfers[0]->txHash;
+            }
+
+            if ($hash === null) {
+                return BscVerificationResult::of(BscVerificationOutcome::AwaitingTransfer, retryable: true);
             }
 
             $result = $this->verifySubmittedHash($payment, $detail, $hash, $submissionVersion);
@@ -1147,6 +1244,86 @@ final class BscPaymentVerification
         }
 
         return BscVerificationResult::of($outcome, $evidence, retryable: false);
+    }
+
+    private function isAmountUnique(PaymentBscDetail $detail): bool
+    {
+        return (string) ($detail->verification_mode ?? PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH)
+            === PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE;
+    }
+
+    private function scanAmountUniqueTransfers(
+        Payment $payment,
+        PaymentBscDetail $detail,
+    ): BscTransferInspection {
+        if (! $this->rpc instanceof BscTransferLogRpcClientInterface) {
+            throw new BscRpcException('BSC RPC client does not support transfer log scanning.', retryable: false);
+        }
+
+        $latest = $this->rpc->blockByNumber('latest');
+        $latestNumber = $this->blockNumber($latest['number'] ?? null);
+        if ($latest === null || $latestNumber === null) {
+            throw new BscRpcException('BSC RPC returned incomplete latest-block facts.');
+        }
+
+        $createdAt = $payment->created_at;
+        if ($createdAt === null) {
+            throw new BscRpcException('BSC payment has no creation timestamp.', retryable: false);
+        }
+
+        $clockSkew = max(0, (int) config('services.bsc.log_scan_clock_skew_seconds', 120));
+        $blocksPerSecond = max(1, (int) config('services.bsc.log_scan_blocks_per_second', 3));
+        $reorgBuffer = max(0, (int) config('services.bsc.log_scan_reorg_buffer_blocks', 12));
+        $requiredBlocks = (int) ceil(max(0, now()->timestamp - $createdAt->timestamp + $clockSkew) * $blocksPerSecond)
+            + $reorgBuffer;
+        $maxBlocks = max(1, (int) config('services.bsc.log_scan_max_blocks', 250_000));
+        if ($requiredBlocks > $maxBlocks) {
+            throw new BscRpcException('BSC amount-unique scan window exceeds the configured safety bound.', retryable: false);
+        }
+
+        $chunkSize = max(1, (int) config('services.bsc.log_scan_chunk_blocks', 2_000));
+        $fromBlock = max(0, $latestNumber - $requiredBlocks);
+        $logs = [];
+        for ($chunkStart = $fromBlock; $chunkStart <= $latestNumber; $chunkStart += $chunkSize) {
+            $chunkEnd = min($latestNumber, $chunkStart + $chunkSize - 1);
+            $logs = [...$logs, ...$this->rpc->transferLogs(
+                tokenContract: (string) $detail->token_contract,
+                receiverAddress: (string) $detail->receiver_address,
+                fromBlock: $chunkStart,
+                toBlock: $chunkEnd,
+            )];
+        }
+
+        return $this->reader->inspectTransferLogs(
+            logs: $logs,
+            expectedContract: (string) $detail->token_contract,
+            expectedReceiver: (string) $detail->receiver_address,
+            expectedAmountUnits: (string) $detail->expected_token_units,
+        );
+    }
+
+    private function ambiguousAmountUniqueTransfer(
+        Payment $payment,
+        PaymentBscDetail $detail,
+        int $submissionVersion,
+        BscTransferInspection $inspection,
+    ): BscVerificationResult {
+        $evidence = $inspection->exactTransfers[0] ?? null;
+
+        return $this->flagForManualReview(
+            payment: $payment,
+            detail: $detail,
+            submissionVersion: $submissionVersion,
+            outcome: BscVerificationOutcome::ManualReview,
+            detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+            reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+            hash: $evidence?->txHash,
+            evidence: $evidence,
+            metadata: [
+                'reason' => 'amount_unique_multiple_matching_transfers',
+                'match_count' => count($inspection->exactTransfers),
+            ],
+        );
     }
 
     private function guard(Payment $payment): ?BscVerificationResult

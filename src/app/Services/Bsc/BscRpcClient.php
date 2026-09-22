@@ -9,7 +9,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Throwable;
 
-final class BscRpcClient implements BscVerificationRpcClientInterface
+final class BscRpcClient implements BscVerificationRpcClientInterface, BscTransferLogRpcClientInterface
 {
     public const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef';
 
@@ -111,6 +111,47 @@ final class BscRpcClient implements BscVerificationRpcClientInterface
         }
 
         return $result;
+    }
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function transferLogs(
+        string $tokenContract,
+        string $receiverAddress,
+        int $fromBlock,
+        int $toBlock,
+    ): array {
+        $tokenContract = strtolower(trim($tokenContract));
+        $receiverAddress = strtolower(trim($receiverAddress));
+        if (preg_match('/^0x[0-9a-f]{40}$/', $tokenContract) !== 1
+            || preg_match('/^0x[0-9a-f]{40}$/', $receiverAddress) !== 1) {
+            throw new BscRpcException('BSC transfer log filter contains an invalid address.', retryable: false);
+        }
+        if ($fromBlock < 0 || $toBlock < $fromBlock) {
+            throw new BscRpcException('BSC transfer log block range is invalid.', retryable: false);
+        }
+
+        $result = $this->call('eth_getLogs', [[
+            'fromBlock' => $this->blockParameter($fromBlock),
+            'toBlock' => $this->blockParameter($toBlock),
+            'address' => $tokenContract,
+            'topics' => [
+                self::TRANSFER_TOPIC,
+                null,
+                '0x'.str_pad(substr($receiverAddress, 2), 64, '0', STR_PAD_LEFT),
+            ],
+        ]]);
+        if (! is_array($result)) {
+            throw new BscRpcException('BSC RPC returned invalid transfer logs.');
+        }
+
+        foreach ($result as $log) {
+            if (! is_array($log)) {
+                throw new BscRpcException('BSC RPC returned an invalid transfer log.');
+            }
+        }
+
+        return array_values($result);
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Services\Bsc;
 
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 
 final class BscOperationalMetrics
 {
@@ -16,7 +17,15 @@ final class BscOperationalMetrics
                 ->where('method', 'USDT_BEP20')
                 ->where('status', PaymentStatus::Pending->value)
                 ->whereHas('bscDetail', fn ($detail) => $detail
-                    ->whereNotNull('current_tx_hash')
+                    ->where(function ($mode): void {
+                        $mode
+                            ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE)
+                            ->orWhere(function ($legacy): void {
+                                $legacy
+                                    ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH)
+                                    ->whereNotNull('current_tx_hash');
+                            });
+                    })
                     ->whereNotIn('verification_status', [
                         'confirmed',
                         'expired',

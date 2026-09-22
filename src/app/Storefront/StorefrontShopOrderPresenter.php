@@ -4,6 +4,7 @@ namespace App\Storefront;
 
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
+use App\Models\PaymentBscDetail;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\Bsc\BscVerificationOutcome;
@@ -127,6 +128,10 @@ class StorefrontShopOrderPresenter
             'bscVerificationStatus' => $bscStatus,
             'bscStatusLabel' => $this->terminalCopy->bscStatusLabel($bscStatus),
             'bscVerificationOutcome' => $invoice->bscVerificationStatus?->outcome->value,
+            'bscVerificationMode' => $invoice->bscVerificationStatus?->verificationMode
+                ?? PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH,
+            'bscVerificationAutomatic' => $invoice->bscVerificationStatus?->verificationMode
+                === PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
             'bscConfirmations' => $invoice->bscVerificationStatus?->confirmations ?? 0,
             'bscRequiredConfirmations' => $invoice->bscVerificationStatus?->requiredConfirmations
                 ?? ManualPaymentSetting::DEFAULT_BSC_MIN_CONFIRMATIONS,
