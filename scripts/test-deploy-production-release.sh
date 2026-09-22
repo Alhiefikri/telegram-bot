@@ -183,6 +183,10 @@ case "$command" in
     ;;
   run)
     if [ "$scenario" = "migration-failure" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then exit 1; fi
+    if [ "$scenario" = "identity-backfill-key-failure" ] && printf '%s' "$*" | grep -q 'credentials:backfill-identity-registry'; then
+      printf 'Credential identity backfill failed: fingerprint key could not be prepared.\n'
+      exit 1
+    fi
     if [ "$scenario" = "identity-backfill-failure" ] && printf '%s' "$*" | grep -q 'credentials:backfill-identity-registry'; then
       printf 'SUMMARY mode=commit scanned=4 registered=1 already_registered=0 skipped_unrecognized=1 conflicts=1 unresolved=1 last_id=4 ready=false\n'
       printf 'UNRESOLVED_STOCK_ITEM_IDS 2\n'
@@ -282,8 +286,9 @@ SCRIPT
       grep -Eq '^CREDENTIAL_IDENTITY_FINGERPRINT_KEY=[0-9a-f]{64}$' "$workspace/.env" || fail "fingerprint key was not initialized safely"
       grep -q 'Initialized CREDENTIAL_IDENTITY_FINGERPRINT_KEY directly on the VPS' "$workspace/stdout" || fail "fingerprint initialization was not explicit"
       ;;
-    migration-failure)
-      ! grep -q 'compose .* up -d' "$workspace/commands.log" || fail "migration failure cut over application services"
+    identity-backfill-key-failure)
+      grep -q '^status=unavailable reason=fingerprint-key-preparation-failed$' "$artifacts/credential-identity-backfill-summary.txt" || fail "backfill startup failure was not classified without raw output"
+      ! grep -q 'compose .* up -d' "$workspace/commands.log" || fail "backfill startup failure cut over application services"
       ;;
     identity-backfill-failure)
       grep -q '^SUMMARY mode=commit scanned=4 registered=1 already_registered=0 skipped_unrecognized=1 conflicts=1 unresolved=1 last_id=4 ready=false$' "$artifacts/credential-identity-backfill-summary.txt" || fail "backfill summary artifact is not sanitized"
@@ -340,6 +345,7 @@ run_scenario legacy-bootstrap-health-failure 20 deploy-failed-rollback-succeeded
 run_scenario initialize-fingerprint-key 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario identity-backfill-failure 1 credential-identity-backfill-failed-no-cutover "$PREVIOUS_IMAGE"
+run_scenario identity-backfill-key-failure 1 credential-identity-backfill-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"
 run_scenario external-smoke-rollback 0 external-smoke-failed-rollback-succeeded "$PREVIOUS_IMAGE"

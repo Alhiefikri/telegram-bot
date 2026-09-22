@@ -867,6 +867,7 @@ SH);
         $this->assertStringContainsString('compose run --rm --no-deps --entrypoint php', $release);
         $this->assertStringContainsString('exec|run)', $release);
         $this->assertStringContainsString('"$1" -u laravel', $release);
+        $this->assertStringContainsString('fingerprint-key-preparation-failed', $release);
         $this->assertStringContainsString('2026_08_18_000001_contract_telegram_outbound_effects.php', $release);
         $this->assertStringContainsString('run_expand_migrations', $release);
         $this->assertStringContainsString('run_deferred_telegram_contract', $release);

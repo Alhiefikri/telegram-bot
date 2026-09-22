@@ -271,7 +271,7 @@ run_expand_migrations() {
 }
 
 run_credential_identity_backfill() {
-  local raw_output status
+  local raw_output safe_reason status
   raw_output="$RELEASE_ARTIFACT_DIR/credential-identity-backfill.raw"
 
   echo "Preparing the credential identity registry for Account Input."
@@ -290,7 +290,16 @@ run_credential_identity_backfill() {
     -e '/^CONFLICT_STOCK_ITEM_IDS (none|[0-9]+(,[0-9]+)*)$/p' \
     "$raw_output" > "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE"
   if [ ! -s "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE" ]; then
-    printf 'status=unavailable reason=backfill-summary-not-available\n' > "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE"
+    safe_reason=backfill-summary-not-available
+    if [ "$status" -ne 0 ]; then
+      case "$(sed -n '/^Credential identity backfill failed:/p' "$raw_output")" in
+        *'fingerprint key could not be prepared'*) safe_reason=fingerprint-key-preparation-failed ;;
+        *'readiness state could not be started safely'*) safe_reason=readiness-state-start-failed ;;
+        *'while processing retained rows'*) safe_reason=retained-row-processing-failed ;;
+        *'readiness state could not be finalized safely'*) safe_reason=readiness-state-finalization-failed ;;
+      esac
+    fi
+    printf 'status=unavailable reason=%s\n' "$safe_reason" > "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE"
   fi
   chmod 0600 "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE"
   cat "$CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE"
