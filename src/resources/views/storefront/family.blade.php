@@ -15,9 +15,15 @@
                     <span aria-hidden="true">&larr;</span> Kembali ke katalog
                 </a>
 
-                <header class="family-hero mt-5 overflow-hidden rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.08)]">
-                    <div class="grid gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:items-center lg:p-7">
-                        <div class="family-hero-art relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl border border-[var(--sf-border)] bg-[var(--sf-yellow)]">
+                @php
+                    $firstAvailableMember = $members->first(fn ($member): bool => $member->presentation->isAvailable);
+                    $firstAvailableMemberId = $firstAvailableMember?->presentation->id;
+                    $selectedMemberId = $firstAvailableMemberId ?? $members->first()?->presentation->id;
+                @endphp
+
+                <section class="family-product-panel mt-5 overflow-hidden rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.08)]" aria-labelledby="family-title">
+                    <div class="grid lg:grid-cols-[minmax(17rem,0.82fr)_minmax(0,1.18fr)]">
+                        <div class="family-hero-art relative flex aspect-[16/10] items-center justify-center overflow-hidden border-b border-[var(--sf-border)] bg-[var(--sf-yellow)] lg:aspect-auto lg:border-b-0 lg:border-r">
                             @if ($family->imageUrl)
                                 <img src="{{ $family->imageUrl }}" alt="{{ $family->name }}" loading="eager" decoding="async" class="absolute inset-0 h-full w-full object-cover">
                             @else
@@ -25,166 +31,124 @@
                                 <span class="sr-only">Gambar {{ $family->name }}</span>
                             @endif
                         </div>
-                        <div class="family-hero-copy">
+
+                        <div class="min-w-0 p-5 sm:p-7">
                             <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Pilih paket</p>
-                            <h1 class="mt-2 font-display text-3xl font-black leading-tight tracking-tight sm:text-5xl">{{ $family->name }}</h1>
+                            <h1 id="family-title" class="mt-2 font-display text-3xl font-black leading-tight tracking-tight sm:text-5xl">{{ $family->name }}</h1>
                             @if ($family->description)
-                                <p class="mt-4 max-w-3xl whitespace-pre-line break-words text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ $family->description }}</p>
+                                <p class="mt-3 max-w-3xl whitespace-pre-line break-words text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $family->description }}</p>
                             @endif
-                            <div class="mt-5 flex flex-wrap gap-2 text-xs font-black">
-                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2">{{ $family->optionCount }} pilihan</span>
-                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-2">{{ $family->availableOptionCount }} tersedia</span>
-                                <span class="rounded-full border border-[var(--sf-border)] bg-white px-3 py-2">Mulai {{ $family->minimumPriceAmount !== null ? $storefront->idr($family->minimumPriceAmount) : '—' }}</span>
-                                @if ($family->minimumUsdtPriceAmount !== null)
-                                    <span class="rounded-full border border-[var(--sf-border)] bg-white px-3 py-2">{{ $storefront->usdt($family->minimumUsdtPriceAmount) }}</span>
-                                @endif
+
+                            <div class="mt-4 flex flex-wrap items-center gap-2 text-xs font-black">
+                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1.5">{{ $family->optionCount }} varian</span>
+                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-1.5">{{ $family->availableOptionCount }} tersedia</span>
+                                <span class="rounded-full border border-[var(--sf-border)] bg-white px-3 py-1.5">Mulai {{ $family->minimumPriceAmount !== null ? $storefront->idr($family->minimumPriceAmount) : '—' }}</span>
+                            </div>
+
+                            <div class="mt-6 border-t border-dashed border-[var(--sf-border)] pt-5">
+                                <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Pilih varian</p>
+                                <div id="family-options" class="family-option-picker mt-3 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Pilih varian {{ $family->name }}">
+                                    @foreach ($members as $member)
+                                        @php
+                                            $presentation = $member->presentation;
+                                            $optionLabel = trim((string) ($presentation->familyOptionLabel ?? $presentation->name));
+                                            $productUrl = $storefront->productUrl($presentation->id, $familyUrl);
+                                            $checkoutUrl = $storefront->checkoutProductUrl($presentation->id, $familyUrl);
+                                            $detailId = 'family-option-detail-'.$presentation->id;
+                                            $isSelected = $selectedMemberId === $presentation->id;
+                                            $description = trim((string) $presentation->description);
+                                        @endphp
+                                        <article
+                                            id="family-option-{{ $presentation->id }}"
+                                            aria-labelledby="family-option-title-{{ $presentation->id }}"
+                                            data-product-id="{{ $presentation->id }}"
+                                            data-family-option
+                                            data-family-option-name="{{ $optionLabel }}"
+                                            data-family-option-price="{{ $presentation->priceAmount }}"
+                                            data-family-option-stock="{{ $presentation->stockAvailable }}"
+                                            data-family-option-product-url="{{ $productUrl }}"
+                                            data-family-checkout-url="{{ $checkoutUrl }}"
+                                            data-family-detail-id="{{ $detailId }}"
+                                            @if ($isSelected) data-family-selected="true" @endif
+                                            class="family-option {{ $isSelected ? 'family-option-selected' : '' }} relative min-w-0"
+                                        >
+                                            <input type="radio" name="family_option" value="{{ $presentation->id }}" data-family-select @checked($isSelected) tabindex="-1" class="sr-only">
+                                            <a
+                                                href="{{ $productUrl }}"
+                                                id="family-option-button-{{ $presentation->id }}"
+                                                data-family-option-button
+                                                role="radio"
+                                                aria-controls="{{ $detailId }}"
+                                                aria-checked="{{ $isSelected ? 'true' : 'false' }}"
+                                                aria-label="Pilih varian {{ $optionLabel }}"
+                                                class="family-option-button group inline-flex min-h-11 min-w-[7.5rem] max-w-full items-center justify-between gap-2 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] px-3 py-2 text-left transition"
+                                            >
+                                                <span id="family-option-title-{{ $presentation->id }}" class="min-w-0 truncate font-display text-sm font-black leading-tight text-[var(--sf-ink)]">{{ $optionLabel }}</span>
+                                                <span class="h-2 w-2 shrink-0 rounded-full {{ $presentation->isAvailable ? 'bg-[var(--sf-success)]' : 'bg-[#c94856]' }}" aria-hidden="true"></span>
+                                            </a>
+
+                                            <section
+                                                id="{{ $detailId }}"
+                                                data-family-option-detail
+                                                data-family-detail-product-id="{{ $presentation->id }}"
+                                                aria-labelledby="family-option-detail-title-{{ $presentation->id }}"
+                                                aria-hidden="{{ $isSelected ? 'false' : 'true' }}"
+                                                aria-live="polite"
+                                                @if (! $isSelected) hidden @endif
+                                                class="family-option-detail mt-4 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4"
+                                            >
+
+                                                <div class="flex flex-wrap items-center justify-between gap-2">
+                                                    <strong class="font-display text-xl text-[var(--sf-accent)]">{{ $storefront->idr($presentation->priceAmount) }}</strong>
+                                                    <span class="rounded-full border border-[var(--sf-border)] px-2.5 py-1 text-[10px] font-black {{ $presentation->isAvailable ? 'bg-[var(--sf-yellow)]' : 'bg-[#ffd7d7] text-[#9f1d2d]' }}">{{ $presentation->isAvailable ? $presentation->stockLabel : 'Stok habis' }}</span>
+                                                </div>
+
+                                                <div class="mt-4 flex flex-col gap-2 sm:flex-row">
+                                                    @if ($presentation->isAvailable)
+                                                        <a href="{{ $checkoutUrl }}" data-family-direct-checkout class="neo-button neo-button-stable inline-flex min-h-11 flex-1 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white hover:bg-[var(--sf-accent-deep)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">Beli sekarang</a>
+                                                        <form method="POST" action="{{ route('storefront.shop.cart.items.store') }}" class="flex-1">
+                                                            @csrf
+                                                            <input type="hidden" name="product_id" value="{{ $presentation->id }}">
+                                                            <input type="hidden" name="quantity" value="1">
+                                                            <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-[0.7rem] border border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] hover:bg-[var(--sf-yellow)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">Tambah ke keranjang</button>
+                                                        </form>
+                                                    @else
+                                                        <a href="{{ $productUrl }}#waitlist" class="inline-flex min-h-11 flex-1 items-center justify-center rounded-[0.7rem] border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 text-sm font-black hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">{{ $presentation->waitlistCtaLabel }}</a>
+                                                    @endif
+                                                </div>
+                                                <div class="mt-4 grid gap-3">
+                                                    <div class="flex gap-3 rounded-lg border border-[var(--sf-border)] bg-white p-3">
+                                                        <span class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--sf-accent-soft)] text-[var(--sf-accent)]" aria-hidden="true">
+                                                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 5.5A2.5 2.5 0 0 1 7.5 3H20v16H7.5A2.5 2.5 0 0 0 5 21V5.5Z"/><path stroke-linecap="round" d="M8 7h8M8 11h7"/></svg>
+                                                        </span>
+                                                        <div class="min-w-0">
+                                                            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--sf-muted)]">Deskripsi</p>
+                                                            <p class="mt-1 whitespace-pre-line break-words text-sm font-semibold leading-6 text-[var(--sf-ink)]">{{ $description !== '' ? $description : $presentation->descriptionSnippet }}</p>
+                                                        </div>
+                                                    </div>
+
+                                                    @if ($presentation->merchandising->warrantyPolicy)
+                                                        <div class="storefront-product-note flex gap-3 rounded-lg border border-[#e5b52f] bg-[#fff7d6] p-3">
+                                                            <span class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--sf-yellow)]" aria-hidden="true">
+                                                                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3 5 6v5c0 4.6 2.9 8.4 7 10 4.1-1.6 7-5.4 7-10V6l-7-3Z"/><path stroke-linecap="round" d="m9 12 2 2 4-4"/></svg>
+                                                            </span>
+                                                            <div class="min-w-0">
+                                                                <p class="text-[10px] font-black uppercase tracking-[0.14em] text-[#765800]">Catatan garansi</p>
+                                                                <p class="mt-1 whitespace-pre-line break-words text-sm font-semibold leading-6">{{ $presentation->merchandising->warrantyPolicy }}</p>
+                                                            </div>
+                                                        </div>
+                                                    @endif
+                                                </div>
+
+                                            </section>
+                                        </article>
+                                    @endforeach
+                                </div>
                             </div>
                         </div>
                     </div>
-                </header>
+                </section>
 
-                <div class="family-options-heading mt-8 flex items-end justify-between gap-4">
-                    <div>
-                        <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Satu langkah lagi</p>
-                        <h2 class="mt-1 font-display text-2xl font-black tracking-tight sm:text-3xl">Pilih varian</h2>
-                    </div>
-                    <span class="hidden rounded-full border border-[var(--sf-border)] bg-white px-3 py-2 text-xs font-black sm:inline-flex">{{ $family->optionCount }} pilihan</span>
-                </div>
-
-                <div id="family-options" @class([
-                    'family-option-grid mt-5 grid gap-4',
-                    'md:grid-cols-2' => $members->count() > 1,
-                    'mx-auto max-w-3xl' => $members->count() === 1,
-                ])>
-                    @php
-                        $firstAvailableMember = $members->first(fn ($member): bool => $member->presentation->isAvailable);
-                        $firstAvailableMemberId = $firstAvailableMember?->presentation->id;
-                    @endphp
-                    @foreach ($members as $member)
-                        @php
-                            $presentation = $member->presentation;
-                            $optionLabel = trim((string) ($presentation->familyOptionLabel ?? $presentation->name));
-                            $productUrl = $storefront->productUrl($presentation->id, $familyUrl);
-                            $checkoutUrl = $storefront->checkoutProductUrl($presentation->id, $familyUrl);
-                            $hasSupportingDetails = trim((string) $presentation->description) !== ''
-                                || $presentation->merchandising->hasDetails();
-                            $isQuickBuyDefault = $firstAvailableMemberId === $presentation->id;
-                        @endphp
-                        <article id="family-option-{{ $presentation->id }}" aria-labelledby="family-option-title-{{ $presentation->id }}" aria-label="Pilih varian {{ $optionLabel }}" tabindex="0" data-product-id="{{ $presentation->id }}" data-family-option data-family-option-name="{{ $optionLabel }}" data-family-option-price="{{ $presentation->priceAmount }}" data-family-option-stock="{{ $presentation->stockAvailable }}" data-family-checkout-url="{{ $checkoutUrl }}" @if ($isQuickBuyDefault) data-family-selected="true" @endif class="family-option neo-panel reveal-item relative cursor-pointer overflow-hidden bg-[var(--sf-surface)] p-4 sm:p-5">
-                            <div class="flex items-start justify-between gap-3">
-                                <div class="min-w-0">
-                                    <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Opsi</p>
-                                    <h3 id="family-option-title-{{ $presentation->id }}" class="mt-1 font-display text-xl font-black leading-tight sm:text-2xl">
-                                        <a href="{{ $productUrl }}" class="inline-flex min-h-11 items-center rounded-sm focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">
-                                            {{ $optionLabel }}
-                                        </a>
-                                    </h3>
-                                    @if ($optionLabel !== $presentation->name)
-                                        <p class="mt-1 text-xs font-bold text-[var(--sf-muted)]">
-                                            <a href="{{ $productUrl }}" class="inline-flex min-h-11 items-center rounded-sm focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">
-                                                {{ $presentation->name }}
-                                            </a>
-                                        </p>
-                                    @endif
-                                </div>
-                                <div class="flex shrink-0 items-center gap-2">
-                                    <span class="rounded-full border border-[var(--sf-border)] px-2.5 py-1 text-[10px] font-black {{ $presentation->isAvailable ? 'bg-[var(--sf-yellow)]' : 'bg-[#ffd7d7] text-[#9f1d2d]' }}">{{ $presentation->isAvailable ? 'Tersedia' : 'Stok habis' }}</span>
-                                    <input type="radio" name="family_option" value="{{ $presentation->id }}" data-family-select @checked($isQuickBuyDefault) @disabled(! $presentation->isAvailable) tabindex="-1" aria-label="Pilih varian {{ $optionLabel }}" class="sr-only">
-                                </div>
-                            </div>
-
-                            <div class="mt-3 flex flex-wrap items-center gap-2 text-xs font-black">
-                                <span data-family-option-price="idr" class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2">{{ $storefront->idr($presentation->priceAmount) }}</span>
-                                @if ($presentation->usdtPriceAmount !== null)
-                                    <span data-family-option-price="usdt" class="rounded-full border border-[var(--sf-border)] bg-white px-3 py-2">{{ $storefront->usdt($presentation->usdtPriceAmount) }}</span>
-                                @endif
-                                @if ($presentation->merchandising->accessDuration)
-                                    <span class="rounded-full border border-[var(--sf-border)] bg-white px-3 py-2">Durasi {{ $presentation->merchandising->accessDuration }}</span>
-                                @endif
-                                <span class="rounded-full border border-[var(--sf-border)] bg-white px-3 py-2">{{ $presentation->stockLabel }}</span>
-                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-2">{{ $presentation->soldLabel }}</span>
-                            </div>
-
-                            <div class="mt-4 flex flex-col gap-3">
-                                <div class="flex flex-col gap-2 sm:flex-row">
-                                    <a href="{{ $presentation->isAvailable ? $checkoutUrl : $productUrl }}" data-family-direct-checkout class="neo-button inline-flex min-h-11 flex-1 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white hover:bg-[var(--sf-accent-deep)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">
-                                        {{ $presentation->isAvailable ? 'Beli sekarang' : 'Lihat detail opsi' }}
-                                    </a>
-                                    @if ($presentation->isAvailable)
-                                        <form method="POST" action="{{ route('storefront.shop.cart.items.store') }}" class="flex-1">
-                                            @csrf
-                                            <input type="hidden" name="product_id" value="{{ $presentation->id }}">
-                                            <input type="hidden" name="quantity" value="1">
-                                            <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-[0.7rem] border border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] hover:bg-[var(--sf-yellow)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">Tambah ke keranjang</button>
-                                        </form>
-                                    @else
-                                        <a href="{{ $productUrl }}#waitlist" class="inline-flex min-h-11 flex-1 items-center justify-center rounded-[0.7rem] border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 text-sm font-black hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">Beri tahu saat tersedia</a>
-                                    @endif
-                                </div>
-                            </div>
-
-                            @if ($hasSupportingDetails)
-                                <details data-family-option-details class="mt-4 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-2.5">
-                                    <summary class="flex min-h-11 cursor-pointer items-center justify-between gap-3 text-sm font-black text-[var(--sf-ink)] focus-visible:outline focus-visible:outline-3 focus-visible:outline-[var(--sf-blue)] focus-visible:outline-offset-2">
-                                        <span>Baca detail lengkap</span>
-                                        <span aria-hidden="true" class="text-xs font-bold text-[var(--sf-muted)]">+</span>
-                                    </summary>
-                                    @if (trim((string) $presentation->description) !== '')
-                                        <p class="mt-3 whitespace-pre-line break-words text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $presentation->description }}</p>
-                                    @endif
-                                    @if ($presentation->merchandising->hasDetails())
-                                        <dl class="mt-5 grid gap-3 border-y border-dashed border-[var(--sf-border)] py-4 text-xs font-bold sm:grid-cols-2">
-                                            @if ($presentation->merchandising->productType)
-                                                <div><dt class="uppercase tracking-wider text-[var(--sf-muted)]">Tipe</dt><dd class="mt-1">{{ $presentation->merchandising->productType }}</dd></div>
-                                            @endif
-                                            @if ($presentation->merchandising->accessDuration)
-                                                <div><dt class="uppercase tracking-wider text-[var(--sf-muted)]">Durasi</dt><dd class="mt-1">{{ $presentation->merchandising->accessDuration }}</dd></div>
-                                            @endif
-                                            @if ($presentation->merchandising->region)
-                                                <div><dt class="uppercase tracking-wider text-[var(--sf-muted)]">Region</dt><dd class="mt-1">{{ $presentation->merchandising->region }}</dd></div>
-                                            @endif
-                                            @if ($presentation->merchandising->accountType)
-                                                <div><dt class="uppercase tracking-wider text-[var(--sf-muted)]">Tipe akun</dt><dd class="mt-1">{{ $presentation->merchandising->accountType }}</dd></div>
-                                            @endif
-                                            @if ($presentation->merchandising->deviceLimit)
-                                                <div><dt class="uppercase tracking-wider text-[var(--sf-muted)]">Batas perangkat / seat</dt><dd class="mt-1">{{ $presentation->merchandising->deviceLimit }}</dd></div>
-                                            @endif
-                                        </dl>
-                                        @if ($presentation->merchandising->includedItems !== [])
-                                            <div class="mt-3 rounded-lg border border-[var(--sf-border)] bg-white p-3 text-xs font-bold">
-                                                <p class="uppercase tracking-wider text-[var(--sf-muted)]">Yang termasuk</p>
-                                                <ul class="mt-2 list-inside list-disc space-y-1">
-                                                    @foreach ($presentation->merchandising->includedItems as $item)
-                                                        <li class="break-words">{{ $item }}</li>
-                                                    @endforeach
-                                                </ul>
-                                            </div>
-                                        @endif
-                                        @if ($presentation->merchandising->limitations !== [])
-                                            <div class="mt-3 rounded-lg border border-[var(--sf-border)] bg-white p-3 text-xs font-bold">
-                                                <p class="uppercase tracking-wider text-[var(--sf-muted)]">Batasan penggunaan</p>
-                                                <ul class="mt-2 list-inside list-disc space-y-1">
-                                                    @foreach ($presentation->merchandising->limitations as $limitation)
-                                                        <li class="break-words">{{ $limitation }}</li>
-                                                    @endforeach
-                                                </ul>
-                                            </div>
-                                        @endif
-                                        @if ($presentation->merchandising->fulfillmentExpectation)
-                                            <p class="mt-3 rounded-lg border border-[var(--sf-border)] bg-white p-3 text-xs font-bold"><span class="uppercase tracking-wider text-[var(--sf-muted)]">Pemenuhan:</span> {{ $presentation->merchandising->fulfillmentExpectation }}</p>
-                                        @endif
-                                        @if ($presentation->merchandising->warrantyPolicy)
-                                            <p class="mt-3 rounded-lg border border-[var(--sf-border)] bg-white p-3 text-xs font-bold"><span class="uppercase tracking-wider text-[var(--sf-muted)]">Garansi:</span> {{ $presentation->merchandising->warrantyPolicy }}</p>
-                                        @endif
-                                        @if ($presentation->merchandising->supportPolicy)
-                                            <p class="mt-3 rounded-lg border border-[var(--sf-border)] bg-white p-3 text-xs font-bold"><span class="uppercase tracking-wider text-[var(--sf-muted)]">Dukungan:</span> {{ $presentation->merchandising->supportPolicy }}</p>
-                                        @endif
-                                    @endif
-                                </details>
-                            @endif
-                        </article>
-                    @endforeach
-                </div>
                 @if ($firstAvailableMemberId !== null)
                     @php($quickBuyPresentation = $members->first(fn ($member): bool => $member->presentation->id === $firstAvailableMemberId)->presentation)
                     <div class="family-quick-buy fixed inset-x-0 bottom-0 z-40 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 py-3 shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-family-quick-buy role="region" aria-label="Pembelian cepat">
@@ -206,13 +170,6 @@
                         </div>
                     </div>
                 @endif
-
-
-                @include('storefront.partials.support-chooser', [
-                    'supportContext' => $supportContext,
-                    'supportId' => 'family-support',
-                    'supportClass' => 'mt-10',
-                ])
             </section>
         </main>
 

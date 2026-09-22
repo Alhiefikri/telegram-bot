@@ -33,5 +33,6 @@
         <x-admin-dashboard.badge :tone="$checkoutMaintenance['tone']" dot>
             {{ $checkoutMaintenance['status_badge']['label'] }}
         </x-admin-dashboard.badge>
+        <x-theme-toggle class="h-10 w-10 shrink-0 rounded-lg border-2 border-neo-ink bg-white text-neo-ink shadow-neo-sm transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-neo-focus" />
     </div>
 </x-admin-dashboard.card>

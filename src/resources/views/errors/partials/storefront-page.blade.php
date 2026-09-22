@@ -11,15 +11,18 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
     <meta name="robots" content="noindex, nofollow, noarchive">
     <title>{{ $pageTitle }} | Lhie Store</title>
+    @include('partials.theme-init')
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&family=Space+Grotesk:wght@400..700&display=swap" rel="stylesheet">
 </head>
 <body class="min-h-screen overflow-x-hidden bg-[var(--sf-paper)] text-[var(--sf-ink)] antialiased">
-    <main class="storefront-shell grid min-h-screen place-items-center px-5 py-8 sm:px-6">
+    <x-theme-toggle class="fixed right-4 top-4 z-30 h-11 w-11 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" />
+    <main class="storefront-shell grid min-h-screen place-items-center px-5 py-8 pt-24 sm:px-6">
         <section class="neo-panel w-full max-w-xl bg-[var(--sf-surface)] p-6 sm:p-9" aria-labelledby="error-title">
             <a href="{{ route('storefront.home') }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] transition-colors hover:text-[var(--sf-accent)]">
                 @include('storefront.components.brand-mark', ['brand' => 'Lhie Store'])

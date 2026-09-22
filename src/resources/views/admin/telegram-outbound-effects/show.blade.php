@@ -3,12 +3,15 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
     <meta name="robots" content="noindex, nofollow, noarchive">
     <title>Manual Delivery Review</title>
+    @include('partials.theme-init')
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="min-h-screen bg-brand-bg text-neo-ink">
-    <main class="mx-auto max-w-4xl p-4 sm:p-6">
+<body class="admin-page min-h-screen bg-brand-bg text-neo-ink">
+    <x-theme-toggle showLabel class="fixed right-4 top-4 z-30 rounded-neo-xl border-[3px] border-neo-ink bg-white px-3 text-xs font-black text-neo-ink shadow-neo-sm transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-neo-focus" />
+    <main class="mx-auto max-w-4xl p-4 pt-20 sm:p-6">
         <a href="{{ route('admin.telegram-outbound-effects.index') }}" class="text-sm font-bold text-brand-slate-dark underline">← Kembali ke review queue</a>
 
         @if (session('status'))

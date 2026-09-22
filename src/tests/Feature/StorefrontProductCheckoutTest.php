@@ -267,7 +267,7 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertDontSee('Checkout via Telegram Admin');
     }
 
-    public function test_product_detail_renders_complete_merchandising_without_private_fulfillment_data(): void
+    public function test_product_detail_renders_compact_description_and_warranty_without_private_data(): void
     {
         $product = Product::factory()->create([
             'name' => 'Detail Lengkap',
@@ -295,27 +295,15 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertOk()
             ->assertSee('Akun premium siap pakai.')
             ->assertSee('Baca informasi sebelum checkout.')
-            ->assertSee('Detail produk')
-            ->assertSee('Tipe produk')
-            ->assertSee('Akun premium')
-            ->assertSee('Durasi akses')
-            ->assertSee('30 hari')
-            ->assertSee('Region / negara')
-            ->assertSee('Indonesia')
-            ->assertSee('Tipe akun')
-            ->assertSee('Private')
-            ->assertSee('Batas perangkat / seat')
-            ->assertSee('1 perangkat')
-            ->assertSee('Yang termasuk')
-            ->assertSee('Panduan login')
-            ->assertSee('Batasan penggunaan')
-            ->assertSee('Tidak untuk dijual kembali')
-            ->assertSee('Ekspektasi pemenuhan')
-            ->assertSee('Dikirim setelah pembayaran terverifikasi.')
-            ->assertSee('Kebijakan garansi')
+            ->assertSee('Catatan garansi')
             ->assertSee('Garansi login 7 hari.')
-            ->assertSee('Dukungan pelanggan')
-            ->assertSee('Support pada jam operasional.')
+            ->assertDontSee('Detail produk')
+            ->assertDontSee('Tipe produk')
+            ->assertDontSee('Region / negara')
+            ->assertDontSee('Yang termasuk')
+            ->assertDontSee('Batasan penggunaan')
+            ->assertDontSee('Ekspektasi pemenuhan')
+            ->assertDontSee('Dukungan pelanggan')
             ->getContent();
 
         $this->assertStringNotContainsString('PRIVATE DELIVERY NOTE', $html);

@@ -1,8 +1,10 @@
 import Alpine from "alpinejs";
 import adminDashboard, { salesFilter } from "./admin-dashboard";
 import initStorefront from "./storefront";
+import initTheme from "./theme";
 
 window.Alpine = Alpine;
+initTheme();
 Alpine.data("adminDashboard", adminDashboard);
 Alpine.data("salesFilter", salesFilter);
 Alpine.data("passwordReveal", () => ({

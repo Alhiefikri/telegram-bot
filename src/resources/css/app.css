@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
 @source "../views";
 @source "../js";
 @source "../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views";
@@ -184,6 +186,8 @@
   }
 
   :root {
+    color-scheme: light;
+
     --sf-paper: var(--color-sf-paper);
     --sf-surface: var(--color-sf-surface);
     --sf-surface-warm: var(--color-sf-surface-warm);
@@ -214,6 +218,54 @@
     --sf-trend-text: #f5f7fb;
     --sf-trend-muted: #9aa8bd;
     --sf-trend-accent: #f4b62d;
+
+    --admin-paper: var(--color-neo-admin-paper);
+    --admin-paper-desktop: var(--color-neo-admin-paper-desktop);
+    --admin-surface: #ffffff;
+    --admin-surface-muted: #f1f5f9;
+    --admin-ink: var(--color-neo-ink);
+    --admin-muted: var(--color-brand-muted);
+    --admin-border: var(--color-neo-ink);
+    --admin-line: var(--color-brand-border);
+    --admin-shadow: #050505;
+  }
+
+  [data-theme="dark"] {
+    color-scheme: dark;
+
+    --sf-paper: #0b1220;
+    --sf-surface: #141e2d;
+    --sf-surface-warm: #1b2a3e;
+    --sf-ink: #f5f7fb;
+    --sf-muted: #a8b4c7;
+    --sf-border: #33445c;
+    --sf-accent: #60a5fa;
+    --sf-accent-deep: #3b82f6;
+    --sf-accent-soft: #1e3a5f;
+    --sf-accent-rgb: 96 165 250;
+    --sf-yellow: #f7d44b;
+    --sf-blue: #60a5fa;
+    --sf-green: #4ade80;
+    --sf-lilac: #433566;
+    --sf-success: #86efac;
+    --sf-warning: #fbbf24;
+    --sf-shadow: rgb(0 0 0 / 0.45);
+    --sf-violet: #a78bfa;
+    --sf-violet-rgb: 167 139 250;
+    --sf-violet-soft: #352c54;
+    --sf-lime: #bef264;
+    --sf-pink: #f9a8d4;
+    --sf-grid: rgb(148 163 184 / 0.12);
+
+    --admin-paper: #121722;
+    --admin-paper-desktop: #0e131d;
+    --admin-surface: #1a222f;
+    --admin-surface-muted: #232d3b;
+    --admin-ink: #f5f7fb;
+    --admin-muted: #aab6c8;
+    --admin-border: #33445c;
+    --admin-line: #263344;
+    --admin-shadow: #050505;
   }
 
   html {
@@ -263,7 +315,7 @@
 @layer utilities {
   .admin-page {
     min-height: 100vh;
-    background-color: var(--color-neo-admin-paper);
+    background-color: var(--admin-paper);
     background-image:
       radial-gradient(
         circle at top left,
@@ -389,11 +441,11 @@
     width: 100%;
     border: 3px solid var(--color-neo-ink);
     border-radius: var(--radius-neo-2xl);
-    background: #fff;
+    background: var(--admin-surface);
     padding: 0.5rem 0.75rem;
     font-size: 0.875rem;
     font-weight: 700;
-    color: var(--color-neo-ink);
+    color: var(--admin-ink);
     box-shadow: var(--shadow-neo-md);
     transition:
       box-shadow 150ms ease,
@@ -422,8 +474,8 @@
       background-color 0.15s,
       color 0.15s,
       transform 0.15s;
-    background: #fff;
-    color: var(--color-neo-ink);
+    background: var(--admin-surface);
+    color: var(--admin-ink);
     box-shadow: var(--shadow-neo-sm);
   }
   .filter-pill-active {
@@ -453,7 +505,7 @@
     overflow: hidden;
     border: 3px solid var(--color-neo-ink);
     border-radius: 6px;
-    background: #f1f5f9;
+    background: var(--admin-surface-muted);
   }
   .earnings-bar-fill {
     height: 100%;
@@ -470,7 +522,7 @@
 
   @media (min-width: 768px) {
     .admin-dashboard-page {
-      background-color: var(--color-neo-admin-paper-desktop);
+      background-color: var(--admin-paper-desktop);
       background-image:
         radial-gradient(
           circle at top left,
@@ -1383,6 +1435,18 @@
         env(safe-area-inset-bottom, 0px)
     );
   }
+  .storefront-product-page .product-cover-panel .storefront-media-frame {
+    aspect-ratio: 16 / 10;
+  }
+
+  @media (min-width: 1024px) {
+    .storefront-product-page .product-cover-panel .storefront-media-frame {
+      aspect-ratio: 1 / 1;
+    }
+  }
+  .storefront-product-note {
+    color: #12233f;
+  }
 
   .storefront-product-page .storefront-sticky-action {
     display: none;
@@ -1437,48 +1501,77 @@
     }
   }
   /*
-   * Fast family purchase surface: options stay visible, while the selected
-   * product and quantity remain available at the bottom edge.
+   * Compact family chooser: image, family copy, variants, and the active
+   * option share one product panel instead of stacking separate sections.
    */
   .family-page .family-content {
     padding-bottom: 5rem;
   }
 
-  .family-page .family-hero {
+  .family-page .family-product-panel {
     box-shadow: 0 18px 36px -24px rgb(18 35 63 / 0.35);
   }
 
   .family-page .family-hero-art {
     width: 100%;
     min-width: 0;
-    height: clamp(12rem, 34vw, 18rem);
     min-height: 0;
   }
 
-  .family-page .family-option-grid {
-    align-items: stretch;
+  .family-page .family-option {
+    min-width: 0;
+    flex: 0 0 auto;
   }
 
-  .family-page .family-option {
-    cursor: pointer;
+  .family-page .family-option-picker {
+    align-items: center;
+  }
+
+  .family-page .family-option.family-option-selected {
+    display: contents;
+  }
+
+  .family-page .family-option.family-option-selected .family-option-button {
+    order: 0;
+  }
+
+  .family-page .family-option.family-option-selected .family-option-detail {
+    order: 1;
+    flex: 1 0 100%;
+    width: 100%;
+  }
+
+  .family-page .family-option-button {
     border-color: var(--sf-border);
-    box-shadow: 0 8px 22px rgb(18 35 63 / 0.07);
+    color: var(--sf-ink);
+    text-decoration: none;
     transition:
       border-color 180ms ease,
+      background-color 180ms ease,
       box-shadow 180ms ease,
       transform 180ms ease;
   }
 
-  .family-page .family-option:focus-visible {
+  .family-page .family-option-button:hover,
+  .family-page .family-option-selected .family-option-button,
+  .family-page .family-option-button[aria-checked="true"] {
+    border-color: var(--sf-accent);
+    background: var(--sf-accent-soft);
+    box-shadow: 0 14px 28px -18px rgb(37 99 235 / 0.55);
+    transform: translateY(-1px);
+  }
+
+  .family-page .family-option-button:focus-visible {
     outline: 3px solid var(--sf-accent);
     outline-offset: 3px;
   }
 
-  .family-page .family-option:hover,
-  .family-page .family-option-selected {
-    border-color: var(--sf-accent);
-    box-shadow: 0 14px 28px -18px rgb(37 99 235 / 0.55);
-    transform: translateY(-2px);
+  .family-page .family-option-detail {
+    animation: sf-family-detail-in 180ms ease both;
+  }
+
+  .family-page .family-option-detail[hidden] {
+    display: none;
   }
 
   .family-page .family-quick-buy {
@@ -1495,6 +1588,13 @@
 
   .family-page .family-quick-buy .neo-button {
     box-shadow: 0 5px 14px rgb(18 35 63 / 0.14);
+  }
+
+  .family-page
+    .family-quick-buy[data-family-selected-unavailable]
+    [data-family-checkout] {
+    background: var(--sf-yellow);
+    color: var(--sf-ink);
   }
 
   .family-page .family-quick-buy input[type="number"] {
@@ -1517,9 +1617,20 @@
       color 160ms ease;
   }
 
-  .family-page .family-quick-buy button:hover {
+  .family-page .family-quick-buy button:hover:not(:disabled) {
     background: var(--sf-accent-soft);
     color: var(--sf-accent);
+  }
+
+  @keyframes sf-family-detail-in {
+    from {
+      opacity: 0;
+      transform: translateY(-0.25rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .storefront-catalog-card .product-card > .neo-panel,
@@ -1613,7 +1724,8 @@
 
   @media (min-width: 1024px) {
     .family-page .family-hero-art {
-      height: 18rem;
+      height: 100%;
+      aspect-ratio: auto;
     }
   }
 }
@@ -1795,4 +1907,1027 @@
   .storefront-header {
     transition: none !important;
   }
+}
+
+/* Theme controls and dark tokens. The initial theme is applied in the head
+ * before Vite loads so the first paint does not flash the wrong palette. */
+.theme-toggle [data-theme-icon="dark"] {
+  display: none;
+}
+
+[data-theme="dark"] .theme-toggle [data-theme-icon="light"] {
+  display: none;
+}
+
+[data-theme="dark"] .theme-toggle [data-theme-icon="dark"] {
+  display: block;
+}
+
+[data-theme="dark"] .storefront-shell .bg-white:not(:has(img)),
+[data-theme="dark"] .storefront-shell [class~="bg-white/85"]:not(:has(img)) {
+  background-color: var(--sf-surface) !important;
+  color: var(--sf-ink);
+}
+
+[data-theme="dark"] .storefront-shell [data-storefront-qris-mark],
+[data-theme="dark"] .storefront-shell .qris-logo-overlay,
+[data-theme="dark"] .storefront-shell .payment-qris-poster {
+  background-color: #ffffff !important;
+}
+
+/* Dark footer keeps a deep surface with light text instead of inheriting the
+ * light-theme ink color, which would leave white text on a light gray bar. */
+[data-theme="dark"] .footer-dark {
+  background-color: #0b1120 !important;
+  color: var(--sf-ink);
+  border-color: var(--sf-border);
+}
+
+/* Light-theme accent chips (yellow, green) become pale fills in dark mode, so
+ * text on them must flip to dark ink to stay readable. */
+[data-theme="dark"]
+  .storefront-shell
+  :is(
+    [class~="bg-[var(--sf-yellow)]"],
+    [class~="bg-[var(--sf-green)]"],
+    [class~="bg-[var(--sf-warning)]"]
+  ) {
+  color: #0b1220;
+}
+
+[data-theme="dark"]
+  .storefront-shell
+  :is(
+    [class~="bg-[var(--sf-yellow)]"],
+    [class~="bg-[var(--sf-green)]"],
+    [class~="bg-[var(--sf-warning)]"]
+  )
+  :is(
+    [class*="text-[var(--sf-ink)]"],
+    [class*="text-[var(--sf-muted)]"],
+    p,
+    span,
+    strong,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    a,
+    label
+  ):not([data-checkout-payment-copy], [data-checkout-payment-copy] *) {
+  color: #0b1220 !important;
+}
+
+/* Payment labels only turn yellow once their hidden radio input is checked,
+ * so their ink must follow that state instead of flipping unconditionally. */
+[data-theme="dark"]
+  .storefront-shell
+  .peer:checked
+  ~ [class*="peer-checked:bg-[var(--sf-yellow)]"] {
+  color: #0b1220;
+}
+
+[data-theme="dark"]
+  .storefront-shell
+  .peer:checked
+  ~ [class*="peer-checked:bg-[var(--sf-yellow)]"]
+  :is(
+    [class*="text-[var(--sf-ink)]"],
+    [class*="text-[var(--sf-muted)]"],
+    p,
+    span,
+    strong,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    a,
+    label
+  ):not([data-checkout-payment-copy], [data-checkout-payment-copy] *) {
+  color: #0b1220 !important;
+}
+
+/* Radio dot inside payment options follows the darker accent fill. */
+[data-theme="dark"]
+  .storefront-shell
+  .peer:checked
+  ~ [class*="peer-checked:bg-[var(--sf-accent)]"] {
+  background-color: #2563eb;
+}
+
+/* Buttons and CTAs filled with the light accent token stay saturated blue in
+ * dark mode, so their white labels keep contrast there. */
+[data-theme="dark"] .storefront-shell [class~="bg-[var(--sf-accent)]"] {
+  background-color: #2563eb;
+}
+
+[data-theme="dark"] .storefront-shell [class~="bg-[var(--sf-blue)]"] {
+  background-color: #2563eb;
+}
+
+[data-theme="dark"]
+  .storefront-shell
+  [class~="hover:bg-[var(--sf-accent-deep)]"]:hover {
+  background-color: #1d4ed8;
+}
+
+[data-theme="dark"]
+  .storefront-shell
+  [class~="hover:bg-[var(--sf-yellow)]"]:hover {
+  color: #0b1220;
+}
+
+[data-theme="dark"] .storefront-shell [class~="hover:bg-white"]:hover {
+  color: var(--sf-ink);
+}
+
+[data-theme="dark"] .admin-page {
+  background-color: var(--admin-paper) !important;
+  background-image:
+    radial-gradient(
+      circle at top left,
+      rgb(123 209 10 / 0.12),
+      transparent 26%
+    ),
+    radial-gradient(
+      circle at top right,
+      rgb(219 63 152 / 0.1),
+      transparent 22%
+    ),
+    repeating-linear-gradient(
+      135deg,
+      transparent,
+      transparent 22px,
+      rgb(255 255 255 / 0.025) 22px,
+      rgb(255 255 255 / 0.025) 24px
+    );
+  color: var(--admin-ink);
+}
+
+[data-theme="dark"] .admin-dashboard-page {
+  background-color: var(--admin-paper-desktop) !important;
+  background-image:
+    radial-gradient(
+      circle at top left,
+      rgb(123 209 10 / 0.12),
+      transparent 26%
+    ),
+    radial-gradient(
+      circle at top right,
+      rgb(219 63 152 / 0.12),
+      transparent 22%
+    ),
+    radial-gradient(
+      circle at bottom center,
+      rgb(22 180 202 / 0.1),
+      transparent 24%
+    ),
+    repeating-linear-gradient(
+      135deg,
+      transparent,
+      transparent 22px,
+      rgb(255 255 255 / 0.025) 22px,
+      rgb(255 255 255 / 0.025) 24px
+    );
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is(
+    .bg-white,
+    [class~="bg-brand-bg"],
+    [class~="bg-brand-surface"],
+    [class~="bg-[#f1f5f9]"],
+    [class~="bg-[#f8fafc]"]
+  ) {
+  background-color: var(--admin-surface) !important;
+}
+
+/* Inset panels and sub-boxes nested inside cards get a subtle recessed well */
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-white/40"],
+    [class~="bg-white/60"],
+    [class~="bg-white/70"],
+    [class~="bg-white/80"],
+    [class~="bg-white/85"]
+  ) {
+  background-color: rgba(11, 16, 24, 0.55) !important;
+  border-color: var(--admin-line) !important;
+}
+
+/* Form inputs and textareas get a solid, recessed dark well so they never look hollow/transparent */
+[data-theme="dark"]
+  .admin-page
+  :is(
+    input:not(
+      [type="checkbox"],
+      [type="radio"],
+      [type="submit"],
+      [type="button"],
+      [type="file"]
+    ),
+    select,
+    textarea,
+    .admin-dashboard-input
+  ) {
+  background-color: #0c1017 !important;
+  border-color: var(--admin-border) !important;
+  color: var(--admin-ink) !important;
+}
+
+/* Neutral buttons in dark mode have an elevated surface instead of looking hollow.
+ * Only apply to buttons outside light accent containers (which keep their crisp white/ink look). */
+[data-theme="dark"]
+  .admin-page
+  :is(button, a):is([class~="bg-white"]):not(
+    [class~="text-white"],
+    [class~="text-white"] *,
+    :is(
+        [class~="bg-neo-yellow"],
+        [class~="!bg-neo-yellow"],
+        [class~="bg-[#7BD10A]"],
+        [class~="!bg-[#7BD10A]"],
+        [class~="bg-[#f2da3d]"],
+        [class~="!bg-[#f2da3d]"],
+        [class~="bg-[#fee648]"],
+        [class~="!bg-[#fee648]"],
+        [class~="bg-[#ede5fa]"],
+        [class~="!bg-[#ede5fa]"],
+        [class~="bg-[#efe8ff]"],
+        [class~="!bg-[#efe8ff]"],
+        [class~="bg-[#d9c8ff]"],
+        [class~="!bg-[#d9c8ff]"],
+        [class~="bg-[#e8ffd4]"],
+        [class~="!bg-[#e8ffd4]"],
+        [class~="bg-[#d4f6fb]"],
+        [class~="!bg-[#d4f6fb]"],
+        [class~="bg-[#fef9c3]"],
+        [class~="!bg-[#fef9c3]"],
+        [class~="bg-[#fce4f0]"],
+        [class~="!bg-[#fce4f0]"],
+        [class~="bg-[#fff3a3]"],
+        [class~="!bg-[#fff3a3]"],
+        [class~="bg-[#fff4bd]"],
+        [class~="!bg-[#fff4bd]"],
+        [class~="bg-[#fff6cf]"],
+        [class~="!bg-[#fff6cf]"],
+        [class~="bg-[#fff8d6]"],
+        [class~="!bg-[#fff8d6]"],
+        [class~="bg-[#fff8dc]"],
+        [class~="!bg-[#fff8dc]"],
+        [class~="bg-[#fffdf0]"],
+        [class~="!bg-[#fffdf0]"]
+      )
+      *
+  ) {
+  background-color: #242f40 !important;
+  border-color: var(--admin-border) !important;
+  color: var(--admin-ink) !important;
+}
+[data-theme="dark"]
+  .admin-page
+  :is(button, a):is([class~="bg-white"]):not(
+    [class~="text-white"],
+    [class~="text-white"] *,
+    :is(
+        [class~="bg-neo-yellow"],
+        [class~="!bg-neo-yellow"],
+        [class~="bg-[#7BD10A]"],
+        [class~="!bg-[#7BD10A]"],
+        [class~="bg-[#f2da3d]"],
+        [class~="!bg-[#f2da3d]"],
+        [class~="bg-[#fee648]"],
+        [class~="!bg-[#fee648]"],
+        [class~="bg-[#ede5fa]"],
+        [class~="!bg-[#ede5fa]"],
+        [class~="bg-[#efe8ff]"],
+        [class~="!bg-[#efe8ff]"],
+        [class~="bg-[#d9c8ff]"],
+        [class~="!bg-[#d9c8ff]"],
+        [class~="bg-[#e8ffd4]"],
+        [class~="!bg-[#e8ffd4]"],
+        [class~="bg-[#d4f6fb]"],
+        [class~="!bg-[#d4f6fb]"],
+        [class~="bg-[#fef9c3]"],
+        [class~="!bg-[#fef9c3]"],
+        [class~="bg-[#fce4f0]"],
+        [class~="!bg-[#fce4f0]"],
+        [class~="bg-[#fff3a3]"],
+        [class~="!bg-[#fff3a3]"],
+        [class~="bg-[#fff4bd]"],
+        [class~="!bg-[#fff4bd]"],
+        [class~="bg-[#fff6cf]"],
+        [class~="!bg-[#fff6cf]"],
+        [class~="bg-[#fff8d6]"],
+        [class~="!bg-[#fff8d6]"],
+        [class~="bg-[#fff8dc]"],
+        [class~="!bg-[#fff8dc]"],
+        [class~="bg-[#fffdf0]"],
+        [class~="!bg-[#fffdf0]"]
+      )
+      *
+  ):hover {
+  background-color: #2d3b50 !important;
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-paper"],
+    [class~="bg-neo-cream"],
+    [class~="bg-neo-admin-paper/60"]
+  ) {
+  background-color: var(--admin-surface-muted) !important;
+}
+
+[data-theme="dark"] .admin-page [class~="bg-neo-purple-soft"] {
+  background-color: #35294d !important;
+}
+
+[data-theme="dark"] .admin-page [class~="bg-neo-success-soft"] {
+  background-color: #183a2c !important;
+}
+
+[data-theme="dark"] .admin-page [class~="bg-neo-warning-soft"] {
+  background-color: #4a3915 !important;
+}
+
+[data-theme="dark"] .admin-page [class~="bg-neo-info-soft"] {
+  background-color: #143946 !important;
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is([class~="bg-neo-danger-soft"], [class~="bg-neo-danger-pale"]) {
+  background-color: #4a202b !important;
+}
+
+/* Gradient headers keep their saturated light-mode artwork in dark mode, so
+ * their dark ink labels would vanish. Pin the header to a dark gradient with
+ * light ink instead, and dim the white glow decoration. */
+[data-theme="dark"] .admin-page .desktop-header {
+  background: linear-gradient(
+    135deg,
+    #3d1d47 0%,
+    #5b2551 55%,
+    #14304d 100%
+  ) !important;
+  color: var(--admin-ink);
+}
+
+[data-theme="dark"] .admin-page .header-gradient {
+  background: linear-gradient(
+    135deg,
+    #16311c 0%,
+    #383112 48%,
+    #12333f 100%
+  ) !important;
+  color: var(--admin-ink);
+}
+
+[data-theme="dark"] .admin-page .header-glow {
+  opacity: 0.12;
+}
+
+[data-theme="dark"] .admin-page .store-link-section {
+  background: linear-gradient(135deg, #35294d 0%, #4a202b 100%) !important;
+  color: var(--admin-ink);
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="text-neo-ink"],
+    [class~="text-neo-ink/80"],
+    [class~="text-neo-ink/70"],
+    [class~="text-neo-ink/65"],
+    [class~="text-neo-ink/60"],
+    [class~="text-neo-ink/55"],
+    [class~="text-neo-ink/35"]
+  ) {
+  color: var(--admin-ink) !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-neo-ink/80"] {
+  color: color-mix(in srgb, var(--admin-ink) 80%, transparent) !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-neo-ink/70"] {
+  color: color-mix(in srgb, var(--admin-ink) 70%, transparent) !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-neo-ink/65"] {
+  color: color-mix(in srgb, var(--admin-ink) 65%, transparent) !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-neo-ink/60"] {
+  color: color-mix(in srgb, var(--admin-ink) 60%, transparent) !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-neo-ink/55"] {
+  color: color-mix(in srgb, var(--admin-ink) 55%, transparent) !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-neo-ink/35"] {
+  color: color-mix(in srgb, var(--admin-ink) 35%, transparent) !important;
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is([class~="text-brand-muted"], [class~="text-brand-slate-dark"]) {
+  color: var(--admin-muted) !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-brand-slate-dark"] {
+  color: #d5deeb !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-neo-success-text"] {
+  color: #a7f3d0 !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-neo-warning-text"] {
+  color: #fde68a !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-neo-info-text"] {
+  color: #a5f3fc !important;
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is([class~="text-neo-danger-text"], [class~="text-neo-danger-strong"]) {
+  color: #fecaca !important;
+}
+
+[data-theme="dark"] .admin-page [class~="text-neo-purple"] {
+  color: #d8b4fe !important;
+}
+
+[data-theme="dark"] .admin-page :is([class~="border-neo-ink"]) {
+  border-color: var(--admin-border) !important;
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="border-neo-ink/10"],
+    [class~="border-neo-ink/15"],
+    [class~="border-neo-ink/20"],
+    [class~="border-neo-ink/30"],
+    [class~="border-neo-ink/40"],
+    [class~="border-brand-border"],
+    [class~="border-[#e2e8f0]"]
+  ) {
+  border-color: var(--admin-line) !important;
+}
+
+[data-theme="dark"] .admin-page :is(input, select, textarea)::placeholder {
+  color: #64748b !important;
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  ),
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  )
+  :is(
+    [class~="text-neo-ink"],
+    [class~="text-neo-ink/80"],
+    [class~="text-neo-ink/70"],
+    [class~="text-neo-ink/65"],
+    [class~="text-neo-ink/60"],
+    [class~="text-neo-ink/55"],
+    [class~="text-neo-ink/35"],
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    legend,
+    label
+  ):not(
+    [class~="text-white"],
+    [class~="text-white"] *,
+    [class~="bg-neo-warning-soft"] *,
+    [class~="bg-neo-success-soft"] *,
+    [class~="bg-neo-danger-pale"] *,
+    [class~="bg-neo-danger-soft"] *,
+    [class~="bg-neo-purple-soft"] *
+  ) {
+  color: #050505 !important;
+}
+
+/* Neutral cards and buttons nested inside light accent containers keep their
+ * white surface (matching the light-mode design) so the dark ink forced above
+ * stays readable instead of landing on a remapped dark surface. */
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  )
+  :is(
+    [class~="bg-white"],
+    [class~="bg-white/40"],
+    [class~="bg-white/60"],
+    [class~="bg-white/70"],
+    [class~="bg-white/80"],
+    [class~="bg-white/85"]
+  ) {
+  background-color: #ffffff !important;
+  color: #050505 !important;
+}
+
+/* Buttons and links nested in accent containers explicitly keep white surface,
+ * dark ink, and crisp dark border, with light gray hover */
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  )
+  :is(button, a):is([class~="bg-white"]) {
+  background-color: #ffffff !important;
+  color: #050505 !important;
+  border-color: #050505 !important;
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  )
+  :is(button, a):is([class~="bg-white"]):not(
+    [class~="text-white"],
+    [class~="text-white"] *
+  )
+  * {
+  color: #050505 !important;
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  )
+  :is(button, a):is([class~="bg-white"]):hover {
+  background-color: #f1f5f9 !important;
+  color: #050505 !important;
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  )
+  :is([class~="bg-[#f1f5f9]"], [class~="bg-[#f8fafc]"]) {
+  background-color: #f1f5f9 !important;
+  color: #050505 !important;
+}
+
+/* Inputs inside light accent containers keep clean white background, black ink,
+ * and clear slate placeholder. */
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  )
+  :is(input, select, textarea) {
+  background-color: #ffffff !important;
+  color: #050505 !important;
+  border-color: #050505 !important;
+}
+
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  )
+  :is(input, select, textarea)::placeholder {
+  color: #64748b !important;
+}
+
+/* Muted helper text inside accent containers keeps dark slate ink (#475569) */
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  )
+  :is([class~="text-brand-muted"], [class~="text-brand-slate-dark"]) {
+  color: #475569 !important;
+}
+
+/* Borders inside light accent containers keep strong black neobrutalism borders */
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-neo-yellow"],
+    [class~="!bg-neo-yellow"],
+    [class~="bg-[#7BD10A]"],
+    [class~="!bg-[#7BD10A]"],
+    [class~="bg-[#f2da3d]"],
+    [class~="!bg-[#f2da3d]"],
+    [class~="bg-[#fee648]"],
+    [class~="!bg-[#fee648]"],
+    [class~="bg-[#ede5fa]"],
+    [class~="!bg-[#ede5fa]"],
+    [class~="bg-[#efe8ff]"],
+    [class~="!bg-[#efe8ff]"],
+    [class~="bg-[#d9c8ff]"],
+    [class~="!bg-[#d9c8ff]"],
+    [class~="bg-[#e8ffd4]"],
+    [class~="!bg-[#e8ffd4]"],
+    [class~="bg-[#d4f6fb]"],
+    [class~="!bg-[#d4f6fb]"],
+    [class~="bg-[#fef9c3]"],
+    [class~="!bg-[#fef9c3]"],
+    [class~="bg-[#fce4f0]"],
+    [class~="!bg-[#fce4f0]"],
+    [class~="bg-[#fff3a3]"],
+    [class~="!bg-[#fff3a3]"],
+    [class~="bg-[#fff4bd]"],
+    [class~="!bg-[#fff4bd]"],
+    [class~="bg-[#fff6cf]"],
+    [class~="!bg-[#fff6cf]"],
+    [class~="bg-[#fff8d6]"],
+    [class~="!bg-[#fff8d6]"],
+    [class~="bg-[#fff8dc]"],
+    [class~="!bg-[#fff8dc]"],
+    [class~="bg-[#fffdf0]"],
+    [class~="!bg-[#fffdf0]"]
+  )
+  :is(
+    [class~="border-neo-ink"],
+    [class~="border-neo-ink/10"],
+    [class~="border-neo-ink/15"],
+    [class~="border-neo-ink/20"],
+    [class~="border-neo-ink/30"],
+    [class~="border-neo-ink/40"]
+  ) {
+  border-color: #050505 !important;
+}
+
+/* Hover states that paint a light wash must keep dark ink, otherwise light
+ * text flashes on a pale hover background. */
+[data-theme="dark"] .admin-page [class~="hover:bg-[#fff4bd]"]:hover {
+  background-color: #fff4bd;
+  color: #050505 !important;
+}
+
+[data-theme="dark"] .admin-page [class~="hover:bg-brand-bg"]:hover {
+  background-color: var(--admin-surface-muted);
+}
+
+/* Status chips use bright fills without an explicit text color, so inherited
+ * dark-mode ink would wash out on them. */
+[data-theme="dark"]
+  .admin-page
+  :is(
+    [class~="bg-[#38bdf8]"],
+    [class~="bg-[#facc15]"],
+    [class~="bg-[#7BD10A]"],
+    [class~="bg-[#cbd5e1]"]
+  ):not([class~="text-white"], [class~="text-white"] *) {
+  color: #050505 !important;
 }

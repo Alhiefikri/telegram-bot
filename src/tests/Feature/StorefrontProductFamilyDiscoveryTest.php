@@ -325,7 +325,7 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         Queue::assertPushed(SendProductWaitlistConfirmation::class);
     }
 
-    public function test_family_option_card_leads_with_price_availability_and_buy_before_long_details(): void
+    public function test_family_option_picker_keeps_variants_description_and_warranty_in_one_compact_panel(): void
     {
         $family = ProductFamily::factory()->create([
             'slug' => 'decision-order-family',
@@ -337,7 +337,7 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
             'product_family_id' => $family->id,
             'family_sort_order' => 1,
             'family_option_label' => 'Paket 30 Hari',
-            'description' => "Baris pertama penawaran.\nBaris panjang kedua yang memuat detail panjang berulang-ulang untuk membuktikan bahwa konten pendukung tidak boleh mengubur tombol Beli pada layar sempit.",
+            'description' => "Baris pertama penawaran.\nBaris panjang kedua yang tetap terlihat tanpa panel spesifikasi tambahan.",
             'product_type' => 'Akun premium',
             'access_duration' => '30 hari',
             'region' => 'Global',
@@ -356,49 +356,40 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
 
         $html = $this->get(route('storefront.product-families.show', ['productFamily' => $family->slug]))
             ->assertOk()
+            ->assertSee('Pilih paket sesuai kebutuhan.')
+            ->assertSee('Pilih varian')
+            ->assertSee('Paket 30 Hari')
+            ->assertSee('Baris pertama penawaran.')
+            ->assertSee('Baris panjang kedua yang tetap terlihat tanpa panel spesifikasi tambahan.')
+            ->assertSee('Catatan garansi')
+            ->assertSee('Garansi login 7 hari.')
+            ->assertDontSee('Yang termasuk')
+            ->assertDontSee('Batasan penggunaan')
+            ->assertDontSee('Batas perangkat / seat')
             ->getContent();
-        preg_match('/<article id="family-option-'.$product->id.'"(.*?)<\/article>/s', $html, $card);
+
+        preg_match('/<article\s+id="family-option-'.$product->id.'"(.*?)<\/article>/s', $html, $card);
         $this->assertNotEmpty($card[1] ?? null);
         $cardHtml = $card[1];
-
         $pricePosition = strpos($cardHtml, 'Rp99.000');
-        $durationChipPosition = strpos($cardHtml, 'Durasi 30 hari');
-        $usdtPricePosition = strpos($cardHtml, '1.25 USDT');
-        preg_match('/>\s*Beli(?: sekarang)?\s*</', $cardHtml, $buyMatch, PREG_OFFSET_CAPTURE);
-        $summaryPosition = strpos($cardHtml, 'Baca detail lengkap');
-        $teaserPosition = strpos($cardHtml, 'Baris pertama penawaran.');
-        $merchandisingPosition = strpos($cardHtml, 'Region');
-        $deviceLimitPosition = strpos($cardHtml, 'Batas perangkat / seat');
-        $fullDescriptionPosition = strpos($cardHtml, 'Baris panjang kedua yang memuat detail panjang');
-        $detailPosition = strpos($cardHtml, 'Detail <span aria-hidden="true">→</span>');
+        $descriptionPosition = strpos($cardHtml, 'Baris pertama penawaran.');
+        preg_match('/>\s*Beli sekarang\s*</', $cardHtml, $buyMatch, PREG_OFFSET_CAPTURE);
+        $buyPosition = $buyMatch[0][1] ?? false;
 
-        $this->assertNotFalse($pricePosition, 'Option card should show the price.');
-        $this->assertNotFalse($durationChipPosition, 'Option card should show the duration as a decision fact.');
-        $this->assertNotFalse($buyPosition = $buyMatch[0][1] ?? false, 'Option card should show the Beli action.');
-        $this->assertNotFalse($summaryPosition, 'Option card should keep details in a disclosure.');
-        $this->assertNotFalse($teaserPosition, 'Option card should keep the description reachable.');
-        $this->assertNotFalse($merchandisingPosition, 'Option card should keep merchandising reachable.');
-        $this->assertNotFalse($usdtPricePosition, 'Option card should show the honest USDT price when configured.');
-        $this->assertNotFalse($deviceLimitPosition, 'Option card should keep the device limit reachable.');
-        $this->assertNotFalse($fullDescriptionPosition, 'Option disclosure should keep the full description reachable.');
-        $this->assertFalse($detailPosition, 'Available options should not expose a second visible detail action next to Beli.');
-        $this->assertStringContainsString('href="'.route('storefront.products.show', ['product' => $product]).'?from=', $cardHtml, 'The option name should remain the detail entry point.');
+        $this->assertStringContainsString('aria-checked="true"', $cardHtml);
+        $this->assertStringContainsString('data-family-option-detail', $cardHtml);
+        $this->assertStringContainsString('data-family-direct-checkout', $cardHtml);
+        $this->assertStringContainsString('name="product_id" value="'.$product->id.'"', $cardHtml);
+        $this->assertStringContainsString('href="'.route('storefront.products.show', ['product' => $product]).'?from=', $cardHtml);
+        $this->assertNotFalse($pricePosition);
+        $this->assertNotFalse($descriptionPosition);
+        $this->assertNotFalse($buyPosition);
+        $this->assertLessThan($buyPosition, $pricePosition);
+        $this->assertLessThan($descriptionPosition, $buyPosition);
+
         $familyMainHtml = substr($html, strpos($html, '<main'));
-        $this->assertStringNotContainsString('role="dialog"', $familyMainHtml, 'Family options should remain a document flow without a modal.');
-        $this->assertStringContainsString('Opsi', $cardHtml, 'Option cards should use public option language.');
-        $this->assertLessThan($buyPosition, $pricePosition, 'Price should appear above the Beli action.');
-        $this->assertLessThan($buyPosition, $durationChipPosition, 'Duration should appear above the Beli action.');
-        $this->assertLessThan($summaryPosition, $buyPosition, 'Beli should appear above the details disclosure.');
-        $this->assertLessThan($teaserPosition, $summaryPosition, 'Description should live inside the disclosure.');
-        $this->assertLessThan($merchandisingPosition, $summaryPosition, 'Merchandising should live inside the disclosure.');
-
-        $this->assertSame(1, preg_match('/<details data-family-option-details/', $cardHtml), 'Disclosure should be a native details element.');
-        $this->assertSame(0, preg_match('/<details data-family-option-details[^>]*\bopen\b/', $cardHtml), 'Details should start collapsed.');
-        $this->assertStringContainsString('Tersedia', $cardHtml, 'Availability should stay visible on the card.');
-        $this->assertLessThan($buyPosition, $usdtPricePosition, 'USDT price should appear above the Beli action.');
-        $this->assertLessThan($deviceLimitPosition, $summaryPosition, 'Device limit should remain inside the details disclosure.');
-        $this->assertLessThan($fullDescriptionPosition, $summaryPosition, 'Full description should remain inside the details disclosure.');
-        $this->assertStringContainsString('href="'.route('storefront.shop.checkout.product', ['product' => $product]).'?from=', $cardHtml, 'Beli should point at the direct checkout review.');
+        $this->assertStringNotContainsString('role="dialog"', $familyMainHtml);
+        $this->assertStringNotContainsString('Butuh bantuan?', $familyMainHtml);
     }
 
     public function test_canonical_family_path_and_legacy_slug_aliases_redirect_safely(): void

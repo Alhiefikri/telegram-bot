@@ -20,10 +20,10 @@
 >
     <p @class([
         'text-[9px] font-bold uppercase',
-        'text-[#64748b]' => $tone === 'slate',
-        'text-[#0e7490]' => $tone === 'cyan',
-        'text-[#92400e]' => $tone === 'amber',
-        'text-[#166534]' => $tone === 'emerald',
+        'text-brand-muted' => $tone === 'slate',
+        'text-neo-info-text' => $tone === 'cyan',
+        'text-neo-warning-text' => $tone === 'amber',
+        'text-neo-success-text' => $tone === 'emerald',
     ])>{{ $label }}</p>
     <p class="mt-0.5 break-words font-display text-sm font-bold text-neo-ink">
         @if ($slot->isNotEmpty())

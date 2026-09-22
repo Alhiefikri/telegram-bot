@@ -18,6 +18,7 @@
                     <a href="#bantuan" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Bantuan</a>
                     <a href="{{ $invoiceReturnUrl ?: route('storefront.order-access.create') }}" class="inline-flex items-center gap-1.5 rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">{{ $invoiceReturnUrl ? 'Kembali ke Invoice' : 'Akses Pesanan' }}</a>
                 </nav>
+                <x-theme-toggle class="h-11 w-11 shrink-0 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" />
             </div>
         </header>
 

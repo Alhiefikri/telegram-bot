@@ -3,14 +3,17 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="color-scheme" content="light dark">
         <meta name="robots" content="noindex, nofollow, noarchive">
         <title>Login Admin LHIE STORE</title>
+        @include('partials.theme-init')
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
-    <body class="admin-page admin-login-page flex min-h-full items-center justify-center px-4 py-10 text-neo-ink antialiased">
+    <body class="admin-page admin-login-page flex min-h-full items-center justify-center px-4 py-10 pt-20 text-neo-ink antialiased">
+        <x-theme-toggle showLabel class="fixed right-4 top-4 z-30 rounded-neo-xl border-[3px] border-neo-ink bg-white px-3 text-xs font-black text-neo-ink shadow-neo-sm transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-neo-focus" />
         <main class="w-full max-w-md">
             <x-admin-dashboard.card as="section" padding="compact" shadow="md" class="rounded-neo-5xl border-4 bg-white p-6 shadow-neo-3xl">
                 <div class="mb-6 rounded-neo-3xl border-[3px] border-neo-ink bg-neo-yellow p-4 shadow-neo-md">

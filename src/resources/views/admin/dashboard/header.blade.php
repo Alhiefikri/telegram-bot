@@ -22,6 +22,7 @@
                         <x-admin-dashboard.badge background="rgba(255,255,255,0.55)" color="#050505">
                             {{ $checkoutMaintenance['status_badge']['label'] }}
                         </x-admin-dashboard.badge>
+                        <x-theme-toggle showLabel class="min-h-9 rounded-lg border-2 border-neo-ink bg-white/60 px-2.5 text-[10px] font-black text-neo-ink shadow-[2px_2px_0_#050505] transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-neo-focus" />
                     </div>
                 </div>
 

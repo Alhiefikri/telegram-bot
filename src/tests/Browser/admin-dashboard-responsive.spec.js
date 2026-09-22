@@ -80,6 +80,71 @@ test("storefront navigation: header remains reachable after scrolling", async ({
     .toBeGreaterThanOrEqual(0);
 });
 
+test("theme preference toggles and survives a page reload", async ({
+  page,
+}) => {
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => window.localStorage.removeItem("lhie-store-theme"));
+  await page.reload({ waitUntil: "domcontentloaded" });
+
+  const themeToggle = page.locator("[data-theme-toggle]").first();
+  await expect(themeToggle).toBeVisible();
+
+  const initialTheme = await page.locator("html").getAttribute("data-theme");
+  expect(["light", "dark"]).toContain(initialTheme);
+  const initialBackground = await page
+    .locator("body")
+    .evaluate((body) => getComputedStyle(body).backgroundColor);
+
+  await themeToggle.click();
+
+  const selectedTheme = await page.locator("html").getAttribute("data-theme");
+  expect(selectedTheme).not.toBe(initialTheme);
+  const selectedBackground = await page
+    .locator("body")
+    .evaluate((body) => getComputedStyle(body).backgroundColor);
+  expect(selectedBackground).not.toBe(initialBackground);
+  await expect(themeToggle).toHaveAttribute(
+    "aria-pressed",
+    selectedTheme === "dark" ? "true" : "false"
+  );
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("lhie-store-theme")))
+    .toBe(selectedTheme);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-theme",
+    selectedTheme
+  );
+});
+
+test("admin dashboard exposes the shared theme preference control", async ({
+  page,
+}) => {
+  await login(page);
+
+  const themeToggle = page.locator("[data-theme-toggle]").first();
+  await expect(themeToggle).toBeVisible();
+
+  const initialTheme = await page.locator("html").getAttribute("data-theme");
+  const initialBackground = await page
+    .locator("body")
+    .evaluate((body) => getComputedStyle(body).backgroundColor);
+  await themeToggle.click();
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-theme",
+    initialTheme === "dark" ? "light" : "dark"
+  );
+  await expect
+    .poll(() =>
+      page
+        .locator("body")
+        .evaluate((body) => getComputedStyle(body).backgroundColor)
+    )
+    .not.toBe(initialBackground);
+});
+
 test("storefront navigation: desktop resize releases mobile scroll lock", async ({
   page,
 }) => {
@@ -1000,13 +1065,18 @@ test("customer checkout: proves direct and Family review geometry across require
     const familyOption = page
       .locator("#family-options article")
       .filter({ hasText: "QA option" });
-    const familyCheckoutLink = familyOption.locator(
-      'a[href*="/shop/checkout/products/"]'
-    );
+    const familyCheckoutLink = page
+      .locator("#family-options [data-family-direct-checkout]:visible")
+      .first();
     await expect(familyCheckoutLink).toHaveCount(1);
-    await familyOption.scrollIntoViewIfNeeded();
-    await expect(familyOption).toHaveCSS("opacity", "1");
-    await familyCheckoutLink.click({ force: true, noWaitAfter: true });
+    await familyOption
+      .locator("[data-family-option-button]")
+      .scrollIntoViewIfNeeded();
+    await expect(familyOption.locator("[data-family-option-button]")).toHaveCSS(
+      "opacity",
+      "1"
+    );
+    await familyCheckoutLink.evaluate((element) => element.click());
     await expectStorefrontPageCheckout(page);
     await expectStorefrontCheckoutResponsiveContract(page, viewport);
   }
@@ -1150,7 +1220,7 @@ test("customer checkout: keeps checkout back links source-aware at mobile widths
   }
 });
 
-test("customer checkout: keeps Family option decisions above long details at mobile widths", async ({
+test("customer checkout: keeps Family options and sticky purchase reachable at mobile widths", async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -1172,27 +1242,59 @@ test("customer checkout: keeps Family option decisions above long details at mob
     const optionCard = page
       .locator("#family-options article")
       .filter({ hasText: "QA option" });
-    await expect(optionCard).toBeVisible();
-    const availabilityBadge = optionCard
+    const optionButton = optionCard.locator("[data-family-option-button]");
+    const optionDetail = optionCard.locator("[data-family-option-detail]");
+    const availabilityBadge = optionDetail
       .locator("span")
       .filter({ hasText: "Tersedia" })
       .first();
-    const priceChip = optionCard
-      .locator("span")
+    const priceChip = optionDetail
+      .locator("strong")
       .filter({ hasText: "Rp45.000" })
       .first();
-    const buyLink = optionCard
-      .locator('a[href*="/shop/checkout/products/"]')
-      .filter({ hasText: "Beli" });
-    const details = optionCard.locator("details[data-family-option-details]");
-    const detailsSummary = details.locator("summary");
-    const durationChip = optionCard
-      .locator("span")
-      .filter({ hasText: "Durasi 30 hari" });
+    const buyLink = optionDetail.locator('a[href*="/shop/checkout/products/"]');
+    const description = optionDetail.getByText(
+      /Paket QA dengan deskripsi panjang/
+    );
+    const warrantyNote = optionDetail.getByText("Garansi login 7 hari.", {
+      exact: true,
+    });
+
+    await expect(optionCard).toBeVisible();
+    await expect(optionButton).toHaveAttribute("aria-checked", "true");
+    await expect(optionDetail).toBeVisible();
+    await expect(description).toBeVisible();
     await expect(buyLink).toHaveCount(1);
-    await expect(details).toHaveCount(1);
-    await expect(detailsSummary).toHaveText(/Baca detail lengkap/);
-    await expect(durationChip).toHaveCount(1);
+    await expect(warrantyNote).toBeVisible();
+    await expect(optionCard.locator("details")).toHaveCount(0);
+    await expect(page.getByText("Butuh bantuan?", { exact: true })).toHaveCount(
+      0
+    );
+    const secondaryCard = page
+      .locator("#family-options article")
+      .filter({ hasText: "QA secondary" });
+    const secondaryButton = secondaryCard.locator(
+      "[data-family-option-button]"
+    );
+    const secondaryDetail = secondaryCard.locator(
+      "[data-family-option-detail]"
+    );
+    await expect(secondaryButton).toHaveAttribute("aria-checked", "false");
+    await expect(secondaryDetail).toBeHidden();
+    await secondaryButton.click();
+    await expect(secondaryButton).toHaveAttribute("aria-checked", "true");
+    await expect(optionButton).toHaveAttribute("aria-checked", "false");
+    await expect(secondaryDetail).toBeVisible();
+    await expect(optionDetail).toBeHidden();
+    await expect(
+      secondaryDetail.getByText(
+        "Deskripsi varian sekunder untuk browser selector coverage."
+      )
+    ).toBeVisible();
+    await optionButton.click();
+    await expect(optionButton).toHaveAttribute("aria-checked", "true");
+    await expect(secondaryButton).toHaveAttribute("aria-checked", "false");
+    await expect(optionDetail).toBeVisible();
 
     const documentOverflow = await page.evaluate(
       () =>
@@ -1203,21 +1305,25 @@ test("customer checkout: keeps Family option decisions above long details at mob
 
     const availabilityBox = await availabilityBadge.boundingBox();
     const priceBox = await priceChip.boundingBox();
-    const durationBox = await durationChip.boundingBox();
+    const warrantyBox = await warrantyNote.boundingBox();
     const buyBox = await buyLink.boundingBox();
-    const summaryBox = await detailsSummary.boundingBox();
-    expect(priceBox.y).toBeGreaterThan(availabilityBox.y);
-    expect(durationBox.y + durationBox.height).toBeLessThanOrEqual(
+    const optionButtonBox = await optionButton.boundingBox();
+    expect(availabilityBox).not.toBeNull();
+    expect(priceBox).not.toBeNull();
+    expect(warrantyBox).not.toBeNull();
+    expect(buyBox).not.toBeNull();
+    expect(optionButtonBox).not.toBeNull();
+    expect(optionButtonBox.height).toBeLessThanOrEqual(64);
+    expect(availabilityBox.y).toBeGreaterThanOrEqual(optionButtonBox.y);
+    expect(priceBox.y).toBeGreaterThanOrEqual(optionButtonBox.y);
+    expect(warrantyBox.y).toBeGreaterThanOrEqual(optionButtonBox.y);
+    expect(warrantyBox.y + warrantyBox.height).toBeLessThanOrEqual(
       buyBox.y + 1
     );
-    expect(buyBox.y).toBeGreaterThan(priceBox.y);
-    expect(summaryBox.y).toBeGreaterThan(buyBox.y);
+    expect(buyBox.y).toBeGreaterThan(optionButtonBox.y);
     expect(Math.round(buyBox.width)).toBeGreaterThanOrEqual(44);
     expect(Math.round(buyBox.height)).toBeGreaterThanOrEqual(44);
-    expect(Math.round(summaryBox.height)).toBeGreaterThanOrEqual(44);
 
-    // With the option list in view, the decision facts and Beli CTA must fit
-    // the first viewport so long details cannot push them out of reach.
     await page.locator("#family-options").evaluate((element) =>
       element.scrollIntoView({
         block: "start",
@@ -1225,31 +1331,14 @@ test("customer checkout: keeps Family option decisions above long details at mob
         behavior: "instant",
       })
     );
-    const buyReachability = await buyLink.evaluate((element) => ({
-      top: element.getBoundingClientRect().top,
-      height: element.getBoundingClientRect().height,
-    }));
-    expect(buyReachability.top + buyReachability.height).toBeLessThanOrEqual(
+    const stickyCheckout = page.locator("[data-family-checkout]");
+    await expect(stickyCheckout).toBeVisible();
+    const stickyBox = await stickyCheckout.boundingBox();
+    expect(stickyBox).not.toBeNull();
+    expect(stickyBox.y).toBeGreaterThanOrEqual(0);
+    expect(stickyBox.y + stickyBox.height).toBeLessThanOrEqual(
       viewport.height + 1
     );
-
-    await expect(details.locator("dt", { hasText: /^Durasi$/ })).toBeHidden();
-    await expect(details.locator("text=30 hari")).toBeHidden();
-    await detailsSummary.focus();
-    await expect(detailsSummary).toBeFocused();
-    await expect(detailsSummary).toHaveCSS("outline-style", "solid");
-    await page.keyboard.press("Enter");
-    await expect(details).toHaveAttribute("open", "");
-    await expect(details.locator("dt", { hasText: /^Durasi$/ })).toBeVisible();
-    await expect(details.locator("text=30 hari")).toBeVisible();
-    const expandedOverflow = await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth
-    );
-    expect(expandedOverflow).toBeLessThanOrEqual(1);
-    await page.keyboard.press("Enter");
-    await expect(details).not.toHaveAttribute("open", "");
   }
 });
 
@@ -4826,6 +4915,19 @@ foreach (range(3, 9) as $stockIndex) {
         'secret' => "browser-stock-{$stockIndex}@example.test|pass",
     ]);
 }
+Product::factory()->create([
+    'is_active' => true,
+    'product_family_id' => $family->id,
+    'family_sort_order' => 2,
+    'family_option_label' => 'QA secondary',
+    'category_id' => $category->id,
+    'name' => 'Browser QA Produk Family Secondary',
+    'description' => 'Deskripsi varian sekunder untuk browser selector coverage.',
+    'access_duration' => '60 hari',
+    'price_amount' => 65000,
+    'stock' => 4,
+    'reserved_stock' => 0,
+]);
 Product::factory()->create([
     'category_id' => $category->id,
     'name' => 'Browser QA Produk A',

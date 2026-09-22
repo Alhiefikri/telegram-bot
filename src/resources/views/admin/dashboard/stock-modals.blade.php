@@ -8,7 +8,7 @@
                         show="stockModalOpen"
                         title="Tambah stok"
                         description="Input Cepat tetap untuk stok legacy. Input Akun membuat satu akun = satu stok."
-                        class="max-h-[calc(100vh-1.5rem)] w-full max-w-5xl overflow-y-auto bg-[#7BD10A] p-3 sm:p-5"
+                        class="max-h-[calc(100vh-1.5rem)] w-full max-w-5xl overflow-y-auto !bg-[#7BD10A] p-3 sm:p-5"
                     >
                         @if ($structuredStockInputEnabled)
                         <div class="mb-4 grid grid-cols-2 gap-2" role="tablist" aria-label="Mode input stok">
@@ -349,7 +349,7 @@
                         show="manageStockModalOpen"
                         title="Kelola stok"
                         description="Ready dikelompokkan paling atas, paid, retired, dan repair bersifat read-only."
-                        class="max-h-[92vh] w-full max-w-3xl overflow-y-auto bg-[#fee648] p-3 sm:p-4"
+                        class="max-h-[92vh] w-full max-w-3xl overflow-y-auto !bg-[#fee648] p-3 sm:p-4"
                     >
                         <div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs font-extrabold uppercase text-neo-ink">
                             <span class="max-w-[15rem] truncate" x-text="manageStockProductName">Produk</span>

@@ -1,5 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <title>{{ $metadata->title }}</title>
 <meta name="description" content="{{ $metadata->description }}">
@@ -25,6 +26,7 @@
 @foreach ($metadata->jsonLd as $jsonLd)
 <script type="application/ld+json">{!! json_encode($jsonLd, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR) !!}</script>
 @endforeach
+@include('partials.theme-init')
 <link rel="icon" type="image/png" sizes="256x256" href="{{ Vite::asset('resources/images/chibi-favicon-256.png') }}">
 <link rel="icon" type="image/png" sizes="64x64" href="{{ Vite::asset('resources/images/chibi-favicon-64.png') }}">
 <link rel="apple-touch-icon" href="{{ Vite::asset('resources/images/chibi-favicon-256.png') }}">
