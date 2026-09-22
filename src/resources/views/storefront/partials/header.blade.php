@@ -19,7 +19,7 @@
             @include('storefront.components.brand-mark', ['brand' => $brand])
         </a>
 
-        <form action="{{ $shopUrl }}" method="GET" class="order-3 basis-full md:order-2 md:flex md:min-w-0 md:flex-1 md:basis-auto lg:min-w-[8rem]" role="search">
+        <form action="{{ $shopUrl }}" method="GET" class="order-3 min-w-0 basis-full md:order-2 md:flex md:flex-1 md:basis-auto lg:min-w-[8rem]" role="search">
             <label for="header-search" class="sr-only">Cari produk</label>
             <div class="storefront-search relative flex h-14 w-full items-center rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-1 shadow-[0_6px_18px_rgb(18_35_63_/_0.08)]">
                 <button type="submit" class="inline-flex h-12 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--sf-muted)] transition-colors hover:bg-[var(--sf-surface)] hover:text-[var(--sf-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" aria-label="Cari produk">
