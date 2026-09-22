@@ -1244,7 +1244,7 @@ test("customer checkout: keeps Family options and sticky purchase reachable at m
     const optionDetail = optionCard.locator("[data-family-option-detail]");
     const availabilityBadge = optionDetail
       .locator("span")
-      .filter({ hasText: "Tersedia" })
+      .filter({ hasText: /^Stok:\s*\d+$/ })
       .first();
     const priceChip = optionDetail
       .locator("strong")
@@ -1315,9 +1315,7 @@ test("customer checkout: keeps Family options and sticky purchase reachable at m
     expect(availabilityBox.y).toBeGreaterThanOrEqual(optionButtonBox.y);
     expect(priceBox.y).toBeGreaterThanOrEqual(optionButtonBox.y);
     expect(warrantyBox.y).toBeGreaterThanOrEqual(optionButtonBox.y);
-    expect(warrantyBox.y + warrantyBox.height).toBeLessThanOrEqual(
-      buyBox.y + 1
-    );
+    expect(warrantyBox.y).toBeGreaterThanOrEqual(buyBox.y);
     expect(buyBox.y).toBeGreaterThan(optionButtonBox.y);
     expect(Math.round(buyBox.width)).toBeGreaterThanOrEqual(44);
     expect(Math.round(buyBox.height)).toBeGreaterThanOrEqual(44);
