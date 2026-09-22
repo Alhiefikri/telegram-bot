@@ -295,7 +295,7 @@ run_credential_identity_backfill() {
 
   echo "Preparing the credential identity registry for Account Input."
   status=0
-  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps --entrypoint php \
+  APP_IMAGE="$APP_IMAGE" compose_root run --rm --no-deps --entrypoint php \
     -e APP_AUTO_MIGRATE=false \
     -e APP_OPTIMIZE=false \
     app artisan credentials:backfill-identity-registry --chunk=100 </dev/null > "$raw_output" 2>&1 || status=$?
