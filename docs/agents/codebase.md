@@ -65,6 +65,7 @@ Customer
 Gunakan `Product::publicVisible()`, `availableForPurchase()`, `withAvailability()`, dan `availableStock()` daripada mengulang query visibility/stock di caller. Perubahan stok direkam lewat `InventoryLedger`/`EloquentInventoryLedger` dan menghasilkan `InventoryMovement` bertipe `reservation`, `sale`, `release`, atau `adjustment`.
 
 `ProductStockIntake` adalah pemilik canonical untuk penambahan positif melalui **Input Cepat** dan **Input Akun**. Ia menormalkan seluruh batch sebelum transaksi, mengunci Product, mengklaim idempotency key dan `CredentialIdentity`, membuat `ProductStockItem`, menaikkan numeric stock, membuat satu adjustment movement/audit, lalu menyerahkan restock notification setelah commit. `StockNotificationDeliveryPipeline` mematerialisasi teks recipient sebelum bounded delivery batches; untuk adjustment ia menyimpan tier terendah yang baru reachable pada `StockNotificationEvent`, sehingga retry/recovery tidak membaca ulang Product/tier yang sudah berubah. Controller `AdminProductStockController` dan `AdminProductAccountStockController` hanya adapter; mereka tidak boleh mengubah stock atau membuat identity secara langsung.
+`ProductStockItemManager::deleteAvailable` owns manual credential deletion. It locks Product and the Available item, creates a negative `adjustment` movement plus audit row, records the `available > 0 → 0` transition, and only after commit records the deletion in the 20-second per-Product Fake Sales Proof aggregation window. The aggregation job runs on `telegram-stock`; it never sends Telegram while the stock transaction is open. Sold-out and restock fan-out both use `StockNotificationDeliveryPipeline`, which sends the Store Channel copy plus every eligible Telegram Customer without a channel-membership gate. A sold-out customer delivery is localized and has no checkout button; a stale sold-out event is finalized without sending after restock.
 
 `CredentialIdentity` menyimpan fingerprint HMAC keyed untuk identity yang memang tidak boleh dipakai ulang, saat ini hanya Auth Token eksplisit; email tetap menjadi data akun biasa dan tidak lagi diklaim sebagai identity registry. Fingerprint bukan plaintext. `CredentialIdentityFingerprint` memakai override ENV opsional atau kunci acak persisten di `storage/app/private`; `BackfillCredentialIdentityRegistry` memproses retained Product Stock Items secara bounded dan hanya melaporkan row IDs/counts, lalu menyimpan readiness singleton yang dikunci ke digest fingerprint key hanya setelah full commit tanpa unresolved row. `CredentialIdentityBackfillReadinessService` adalah runtime gate untuk Input Akun; deployment otomatis menjalankan backfill setelah migration, dan `credentials:check-identity-readiness` adalah deployment check. Tidak ada environment feature switch untuk menyalakan atau mematikan Input Akun.
 
@@ -158,17 +159,19 @@ OrderItem/InventoryMovement/Product` untuk refund.
 The shared public-safe invoice image is owned by
 [`PaidInvoiceRenderer`](../../src/app/Services/PaidInvoice/PaidInvoiceRenderer.php)
 and accepts only the immutable
-[`PaidInvoicePresentation`](../../src/app/Services/PaidInvoice/PaidInvoicePresentation.php)
+[`PaidInvoicePresentation`](../../src/app/Services/PaidInvoice/PaidInvoicePresentation.php).
 `PaidInvoiceOrderPresentationAdapter` reads paid Order snapshots and the
 canonical paid Payment; its immutable item values include the nullable
-`quantity_price_tier_minimum` captured on each Order Item. `SalesProofPostFormatter`
-adds one factual English bulk-pricing line only when that immutable snapshot is
-present. `PaidInvoiceSyntheticPresentationAdapter` and
-`PaidInvoiceTopUpPresentationAdapter` always set the field to null, so Fake
-Sales Proof, base/legacy proof, and Store Balance top-up captions never claim
-bulk pricing. Buyer receipts and real/fake Store Channel posts use the same
-renderer; fake publication never creates an Order, Payment, inventory movement,
-or durable Sales Proof effect.
+`quantity_price_tier_minimum` captured on each Order Item. `PaidInvoiceSyntheticPresentationAdapter`
+uses the same `ProductQuantityPricing` quote for manual, automatic, and
+deleted-stock Fake Sales Proofs, including the aggregated quantity and the
+one-percent provider fee; `SalesProofPostFormatter` renders subtotal, fee when
+non-zero, and total after fee. `PaidInvoiceTopUpPresentationAdapter` remains
+separate. Buyer receipts and real/fake Store Channel posts use the same
+renderer; fake publication never creates an Order, Payment, Sale movement, or
+durable Sales Proof effect. Manual stock deletion remains an inventory
+adjustment/audit, while its cache-locked 20-second aggregation only controls
+the public fake proof.
 `SalesProofStockSignal` owns the optional low-stock line of the public caption:
 it reads mutable Product availability and passes a plain number into the
 formatter, so `PaidInvoicePresentation` keeps only immutable order/payment data
@@ -183,6 +186,7 @@ and the caption never publishes a number that the sold-out post will contradict.
 | rail-specific Payment assembly dan preflight/prepare           | adapter [`CheckoutPaymentPreparation`](../../src/app/Services/Checkout/CheckoutPaymentPreparation.php) yang dipilih oleh [`CheckoutPaymentPreparationResolver`](../../src/app/Services/Checkout/CheckoutPaymentPreparationResolver.php) | `OrderCheckoutService`, provider resolver, channel adapter              |
 | generic Payment plan persistence                                | [`CheckoutPaymentPlanWriter`](../../src/app/Services/Checkout/CheckoutPaymentPlanWriter.php)                                                                                                                      | rail adapter menulis Payment langsung                                 |
 | positive stock intake + identity claim                          | [`ProductStockIntake`](../../src/app/Services/ProductStockIntake.php), [`CredentialIdentity`](../../src/app/Models/CredentialIdentity.php)                                                                       | admin controller, model caller, browser adapter                         |
+| manual stock deletion + Fake Sales Proof handoff                 | [`ProductStockItemManager`](../../src/app/Services/ProductStockItemManager.php), [`ProductStockDeletionFakeSalesProofAggregator`](../../src/app/Services/ProductStockDeletionFakeSalesProofAggregator.php) | admin controller creates neither movement nor Telegram delivery directly |
 | transisi paid/cancel/expiry/refund                              | [`OrderLifecycle`](../../src/app/Services/OrderLifecycle.php) dan [`OrderStateMachine`](../../src/app/Services/OrderStateMachine.php)                                                                            | callback controller, provider client                                   |
 | provider baru untuk checkout                                    | [`PaymentProviderSwitcher`](../../src/app/Services/Admin/PaymentProviderSwitcher.php) dan [`PaymentProviderResolver`](../../src/app/Services/Checkout/PaymentProviderResolver.php)                              | channel-specific provider selection                                    |
 | reservation/sale/release stock                                  | [`InventoryLedger`](../../src/app/Services/InventoryLedger.php)                                                                                                                                                    | model/controller langsung mengubah stock                               |

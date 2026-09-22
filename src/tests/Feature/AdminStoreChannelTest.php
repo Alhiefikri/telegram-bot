@@ -294,7 +294,12 @@ class AdminStoreChannelTest extends TestCase
             $photo = (string) $this->multipartField($request, 'photo');
             $replyMarkup = json_decode((string) $this->multipartField($request, 'reply_markup'), true);
             $dimensions = getimagesizefromstring($photo);
-            $amount = number_format((int) $selectedProduct->price_amount, 0, ',', '.');
+            $subtotal = (int) $selectedProduct->price_amount;
+            $fee = intdiv($subtotal, 100) + ($subtotal % 100 === 0 ? 0 : 1);
+            $total = $subtotal + $fee;
+            $subtotalLabel = number_format($subtotal, 0, ',', '.');
+            $feeLabel = number_format($fee, 0, ',', '.');
+            $totalLabel = number_format($total, 0, ',', '.');
 
             return $request->url() === 'https://api.telegram.org/botbot-token/sendPhoto'
                 && $this->multipartField($request, 'chat_id') === '-100123'
@@ -309,8 +314,9 @@ class AdminStoreChannelTest extends TestCase
                 && str_contains($caption, $selectedProduct->name.' × 1')
                 && ! str_contains($caption, $otherActiveProduct->name)
                 && str_contains($caption, 'Paid via: QRIS')
-                && str_contains($caption, 'Subtotal: Rp '.$amount)
-                && str_contains($caption, 'Amount paid: Rp '.$amount)
+                && str_contains($caption, 'Subtotal: Rp '.$subtotalLabel)
+                && str_contains($caption, 'Fee: Rp '.$feeLabel)
+                && str_contains($caption, 'Amount paid: Rp '.$totalLabel)
                 && str_contains($caption, 'Successful orders: #1')
                 && str_contains($caption, 'Thank you for choosing Lhie Store.')
                 && mb_strlen($caption, 'UTF-8') <= 1024

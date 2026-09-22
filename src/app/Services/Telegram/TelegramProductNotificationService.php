@@ -16,7 +16,6 @@ class TelegramProductNotificationService
     public function __construct(
         private TelegramBroadcastService $broadcast,
         private TelegramBotClient $bot,
-        private TelegramAdminAccess $adminAccess,
         private StorefrontUrl $urls,
         private TelegramLocale $locale,
         private ProductQuantityPricing $pricing,
@@ -201,40 +200,69 @@ class TelegramProductNotificationService
     /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array,photo_path:?string}> */
     public function productSoldOutDeliveries(Product $product): array
     {
-        $product = $product->fresh();
-        if (! $product) {
-            return [];
-        }
         $deliveries = [];
-        if ($channelChatId = $this->storeChannelChatId()) {
-            $deliveries[] = ['customer_id' => null, 'recipient_type' => 'store_channel', 'telegram_id' => $channelChatId, 'locale' => null, 'text' => $this->storeChannelSoldOutMessage($product), 'reply_markup' => [], 'photo_path' => null];
-        }
-        if (! blank(config('services.telegram.token')) && ($adminChatId = $this->adminAccess->adminChatId())) {
-            $deliveries[] = ['customer_id' => null, 'recipient_type' => 'admin', 'telegram_id' => (string) $adminChatId, 'locale' => null, 'text' => implode("\n", ['⚠️ Stok habis', '━━━━━━━━━━━━━━', '📦 '.$product->name, '', 'Stok yang tersedia untuk dibeli sekarang 0.', '', 'Tambahkan stok dari dashboard agar produk bisa tampil dan dibeli lagi di katalog.']), 'reply_markup' => [], 'photo_path' => null];
-        }
+        $cursor = 0;
+
+        do {
+            $batch = $this->productSoldOutDeliveryBatch($product, $cursor, 100);
+            $deliveries = [...$deliveries, ...$batch['deliveries']];
+            $cursor = $batch['next_cursor'];
+        } while ($batch['has_more']);
 
         return $deliveries;
     }
 
-    /** @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:string,text:string,reply_markup:array,photo_path:?string}> */
-    private function customerDeliveries(Product $product, int $availableStock, bool $created): array
+    /**
+     * @return array{
+     *     deliveries:list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:?string,text:string,reply_markup:array,photo_path:?string}>,
+     *     next_cursor:int,
+     *     has_more:bool
+     * }
+     */
+    public function productSoldOutDeliveryBatch(Product $product, int $customerCursor = 0, int $limit = 100): array
     {
-        $seen = [];
+        $product = $product->fresh();
+        $customerCursor = max(0, $customerCursor);
+        $limit = max(1, $limit);
+
+        if (! $product || $product->availableStock() > 0) {
+            return ['deliveries' => [], 'next_cursor' => $customerCursor, 'has_more' => false];
+        }
+
+        $deliveries = [];
+        if ($customerCursor === 0 && ($channelChatId = $this->storeChannelChatId())) {
+            $deliveries[] = [
+                'customer_id' => null,
+                'recipient_type' => 'store_channel',
+                'telegram_id' => $channelChatId,
+                'locale' => null,
+                'text' => $this->storeChannelSoldOutMessage($product),
+                'reply_markup' => [],
+                'photo_path' => null,
+            ];
+        }
+
         $customers = Customer::query()
             ->whereNotNull('telegram_id')
+            ->where('id', '>', $customerCursor)
             ->orderBy('id')
-            ->get(['id', 'telegram_id', 'locale'])
-            ->filter(function (Customer $customer) use (&$seen): bool {
-                $id = trim((string) $customer->telegram_id);
-                if ($id === '' || isset($seen[$id])) {
-                    return false;
-                }
-                $seen[$id] = true;
+            ->limit($limit + 1)
+            ->get(['id', 'telegram_id', 'locale']);
+        $customerPage = $customers->take($limit);
 
-                return true;
-            });
+        $deliveries = [
+            ...$deliveries,
+            ...$this->renderSoldOutCustomerDeliveries(
+                $product,
+                $customerPage->filter(fn (Customer $customer): bool => trim((string) $customer->telegram_id) !== ''),
+            ),
+        ];
 
-        return $this->renderCustomerDeliveries($product, $availableStock, $created, $customers);
+        return [
+            'deliveries' => $deliveries,
+            'next_cursor' => (int) ($customerPage->last()?->id ?? $customerCursor),
+            'has_more' => $customers->count() > $limit,
+        ];
     }
 
     /**
@@ -277,6 +305,36 @@ class TelegramProductNotificationService
                 'locale' => $locale,
                 'text' => $text,
                 'reply_markup' => $this->productReplyMarkup($product, $availableStock, $locale),
+                'photo_path' => null,
+            ];
+        }
+
+        return $deliveries;
+    }
+
+    /**
+     * @param  iterable<Customer>  $customers
+     * @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:string,text:string,reply_markup:array,photo_path:?string}>
+     */
+    private function renderSoldOutCustomerDeliveries(Product $product, iterable $customers): array
+    {
+        $deliveries = [];
+        foreach ($customers as $customer) {
+            $locale = $this->locale->code($customer);
+            $deliveries[] = [
+                'customer_id' => $customer->id,
+                'recipient_type' => 'customer',
+                'telegram_id' => (string) $customer->telegram_id,
+                'locale' => $locale,
+                'text' => implode("\n", [
+                    $this->locale->translateLocale($locale, 'notification.product.sold_out.title'),
+                    '━━━━━━━━━━━━━━',
+                    '📦 '.$product->name,
+                    $this->locale->translateLocale($locale, 'notification.product.sold_out.message'),
+                    '',
+                    $this->locale->translateLocale($locale, 'notification.product.sold_out.catalog'),
+                ]),
+                'reply_markup' => [],
                 'photo_path' => null,
             ];
         }
@@ -370,43 +428,6 @@ class TelegramProductNotificationService
             'telegram_total_duration_ms' => 0.0,
             'per_recipient_telegram' => [],
         ];
-    }
-
-    public function notifyProductSoldOut(Product $product): void
-    {
-        $this->sendStoreChannel($this->storeChannelSoldOutMessage($product));
-
-        $this->notifyAdminOutOfStock($product);
-    }
-
-    /**
-     * Kept as a compatibility alias for callers that used the old internal name.
-     */
-    public function notifyOutOfStock(Product $product): void
-    {
-        $this->notifyProductSoldOut($product);
-    }
-
-    private function notifyAdminOutOfStock(Product $product): void
-    {
-        $adminChatId = $this->adminAccess->adminChatId();
-        if (blank(config('services.telegram.token')) || ! $adminChatId) {
-            return;
-        }
-
-        try {
-            $this->bot->sendMessage($adminChatId, implode("\n", [
-                '⚠️ Stok habis',
-                '━━━━━━━━━━━━━━',
-                '📦 '.$product->name,
-                '',
-                'Stok yang tersedia untuk dibeli sekarang 0.',
-                '',
-                'Tambahkan stok dari dashboard agar produk bisa tampil dan dibeli lagi di katalog.',
-            ]));
-        } catch (Throwable $e) {
-            report($e);
-        }
     }
 
     private function sendStoreChannel(string $text, array $replyMarkup = []): void
@@ -506,10 +527,11 @@ class TelegramProductNotificationService
 
     private function shouldNotifyCustomers(?int $availableBefore, ?string $channelChatId): bool
     {
-        // The Store Channel is the canonical high-frequency stock feed. DM
-        // customers only when availability is restored, unless the channel is
-        // unavailable and must be used as a fallback.
-        return $channelChatId === null || $availableBefore === null || $availableBefore <= 0;
+        unset($availableBefore, $channelChatId);
+
+        // Store Channel membership is never an access or notification gate.
+        // Every Telegram Customer remains eligible for the localized DM.
+        return true;
     }
 
     private function formatUsdt(int $amount): string

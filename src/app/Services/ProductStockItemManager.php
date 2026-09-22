@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\Credentials\CredentialIdentityFingerprint;
 use App\Services\Credentials\CredentialIdentityKind;
 use App\Services\Credentials\StructuredCredentialPayload;
+use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -23,6 +24,8 @@ class ProductStockItemManager
     public function __construct(
         private readonly AuditLogger $auditLogger,
         private readonly CredentialIdentityFingerprint $fingerprints,
+        private readonly StockNotificationDeliveryPipeline $stockNotifications,
+        private readonly ProductStockDeletionFakeSalesProofAggregator $deletionFakeSalesProof,
     ) {}
 
     public function updateAvailableSecret(Product $product, ProductStockItem $stockItem, string $secret, User $user, ?string $ip = null): ProductStockItem
@@ -162,7 +165,13 @@ class ProductStockItemManager
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            $old = ['stock' => $lockedProduct->stock, 'reserved_stock' => $lockedProduct->reserved_stock, 'stock_item_id' => $lockedItem->id];
+            $availableBefore = $lockedProduct->availableStock();
+            $old = [
+                'stock' => $lockedProduct->stock,
+                'reserved_stock' => $lockedProduct->reserved_stock,
+                'available_stock' => $availableBefore,
+                'stock_item_id' => $lockedItem->id,
+            ];
             $newStock = $lockedProduct->stock - 1;
 
             if ($newStock < $lockedProduct->reserved_stock) {
@@ -173,24 +182,49 @@ class ProductStockItemManager
 
             $lockedItem->delete();
             $lockedProduct->forceFill(['stock' => $newStock])->save();
+            $availableAfter = $lockedProduct->refresh()->availableStock();
+            $becameUnavailable = $availableBefore > 0 && $availableAfter === 0;
 
-            InventoryMovement::create([
+            $movement = InventoryMovement::create([
                 'product_id' => $lockedProduct->id,
                 'type' => InventoryMovementType::Adjustment,
                 'quantity' => -1,
-                'available_before' => $lockedProduct->availableStock(),
+                'stock_before' => $old['stock'],
+                'became_unavailable' => $becameUnavailable,
+                'available_before' => $availableBefore,
+                'available_after' => $availableAfter,
                 'notes' => 'Hapus stok manual dashboard (1 item).',
                 'created_at' => now(),
             ]);
+
+            if ($becameUnavailable) {
+                $this->stockNotifications->register($movement->id);
+            }
 
             $this->auditLogger->log(
                 'product_stock_item.deleted',
                 $lockedProduct,
                 $old,
-                ['stock' => $newStock, 'reserved_stock' => $lockedProduct->reserved_stock, 'stock_item_id' => $lockedItem->id, 'delta' => -1],
+                [
+                    'stock' => $newStock,
+                    'reserved_stock' => $lockedProduct->reserved_stock,
+                    'available_stock' => $availableAfter,
+                    'stock_item_id' => $lockedItem->id,
+                    'delta' => -1,
+                ],
                 $user,
                 $ip,
             );
+
+            $productId = (int) $lockedProduct->id;
+            $movementId = (int) $movement->id;
+            DB::afterCommit(function () use ($productId, $movementId, $becameUnavailable): void {
+                $this->deletionFakeSalesProof->record(
+                    $productId,
+                    1,
+                    $becameUnavailable ? $movementId : null,
+                );
+            });
 
             return $lockedProduct->refresh();
         });

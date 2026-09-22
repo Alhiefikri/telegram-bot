@@ -253,7 +253,7 @@ class StockNotificationDeliveryPipeline
                 ['kind' => $movement->type->value],
             );
             if ($event->recipients_snapshotted_at === null) {
-                if ($movement->type === InventoryMovementType::Adjustment) {
+                if ($movement->type === InventoryMovementType::Adjustment && $movement->quantity > 0) {
                     $promotionSnapshotResolved = $event->tier_promotion_snapshotted_at !== null;
                     $promotedTier = $promotionSnapshotResolved
                         ? $this->promotedTierFromSnapshot($event)
@@ -287,8 +287,16 @@ class StockNotificationDeliveryPipeline
                         'recipients_snapshotted_at' => $batch['has_more'] ? null : now(),
                     ])->save();
                 } else {
-                    $deliveries = $this->notifications->productSoldOutDeliveries($movement->product);
-                    $event->forceFill(['recipients_snapshotted_at' => now()])->save();
+                    $batch = $this->notifications->productSoldOutDeliveryBatch(
+                        $movement->product,
+                        (int) ($event->materialization_cursor ?? 0),
+                        self::RECIPIENT_MATERIALIZATION_BATCH_SIZE,
+                    );
+                    $deliveries = $batch['deliveries'];
+                    $event->forceFill([
+                        'materialization_cursor' => $batch['next_cursor'],
+                        'recipients_snapshotted_at' => $batch['has_more'] ? null : now(),
+                    ])->save();
                 }
 
                 $now = now();
@@ -457,6 +465,19 @@ class StockNotificationDeliveryPipeline
                 throw new \RuntimeException('stock_notification_recipient_missing');
             }
 
+            if ($this->isStaleSoldOutRecipient($recipient)) {
+                $finalized = $this->ledger()->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'sold_out_stale',
+                    'Sold-out notification is stale because the product has stock again.',
+                );
+                if ($finalized !== null) {
+                    $this->synchronizeNotDeliverableProjection($finalized);
+                }
+
+                return $finalized === null ? 'skipped' : 'terminal_failure';
+            }
             $photo = mb_strlen((string) $recipient->text, 'UTF-8') <= 1024
                 ? $this->images->telegramPhoto($recipient->photo_path)
                 : null;
@@ -518,6 +539,42 @@ class StockNotificationDeliveryPipeline
 
             return $terminal ? 'terminal_failure' : 'transient_failure';
         }
+    }
+
+    private function isStaleSoldOutRecipient(StockNotificationRecipient $recipient): bool
+    {
+        if (! in_array($recipient->recipient_type, ['store_channel', 'customer'], true)) {
+            return false;
+        }
+
+        $movementId = StockNotificationEvent::query()
+            ->whereKey($recipient->stock_notification_event_id)
+            ->value('inventory_movement_id');
+        if ($movementId === null) {
+            return false;
+        }
+
+        $movement = InventoryMovement::query()->with('product')->find($movementId);
+
+        return $movement !== null
+            && $movement->quantity < 0
+            && $movement->became_unavailable === true
+            && $movement->product !== null
+            && $movement->product->availableStock() > 0;
+    }
+
+    private function synchronizeNotDeliverableProjection(TelegramOutboundEffect $effect): void
+    {
+        StockNotificationRecipient::query()
+            ->whereKey($effect->source_id)
+            ->whereNull('sent_at')
+            ->update([
+                'failed_at' => $effect->failed_at ?? now(),
+                'terminal_failed_at' => $effect->failed_at ?? now(),
+                'last_error' => $effect->last_error ?: 'Sold-out notification became stale before delivery.',
+                'attempts' => (int) $effect->attempts,
+                'updated_at' => now(),
+            ]);
     }
 
     private function logEffectFailure(TelegramOutboundEffect $effect, Throwable $exception, string $status): void
@@ -642,6 +699,7 @@ class StockNotificationDeliveryPipeline
                                         'telegram_http_403',
                                         'stock_notification_attempts_exhausted',
                                         'stock_notification_terminal_failure',
+                                        'sold_out_stale',
                                     ])
                                     ->orWhere('attempts', '>=', self::MAX_ATTEMPTS);
                             });
@@ -664,8 +722,17 @@ class StockNotificationDeliveryPipeline
 
     private function isNotifiable(InventoryMovement $movement): bool
     {
-        return $movement->type === InventoryMovementType::Adjustment
-            ? $movement->quantity > 0 && $movement->product !== null
-            : $movement->type === InventoryMovementType::Sale && $movement->quantity < 0 && $movement->became_unavailable && $movement->product !== null;
+        if ($movement->product === null) {
+            return false;
+        }
+
+        if ($movement->type === InventoryMovementType::Adjustment) {
+            return $movement->quantity > 0
+                || ($movement->quantity < 0 && $movement->became_unavailable === true);
+        }
+
+        return $movement->type === InventoryMovementType::Sale
+            && $movement->quantity < 0
+            && $movement->became_unavailable === true;
     }
 }

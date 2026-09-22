@@ -19,11 +19,16 @@ final class ProductQuantityPricing
             throw new InvalidArgumentException('Product quantity must be positive.');
         }
 
-        $tierQuery = $product->quantityPriceTiers()
-            ->select(['id', 'product_id', 'minimum_quantity', 'price_amount', 'usdt_price_amount']);
-        $tiers = (clone $tierQuery)->limit(self::MAX_TIERS)->get();
+        $tierQuery = $product->exists
+            ? $product->quantityPriceTiers()
+                ->select(['id', 'product_id', 'minimum_quantity', 'price_amount', 'usdt_price_amount'])
+            : null;
+        $tiers = $product->relationLoaded('quantityPriceTiers')
+            ? $product->quantityPriceTiers
+            : ($tierQuery?->limit(self::MAX_TIERS)->get() ?? collect());
 
-        if ($tiers->count() === self::MAX_TIERS
+        if (count($tiers) === self::MAX_TIERS
+            && $tierQuery !== null
             && (clone $tierQuery)->offset(self::MAX_TIERS)->limit(1)->exists()) {
             throw $this->invalidSchedule('more than five tiers are configured');
         }
@@ -35,7 +40,7 @@ final class ProductQuantityPricing
         $normalizedTiers = $this->validatedTierValues(
             $baseIdrUnitAmount,
             $baseUsdtUnitAmount,
-            $tiers->map(static fn ($tier): array => [
+            collect($tiers)->map(static fn ($tier): array => [
                 'minimum_quantity' => $tier->minimum_quantity,
                 'price_amount' => $tier->price_amount,
                 'usdt_price_amount' => $tier->usdt_price_amount,

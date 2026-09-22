@@ -43,6 +43,9 @@ class SalesProofPostFormatter
             '🕒 Completed: '.$presentation->paidAtWib(),
             '📦 Quantity: '.$quantity,
             '💵 Subtotal: '.$this->money($presentation->subtotal(), $presentation->currency),
+            ...($presentation->providerFee > 0
+                ? ['💸 Fee: '.$this->money($presentation->providerFee, $presentation->currency)]
+                : []),
             '💰 Amount paid: '.$this->money($presentation->totalPaid, $presentation->currency),
             '🏆 Successful orders: #'.$successfulPostNumber,
         ];

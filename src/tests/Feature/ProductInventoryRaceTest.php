@@ -663,7 +663,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $customerMessages = collect(Http::recorded())
             ->filter(fn (array $request): bool => str_ends_with($request[0]->url(), '/sendMessage')
                 && (string) ($request[0]['chat_id'] ?? '') === '399007');
-        $this->assertCount(1, $customerMessages);
+        $this->assertCount(2, $customerMessages);
         $this->assertSame(2, StockNotificationEvent::query()->count());
     }
 

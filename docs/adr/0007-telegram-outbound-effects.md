@@ -227,6 +227,23 @@ queue pickup cannot lose the committed restock intent. Existing compatibility
 paths that explicitly opt out of notification dispatch retain eager
 materialization.
 
+### Deferred deleted-stock Fake Sales Proof
+
+Manual deletion of an Available Product Stock Item is the third deferred
+handoff. The transaction durably records the negative `adjustment` movement,
+audit row, and any `available > 0 → 0` Stock Notification Event. An
+after-commit, cache-locked 20-second per-Product window aggregates committed
+deletions and dispatches one `PublishDeletedStockFakeSalesProof` job on
+`telegram-stock`.
+
+This fake proof deliberately does not create an Order, Payment, Sale movement,
+or durable Sales Proof effect. The job renders the aggregated quantity through
+the shared invoice/pricing seam, then dispatches the existing stock notification
+job for a sold-out transition. Telegram failure is isolated from the committed
+inventory adjustment; the fake-proof job and Stock Notification ledger use
+bounded retry behavior independently. A restock before the deferred job flushes
+the sold-out event as stale without sending an obsolete sold-out message.
+
 ## Consequences
 
 - A committed checkout or lifecycle transition cannot lose its durable Telegram effect merely because the process dies before queue dispatch.

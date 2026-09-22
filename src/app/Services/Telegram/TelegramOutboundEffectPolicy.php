@@ -70,6 +70,7 @@ final class TelegramOutboundEffectPolicy
         'stock_notification_recipient_missing',
         'stock_notification_attempts_exhausted',
         'stock_notification_terminal_failure',
+        'sold_out_stale',
         'price_change_recipient_missing',
         'price_change_event_missing',
         'price_change_recipient_attempts_exhausted',

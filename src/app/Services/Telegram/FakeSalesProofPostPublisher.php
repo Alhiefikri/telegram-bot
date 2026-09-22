@@ -94,14 +94,16 @@ class FakeSalesProofPostPublisher
     }
 
     /**
-     * @param  callable(): array{success: bool, message: string, skipped?: bool}  $callback
-     * @return array{success: bool, message: string, skipped?: bool}
+     * @param  callable(): array{success: bool, message: string, skipped?: bool, retryable?: bool}  $callback
+     * @return array{success: bool, message: string, skipped?: bool, retryable?: bool}
      */
-    private function withPublishLock(callable $callback): array
+    private function withPublishLock(callable $callback, bool $retryWhenBusy = false): array
     {
         $lock = Cache::lock('sales-proof-posts:publish', 60);
         if (! $lock->get()) {
-            return ['success' => false, 'skipped' => true, 'message' => 'Publikasi Sales Proof lain sedang berjalan. Coba lagi sebentar.'];
+            return $retryWhenBusy
+                ? ['success' => false, 'retryable' => true, 'message' => 'Publikasi Sales Proof lain sedang berjalan; coba lagi.']
+                : ['success' => false, 'skipped' => true, 'message' => 'Publikasi Sales Proof lain sedang berjalan. Coba lagi sebentar.'];
         }
 
         try {
@@ -175,7 +177,7 @@ class FakeSalesProofPostPublisher
         }
 
         try {
-            $this->sendFakeSalesProof((string) $chatId, $product);
+            $this->sendFakeSalesProof((string) $chatId, $product, 1);
             $intervalHours = $this->recordSuccessfulAutomaticInterval();
 
             return [
@@ -187,9 +189,53 @@ class FakeSalesProofPostPublisher
         }
     }
 
-    private function sendFakeSalesProof(int|string $chatId, Product $product): void
+    /**
+     * Publish the proof for a committed manual stock deletion. The product may
+     * already be unavailable; unlike manual/automatic selection, this path
+     * deliberately renders the deleted quantity and does not mutate inventory.
+     *
+     * @return array{success: bool, message: string, skipped?: bool, retryable?: bool}
+     */
+    public function publishDeletedStock(int $productId, int $quantity): array
     {
-        $presentation = $this->invoicePresentation->present($product);
+        return $this->withPublishLock(
+            callback: fn (): array => $this->publishDeletedStockWhileLocked($productId, $quantity),
+            retryWhenBusy: true,
+        );
+    }
+
+    /**
+     * @return array{success: bool, message: string, skipped?: bool, retryable?: bool}
+     */
+    private function publishDeletedStockWhileLocked(int $productId, int $quantity): array
+    {
+        if ($quantity < 1) {
+            return ['success' => false, 'skipped' => true, 'message' => 'Penghapusan stok kosong; fake notif dilewati.'];
+        }
+
+        $setting = StoreChannelSetting::current();
+        $chatId = $setting->telegram_chat_id ?: $setting->channel_username;
+        if (! $setting->sales_proof_enabled || ! $chatId) {
+            return ['success' => false, 'skipped' => true, 'message' => 'Fake Sales Proof tidak siap; notif penghapusan stok dilewati.'];
+        }
+
+        $product = Product::query()->find($productId);
+        if (! $product) {
+            return ['success' => false, 'skipped' => true, 'message' => 'Produk penghapusan stok sudah tidak tersedia.'];
+        }
+
+        try {
+            $this->sendFakeSalesProof((string) $chatId, $product, $quantity);
+
+            return ['success' => true, 'message' => 'Fake Sales Proof penghapusan stok dikirim.'];
+        } catch (Throwable $e) {
+            return [...$this->failedSendResult($e), 'retryable' => true];
+        }
+    }
+
+    private function sendFakeSalesProof(int|string $chatId, Product $product, int $quantity = 1): void
+    {
+        $presentation = $this->invoicePresentation->present($product, quantity: $quantity);
         $invoice = $this->invoiceRenderer->render($presentation);
 
         try {

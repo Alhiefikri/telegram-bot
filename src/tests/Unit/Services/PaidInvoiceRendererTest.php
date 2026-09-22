@@ -317,8 +317,9 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertSame(1_250_000, $presentation->items[0]['subtotal']);
         $caption = app(SalesProofPostFormatter::class)->format($presentation, 1);
         $this->assertStringNotContainsString('Bulk pricing applied', $caption);
-        $this->assertSame(0, $presentation->providerFee);
-        $this->assertSame(1_250_000, $presentation->totalPaid);
+        $this->assertStringContainsString('💸 Fee: 0.0125 USDT', $caption);
+        $this->assertSame(12_500, $presentation->providerFee);
+        $this->assertSame(1_262_500, $presentation->totalPaid);
 
         $result = app(PaidInvoiceRenderer::class)->render($presentation);
         $decoded = getimagesizefromstring($result->bytes);
@@ -327,7 +328,7 @@ class PaidInvoiceRendererTest extends TestCase
         $this->assertSame(720, $decoded[0] ?? null);
         $this->assertSame(720, $decoded[1] ?? null);
         $this->assertSame('USDT', $result->metadata['currency']);
-        $this->assertSame(1_250_000, $result->metadata['total_paid']);
+        $this->assertSame(1_262_500, $result->metadata['total_paid']);
     }
 
     public function test_three_products_and_additional_products_remain_bounded_in_presentation(): void

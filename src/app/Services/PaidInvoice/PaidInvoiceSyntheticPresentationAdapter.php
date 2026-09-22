@@ -3,18 +3,23 @@
 namespace App\Services\PaidInvoice;
 
 use App\Models\Product;
+use App\Services\Pricing\ProductQuantityPricing;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
 
 /**
  * Builds an in-memory public-safe invoice for Fake Sales Proof only.
  *
- * It reads an already-selected available Product and never creates or loads an
+ * It reads a selected Product and never creates or loads an
  * Order, Payment, OrderItem, inventory record, or durable effect.
  */
 final class PaidInvoiceSyntheticPresentationAdapter
 {
     private const TIMEZONE = 'Asia/Jakarta';
+
+    public function __construct(
+        private readonly ProductQuantityPricing $pricing,
+    ) {}
 
     /** @var list<string> */
     private const BUYER_NAMES = [
@@ -36,15 +41,23 @@ final class PaidInvoiceSyntheticPresentationAdapter
         'Siti Rahma',
     ];
 
-    public function present(Product $product, ?CarbonImmutable $paidAt = null): PaidInvoicePresentation
+    public function present(Product $product, ?CarbonImmutable $paidAt = null, int $quantity = 1): PaidInvoicePresentation
     {
+        if ($quantity < 1) {
+            throw new \InvalidArgumentException('Synthetic invoice quantity must be positive.');
+        }
+
         $paidAt ??= CarbonImmutable::now(self::TIMEZONE);
         $paidAt = $paidAt->setTimezone(self::TIMEZONE);
         $currency = strtoupper(trim((string) ($product->currency ?: 'IDR'))) ?: 'IDR';
+        $quote = $this->pricing->quote($product, $quantity);
         $amount = $currency === 'USDT'
-            ? (int) ($product->usdt_price_amount ?? $product->price_amount)
-            : (int) $product->price_amount;
-        $amount = max(0, $amount);
+            ? (int) ($quote->effectiveUsdtUnitAmount ?? $quote->effectiveIdrUnitAmount)
+            : $quote->effectiveIdrUnitAmount;
+        $subtotal = $currency === 'USDT'
+            ? (int) ($quote->usdtSubtotal ?? $quote->idrSubtotal)
+            : $quote->idrSubtotal;
+        $fee = $this->feeFor($subtotal);
         $invoiceId = $this->invoiceIdentifier($paidAt);
 
         return new PaidInvoicePresentation(
@@ -55,15 +68,22 @@ final class PaidInvoiceSyntheticPresentationAdapter
             currency: $currency,
             items: [[
                 'product_name' => ((string) $product->name) !== '' ? (string) $product->name : 'Digital product',
-                'quantity' => 1,
-                'quantity_price_tier_minimum' => null,
-                'unit_price' => $amount,
-                'subtotal' => $amount,
+                'quantity' => $quantity,
+                'quantity_price_tier_minimum' => $quote->appliedTierMinimum,
+                'unit_price' => max(0, $amount),
+                'subtotal' => max(0, $subtotal),
             ]],
-            providerFee: 0,
-            totalPaid: $amount,
+            providerFee: $fee,
+            totalPaid: $subtotal + $fee,
             buyerName: $this->buyerName($product, $invoiceId),
         );
+    }
+
+    private function feeFor(int $subtotal): int
+    {
+        $subtotal = max(0, $subtotal);
+
+        return $subtotal === 0 ? 0 : intdiv($subtotal, 100) + ($subtotal % 100 === 0 ? 0 : 1);
     }
 
     private function invoiceIdentifier(CarbonImmutable $paidAt): string
