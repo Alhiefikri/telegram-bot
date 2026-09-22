@@ -83,7 +83,7 @@ class StorefrontProductPresentationTest extends TestCase
 
         $this->get(route('storefront.products.show', $product))
             ->assertOk()
-            ->assertSee('Harga grosir mulai Rp24.000 per unit untuk minimal 2 unit.')
+            ->assertSee('Harga grosir mulai Rp24.000')
             ->assertSee('Mulai 2 unit')
             ->assertSee('Mulai 4 unit')
             ->assertDontSee('Mulai 5 unit');

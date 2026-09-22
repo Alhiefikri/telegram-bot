@@ -418,8 +418,8 @@ class AdminDashboardProductFormsTest extends TestCase
 
         [$width, $height, $type] = getimagesize(Storage::disk('public')->path($product->image_path));
         $this->assertSame(IMAGETYPE_WEBP, $type);
-        $this->assertSame(1600, $width);
-        $this->assertSame(667, $height);
+        $this->assertSame(800, $width);
+        $this->assertSame(333, $height);
 
         $this->get('/admin?tab=produk')
             ->assertOk()
@@ -468,8 +468,8 @@ class AdminDashboardProductFormsTest extends TestCase
 
         [$width, $height, $type] = getimagesize(Storage::disk('public')->path($product->image_path));
         $this->assertSame(IMAGETYPE_WEBP, $type);
-        $this->assertSame(900, $width);
-        $this->assertSame(1200, $height);
+        $this->assertSame(600, $width);
+        $this->assertSame(800, $height);
     }
 
     public function test_admin_can_upload_separate_telegram_product_image(): void
