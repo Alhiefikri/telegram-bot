@@ -142,7 +142,7 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             ]),
         ]);
 
-        $rpc = new class implements BscVerificationRpcClientInterface, BscTransferLogRpcClientInterface
+        $rpc = new class implements BscTransferLogRpcClientInterface, BscVerificationRpcClientInterface
         {
             /** @var array<string, array<string, mixed>|null> */
             public array $receipts = [];
@@ -150,6 +150,7 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             /** @var array<string, array<string, mixed>|null> */
             /** @var list<array<string, mixed>> */
             public array $logs = [];
+
             public array $blocks = [];
 
             public function chainId(): int
@@ -181,6 +182,7 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             {
                 return $this->blocks[(string) $blockNumber] ?? null;
             }
+
             /** @return list<array<string, mixed>> */
             public function transferLogs(
                 string $tokenContract,

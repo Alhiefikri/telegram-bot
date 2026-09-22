@@ -56,12 +56,13 @@ final class BscTokenTransferReader
 
         return new BscTransferInspection('success', $transfers, $exactTransfers);
     }
+
     /**
      * Decode transfer logs returned by eth_getLogs. Receipt verification still
      * happens after a candidate hash is discovered; these logs only identify
      * which transaction should be checked.
      *
-     * @param list<array<string, mixed>> $logs
+     * @param  list<array<string, mixed>>  $logs
      */
     public function inspectTransferLogs(
         array $logs,
@@ -99,7 +100,6 @@ final class BscTokenTransferReader
 
         return new BscTransferInspection('success', $transfers, $exactTransfers);
     }
-
 
     /** @param array<string, mixed> $log */
     private function decodeTransfer(array $log, string $transactionHash, int $blockNumber): ?BscTransferEvidence

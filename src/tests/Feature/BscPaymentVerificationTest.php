@@ -48,7 +48,7 @@ class BscPaymentVerificationTest extends TestCase
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
 
-        $this->rpc = new class implements BscVerificationRpcClientInterface, BscTransferLogRpcClientInterface
+        $this->rpc = new class implements BscTransferLogRpcClientInterface, BscVerificationRpcClientInterface
         {
             public int $calls = 0;
 
@@ -59,6 +59,7 @@ class BscPaymentVerificationTest extends TestCase
 
             /** @var array<string, array<string, mixed>|null> */
             public array $blocks = [];
+
             /** @var list<array<string, mixed>> */
             public array $logs = [];
 
@@ -113,6 +114,7 @@ class BscPaymentVerificationTest extends TestCase
 
                 return $this->blocks[(string) $blockNumber] ?? null;
             }
+
             /** @return list<array<string, mixed>> */
             public function transferLogs(
                 string $tokenContract,
@@ -227,6 +229,7 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertSame($beforeCalls, $this->rpc->calls);
     }
+
     public function test_amount_unique_verification_discovers_transfer_without_customer_hash(): void
     {
         $payment = $this->payment();
@@ -250,7 +253,6 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame($hash, $payment->fresh()->bscDetail->current_tx_hash);
     }
-
 
     public function test_exact_transfer_stays_confirming_until_three_confirmations_then_claims_once(): void
     {

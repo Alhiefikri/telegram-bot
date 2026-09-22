@@ -61,15 +61,18 @@ use App\Http\Controllers\StorefrontShopOrderStatusController;
 use App\Http\Controllers\StorefrontSitemapController;
 use App\Http\Controllers\StorefrontVerifiedPurchaseActivityController;
 use App\Http\Controllers\StorefrontWaitlistController;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 Route::get('/robots.txt', StorefrontRobotsController::class)->name('storefront.robots');
 Route::get('/sitemap.xml', StorefrontSitemapController::class)->name('storefront.sitemap');
 Route::get('/', StorefrontController::class)
     ->withoutMiddleware([
-        \Illuminate\Session\Middleware\StartSession::class,
-        \Illuminate\View\Middleware\ShareErrorsFromSession::class,
-        \Illuminate\Foundation\Http\Middleware\PreventRequestForgery::class,
+        StartSession::class,
+        ShareErrorsFromSession::class,
+        PreventRequestForgery::class,
     ])
     ->name('storefront.home');
 Route::get('/panduan', [StorefrontLoginGuideController::class, 'index'])->name('storefront.guides.index');
@@ -94,7 +97,7 @@ Route::get('/aktivitas-pembelian-terverifikasi', StorefrontVerifiedPurchaseActiv
     ->name('storefront.verified-purchase-activity');
 Route::post('/storefront/events', StorefrontFunnelEventController::class)
     ->middleware('throttle:120,1')
-    ->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\PreventRequestForgery::class)
+    ->withoutMiddleware(PreventRequestForgery::class)
     ->name('storefront.events.store');
 Route::get('/akses-pesanan', [StorefrontOrderAccessController::class, 'create'])->name('storefront.order-access.create');
 Route::post('/akses-pesanan', [StorefrontOrderAccessController::class, 'store'])->middleware('throttle:storefront-order-access')->name('storefront.order-access.store');

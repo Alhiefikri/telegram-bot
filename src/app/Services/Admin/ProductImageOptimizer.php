@@ -69,8 +69,7 @@ final class ProductImageOptimizer
         string $directory,
         int $maxDimension = self::MAX_DIMENSION,
         int $quality = self::WEBP_QUALITY,
-    ): string
-    {
+    ): string {
         $source = $this->createImageResource($image);
         $sourceWidth = imagesx($source);
         $sourceHeight = imagesy($source);
@@ -221,6 +220,7 @@ final class ProductImageOptimizer
             $largestSide = max($sourceWidth, $sourceHeight);
             if ($largestSide <= self::PRODUCT_MAX_DIMENSION) {
                 imagedestroy($source);
+
                 continue;
             }
 

@@ -78,6 +78,7 @@ class BscRpcClientTest extends TestCase
         $this->assertSame(56, (new BscRpcClient)->chainId());
         Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'bsc-fallback.test'));
     }
+
     public function test_it_filters_transfer_logs_by_token_contract_and_receiver(): void
     {
         config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
@@ -110,7 +111,6 @@ class BscRpcClientTest extends TestCase
                 && data_get($filter, 'topics.2') === $receiverTopic;
         });
     }
-
 
     public function test_it_reports_the_last_endpoint_failure_when_every_endpoint_is_unavailable(): void
     {

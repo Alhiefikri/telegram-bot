@@ -207,6 +207,7 @@ class BscOperationsTest extends TestCase
             $providerError->fresh()->bscDetail->last_verified_at?->format('Y-m-d H:i:s'),
         );
     }
+
     public function test_bsc_reconciliation_includes_amount_unique_payments_without_hashes(): void
     {
         $payment = $this->bscPayment();

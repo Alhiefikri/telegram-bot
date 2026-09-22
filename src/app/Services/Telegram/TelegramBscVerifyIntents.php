@@ -49,7 +49,6 @@ final class TelegramBscVerifyIntents
             return;
         }
 
-
         $this->session->promptOrder($customer, $order->id);
         $this->bot->answerCallbackQuery($callbackQueryId);
         $this->bot->sendMessage($chatId, $this->translate($customer, 'payment.bsc.hash_prompt'));

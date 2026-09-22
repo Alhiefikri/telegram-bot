@@ -9,7 +9,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Throwable;
 
-final class BscRpcClient implements BscVerificationRpcClientInterface, BscTransferLogRpcClientInterface
+final class BscRpcClient implements BscTransferLogRpcClientInterface, BscVerificationRpcClientInterface
 {
     public const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef';
 
@@ -112,6 +112,7 @@ final class BscRpcClient implements BscVerificationRpcClientInterface, BscTransf
 
         return $result;
     }
+
     /**
      * @return list<array<string, mixed>>
      */
