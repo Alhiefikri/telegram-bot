@@ -826,7 +826,7 @@ SH);
         $this->assertStringContainsString('compose up -d --no-build --remove-orphans', $release);
         $this->assertStringContainsString('running_image="$(docker inspect "$container_id" --format \'{{.Image}}\')"', $release);
         $this->assertStringNotContainsString('up -d --build --remove-orphans', $contents);
-        $this->assertStringContainsString('php artisan ops:check-failed-jobs --snapshot', $release);
+        $this->assertStringContainsString('app artisan ops:check-failed-jobs --snapshot', $release);
         $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --baseline-stdin', $release);
         $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5', $release);
         $this->assertMatchesRegularExpression(
@@ -864,7 +864,7 @@ SH);
 
         $this->assertStringContainsString('PREVIOUS_COMMIT="$(git rev-parse HEAD)"', $release);
         $this->assertStringContainsString('PREVIOUS_IMAGE="$(docker inspect', $release);
-        $this->assertStringContainsString('compose run --rm --no-deps -e APP_AUTO_MIGRATE=false', $release);
+        $this->assertStringContainsString('compose run --rm --no-deps --entrypoint php', $release);
         $this->assertStringContainsString('exec|run)', $release);
         $this->assertStringContainsString('"$1" -u laravel', $release);
         $this->assertStringContainsString('2026_08_18_000001_contract_telegram_outbound_effects.php', $release);

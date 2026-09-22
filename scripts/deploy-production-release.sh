@@ -264,10 +264,10 @@ run_expand_migrations() {
   fi
 
   echo "Running expand migrations; deferred contract migration is excluded: $TELEGRAM_OUTBOUND_CONTRACT_MIGRATION"
-  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
+  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps --entrypoint php \
     -e APP_AUTO_MIGRATE=false \
     -e APP_OPTIMIZE=false \
-    app php artisan migrate --force --isolated "${migration_args[@]}" </dev/null
+    app artisan migrate --force --isolated "${migration_args[@]}" </dev/null
 }
 
 run_credential_identity_backfill() {
@@ -276,10 +276,10 @@ run_credential_identity_backfill() {
 
   echo "Preparing the credential identity registry for Account Input."
   status=0
-  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
+  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps --entrypoint php \
     -e APP_AUTO_MIGRATE=false \
     -e APP_OPTIMIZE=false \
-    app php artisan credentials:backfill-identity-registry --chunk=100 </dev/null > "$raw_output" 2>&1 || status=$?
+    app artisan credentials:backfill-identity-registry --chunk=100 </dev/null > "$raw_output" 2>&1 || status=$?
 
   # The backfill command has a safe output contract. Persist only the three
   # machine-readable lines that contain counts and row IDs; never retain raw
@@ -317,10 +317,10 @@ run_credential_identity_conflict_diagnostic() {
 
   echo "Running the read-only credential identity conflict diagnostic for stock item IDs: $ids"
   status=0
-  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
+  APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps --entrypoint php \
     -e APP_AUTO_MIGRATE=false \
     -e APP_OPTIMIZE=false \
-    app php artisan credentials:diagnose-identity-conflicts "$ids" --json </dev/null \
+    app artisan credentials:diagnose-identity-conflicts "$ids" --json </dev/null \
     > "$diagnostic_output" 2> "$diagnostic_error" || status=$?
 
   if [ "$status" -eq 0 ] && grep -q '^{' "$diagnostic_output"; then
@@ -390,10 +390,10 @@ run_deferred_telegram_contract() {
 
   write_release_state "contract-migration-started"
   echo "Applying deferred Telegram outbound contract migration."
-  if ! APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps \
+  if ! APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps --entrypoint php \
     -e APP_AUTO_MIGRATE=false \
     -e APP_OPTIMIZE=false \
-    app php artisan migrate --force --isolated </dev/null; then
+    app artisan migrate --force --isolated </dev/null; then
     echo "Deferred Telegram outbound contract migration failed." >&2
     return 1
   fi
@@ -736,7 +736,7 @@ docker pull "$APP_IMAGE"
 write_release_state "image-pulled"
 
 echo "Recording the pre-release failed-job ID watermark with the candidate image."
-APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app php artisan ops:check-failed-jobs --snapshot </dev/null > "$FAILED_JOBS_BASELINE_FILE"
+APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps --entrypoint php -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app artisan ops:check-failed-jobs --snapshot </dev/null > "$FAILED_JOBS_BASELINE_FILE"
 
 write_release_state "candidate-migrations-started"
 echo "Running candidate expand migrations before application cutover."

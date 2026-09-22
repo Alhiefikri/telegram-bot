@@ -14,7 +14,7 @@ grep -Fq 'ops:check-failed-jobs --snapshot </dev/null' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: failed-job snapshot can consume the streamed SSH script stdin\n' >&2; exit 1; }
 grep -Fq 'telegram:recover-failed-updates --prune-unrecoverable </dev/null' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: failed Telegram update recovery can consume the streamed SSH script stdin\n' >&2; exit 1; }
-grep -Fq 'php artisan migrate --force' "$RELEASE_SCRIPT" \
+grep -Fq 'app artisan migrate --force' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: candidate migration can consume the streamed SSH script stdin\n' >&2; exit 1; }
 grep -Fq '2026_08_18_000001_contract_telegram_outbound_effects.php' "$RELEASE_SCRIPT" \
   || { printf 'FAIL: expand migration must name the deferred Telegram outbound contract migration\n' >&2; exit 1; }
@@ -270,7 +270,7 @@ SCRIPT
 
   case "$scenario" in
     success)
-      grep -q 'compose .* run .*--rm --no-deps .*artisan migrate --force' "$workspace/commands.log" || fail "success did not run explicit migration"
+      grep -q 'compose .* run .*--rm --no-deps --entrypoint php .*artisan migrate --force' "$workspace/commands.log" || fail "success did not run explicit migration without the application entrypoint"
       grep -q 'credentials:backfill-identity-registry --chunk=100' "$workspace/commands.log" || fail "success did not prepare the credential identity registry"
       grep -q 'database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php' "$workspace/commands.log" || fail "success did not run the additive migration"
       ! grep -q 'database/migrations/2026_08_18_000001_contract_telegram_outbound_effects.php' "$workspace/commands.log" || fail "success ran the deferred contract migration before cutover"
