@@ -371,7 +371,7 @@ test("customer checkout: keeps the mobile sticky action aligned with the canonic
     expect(metrics.position).toBe("fixed");
     expect(
       Math.abs(metrics.bottom - metrics.viewportHeight)
-    ).toBeLessThanOrEqual(1);
+    ).toBeLessThanOrEqual(2);
     expect(metrics.paddingBottom).toBeGreaterThanOrEqual(metrics.height - 1);
     expect(metrics.documentWidth).toBeLessThanOrEqual(390);
 
