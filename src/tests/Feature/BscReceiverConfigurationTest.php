@@ -19,6 +19,7 @@ use App\Services\Admin\BscReceiverPendingMutationStore;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Bsc\BscReceiverManager;
 use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,6 +30,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Validator;
+use Tests\Support\BscTransferLogRpcStub;
 use Tests\TestCase;
 
 class BscReceiverConfigurationTest extends TestCase
@@ -537,8 +539,10 @@ class BscReceiverConfigurationTest extends TestCase
 
     public function test_readiness_requires_enabled_setting_rpc_identity_and_active_verified_receiver(): void
     {
-        $rpc = new class implements BscRpcClientInterface
+        $rpc = new class implements BscRpcClientInterface, BscTransferLogRpcClientInterface
         {
+            use BscTransferLogRpcStub;
+
             public function chainId(): int
             {
                 return 56;

@@ -22,6 +22,7 @@ use App\Services\Bsc\BscOperationalMetrics;
 use App\Services\Bsc\BscPaymentVerification;
 use App\Services\Bsc\BscReadinessReport;
 use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Bsc\BscVerificationOutcome;
 use App\Services\Bsc\BscVerificationResult;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -33,6 +34,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\BscTransferLogRpcStub;
 use Tests\TestCase;
 
 class BscOperationsTest extends TestCase
@@ -50,8 +52,10 @@ class BscOperationsTest extends TestCase
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
 
-        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface
+        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface, BscTransferLogRpcClientInterface
         {
+            use BscTransferLogRpcStub;
+
             public function chainId(): int
             {
                 return 56;

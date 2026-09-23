@@ -14,9 +14,11 @@ use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\Product;
 use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\BscTransferLogRpcStub;
 use Tests\TestCase;
 
 class BscPaymentAllocationTest extends TestCase
@@ -34,8 +36,10 @@ class BscPaymentAllocationTest extends TestCase
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
 
-        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface
+        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface, BscTransferLogRpcClientInterface
         {
+            use BscTransferLogRpcStub;
+
             public function chainId(): int
             {
                 return 56;

@@ -42,6 +42,11 @@ final class BscVerificationRpcClientAdapter implements BscTransferLogRpcClientIn
         return $this->callOptional('blockByNumber', [$blockNumber]);
     }
 
+    public function latestBlockNumber(): int
+    {
+        return $this->callOptional('latestBlockNumber', []);
+    }
+
     /** @return list<array<string, mixed>> */
     public function transferLogs(
         string $tokenContract,

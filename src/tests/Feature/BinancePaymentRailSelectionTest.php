@@ -12,11 +12,13 @@ use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\Product;
 use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\BscTransferLogRpcStub;
 use Tests\TestCase;
 
 class BinancePaymentRailSelectionTest extends TestCase
@@ -35,8 +37,10 @@ class BinancePaymentRailSelectionTest extends TestCase
         config()->set('services.bsc.expected_token_decimals', 18);
         config()->set('services.storefront.telegram_reservation_floor', 0);
 
-        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface
+        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface, BscTransferLogRpcClientInterface
         {
+            use BscTransferLogRpcStub;
+
             public function chainId(): int
             {
                 return 56;

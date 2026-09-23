@@ -113,6 +113,27 @@ final class BscRpcClient implements BscTransferLogRpcClientInterface, BscVerific
         return $result;
     }
 
+    public function latestBlockNumber(): int
+    {
+        $block = $this->blockByNumber('latest');
+        $value = strtolower(trim((string) ($block['number'] ?? '')));
+        if ($block === null || preg_match('/^0x[0-9a-f]+$/', $value) !== 1) {
+            throw new BscRpcException('BSC RPC returned an invalid latest block number.');
+        }
+
+        $hex = ltrim(substr($value, 2), '0');
+        if (strlen($hex) > 14) {
+            throw new BscRpcException('BSC RPC returned an unsupported latest block number.');
+        }
+
+        $number = hexdec($hex === '' ? '0' : $hex);
+        if (! is_int($number)) {
+            throw new BscRpcException('BSC RPC returned an unsupported latest block number.');
+        }
+
+        return $number;
+    }
+
     /**
      * @return list<array<string, mixed>>
      */

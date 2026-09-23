@@ -49,8 +49,12 @@ Schedule::command('telegram:recover-updates --queue=default')->everyMinute()->wi
 Schedule::command('telegram:forward-payment-proofs --chunk=100')->everyMinute()->withoutOverlapping();
 // Recovery is the safety net for effects whose after-commit dispatch was lost.
 // Keep its mutex bounded so a killed scheduler cannot suppress recovery for a
-// full day (Laravel's default withoutOverlapping expiry is 24 hours).
-Schedule::command('telegram:recover-outbound --chunk=25 --queue=notifications')->everyMinute()->withoutOverlapping(10);
+// full day (Laravel's default withoutOverlapping expiry is 24 hours). Its
+// ledger sweep can take several minutes, so it must not hold up payment scans.
+Schedule::command('telegram:recover-outbound --chunk=25 --queue=notifications')
+    ->everyMinute()
+    ->withoutOverlapping(10)
+    ->runInBackground();
 Schedule::command('telegram:reconcile-stock-notifications --chunk=25')->everyMinute()->withoutOverlapping();
 Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
 Schedule::command('ops:payment-lifecycle-rollout-report')->everyFiveMinutes()->withoutOverlapping();

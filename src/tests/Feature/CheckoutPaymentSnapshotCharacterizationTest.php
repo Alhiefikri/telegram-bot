@@ -19,6 +19,7 @@ use App\Models\PaymentBscDetail;
 use App\Models\Product;
 use App\Models\TelegramOutboundEffect;
 use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\PaymentProviderResolver;
@@ -30,6 +31,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\BscTransferLogRpcStub;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
 
@@ -621,8 +623,10 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         config()->set('services.bsc.usdt_contract', self::BSC_CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
 
-        $rpc = new class implements BscRpcClientInterface
+        $rpc = new class implements BscRpcClientInterface, BscTransferLogRpcClientInterface
         {
+            use BscTransferLogRpcStub;
+
             public int $transactionBaseline = 0;
 
             public int $callsUnderCheckoutTransaction = 0;

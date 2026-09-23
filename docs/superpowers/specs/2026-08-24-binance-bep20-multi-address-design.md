@@ -4,6 +4,8 @@
 
 > **Implementation amendment — 2026-09-22.** New `USDT_BEP20` Payments allocate a unique micro-USDT amount while the checkout payment-setting lock is held, persist `verification_mode=amount_unique`, and are verified by bounded `eth_getLogs` discovery followed by authoritative receipt/block validation. New Telegram and Storefront instructions do not ask for a transaction hash. Existing `verification_mode=transaction_hash` Payments remain supported through the legacy hash endpoint and targeted receipt path. The historical sections below describe the original design decisions and must not override this amendment.
 
+> **Operations amendment — 2026-09-23.** BSC readiness must verify that the configured RPC can answer the bounded USDT `Transfer` log filter used by `amount_unique` Payments. A successful chain ID or token-metadata response is not enough to enable checkout. Public RPCs are best-effort fallbacks; production should configure the existing `BSC_RPC_URL` override with a provider that supports the required `eth_getLogs` filters.
+
 **Date:** 2026-08-24
 
 ## Historical design record (superseded for new BSC checkouts)

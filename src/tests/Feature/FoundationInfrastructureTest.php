@@ -190,6 +190,7 @@ class FoundationInfrastructureTest extends TestCase
 
         $this->assertNotNull($event);
         $this->assertSame(10, $event->expiresAt);
+        $this->assertTrue($event->runInBackground);
     }
 
     public function test_klikqris_reconciliation_mutex_covers_the_execution_and_provider_retry_budgets(): void

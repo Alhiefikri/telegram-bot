@@ -16,6 +16,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Bsc\BscRpcException;
+use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\Checkout\BscCheckoutPaymentPreparation;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -45,8 +46,9 @@ final class BscReadinessTest extends TestCase
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
         config()->set('services.bsc.readiness_cache_seconds', 60);
+        config()->set('services.bsc.log_scan_chunk_blocks', 2_000);
 
-        $this->rpc = new class implements BscVerificationRpcClientInterface
+        $this->rpc = new class implements BscTransferLogRpcClientInterface, BscVerificationRpcClientInterface
         {
             public int $calls = 0;
 
@@ -61,6 +63,14 @@ final class BscReadinessTest extends TestCase
             public int $chainIdValue = 56;
 
             public int $tokenDecimalsValue = 18;
+
+            public bool $transferLogsAvailable = true;
+
+            public bool $latestBlockAvailable = true;
+
+            public int $transferLogCalls = 0;
+
+            public ?array $lastTransferLogQuery = null;
 
             private bool $settingDisabled = false;
 
@@ -109,7 +119,33 @@ final class BscReadinessTest extends TestCase
 
             public function blockByNumber(string|int $blockNumber): ?array
             {
-                throw new BscRpcException('Not used by readiness.');
+                $this->recordCall();
+
+                return ['number' => '0x64', 'hash' => '0x'.str_repeat('a', 64)];
+            }
+
+            public function latestBlockNumber(): int
+            {
+                $this->recordCall();
+
+                if (! $this->latestBlockAvailable) {
+                    throw new BscRpcException('BSC RPC returned invalid latest block number.');
+                }
+
+                return 10_000;
+            }
+
+            public function transferLogs(string $tokenContract, string $receiverAddress, int $fromBlock, int $toBlock): array
+            {
+                $this->recordCall();
+                $this->transferLogCalls++;
+                $this->lastTransferLogQuery = compact('tokenContract', 'receiverAddress', 'fromBlock', 'toBlock');
+
+                if (! $this->transferLogsAvailable) {
+                    throw new BscRpcException('BSC RPC error: limit exceeded.');
+                }
+
+                return [];
             }
 
             private function recordCall(): void
@@ -138,14 +174,49 @@ final class BscReadinessTest extends TestCase
         ]);
     }
 
-    public function test_readiness_requires_only_rpc_metadata_for_hash_verification(): void
+    public function test_readiness_requires_rpc_metadata_and_transfer_log_access_for_bsc_checkout(): void
     {
         $report = app(BscReadiness::class)->check();
 
         $this->assertTrue($report->isReady());
         $this->assertSame(56, $report->rpcChainId);
         $this->assertSame(18, $report->tokenDecimals);
-        $this->assertStringContainsString('TX Hash', $report->configurationMessage());
+        $this->assertStringContainsString('jumlah unik', $report->configurationMessage());
+    }
+
+    public function test_readiness_fails_when_the_rpc_rejects_bep20_transfer_log_queries(): void
+    {
+        $this->rpc->transferLogsAvailable = false;
+
+        $report = app(BscReadiness::class)->check();
+
+        $this->assertFalse($report->isReady());
+        $this->assertArrayHasKey('BSC_RPC_TRANSFER_LOGS', $report->invalid);
+    }
+
+    public function test_readiness_uses_a_bounded_recent_log_probe_and_accepts_empty_results(): void
+    {
+        $report = app(BscReadiness::class)->check();
+
+        $this->assertTrue($report->isReady());
+        $this->assertSame([
+            'tokenContract' => self::CONTRACT,
+            'receiverAddress' => '0x0000000000000000000000000000000000000001',
+            'fromBlock' => 8_001,
+            'toBlock' => 10_000,
+        ], $this->rpc->lastTransferLogQuery);
+        $this->assertSame(1, $this->rpc->transferLogCalls);
+    }
+
+    public function test_readiness_fails_when_latest_block_cannot_be_resolved_for_the_log_probe(): void
+    {
+        $this->rpc->latestBlockAvailable = false;
+
+        $report = app(BscReadiness::class)->check();
+
+        $this->assertFalse($report->isReady());
+        $this->assertArrayHasKey('BSC_RPC_TRANSFER_LOGS', $report->invalid);
+        $this->assertSame(0, $this->rpc->transferLogCalls);
     }
 
     public function test_readiness_fails_when_the_rpc_is_down(): void
@@ -174,17 +245,17 @@ final class BscReadinessTest extends TestCase
 
         $readiness->check();
         $readiness->check();
-        $this->assertSame(3, $this->rpc->calls);
+        $this->assertSame(5, $this->rpc->calls);
 
         ManualPaymentSetting::current()->update(['bsc_payment_enabled' => false]);
         $readiness->check();
-        $this->assertSame(3, $this->rpc->calls);
+        $this->assertSame(5, $this->rpc->calls);
 
         ManualPaymentSetting::current()->update(['bsc_payment_enabled' => true]);
         BscPaymentReceiver::query()->firstOrFail()->update(['label' => 'Rotated receiver']);
         $readiness->check();
 
-        $this->assertSame(6, $this->rpc->calls);
+        $this->assertSame(10, $this->rpc->calls);
     }
 
     public function test_readiness_cache_expires_after_its_short_ttl(): void
@@ -200,7 +271,20 @@ final class BscReadinessTest extends TestCase
             Carbon::setTestNow();
         }
 
-        $this->assertSame(6, $this->rpc->calls);
+        $this->assertSame(10, $this->rpc->calls);
+    }
+
+    public function test_readiness_cache_is_invalidated_when_the_transfer_scan_chunk_changes(): void
+    {
+        $readiness = app(BscReadiness::class);
+        $readiness->check();
+        $this->assertSame(8_001, $this->rpc->lastTransferLogQuery['fromBlock']);
+
+        config()->set('services.bsc.log_scan_chunk_blocks', 1_000);
+        $readiness->check();
+
+        $this->assertSame(10, $this->rpc->calls);
+        $this->assertSame(9_001, $this->rpc->lastTransferLogQuery['fromBlock']);
     }
 
     public function test_customer_surfaces_keep_bsc_when_receipt_verification_is_available(): void
@@ -218,7 +302,22 @@ final class BscReadinessTest extends TestCase
         $this->assertNotNull(
             app(StorefrontProductPresenter::class)->present($product)->checkoutChoice('website_binance_pay'),
         );
-        $this->assertSame(3, $this->rpc->calls);
+        $this->assertSame(5, $this->rpc->calls);
+    }
+
+    public function test_customer_surfaces_hide_bsc_when_transfer_log_readiness_fails(): void
+    {
+        $this->rpc->transferLogsAvailable = false;
+        $product = Product::factory()->create([
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 2_500_000,
+        ]);
+
+        $this->assertFalse(app(TelegramCheckoutIntents::class)->bscRailSelectable());
+        $this->assertNull(
+            app(StorefrontProductPresenter::class)->present($product)->checkoutChoice('website_usdt_bep20'),
+        );
     }
 
     public function test_storefront_exposes_both_binance_rails_with_hash_verification(): void

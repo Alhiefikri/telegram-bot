@@ -115,6 +115,13 @@ class BscPaymentVerificationTest extends TestCase
                 return $this->blocks[(string) $blockNumber] ?? null;
             }
 
+            public function latestBlockNumber(): int
+            {
+                $this->calls++;
+
+                return 102;
+            }
+
             /** @return list<array<string, mixed>> */
             public function transferLogs(
                 string $tokenContract,

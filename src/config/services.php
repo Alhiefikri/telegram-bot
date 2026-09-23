@@ -47,14 +47,14 @@ return [
     ],
 
     'bsc' => [
-        // Public BSC endpoints are pinned fallbacks: they carry no credentials
-        // and keep receipt verification alive when one provider is degraded.
-        // BSC_RPC_URL remains the optional override for private or credentialed
-        // providers, and always takes priority over the pinned fallbacks.
+        // Public BSC endpoints are best-effort fallbacks. Production should use
+        // BSC_RPC_URL for a provider whose eth_getLogs support and limits have
+        // been verified; BSC readiness probes transfer-log access before checkout.
+        // The optional private or credentialed override remains first priority.
         'rpc_urls' => array_values(array_unique(array_filter([
             trim((string) env('BSC_RPC_URL')),
             'https://bsc-dataseed.binance.org',
-            'https://bsc.publicnode.com',
+            'https://bsc-rpc.publicnode.com',
         ], fn ($url): bool => is_string($url) && trim($url) !== ''))),
         'chain_id' => 56,
         'usdt_contract' => BscReadiness::APPROVED_USDT_CONTRACT,

@@ -112,6 +112,67 @@ class BscRpcClientTest extends TestCase
         });
     }
 
+    public function test_it_reads_the_latest_block_number_for_readiness_probes(): void
+    {
+        config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
+        Http::fake([
+            'https://bsc-rpc.test' => Http::response([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'result' => ['number' => '0x64', 'hash' => '0x'.str_repeat('a', 64)],
+            ]),
+        ]);
+
+        $this->assertSame(100, (new BscRpcClient)->latestBlockNumber());
+        Http::assertSent(fn (Request $request): bool => data_get($request->data(), 'method') === 'eth_getBlockByNumber'
+            && data_get($request->data(), 'params.0') === 'latest'
+            && data_get($request->data(), 'params.1') === false);
+    }
+
+    public function test_latest_block_number_requires_a_valid_hex_quantity(): void
+    {
+        config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
+        Http::fake([
+            'https://bsc-rpc.test' => Http::response([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'result' => ['number' => 'head'],
+            ]),
+        ]);
+
+        $this->expectException(BscRpcException::class);
+        $this->expectExceptionMessage('invalid latest block number');
+
+        (new BscRpcClient)->latestBlockNumber();
+    }
+
+    public function test_it_falls_over_when_the_primary_provider_rejects_transfer_log_queries(): void
+    {
+        config()->set('services.bsc.rpc_urls', ['https://bsc-primary.test', 'https://bsc-log-fallback.test']);
+        $contract = '0x55d398326f99059ff775485246999027b3197955';
+        $receiver = '0x1111111111111111111111111111111111111111';
+
+        Http::fake([
+            'https://bsc-primary.test' => Http::response([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'error' => ['code' => -32005, 'message' => 'limit exceeded'],
+            ]),
+            'https://bsc-log-fallback.test' => Http::response([
+                'jsonrpc' => '2.0',
+                'id' => 2,
+                'result' => [],
+            ]),
+        ]);
+
+        $logs = (new BscRpcClient)->transferLogs($contract, $receiver, 100, 100);
+
+        $this->assertSame([], $logs);
+        Http::assertSentCount(2);
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'bsc-log-fallback.test')
+            && data_get($request->data(), 'method') === 'eth_getLogs');
+    }
+
     public function test_it_reports_the_last_endpoint_failure_when_every_endpoint_is_unavailable(): void
     {
         config()->set('services.bsc.rpc_urls', ['https://bsc-primary.test', 'https://bsc-fallback.test']);
@@ -145,7 +206,8 @@ class BscRpcClientTest extends TestCase
         $urls = (array) config('services.bsc.rpc_urls');
 
         $this->assertContains('https://bsc-dataseed.binance.org', $urls);
-        $this->assertContains('https://bsc.publicnode.com', $urls);
+        $this->assertContains('https://bsc-rpc.publicnode.com', $urls);
+        $this->assertNotContains('https://bsc.publicnode.com', $urls);
         foreach ($urls as $url) {
             $this->assertStringStartsWith('https://', (string) $url);
         }

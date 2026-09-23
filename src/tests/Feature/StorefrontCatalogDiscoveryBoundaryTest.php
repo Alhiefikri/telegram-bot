@@ -8,15 +8,19 @@ use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\KlikQris\KlikQrisCheckoutSelector;
 use App\Storefront\StorefrontPresenter;
 use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\BscTransferLogRpcStub;
 use Tests\TestCase;
 
-final class StorefrontCatalogBoundaryRpc implements BscVerificationRpcClientInterface
+final class StorefrontCatalogBoundaryRpc implements BscTransferLogRpcClientInterface, BscVerificationRpcClientInterface
 {
+    use BscTransferLogRpcStub;
+
     public int $calls = 0;
 
     public function chainId(): int

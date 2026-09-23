@@ -33,6 +33,7 @@ use App\Support\PaymentProvider;
 use Brick\Math\BigInteger;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\BscTransferLogRpcStub;
 use Tests\Support\TelegramBotTestSupport;
 
 final class BscCheckoutRailTest extends TelegramBotTestSupport
@@ -48,8 +49,10 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
 
-        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface
+        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface, BscTransferLogRpcClientInterface
         {
+            use BscTransferLogRpcStub;
+
             public function chainId(): int
             {
                 return 56;
@@ -181,6 +184,11 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             public function blockByNumber(string|int $blockNumber): ?array
             {
                 return $this->blocks[(string) $blockNumber] ?? null;
+            }
+
+            public function latestBlockNumber(): int
+            {
+                return 102;
             }
 
             /** @return list<array<string, mixed>> */

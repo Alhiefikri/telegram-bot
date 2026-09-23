@@ -41,6 +41,7 @@ use App\Services\Binance\BinanceOrderIdActivation;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Bsc\BscReceiverManager;
 use App\Services\Bsc\BscRpcClientInterface;
+use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
@@ -65,6 +66,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\Group;
+use Tests\Support\BscTransferLogRpcStub;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
 use Throwable;
@@ -532,8 +534,10 @@ class ProductionConcurrencyTest extends TestCase
             'usdt_contract' => '0x55d398326f99059ff775485246999027b3197955',
             'expected_token_decimals' => 18,
         ]));
-        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface
+        app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface, BscTransferLogRpcClientInterface
         {
+            use BscTransferLogRpcStub;
+
             public function chainId(): int
             {
                 return 56;

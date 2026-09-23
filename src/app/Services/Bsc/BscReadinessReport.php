@@ -39,6 +39,6 @@ final readonly class BscReadinessReport
             return implode(' ', $problems);
         }
 
-        return 'BSC siap digunakan melalui verifikasi TX Hash.';
+        return 'BSC siap digunakan melalui deteksi otomatis transfer dengan jumlah unik.';
     }
 }

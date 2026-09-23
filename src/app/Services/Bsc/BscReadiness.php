@@ -13,7 +13,7 @@ final class BscReadiness
 {
     public const APPROVED_USDT_CONTRACT = '0x55d398326f99059ff775485246999027b3197955';
 
-    private const CACHE_VERSION_KEY = 'bsc.readiness.v2.version';
+    private const CACHE_VERSION_KEY = 'bsc.readiness.v3.version';
 
     private const CACHE_KEY_PREFIX = 'bsc.readiness';
 
@@ -136,7 +136,16 @@ final class BscReadiness
             } catch (Throwable) {
                 $invalid['BSC_RPC'] = 'Readiness RPC BSC gagal.';
             }
+        }
 
+        if ($probeProvider && $missing === [] && $invalid === []) {
+            try {
+                $this->probeTransferLogSupport($contract);
+            } catch (BscRpcException $exception) {
+                $invalid['BSC_RPC_TRANSFER_LOGS'] = 'RPC BSC tidak dapat membaca log transfer USDT: '.$exception->getMessage();
+            } catch (Throwable) {
+                $invalid['BSC_RPC_TRANSFER_LOGS'] = 'RPC BSC tidak dapat membaca log transfer USDT.';
+            }
         }
 
         return new BscReadinessReport(
@@ -196,6 +205,26 @@ final class BscReadiness
         );
     }
 
+    private function probeTransferLogSupport(string $contract): void
+    {
+        if (! ($this->rpc instanceof BscTransferLogRpcClientInterface)) {
+            throw new BscRpcException('RPC client does not support BSC transfer-log verification.', retryable: false);
+        }
+
+        // Probe one full configured scanner chunk so an RPC that accepts only
+        // smaller log ranges cannot pass readiness and fail on real Payments.
+        // An empty result is healthy; provider errors must keep checkout closed.
+        $latestBlockNumber = $this->rpc->latestBlockNumber();
+        $chunkSize = max(1, (int) config('services.bsc.log_scan_chunk_blocks', 2_000));
+
+        $this->rpc->transferLogs(
+            tokenContract: $contract,
+            receiverAddress: self::READINESS_PROBE_RECEIVER,
+            fromBlock: max(0, $latestBlockNumber - $chunkSize + 1),
+            toBlock: $latestBlockNumber,
+        );
+    }
+
     private function cacheKey(?ManualPaymentSetting $setting): string
     {
         Cache::add(self::CACHE_VERSION_KEY, 1, now()->addYears(5));
@@ -215,6 +244,7 @@ final class BscReadiness
             'chain_id' => (int) config('services.bsc.chain_id', 56),
             'contract' => strtolower(trim((string) config('services.bsc.usdt_contract'))),
             'expected_decimals' => (int) config('services.bsc.expected_token_decimals', 18),
+            'log_scan_chunk_blocks' => max(1, (int) config('services.bsc.log_scan_chunk_blocks', 2_000)),
         ], JSON_THROW_ON_ERROR));
     }
 
