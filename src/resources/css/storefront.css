@@ -612,3 +612,62 @@
     display: none !important;
   }
 }
+
+/* Public pages load this stylesheet without app.css. Keep hard-coded white
+ * surfaces in sync with the storefront's dark palette so variable-colored ink
+ * remains readable, including cards that also contain product imagery. */
+[data-theme="dark"]
+  .storefront-shell
+  :is(
+    .bg-white,
+    [class~="bg-white/40"],
+    [class~="bg-white/60"],
+    [class~="bg-white/70"],
+    [class~="bg-white/80"],
+    [class~="bg-white/85"]
+  ) {
+  background-color: var(--sf-surface) !important;
+  color: var(--sf-ink);
+}
+
+[data-theme="dark"]
+  .storefront-shell
+  [class~="bg-[var(--sf-ink)]"]:not(.footer-dark) {
+  background-color: #12233f !important;
+  color: #ffffff;
+}
+
+[data-theme="dark"]
+  .storefront-shell
+  :is(
+    [class~="bg-[var(--sf-yellow)]"],
+    [class~="bg-[var(--sf-green)]"],
+    [class~="bg-[var(--sf-warning)]"]
+  ) {
+  color: #0b1220;
+}
+
+[data-theme="dark"]
+  .storefront-shell
+  :is(
+    [class~="bg-[var(--sf-yellow)]"],
+    [class~="bg-[var(--sf-green)]"],
+    [class~="bg-[var(--sf-warning)]"]
+  )
+  :is(
+    [class*="text-[var(--sf-ink)]"],
+    [class*="text-[var(--sf-muted)]"],
+    p,
+    span,
+    strong,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    a,
+    label
+  ) {
+  color: #0b1220 !important;
+}

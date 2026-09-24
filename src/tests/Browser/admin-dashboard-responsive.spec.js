@@ -3252,6 +3252,21 @@ test("traps keyboard focus in the stock modal and restores its opener", async ({
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(opener).toBeFocused();
+
+  const manageStockOpener = productCard.getByRole("button", {
+    name: /Kelola/i,
+  });
+  await manageStockOpener.click();
+  const manageStockDialog = page.getByRole("dialog", {
+    name: "Kelola stok",
+  });
+  await expect(manageStockDialog).toBeVisible();
+  await expect(
+    manageStockDialog.getByRole("button", { name: /Tambah stok baru/i })
+  ).toBeVisible();
+  await manageStockDialog.getByRole("button", { name: "Tutup modal" }).click();
+  await expect(manageStockDialog).toBeHidden();
+  await expect(manageStockOpener).toBeFocused();
 });
 
 test("keeps structured Account Input reviewed, bounded, and private in page memory", async ({

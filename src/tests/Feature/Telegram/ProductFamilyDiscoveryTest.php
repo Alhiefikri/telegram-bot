@@ -12,9 +12,12 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Services\Telegram\TelegramCatalogIntents;
 use App\Services\Telegram\TelegramFamilyCallbackToken;
 use App\Services\Telegram\TelegramIntentSession;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -47,15 +50,24 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(41001, '/product', [], 41001))->assertOk();
         $catalog = $this->lastMessageContaining('Netflix');
-        $this->assertStringContainsString('Netflix', (string) $catalog['text']);
-        $this->assertStringContainsString('01. ', (string) $catalog['text']);
-        $this->assertStringContainsString('Netflix (3)', (string) $catalog['text']);
-        $this->assertStringContainsString('Spotify Standalone', (string) $catalog['text']);
-        $this->assertStringContainsString('Produk mandiri', (string) $catalog['text']);
-        $familyCallback = $catalog['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $catalogText = (string) $catalog['text'];
+        $this->assertStringContainsString('DAFTAR PRODUK DIGITAL', $catalogText);
+        $this->assertStringContainsString('Pilih keluarga atau produk', $catalogText);
+        $this->assertStringNotContainsString('Netflix', $catalogText);
+        $this->assertStringNotContainsString('Spotify Standalone', $catalogText);
+
+        $keyboard = $catalog['reply_markup']['inline_keyboard'];
+        $familyButton = $keyboard[0][0];
+        $this->assertStringContainsString('Netflix', $familyButton['text']);
+        $this->assertStringContainsString('1/2 varian tersedia', $familyButton['text']);
+        $familyCallback = $familyButton['callback_data'];
         $this->assertStringStartsWith('family:options:v', $familyCallback);
-        $this->assertSame('product:'.$standalone->id, $catalog['reply_markup']['inline_keyboard'][0][1]['callback_data']);
-        $this->assertCount(3, $catalog['reply_markup']['inline_keyboard']);
+        $this->assertCount(1, $keyboard[0]);
+        $this->assertSame('product:'.$standalone->id, $keyboard[1][0]['callback_data']);
+        $this->assertStringContainsString('Spotify Standalone', $keyboard[1][0]['text']);
+        $this->assertStringContainsString('Stok 2', $keyboard[1][0]['text']);
+        $this->assertCount(1, $keyboard[1]);
+        $this->assertCount(4, $keyboard);
 
         $this->postTelegramWebhook($this->callbackUpdate(41002, 'family-open', 'family:options:'.$family->id.':1,', [], 41001))->assertOk();
         $this->assertSame(0, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage') && str_contains((string) ($request['text'] ?? ''), 'Family 5 Profile'))->count());
@@ -160,16 +172,16 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(41007, '/produk', [], 41007))->assertOk();
         $firstPage = $this->lastMessageContaining('Paged Family 15');
-        $this->assertStringContainsString('Page 1 of 2', (string) $firstPage['text']);
+        $this->assertStringContainsString('Choose a family or product', (string) $firstPage['text']);
+        $this->assertStringNotContainsString('Paged Family 15', (string) $firstPage['text']);
         $this->assertStringNotContainsString('Paged Family 16', (string) $firstPage['text']);
         $keyboard = $firstPage['reply_markup']['inline_keyboard'];
-        $familyButtons = collect(array_slice($keyboard, 0, 8))->flatten(1);
-        $this->assertCount(15, $familyButtons);
-        $this->assertSame('family:list:2', $keyboard[8][0]['callback_data']);
-
-        // Entries sit directly on their divider instead of one blank line apart.
-        $this->assertMatchesRegularExpression('/01\. .+\n━+\n02\. /u', (string) $firstPage['text']);
-        $this->assertStringNotContainsString("━\n\n", (string) $firstPage['text']);
+        $familyRows = array_slice($keyboard, 0, 15);
+        $this->assertCount(15, $familyRows);
+        foreach ($familyRows as $row) {
+            $this->assertCount(1, $row);
+        }
+        $this->assertSame('family:list:2', $keyboard[15][0]['callback_data']);
 
         $this->postTelegramWebhook($this->callbackUpdate(41008, 'paged-family-next', 'family:list:2', [], 41007))->assertOk();
         $secondPage = $this->lastMessageContaining('Paged Family 16');
@@ -715,12 +727,16 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 
         $catalog = $this->lastMessageContaining('Canva');
         $keyboard = $catalog['reply_markup']['inline_keyboard'];
-        $this->assertStringContainsString('01. 🖌️ Canva (2)', (string) $catalog['text']);
-        $this->assertCount(2, $keyboard[0]);
-        $this->assertSame('🖌️ Canva', $keyboard[0][0]['text']);
-        $this->assertSame('🎬 CapCut', $keyboard[0][1]['text']);
-        $this->assertSame('🤖 ChatGPT', $keyboard[1][0]['text']);
-        $this->assertSame('✨ Gemini AI', $keyboard[1][1]['text']);
+        $this->assertStringNotContainsString('Canva', (string) $catalog['text']);
+        $this->assertStringContainsString('Pilih keluarga atau produk', (string) $catalog['text']);
+        $this->assertCount(6, $keyboard);
+        $this->assertSame('🖌️ Canva · Stok 2', $keyboard[0][0]['text']);
+        $this->assertSame('🎬 CapCut · Stok 2', $keyboard[1][0]['text']);
+        $this->assertSame('🤖 ChatGPT · Stok 2', $keyboard[2][0]['text']);
+        $this->assertSame('✨ Gemini AI · Stok 2', $keyboard[3][0]['text']);
+        foreach (array_slice($keyboard, 0, 4) as $row) {
+            $this->assertCount(1, $row);
+        }
     }
 
     public function test_family_options_show_per_product_quotes_and_two_column_icon_buttons(): void
@@ -873,6 +889,211 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 
         $this->assertSame(PHP_INT_MAX, $tokens->decodeOptions(substr($optionToken, 1))['familyId']);
         $this->assertSame(PHP_INT_MAX, $tokens->decodeSelect(substr($selectToken, 1))['productId']);
+    }
+
+    public function test_unavailable_families_show_habis_and_remain_openable(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41130, 'locale' => 'id']);
+        $single = ProductFamily::factory()->create([
+            'name' => 'Single Sold Out',
+            'slug' => 'single-sold-out',
+            'sort_order' => 1,
+        ]);
+        Product::factory()->create([
+            'name' => 'Single Sold Out Product',
+            'product_family_id' => $single->id,
+            'stock' => 8,
+            'reserved_stock' => 8,
+        ]);
+        $multiple = ProductFamily::factory()->create([
+            'name' => 'Multiple Sold Out',
+            'slug' => 'multiple-sold-out',
+            'sort_order' => 2,
+        ]);
+        foreach (range(1, 2) as $number) {
+            Product::factory()->create([
+                'name' => 'Multiple Sold Out Product '.$number,
+                'product_family_id' => $multiple->id,
+                'family_sort_order' => $number,
+                'stock' => 5 + $number,
+                'reserved_stock' => 5 + $number,
+            ]);
+        }
+
+        $this->postTelegramWebhook($this->messageUpdate(41131, '/product', [], 41130))->assertOk();
+        $catalog = $this->lastMessageContaining('Single Sold Out');
+        $keyboard = $catalog['reply_markup']['inline_keyboard'];
+        $singleButton = $keyboard[0][0];
+        $multipleButton = $keyboard[1][0];
+        $this->assertStringContainsString('Single Sold Out', $singleButton['text']);
+        $this->assertStringContainsString('Habis', $singleButton['text']);
+        $this->assertStringContainsString('Multiple Sold Out', $multipleButton['text']);
+        $this->assertStringContainsString('Habis', $multipleButton['text']);
+        $this->assertSame('danger', $singleButton['style']);
+        $this->assertStringStartsWith('family:options:v', $singleButton['callback_data']);
+        $this->assertSame('danger', $multipleButton['style']);
+        $this->assertStringStartsWith('family:options:v', $multipleButton['callback_data']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41132, 'open-sold-out-family', $singleButton['callback_data'], [], 41130))->assertOk();
+        $this->assertStringContainsString('Single Sold Out Product', (string) $this->lastMessageContaining('Single Sold Out Product')['text']);
+    }
+
+    public function test_family_options_refresh_stock_after_the_catalog_button_was_rendered(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41140, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Fresh Family', 'slug' => 'fresh-family']);
+        $product = Product::factory()->create([
+            'name' => 'Fresh Option',
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Fresh Option',
+            'price_amount' => 18000,
+            'stock' => 6,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(41141, '/product', [], 41140))->assertOk();
+        $catalog = $this->lastMessageContaining('Fresh Family');
+        $familyCallback = $catalog['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->assertStringContainsString('Stok 6', $catalog['reply_markup']['inline_keyboard'][0][0]['text']);
+
+        $product->forceFill(['stock' => 2])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(41142, 'fresh-family-open', $familyCallback, [], 41140))->assertOk();
+        $options = $this->lastMessageContaining('Fresh Option');
+        $this->assertStringContainsString('Harga: Rp18.000', (string) $options['text']);
+        $this->assertStringContainsString('Stok tersedia: 2', (string) $options['text']);
+        $this->assertStringNotContainsString('Stok tersedia: 6', (string) $options['text']);
+
+        $product->forceFill(['stock' => 0])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(41143, 'fresh-family-open-again', $familyCallback, [], 41140))->assertOk();
+        $soldOutOptions = $this->lastMessageContaining('Fresh Option');
+        $this->assertStringContainsString('❌ Stok: Habis', (string) $soldOutOptions['text']);
+        $soldOutButton = $soldOutOptions['reply_markup']['inline_keyboard'][0][0];
+        $this->assertSame('danger', $soldOutButton['style']);
+        $this->assertArrayNotHasKey('callback_data', $soldOutButton);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            41144,
+            'select-now-sold-out',
+            $this->selectCallback($family->id, $product->id),
+            [],
+            41140,
+        ))->assertOk();
+        $detail = $this->lastMessageContaining('Fresh Option');
+        $this->assertStringContainsString('Stok kosong', (string) $detail['text']);
+        $this->assertStringNotContainsString('detail:pay:', json_encode($detail, JSON_THROW_ON_ERROR));
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+    }
+
+    public function test_family_selection_rejects_products_that_are_inactive_or_moved(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41150, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Mutable Family', 'slug' => 'mutable-family']);
+        $product = Product::factory()->create([
+            'name' => 'Mutable Product',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'family_option_label' => 'Mutable Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'Remaining Product',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $destination = ProductFamily::factory()->create(['name' => 'Destination Family', 'slug' => 'destination-family']);
+
+        $this->openFamilyFromDeepLink($customer, 41151, $family);
+        $options = $this->lastMessageContaining('Mutable Product');
+        $selectionCallback = $options['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $messagesBefore = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request->body(), 'Mutable Product'))->count();
+
+        $product->forceFill(['is_active' => false])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(41152, 'inactive-family-product', $selectionCallback, [], 41150))->assertOk();
+        $messagesAfterInactive = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request->body(), 'Mutable Product'))->count();
+        $this->assertSame($messagesBefore, $messagesAfterInactive);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'inactive-family-product'
+            && str_contains((string) ($request['text'] ?? ''), 'sudah tidak berlaku'));
+
+        $product->forceFill(['is_active' => true])->save();
+        $this->openFamilyFromDeepLink($customer, 41153, $family);
+        $options = $this->lastMessageContaining('Mutable Product');
+        $selectionCallback = $options['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $messagesBeforeMove = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request->body(), 'Mutable Product'))->count();
+        $product->forceFill(['product_family_id' => $destination->id])->save();
+
+        $this->postTelegramWebhook($this->callbackUpdate(41154, 'moved-family-product', $selectionCallback, [], 41150))->assertOk();
+        $messagesAfterMove = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request->body(), 'Mutable Product'))->count();
+        $this->assertSame($messagesBeforeMove, $messagesAfterMove);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'moved-family-product'
+            && str_contains((string) ($request['text'] ?? ''), 'sudah tidak berlaku'));
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+    }
+
+    public function test_catalog_query_count_stays_bounded_as_family_count_grows(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41160, 'locale' => 'en']);
+        $catalog = app(TelegramCatalogIntents::class);
+        $measuring = false;
+        $queryCount = 0;
+        DB::listen(function (QueryExecuted $query) use (&$measuring, &$queryCount): void {
+            if ($measuring) {
+                $queryCount++;
+            }
+        });
+        $measureRender = function () use ($catalog, $customer, &$measuring, &$queryCount): int {
+            $queryCount = 0;
+            $measuring = true;
+            try {
+                $catalog->sendCatalogPage($customer, (string) $customer->telegram_id);
+            } finally {
+                $measuring = false;
+            }
+
+            return $queryCount;
+        };
+        $createFamily = function (int $number): void {
+            $family = ProductFamily::factory()->create([
+                'name' => 'Query Family '.$number,
+                'slug' => 'query-family-'.$number,
+                'sort_order' => $number,
+            ]);
+            Product::factory()->create([
+                'name' => 'Query Product '.$number,
+                'product_family_id' => $family->id,
+                'stock' => 1,
+                'reserved_stock' => 0,
+            ]);
+        };
+
+        $createFamily(1);
+        $smallCatalogQueries = $measureRender();
+        foreach (range(2, 16) as $number) {
+            $createFamily($number);
+        }
+        $largeCatalogQueries = $measureRender();
+
+        $this->assertLessThanOrEqual(
+            $smallCatalogQueries + 1,
+            $largeCatalogQueries,
+            sprintf('Query count grew from %d to %d for fifteen additional families.', $smallCatalogQueries, $largeCatalogQueries),
+        );
     }
 
     private function openFamilyFromDeepLink(Customer $customer, int $updateId, ProductFamily $family): void

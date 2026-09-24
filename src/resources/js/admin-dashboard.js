@@ -264,6 +264,11 @@ export default function adminDashboard(initialState = {}) {
     manageStockSummary: { available: 0, reserved: 0, paid: 0 },
     manageStockTruncated: false,
     manageStockAddPayload: null,
+    manageStockLoading: false,
+    manageStockLoadError: "",
+    manageStockLoadPayload: null,
+    manageStockLoadEditingItemId: null,
+    manageStockRequestId: 0,
     manageStockInitialPayload: initialState.manageStockPayload ?? null,
     manageStockInitialEditingItemId:
       initialState.manageStockEditingItemId ?? null,
@@ -306,11 +311,16 @@ export default function adminDashboard(initialState = {}) {
         }
 
         if (this.manageStockModalOpen && this.manageStockInitialPayload) {
-          this.applyManageStockPayload(
-            this.manageStockInitialPayload,
-            this.manageStockInitialEditingItemId
-          );
-          this.$nextTick(() => this.focusManageStockError());
+          const payload = this.manageStockInitialPayload;
+          const editingItemId = this.manageStockInitialEditingItemId;
+          this.manageStockInitialPayload = null;
+          this.manageStockLoadPayload = payload;
+          this.manageStockLoadEditingItemId = editingItemId;
+          this.loadManageStockPayload(payload, editingItemId).then(() => {
+            if (!this.manageStockLoadError && this.manageStockModalOpen) {
+              this.focusManageStockError();
+            }
+          });
           return;
         }
 
@@ -1308,6 +1318,7 @@ export default function adminDashboard(initialState = {}) {
           paid: 0,
         },
         manageStockTruncated: Boolean(product.stockItemsTruncated),
+        manageStockLoadError: "",
         manageStockAddPayload: {
           id: product.id,
           name: product.name,
@@ -1320,7 +1331,62 @@ export default function adminDashboard(initialState = {}) {
       });
     },
 
-    openManageStockModal(product) {
+    async loadManageStockPayload(product, editingItemId = null) {
+      const requestId = ++this.manageStockRequestId;
+      this.manageStockLoadPayload = product;
+      this.manageStockLoadEditingItemId = editingItemId;
+      this.manageStockLoadError = "";
+      this.manageStockLoading = true;
+      this.manageStockItems = [];
+      this.manageStockSummary = { available: 0, reserved: 0, paid: 0 };
+      this.manageStockTruncated = false;
+
+      try {
+        const response = await fetch(product?.stockItemsUrl ?? "", {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        });
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(
+            body.message ?? "Data stok produk tidak dapat dimuat."
+          );
+        }
+
+        if (!Array.isArray(body.stockItems) || !body.stockSummary) {
+          throw new Error("Respons data stok produk tidak valid.");
+        }
+
+        if (requestId === this.manageStockRequestId) {
+          this.applyManageStockPayload({ ...product, ...body }, editingItemId);
+        }
+      } catch (error) {
+        if (requestId === this.manageStockRequestId) {
+          this.manageStockLoadError =
+            error instanceof Error
+              ? error.message
+              : "Data stok produk tidak dapat dimuat.";
+        }
+      } finally {
+        if (requestId === this.manageStockRequestId) {
+          this.manageStockLoading = false;
+        }
+      }
+    },
+
+    async retryManageStockLoad() {
+      if (!this.manageStockLoadPayload) {
+        return;
+      }
+
+      await this.loadManageStockPayload(
+        this.manageStockLoadPayload,
+        this.manageStockLoadEditingItemId
+      );
+    },
+
+    async openManageStockModal(product) {
       this.manageStockModalOpener = document.activeElement;
       this.manageStockInitialPayload = null;
       this.manageStockInitialEditingItemId = null;
@@ -1328,8 +1394,14 @@ export default function adminDashboard(initialState = {}) {
       Object.assign(this, {
         activeTab: "produk",
         manageStockModalOpen: true,
+        manageStockProductName: product.name,
+        manageStockProductStock: product.stock,
       });
-      this.applyManageStockPayload(product);
+      await this.loadManageStockPayload(product);
+      if (!this.manageStockModalOpen) {
+        return;
+      }
+
       this.$nextTick(() =>
         this.modalFocusableElements(
           document.getElementById("manage-stock-modal")
@@ -1339,7 +1411,12 @@ export default function adminDashboard(initialState = {}) {
 
     closeManageStockModal(restoreFocus = true) {
       const opener = this.manageStockModalOpener;
+      this.manageStockRequestId += 1;
       this.manageStockModalOpen = false;
+      this.manageStockLoading = false;
+      this.manageStockLoadError = "";
+      this.manageStockLoadPayload = null;
+      this.manageStockLoadEditingItemId = null;
       this.manageStockItems = [];
       this.manageStockSummary = { available: 0, reserved: 0, paid: 0 };
       this.manageStockAddPayload = null;
@@ -1354,7 +1431,7 @@ export default function adminDashboard(initialState = {}) {
     },
 
     openStockModalFromManage() {
-      if (!this.manageStockAddPayload) {
+      if (!this.manageStockAddPayload || this.manageStockLoading) {
         return;
       }
 

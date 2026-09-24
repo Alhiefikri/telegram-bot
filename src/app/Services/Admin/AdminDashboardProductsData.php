@@ -32,9 +32,9 @@ final class AdminDashboardProductsData
     /**
      * @return array<string, mixed>
      */
-    public function forProducts(bool $canManageProducts, int $productsPage = 1): array
+    public function forProducts(bool $canManageProducts, int $productsPage = 1, bool $includeStockItems = true): array
     {
-        $productPage = $this->latestProducts($canManageProducts, $productsPage);
+        $productPage = $this->latestProducts($canManageProducts, $productsPage, $includeStockItems);
         $familyOptions = $this->familyOptions();
 
         return [
@@ -58,7 +58,7 @@ final class AdminDashboardProductsData
         ];
     }
 
-    private function latestProducts(bool $includeManageableStockItems, int $productsPage): array
+    private function latestProducts(bool $includeManageableStockItems, int $productsPage, bool $includeStockItems): array
     {
         $catalog = $this->catalog->browseAdmin(new CatalogBrowseQuery(page: max(1, $productsPage), perPage: 20));
         $productIds = collect($catalog->entries)
@@ -92,36 +92,26 @@ final class AdminDashboardProductsData
             ->values()
             ->all());
 
-        $stockItemSummaries = $includeManageableStockItems
-            ? ProductStockItem::query()
-                ->whereIn('product_stock_items.product_id', $productIds->all())
-                ->leftJoin('order_items', 'product_stock_items.order_item_id', '=', 'order_items.id')
-                ->leftJoin('orders', 'order_items.order_id', '=', 'orders.id')
-                ->select('product_stock_items.product_id')
-                ->selectRaw('count(*) as total')
-                ->selectRaw('sum(case when product_stock_items.order_item_id is null and product_stock_items.retired_at is null then 1 else 0 end) as available')
-                ->selectRaw('sum(case when orders.order_status = ? and orders.payment_status <> ? and not exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as reserved', [OrderStatus::PendingPayment->value, PaymentStatus::Paid->value, PaymentStatus::Paid->value])
-                ->selectRaw('sum(case when orders.payment_status = ? or exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as paid', [PaymentStatus::Paid->value, PaymentStatus::Paid->value])
-                ->groupBy('product_stock_items.product_id')
-                ->get()
-                ->keyBy('product_id')
+        $stockItemSummaries = $includeManageableStockItems && $includeStockItems
+            ? $this->stockItemSummaries($productIds)
             : collect();
-        if ($includeManageableStockItems) {
+        if ($includeManageableStockItems && $includeStockItems) {
             $this->loadOrderedStockItems($orderedProducts);
         }
 
         $placeholderUrl = $this->placeholder->imageUrl();
         $productPayloadsById = $orderedProducts
-            ->mapWithKeys(function (Product $product) use ($stockItemSummaries, $includeManageableStockItems, $placeholderUrl, $catalogProducts): array {
+            ->mapWithKeys(function (Product $product) use ($stockItemSummaries, $includeManageableStockItems, $includeStockItems, $placeholderUrl, $catalogProducts): array {
                 $availableStockItemCount = $product->availableStockItemCount();
                 $availableStock = $product->availableStock();
                 $stockItems = $includeManageableStockItems
+                    && $includeStockItems
                     ? $product->stockItems
                         ->map(fn (ProductStockItem $stockItem): array => $this->stockItemPayload($stockItem, $product))
                         ->all()
                     : [];
                 $summary = $stockItemSummaries->get($product->id);
-                $stockSummary = $includeManageableStockItems
+                $stockSummary = $includeManageableStockItems && $includeStockItems
                     ? ['available' => (int) ($summary?->available ?? 0), 'reserved' => (int) ($summary?->reserved ?? 0), 'paid' => (int) ($summary?->paid ?? 0)]
                     : ['available' => 0, 'reserved' => 0, 'paid' => 0];
                 $stockUrl = route('admin.products.stock.store', ['product' => $product]);
@@ -221,6 +211,7 @@ final class AdminDashboardProductsData
                         'stockSummary' => $stockSummary,
                         'stockItemsTruncated' => (int) ($summary?->total ?? 0) > count($stockItems),
                         'stockItems' => $stockItems,
+                        'stockItemsUrl' => route('admin.products.stock-items.index', ['product' => $product]),
                     ],
                 ]];
             });
@@ -285,6 +276,56 @@ final class AdminDashboardProductsData
                     ->all(),
             ],
         ];
+    }
+
+    /**
+     * Load the bounded stock history only after an Admin opens its management
+     * modal. Product-list requests otherwise avoid hydrating credentials and
+     * their Order/Payment relations.
+     *
+     * @return array{stockItems: list<array<string, mixed>>, availableStockItemCount: int, stockSummary: array{available: int, reserved: int, paid: int}, stockItemsTruncated: bool}
+     */
+    public function stockManagementFor(Product $product): array
+    {
+        $summary = $this->stockItemSummaries(collect([(int) $product->getKey()]))->get($product->getKey());
+        $products = new EloquentCollection([$product]);
+        $this->loadOrderedStockItems($products);
+        $stockItems = $product->stockItems
+            ->map(fn (ProductStockItem $stockItem): array => $this->stockItemPayload($stockItem, $product))
+            ->all();
+        $total = (int) ($summary?->total ?? 0);
+
+        return [
+            'stockItems' => $stockItems,
+            'availableStockItemCount' => (int) ($summary?->available ?? 0),
+            'stockSummary' => [
+                'available' => (int) ($summary?->available ?? 0),
+                'reserved' => (int) ($summary?->reserved ?? 0),
+                'paid' => (int) ($summary?->paid ?? 0),
+            ],
+            'stockItemsTruncated' => $total > count($stockItems),
+        ];
+    }
+
+    /** @param Collection<int, int> $productIds */
+    private function stockItemSummaries(Collection $productIds): Collection
+    {
+        if ($productIds->isEmpty()) {
+            return collect();
+        }
+
+        return ProductStockItem::query()
+            ->whereIn('product_stock_items.product_id', $productIds->all())
+            ->leftJoin('order_items', 'product_stock_items.order_item_id', '=', 'order_items.id')
+            ->leftJoin('orders', 'order_items.order_id', '=', 'orders.id')
+            ->select('product_stock_items.product_id')
+            ->selectRaw('count(*) as total')
+            ->selectRaw('sum(case when product_stock_items.order_item_id is null and product_stock_items.retired_at is null then 1 else 0 end) as available')
+            ->selectRaw('sum(case when orders.order_status = ? and orders.payment_status <> ? and not exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as reserved', [OrderStatus::PendingPayment->value, PaymentStatus::Paid->value, PaymentStatus::Paid->value])
+            ->selectRaw('sum(case when orders.payment_status = ? or exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as paid', [PaymentStatus::Paid->value, PaymentStatus::Paid->value])
+            ->groupBy('product_stock_items.product_id')
+            ->get()
+            ->keyBy('product_id');
     }
 
     /**

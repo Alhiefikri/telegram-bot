@@ -1923,16 +1923,34 @@
   display: block;
 }
 
-[data-theme="dark"] .storefront-shell .bg-white:not(:has(img)),
-[data-theme="dark"] .storefront-shell [class~="bg-white/85"]:not(:has(img)) {
+[data-theme="dark"]
+  .storefront-shell
+  :is(
+    .bg-white,
+    [class~="bg-white/40"],
+    [class~="bg-white/60"],
+    [class~="bg-white/70"],
+    [class~="bg-white/80"],
+    [class~="bg-white/85"]
+  ) {
   background-color: var(--sf-surface) !important;
   color: var(--sf-ink);
 }
 
 [data-theme="dark"] .storefront-shell [data-storefront-qris-mark],
 [data-theme="dark"] .storefront-shell .qris-logo-overlay,
-[data-theme="dark"] .storefront-shell .payment-qris-poster {
+[data-theme="dark"] .storefront-shell .payment-qris-poster,
+[data-theme="dark"] .storefront-shell .payment-qris-stage,
+[data-theme="dark"] .storefront-shell .qris-frame {
   background-color: #ffffff !important;
+  color: #12233f;
+}
+
+[data-theme="dark"]
+  .storefront-shell
+  [class~="bg-[var(--sf-ink)]"]:not(.footer-dark) {
+  background-color: #12233f !important;
+  color: #ffffff;
 }
 
 /* Dark footer keeps a deep surface with light text instead of inheriting the

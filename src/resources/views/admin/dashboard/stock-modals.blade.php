@@ -369,7 +369,18 @@
                             </ul>
                         </x-admin-dashboard.notice>
 
-                        <div class="space-y-3">
+                        <x-admin-dashboard.notice tone="neutral" x-show="manageStockLoading" role="status" aria-live="polite" class="mb-3">
+                            Memuat data stok produk…
+                        </x-admin-dashboard.notice>
+
+                        <div x-show="manageStockLoadError" role="alert" aria-live="assertive" class="mb-3 grid gap-3 rounded-[0.45rem] border-2 border-neo-ink bg-white p-3 text-xs font-bold text-neo-ink">
+                            <p x-text="manageStockLoadError">Data stok produk tidak dapat dimuat.</p>
+                            <x-admin-dashboard.button type="button" variant="secondary" size="sm" class="w-full" x-on:click="retryManageStockLoad()" x-bind:disabled="manageStockLoading">
+                                Coba muat ulang
+                            </x-admin-dashboard.button>
+                        </div>
+
+                        <div x-show="!manageStockLoading && !manageStockLoadError" class="space-y-3">
                             <template x-for="group in manageStockGroups()" :key="group.key">
                                 <section class="rounded-[0.55rem] border-2 border-neo-ink bg-white/80 p-2 shadow-[3px_3px_0_0_#050505]">
                                     <div class="flex flex-wrap items-center justify-between gap-2 border-b-2 border-dashed border-neo-ink pb-2">
@@ -470,9 +481,9 @@
                             </template>
                         </div>
 
-                        <x-admin-dashboard.empty-state title="Belum ada akun tersedia." body="Tambahkan stok baru." x-show="manageStockItems.length === 0" class="rounded-neo-md p-4 text-sm font-bold text-neo-ink" />
+                        <x-admin-dashboard.empty-state title="Belum ada akun tersedia." body="Tambahkan stok baru." x-show="!manageStockLoading && !manageStockLoadError && manageStockItems.length === 0" class="rounded-neo-md p-4 text-sm font-bold text-neo-ink" />
 
-                        <x-admin-dashboard.button type="button" variant="primary" class="mt-4 w-full" x-on:click="openStockModalFromManage()">
+                        <x-admin-dashboard.button type="button" variant="primary" class="mt-4 w-full" x-show="!manageStockLoading && !manageStockLoadError" x-bind:disabled="!manageStockAddPayload" x-on:click="openStockModalFromManage()">
                             ➕ Tambah stok baru
                         </x-admin-dashboard.button>
                     </x-admin-dashboard.modal-shell>

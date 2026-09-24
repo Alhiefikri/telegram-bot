@@ -26,6 +26,7 @@ use App\Http\Controllers\Admin\AdminProductFamilyMembershipController;
 use App\Http\Controllers\Admin\AdminProductFamilyUpdateController;
 use App\Http\Controllers\Admin\AdminProductStockController;
 use App\Http\Controllers\Admin\AdminProductStockItemDeleteController;
+use App\Http\Controllers\Admin\AdminProductStockItemsController;
 use App\Http\Controllers\Admin\AdminProductStockItemUpdateController;
 use App\Http\Controllers\Admin\AdminProductUpdateController;
 use App\Http\Controllers\Admin\AdminProductVisibilityController;
@@ -214,6 +215,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::patch('{product}', AdminProductUpdateController::class)->name('update');
                 Route::delete('{product}', AdminProductDeleteController::class)->name('destroy');
                 Route::patch('{product}/visibility', AdminProductVisibilityController::class)->name('visibility.update');
+                Route::get('{product}/stock-items', AdminProductStockItemsController::class)->name('stock-items.index');
                 Route::post('{product}/stock', AdminProductStockController::class)->name('stock.store');
                 Route::post('{product}/stock/accounts/review', [AdminProductAccountStockController::class, 'review'])->name('stock.accounts.review');
                 Route::post('{product}/stock/accounts', AdminProductAccountStockController::class)->name('stock.accounts.store');

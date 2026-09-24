@@ -23,6 +23,9 @@ final class CatalogBrowse
 {
     private const ADMIN_PER_PAGE = 20;
 
+    /** @var list<CatalogFamilyReadModel>|null */
+    private ?array $unfilteredAdminFamilies = null;
+
     /** @var list<string> */
     private const CATEGORY_COLUMNS = ['id', 'name', 'slug', 'description', 'sort_order'];
 
@@ -159,6 +162,10 @@ final class CatalogBrowse
      */
     public function allAdminFamilies(): array
     {
+        if ($this->unfilteredAdminFamilies !== null) {
+            return $this->unfilteredAdminFamilies;
+        }
+
         $result = $this->browse(new CatalogBrowseQuery(perPage: 100), public: false);
 
         return $result->families;
@@ -216,6 +223,14 @@ final class CatalogBrowse
             })
             ->filter()
             ->values();
+
+        if (! $public
+            && ! $familiesOnly
+            && $query->search === ''
+            && $query->category === null
+            && $query->sort === CatalogBrowseQuery::DEFAULT_SORT) {
+            $this->unfilteredAdminFamilies ??= $familyModels->all();
+        }
 
         $standalone = $familiesOnly
             ? collect()

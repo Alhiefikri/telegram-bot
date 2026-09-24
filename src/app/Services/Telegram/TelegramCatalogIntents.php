@@ -947,20 +947,15 @@ class TelegramCatalogIntents
             return;
         }
 
-        if ($mode !== 'catalog') {
+        if ($mode === 'catalog') {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'catalog.family.choose');
+        } else {
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
-        }
-        foreach ($result->entries as $index => $entry) {
-            $number = $index + 1;
-            // Catalog entries are already divided by a rule, so only the first
-            // one keeps the blank line that separates the list from the header.
-            if ($mode !== 'catalog' || $index === 0) {
+            foreach ($result->entries as $index => $entry) {
                 $lines[] = '';
-            }
-            $lines[] = $this->entryBlock($customer, $entry, $number);
-            if ($mode === 'catalog' && $index < count($result->entries) - 1) {
-                $lines[] = '━━━━━━━━━━━━━━';
+                $lines[] = $this->entryBlock($customer, $entry, $index + 1);
             }
         }
 
@@ -1073,7 +1068,7 @@ class TelegramCatalogIntents
                 }
                 $buttons[] = [
                     'text' => $mode === 'catalog'
-                        ? $this->productIcon($family->name, $this->familyIconOverride($family)).' '.$family->name
+                        ? $this->familyIcon($family).' '.$family->name.' · '.$this->familyAvailabilityLabel($customer, $family)
                         : $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
                     'callback_data' => $callback,
                     'style' => $family->isAvailable ? 'success' : 'danger',
@@ -1081,7 +1076,11 @@ class TelegramCatalogIntents
             } elseif ($product !== null) {
                 $buttons[] = [
                     'text' => $mode === 'catalog'
-                        ? $this->productIcon($product->name, $product->icon).' '.$product->name
+                        ? $this->productIcon($product->name, $product->icon).' '.$product->name.' · '.$this->productAvailabilityLabel(
+                            $customer,
+                            $product->isAvailable,
+                            $product->availableStock,
+                        )
                         : $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
                     'callback_data' => 'product:'.$product->id,
                     'style' => $product->isAvailable ? 'success' : 'danger',
@@ -1089,25 +1088,19 @@ class TelegramCatalogIntents
             }
         }
 
-        return $mode === 'catalog'
-            ? array_chunk($buttons, 2)
-            : array_map(static fn (array $button): array => [$button], $buttons);
+        return array_map(static fn (array $button): array => [$button], $buttons);
     }
 
     private function entryBlock(Customer $customer, CatalogBrowseEntry $entry, int $number): string
     {
         if ($entry->family !== null) {
             $family = $entry->family;
-            $stock = array_sum(array_map(
-                static fn (CatalogProductReadModel $member): int => max(0, $member->availableStock),
-                $family->members,
-            ));
 
             return $this->locale->translate($customer, 'catalog.family.list_item', [
                 'number' => sprintf('%02d.', $number),
                 'icon' => $this->familyIcon($family),
                 'name' => $family->name,
-                'stock' => $stock,
+                'availability' => $this->familyAvailabilityLabel($customer, $family),
             ]);
         }
 
@@ -1122,6 +1115,34 @@ class TelegramCatalogIntents
                 'price' => number_format($product->priceAmount, 0, ',', '.'),
                 'stock' => $product->availableStock,
             ]);
+    }
+
+    private function familyAvailabilityLabel(Customer $customer, CatalogFamilyReadModel $family): string
+    {
+        if ($family->optionCount === 1) {
+            $member = $family->members[0] ?? null;
+            if ($member instanceof CatalogProductReadModel) {
+                return $this->productAvailabilityLabel($customer, $member->isAvailable, $member->availableStock);
+            }
+        }
+
+        if ($family->optionCount > 1 && $family->availableOptionCount > 0) {
+            return $this->locale->translate($customer, 'catalog.family.button_options_available', [
+                'available' => $family->availableOptionCount,
+                'total' => $family->optionCount,
+            ]);
+        }
+
+        return $this->locale->translate($customer, 'catalog.family.button_sold_out');
+    }
+
+    private function productAvailabilityLabel(Customer $customer, bool $isAvailable, int $availableStock): string
+    {
+        return $this->locale->translate(
+            $customer,
+            $isAvailable ? 'catalog.family.button_stock' : 'catalog.family.button_sold_out',
+            ['stock' => $availableStock],
+        );
     }
 
     private function familyOptionBlock(Customer $customer, CatalogProductReadModel $member, int $number): string

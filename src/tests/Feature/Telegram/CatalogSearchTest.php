@@ -295,12 +295,13 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains($request['text'], 'DAFTAR PRODUK DIGITAL')
-            && str_contains($request['text'], 'Aktif')
-            && str_contains($request['text'], 'Kosong Aktif')
-            && str_contains($request['text'], 'Tanpa Kategori')
-            && ! str_contains($request['text'], 'Kategori Mati')
-            && ! str_contains($request['text'], 'Produk Kategori Mati')
-            && ! str_contains($request['text'], 'Mati ('));
+            && str_contains(json_encode($request->data()), 'Aktif')
+            && str_contains(json_encode($request->data()), 'Kosong Aktif')
+            && str_contains(json_encode($request->data()), 'Tanpa Kategori')
+            && ! str_contains((string) $request['text'], 'Aktif')
+            && ! str_contains(json_encode($request->data()), 'Kategori Mati')
+            && ! str_contains(json_encode($request->data()), 'Produk Kategori Mati')
+            && ! str_contains(json_encode($request->data()), 'Mati ('));
 
         $this->fakeTelegramHttp();
         Product::query()->delete();
@@ -349,8 +350,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'DAFTAR PRODUK DIGITAL')
-            && str_contains($r['text'], 'Gemini Pro')
-            && str_contains($r['text'], 'Netflix'));
+            && str_contains(json_encode($r->data()), 'Gemini Pro')
+            && str_contains(json_encode($r->data()), 'Netflix')
+            && ! str_contains($r['text'], 'Gemini Pro')
+            && ! str_contains($r['text'], 'Netflix'));
     }
 
     public function test_katalog_with_single_category_skips_category_selection(): void
@@ -363,7 +366,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(135, '/produk'))->assertOk();
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'Gemini Pro')
+            && str_contains(json_encode($r->data()), 'Gemini Pro')
+            && ! str_contains($r['text'], 'Gemini Pro')
             && str_contains(json_encode($r->data()), 'family:options:v')
             && ! str_contains($r['text'], 'Pilih kategori yang kamu mau'));
     }
@@ -379,7 +383,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'DAFTAR PRODUK DIGITAL')
-            && str_contains($r['text'], 'Tanpa Kategori')
+            && str_contains(json_encode($r->data()), 'Tanpa Kategori')
+            && ! str_contains($r['text'], 'Tanpa Kategori')
             && str_contains(json_encode($r->data()), 'family:options:v')
             && ! str_contains($r['text'], 'Pilih kategori yang kamu mau'));
     }
@@ -1090,6 +1095,24 @@ class CatalogSearchTest extends TelegramBotTestSupport
             'is_active' => true,
         ]);
         Product::factory()->create([
+            'name' => 'Netflix Premium Second Option',
+            'product_family_id' => $family->id,
+            'category_id' => $category->id,
+            'family_option_label' => 'Second Option',
+            'stock' => 0,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $singleFamily = ProductFamily::factory()->create(['name' => 'Single Locale Family', 'slug' => 'single-locale-family']);
+        Product::factory()->create([
+            'name' => 'Single Locale Option',
+            'product_family_id' => $singleFamily->id,
+            'category_id' => $otherCategory->id,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        Product::factory()->create([
             'name' => 'Canva Pro',
             'category_id' => $otherCategory->id,
             'stock' => 2,
@@ -1098,9 +1121,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
         ]);
 
         $locales = [
-            'id' => ['chat_id' => 45101, 'catalog' => 'DAFTAR PRODUK DIGITAL', 'list' => 'Daftar Produk', 'details' => 'Detail produk', 'quantity' => 'Jumlah: 1', 'search' => 'Hasil pencarian'],
-            'en' => ['chat_id' => 45102, 'catalog' => 'DIGITAL PRODUCT LIST', 'list' => 'Product List', 'details' => 'Product details', 'quantity' => 'Quantity: 1', 'search' => 'Search results'],
-            'ms' => ['chat_id' => 45103, 'catalog' => 'SENARAI PRODUK DIGITAL', 'list' => 'Senarai Produk', 'details' => 'Butiran produk', 'quantity' => 'Kuantiti: 1', 'search' => 'Hasil carian'],
+            'id' => ['chat_id' => 45101, 'catalog' => 'DAFTAR PRODUK DIGITAL', 'list' => 'Daftar Produk', 'details' => 'Detail produk', 'quantity' => 'Jumlah: 1', 'search' => 'Hasil pencarian', 'instruction' => 'Pilih keluarga atau produk', 'single_label' => 'Stok 2', 'multi_label' => '1/2 varian tersedia'],
+            'en' => ['chat_id' => 45102, 'catalog' => 'DIGITAL PRODUCT LIST', 'list' => 'Product List', 'details' => 'Product details', 'quantity' => 'Quantity: 1', 'search' => 'Search results', 'instruction' => 'Choose a family or product', 'single_label' => 'Stock 2', 'multi_label' => '1/2 variants available'],
+            'ms' => ['chat_id' => 45103, 'catalog' => 'SENARAI PRODUK DIGITAL', 'list' => 'Senarai Produk', 'details' => 'Butiran produk', 'quantity' => 'Kuantiti: 1', 'search' => 'Hasil carian', 'instruction' => 'Pilih keluarga atau produk', 'single_label' => 'Stok 2', 'multi_label' => '1/2 varian tersedia'],
         ];
 
         foreach ($locales as $index => $locale) {
@@ -1127,10 +1150,15 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 }
             }
 
-            $this->assertCount(3, $selectorButtons);
-            $this->assertContains('📺 Netflix Premium™', array_column($selectorButtons, 'text'));
+            $this->assertCount(4, $selectorButtons);
+            $multiFamilyButton = collect($selectorButtons)->first(fn (array $button): bool => str_contains($button['text'], 'Netflix Premium™'));
+            $singleFamilyButton = collect($selectorButtons)->first(fn (array $button): bool => str_contains($button['text'], 'Single Locale Family'));
+            $this->assertIsArray($multiFamilyButton);
+            $this->assertIsArray($singleFamilyButton);
+            $this->assertStringContainsString($locale['multi_label'], $multiFamilyButton['text']);
+            $this->assertStringContainsString($locale['single_label'], $singleFamilyButton['text']);
             foreach ($selectorButtons as $selectorButton) {
-                if ($selectorButton['text'] === '📺 Netflix Premium™') {
+                if ($selectorButton === $multiFamilyButton || $selectorButton === $singleFamilyButton) {
                     continue;
                 }
                 $this->assertMatchesRegularExpression('/^(?:.*\([1-2]\)$|(?:.* )?[1-2](?:\. |$))/', $selectorButton['text'] ?? '');
@@ -1138,7 +1166,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 $this->assertSame('success', $selectorButton['style'] ?? null);
             }
 
+            $this->assertStringContainsString($locale['instruction'], $copy);
+
             $this->assertStringContainsString($locale['catalog'], $copy);
+            $this->assertStringContainsString('Single Locale Family', $copy);
             $this->assertStringContainsString($locale['list'], $copy);
             $this->assertStringContainsString($locale['details'], $copy);
             $this->assertStringContainsString($locale['quantity'], $copy);
@@ -1153,6 +1184,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 $this->assertStringNotContainsString('Detail produk', $copy);
                 $this->assertStringNotContainsString('Pilih jumlah', $copy);
                 $this->assertStringNotContainsString('Hasil pencarian', $copy);
+                $this->assertStringNotContainsString('Pilih keluarga atau produk', $copy);
             }
 
             if ($index === 'ms') {
@@ -1163,6 +1195,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 $this->assertStringNotContainsString('Product List', $copy);
                 $this->assertStringNotContainsString('Product details', $copy);
                 $this->assertStringNotContainsString('Choose quantity', $copy);
+                $this->assertStringNotContainsString('Choose a family or product', $copy);
                 $this->assertStringNotContainsString('Search results', $copy);
             }
         }

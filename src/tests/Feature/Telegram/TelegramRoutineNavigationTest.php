@@ -318,9 +318,8 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
             && (string) ($request['chat_id'] ?? '') === '45425'
             && str_contains(
                 (string) ($request['text'] ?? $this->telegramRequestField($request, 'caption')),
-                'Legacy Keyboard Product',
+                'Choose a family or product',
             ));
-
         $this->assertCount(1, $catalogMessages, 'The legacy keyboard action must create a visible tail message.');
         $catalogRequest = $catalogMessages->sole()[0];
         $replyMarkup = $this->telegramRequestField($catalogRequest, 'reply_markup');
@@ -332,6 +331,14 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $current = $root->fresh();
         $this->assertSame(TelegramNavigationScreen::Catalog, $current->screen);
         $this->assertNotSame($root->message_id, $current->message_id);
+        $restoredControls = Http::recorded(fn (Request $request): bool => (
+            str_ends_with($request->url(), '/editMessageCaption')
+            || str_ends_with($request->url(), '/editMessageText')
+        )
+            && (string) ($request['chat_id'] ?? '') === '45425'
+            && (string) ($request['message_id'] ?? '') === (string) $current->message_id
+            && str_contains(json_encode($request->data()), 'Legacy Keyboard Product'));
+        $this->assertCount(1, $restoredControls, 'The fresh catalog root restores direct product controls.');
         $oldRootEdits = Http::recorded(fn (Request $request): bool => (
             (str_ends_with($request->url(), '/editMessageCaption') || str_ends_with($request->url(), '/editMessageText'))
             && (string) ($request['message_id'] ?? '') === (string) $root->message_id
@@ -409,7 +416,10 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $messageId = TelegramNavigationRoot::query()->sole()->message_id;
 
         $this->postTelegramWebhook($this->callbackUpdate(45452, 'catalog-open', 'katalog', [], 45451, 'private', $messageId))->assertOk();
-        $this->assertStringContainsString('Netflix Premium', $this->editCopy($this->lastCanonicalEdit(45451)));
+        $catalogEdit = $this->lastCanonicalEdit(45451);
+        $this->assertStringContainsString('Pilih keluarga atau produk', $this->editCopy($catalogEdit));
+        $this->assertStringNotContainsString('Netflix Premium', $this->editCopy($catalogEdit));
+        $this->assertStringContainsString('Netflix Premium', json_encode($catalogEdit['reply_markup'], JSON_THROW_ON_ERROR));
 
         $this->postTelegramWebhook($this->callbackUpdate(45453, 'catalog-category', 'category:'.$category->id, [], 45451, 'private', $messageId))->assertOk();
         $this->assertStringContainsString('Kategori: Streaming', $this->editCopy($this->lastCanonicalEdit(45451)));
@@ -452,7 +462,9 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(45462, 'long-catalog', 'katalog', [], 45461, 'private', $photoRoot->message_id))->assertOk();
         $list = $this->lastCanonicalEdit(45461);
         $this->assertSame($photoRoot->message_id, (int) $list['message_id']);
-        $this->assertStringContainsString('Collector Family', $this->editCopy($list));
+        $this->assertStringContainsString('Choose a family or product', $this->editCopy($list));
+        $this->assertStringNotContainsString('Collector Family', $this->editCopy($list));
+        $this->assertStringContainsString('Collector Family', json_encode($list['reply_markup'], JSON_THROW_ON_ERROR));
 
         $options = null;
         foreach ($list['reply_markup']['inline_keyboard'] as $row) {

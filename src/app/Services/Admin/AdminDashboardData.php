@@ -103,16 +103,28 @@ final class AdminDashboardData
         int $productsPage = 1,
         array $reportingFilters = [],
     ): array {
-        $metrics = $this->metrics();
-        $statusCounts = $this->statusCounts();
-        $storeLink = $this->storeLink();
         $navigation = $this->navigation($requestedTab, $user);
+        $activeTab = $navigation['activeTab'];
+        $storeLink = $this->storeLink();
+        if ($activeTab === 'stats') {
+            $metrics = $this->metrics();
+            $statusCounts = $this->statusCounts();
+            $statsTab = $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink);
+        } else {
+            $statusCounts = $activeTab === 'penjualan' ? $this->statusCounts() : [];
+            $activeProductCount = Product::query()->where('is_active', true)->count();
+            $ordersToProcess = $activeTab === 'penjualan'
+                ? (int) ($statusCounts[OrderStatus::Processing->value]['count'] ?? 0)
+                : Order::query()->where('order_status', OrderStatus::Processing)->count();
+            $metrics = [];
+            $statsTab = $this->statsData->forCompactHeader($activeProductCount, $ordersToProcess, $storeLink);
+        }
         $canManageProducts = (bool) $user->role?->canMutateProducts();
         $data = [
             'admin' => $this->adminIdentity($user),
             'metrics' => $metrics,
             'navigation' => $navigation,
-            'statsTab' => $this->statsData->forHeader($metrics, $storeLink),
+            'statsTab' => $statsTab,
             'productsTab' => [
                 'canManage' => $canManageProducts,
                 'productStoreUrl' => route('admin.products.store'),
@@ -140,9 +152,9 @@ final class AdminDashboardData
             'balanceIssuesTab' => $this->ownerCompensation->emptyQueue($user),
         ];
 
-        match ($navigation['activeTab']) {
-            'stats' => $data['statsTab'] = $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink),
-            'produk' => $data['productsTab'] = $this->productsData->forProducts($canManageProducts, $productsPage),
+        match ($activeTab) {
+            'stats' => null,
+            'produk' => $data['productsTab'] = $this->productsData->forProducts($canManageProducts, $productsPage, includeStockItems: false),
             'penjualan' => $data['salesTab'] = $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
             'broadcast' => $data['broadcastTab'] = $this->broadcastTab(),
             'telegram-channel' => $data['storeChannelTab'] = $this->storeChannelTab($user),

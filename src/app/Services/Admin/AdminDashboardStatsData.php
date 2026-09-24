@@ -73,6 +73,30 @@ final class AdminDashboardStatsData
         ];
     }
 
+    /**
+     * Build the shared internal-tab header without calculating dashboard
+     * summary metrics that are only shown on the Stats tab.
+     *
+     * @param  array{label: string, url: string, display: string}  $storeLink
+     * @return array<string, mixed>
+     */
+    public function forCompactHeader(int $activeProductCount, int $ordersToProcess, array $storeLink): array
+    {
+        return [
+            'storeLink' => $storeLink,
+            'summary' => [],
+            'storeStatus' => $this->storeStatus([
+                'active_product_count' => $activeProductCount,
+                'orders_to_process' => $ordersToProcess,
+            ]),
+            'checkoutMaintenance' => $this->checkoutMaintenance(),
+            'actions' => [
+                'shop' => url('/#products'),
+                'share' => $storeLink['url'],
+            ],
+        ];
+    }
+
     private function balance(int $readOnlyBalanceAmount): array
     {
         return [

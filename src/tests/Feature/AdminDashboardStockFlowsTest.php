@@ -381,8 +381,10 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertSee('Tambah kategori')
             ->assertSee('Kelola stok')
             ->assertSee('Tidak ada batas total karakter pada Input Cepat.')
-            ->assertSee('available@example.test|pass')
-            ->assertSee('claimed@example.test|pass')
+            ->assertDontSee('available@example.test|pass')
+            ->assertDontSee('claimed@example.test|pass')
+            ->assertSee('stockItemsUrl', false)
+            ->assertSee('stock-items', false)
             ->assertSee('bg-[#ef4444] text-white', false)
             ->assertDontSee('background: #fecaca; color: #dc2626;', false)
             ->assertDontSee('product-action-btn', false)
@@ -883,7 +885,8 @@ class AdminDashboardStockFlowsTest extends TestCase
 
         $dashboard = $this->get('/admin?tab=produk')
             ->assertOk()
-            ->assertSee('keep-me@example.test|pass')
+            ->assertDontSee('keep-me@example.test|pass')
+            ->assertSee('stockItemsUrl', false)
             ->assertSeeInOrder([$product->name, 'Stok', '1']);
 
         $this->assertStringNotContainsString('delete-me@example.test|pass', $dashboard->getContent());
