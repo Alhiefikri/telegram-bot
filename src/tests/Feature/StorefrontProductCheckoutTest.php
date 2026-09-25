@@ -515,7 +515,7 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringContainsString('aria-live="polite"', $html);
         $this->assertSame(
             0,
-            preg_match('/<details id="checkout-contact-details"[^>]*\bopen\b/', $html),
+            preg_match('/<details id="checkout-contact-details"[^>]*\sopen(?:\s|>)/', $html),
         );
         $this->assertStringContainsString('type="hidden" name="payment_method" value="qris"', $html);
         $this->assertStringNotContainsString('type="radio" name="payment_method"', $html);
