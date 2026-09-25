@@ -123,6 +123,12 @@ test("admin dashboard exposes the shared theme preference control", async ({
   page,
 }) => {
   await login(page);
+  await expect(
+    page.locator('script[type="module"][src*="/assets/app-"]')
+  ).toHaveCount(1);
+  await expect(
+    page.locator('script[type="module"][src*="/assets/storefront-entry-"]')
+  ).toHaveCount(0);
 
   const themeToggle = page.locator("[data-theme-toggle]").first();
   await expect(themeToggle).toBeVisible();
@@ -143,6 +149,34 @@ test("admin dashboard exposes the shared theme preference control", async ({
         .evaluate((body) => getComputedStyle(body).backgroundColor)
     )
     .not.toBe(initialBackground);
+});
+
+test("asset isolation: Storefront 404 retains its Storefront entry and theme", async ({
+  page,
+}) => {
+  const response = await page.goto(
+    `${baseUrl}/__entrypoint-smoke-not-found__`,
+    {
+      waitUntil: "domcontentloaded",
+    }
+  );
+  expect(response?.status()).toBe(404);
+  await expect(
+    page.getByRole("heading", { name: "Halaman ini tidak ditemukan." })
+  ).toBeVisible();
+  await expect(
+    page.locator('script[type="module"][src*="/assets/storefront-entry-"]')
+  ).toHaveCount(1);
+  await expect(
+    page.locator('script[type="module"][src*="/assets/app-"]')
+  ).toHaveCount(0);
+
+  const initialTheme = await page.locator("html").getAttribute("data-theme");
+  await page.locator("[data-theme-toggle]").first().click();
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-theme",
+    initialTheme === "dark" ? "light" : "dark"
+  );
 });
 
 test("storefront navigation: desktop resize releases mobile scroll lock", async ({
@@ -188,6 +222,12 @@ test("customer checkout: opens canonical page checkout from the landing catalog"
 }) => {
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await expect(
+    page.locator('script[type="module"][src*="/assets/storefront-entry-"]')
+  ).toHaveCount(1);
+  await expect(
+    page.locator('script[type="module"][src*="/assets/app-"]')
+  ).toHaveCount(0);
 
   const checkoutLink = page
     .locator('a[href*="/shop/checkout/products/"]')
@@ -197,6 +237,12 @@ test("customer checkout: opens canonical page checkout from the landing catalog"
   await checkoutLink.click();
 
   await expect(page).toHaveURL(/\/shop\/checkout\/products\/\d+/);
+  await expect(
+    page.locator('script[type="module"][src*="/assets/storefront-entry-"]')
+  ).toHaveCount(1);
+  await expect(
+    page.locator('script[type="module"][src*="/assets/app-"]')
+  ).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "Review produk sebelum bayar." })
   ).toBeVisible();

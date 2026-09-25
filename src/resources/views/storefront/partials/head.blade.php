@@ -36,5 +36,5 @@
 @if ($isPublicHomepage ?? false)
 @vite(['resources/css/storefront.css', 'resources/js/storefront-entry.js'])
 @else
-@vite(['resources/css/app.css', 'resources/js/app.js'])
+@vite(['resources/css/app.css', 'resources/js/storefront-entry.js'])
 @endif
