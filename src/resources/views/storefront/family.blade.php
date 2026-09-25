@@ -10,16 +10,29 @@
 
         <main class="family-content flex-grow pb-20 pt-8 sm:pt-10">
             @include('storefront.partials.breadcrumbs', ['metadata' => $metadata])
-            <section class="family-layout mx-auto max-w-7xl px-5 sm:px-6">
+            @php
+                $firstAvailableMember = $members->first(fn ($member): bool => $member->presentation->isAvailable);
+                $firstAvailableMemberId = $firstAvailableMember?->presentation->id;
+                $quickBuyPresentation = $firstAvailableMember?->presentation;
+                $selectedMemberId = $firstAvailableMemberId ?? $members->first()?->presentation->id;
+                $familyQuickBuyOptions = $members->map(function ($member) use ($storefront, $familyUrl, $selectedMemberId): array {
+                    $presentation = $member->presentation;
+
+                    return [
+                        'id' => $presentation->id,
+                        'name' => trim((string) ($presentation->familyOptionLabel ?? $presentation->name)),
+                        'priceLabel' => $storefront->idr($presentation->priceAmount),
+                        'stock' => $presentation->stockAvailable,
+                        'selected' => $selectedMemberId === $presentation->id,
+                        'productUrl' => $storefront->productUrl($presentation->id, $familyUrl),
+                        'checkoutUrl' => $storefront->checkoutProductUrl($presentation->id, $familyUrl),
+                    ];
+                })->values()->all();
+            @endphp
+            <section class="family-layout mx-auto max-w-7xl px-5 sm:px-6" x-data="familyQuickBuy(@js($familyQuickBuyOptions))">
                 <a href="{{ $returnUrl }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]">
                     <span aria-hidden="true">&larr;</span> Kembali ke katalog
                 </a>
-
-                @php
-                    $firstAvailableMember = $members->first(fn ($member): bool => $member->presentation->isAvailable);
-                    $firstAvailableMemberId = $firstAvailableMember?->presentation->id;
-                    $selectedMemberId = $firstAvailableMemberId ?? $members->first()?->presentation->id;
-                @endphp
 
                 <section class="family-product-panel mt-5 overflow-hidden rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.08)]" aria-labelledby="family-title">
                     <div class="grid lg:grid-cols-[minmax(17rem,0.82fr)_minmax(0,1.18fr)]">
@@ -47,15 +60,16 @@
 
                             <div class="mt-6 border-t border-dashed border-[var(--sf-border)] pt-5">
                                 <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Pilih varian</p>
-                                <div id="family-options" class="family-option-picker mt-3 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Pilih varian {{ $family->name }}">
+                                <div id="family-options" class="family-option-picker mt-3 flex flex-wrap items-center gap-2" role="radiogroup" aria-orientation="horizontal" aria-label="Pilih varian {{ $family->name }}">
                                     @foreach ($members as $member)
                                         @php
                                             $presentation = $member->presentation;
-                                            $optionLabel = trim((string) ($presentation->familyOptionLabel ?? $presentation->name));
-                                            $productUrl = $storefront->productUrl($presentation->id, $familyUrl);
-                                            $checkoutUrl = $storefront->checkoutProductUrl($presentation->id, $familyUrl);
+                                            $option = $familyQuickBuyOptions[$loop->index];
+                                            $optionLabel = $option['name'];
+                                            $productUrl = $option['productUrl'];
+                                            $checkoutUrl = $option['checkoutUrl'];
                                             $detailId = 'family-option-detail-'.$presentation->id;
-                                            $isSelected = $selectedMemberId === $presentation->id;
+                                            $isSelected = $option['selected'];
                                             $description = trim((string) $presentation->description);
                                         @endphp
                                         <article
@@ -70,17 +84,23 @@
                                             data-family-checkout-url="{{ $checkoutUrl }}"
                                             data-family-detail-id="{{ $detailId }}"
                                             @if ($isSelected) data-family-selected="true" @endif
+                                            x-bind:data-family-selected="isSelected('{{ $presentation->id }}') ? 'true' : null"
+                                            x-bind:class="{ 'family-option-selected': isSelected('{{ $presentation->id }}') }"
                                             class="family-option {{ $isSelected ? 'family-option-selected' : '' }} relative min-w-0"
                                         >
-                                            <input type="radio" name="family_option" value="{{ $presentation->id }}" data-family-select @checked($isSelected) tabindex="-1" class="sr-only">
                                             <a
                                                 href="{{ $productUrl }}"
                                                 id="family-option-button-{{ $presentation->id }}"
+                                                x-ref="family-option-button-{{ $presentation->id }}"
                                                 data-family-option-button
                                                 role="radio"
                                                 aria-controls="{{ $detailId }}"
                                                 aria-checked="{{ $isSelected ? 'true' : 'false' }}"
+                                                x-bind:aria-checked="isSelected('{{ $presentation->id }}') ? 'true' : 'false'"
+                                                x-bind:tabindex="isSelected('{{ $presentation->id }}') ? 0 : -1"
                                                 aria-label="Pilih varian {{ $optionLabel }}"
+                                                @click.prevent="selectOption('{{ $presentation->id }}')"
+                                                @keydown="handleOptionKeydown($event, '{{ $presentation->id }}', $refs)"
                                                 class="family-option-button group inline-flex min-h-11 min-w-[7.5rem] max-w-full items-center justify-between gap-2 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] px-3 py-2 text-left transition"
                                             >
                                                 <span id="family-option-title-{{ $presentation->id }}" class="min-w-0 truncate font-display text-sm font-black leading-tight text-[var(--sf-ink)]">{{ $optionLabel }}</span>
@@ -93,13 +113,14 @@
                                                 data-family-detail-product-id="{{ $presentation->id }}"
                                                 aria-labelledby="family-option-detail-title-{{ $presentation->id }}"
                                                 aria-hidden="{{ $isSelected ? 'false' : 'true' }}"
-                                                aria-live="polite"
+                                                x-bind:aria-hidden="isSelected('{{ $presentation->id }}') ? 'false' : 'true'"
+                                                x-bind:hidden="!isSelected('{{ $presentation->id }}')"
                                                 @if (! $isSelected) hidden @endif
                                                 class="family-option-detail mt-4 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4"
                                             >
 
                                                 <div class="flex flex-wrap items-center justify-between gap-2">
-                                                    <strong class="font-display text-xl text-[var(--sf-accent)]">{{ $storefront->idr($presentation->priceAmount) }}</strong>
+                                                    <strong class="font-display text-xl text-[var(--sf-accent)]">{{ $option['priceLabel'] }}</strong>
                                                     <span class="rounded-full border border-[var(--sf-border)] px-2.5 py-1 text-[10px] font-black {{ $presentation->isAvailable ? 'bg-[var(--sf-yellow)]' : 'bg-[#ffd7d7] text-[#9f1d2d]' }}">{{ $presentation->isAvailable ? $presentation->stockLabel : 'Stok habis' }}</span>
                                                 </div>
 
@@ -144,28 +165,28 @@
                                         </article>
                                     @endforeach
                                 </div>
+                                <p class="sr-only" aria-live="polite" aria-atomic="true" x-text="announcement"></p>
                             </div>
                         </div>
                     </div>
                 </section>
 
-                @if ($firstAvailableMemberId !== null)
-                    @php($quickBuyPresentation = $members->first(fn ($member): bool => $member->presentation->id === $firstAvailableMemberId)->presentation)
-                    <div class="family-quick-buy fixed inset-x-0 bottom-0 z-40 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 py-3 shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-family-quick-buy role="region" aria-label="Pembelian cepat">
+                @if ($quickBuyPresentation !== null)
+                    <div class="family-quick-buy fixed inset-x-0 bottom-0 z-40 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 py-3 shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-family-quick-buy role="region" aria-label="Pembelian cepat" x-bind:data-family-selected-unavailable="isAvailable ? null : 'true'">
                         <div class="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div class="min-w-0">
                                 <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Pilihan Anda</span>
-                                <strong data-family-selected-name class="block truncate text-sm font-black text-[var(--sf-ink)]">{{ trim((string) ($quickBuyPresentation->familyOptionLabel ?? $quickBuyPresentation->name)) }}</strong>
-                                <span data-family-selected-price class="block text-xs font-bold text-[var(--sf-accent)]">{{ $storefront->idr($quickBuyPresentation->priceAmount) }}</span>
+                                <strong data-family-selected-name class="block truncate text-sm font-black text-[var(--sf-ink)]" x-text="selectedOption ? selectedOption.name : ''">{{ trim((string) ($quickBuyPresentation->familyOptionLabel ?? $quickBuyPresentation->name)) }}</strong>
+                                <span data-family-selected-price class="block text-xs font-bold text-[var(--sf-accent)]" x-text="selectedOption ? selectedOption.priceLabel : ''">{{ $storefront->idr($quickBuyPresentation->priceAmount) }}</span>
                             </div>
                             <div class="flex w-full items-center gap-2 sm:w-auto">
                                 <label for="family-quick-quantity" class="sr-only">Jumlah</label>
                                 <div class="family-quantity-control flex h-11 shrink-0 items-center rounded-lg border border-[var(--sf-border)] bg-white">
-                                    <button type="button" data-family-quantity-step="-1" class="grid h-10 w-9 place-items-center text-lg font-black text-[var(--sf-muted)]" aria-label="Kurangi jumlah">−</button>
-                                    <input id="family-quick-quantity" type="number" value="1" min="1" max="{{ min(20, max(1, $quickBuyPresentation->stockAvailable)) }}" data-family-quantity class="h-10 w-10 border-x border-[var(--sf-border)] bg-transparent text-center text-sm font-black text-[var(--sf-ink)] focus:outline-none">
-                                    <button type="button" data-family-quantity-step="1" class="grid h-10 w-9 place-items-center text-lg font-black text-[var(--sf-muted)]" aria-label="Tambah jumlah">+</button>
+                                    <button type="button" data-family-quantity-step="-1" class="grid h-10 w-9 place-items-center text-lg font-black text-[var(--sf-muted)]" aria-label="Kurangi jumlah" x-bind:disabled="!isAvailable" @click="adjustQuantity(-1)">−</button>
+                                    <input id="family-quick-quantity" type="number" value="1" min="1" max="{{ min(20, max(1, $quickBuyPresentation->stockAvailable)) }}" step="1" data-family-quantity class="h-10 w-10 border-x border-[var(--sf-border)] bg-transparent text-center text-sm font-black text-[var(--sf-ink)] focus:outline-none" x-bind:min="quantityMinimum" x-bind:max="quantityMaximum" x-bind:value="quantity" x-bind:disabled="!isAvailable" @input="setQuantity($event.target.value)">
+                                    <button type="button" data-family-quantity-step="1" class="grid h-10 w-9 place-items-center text-lg font-black text-[var(--sf-muted)]" aria-label="Tambah jumlah" x-bind:disabled="!isAvailable" @click="adjustQuantity(1)">+</button>
                                 </div>
-                                <a href="{{ $storefront->checkoutProductUrl($quickBuyPresentation->id, $familyUrl) }}" data-family-checkout class="neo-button neo-button-stable inline-flex min-h-11 flex-1 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white sm:min-w-44">Beli sekarang</a>
+                                <a href="{{ $storefront->checkoutProductUrl($quickBuyPresentation->id, $familyUrl) }}" data-family-checkout class="neo-button neo-button-stable inline-flex min-h-11 flex-1 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white sm:min-w-44" x-bind:href="checkoutHref" x-bind:aria-label="checkoutAriaLabel" x-text="checkoutLabel">Beli sekarang</a>
                             </div>
                         </div>
                     </div>

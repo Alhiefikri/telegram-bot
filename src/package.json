@@ -5,7 +5,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "test:js": "node --test tests/JavaScript/storefront-components.test.js",
+    "test:js": "node --test tests/JavaScript/*.test.js",
     "test:browser:admin": "npm run build && playwright test tests/Browser/admin-dashboard-responsive.spec.js",
     "test:browser:customer": "npm run build && playwright test tests/Browser/admin-dashboard-responsive.spec.js -g \"customer checkout\"",
     "test:browser:docker": "playwright test tests/Browser/docker-production-smoke.spec.js",
