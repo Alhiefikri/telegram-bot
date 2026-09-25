@@ -258,15 +258,20 @@ search keep up to ten; family option callbacks use the signed compact
 `TelegramFamilyCallbackToken` and resolve the existing Product ID only after
 the current public family projection and page are revalidated. Product Detail,
 quantity, payment, Cart, Order, and outbound-effect ownership remains unchanged.
-Routine catalog navigation renders onto the canonical message (`editMessageCaption`
-for a photo root, `editMessageText` for a text root) through the same
-`sendCatalogMessage` seam; `editMessageTextOrSend` remains only for group chats
-and entry points without a root. A screen that cannot fit a media caption
-replaces the photo root once with a text root instead of truncating content or
-uploading media again. Product quote cards use Telegram HTML `<blockquote>`
-formatting; command/deep-link entry points without an originating message use
-the send path, while deterministic edit rejection may use a safe new-message
-fallback and transport ambiguity never triggers one.
+Routine catalog navigation from inline controls renders onto the canonical
+message (`editMessageCaption` for a photo root, `editMessageText` for a text
+root) through the same `sendCatalogMessage` seam. Text product-list commands
+(`/product`, `/products`, `/produk`, `/lihat_produk`, `/lihat produk`,
+`/katalog`) create a new catalog root at the chat tail when one already exists;
+callbacks from that list continue against the new root, leaving an older `/start`
+message untouched. With no existing root, the command keeps its send path.
+Legacy persistent-keyboard labels also establish a fresh root and remove the
+stale keyboard. A screen that cannot fit a media caption replaces the photo root
+once with a text root instead of truncating content or uploading media again.
+Product quote cards use Telegram HTML `<blockquote>` formatting; other
+command/deep-link entry points without a root use their send path, while
+deterministic edit rejection may use a safe new-message fallback and transport
+ambiguity never triggers one.
 
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
 

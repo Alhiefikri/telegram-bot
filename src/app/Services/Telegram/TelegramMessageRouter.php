@@ -126,12 +126,14 @@ class TelegramMessageRouter
         if (in_array($text, ['/produk', '/product', '/products', '/lihat_produk', '/lihat produk', '/katalog', '🛍️ Lihat Produk', '🛍️ Browse Products'], true)) {
             $this->catalogQueries->forget($customer);
             $this->session->forgetWithLock($customer);
-            // Old persistent keyboards send text at the chat tail. Migrate
-            // this product alias to a fresh root and remove the stale keyboard.
+            // Text catalog commands start a new message at the chat tail when
+            // a root exists; legacy keyboard labels also remove the old keyboard.
+            $removeLegacyReplyKeyboard = in_array($text, ['🛍️ Lihat Produk', '🛍️ Browse Products'], true);
             $this->catalog->sendCategoryCatalog(
                 $customer,
                 $chatId,
-                establishFreshRoot: in_array($text, ['🛍️ Lihat Produk', '🛍️ Browse Products'], true),
+                establishFreshRoot: true,
+                removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
             );
 
             return;

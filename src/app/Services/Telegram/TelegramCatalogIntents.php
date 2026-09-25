@@ -48,12 +48,14 @@ class TelegramCatalogIntents
         string $chatId,
         ?int $messageId = null,
         bool $establishFreshRoot = false,
+        bool $removeLegacyReplyKeyboard = false,
     ): void {
         $this->sendCatalogPage(
             $customer,
             $chatId,
             messageId: $messageId,
             establishFreshRoot: $establishFreshRoot,
+            removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
         );
     }
 
@@ -65,6 +67,7 @@ class TelegramCatalogIntents
         ?string $category = null,
         ?int $messageId = null,
         bool $establishFreshRoot = false,
+        bool $removeLegacyReplyKeyboard = false,
     ): void {
         $requestedPage = max(1, $page);
         $result = $this->browse->browsePublic(CatalogBrowseQuery::fromValues(
@@ -75,7 +78,7 @@ class TelegramCatalogIntents
         ));
 
         if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
-            $this->sendStaleCatalog($customer, $chatId, $messageId, $establishFreshRoot);
+            $this->sendStaleCatalog($customer, $chatId, $messageId, $establishFreshRoot, $removeLegacyReplyKeyboard);
 
             return;
         }
@@ -98,6 +101,7 @@ class TelegramCatalogIntents
             $originToken,
             $messageId,
             establishFreshRoot: $establishFreshRoot,
+            removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
         );
     }
 
@@ -896,6 +900,7 @@ class TelegramCatalogIntents
         ?string $originToken = null,
         ?int $messageId = null,
         bool $establishFreshRoot = false,
+        bool $removeLegacyReplyKeyboard = false,
     ): void {
         $maintenance = $this->maintenance->current();
         $title = $this->locale->translate(
@@ -942,6 +947,7 @@ class TelegramCatalogIntents
                 ['inline_keyboard' => $this->browseNavigationKeyboard($customer, $mode)],
                 $messageId,
                 establishFreshRoot: $establishFreshRoot,
+                removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
             );
 
             return;
@@ -992,13 +998,14 @@ class TelegramCatalogIntents
             ['inline_keyboard' => $keyboard],
             $messageId,
             establishFreshRoot: $establishFreshRoot,
+            removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
         );
     }
 
     /**
-     * Routine catalog navigation edits the canonical message whenever this
-     * customer/chat owns one; the legacy edit-or-send seam remains only for
-     * chats without a root (groups and pre-/start entry points).
+     * Inline navigation edits the current root. Text catalog entry points
+     * establish a new root at the chat tail when one already exists; the
+     * legacy edit-or-send path remains for groups and chats without a root.
      */
     private function sendCatalogMessage(
         Customer $customer,
@@ -1008,8 +1015,15 @@ class TelegramCatalogIntents
         ?int $messageId = null,
         array $options = [],
         bool $establishFreshRoot = false,
+        bool $removeLegacyReplyKeyboard = false,
     ): void {
-        if ($establishFreshRoot && $messageId === null) {
+        $root = $messageId === null
+            ? $this->roots->currentForChat($customer, $chatId)
+            : $this->roots->match($customer, $chatId, $messageId);
+
+        if ($establishFreshRoot
+            && $messageId === null
+            && ($root !== null || $removeLegacyReplyKeyboard)) {
             $this->roots->establish(
                 $customer,
                 $chatId,
@@ -1020,15 +1034,11 @@ class TelegramCatalogIntents
                     $replyMarkup,
                     $options,
                 ),
-                removeLegacyReplyKeyboard: true,
+                removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
             );
 
             return;
         }
-
-        $root = $messageId === null
-            ? $this->roots->currentForChat($customer, $chatId)
-            : $this->roots->match($customer, $chatId, $messageId);
 
         if ($root !== null) {
             $this->roots->render($root, $chatId, new TelegramNavigationSurface(
@@ -1307,13 +1317,14 @@ class TelegramCatalogIntents
         string $chatId,
         ?int $messageId = null,
         bool $establishFreshRoot = false,
+        bool $removeLegacyReplyKeyboard = false,
     ): void {
         $this->sendCatalogMessage($customer, $chatId, $this->locale->translate($customer, 'catalog.family.stale'), [
             'inline_keyboard' => [[[
                 'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
                 'callback_data' => 'family:back:menu',
             ]]],
-        ], $messageId, [], $establishFreshRoot);
+        ], $messageId, [], $establishFreshRoot, $removeLegacyReplyKeyboard);
     }
 
     /** @param  array<string, mixed>|null  $navigation */

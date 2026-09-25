@@ -274,6 +274,47 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains((string) $request['text'], 'Choose quantity'));
     }
 
+    public function test_product_command_sends_catalog_as_a_new_message_after_start(): void
+    {
+        config()->set('services.telegram.welcome_banner_url', 'banner-file-id');
+        $nextPhotoMessageId = 1000;
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => function () use (&$nextPhotoMessageId) {
+                return Http::response([
+                    'ok' => true,
+                    'result' => [
+                        'message_id' => ++$nextPhotoMessageId,
+                        'photo' => [['file_id' => 'fake-photo-file-id']],
+                    ],
+                ]);
+            },
+        ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        Product::factory()->create([
+            'name' => 'Command Catalog Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(1201, '/start'))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(1202, '/product'))->assertOk();
+
+        Http::assertSent(fn ($request): bool => (
+            str_ends_with($request->url(), '/sendMessage')
+            || str_ends_with($request->url(), '/sendPhoto')
+        )
+            && str_contains(
+                (string) ($this->telegramRequestField($request, 'caption') ?? $this->telegramRequestField($request, 'text')),
+                'DAFTAR PRODUK DIGITAL',
+            )
+            && str_contains(json_encode($request->data()), 'Command Catalog Product'));
+        Http::assertNotSent(fn ($request): bool => (
+            str_ends_with($request->url(), '/editMessageCaption')
+            || str_ends_with($request->url(), '/editMessageText')
+        ) && (string) $this->telegramRequestField($request, 'message_id') === '1001');
+    }
+
     public function test_katalog_lists_active_categories_uncategorized_and_empty_state(): void
     {
         $this->fakeTelegramHttp();

@@ -10,11 +10,11 @@ Each private Telegram Customer chat has at most one current **Canonical
 Navigation Message**: a bot-owned message tracked in `telegram_navigation_roots`
 by `customer_id`, `chat_id`, `message_id`, media kind, screen, locale, and a
 generation/lease pair. The welcome banner establishes it, and every routine
-customer navigation action edits that same message instead of sending a new
-bot reply:
+customer navigation from inline controls edits that same message instead of
+sending a new bot reply:
 
-- Browse Products (catalog list, category picker, category list, family
-  options, product detail, search results);
+- Browse Products from inline controls (catalog list, category picker, category
+  list, family options, product detail, search results);
 - My Balance, Orders, Support, and the Language picker;
 - Back and Home, which always return to the current home projection.
 
@@ -22,8 +22,17 @@ bot reply:
 commit to the root the callback message really targets; a callback on any other
 message is stale, answers a localized recovery hint, and never edits or sends.
 Content built without an originating message (commands such as `/menu`,
-`/produk`, `/riwayat`, `/support`, `/language`) edits the current root when one
-exists and only keeps the legacy send path when the chat has no root yet.
+`/riwayat`, `/support`, `/language`) edits the current root when one exists and
+only keeps the legacy send path when the chat has no root yet.
+
+### Product-list command exception (2026-09-25)
+
+`/product`, `/products`, `/produk`, `/lihat_produk`, `/lihat produk`, and
+`/katalog` open the catalog at the chat tail. If a canonical root already
+exists, the command sends a new catalog message and promotes it to the root;
+inline catalog callbacks then edit that new message, not an older `/start`
+panel. If no root exists, the command keeps the existing send path. Legacy
+reply-keyboard labels also create a fresh root and remove the old keyboard.
 
 Rendering leases the stored generation before touching Telegram and commits the
 new screen/locale projection only after the edit is proven. A lost lease, an
@@ -55,8 +64,9 @@ on that same root message.
 
 ## Consequences
 
-- Routine navigation produces exactly one edited message; a stale, ambiguous,
-  or foreign callback produces no message side effect.
+- Inline routine navigation edits the canonical message; product-list commands
+  with an existing root create a new root at the chat tail. Stale, ambiguous,
+  or foreign callbacks produce no message side effect.
 - The root projection is evidence of what the Customer sees, so recovery and
   reconciliation can trust `screen`, `locale`, and `rendered_at`.
 - Long catalog screens may downgrade the root from banner photo to text for the
