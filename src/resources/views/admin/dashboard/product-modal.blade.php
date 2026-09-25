@@ -286,7 +286,7 @@
                                 <label for="telegram-product-image" class="shrink-0 cursor-pointer rounded-lg bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih gambar</label>
                                 <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="telegramProductImageFileName">Tidak ada file yang dipilih</span>
                             </div>
-                            <input type="file" id="telegram-product-image" name="telegram_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-on:change="telegramProductImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
+                            <input type="file" id="telegram-product-image" name="telegram_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-ref="telegramProductImage" x-on:change="updateTelegramProductImageFileName($event)">
                             <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Kosongkan kalau gambar Telegram lama tetap dipakai.</p>
                             @error('telegram_image', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                             @error('telegram_image', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
