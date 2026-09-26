@@ -13,7 +13,7 @@
     $searchMaxLength = \App\Storefront\StorefrontCatalogSearch::MAX_LENGTH;
 @endphp
 
-<header class="storefront-header sticky top-4 z-50 mx-auto mb-4 mt-4 w-[calc(100%-2rem)] max-w-6xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.1)] transition-all duration-300" data-storefront-header>
+<header class="storefront-header sticky top-4 z-50 mx-auto mb-4 mt-4 w-[calc(100%-2rem)] max-w-6xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.1)] transition-all duration-300" data-storefront-header x-data="mobileMenu">
     <div class="flex min-h-[88px] w-full flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:flex-nowrap">
         <a href="{{ $homeUrl }}" class="order-1 flex min-w-0 shrink-0 items-center gap-2 lg:w-[10rem] xl:w-[9rem]" aria-label="Beranda {{ $brand }}">
             @include('storefront.components.brand-mark', ['brand' => $brand])
@@ -117,24 +117,26 @@
                 aria-label="Buka menu navigasi"
                 aria-controls="mobile-menu"
                 aria-expanded="false"
+                :aria-expanded="isOpen ? 'true' : 'false'"
+                @click="toggle($event)"
             >
-                <span id="menu-icon-1" class="h-[3px] w-5 rounded-full bg-[var(--sf-ink)] transition-transform duration-300"></span>
-                <span id="menu-icon-2" class="h-[3px] w-5 rounded-full bg-[var(--sf-ink)] transition-transform duration-300"></span>
-                <span id="menu-icon-3" class="h-[3px] w-5 rounded-full bg-[var(--sf-ink)] transition-opacity duration-300"></span>
+                <span id="menu-icon-1" class="h-[3px] w-5 rounded-full bg-[var(--sf-ink)] transition-transform duration-300" :class="{ 'rotate-45': isOpen, 'translate-y-[9px]': isOpen }"></span>
+                <span id="menu-icon-2" class="h-[3px] w-5 rounded-full bg-[var(--sf-ink)] transition-transform duration-300" :class="{ 'opacity-0': isOpen }"></span>
+                <span id="menu-icon-3" class="h-[3px] w-5 rounded-full bg-[var(--sf-ink)] transition-opacity duration-300" :class="{ '-rotate-45': isOpen, '-translate-y-[9px]': isOpen }"></span>
             </button>
         </div>
 
     </div>
 
-    <div id="mobile-menu-backdrop" class="fixed inset-0 z-40 hidden bg-[var(--sf-ink)]/45 opacity-0 backdrop-blur-[2px] transition-opacity duration-200 lg:hidden" aria-hidden="true"></div>
+    <div id="mobile-menu-backdrop" class="fixed inset-0 z-40 hidden bg-[var(--sf-ink)]/45 opacity-0 backdrop-blur-[2px] transition-opacity duration-200 lg:hidden" aria-hidden="true" :class="{ hidden: !isVisible, 'opacity-0': !isAnimating, 'opacity-100': isAnimating }" @click.self="close()"></div>
 
-    <div id="mobile-menu" class="fixed bottom-0 left-0 top-0 z-50 hidden w-[min(84vw,22rem)] -translate-x-full overflow-y-auto border-r border-[var(--sf-border)] bg-[var(--sf-surface)] text-[var(--sf-ink)] shadow-[0_12px_30px_rgb(18_35_63_/_0.12)] transition-transform duration-300 ease-out lg:hidden" role="dialog" aria-modal="true" inert aria-hidden="true" aria-label="Menu navigasi Lhie Store">
+    <div id="mobile-menu" class="fixed bottom-0 left-0 top-0 z-50 hidden w-[min(84vw,22rem)] -translate-x-full overflow-y-auto border-r border-[var(--sf-border)] bg-[var(--sf-surface)] text-[var(--sf-ink)] shadow-[0_12px_30px_rgb(18_35_63_/_0.12)] transition-transform duration-300 ease-out lg:hidden" role="dialog" aria-modal="true" inert aria-hidden="true" aria-label="Menu navigasi Lhie Store" :class="{ hidden: !isVisible, '-translate-x-full': !isAnimating, 'translate-x-0': isAnimating }" :aria-hidden="isOpen ? 'false' : 'true'" :inert="!isOpen" @click="closeOnLink($event)">
         <div class="flex min-h-full flex-col">
             <div class="flex items-center justify-between gap-3 border-b border-[var(--sf-border)] px-5 py-4">
                 <a href="{{ $homeUrl }}" class="flex min-w-0 items-center gap-2" aria-label="Beranda {{ $brand }}">
                     @include('storefront.components.brand-mark', ['brand' => $brand])
                 </a>
-                <button id="mobile-menu-close" type="button" class="grid h-10 w-10 place-items-center rounded-lg border border-[var(--sf-border)] bg-[var(--sf-yellow)] text-xl font-black shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform active:translate-y-0" aria-label="Tutup menu">
+                <button id="mobile-menu-close" type="button" class="grid h-10 w-10 place-items-center rounded-lg border border-[var(--sf-border)] bg-[var(--sf-yellow)] text-xl font-black shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform active:translate-y-0" aria-label="Tutup menu" @click="close()">
                     <span aria-hidden="true">×</span>
                 </button>
             </div>
