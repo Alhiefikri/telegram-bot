@@ -103,6 +103,10 @@ _Avoid_: sellable Variant, shared inventory
 An existing sellable Product/SKU shown as a member of a Product Family. Its Product ID remains the identity submitted to cart, checkout, order, inventory, waitlist, and delivery flows.
 _Avoid_: family-level stock, new Variant entity
 
+**Plan**:
+The customer-facing name for one Product option inside a Product Family, used by the Store Bot catalog and the Web Storefront. It is presentation vocabulary only: the sellable identity remains the Product option, and a Product Family with a single Plan opens that Product Detail directly instead of listing its Plans.
+_Avoid_: Variant, SKU, subscription tier
+
 **Product catalog icon**:
 An optional plain Unicode presentation value stored on a Product and edited through the Admin Dashboard. It is used by the Store Bot catalog and keyboard; when empty, the bot uses a static brand fallback. It is not a secret and must not be configured through ENV.
 

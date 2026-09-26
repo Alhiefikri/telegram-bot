@@ -59,7 +59,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $keyboard = $catalog['reply_markup']['inline_keyboard'];
         $familyButton = $keyboard[0][0];
         $this->assertStringContainsString('Netflix', $familyButton['text']);
-        $this->assertStringContainsString('1/2 varian tersedia', $familyButton['text']);
+        $this->assertStringContainsString('▶ 2 Plan »', $familyButton['text']);
         $familyCallback = $familyButton['callback_data'];
         $this->assertStringStartsWith('family:options:v', $familyCallback);
         $this->assertCount(1, $keyboard[0]);
@@ -144,7 +144,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 
         $this->openFamilyFromDeepLink($customer, 41007, $family);
 
-        $options = $this->lastMessageContaining('Pilih opsi Aggregate Family');
+        $options = $this->lastMessageContaining('Pilih Plan Aggregate Family');
         $this->assertStringContainsString('Terjual: 10', (string) $options['text']);
         $this->assertStringContainsString('Terjual: 4', (string) $options['text']);
         $this->assertStringContainsString('Terjual: 6', (string) $options['text']);
@@ -317,12 +317,28 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         Product::factory()->create([
             'name' => 'First Origin Product',
             'product_family_id' => $firstFamily->id,
+            'family_sort_order' => 1,
             'stock' => 1,
             'reserved_stock' => 0,
         ]);
         Product::factory()->create([
             'name' => 'Second Origin Product',
             'product_family_id' => $secondFamily->id,
+            'family_sort_order' => 1,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'First Origin Add-on',
+            'product_family_id' => $firstFamily->id,
+            'family_sort_order' => 2,
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'Second Origin Add-on',
+            'product_family_id' => $secondFamily->id,
+            'family_sort_order' => 2,
             'stock' => 1,
             'reserved_stock' => 0,
         ]);
@@ -372,7 +388,16 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         Product::factory()->create([
             'name' => 'Stale Option',
             'product_family_id' => $family->id,
+            'family_sort_order' => 1,
             'family_option_label' => 'Stale Package',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'Stale Option Extra',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'family_option_label' => 'Stale Package Extra',
             'stock' => 1,
             'reserved_stock' => 0,
         ]);
@@ -420,7 +445,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertSame(1, $state['familyPage']);
 
         $this->postTelegramWebhook($this->callbackUpdate(41012, 'back-family', 'detail:back:'.$product->id.':'.$state['interactionToken'], [], 41002))->assertOk();
-        $back = $this->lastMessageContaining('Choose an option for CapCut');
+        $back = $this->lastMessageContaining('Choose a plan for CapCut');
         $this->assertStringContainsString('Team 30 Days', (string) $back['text']);
         $this->assertSame('family:list:1', $back['reply_markup']['inline_keyboard'][1][0]['callback_data']);
         $this->assertSame(0, Cart::count());
@@ -461,7 +486,17 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'name' => 'Netflix Individual',
             'description' => 'Netflix profile package',
             'product_family_id' => $family->id,
+            'family_sort_order' => 1,
             'family_option_label' => 'Individual',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'Netflix Shared',
+            'description' => 'Netflix shared package',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'family_option_label' => 'Shared',
             'stock' => 2,
             'reserved_stock' => 0,
         ]);
@@ -500,7 +535,17 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'name' => 'Origin Family Member',
             'description' => 'Origin search member',
             'product_family_id' => $family->id,
+            'family_sort_order' => 1,
             'family_option_label' => 'Origin Package',
+            'stock' => 1,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'Origin Family Extra',
+            'description' => 'Origin search extra',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'family_option_label' => 'Origin Package Extra',
             'stock' => 1,
             'reserved_stock' => 0,
         ]);
@@ -537,7 +582,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         }
 
         $this->openFamilyFromDeepLink($customer, 41038, $family);
-        $first = $this->lastMessageContaining('Choose an option for Paged Family');
+        $first = $this->lastMessageContaining('Choose a plan for Paged Family');
         $firstKeyboard = $first['reply_markup']['inline_keyboard'];
         $this->assertCount(7, $firstKeyboard);
         $optionRows = array_slice($firstKeyboard, 0, 5);
@@ -585,7 +630,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertDatabaseHas('customers', ['telegram_id' => 41006, 'locale' => 'id']);
 
         $this->postTelegramWebhook($this->messageUpdate(41052, '/start family_'.$family->id, [], 41007))->assertOk();
-        $familyOptions = $this->lastMessageContaining('Pilih opsi Deep Linked Family');
+        $familyOptions = $this->lastMessageContaining('Pilih Plan Deep Linked Family');
         $this->assertStringContainsString('Option A', (string) $familyOptions['text']);
         $this->assertDatabaseHas('customers', ['telegram_id' => 41007, 'locale' => 'id']);
     }
@@ -763,8 +808,8 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
 
         $this->openFamilyFromDeepLink($customer, 41111, $family);
 
-        $options = $this->lastMessageContaining('Pilih opsi Netflix');
-        $this->assertStringContainsString('🟥 Pilih opsi Netflix', (string) $options['text']);
+        $options = $this->lastMessageContaining('Pilih Plan Netflix');
+        $this->assertStringContainsString('🟥 Pilih Plan Netflix', (string) $options['text']);
         $this->assertStringContainsString('Terjual: 0', (string) $options['text']);
         $this->assertStringContainsString('01. 🟥 Premium (No VPN)', (string) $options['text']);
         $this->assertStringContainsString('Harga: Rp25.000', (string) $options['text']);
@@ -817,6 +862,15 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'family_sort_order' => 1,
             'family_option_label' => 'Premium 30 Hari',
             'price_amount' => 25000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'Single Message Option Extra',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'family_option_label' => 'Premium 90 Hari',
+            'price_amount' => 60000,
             'stock' => 2,
             'reserved_stock' => 0,
         ]);
@@ -900,7 +954,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'slug' => 'single-sold-out',
             'sort_order' => 1,
         ]);
-        Product::factory()->create([
+        $singleProduct = Product::factory()->create([
             'name' => 'Single Sold Out Product',
             'product_family_id' => $single->id,
             'stock' => 8,
@@ -931,7 +985,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Multiple Sold Out', $multipleButton['text']);
         $this->assertStringContainsString('Habis', $multipleButton['text']);
         $this->assertSame('danger', $singleButton['style']);
-        $this->assertStringStartsWith('family:options:v', $singleButton['callback_data']);
+        $this->assertSame('product:'.$singleProduct->id, $singleButton['callback_data']);
         $this->assertSame('danger', $multipleButton['style']);
         $this->assertStringStartsWith('family:options:v', $multipleButton['callback_data']);
 
@@ -947,16 +1001,26 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $product = Product::factory()->create([
             'name' => 'Fresh Option',
             'product_family_id' => $family->id,
+            'family_sort_order' => 1,
             'family_option_label' => 'Fresh Option',
             'price_amount' => 18000,
             'stock' => 6,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'Fresh Option Partner',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'family_option_label' => 'Fresh Option Partner',
+            'price_amount' => 22000,
+            'stock' => 3,
             'reserved_stock' => 0,
         ]);
 
         $this->postTelegramWebhook($this->messageUpdate(41141, '/product', [], 41140))->assertOk();
         $catalog = $this->lastMessageContaining('Fresh Family');
         $familyCallback = $catalog['reply_markup']['inline_keyboard'][0][0]['callback_data'];
-        $this->assertStringContainsString('Stok 6', $catalog['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertStringContainsString('▶ 2 Plan »', $catalog['reply_markup']['inline_keyboard'][0][0]['text']);
 
         $product->forceFill(['stock' => 2])->save();
         $this->postTelegramWebhook($this->callbackUpdate(41142, 'fresh-family-open', $familyCallback, [], 41140))->assertOk();
@@ -1094,6 +1158,118 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             $largeCatalogQueries,
             sprintf('Query count grew from %d to %d for fifteen additional families.', $smallCatalogQueries, $largeCatalogQueries),
         );
+    }
+
+    public function test_single_plan_family_entry_opens_detail_without_the_plan_list(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41130, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Spotify Solo', 'slug' => 'spotify-solo']);
+        $product = Product::factory()->create([
+            'name' => 'Spotify Solo 1 Bulan',
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Solo 1 Bulan',
+            'price_amount' => 45000,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(41130, '/produk', [], 41130))->assertOk();
+        $catalog = $this->lastMessageContaining('Spotify Solo');
+        $entryButton = $catalog['reply_markup']['inline_keyboard'][0][0];
+        $this->assertSame('product:'.$product->id, $entryButton['callback_data']);
+        $this->assertStringContainsString('Stok 5', $entryButton['text']);
+        $this->assertStringNotContainsString('Plan', $entryButton['text']);
+        $this->assertSame('success', $entryButton['style']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41131, 'single-plan-open', 'product:'.$product->id, [], 41130))->assertOk();
+        $detail = $this->lastMessageContaining('Spotify Solo 1 Bulan');
+        $this->assertStringContainsString('Detail produk', (string) $detail['text']);
+        $this->assertStringContainsString('Harga: Rp45.000', (string) $detail['text']);
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->body(), 'Pilih Plan Spotify Solo'));
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+    }
+
+    public function test_sold_out_single_plan_family_entry_opens_detail_instead_of_an_empty_plan_list(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41131, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Viu Solo', 'slug' => 'viu-solo']);
+        $product = Product::factory()->create([
+            'name' => 'Viu Solo 1 Bulan',
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Solo 1 Bulan',
+            'stock' => 1,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(41132, '/produk', [], 41131))->assertOk();
+        $catalog = $this->lastMessageContaining('Viu Solo');
+        $entryButton = $catalog['reply_markup']['inline_keyboard'][0][0];
+        $this->assertSame('product:'.$product->id, $entryButton['callback_data']);
+        $this->assertStringContainsString('Habis', $entryButton['text']);
+        $this->assertSame('danger', $entryButton['style']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41133, 'sold-out-single-plan-open', 'product:'.$product->id, [], 41131))->assertOk();
+        $detail = $this->lastMessageContaining('Viu Solo 1 Bulan');
+        $this->assertStringContainsString('Stok kosong', (string) $detail['text']);
+        $this->assertStringNotContainsString('family:options:v', json_encode($detail, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('detail:pay:', json_encode($detail, JSON_THROW_ON_ERROR));
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+    }
+
+    public function test_multi_plan_family_label_is_localized_and_still_opens_the_plan_list(): void
+    {
+        $this->fakeTelegramHttp();
+        $family = ProductFamily::factory()->create(['name' => 'Locale Plans', 'slug' => 'locale-plans']);
+        foreach ([
+            ['name' => 'Locale Plans Basic', 'label' => 'Basic', 'price' => 10000],
+            ['name' => 'Locale Plans Pro', 'label' => 'Pro', 'price' => 20000],
+        ] as $sortOrder => $option) {
+            Product::factory()->create([
+                'name' => $option['name'],
+                'product_family_id' => $family->id,
+                'family_sort_order' => $sortOrder + 1,
+                'family_option_label' => $option['label'],
+                'price_amount' => $option['price'],
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+        }
+
+        foreach ([
+            'id' => [41132, '▶ 2 Plan »', 'Pilih Plan Locale Plans'],
+            'en' => [41133, '▶ 2 Plans »', 'Choose a plan for Locale Plans'],
+            'ms' => [41134, '▶ 2 Plan »', 'Pilih Plan Locale Plans'],
+        ] as $locale => [$chatId, $expectedLabel, $expectedTitle]) {
+            Customer::factory()->create(['telegram_id' => $chatId, 'locale' => $locale]);
+            $this->postTelegramWebhook($this->messageUpdate(41140 + $chatId, '/product', [], $chatId))->assertOk();
+
+            $catalogPayloads = Http::recorded(fn (Request $request): bool => (str_ends_with($request->url(), '/sendMessage')
+                    || str_ends_with($request->url(), '/editMessageText'))
+                && (string) ($request['chat_id'] ?? '') === (string) $chatId
+                && str_contains($request->body(), 'Locale Plans'));
+            $this->assertNotEmpty($catalogPayloads, 'Expected a catalog message for locale '.$locale);
+
+            $button = $catalogPayloads->last()[0]->data()['reply_markup']['inline_keyboard'][0][0];
+            $this->assertStringContainsString($expectedLabel, $button['text']);
+            $this->assertStringStartsWith('family:options:v', $button['callback_data']);
+
+            $this->postTelegramWebhook($this->callbackUpdate(41150 + $chatId, 'plan-list-'.$locale, $button['callback_data'], [], $chatId))->assertOk();
+            $optionPayloads = Http::recorded(fn (Request $request): bool => (str_ends_with($request->url(), '/sendMessage')
+                    || str_ends_with($request->url(), '/editMessageText'))
+                && (string) ($request['chat_id'] ?? '') === (string) $chatId
+                && str_contains($request->body(), $expectedTitle));
+            $this->assertNotEmpty($optionPayloads, 'Expected a plan list for locale '.$locale);
+
+            $options = $optionPayloads->last()[0]->data();
+            $this->assertStringContainsString('Basic', (string) $options['text']);
+            $this->assertStringContainsString('Pro', (string) $options['text']);
+            $this->assertStringStartsWith('family:select:v', $options['reply_markup']['inline_keyboard'][0][0]['callback_data']);
+        }
     }
 
     private function openFamilyFromDeepLink(Customer $customer, int $updateId, ProductFamily $family): void

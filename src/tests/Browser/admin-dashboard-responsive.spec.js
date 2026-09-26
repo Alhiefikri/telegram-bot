@@ -1080,7 +1080,7 @@ test("customer checkout: restores Product and Family context through browser bac
   await expectStorefrontPageCheckout(page);
   await page.goBack({ waitUntil: "domcontentloaded" });
   await expect(page).toHaveURL(familyUrl);
-  await expect(page.getByText("Pilih varian", { exact: true })).toBeVisible();
+  await expect(page.getByText("Pilih Plan", { exact: true })).toBeVisible();
 
   expect(retiredRequests).toEqual([]);
 });

@@ -256,7 +256,11 @@ list shows up to fifteen entries per page, with entries pressed against their
 divider rule instead of padded by blank lines, while category filtering and
 search keep up to ten; family option callbacks use the signed compact
 `TelegramFamilyCallbackToken` and resolve the existing Product ID only after
-the current public family projection and page are revalidated. Product Detail,
+the current public family projection and page are revalidated. Family entries
+label their customer-facing Plan count (`▶ N Plan »`) or the stock of their
+single Plan; a family with exactly one public Product option submits
+`product:<id>` from the discovery list so the Plan list screen is skipped,
+while `/start family_<id>` still opens that list. Product Detail,
 quantity, payment, Cart, Order, and outbound-effect ownership remains unchanged.
 Routine catalog navigation from inline controls renders onto the canonical
 message (`editMessageCaption` for a photo root, `editMessageText` for a text
@@ -755,6 +759,7 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/Telegram/StoreBalanceTopUpProviderUnavailableTest.php` — fail-closed `provider_unavailable` for a rail that is not operationally ready, with no QR claimed or sent and no provider request.
 - `tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php` — Payment and Store Balance top-up provider single-flight races, same-target recovery, and one instruction-effect materialization; runs only through the PostgreSQL gate.
 - `tests/Feature/Telegram/StoreBalanceHomeTest.php` — private home greeting → Profile → Store Activity → prompt ordering, fresh Store Balance independent of the global metrics cache, fail-safe unavailable projection, localized missing value, and public-safe group home.
+- `tests/Feature/Telegram/ProductFamilyDiscoveryTest.php` dan `tests/Feature/Telegram/CatalogSearchTest.php` — family discovery entry rendering (label `▶ N Plan »`, label stok dan `product:<id>` untuk family satu Plan), signed family option callbacks, origin/back restoration, dan copy per locale.
 - `tests/Feature/Telegram/TelegramRoutineNavigationTest.php` — webhook-level single-message navigation evidence: Home → Balance → Home → Language → Home → Orders → Support on one canonical message, preset/custom Store Balance confirmation intents, strict amount recovery, confirm/cancel/back/expiry/stale-policy replay behavior, zero pre-confirm provider/Payment/ledger effects, stale/ambiguous/missing-root recovery, catalog navigation on the root, long-screen text-root replacement, group privacy, and id/en/ms screen copy.
 - `tests/Feature/Telegram/TelegramNavigationRootTest.php` dan `TelegramNavigationRootPostgresConcurrencyTest.php` — root establishment/replacement/lease semantics dan race PostgreSQL-nya.
 - `tests/Feature/Telegram/StartMetricsTest.php` — canonical successful Order and Telegram Customer metrics with bounded staleness cache.

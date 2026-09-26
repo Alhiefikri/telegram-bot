@@ -409,7 +409,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains(json_encode($r->data()), 'Gemini Pro')
             && ! str_contains($r['text'], 'Gemini Pro')
-            && str_contains(json_encode($r->data()), 'family:options:v')
+            && str_contains(json_encode($r->data()), 'product:'.$product->id)
             && ! str_contains($r['text'], 'Pilih kategori yang kamu mau'));
     }
 
@@ -426,7 +426,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'DAFTAR PRODUK DIGITAL')
             && str_contains(json_encode($r->data()), 'Tanpa Kategori')
             && ! str_contains($r['text'], 'Tanpa Kategori')
-            && str_contains(json_encode($r->data()), 'family:options:v')
+            && str_contains(json_encode($r->data()), 'product:'.$product->id)
             && ! str_contains($r['text'], 'Pilih kategori yang kamu mau'));
     }
 
@@ -1145,7 +1145,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             'is_active' => true,
         ]);
         $singleFamily = ProductFamily::factory()->create(['name' => 'Single Locale Family', 'slug' => 'single-locale-family']);
-        Product::factory()->create([
+        $singleProduct = Product::factory()->create([
             'name' => 'Single Locale Option',
             'product_family_id' => $singleFamily->id,
             'category_id' => $otherCategory->id,
@@ -1162,9 +1162,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
         ]);
 
         $locales = [
-            'id' => ['chat_id' => 45101, 'catalog' => 'DAFTAR PRODUK DIGITAL', 'list' => 'Daftar Produk', 'details' => 'Detail produk', 'quantity' => 'Jumlah: 1', 'search' => 'Hasil pencarian', 'instruction' => 'Pilih keluarga atau produk', 'single_label' => 'Stok 2', 'multi_label' => '1/2 varian tersedia'],
-            'en' => ['chat_id' => 45102, 'catalog' => 'DIGITAL PRODUCT LIST', 'list' => 'Product List', 'details' => 'Product details', 'quantity' => 'Quantity: 1', 'search' => 'Search results', 'instruction' => 'Choose a family or product', 'single_label' => 'Stock 2', 'multi_label' => '1/2 variants available'],
-            'ms' => ['chat_id' => 45103, 'catalog' => 'SENARAI PRODUK DIGITAL', 'list' => 'Senarai Produk', 'details' => 'Butiran produk', 'quantity' => 'Kuantiti: 1', 'search' => 'Hasil carian', 'instruction' => 'Pilih keluarga atau produk', 'single_label' => 'Stok 2', 'multi_label' => '1/2 varian tersedia'],
+            'id' => ['chat_id' => 45101, 'catalog' => 'DAFTAR PRODUK DIGITAL', 'list' => 'Daftar Produk', 'details' => 'Detail produk', 'quantity' => 'Jumlah: 1', 'search' => 'Hasil pencarian', 'instruction' => 'Pilih keluarga atau produk', 'single_label' => 'Stok 2', 'multi_label' => '▶ 2 Plan »'],
+            'en' => ['chat_id' => 45102, 'catalog' => 'DIGITAL PRODUCT LIST', 'list' => 'Product List', 'details' => 'Product details', 'quantity' => 'Quantity: 1', 'search' => 'Search results', 'instruction' => 'Choose a family or product', 'single_label' => 'Stock 2', 'multi_label' => '▶ 2 Plans »'],
+            'ms' => ['chat_id' => 45103, 'catalog' => 'SENARAI PRODUK DIGITAL', 'list' => 'Senarai Produk', 'details' => 'Butiran produk', 'quantity' => 'Kuantiti: 1', 'search' => 'Hasil carian', 'instruction' => 'Pilih keluarga atau produk', 'single_label' => 'Stok 2', 'multi_label' => '▶ 2 Plan »'],
         ];
 
         foreach ($locales as $index => $locale) {
@@ -1181,23 +1181,28 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 ->map(fn (array $record): array => $record[0]->data());
             $copy = $payloads->map(fn (array $payload): string => (string) ($payload['text'] ?? '')."\n".json_encode($payload['reply_markup'] ?? []))->implode("\n");
             $selectorButtons = [];
+            $productEntryButtons = [];
             foreach ($payloads as $payload) {
                 foreach (($payload['reply_markup']['inline_keyboard'] ?? []) as $row) {
                     foreach ($row as $button) {
                         if (str_starts_with((string) ($button['callback_data'] ?? ''), 'family:options:v')) {
                             $selectorButtons[] = $button;
                         }
+                        if (str_starts_with((string) ($button['callback_data'] ?? ''), 'product:')) {
+                            $productEntryButtons[] = $button;
+                        }
                     }
                 }
             }
 
-            $this->assertCount(4, $selectorButtons);
+            $this->assertCount(3, $selectorButtons);
             $multiFamilyButton = collect($selectorButtons)->first(fn (array $button): bool => str_contains($button['text'], 'Netflix Premium™'));
-            $singleFamilyButton = collect($selectorButtons)->first(fn (array $button): bool => str_contains($button['text'], 'Single Locale Family'));
+            $singleFamilyButton = collect($productEntryButtons)->first(fn (array $button): bool => str_contains($button['text'], 'Single Locale Family'));
             $this->assertIsArray($multiFamilyButton);
             $this->assertIsArray($singleFamilyButton);
             $this->assertStringContainsString($locale['multi_label'], $multiFamilyButton['text']);
             $this->assertStringContainsString($locale['single_label'], $singleFamilyButton['text']);
+            $this->assertSame('product:'.$singleProduct->id, $singleFamilyButton['callback_data']);
             foreach ($selectorButtons as $selectorButton) {
                 if ($selectorButton === $multiFamilyButton || $selectorButton === $singleFamilyButton) {
                     continue;

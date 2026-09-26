@@ -1072,13 +1072,18 @@ class TelegramCatalogIntents
             $family = $entry->family;
             $product = $entry->product;
             if ($family !== null) {
-                $callback = 'family:options:'.$this->familyTokens->options($family->id, 1, $listPage);
-                if ($originToken !== null) {
-                    $callback .= ':o'.$originToken;
+                $singleOption = $family->optionCount === 1 ? ($family->members[0] ?? null) : null;
+                if ($singleOption instanceof CatalogProductReadModel) {
+                    $callback = 'product:'.$singleOption->id;
+                } else {
+                    $callback = 'family:options:'.$this->familyTokens->options($family->id, 1, $listPage);
+                    if ($originToken !== null) {
+                        $callback .= ':o'.$originToken;
+                    }
                 }
                 $buttons[] = [
                     'text' => $mode === 'catalog'
-                        ? $this->familyIcon($family).' '.$family->name.' · '.$this->familyAvailabilityLabel($customer, $family)
+                        ? $this->familyIcon($family).' '.$family->name.$this->familyAvailabilitySuffix($customer, $family)
                         : $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
                     'callback_data' => $callback,
                     'style' => $family->isAvailable ? 'success' : 'danger',
@@ -1110,7 +1115,7 @@ class TelegramCatalogIntents
                 'number' => sprintf('%02d.', $number),
                 'icon' => $this->familyIcon($family),
                 'name' => $family->name,
-                'availability' => $this->familyAvailabilityLabel($customer, $family),
+                'availability' => $this->familyAvailabilitySuffix($customer, $family),
             ]);
         }
 
@@ -1127,23 +1132,22 @@ class TelegramCatalogIntents
             ]);
     }
 
-    private function familyAvailabilityLabel(Customer $customer, CatalogFamilyReadModel $family): string
+    private function familyAvailabilitySuffix(Customer $customer, CatalogFamilyReadModel $family): string
     {
         if ($family->optionCount === 1) {
             $member = $family->members[0] ?? null;
             if ($member instanceof CatalogProductReadModel) {
-                return $this->productAvailabilityLabel($customer, $member->isAvailable, $member->availableStock);
+                return ' · '.$this->productAvailabilityLabel($customer, $member->isAvailable, $member->availableStock);
             }
         }
 
         if ($family->optionCount > 1 && $family->availableOptionCount > 0) {
-            return $this->locale->translate($customer, 'catalog.family.button_options_available', [
-                'available' => $family->availableOptionCount,
-                'total' => $family->optionCount,
+            return ' '.$this->locale->translate($customer, 'catalog.family.button_plans', [
+                'count' => $family->optionCount,
             ]);
         }
 
-        return $this->locale->translate($customer, 'catalog.family.button_sold_out');
+        return ' · '.$this->locale->translate($customer, 'catalog.family.button_sold_out');
     }
 
     private function productAvailabilityLabel(Customer $customer, bool $isAvailable, int $availableStock): string

@@ -53,14 +53,14 @@
                             @endif
 
                             <div class="mt-4 flex flex-wrap items-center gap-2 text-xs font-black">
-                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1.5">{{ $family->optionCount }} varian</span>
+                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1.5">{{ $family->optionCount }} Plan</span>
                                 <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-1.5">{{ $family->availableOptionCount }} tersedia</span>
                                 <span class="rounded-full border border-[var(--sf-border)] bg-white px-3 py-1.5">Mulai {{ $family->minimumPriceAmount !== null ? $storefront->idr($family->minimumPriceAmount) : '—' }}</span>
                             </div>
 
                             <div class="mt-6 border-t border-dashed border-[var(--sf-border)] pt-5">
-                                <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Pilih varian</p>
-                                <div id="family-options" class="family-option-picker mt-3 flex flex-wrap items-center gap-2" role="radiogroup" aria-orientation="horizontal" aria-label="Pilih varian {{ $family->name }}">
+                                <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Pilih Plan</p>
+                                <div id="family-options" class="family-option-picker mt-3 flex flex-wrap items-center gap-2" role="radiogroup" aria-orientation="horizontal" aria-label="Pilih Plan {{ $family->name }}">
                                     @foreach ($members as $member)
                                         @php
                                             $presentation = $member->presentation;
@@ -98,7 +98,7 @@
                                                 aria-checked="{{ $isSelected ? 'true' : 'false' }}"
                                                 x-bind:aria-checked="isSelected('{{ $presentation->id }}') ? 'true' : 'false'"
                                                 x-bind:tabindex="isSelected('{{ $presentation->id }}') ? 0 : -1"
-                                                aria-label="Pilih varian {{ $optionLabel }}"
+                                                aria-label="Pilih Plan {{ $optionLabel }}"
                                                 @click.prevent="selectOption('{{ $presentation->id }}')"
                                                 @keydown="handleOptionKeydown($event, '{{ $presentation->id }}', $refs)"
                                                 class="family-option-button group inline-flex min-h-11 min-w-[7.5rem] max-w-full items-center justify-between gap-2 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] px-3 py-2 text-left transition"
