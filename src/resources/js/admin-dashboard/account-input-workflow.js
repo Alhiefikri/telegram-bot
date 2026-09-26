@@ -448,10 +448,16 @@ export default function accountInputWorkflow({
     async submitAccountInput(event) {
       event.preventDefault();
 
+      if (this.accountInputSubmitting) {
+        return;
+      }
+
       if (!this.accountInputCanCommit()) {
         await this.reviewAccountInput();
         return;
       }
+
+      const submittedRevision = this.accountInputDraftRevision;
 
       this.accountInputSubmitting = true;
       this.accountInputErrors = {};
@@ -473,6 +479,10 @@ export default function accountInputWorkflow({
         });
         const body = await response.json().catch(() => ({}));
 
+        if (submittedRevision !== this.accountInputDraftRevision) {
+          return;
+        }
+
         if (!response.ok) {
           this.accountInputErrors = body.errors ?? {};
           this.accountInputMessage =
@@ -492,6 +502,9 @@ export default function accountInputWorkflow({
           body.redirect_url ?? this.stockReturnUrl
         );
       } catch {
+        if (submittedRevision !== this.accountInputDraftRevision) {
+          return;
+        }
         this.accountInputMessage =
           "Koneksi gagal. Draf akun tetap tersimpan di halaman ini.";
         this.accountInputSubmitting = false;

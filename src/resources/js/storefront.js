@@ -752,6 +752,7 @@ function initShopPaymentStatus() {
         window.clearTimeout(pollTimer);
         pollTimer = null;
       }
+      nextPollAt = null;
     };
 
     const markTerminal = () => {
@@ -806,8 +807,10 @@ function initShopPaymentStatus() {
       if (pollTimer !== null) {
         window.clearTimeout(pollTimer);
       }
+      nextPollAt = Date.now() + delay;
       pollTimer = window.setTimeout(() => {
         pollTimer = null;
+        nextPollAt = null;
         if (!isHidden()) {
           void refresh(true);
         }
@@ -1036,8 +1039,11 @@ function initShopPaymentStatus() {
       }
 
       if (!autoPollingStopped && !inFlight) {
-        const delay =
-          nextPollAt === null ? pollMs : Math.max(0, nextPollAt - Date.now());
+        const delay = Math.max(
+          0,
+          nextPollAt === null ? pollMs : nextPollAt - Date.now(),
+          cooldownUntil - Date.now()
+        );
         scheduleAutoPoll(delay);
       }
     });

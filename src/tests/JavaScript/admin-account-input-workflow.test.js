@@ -211,6 +211,54 @@ test("current server rejection cannot leave Account Input committable", async ()
   assert.equal(workflow.accountInputError(0, "email"), "Email already exists.");
 });
 
+test("a pending Account Input commit cannot mutate a replacement draft", async () => {
+  for (const succeeds of [true, false]) {
+    const pending = deferred();
+    let commits = 0;
+    let redirects = 0;
+    let requests = 0;
+    const workflow = makeWorkflow({
+      fetchRequest: () => {
+        requests++;
+        return pending.promise;
+      },
+    });
+    workflow.accountInputReviewed = true;
+    workflow.accountInputStage = "review";
+    workflow.accountInputReview = { status: "ready" };
+    workflow.closeStockModal = () => commits++;
+    const previousWindow = globalThis.window;
+    globalThis.window = { location: { assign: () => redirects++ } };
+
+    try {
+      const submit = workflow.submitAccountInput({ preventDefault() {} });
+      await workflow.submitAccountInput({ preventDefault() {} });
+      assert.equal(requests, 1);
+      workflow.accountInputChanged();
+      workflow.accountInputMessage = "Draf pengganti";
+      workflow.accountInputErrors = { accounts: ["Draf pengganti invalid"] };
+      pending.resolve({
+        ok: succeeds,
+        json: async () =>
+          succeeds
+            ? { item_count: 1, redirect_url: "/admin" }
+            : { message: "Respons lama", errors: { accounts: ["Lama"] } },
+      });
+      await submit;
+
+      assert.equal(commits, 0);
+      assert.equal(redirects, 0);
+      assert.equal(workflow.accountInputMessage, "Draf pengganti");
+      assert.deepEqual(workflow.accountInputErrors, {
+        accounts: ["Draf pengganti invalid"],
+      });
+    } finally {
+      if (previousWindow === undefined) delete globalThis.window;
+      else globalThis.window = previousWindow;
+    }
+  }
+});
+
 test("local validation rejects malformed credentials and account counts outside 1–20", () => {
   const workflow = makeWorkflow();
   workflow.accountCards[0] = validCard({
@@ -295,8 +343,55 @@ test("stock modal resets advance revision before pending reviews resolve", async
     }
   }
 });
+test("pending Account Input submission keeps its stock modal and tab", async () => {
+  const previousDocument = globalThis.document;
+  const previousFetch = globalThis.fetch;
+  const pending = deferred();
+  const opener = { isConnected: true, focus() {} };
+  globalThis.document = { activeElement: opener };
+  globalThis.fetch = () => pending.promise;
 
-test("Product record changes clear the Telegram upload and keep saved images", () => {
+  try {
+    const dashboard = adminDashboard();
+    dashboard.$refs = { stockItems: { focus() {} } };
+    dashboard.$nextTick = (callback) => callback();
+    dashboard.openStockModal({
+      id: 1,
+      name: "Product",
+      stock: 0,
+      stockUrl: "/stock",
+      stockAccountsUrl: "/stock/accounts",
+      stockAccountsReviewUrl: "/stock/accounts/review",
+      stockReturnUrl: "/admin?tab=produk",
+    });
+    dashboard.stockInputMode = "account";
+    dashboard.accountCards[0] = validCard();
+    dashboard.accountInputReviewed = true;
+    dashboard.accountInputStage = "review";
+    dashboard.accountInputReview = { status: "ready" };
+
+    const submit = dashboard.submitAccountInput({ preventDefault() {} });
+    dashboard.closeStockModal();
+    assert.equal(dashboard.stockModalOpen, true);
+    assert.equal(dashboard.setStockInputMode("quick"), false);
+    assert.equal(dashboard.stockInputMode, "account");
+
+    dashboard.closeStockModal(true);
+    pending.resolve({
+      ok: true,
+      json: async () => ({ redirect_url: "/admin" }),
+    });
+    await submit;
+    assert.equal(dashboard.stockModalOpen, false);
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+    if (previousFetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = previousFetch;
+  }
+});
+
+test("Product record changes clear native uploads without removing saved images", () => {
   const previousDocument = globalThis.document;
   const opener = { isConnected: true, focus() {} };
   globalThis.document = { activeElement: opener };
@@ -308,8 +403,10 @@ test("Product record changes clear the Telegram upload and keep saved images", (
         return this.value ? [{ name: this.value }] : [];
       },
     };
+    const standardInput = { value: "old-standard-image.png" };
     const dashboard = adminDashboard();
     dashboard.$refs = {
+      productImage: standardInput,
       telegramProductImage: input,
       productName: { focus() {} },
     };
@@ -318,6 +415,8 @@ test("Product record changes clear the Telegram upload and keep saved images", (
     dashboard.telegramProductImageFileName = "old-telegram-image.png";
     dashboard.openProductForm();
     assert.equal(input.value, "");
+    assert.equal(standardInput.value, "");
+    assert.equal(dashboard.productImageFileName, "Tidak ada file yang dipilih");
     assert.equal(
       dashboard.telegramProductImageFileName,
       "Tidak ada file yang dipilih"
@@ -330,6 +429,8 @@ test("Product record changes clear the Telegram upload and keep saved images", (
       "selected-telegram-image.png"
     );
 
+    standardInput.value = "selected-standard-image.png";
+    dashboard.productImageFileName = standardInput.value;
     dashboard.openProductEditModal({
       id: 12,
       name: "Product",
@@ -342,6 +443,8 @@ test("Product record changes clear the Telegram upload and keep saved images", (
     });
 
     assert.equal(input.value, "");
+    assert.equal(standardInput.value, "");
+    assert.equal(dashboard.productImageFileName, "Tidak ada file yang dipilih");
     assert.equal(
       dashboard.telegramProductImageFileName,
       "Tidak ada file yang dipilih"
@@ -357,6 +460,58 @@ test("Product record changes clear the Telegram upload and keep saved images", (
     } else {
       globalThis.document = previousDocument;
     }
+  }
+});
+
+test("Family record changes clear both native image selections", () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = { activeElement: { isConnected: true, focus() {} } };
+
+  try {
+    const image = { value: "stale-family.png" };
+    const telegramImage = { value: "stale-telegram-family.png" };
+    const dashboard = adminDashboard();
+    dashboard.$refs = {
+      familyImage: image,
+      telegramFamilyImage: telegramImage,
+      familyName: { focus() {} },
+    };
+    dashboard.$nextTick = (callback) => callback();
+
+    dashboard.openProductFamilyForm();
+    assert.equal(image.value, "");
+    assert.equal(telegramImage.value, "");
+
+    image.value = "different-family.png";
+    telegramImage.value = "different-telegram-family.png";
+    dashboard.openProductFamilyEditModal({
+      id: 12,
+      name: "Family",
+      imageUrl: "/storage/family-existing.webp",
+      telegramImageUrl: "/storage/telegram-existing.webp",
+      updateUrl: "/admin/product-families/12",
+    });
+    assert.equal(image.value, "");
+    assert.equal(telegramImage.value, "");
+    assert.equal(dashboard.familyImageFileName, "Tidak ada file yang dipilih");
+    assert.equal(
+      dashboard.telegramFamilyImageFileName,
+      "Tidak ada file yang dipilih"
+    );
+    assert.equal(dashboard.familyImageUrl, "/storage/family-existing.webp");
+    assert.equal(
+      dashboard.telegramFamilyImageUrl,
+      "/storage/telegram-existing.webp"
+    );
+
+    image.value = "unsubmitted.png";
+    telegramImage.value = "unsubmitted-telegram.png";
+    dashboard.resetProductFamilyForm();
+    assert.equal(image.value, "");
+    assert.equal(telegramImage.value, "");
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
   }
 });
 

@@ -262,6 +262,7 @@
                                 name="image"
                                 accept="image/jpeg,image/png,image/webp"
                                 class="sr-only"
+                                x-ref="productImage"
                                 x-on:change="productImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'"
                             >
                             <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Kosongkan kalau gambar lama tetap dipakai.</p>

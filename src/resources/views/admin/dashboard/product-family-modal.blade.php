@@ -72,7 +72,7 @@
                         <label for="product-family-image" class="shrink-0 cursor-pointer rounded-md bg-neo-ink px-3 py-2 text-xs font-black text-white">Pilih gambar</label>
                         <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="familyImageFileName">Tidak ada file yang dipilih</span>
                     </div>
-                    <input type="file" id="product-family-image" name="image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-on:change="familyImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
+                    <input type="file" id="product-family-image" name="image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-ref="familyImage" x-on:change="familyImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
                     <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="familyFormMode === 'edit'">Kosongkan kalau gambar lama tetap dipakai.</p>
                     @error('image', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     @error('image', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
@@ -89,7 +89,7 @@
                         <label for="telegram-product-family-image" class="shrink-0 cursor-pointer rounded-md bg-neo-ink px-3 py-2 text-xs font-black text-white">Pilih gambar</label>
                         <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="telegramFamilyImageFileName">Tidak ada file yang dipilih</span>
                     </div>
-                    <input type="file" id="telegram-product-family-image" name="telegram_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-on:change="telegramFamilyImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
+                    <input type="file" id="telegram-product-family-image" name="telegram_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-ref="telegramFamilyImage" x-on:change="telegramFamilyImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
                     <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="familyFormMode === 'edit'">Kosongkan kalau gambar Telegram family lama tetap dipakai.</p>
                     @error('telegram_image', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     @error('telegram_image', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror

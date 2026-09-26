@@ -239,6 +239,34 @@ test("activation without an anchor inside the drawer keeps it open", () => {
   assert.equal(component.isOpen, true);
 });
 
+test("modified, new-tab, download, and cancelled link clicks keep the drawer open", () => {
+  const { component, opener, flushTicks } = fixture();
+  const link = { target: "", hasAttribute: () => false };
+  component.open({ currentTarget: opener });
+  flushTicks();
+
+  const click = (overrides = {}) =>
+    component.closeOnLink({
+      target: { closest: () => link },
+      button: 0,
+      ...overrides,
+    });
+
+  click({ ctrlKey: true });
+  assert.equal(component.isOpen, true);
+  click({ metaKey: true });
+  assert.equal(component.isOpen, true);
+  click({ defaultPrevented: true });
+  assert.equal(component.isOpen, true);
+  link.target = "_blank";
+  click();
+  assert.equal(component.isOpen, true);
+  link.target = "";
+  link.hasAttribute = (attribute) => attribute === "download";
+  click();
+  assert.equal(component.isOpen, true);
+});
+
 test("Tab and Shift+Tab keep focus inside the drawer and skip hidden content", () => {
   const {
     component,
@@ -346,7 +374,7 @@ test("closing before the queued focus runs does not pull focus into the drawer",
   assert.equal(document.activeElement, opener);
 });
 
-test("closing releases a body scroll lock that pre-existed the drawer session", () => {
+test("closing preserves a body scroll lock that pre-existed the drawer session", () => {
   const { component, document, opener, flushTicks } = fixture();
   document.body.classList.add("overflow-hidden");
 
@@ -354,7 +382,7 @@ test("closing releases a body scroll lock that pre-existed the drawer session", 
   flushTicks();
   component.close();
 
-  assert.equal(document.body.classList.contains("overflow-hidden"), false);
+  assert.equal(document.body.classList.contains("overflow-hidden"), true);
 });
 
 test("destroy releases document and media-query listeners, timers, frames, and the scroll lock", () => {

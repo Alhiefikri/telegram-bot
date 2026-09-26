@@ -51,6 +51,7 @@ const emptyProductForm = () => ({
   productUsageGuideTitle: "",
   productUsageGuideUrl: "",
   productIsActive: true,
+  productImageFileName: EMPTY_IMAGE_FILE_NAME,
   productImageUrl: "",
   telegramProductImageUrl: "",
   telegramProductImageFileName: EMPTY_IMAGE_FILE_NAME,
@@ -76,6 +77,7 @@ const emptyProductFamilyForm = () => ({
   familyName: "",
   familyDescription: "",
   familySortOrder: 0,
+  familyImageFileName: EMPTY_IMAGE_FILE_NAME,
   familyImageUrl: "",
   telegramFamilyImageUrl: "",
   telegramFamilyImageFileName: EMPTY_IMAGE_FILE_NAME,
@@ -471,8 +473,10 @@ export default function adminDashboard(initialState = {}) {
         reduceMotion ? 900 : RETURN_TARGET_HIGHLIGHT_MS
       );
     },
-
     setStockInputMode(mode) {
+      if (this.accountInputSubmitting) {
+        return false;
+      }
       if (mode !== "quick" && mode !== "account") {
         return false;
       }
@@ -673,16 +677,12 @@ export default function adminDashboard(initialState = {}) {
       });
     },
 
-    resetTelegramProductImageInput() {
-      const input = this.$refs.telegramProductImage;
+    resetImageInput(ref, fileNameField) {
+      const input = this.$refs[ref];
       if (input) {
         input.value = "";
-        this.telegramProductImageFileName =
-          input.files?.[0]?.name ?? EMPTY_IMAGE_FILE_NAME;
-        return;
       }
-
-      this.telegramProductImageFileName = EMPTY_IMAGE_FILE_NAME;
+      this[fileNameField] = EMPTY_IMAGE_FILE_NAME;
     },
 
     updateTelegramProductImageFileName(event) {
@@ -699,7 +699,11 @@ export default function adminDashboard(initialState = {}) {
         ...emptyProductForm(),
         productModalOpen: true,
       });
-      this.resetTelegramProductImageInput();
+      this.resetImageInput("productImage", "productImageFileName");
+      this.resetImageInput(
+        "telegramProductImage",
+        "telegramProductImageFileName"
+      );
       this.$nextTick(() => this.$refs.productName?.focus());
     },
     focusProductFamilyAssignment(familyId) {
@@ -800,6 +804,11 @@ export default function adminDashboard(initialState = {}) {
         ...emptyProductFamilyForm(),
       });
       this.$nextTick(() => this.$refs.familyName?.focus());
+      this.resetImageInput("familyImage", "familyImageFileName");
+      this.resetImageInput(
+        "telegramFamilyImage",
+        "telegramFamilyImageFileName"
+      );
     },
 
     openProductFamilyEditModal(family) {
@@ -822,6 +831,11 @@ export default function adminDashboard(initialState = {}) {
         telegramFamilyImageUrl: family.telegramImageUrl ?? "",
       });
       this.$nextTick(() => this.$refs.familyName?.focus());
+      this.resetImageInput("familyImage", "familyImageFileName");
+      this.resetImageInput(
+        "telegramFamilyImage",
+        "telegramFamilyImageFileName"
+      );
     },
 
     resetProductFamilyForm() {
@@ -830,6 +844,11 @@ export default function adminDashboard(initialState = {}) {
         familyFormAction: this.familyCreateUrl,
         ...emptyProductFamilyForm(),
       });
+      this.resetImageInput("familyImage", "familyImageFileName");
+      this.resetImageInput(
+        "telegramFamilyImage",
+        "telegramFamilyImageFileName"
+      );
       this.$nextTick(() => this.$refs.familyName?.focus());
     },
 
@@ -876,12 +895,15 @@ export default function adminDashboard(initialState = {}) {
         productIsActive: product.isActive,
         productImageUrl: product.imageUrl ?? "",
         telegramProductImageUrl: product.telegramImageUrl ?? "",
-        telegramProductImageFileName: EMPTY_IMAGE_FILE_NAME,
         productDeliveryNoteOpen:
           String(product.deliveryNote || "").trim().length > 0,
         productModalOpen: true,
       });
-      this.resetTelegramProductImageInput();
+      this.resetImageInput("productImage", "productImageFileName");
+      this.resetImageInput(
+        "telegramProductImage",
+        "telegramProductImageFileName"
+      );
       this.$nextTick(() => this.$refs.productName?.focus());
     },
 
@@ -1068,8 +1090,10 @@ export default function adminDashboard(initialState = {}) {
       });
       this.$nextTick(() => this.$refs.stockItems?.focus());
     },
-
     closeStockModal(force = false) {
+      if (this.accountInputSubmitting && !force) {
+        return;
+      }
       if (!force && !this.confirmAccountInputClose()) {
         return;
       }

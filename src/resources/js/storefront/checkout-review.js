@@ -561,6 +561,25 @@ export default function checkoutReview(initialConfig = {}) {
     },
 
     refreshFormValidity() {
+      const channel = this.$refs?.checkoutForm?.elements?.namedItem?.(
+        "support_contact_channel"
+      );
+      const contact = this.$refs?.checkoutForm?.elements?.namedItem?.(
+        "support_contact_value"
+      );
+      if (channel && contact) {
+        channel.setCustomValidity(
+          this.contactRequired && channel.value !== "whatsapp"
+            ? "Pilih WhatsApp untuk metode pembayaran ini."
+            : ""
+        );
+        contact.pattern = this.contactRequired
+          ? "\\+?[0-9][0-9 .\\-]{7,19}"
+          : "";
+        contact.title = this.contactRequired
+          ? "Masukkan nomor WhatsApp yang valid."
+          : "";
+      }
       const refresh = () => {
         this.formIsValid = Boolean(
           this.$refs?.checkoutForm?.matches?.(":valid")

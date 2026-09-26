@@ -1339,6 +1339,14 @@ test("customer checkout: keeps Family options and sticky purchase reachable at m
     await expect(optionButton).toHaveAttribute("aria-checked", "true");
     await expect(secondaryButton).toHaveAttribute("aria-checked", "false");
     await expect(optionDetail).toBeVisible();
+    const quickQuantity = page.locator("[data-family-quantity]");
+    await quickQuantity.fill("0");
+    await quickQuantity.blur();
+    await expect(quickQuantity).toHaveValue("1");
+    await expect(page.locator("[data-family-checkout]")).toHaveAttribute(
+      "href",
+      /quantity=1(?:&|$)/
+    );
 
     await settleSmoothScroll(page);
 
@@ -2131,9 +2139,24 @@ test("polls active invoices within the budget and stops on hidden or terminal st
     "Terlalu sering cek status"
   );
 
-  await page.clock.runFor(20_000);
-  expect(calls).toBe(1);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
   await page.clock.runFor(10_000);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(19_000);
+  expect(calls).toBe(1);
+  await page.clock.runFor(2_000);
   await expect.poll(() => calls).toBe(2);
 
   await statusCard.evaluate((element) => {

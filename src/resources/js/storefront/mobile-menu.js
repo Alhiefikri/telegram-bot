@@ -77,7 +77,11 @@ export default function mobileMenu(environment = globalThis) {
   }
 
   function lockBodyScroll() {
-    if (bodyLockOwned || !document.body) {
+    if (
+      bodyLockOwned ||
+      !document.body ||
+      document.body.classList.contains("overflow-hidden")
+    ) {
       return;
     }
 
@@ -220,9 +224,22 @@ export default function mobileMenu(environment = globalThis) {
     },
 
     closeOnLink(event) {
-      if (event.target?.closest?.("a")) {
-        this.close(false);
+      const link = event.target?.closest?.("a");
+      if (
+        !link ||
+        event.defaultPrevented ||
+        event.button > 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey ||
+        link.target === "_blank" ||
+        link.hasAttribute?.("download")
+      ) {
+        return;
       }
+
+      this.close(false);
     },
 
     handleKeydown(event) {

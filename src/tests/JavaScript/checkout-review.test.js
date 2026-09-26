@@ -307,6 +307,54 @@ test("payment changes project copy, required contact, and native form validity",
   assert.equal(review.stickySubmitDisabled, false);
 });
 
+test("Sakurupiah keeps checkout disabled until a WhatsApp number is valid", () => {
+  const review = checkoutReview(reviewConfig());
+  const channel = {
+    value: "telegram",
+    error: "",
+    setCustomValidity(message) {
+      this.error = message;
+    },
+  };
+  const contact = { value: "@username", pattern: "", title: "" };
+  review.$refs = {
+    checkoutForm: {
+      elements: {
+        namedItem(name) {
+          return name === "support_contact_channel" ? channel : contact;
+        },
+      },
+      matches(selector) {
+        assert.equal(selector, ":valid");
+        return (
+          channel.error === "" &&
+          (!contact.pattern ||
+            new RegExp(`^(?:${contact.pattern})$`, "v").test(contact.value))
+        );
+      },
+    },
+  };
+
+  review.selectedPaymentMethod = "sakurupiah";
+  review.refreshFormValidity();
+  assert.equal(review.stickySubmitDisabled, true);
+  assert.match(channel.error, /WhatsApp/);
+
+  channel.value = "whatsapp";
+  review.refreshFormValidity();
+  assert.equal(review.stickySubmitDisabled, true);
+  contact.value = "+628123456789";
+  review.refreshFormValidity();
+  assert.equal(review.stickySubmitDisabled, false);
+
+  review.selectedPaymentMethod = "qris";
+  channel.value = "telegram";
+  contact.value = "@username";
+  review.refreshFormValidity();
+  assert.equal(review.stickySubmitDisabled, false);
+  assert.equal(contact.pattern, "");
+});
+
 test("payment metadata hydrates from server-rendered option attributes", () => {
   const review = checkoutReview(
     reviewConfig({ paymentOptions: [], selectedPaymentMethod: "" })
