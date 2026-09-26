@@ -155,12 +155,6 @@ export default function mobileMenu(environment = globalThis) {
     },
 
     toggle(event) {
-      // The Storefront initializer keeps a second click listener on this button
-      // until the parent cutover. It decides from the rendered drawer state, so
-      // it would invert every toggle Alpine commits. Stop that listener and own
-      // the click here.
-      event?.stopImmediatePropagation?.();
-
       if (this.isOpen) {
         this.close();
         return;

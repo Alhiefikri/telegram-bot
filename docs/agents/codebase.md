@@ -759,8 +759,10 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/Telegram/TelegramNavigationRootTest.php` dan `TelegramNavigationRootPostgresConcurrencyTest.php` — root establishment/replacement/lease semantics dan race PostgreSQL-nya.
 - `tests/Feature/Telegram/StartMetricsTest.php` — canonical successful Order and Telegram Customer metrics with bounded staleness cache.
 - `tests/Unit/Services/` — pure parser/policy/outcome/verification behavior.
-- `tests/Browser/admin-dashboard-responsive.spec.js` — customer checkout/page-flow evidence, admin behavior, reporting navigation, and responsive checks. The `customer checkout:` cases are the focused Storefront lane; they assert geometry and interaction behavior rather than screenshot-only output.
+- `tests/JavaScript/*.test.js` — Node unit lane (`npm run test:js`, enforced in CI) for the consumer-visible Alpine module contracts: Family quick-buy selection/quantity/checkout href, checkout review quotes/sticky action/form validity, mobile navigation focus/scroll lock/Escape, and Admin Account Input revision safety. Tests import the module factories and assert behavior rather than pinning entrypoint implementation text.
+- `tests/Browser/admin-dashboard-responsive.spec.js` — customer checkout/page-flow evidence, admin behavior, reporting navigation, and responsive checks. The `customer checkout:` cases are the focused Storefront lane; they assert geometry and interaction behavior rather than screenshot-only output. Entry lanes are `npm run test:browser:admin` (full Admin/responsive slice) and `npm run test:browser:customer` (Storefront slice), both rebuilding assets first.
 - `tests/Browser/` — real browser responsive/admin/Docker smoke.
+- `src/resources/js/storefront.js` — retained imperative services only: analytics event transport (`trackStorefrontEvent`), scroll progress/reveal/header-elevation observers, media frames, FAQ accordion, verified-purchase activity polling, native QRIS image fallback, payment countdown/status polling and actions, catalog filter focus, invoice follow-up details, and support funnel listeners. Family quick-buy, checkout review, and mobile navigation state are owned solely by the Alpine modules in `src/resources/js/storefront/` (`familyQuickBuy`, `checkoutReview`, `mobileMenu`).
 
 Perintah umum:
 
@@ -769,11 +771,13 @@ cd src
 composer test
 composer test:foundation
 composer test:concurrency-gate
+npm run test:js
 npm run build
+npm run test:browser:admin
 npm run test:browser:customer
 ```
 
-`composer test:concurrency-gate` memerlukan PostgreSQL disposable dan dipakai ketika perubahan menyentuh lock/stock/checkout/payment. `npm run build` diperlukan bila perubahan menyentuh Blade asset, Vite entry, CSS, atau JavaScript.
+`composer test:concurrency-gate` memerlukan PostgreSQL disposable dan dipakai ketika perubahan menyentuh lock/stock/checkout/payment. `npm run test:js` menjalankan Node unit test untuk modul Alpine tanpa browser. `npm run build` diperlukan bila perubahan menyentuh Blade asset, Vite entry, CSS, atau JavaScript; kedua lane Playwright membangun asset terlebih dahulu.
 
 Structured stock availability uses [`runbook-structured-account-stock-intake-rollout.md`](../../docs/runbook-structured-account-stock-intake-rollout.md). Never expose Input Akun before the bounded backfill, persisted readiness check, conflict resolution, and non-production end-to-end proof are recorded.
 

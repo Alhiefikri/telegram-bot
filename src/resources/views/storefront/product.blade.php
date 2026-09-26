@@ -4,7 +4,7 @@
     @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
 <body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)]">
-    <div class="storefront-shell storefront-product-page relative z-10 flex min-h-screen flex-col justify-between overflow-x-hidden">
+    <div class="storefront-shell storefront-product-page relative z-10 flex min-h-screen flex-col justify-between overflow-x-clip">
         @include('storefront.partials.header')
 
             @include('storefront.partials.checkout-maintenance', ['maintenance' => $checkoutMaintenance])

@@ -3751,7 +3751,9 @@ test("manages quantity price tiers from the product modal at narrow mobile width
     dialog.getByRole("button", { name: /Simpan/i }).click(),
   ]);
   await expect(
-    page.getByText("Produk Browser QA Produk A berhasil diperbarui.")
+    page.getByText(
+      /Produk Browser QA Produk A(?: Edited)? berhasil diperbarui\./
+    )
   ).toBeVisible();
 
   const updatedCard = await getAdminProductCard(

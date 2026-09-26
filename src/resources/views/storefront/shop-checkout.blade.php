@@ -4,7 +4,7 @@
     @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
 <body class="relative overflow-x-hidden text-[var(--sf-ink)] antialiased selection:bg-[var(--sf-ink)] selection:text-white motion-reduce:animate-none">
-    <div class="storefront-shell storefront-checkout-page relative z-10 flex min-h-screen flex-col justify-between overflow-x-hidden">
+    <div class="storefront-shell storefront-checkout-page relative z-10 flex min-h-screen flex-col justify-between overflow-x-clip">
         @include('storefront.partials.header')
 
         @php

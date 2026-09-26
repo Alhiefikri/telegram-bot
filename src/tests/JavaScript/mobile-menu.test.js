@@ -172,21 +172,6 @@ test("opening locks scrolling, focuses the close button, and slides in on a fram
   assert.equal(component.isAnimating, true);
 });
 
-test("the toggle click stops the co-owning button listener", () => {
-  const { component, opener } = fixture();
-  let stopped = 0;
-
-  component.toggle({
-    currentTarget: opener,
-    stopImmediatePropagation() {
-      stopped += 1;
-    },
-  });
-
-  assert.equal(stopped, 1);
-  assert.equal(component.isOpen, true);
-});
-
 test("toggling an open menu closes it and restores focus to the trigger", () => {
   const { component, document, opener, flushTicks } = fixture();
   component.toggle({ currentTarget: opener });
@@ -361,7 +346,7 @@ test("closing before the queued focus runs does not pull focus into the drawer",
   assert.equal(document.activeElement, opener);
 });
 
-test("releases a scroll lock the co-owning initializer already applied", () => {
+test("closing releases a body scroll lock that pre-existed the drawer session", () => {
   const { component, document, opener, flushTicks } = fixture();
   document.body.classList.add("overflow-hidden");
 

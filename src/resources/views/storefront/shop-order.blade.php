@@ -4,7 +4,7 @@
     @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
 <body class="storefront-invoice-page overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)]">
-    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-hidden">
+    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-clip">
         @include('storefront.partials.header')
 
         <main class="flex-grow pb-20 pt-8 sm:pt-12">
