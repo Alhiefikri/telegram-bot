@@ -1340,6 +1340,8 @@ test("customer checkout: keeps Family options and sticky purchase reachable at m
     await expect(secondaryButton).toHaveAttribute("aria-checked", "false");
     await expect(optionDetail).toBeVisible();
 
+    await settleSmoothScroll(page);
+
     const documentOverflow = await page.evaluate(
       () =>
         document.documentElement.scrollWidth -
@@ -1449,7 +1451,7 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
     await page
       .getByText("Tambahkan email atau kontak bantuan", { exact: true })
       .click();
-    await expect(contactDisclosure).toHaveAttribute("open", "");
+    await expect(contactDisclosure).toHaveJSProperty("open", true);
     await expect(page.getByRole("textbox", { name: "Email" })).toBeVisible();
   } finally {
     await runArtisan([
@@ -2456,7 +2458,7 @@ test("keeps the mobile navigation focus contained and restores its trigger", asy
   ).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(
-    menu.getByRole("link", { name: "Akun pelanggan" })
+    menu.getByRole("button", { name: /Aktifkan mode (gelap|terang)/ })
   ).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(
@@ -4755,6 +4757,34 @@ async function expectStorefrontCheckoutFocusIndicators(page) {
       invalid
     )}`
   ).toEqual([]);
+}
+
+async function settleSmoothScroll(page) {
+  await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        let previous = window.scrollY;
+        let stableFrames = 0;
+
+        const tick = () => {
+          if (window.scrollY === previous) {
+            stableFrames += 1;
+          } else {
+            stableFrames = 0;
+            previous = window.scrollY;
+          }
+
+          if (stableFrames >= 5) {
+            resolve();
+            return;
+          }
+
+          requestAnimationFrame(tick);
+        };
+
+        requestAnimationFrame(tick);
+      })
+  );
 }
 
 async function startBrowserServer() {
