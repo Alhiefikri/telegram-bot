@@ -655,16 +655,33 @@ class ProductFamilyCatalogTest extends TestCase
             ->from('/admin?tab=produk')
             ->post(route('admin.product-families.store'), [
                 'name' => '',
-                'description' => str_repeat('x', 1001),
+                'description' => 'Deskripsi keluarga produk.',
                 'sort_order' => '-1',
             ])
             ->assertRedirect()
-            ->assertSessionHasErrors(['name', 'description', 'sort_order'], null, 'productFamilyCreate');
+            ->assertSessionHasErrors(['name', 'sort_order'], null, 'productFamilyCreate');
 
         $this->actingAs($admin)
             ->get('/admin?tab=produk&family_form=create')
             ->assertOk()
             ->assertSee('\u0022familyModalOpen\u0022:true', false);
+    }
+
+    public function test_admin_can_create_family_with_long_unicode_description(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $description = implode(' ', array_fill(0, 30, '🎬 Pilihan paket keluarga produk dengan detail lengkap.'));
+
+        $this->actingAs($admin)
+            ->post(route('admin.product-families.store'), [
+                'name' => 'Long Description Family',
+                'description' => $description,
+                'sort_order' => '0',
+            ])
+            ->assertRedirect();
+
+        $family = ProductFamily::query()->where('name', 'Long Description Family')->firstOrFail();
+        $this->assertSame($description, $family->description);
     }
 
     public function test_family_update_keeps_slug_replaces_managed_image_and_delete_requires_confirmation(): void

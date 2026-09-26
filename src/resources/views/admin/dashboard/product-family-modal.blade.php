@@ -42,7 +42,7 @@
                     </div>
                     <div>
                         <x-admin-dashboard.field-label for="product-family-description">Deskripsi opsional</x-admin-dashboard.field-label>
-                        <x-admin-dashboard.input id="product-family-description" name="description" maxlength="1000" placeholder="Pilihan paket Netflix" class="mt-1.5" x-model="familyDescription" />
+                        <x-admin-dashboard.textarea id="product-family-description" name="description" rows="3" placeholder="Pilihan paket Netflix" class="mt-1.5" x-model="familyDescription" />
                         @error('description', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                         @error('description', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     </div>

@@ -63,7 +63,7 @@ abstract class AdminProductFamilyFormRequest extends FormRequest
                     }
                 },
             ],
-            'description' => ['nullable', 'string', 'max:1000'],
+            'description' => ['nullable', 'string'],
             'sort_order' => ['required', 'integer', 'min:0', 'max:999999'],
             'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120', 'dimensions:max_width=6000,max_height=6000'],
             'telegram_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120', 'dimensions:max_width=6000,max_height=6000'],
@@ -76,7 +76,6 @@ abstract class AdminProductFamilyFormRequest extends FormRequest
         return [
             'name.required' => 'Nama Product Family wajib diisi.',
             'name.max' => 'Nama Product Family maksimal 160 karakter.',
-            'description.max' => 'Deskripsi Product Family maksimal 1000 karakter.',
             'sort_order.required' => 'Urutan Product Family wajib diisi.',
             'sort_order.integer' => 'Urutan Product Family harus berupa angka bulat.',
             'sort_order.min' => 'Urutan Product Family minimal 0.',

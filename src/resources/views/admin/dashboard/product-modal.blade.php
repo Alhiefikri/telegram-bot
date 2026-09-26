@@ -294,12 +294,12 @@
                         </x-admin-dashboard.card>
 
                         <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
-                            <x-admin-dashboard.field-label for="product-description" class="text-sm normal-case tracking-normal">📝 Deskripsi singkat</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.field-label for="product-description" class="text-sm normal-case tracking-normal">📝 Deskripsi produk</x-admin-dashboard.field-label>
                             <x-admin-dashboard.textarea
                                 id="product-description"
                                 name="description"
                                 rows="3"
-                                placeholder="Deskripsi singkat produk (1–3 kalimat)..."
+                                placeholder="Deskripsi lengkap produk; emoji boleh digunakan..."
                                 class="mt-2"
                                 x-model="productDescription"
                                 required
@@ -319,7 +319,6 @@
                                 id="product-warranty-policy"
                                 name="warranty_policy"
                                 rows="4"
-                                maxlength="1000"
                                 placeholder="Contoh: Penggantian akun maksimal 1 kali dalam 7 hari. Refund mengikuti hasil pemeriksaan admin."
                                 class="mt-2"
                                 x-model="productWarrantyPolicy"

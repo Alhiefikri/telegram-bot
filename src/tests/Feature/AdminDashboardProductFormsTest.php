@@ -35,7 +35,7 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSee('Nama produk')
             ->assertSee('Harga')
             ->assertSee('Kategori')
-            ->assertSee('Deskripsi singkat')
+            ->assertSee('Deskripsi produk')
             ->assertSee('Ikon katalog (opsional)')
             ->assertSee('Catatan pengiriman rahasia')
             ->assertSee('Panduan pemakaian produk')
@@ -567,12 +567,16 @@ class AdminDashboardProductFormsTest extends TestCase
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
 
+        $description = implode(' ', array_fill(0, 30, '📘 Deskripsi lengkap product dengan detail tambahan.'));
+        $fulfillmentExpectation = implode(' ', array_fill(0, 30, '📦 Dikirim setelah pembayaran terverifikasi.'));
+        $warrantyPolicy = implode(' ', array_fill(0, 30, '⚠️ Kebijakan penggantian dan refund untuk produk ini.'));
+        $supportPolicy = implode(' ', array_fill(0, 30, '💬 Dukungan pelanggan tersedia untuk pemakaian produk.'));
         $this->actingAs($admin)
             ->from('/admin?tab=produk')
             ->post(route('admin.products.store'), [
                 'name' => 'Merchandising Product',
                 'price_amount' => '75000',
-                'description' => 'Deskripsi customer yang lengkap.',
+                'description' => $description,
                 'product_type' => 'Akun premium',
                 'access_duration' => '30 hari',
                 'region' => 'Indonesia',
@@ -580,15 +584,18 @@ class AdminDashboardProductFormsTest extends TestCase
                 'device_limit' => '1 perangkat',
                 'included_items' => "Akun siap pakai\nPanduan login\n\nDukungan awal",
                 'limitations' => "Tidak untuk dijual kembali\nSatu perangkat",
-                'fulfillment_expectation' => 'Dikirim setelah pembayaran terverifikasi.',
-                'warranty_policy' => 'Garansi login 7 hari.',
-                'support_policy' => 'Support pada jam operasional.',
+                'fulfillment_expectation' => $fulfillmentExpectation,
+                'warranty_policy' => $warrantyPolicy,
+                'support_policy' => $supportPolicy,
                 'featured_rank' => '2',
                 'delivery_note' => 'PRIVATE DELIVERY NOTE',
+                'icon' => '🪄',
             ])
             ->assertRedirect('/admin?tab=produk#product-1');
 
         $product = Product::query()->where('name', 'Merchandising Product')->firstOrFail();
+        $this->assertSame($description, $product->description);
+        $this->assertSame('🪄', $product->icon);
         $this->assertSame('Akun premium', $product->product_type);
         $this->assertSame('30 hari', $product->access_duration);
         $this->assertSame('Indonesia', $product->region);
@@ -596,9 +603,9 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertSame('1 perangkat', $product->device_limit);
         $this->assertSame("Akun siap pakai\nPanduan login\nDukungan awal", $product->included_items);
         $this->assertSame("Tidak untuk dijual kembali\nSatu perangkat", $product->limitations);
-        $this->assertSame('Dikirim setelah pembayaran terverifikasi.', $product->fulfillment_expectation);
-        $this->assertSame('Garansi login 7 hari.', $product->warranty_policy);
-        $this->assertSame('Support pada jam operasional.', $product->support_policy);
+        $this->assertSame($fulfillmentExpectation, $product->fulfillment_expectation);
+        $this->assertSame($warrantyPolicy, $product->warranty_policy);
+        $this->assertSame($supportPolicy, $product->support_policy);
         $this->assertSame(2, $product->featured_rank);
 
         $this->actingAs($admin)
