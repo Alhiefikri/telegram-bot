@@ -111,7 +111,7 @@ class TelegramMessageRouter
             return;
         }
 
-        if ($text === '📦 Cek Stok' || $text === '/stok') {
+        if ($text === '📦 Cek Stok' || $text === '/stok' || $text === '/stock') {
             $this->session->forgetWithLock($customer);
             if (! $this->adminAccess->isAdmin($customer, $chatId)) {
                 $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.access_denied'));
@@ -322,6 +322,7 @@ class TelegramMessageRouter
             '📊 Statistik Harian',
             '📦 Cek Stok',
             '/stok',
+            '/stock',
         ], true)
             || $this->balanceFunding->isDepositCommand($text)
             || str_starts_with($text, '/payment ')

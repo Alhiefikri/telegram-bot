@@ -727,6 +727,38 @@ class AdminMenuTest extends TelegramBotTestSupport
             && strpos($request['text'], 'Canva Pro') < strpos($request['text'], 'Gemini Pro'));
     }
 
+    public function test_admin_can_open_stock_overview_with_english_command_alias(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        Product::factory()->create(['name' => 'Canva Pro', 'stock' => 4, 'reserved_stock' => 1]);
+
+        $this->postTelegramWebhook($this->messageUpdate(320, '/stock', ['id' => 999], 999))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '999'
+            && str_contains($request['text'], '📦 Stok Produk')
+            && str_contains($request['text'], 'Canva Pro: 3'));
+    }
+
+    public function test_english_stock_command_stays_private_chat_only(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
+        Product::factory()->create(['name' => 'Canva Pro', 'stock' => 4, 'reserved_stock' => 1]);
+
+        $this->postTelegramWebhook(
+            $this->messageUpdate(321, '/stock', ['id' => 999], -100123, 'group')
+        )->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '-100123'
+            && str_contains($request['text'], 'Lanjut di chat pribadi'));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Stok Produk'));
+    }
+
     public function test_non_admin_cannot_open_product_stock_overview(): void
     {
         config()->set('services.telegram.admin_user_id', '999');
