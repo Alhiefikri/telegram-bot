@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Cart;
+use App\Models\CatalogBrandIcon;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -12,6 +13,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Services\Catalog\CatalogBrandIcons;
 use App\Services\Telegram\TelegramCatalogIntents;
 use App\Services\Telegram\TelegramFamilyCallbackToken;
 use App\Services\Telegram\TelegramIntentSession;
@@ -86,7 +88,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertSame('{}', json_encode($soldOutButton['disabled'], JSON_THROW_ON_ERROR));
         $this->assertArrayNotHasKey('callback_data', $soldOutButton);
         $availableButton = $options['reply_markup']['inline_keyboard'][0][1];
-        $this->assertSame('success', $availableButton['style']);
+        $this->assertSame('primary', $availableButton['style']);
         $this->assertArrayNotHasKey('disabled', $availableButton);
         $this->assertStringStartsWith('family:select:v', $availableButton['callback_data']);
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
@@ -784,6 +786,44 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         }
     }
 
+    public function test_captured_brand_custom_emoji_icon_is_rendered_on_catalog_buttons(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41200, 'locale' => 'id']);
+        CatalogBrandIcon::query()->where('slug', 'chatgpt')->sole()->update(['custom_emoji_id' => '5368324170671202286']);
+        app(CatalogBrandIcons::class)->forget();
+
+        $family = ProductFamily::factory()->create(['name' => 'ChatGPT', 'slug' => 'chatgpt']);
+        foreach ([
+            ['name' => 'ChatGPT Plus 1 Bulan', 'label' => 'Plus 1 Bulan'],
+            ['name' => 'ChatGPT Go 1 Bulan', 'label' => 'Go 1 Bulan'],
+        ] as $sortOrder => $productData) {
+            Product::factory()->create([
+                'name' => $productData['name'],
+                'product_family_id' => $family->id,
+                'family_sort_order' => $sortOrder + 1,
+                'family_option_label' => $productData['label'],
+                'stock' => 2,
+                'reserved_stock' => 0,
+            ]);
+        }
+
+        $this->postTelegramWebhook($this->messageUpdate(41201, '/produk', [], 41200))->assertOk();
+
+        $catalog = $this->lastMessageContaining('ChatGPT');
+        $entry = $catalog['reply_markup']['inline_keyboard'][0][0];
+        $this->assertSame('5368324170671202286', $entry['icon_custom_emoji_id']);
+        $this->assertSame('ChatGPT ▶ 2 Plan »', $entry['text']);
+
+        $this->openFamilyFromDeepLink($customer, 41202, $family);
+
+        $options = $this->lastMessageContaining('Pilih Plan ChatGPT');
+        $this->assertStringContainsString('🤖 Pilih Plan ChatGPT', (string) $options['text']);
+        $plan = $options['reply_markup']['inline_keyboard'][0][0];
+        $this->assertSame('5368324170671202286', $plan['icon_custom_emoji_id']);
+        $this->assertSame('1', $plan['text']);
+    }
+
     public function test_family_options_show_per_product_quotes_and_two_column_icon_buttons(): void
     {
         $this->fakeTelegramHttp();
@@ -1180,7 +1220,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertSame('product:'.$product->id, $entryButton['callback_data']);
         $this->assertStringContainsString('Stok 5', $entryButton['text']);
         $this->assertStringNotContainsString('Plan', $entryButton['text']);
-        $this->assertSame('success', $entryButton['style']);
+        $this->assertSame('primary', $entryButton['style']);
 
         $this->postTelegramWebhook($this->callbackUpdate(41131, 'single-plan-open', 'product:'.$product->id, [], 41130))->assertOk();
         $detail = $this->lastMessageContaining('Spotify Solo 1 Bulan');

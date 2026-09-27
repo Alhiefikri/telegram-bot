@@ -554,7 +554,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             $this->assertCount($entryCount, $entryButtons);
             foreach ($entryButtons as $button) {
                 $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', (string) ($button['callback_data'] ?? ''));
-                $this->assertContains($button['style'] ?? null, ['success', 'danger']);
+                $this->assertContains($button['style'] ?? null, ['primary', 'danger']);
             }
             if ($count > 10) {
                 $this->assertSame(sprintf('category:%d:page:2', $category->id), $keyboard[$entryCount][0]['callback_data']);
@@ -648,7 +648,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $buttonText = $request['reply_markup']['inline_keyboard'][0][0]['text'] ?? '';
 
         $this->assertSame('1. Pilih', $buttonText);
-        $this->assertSame('success', $request['reply_markup']['inline_keyboard'][0][0]['style'] ?? null);
+        $this->assertSame('primary', $request['reply_markup']['inline_keyboard'][0][0]['style'] ?? null);
         $this->assertStringContainsString('Rp35.000', (string) $request['text']);
         $this->assertStringNotContainsString('1.5 USDT', (string) $request['text']);
         $this->assertSame('product:'.$product->id, $request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null);
@@ -693,7 +693,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             array_column($buttons, 'callback_data'),
         );
         foreach ($buttons as $button) {
-            $this->assertSame('success', $button['style'] ?? null);
+            $this->assertSame('primary', $button['style'] ?? null);
         }
     }
 
@@ -749,7 +749,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains($request['text'], 'netflix@example.test')
             && ($request['reply_markup']['inline_keyboard'][0][0]['text'] ?? null) === '1. Pilih'
             && ($request['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '2. Pilih'
-            && ($request['reply_markup']['inline_keyboard'][0][0]['style'] ?? null) === 'success'
+            && ($request['reply_markup']['inline_keyboard'][0][0]['style'] ?? null) === 'primary'
             && ($request['reply_markup']['inline_keyboard'][1][0]['style'] ?? null) === 'danger'
             && ($request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'product:'.$matching->id
             && ($request['reply_markup']['inline_keyboard'][1][0]['callback_data'] ?? null) === 'product:'.$empty->id
@@ -1209,7 +1209,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
                 }
                 $this->assertMatchesRegularExpression('/^(?:.*\([1-2]\)$|(?:.* )?[1-2](?:\. |$))/', $selectorButton['text'] ?? '');
                 $this->assertStringStartsWith('family:options:v', $selectorButton['callback_data'] ?? '');
-                $this->assertSame('success', $selectorButton['style'] ?? null);
+                $this->assertSame('primary', $selectorButton['style'] ?? null);
             }
 
             $this->assertStringContainsString($locale['instruction'], $copy);
@@ -1287,7 +1287,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $productRows = array_slice($keyboard, 0, $entryCount);
         foreach ($productRows as $row) {
             $this->assertCount(1, $row);
-            $this->assertSame('success', $row[0]['style'] ?? null);
+            $this->assertSame('primary', $row[0]['style'] ?? null);
             $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', $row[0]['callback_data']);
         }
         if ($count > 10) {

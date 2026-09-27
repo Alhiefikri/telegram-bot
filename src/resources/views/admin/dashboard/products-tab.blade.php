@@ -11,6 +11,9 @@
 
                     @if ($canManageProducts)
                     <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+                        <x-admin-dashboard.action-link :href="route('admin.brand-icons.index')" size="sm" class="w-full text-[11px] sm:w-auto">
+                            🎨 Ikon Brand
+                        </x-admin-dashboard.action-link>
                         <x-admin-dashboard.button
                             type="button"
                             variant="secondary"

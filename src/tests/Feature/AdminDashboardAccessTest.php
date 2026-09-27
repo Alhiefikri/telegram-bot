@@ -114,6 +114,26 @@ class AdminDashboardAccessTest extends TestCase
                 'methods' => ['POST'],
                 'middleware' => ['web', 'admin.no-cache', 'admin.access'],
             ],
+            'admin.brand-icons.index' => [
+                'uri' => 'admin/brand-icons',
+                'methods' => ['GET', 'HEAD'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.brand-icons.store' => [
+                'uri' => 'admin/brand-icons',
+                'methods' => ['POST'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.brand-icons.update' => [
+                'uri' => 'admin/brand-icons/{brand}',
+                'methods' => ['PATCH'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
+            'admin.brand-icons.custom-emoji.destroy' => [
+                'uri' => 'admin/brand-icons/{brand}/custom-emoji',
+                'methods' => ['DELETE'],
+                'middleware' => ['web', 'admin.no-cache', 'admin.access'],
+            ],
             'admin.orders.show' => [
                 'uri' => 'admin/orders/{order}',
                 'methods' => ['GET', 'HEAD'],

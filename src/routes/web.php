@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\AdminBroadcastController;
 use App\Http\Controllers\Admin\AdminBscReceiverController;
+use App\Http\Controllers\Admin\AdminCatalogBrandIconController;
 use App\Http\Controllers\Admin\AdminCategoryCreateController;
 use App\Http\Controllers\Admin\AdminCategoryDeleteController;
 use App\Http\Controllers\Admin\AdminCategoryUpdateController;
@@ -173,6 +174,13 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::post('categories', AdminCategoryCreateController::class)->name('categories.store');
             Route::patch('categories/{category}', AdminCategoryUpdateController::class)->name('categories.update');
             Route::delete('categories/{category}', AdminCategoryDeleteController::class)->name('categories.destroy');
+
+            Route::prefix('brand-icons')->name('brand-icons.')->group(function (): void {
+                Route::get('/', [AdminCatalogBrandIconController::class, 'index'])->name('index');
+                Route::post('/', [AdminCatalogBrandIconController::class, 'store'])->name('store');
+                Route::patch('{brand}', [AdminCatalogBrandIconController::class, 'update'])->name('update');
+                Route::delete('{brand}/custom-emoji', [AdminCatalogBrandIconController::class, 'clearCustomEmoji'])->name('custom-emoji.destroy');
+            });
 
             Route::prefix('product-families')->name('product-families.')->group(function (): void {
                 Route::post('/', AdminProductFamilyCreateController::class)->name('store');

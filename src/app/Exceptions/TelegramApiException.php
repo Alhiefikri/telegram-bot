@@ -40,6 +40,18 @@ final class TelegramApiException extends RuntimeException
         return str_contains($this->normalizedDescription(), 'message is not modified');
     }
 
+    public function isCustomEmojiRejected(): bool
+    {
+        if ($this->status !== 400) {
+            return false;
+        }
+
+        $description = $this->normalizedDescription();
+
+        return str_contains($description, 'custom emoji')
+            || str_contains($description, 'icon_custom_emoji_id');
+    }
+
     public function isDefiniteEditFailure(): bool
     {
         if ($this->status !== 400) {

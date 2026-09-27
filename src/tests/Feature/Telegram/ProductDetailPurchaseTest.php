@@ -47,7 +47,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertCount(1, $keyboard[2]);
         $this->assertCount(1, $keyboard[3]);
         $this->assertCount(1, $keyboard[4]);
-        $this->assertSame('success', $keyboard[2][0]['style'] ?? null);
+        $this->assertSame('primary', $keyboard[2][0]['style'] ?? null);
         $this->assertSame('💳 QRIS · Rp10.000', $keyboard[2][0]['text']);
         $this->assertStringContainsString('Balance · Rp10.000', $keyboard[3][0]['text']);
         $this->assertStringStartsWith('detail:pay:balance:', $keyboard[3][0]['callback_data']);

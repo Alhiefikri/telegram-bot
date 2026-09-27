@@ -4,9 +4,11 @@ namespace Tests\Unit\Services\Telegram;
 
 use App\Exceptions\TelegramApiException;
 use App\Exceptions\TelegramTransportException;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackAckState;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 use Throwable;
@@ -24,6 +26,8 @@ class TelegramBotClientTest extends TestCase
             'http_timeout_seconds' => 7.25,
             'http_connect_timeout_seconds' => 2.5,
         ]);
+
+        app(CustomEmojiCapability::class)->markAvailable();
     }
 
     public function test_runtime_methods_apply_configured_http_timeouts_to_json_and_multipart_requests(): void
@@ -138,6 +142,65 @@ class TelegramBotClientTest extends TestCase
 
         Http::assertSentCount(1);
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/editMessageText'));
+    }
+
+    public function test_custom_emoji_rejection_is_retried_once_without_the_button_icons(): void
+    {
+        $calls = 0;
+        Http::fake(function () use (&$calls) {
+            $calls++;
+
+            if ($calls === 1) {
+                return Http::response([
+                    'ok' => false,
+                    'description' => "Bad Request: can't use custom emoji in this chat",
+                ], 400);
+            }
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 779]], 200);
+        });
+
+        $capability = app(CustomEmojiCapability::class);
+        $this->assertTrue($capability->isAvailable());
+
+        app(TelegramBotClient::class)->sendMessage(12345, 'Katalog', [
+            'inline_keyboard' => [
+                [['text' => 'ChatGPT', 'icon_custom_emoji_id' => '5368324170671202286']],
+                [['text' => 'Netflix', 'icon_custom_emoji_id' => '5368324170671202286']],
+            ],
+        ]);
+
+        Http::assertSentCount(2);
+        $this->assertFalse($capability->isAvailable(), 'A rejected send must disable custom emoji for later sends.');
+        $this->assertNotNull($capability->unavailableReason());
+
+        $retry = Http::recorded()[1][0];
+        $this->assertSame(
+            [[['text' => 'ChatGPT']], [['text' => 'Netflix']]],
+            $retry['reply_markup']['inline_keyboard'],
+        );
+    }
+
+    public function test_rejections_unrelated_to_custom_emoji_are_not_retried(): void
+    {
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => false,
+                'description' => 'Bad Request: chat not found',
+            ], 400),
+        ]);
+
+        try {
+            app(TelegramBotClient::class)->sendMessage(12345, 'Katalog', [
+                'inline_keyboard' => [[['text' => 'ChatGPT', 'icon_custom_emoji_id' => '5368324170671202286']]],
+            ]);
+            $this->fail('Expected the rejected send to surface.');
+        } catch (RequestException $exception) {
+            $this->assertSame(400, $exception->response?->status());
+        }
+
+        Http::assertSentCount(1);
+        $this->assertTrue(app(CustomEmojiCapability::class)->isAvailable());
     }
 
     public function test_unsuccessful_json_edit_response_is_rejected(): void

@@ -91,6 +91,11 @@ class TelegramWebhookIngress
         $minimized['from'] = Arr::only((array) $message['from'], ['id', 'first_name', 'username']);
         $minimized['chat'] = Arr::only((array) $message['chat'], ['id', 'type']);
 
+        $customEmoji = $this->customEmojiEntities($message);
+        if ($customEmoji !== []) {
+            $minimized['entities'] = $customEmoji;
+        }
+
         $mediaKind = TelegramMessageMedia::kind($message);
         if ($mediaKind !== null) {
             $minimized['media_kind'] = $mediaKind;
@@ -117,6 +122,33 @@ class TelegramWebhookIngress
         }
 
         return $minimized;
+    }
+
+    /**
+     * Custom emoji are the one inbound entity the bot acts on: the Store Bot
+     * reads them to capture a brand icon identifier. Every other entity is
+     * dropped, so the stored payload stays as small as the rest of minimize.
+     *
+     * @return list<array{type: string, custom_emoji_id: string}>
+     */
+    private function customEmojiEntities(array $message): array
+    {
+        $entities = [];
+
+        foreach (['entities', 'caption_entities'] as $field) {
+            foreach ((array) ($message[$field] ?? []) as $entity) {
+                if (! is_array($entity) || ($entity['type'] ?? null) !== 'custom_emoji') {
+                    continue;
+                }
+
+                $id = $entity['custom_emoji_id'] ?? null;
+                if (is_string($id) && trim($id) !== '') {
+                    $entities[] = ['type' => 'custom_emoji', 'custom_emoji_id' => trim($id)];
+                }
+            }
+        }
+
+        return $entities;
     }
 
     /** @return array{file_id: string, file_size?: int, width?: int, height?: int}|null */

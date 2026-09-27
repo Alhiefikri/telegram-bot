@@ -108,7 +108,15 @@ The customer-facing name for one Product option inside a Product Family, used by
 _Avoid_: Variant, SKU, subscription tier
 
 **Product catalog icon**:
-An optional plain Unicode presentation value stored on a Product and edited through the Admin Dashboard. It is used by the Store Bot catalog and keyboard; when empty, the bot uses a static brand fallback. It is not a secret and must not be configured through ENV.
+An optional plain Unicode presentation value stored on a Product and edited through the Admin Dashboard. It overrides the Catalog Brand Icon for that Product's catalog buttons and plain text. It is not a secret and must not be configured through ENV.
+
+**Catalog Brand Icon**:
+An admin-managed brand registry entry that owns the name patterns, a plain Unicode fallback glyph, and the Telegram custom emoji identifier captured from the owner's own emoji pack. The Store Bot resolves it for any Product or Product Family whose name matches, and inline keyboard buttons carry the captured identifier as their icon while the bot owner holds Telegram Premium. It is presentation only: matching never changes price, stock, checkout, or fulfillment.
+_Avoid_: Product icon, emoji configuration, sticker pack
+
+**Telegram UI icon**:
+A named Store Bot navigation slot (home, back, product catalog, balance, orders, support, language, channel) that may carry a captured Telegram custom emoji on its button. The plain Unicode glyph stays in the locale copy and is dropped only while a captured identifier renders. It is presentation only: the callback behaviour of the button never changes.
+_Avoid_: menu sticker, navigation setting
 
 **Uncategorized Product**:
 An active product that is not assigned to a Product Category. Deleting a Product Category moves its products into this state without changing their active status or sale availability.

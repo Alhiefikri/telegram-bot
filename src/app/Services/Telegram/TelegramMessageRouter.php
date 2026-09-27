@@ -29,6 +29,7 @@ class TelegramMessageRouter
         private TelegramManualTopUpIntents $manualTopUps,
         private TelegramAdminAccess $adminAccess,
         private TelegramAdminStatsIntents $adminStats,
+        private TelegramIconIntents $icons,
         private TelegramBroadcastIntents $broadcasts,
         private TelegramChatPrivacyGuard $chatPrivacy,
         private TelegramLocale $locale,
@@ -48,6 +49,19 @@ class TelegramMessageRouter
 
             return;
         }
+
+        // A pending brand icon capture owns the next private message so the
+        // admin's emoji never falls through to the normal command routing.
+        if ($isPrivateChat && $this->icons->hasPendingCapture($customer)) {
+            if ($this->adminAccess->isAdmin($customer, $chatId)) {
+                $this->icons->captureFromMessage($customer, $chatId, $message);
+            } else {
+                $this->icons->forgetPendingCapture($customer);
+            }
+
+            return;
+        }
+
         if ($text === '/start' || str_starts_with($text, '/start ')) {
             $this->session->forgetWithLock($customer);
             $this->catalogQueries->forget($customer);

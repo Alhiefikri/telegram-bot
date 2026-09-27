@@ -41,6 +41,7 @@ class TelegramMenuIntents
         private StoreBalanceLedger $balances,
         private TelegramBalanceActivityToken $activityTokens,
         private StoreBalanceFundingPolicyManager $fundingPolicies,
+        private TelegramUiIcons $uiIcons,
     ) {}
 
     public function sendLanguagePicker(string $chatId, ?Customer $customer = null, bool $isPrivateChat = true): void
@@ -235,10 +236,7 @@ class TelegramMenuIntents
         $keyboard[] = [[
             'text' => $this->locale->translate($customer, 'balance.activity.detail.back'),
             'callback_data' => 'balance',
-        ], [
-            'text' => $this->locale->translate($customer, 'menu.home'),
-            'callback_data' => 'menu:home',
-        ]];
+        ], $this->navButton($customer, 'menu.home', 'menu:home')];
 
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::Balance,
@@ -637,15 +635,28 @@ class TelegramMenuIntents
     public function navigationRow(?Customer $customer): array
     {
         return [
-            [
-                'text' => $this->locale->translate($customer, 'menu.back'),
-                'callback_data' => 'menu:back',
-            ],
-            [
-                'text' => $this->locale->translate($customer, 'menu.home'),
-                'callback_data' => 'menu:home',
-            ],
+            $this->navButton($customer, 'menu.back', 'menu:back'),
+            $this->navButton($customer, 'menu.home', 'menu:home'),
         ];
+    }
+
+    /**
+     * One navigation button with the standard shape: label text, an optional
+     * custom emoji icon, and its callback data.
+     *
+     * @return array<string, string>
+     */
+    private function navButton(?Customer $customer, string $localeKey, string $callbackData): array
+    {
+        return [...$this->navLabel($customer, $localeKey), 'callback_data' => $callbackData];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function navLabel(?Customer $customer, string $localeKey): array
+    {
+        return $this->uiIcons->apply($localeKey, $this->locale->translate($customer, $localeKey));
     }
 
     /**
@@ -655,21 +666,21 @@ class TelegramMenuIntents
     {
         $keyboard = ['inline_keyboard' => [
             [
-                ['text' => $this->locale->translate($customer, 'menu.products'), 'callback_data' => 'katalog'],
+                $this->navButton($customer, 'menu.products', 'katalog'),
             ],
             [
-                ['text' => $this->locale->translate($customer, 'menu.balance'), 'callback_data' => 'balance'],
-                ['text' => $this->locale->translate($customer, 'menu.orders'), 'callback_data' => 'menu:orders'],
+                $this->navButton($customer, 'menu.balance', 'balance'),
+                $this->navButton($customer, 'menu.orders', 'menu:orders'),
             ],
             [
-                ['text' => $this->locale->translate($customer, 'menu.language'), 'callback_data' => 'menu:language'],
-                ['text' => $this->locale->translate($customer, 'menu.support'), 'callback_data' => 'menu:support'],
+                $this->navButton($customer, 'menu.language', 'menu:language'),
+                $this->navButton($customer, 'menu.support', 'menu:support'),
             ],
         ]];
 
         if ($channelUrl !== null) {
             $keyboard['inline_keyboard'][] = [[
-                'text' => $this->locale->translate($customer, 'menu.channel'),
+                ...$this->navLabel($customer, 'menu.channel'),
                 'url' => $channelUrl,
             ]];
         }
@@ -681,6 +692,10 @@ class TelegramMenuIntents
             $keyboard['inline_keyboard'][] = [[
                 'text' => '📊 Statistik',
                 'callback_data' => 'statistik_harian',
+            ]];
+            $keyboard['inline_keyboard'][] = [[
+                'text' => '🎨 Ikon Brand',
+                'callback_data' => 'brandicon:list',
             ]];
         }
 
@@ -694,7 +709,7 @@ class TelegramMenuIntents
     {
         return ['inline_keyboard' => [
             [
-                ['text' => $this->locale->translate($customer, 'menu.products'), 'callback_data' => 'katalog'],
+                $this->navButton($customer, 'menu.products', 'katalog'),
             ],
         ]];
     }

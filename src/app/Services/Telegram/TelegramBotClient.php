@@ -14,12 +14,16 @@ class TelegramBotClient
 
     private readonly TelegramOutboundResponseValidator $responseValidator;
 
+    private readonly CustomEmojiCapability $customEmoji;
+
     public function __construct(
         ?TelegramBotApiRequestFactory $requests = null,
         ?TelegramOutboundResponseValidator $responseValidator = null,
+        ?CustomEmojiCapability $customEmoji = null,
     ) {
         $this->requests = $requests ?? new TelegramBotApiRequestFactory;
         $this->responseValidator = $responseValidator ?? new TelegramOutboundResponseValidator;
+        $this->customEmoji = $customEmoji ?? new CustomEmojiCapability;
     }
 
     public function getChat(int|string $chatId): array
@@ -32,6 +36,19 @@ class TelegramBotClient
         return $this->timed('getChatMember', fn () => $this->requests->request()->post($this->requests->url('getChatMember'), ['chat_id' => $chatId, 'user_id' => $userId])->throw()->json());
     }
 
+    /**
+     * @param  list<string>  $customEmojiIds
+     * @return array<string, mixed>
+     */
+    public function getCustomEmojiStickers(array $customEmojiIds): array
+    {
+        $response = $this->timed('getCustomEmojiStickers', fn () => $this->requests->request()->post($this->requests->url('getCustomEmojiStickers'), [
+            'custom_emoji_ids' => json_encode(array_values($customEmojiIds), JSON_THROW_ON_ERROR),
+        ])->throw()->json());
+
+        return $this->successfulResponse('getCustomEmojiStickers', $response);
+    }
+
     public function sendMessage(int|string $chatId, string $text, array $replyMarkup = [], array $options = []): array
     {
         $payload = array_merge(['chat_id' => $chatId, 'text' => $text], $options);
@@ -39,7 +56,7 @@ class TelegramBotClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        return $this->timed('sendMessage', fn () => $this->requests->request()->post($this->requests->url('sendMessage'), $payload)->throw()->json());
+        return $this->timed('sendMessage', fn () => $this->postWithCustomEmojiFallback('sendMessage', 'sendMessage', $payload, wrapFailures: false));
     }
 
     public function editMessageText(int|string $chatId, int $messageId, string $text, array $replyMarkup = [], array $options = []): array
@@ -53,11 +70,7 @@ class TelegramBotClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        try {
-            $response = $this->timed('editMessageText', fn () => $this->requests->request()->post($this->requests->url('editMessageText'), $payload)->throw()->json());
-        } catch (RequestException $exception) {
-            throw TelegramApiException::fromRequest('editMessageText', $exception);
-        }
+        $response = $this->timed('editMessageText', fn () => $this->postWithCustomEmojiFallback('editMessageText', 'editMessageText', $payload, wrapFailures: true));
 
         return $this->successfulResponse('editMessageText', $response);
     }
@@ -76,11 +89,7 @@ class TelegramBotClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        try {
-            $response = $this->timed('editMessageCaption', fn () => $this->requests->request()->post($this->requests->url('editMessageCaption'), $payload)->throw()->json());
-        } catch (RequestException $exception) {
-            throw TelegramApiException::fromRequest('editMessageCaption', $exception);
-        }
+        $response = $this->timed('editMessageCaption', fn () => $this->postWithCustomEmojiFallback('editMessageCaption', 'editMessageCaption', $payload, wrapFailures: true));
 
         return $this->successfulResponse('editMessageCaption', $response);
     }
@@ -97,11 +106,7 @@ class TelegramBotClient
             'reply_markup' => $replyMarkup,
         ], $options);
 
-        try {
-            $response = $this->timed('editMessageReplyMarkup', fn () => $this->requests->request()->post($this->requests->url('editMessageReplyMarkup'), $payload)->throw()->json());
-        } catch (RequestException $exception) {
-            throw TelegramApiException::fromRequest('editMessageReplyMarkup', $exception);
-        }
+        $response = $this->timed('editMessageReplyMarkup', fn () => $this->postWithCustomEmojiFallback('editMessageReplyMarkup', 'editMessageReplyMarkup', $payload, wrapFailures: true));
 
         return $this->successfulResponse('editMessageReplyMarkup', $response);
     }
@@ -303,6 +308,53 @@ class TelegramBotClient
         $sanitized = trim($sanitized, '.-');
 
         return $sanitized !== '' ? $sanitized : 'document';
+    }
+
+    /**
+     * Custom emoji on buttons need a bot whose owner holds Telegram Premium,
+     * and Telegram gives no way to ask for that capability up front. A rejected
+     * send is retried once without the icons, and the capability stays disabled
+     * for a while so later sends fall back immediately.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function postWithCustomEmojiFallback(string $operation, string $method, array $payload, bool $wrapFailures): array
+    {
+        try {
+            return $this->requests->request()->post($this->requests->url($method), $payload)->throw()->json();
+        } catch (RequestException $exception) {
+            $apiException = TelegramApiException::fromRequest($operation, $exception);
+            if (! $apiException->isCustomEmojiRejected()) {
+                throw $wrapFailures ? $apiException : $exception;
+            }
+
+            // The rejected request created no message, so retrying without the
+            // icons cannot duplicate anything the customer can see.
+            $this->customEmoji->markUnavailable($apiException->description);
+
+            try {
+                return $this->requests->request()
+                    ->post($this->requests->url($method), $this->withoutCustomEmojiIcons($payload))
+                    ->throw()
+                    ->json();
+            } catch (RequestException $retryException) {
+                throw $wrapFailures ? TelegramApiException::fromRequest($operation, $retryException) : $retryException;
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function withoutCustomEmojiIcons(array $payload): array
+    {
+        if (is_array($payload['reply_markup'] ?? null)) {
+            $payload['reply_markup'] = $this->customEmoji->stripIcons($payload['reply_markup']);
+        }
+
+        return $payload;
     }
 
     /**

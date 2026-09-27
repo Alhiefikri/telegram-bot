@@ -16,6 +16,7 @@ final class BalanceTopUpReceiptDeliveryPipeline
         private readonly TelegramBotClient $bot,
         private readonly TelegramLocale $locale,
         private readonly TelegramHtmlCaption $html,
+        private readonly TelegramUiIcons $uiIcons,
     ) {}
 
     public function deliver(string $topUpId, ?string $effectId = null): void
@@ -92,16 +93,16 @@ final class BalanceTopUpReceiptDeliveryPipeline
             $replyMarkup = [
                 'inline_keyboard' => [[
                     [
-                        'text' => $this->locale->translateLocale($locale, 'menu.balance'),
+                        ...$this->uiIcons->apply('menu.balance', $this->locale->translateLocale($locale, 'menu.balance')),
                         'callback_data' => 'balance',
                     ],
                     [
-                        'text' => $this->locale->translateLocale($locale, 'menu.home'),
+                        ...$this->uiIcons->apply('menu.home', $this->locale->translateLocale($locale, 'menu.home')),
                         'callback_data' => 'menu:home',
                     ],
                 ], [
                     [
-                        'text' => $this->locale->translateLocale($locale, 'menu.support'),
+                        ...$this->uiIcons->apply('menu.support', $this->locale->translateLocale($locale, 'menu.support')),
                         'callback_data' => 'menu:support',
                     ],
                 ]],
