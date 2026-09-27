@@ -120,7 +120,9 @@ class RecoverTelegramOutboundEffects extends Command
 
         // Source discovery is ledger-only: committed lifecycle rows without
         // an effect are materialized here, while every delivery attempt still
-        // goes through the shared claim/finalization protocol.
+        // goes through the shared claim/finalization protocol. The SQL guards
+        // mirror the per-order conditions below so a steady-state table is not
+        // rescanned row by row on every sweep.
         Order::query()
             ->with(['customer', 'payments'])
             ->where(function ($orders): void {
@@ -128,19 +130,73 @@ class RecoverTelegramOutboundEffects extends Command
                     ->where(function ($checkout): void {
                         $checkout
                             ->where('order_status', 'pending_payment')
+                            ->where('payment_status', 'pending')
                             ->where(function ($expiry): void {
                                 $expiry->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                            })
+                            ->whereNotExists(function ($effects): void {
+                                $effects
+                                    ->selectRaw('1')
+                                    ->from('telegram_outbound_effects as checkout_discovery_effects')
+                                    ->where('checkout_discovery_effects.source_type', Order::class)
+                                    ->whereIn('checkout_discovery_effects.effect_type', TelegramOutboundEffectService::CHECKOUT_EFFECT_TYPES)
+                                    ->whereRaw('checkout_discovery_effects.source_id = CAST(orders.id AS TEXT)');
                             });
                     })
                     ->orWhere(function ($paid): void {
                         $paid
                             ->whereIn('order_status', ['processing', 'completed'])
-                            ->where('payment_status', 'paid');
+                            ->where('payment_status', 'paid')
+                            ->whereNotExists(function ($effects): void {
+                                $effects
+                                    ->selectRaw('1')
+                                    ->from('telegram_outbound_effects as receipt_discovery_effects')
+                                    ->where('receipt_discovery_effects.source_type', Order::class)
+                                    ->where('receipt_discovery_effects.effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+                                    ->whereRaw('receipt_discovery_effects.source_id = CAST(orders.id AS TEXT)');
+                            });
                     })
                     ->orWhere(function ($expired): void {
                         $expired
                             ->where('order_status', 'expired')
-                            ->where('payment_status', 'expired');
+                            ->where('payment_status', 'expired')
+                            ->whereNotExists(function ($effects): void {
+                                $effects
+                                    ->selectRaw('1')
+                                    ->from('telegram_outbound_effects as expired_admin_discovery_effects')
+                                    ->where('expired_admin_discovery_effects.source_type', Order::class)
+                                    ->where('expired_admin_discovery_effects.effect_type', TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED)
+                                    ->whereRaw('expired_admin_discovery_effects.source_id = CAST(orders.id AS TEXT)');
+                            });
+                    })
+                    ->orWhere(function ($pendingAdmin): void {
+                        $pendingAdmin
+                            ->where('order_status', 'pending_payment')
+                            ->where('payment_status', 'pending')
+                            ->where(function ($expiry): void {
+                                $expiry->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                            })
+                            ->whereNotExists(function ($effects): void {
+                                $effects
+                                    ->selectRaw('1')
+                                    ->from('telegram_outbound_effects as pending_admin_discovery_effects')
+                                    ->where('pending_admin_discovery_effects.source_type', Order::class)
+                                    ->where('pending_admin_discovery_effects.effect_type', TelegramOutboundEffectService::TYPE_ADMIN_PENDING)
+                                    ->whereRaw('pending_admin_discovery_effects.source_id = CAST(orders.id AS TEXT)');
+                            });
+                    })
+                    ->orWhere(function ($paidAdmin): void {
+                        $paidAdmin
+                            ->whereIn('order_status', ['processing', 'completed'])
+                            ->where('payment_status', 'paid')
+                            ->whereNotExists(function ($effects): void {
+                                $effects
+                                    ->selectRaw('1')
+                                    ->from('telegram_outbound_effects as paid_admin_discovery_effects')
+                                    ->where('paid_admin_discovery_effects.source_type', Order::class)
+                                    ->where('paid_admin_discovery_effects.effect_type', TelegramOutboundEffectService::TYPE_ADMIN_PAID)
+                                    ->whereRaw('paid_admin_discovery_effects.source_id = CAST(orders.id AS TEXT)');
+                            });
                     });
             })
             ->orderBy('id')
@@ -193,48 +249,62 @@ class RecoverTelegramOutboundEffects extends Command
                 }
             });
 
+        // Cleanup eligibility must mirror the cleaner's own guards. When the
+        // scan keeps selecting orders the cleaner skips, every sweep
+        // rediscovers them and dispatches deletion jobs that can never do
+        // anything.
         Order::query()
-            ->where(function ($query): void {
-                $query->where(function ($receipt): void {
-                    $receipt
-                        ->whereExists(function ($effects): void {
-                            $effects
-                                ->selectRaw('1')
-                                ->from('telegram_outbound_effects as receipt_effects')
-                                ->where('receipt_effects.source_type', Order::class)
-                                ->where('receipt_effects.effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
-                                ->where('receipt_effects.state', 'sent')
-                                ->whereRaw('receipt_effects.source_id = CAST(orders.id AS TEXT)');
-                        })
-                        ->whereNotExists(function ($unfinished): void {
-                            $unfinished
-                                ->selectRaw('1')
-                                ->from('telegram_outbound_effects as unfinished_receipt_effects')
-                                ->where('unfinished_receipt_effects.source_type', Order::class)
-                                ->where('unfinished_receipt_effects.effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
-                                ->where('unfinished_receipt_effects.state', '<>', 'sent')
-                                ->whereRaw('unfinished_receipt_effects.source_id = CAST(orders.id AS TEXT)');
-                        })
-                        ->orWhereNotNull('telegram_receipt_sent_at');
-                })
-                    ->orWhere('order_status', 'cancelled')
-                    ->orWhereHas('payments', fn ($payments) => $payments->where('provider', PaymentProvider::MANUAL)->where('method', 'BINANCE_PAY_ID'));
-            })
             ->whereIn('order_status', ['completed', 'cancelled'])
             ->where(function ($query) use ($cutoff): void {
-                $query->where(function ($checkout) use ($cutoff): void {
-                    $checkout->whereNotNull('manual_checkout_customer_notification_message_id')
+                // The Binance-manual instruction cleaner deletes its tracked
+                // message without requiring the completed receipt marker.
+                $query->where(function ($binance) use ($cutoff): void {
+                    $binance
+                        ->whereNotNull('manual_checkout_customer_notification_chat_id')
+                        ->whereNotNull('manual_checkout_customer_notification_message_id')
                         ->whereNull('manual_checkout_customer_notification_deleted_at')
                         ->where(function ($claim) use ($cutoff): void {
                             $claim->whereNull('manual_checkout_customer_notification_deletion_started_at')
                                 ->orWhere('manual_checkout_customer_notification_deletion_started_at', '<=', $cutoff);
-                        });
-                })->orWhere(function ($detail) use ($cutoff): void {
-                    $detail->whereNotNull('buyer_order_detail_message_id')
-                        ->whereNull('buyer_order_detail_message_deleted_at')
-                        ->where(function ($claim) use ($cutoff): void {
-                            $claim->whereNull('buyer_order_detail_message_deletion_started_at')
-                                ->orWhere('buyer_order_detail_message_deletion_started_at', '<=', $cutoff);
+                        })
+                        ->whereHas('payments', fn ($payments) => $payments
+                            ->where('provider', PaymentProvider::MANUAL)
+                            ->whereIn('method', ['BINANCE_PAY_ID', 'USDT_BEP20']));
+                })->orWhere(function ($tracked) use ($cutoff): void {
+                    $tracked
+                        ->where(function ($receipt): void {
+                            $receipt->where('order_status', 'cancelled')
+                                ->orWhereNotNull('telegram_receipt_sent_at');
+                        })
+                        ->where(function ($messages) use ($cutoff): void {
+                            $messages->where(function ($checkout) use ($cutoff): void {
+                                $checkout
+                                    ->whereNotNull('manual_checkout_customer_notification_chat_id')
+                                    ->whereNotNull('manual_checkout_customer_notification_message_id')
+                                    ->whereNull('manual_checkout_customer_notification_deleted_at')
+                                    ->where(function ($claim) use ($cutoff): void {
+                                        $claim->whereNull('manual_checkout_customer_notification_deletion_started_at')
+                                            ->orWhere('manual_checkout_customer_notification_deletion_started_at', '<=', $cutoff);
+                                    })
+                                    ->whereHas('payments', function ($payments): void {
+                                        $payments->where(function ($candidates): void {
+                                            $candidates
+                                                ->where(fn ($binance) => $binance
+                                                    ->where('provider', PaymentProvider::MANUAL)
+                                                    ->whereIn('method', ['BINANCE_PAY_ID', 'USDT_BEP20']))
+                                                ->orWhere('provider', PaymentProvider::KLIKQRIS);
+                                        });
+                                    });
+                            })->orWhere(function ($detail) use ($cutoff): void {
+                                $detail
+                                    ->whereNotNull('buyer_order_detail_message_chat_id')
+                                    ->whereNotNull('buyer_order_detail_message_id')
+                                    ->whereNull('buyer_order_detail_message_deleted_at')
+                                    ->where(function ($claim) use ($cutoff): void {
+                                        $claim->whereNull('buyer_order_detail_message_deletion_started_at')
+                                            ->orWhere('buyer_order_detail_message_deletion_started_at', '<=', $cutoff);
+                                    });
+                            });
                         });
                 });
             })

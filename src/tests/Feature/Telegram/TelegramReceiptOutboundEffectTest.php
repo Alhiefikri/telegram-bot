@@ -8,6 +8,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Exceptions\TelegramOutboundPreSendException;
+use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
@@ -38,6 +39,7 @@ use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use App\Services\Telegram\TelegramReceiptPlan;
 use App\Services\Telegram\TelegramSupportContact;
+use App\Support\PaymentProvider;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -616,6 +618,46 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
 
         Queue::assertPushedTimes(DeleteBuyerCheckoutMessages::class, 1);
         Queue::assertNotPushed(SendTelegramReceipt::class);
+    }
+
+    public function test_recovery_does_not_rediscover_cleanup_for_an_uncleanable_checkout_instruction(): void
+    {
+        Queue::fake();
+        $order = $this->multiChunkPaidOrder();
+        $order->forceFill([
+            'telegram_receipt_sent_at' => now(),
+            'manual_checkout_customer_notification_chat_id' => (string) $order->customer->telegram_id,
+            'manual_checkout_customer_notification_message_id' => 889903,
+        ])->save();
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        Queue::assertNotPushed(DeleteBuyerCheckoutMessages::class);
+        Queue::assertNotPushed(DeleteBuyerBinanceCheckoutInstruction::class);
+    }
+
+    public function test_recovery_still_dispatches_cleanup_for_a_klikqris_checkout_instruction(): void
+    {
+        Queue::fake();
+        $order = $this->multiChunkPaidOrder();
+        $order->forceFill([
+            'telegram_receipt_sent_at' => now(),
+            'manual_checkout_customer_notification_chat_id' => (string) $order->customer->telegram_id,
+            'manual_checkout_customer_notification_message_id' => 889904,
+        ])->save();
+        Payment::query()
+            ->where('order_id', $order->id)
+            ->update(['provider' => PaymentProvider::KLIKQRIS]);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->assertSuccessful();
+
+        Queue::assertPushedOn(
+            'notifications',
+            DeleteBuyerCheckoutMessages::class,
+            fn (DeleteBuyerCheckoutMessages $job): bool => $job->orderId === (string) $order->id,
+        );
     }
 
     public function test_recovery_repairs_a_complete_legacy_receipt_with_unresolved_invoice(): void

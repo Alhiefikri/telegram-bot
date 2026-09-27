@@ -201,7 +201,7 @@ class TelegramOutboundEffectService
     public const PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS = TelegramOutboundEffectPolicy::PRICE_CHANGE_STORE_CHANNEL_MAX_ATTEMPTS;
 
     /** @var list<string> */
-    private const CHECKOUT_EFFECT_TYPES = [
+    public const CHECKOUT_EFFECT_TYPES = [
         self::TYPE_MANUAL_CHECKOUT,
         self::TYPE_KLIKQRIS_CHECKOUT,
         self::TYPE_SAKURUPIAH_CHECKOUT,
