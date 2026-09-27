@@ -55,6 +55,8 @@ const emptyProductForm = () => ({
   productImageUrl: "",
   telegramProductImageUrl: "",
   telegramProductImageFileName: EMPTY_IMAGE_FILE_NAME,
+  telegramChannelImageUrl: "",
+  telegramChannelImageFileName: EMPTY_IMAGE_FILE_NAME,
   productQuantityPriceTiers: [],
   productQuantityPriceTierErrors: {},
 });
@@ -704,6 +706,10 @@ export default function adminDashboard(initialState = {}) {
         "telegramProductImage",
         "telegramProductImageFileName"
       );
+      this.resetImageInput(
+        "telegramChannelImage",
+        "telegramChannelImageFileName"
+      );
       this.$nextTick(() => this.$refs.productName?.focus());
     },
     focusProductFamilyAssignment(familyId) {
@@ -895,6 +901,7 @@ export default function adminDashboard(initialState = {}) {
         productIsActive: product.isActive,
         productImageUrl: product.imageUrl ?? "",
         telegramProductImageUrl: product.telegramImageUrl ?? "",
+        telegramChannelImageUrl: product.telegramChannelImageUrl ?? "",
         productDeliveryNoteOpen:
           String(product.deliveryNote || "").trim().length > 0,
         productModalOpen: true,
@@ -903,6 +910,10 @@ export default function adminDashboard(initialState = {}) {
       this.resetImageInput(
         "telegramProductImage",
         "telegramProductImageFileName"
+      );
+      this.resetImageInput(
+        "telegramChannelImage",
+        "telegramChannelImageFileName"
       );
       this.$nextTick(() => this.$refs.productName?.focus());
     },

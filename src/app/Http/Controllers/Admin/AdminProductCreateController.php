@@ -26,11 +26,15 @@ class AdminProductCreateController extends Controller
 
         $validated = $request->validated();
 
-        $imagePath = $request->hasFile('image') ? $images->store($request->file('image')) : null;
-        $telegramImagePath = $request->hasFile('telegram_image') ? $images->storeTelegram($request->file('telegram_image')) : null;
+        $imagePath = null;
+        $telegramImagePath = null;
+        $telegramChannelImagePath = null;
 
         try {
-            $product = DB::transaction(function () use ($validated, $imagePath, $telegramImagePath, $auditLogger, $user, $request, $tierPricing): Product {
+            $imagePath = $request->hasFile('image') ? $images->store($request->file('image')) : null;
+            $telegramImagePath = $request->hasFile('telegram_image') ? $images->storeTelegram($request->file('telegram_image')) : null;
+            $telegramChannelImagePath = $request->hasFile('telegram_channel_image') ? $images->storeTelegramChannel($request->file('telegram_channel_image')) : null;
+            $product = DB::transaction(function () use ($validated, $imagePath, $telegramImagePath, $telegramChannelImagePath, $auditLogger, $user, $request, $tierPricing): Product {
                 $categoryId = $validated['category_id'] ?? null;
 
                 if ($categoryId !== null) {
@@ -51,6 +55,7 @@ class AdminProductCreateController extends Controller
                     'currency' => 'IDR',
                     'image_path' => $imagePath,
                     'telegram_image_path' => $telegramImagePath,
+                    'telegram_channel_image_path' => $telegramChannelImagePath,
                     'is_active' => true,
                 ]);
                 $product->stock = 0;
@@ -59,7 +64,7 @@ class AdminProductCreateController extends Controller
 
                 $tierChange = $tierPricing->replace($product, $request->quantityPriceTiers());
 
-                $newValues = $product->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $newValues = $product->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
                 $newValues['quantity_price_tiers'] = $tierChange['after'];
 
                 $auditLogger->log(
@@ -79,6 +84,9 @@ class AdminProductCreateController extends Controller
             }
             if ($telegramImagePath !== null) {
                 $images->deleteManagedImage($telegramImagePath);
+            }
+            if ($telegramChannelImagePath !== null) {
+                $images->deleteManagedImage($telegramChannelImagePath);
             }
 
             throw $exception;

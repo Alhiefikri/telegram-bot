@@ -121,6 +121,7 @@ final class AdminDashboardProductsData
                 $updateUrl = route('admin.products.update', ['product' => $product]);
                 $imageUrl = $this->images->publicUrl($product->image_path) ?? $placeholderUrl;
                 $telegramImageUrl = $this->images->telegramUrl($product->telegram_image_path);
+                $telegramChannelImageUrl = $this->images->telegramUrl($product->telegram_channel_image_path);
                 $catalogProduct = $catalogProducts->get((int) $product->id);
 
                 return [(int) $product->id => [
@@ -159,6 +160,8 @@ final class AdminDashboardProductsData
                     'image_path' => $product->image_path,
                     'telegram_image_path' => $product->telegram_image_path,
                     'telegram_image_url' => $telegramImageUrl,
+                    'telegram_channel_image_path' => $product->telegram_channel_image_path,
+                    'telegram_channel_image_url' => $telegramChannelImageUrl,
                     'image_url' => $imageUrl,
                     'visibility_action_label' => $product->is_active ? '⏸ Pause' : '▶ Play',
                     'update_url' => $updateUrl,
@@ -200,6 +203,7 @@ final class AdminDashboardProductsData
                         'usageGuideUrl' => $product->usage_guide_url,
                         'isActive' => $product->is_active,
                         'telegramImageUrl' => $telegramImageUrl,
+                        'telegramChannelImageUrl' => $telegramChannelImageUrl,
                         'imageUrl' => $imageUrl,
                         'updateUrl' => $updateUrl,
                         'stockUrl' => $stockUrl,

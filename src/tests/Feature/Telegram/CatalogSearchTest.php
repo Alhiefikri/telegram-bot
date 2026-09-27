@@ -115,20 +115,33 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(113, '/start product_'.$product->id))->assertOk();
 
-        Http::assertSent(function ($request): bool {
-            $photo = collect($request->data())->first(
-                fn ($part): bool => is_array($part) && ($part['name'] ?? null) === 'photo',
-            );
-
-            return str_ends_with($request->url(), '/sendPhoto')
-                && is_array($photo)
-                && ($photo['filename'] ?? null) === 'netflix.webp'
-                && ($photo['contents'] ?? null) === 'webp'
-                && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Netflix Premium Image')
-                && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Stok tersedia: 1');
-        });
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains((string) ($request['photo'] ?? ''), '/storage/telegram-products/netflix.webp')
+            && str_contains((string) ($request['caption'] ?? ''), 'Netflix Premium Image')
+            && str_contains((string) ($request['caption'] ?? ''), 'Stok tersedia: 1'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'Netflix Premium Image'));
+    }
+
+    public function test_product_image_with_oversized_detail_keeps_full_text(): void
+    {
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        Storage::fake('public');
+        Storage::disk('public')->put('telegram-products/long.webp', 'webp');
+        $this->fakeTelegramHttp();
+        $product = Product::factory()->create([
+            'name' => 'Long Detail Product',
+            'description' => str_repeat('Full warranty instructions. ', 55),
+            'stock' => 1,
+            'telegram_image_path' => 'telegram-products/long.webp',
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(116, '/start product_'.$product->id))->assertOk();
+
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Long Detail Product')
+            && str_contains((string) ($request['text'] ?? ''), trim(str_repeat('Full warranty instructions. ', 55))));
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
     }
 
     public function test_product_without_existing_image_keeps_text_only_detail(): void
@@ -176,16 +189,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertSame('telegram-product-families/netflix.webp', $family->fresh()->telegram_image_path);
         $this->assertSame($family->id, $product->fresh()->product_family_id);
 
-        Http::assertSent(function ($request): bool {
-            $photo = collect($request->data())->first(
-                fn ($part): bool => is_array($part) && ($part['name'] ?? null) === 'photo',
-            );
-
-            return str_ends_with($request->url(), '/sendPhoto')
-                && is_array($photo)
-                && ($photo['filename'] ?? null) === 'netflix.webp'
-                && ($photo['contents'] ?? null) === 'webp';
-        });
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains((string) ($request['photo'] ?? ''), '/storage/telegram-product-families/netflix.webp')
+            && str_contains((string) ($request['caption'] ?? ''), 'Netflix Family Monthly'));
     }
 
     public function test_indonesian_welcome_uses_banner_and_indonesian_fallback_copy(): void

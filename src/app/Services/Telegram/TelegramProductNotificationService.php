@@ -399,7 +399,8 @@ class TelegramProductNotificationService
 
     private function telegramImagePath(Product $product): ?string
     {
-        return $product->telegram_image_path
+        return $product->telegram_channel_image_path
+            ?? $product->telegram_image_path
             ?? $product->family?->telegram_image_path
             ?? $product->image_path
             ?? $product->family?->image_path;

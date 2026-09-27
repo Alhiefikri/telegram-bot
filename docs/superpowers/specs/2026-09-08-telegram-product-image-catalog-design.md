@@ -56,12 +56,12 @@ Original filenames and extensions are never used as storage paths. Empty upload 
 ## Telegram behavior
 
 1. Product detail builds the same canonical text and inline keyboard as before.
-2. On a new detail send (`messageId` absent), resolve the Telegram image path as `Product.telegram_image_path ?? ProductFamily.telegram_image_path`.
-3. If the resolved path is a valid existing managed Telegram path and produces an absolute HTTP(S) URL, call Telegram `sendPhoto` with that URL and the canonical detail text as caption.
-4. If no path is configured, the file is missing, the path is outside the Telegram directories, the URL is malformed, or the caption exceeds Telegram's 1024-character photo-caption limit, use the existing `sendMessage` path.
-5. On an existing message edit (`messageId` present), retain the existing text-edit path. Telegram cannot convert a text message into a photo through `editMessageText`; this avoids duplicate messages during quantity/navigation callbacks.
+2. Resolve the Telegram image path as `Product.telegram_image_path ?? ProductFamily.telegram_image_path` for each detail render.
+3. If the resolved path is a valid existing managed Telegram path and produces an absolute HTTP(S) URL, send a new `sendPhoto` message with that URL and the detail as its caption. On a private chat with a canonical navigation root, record the new message as the root before deleting the previous welcome/catalog message. A failed send leaves the previous root intact.
+4. Quantity callbacks edit only the new product caption; returning to another screen sends its normal welcome-banner surface, records it as the root, then deletes the product message. A photo caption over Telegram's 1024-character limit becomes a complete text message instead.
+5. If no usable Telegram image exists, preserve the existing catalog text/caption rendering path.
 6. The server never reads and uploads the image during Telegram delivery. Telegram fetches the already optimized WebP URL.
-7. Caption remains plain text; product/admin content cannot inject Telegram HTML or Markdown.
+7. Detail content uses HTML-safe escaping for product/admin content; it cannot inject Telegram markup.
 
 ## Security
 
@@ -77,7 +77,7 @@ Original filenames and extensions are never used as storage paths. Empty upload 
 
 Media rendering is read-only and does not participate in stock or checkout locks. Admin updates lock the Product/Product Family row using the existing mutation service. A concurrent read may observe the old or new image path, both of which are safe presentation values. A new replacement file is deleted if the transaction fails; an old file is deleted only after a successful replacement.
 
-Image selection does not mutate inventory, payment, order, or outbound-effect state. An ambiguous Telegram transport failure is not converted into a second blind send. Text fallback is used only for deterministic local inability to construct a valid photo request.
+Image selection does not mutate inventory, payment, order, or outbound-effect state. An ambiguous Telegram transport failure is not converted into a second blind send. Root message deletion happens only after the replacement was sent and recorded; a deletion failure is logged without losing the new root.
 
 ## Performance budget
 

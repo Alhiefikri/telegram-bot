@@ -140,6 +140,7 @@ class AdminProductDashboardState
                 'productQuantityPriceTiers' => $productTierRows,
                 'productQuantityPriceTierErrors' => $productFormErrors->toArray(),
                 'productUsageGuideUrl' => old('usage_guide_url', $editingProduct['usage_guide_url'] ?? ''),
+                'telegramChannelImageUrl' => $editingProduct['telegram_channel_image_url'] ?? null,
             ],
             'stockModalOpen' => $stockAdjustmentErrors->count() > 0,
             'structuredStockInputEnabled' => $this->stockIntake->structuredInputEnabled(),

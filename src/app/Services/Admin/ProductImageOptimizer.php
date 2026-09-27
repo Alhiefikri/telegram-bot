@@ -17,6 +17,8 @@ final class ProductImageOptimizer
 
     private const TELEGRAM_DIRECTORY = 'telegram-products';
 
+    private const TELEGRAM_CHANNEL_DIRECTORY = 'telegram-channel-products';
+
     private const TELEGRAM_FAMILY_DIRECTORY = 'telegram-product-families';
 
     private const WELCOME_BANNER_DIRECTORY = 'telegram/welcome-banners';
@@ -42,6 +44,11 @@ final class ProductImageOptimizer
     public function storeTelegram(UploadedFile $image): string
     {
         return $this->storeInDirectory($image, self::TELEGRAM_DIRECTORY);
+    }
+
+    public function storeTelegramChannel(UploadedFile $image): string
+    {
+        return $this->storeInDirectory($image, self::TELEGRAM_CHANNEL_DIRECTORY);
     }
 
     public function storeTelegramFamily(UploadedFile $image): string
@@ -93,6 +100,7 @@ final class ProductImageOptimizer
         $absolutePath = $disk->path($path);
         if (! imagewebp($target, $absolutePath, $quality)) {
             imagedestroy($target);
+            $disk->delete($path);
             throw new RuntimeException('Failed to encode product image as WebP.');
         }
 
@@ -134,6 +142,7 @@ final class ProductImageOptimizer
     {
         if ($path === null
             || (! str_starts_with($path, self::TELEGRAM_DIRECTORY.'/')
+                && ! str_starts_with($path, self::TELEGRAM_CHANNEL_DIRECTORY.'/')
                 && ! str_starts_with($path, self::TELEGRAM_FAMILY_DIRECTORY.'/'))
             || str_contains($path, '..')
             || ! Storage::disk('public')->exists($path)) {
@@ -160,6 +169,7 @@ final class ProductImageOptimizer
         if ($path === null
             || (! str_starts_with($path, self::TELEGRAM_DIRECTORY.'/')
                 && ! str_starts_with($path, self::TELEGRAM_FAMILY_DIRECTORY.'/')
+                && ! str_starts_with($path, self::TELEGRAM_CHANNEL_DIRECTORY.'/')
                 && ! str_starts_with($path, self::DIRECTORY.'/')
                 && ! str_starts_with($path, self::FAMILY_DIRECTORY.'/'))
             || str_contains($path, '..')
@@ -299,10 +309,12 @@ final class ProductImageOptimizer
     public function deleteManagedImage(?string $path): void
     {
         if (! $path
+            || str_contains($path, '..')
             || (! str_starts_with($path, self::DIRECTORY.'/')
                 && ! str_starts_with($path, self::FAMILY_DIRECTORY.'/')
                 && ! str_starts_with($path, self::PLACEHOLDER_DIRECTORY.'/')
                 && ! str_starts_with($path, self::TELEGRAM_DIRECTORY.'/')
+                && ! str_starts_with($path, self::TELEGRAM_CHANNEL_DIRECTORY.'/')
                 && ! str_starts_with($path, self::TELEGRAM_FAMILY_DIRECTORY.'/')
                 && ! str_starts_with($path, self::WELCOME_BANNER_DIRECTORY.'/'))) {
             return;

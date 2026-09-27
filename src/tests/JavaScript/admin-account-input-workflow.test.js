@@ -404,18 +404,26 @@ test("Product record changes clear native uploads without removing saved images"
       },
     };
     const standardInput = { value: "old-standard-image.png" };
+    const channelInput = { value: "old-channel-image.png" };
     const dashboard = adminDashboard();
     dashboard.$refs = {
       productImage: standardInput,
       telegramProductImage: input,
+      telegramChannelImage: channelInput,
       productName: { focus() {} },
     };
     dashboard.$nextTick = (callback) => callback();
 
     dashboard.telegramProductImageFileName = "old-telegram-image.png";
+    dashboard.telegramChannelImageFileName = "old-channel-image.png";
     dashboard.openProductForm();
     assert.equal(input.value, "");
     assert.equal(standardInput.value, "");
+    assert.equal(channelInput.value, "");
+    assert.equal(
+      dashboard.telegramChannelImageFileName,
+      "Tidak ada file yang dipilih"
+    );
     assert.equal(dashboard.productImageFileName, "Tidak ada file yang dipilih");
     assert.equal(
       dashboard.telegramProductImageFileName,
@@ -440,10 +448,16 @@ test("Product record changes clear native uploads without removing saved images"
       imageUrl: "/storage/product-existing.webp",
       telegramImageUrl: "/storage/telegram-existing.webp",
       updateUrl: "/admin/products/12",
+      telegramChannelImageUrl: "/storage/channel-existing.webp",
     });
 
     assert.equal(input.value, "");
     assert.equal(standardInput.value, "");
+    assert.equal(channelInput.value, "");
+    assert.equal(
+      dashboard.telegramChannelImageFileName,
+      "Tidak ada file yang dipilih"
+    );
     assert.equal(dashboard.productImageFileName, "Tidak ada file yang dipilih");
     assert.equal(
       dashboard.telegramProductImageFileName,
@@ -453,6 +467,10 @@ test("Product record changes clear native uploads without removing saved images"
     assert.equal(
       dashboard.telegramProductImageUrl,
       "/storage/telegram-existing.webp"
+    );
+    assert.equal(
+      dashboard.telegramChannelImageUrl,
+      "/storage/channel-existing.webp"
     );
   } finally {
     if (previousDocument === undefined) {

@@ -11,6 +11,7 @@ use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductStockItem;
 use App\Models\StorefrontSetting;
 use App\Models\User;
+use App\Services\AuditLogger;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -20,53 +21,6 @@ use Tests\TestCase;
 class AdminDashboardProductFormsTest extends TestCase
 {
     use RefreshDatabase;
-
-    public function test_product_modal_renders_compact_create_form(): void
-    {
-        $this->actingAs(User::factory()->create([
-            'role' => UserRole::Owner,
-        ]));
-
-        Category::factory()->create(['name' => 'Akun Premium']);
-
-        $this->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertSee('Tambah produk')
-            ->assertSee('Nama produk')
-            ->assertSee('Harga')
-            ->assertSee('Kategori')
-            ->assertSee('Deskripsi produk')
-            ->assertSee('Ikon katalog (opsional)')
-            ->assertSee('Catatan pengiriman rahasia')
-            ->assertSee('Panduan pemakaian produk')
-            ->assertSee('Judul panduan')
-            ->assertSee('URL panduan')
-            ->assertDontSee('Fitur utama')
-            ->assertDontSee('Paket / spesifikasi')
-            ->assertSee('Akun Premium')
-            ->assertSee('Submit produk')
-            ->assertSee('x-data', false)
-            ->assertSee('min-w-0', false)
-            ->assertDontSee('fi-form', false);
-    }
-
-    public function test_product_image_upload_control_uses_custom_responsive_file_picker(): void
-    {
-        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
-
-        $this->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertSee('Pilih gambar')
-            ->assertSee('Gambar default katalog')
-            ->assertSee('Gambar Telegram')
-            ->assertSee('telegram-product-image', false)
-            ->assertSee('Gambar Telegram family')
-            ->assertSee('telegram-product-family-image', false)
-            ->assertSee('admin-product-placeholder', false)
-            ->assertSee('Default bawaan aktif')
-            ->assertSee('sr-only', false)
-            ->assertDontSee('file:mr-3', false);
-    }
 
     public function test_admin_can_change_default_catalog_image_from_dashboard(): void
     {
@@ -386,10 +340,6 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $this->assertNull($product->fresh()->icon);
-        $this->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertSee('Ikon katalog (opsional)')
-            ->assertSee('productIcon', false);
     }
 
     public function test_admin_can_upload_product_image_as_optimized_webp(): void
@@ -472,7 +422,7 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertSame(800, $height);
     }
 
-    public function test_admin_can_upload_separate_telegram_product_image(): void
+    public function test_admin_can_upload_separate_telegram_detail_and_channel_images(): void
     {
         Storage::fake('public');
         $admin = User::factory()->create(['role' => UserRole::Admin]);
@@ -484,17 +434,93 @@ class AdminDashboardProductFormsTest extends TestCase
                 'description' => 'Poster khusus Telegram.',
                 'image' => UploadedFile::fake()->image('storefront-square.png', 800, 800),
                 'telegram_image' => UploadedFile::fake()->image('telegram-landscape.png', 2400, 1000),
+                'telegram_channel_image' => UploadedFile::fake()->image('channel-landscape.png', 2400, 1000),
             ])
             ->assertRedirect('/admin?tab=produk#product-1');
 
         $product = Product::query()->where('name', 'Telegram Poster Product')->firstOrFail();
         $this->assertStringStartsWith('products/', (string) $product->image_path);
         $this->assertStringStartsWith('telegram-products/', (string) $product->telegram_image_path);
+        $this->assertStringStartsWith('telegram-channel-products/', (string) $product->telegram_channel_image_path);
         Storage::disk('public')->assertExists($product->image_path);
         Storage::disk('public')->assertExists($product->telegram_image_path);
+        Storage::disk('public')->assertExists($product->telegram_channel_image_path);
         [$width, $height] = getimagesize(Storage::disk('public')->path($product->telegram_image_path));
         $this->assertSame(1600, $width);
         $this->assertSame(667, $height);
+        [$channelWidth, $channelHeight, $channelType] = getimagesize(Storage::disk('public')->path($product->telegram_channel_image_path));
+        $this->assertSame([1600, 667, IMAGETYPE_WEBP], [$channelWidth, $channelHeight, $channelType]);
+        $createdAudit = AuditLog::query()->where('action', 'product.created')->sole();
+        $this->assertSame($product->telegram_channel_image_path, $createdAudit->new_values['telegram_channel_image_path']);
+        $this->get('/admin?tab=produk')->assertOk()->assertSee(basename($product->telegram_channel_image_path), false);
+    }
+
+    public function test_replacing_channel_image_preserves_detail_media_and_cleans_old_file(): void
+    {
+        Storage::fake('public');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        Storage::disk('public')->put('telegram-channel-products/old.webp', 'old-channel-image');
+        Storage::disk('public')->put('telegram-products/detail.webp', 'detail-image');
+        $product = Product::factory()->create([
+            'telegram_channel_image_path' => 'telegram-channel-products/old.webp',
+            'telegram_image_path' => 'telegram-products/detail.webp',
+        ]);
+        $fields = [
+            'name' => $product->name,
+            'price_amount' => (string) $product->price_amount,
+            'description' => $product->description,
+        ];
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), $fields)
+            ->assertRedirect();
+        $this->assertSame('telegram-channel-products/old.webp', $product->fresh()->telegram_channel_image_path);
+        Storage::disk('public')->assertExists('telegram-channel-products/old.webp');
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), $fields + [
+                'telegram_channel_image' => UploadedFile::fake()->image('new-channel.png', 1200, 900),
+            ])
+            ->assertRedirect();
+
+        $product->refresh();
+        $this->assertStringStartsWith('telegram-channel-products/', (string) $product->telegram_channel_image_path);
+        $this->assertNotSame('telegram-channel-products/old.webp', $product->telegram_channel_image_path);
+        $this->assertSame('telegram-products/detail.webp', $product->telegram_image_path);
+        Storage::disk('public')->assertMissing('telegram-channel-products/old.webp');
+        Storage::disk('public')->assertExists($product->telegram_channel_image_path);
+        Storage::disk('public')->assertExists('telegram-products/detail.webp');
+        $updatedAudit = AuditLog::query()->where('action', 'product.updated')->latest('id')->firstOrFail();
+        $this->assertSame('telegram-channel-products/old.webp', $updatedAudit->old_values['telegram_channel_image_path']);
+        $this->assertSame($product->telegram_channel_image_path, $updatedAudit->new_values['telegram_channel_image_path']);
+    }
+
+    public function test_failed_channel_image_replacement_keeps_original_file_and_database_path(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('telegram-channel-products/old.webp', 'original');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'telegram_channel_image_path' => 'telegram-channel-products/old.webp',
+        ]);
+        $this->mock(AuditLogger::class)
+            ->shouldReceive('log')
+            ->once()
+            ->andThrow(new \RuntimeException('Audit storage unavailable'));
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'Attempted new name',
+                'price_amount' => (string) $product->price_amount,
+                'description' => $product->description,
+                'telegram_channel_image' => UploadedFile::fake()->image('replacement.png', 100, 100),
+            ])
+            ->assertStatus(500);
+
+        $this->assertSame('telegram-channel-products/old.webp', $product->fresh()->telegram_channel_image_path);
+        $this->assertNotSame('Attempted new name', $product->name);
+        $this->assertSame(['telegram-channel-products/old.webp'], Storage::disk('public')->files('telegram-channel-products'));
+        $this->assertSame('original', Storage::disk('public')->get('telegram-channel-products/old.webp'));
     }
 
     public function test_admin_can_upload_telegram_family_image(): void

@@ -24,23 +24,29 @@ class AdminProductUpdateController extends Controller
         $user = $request->attributes->get('adminUser');
 
         $validated = $request->validated();
-        $newImagePath = $request->hasFile('image') ? $images->store($request->file('image')) : null;
-        $newTelegramImagePath = $request->hasFile('telegram_image') ? $images->storeTelegram($request->file('telegram_image')) : null;
+        $newImagePath = null;
+        $newTelegramImagePath = null;
+        $newTelegramChannelImagePath = null;
         $oldImagePath = null;
         $oldTelegramImagePath = null;
+        $oldTelegramChannelImagePath = null;
 
         try {
-            $event = DB::transaction(function () use ($product, $validated, $request, $auditLogger, $user, $priceNotifications, $newImagePath, $newTelegramImagePath, &$oldImagePath, &$oldTelegramImagePath, $coherence, $tierPricing) {
+            $newImagePath = $request->hasFile('image') ? $images->store($request->file('image')) : null;
+            $newTelegramImagePath = $request->hasFile('telegram_image') ? $images->storeTelegram($request->file('telegram_image')) : null;
+            $newTelegramChannelImagePath = $request->hasFile('telegram_channel_image') ? $images->storeTelegramChannel($request->file('telegram_channel_image')) : null;
+            $event = DB::transaction(function () use ($product, $validated, $request, $auditLogger, $user, $priceNotifications, $newImagePath, $newTelegramImagePath, $newTelegramChannelImagePath, &$oldImagePath, &$oldTelegramImagePath, &$oldTelegramChannelImagePath, $coherence, $tierPricing) {
                 $categoryId = $validated['category_id'] ?? null;
 
                 $locked = $coherence->lockForCategoryChange($product, $categoryId);
-                $oldValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $oldValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
                 $tierAudit = [
                     'before' => $tierPricing->snapshot($locked),
                     'after' => [],
                 ];
                 $oldImagePath = $oldValues['image_path'] ?? null;
                 $oldTelegramImagePath = $oldValues['telegram_image_path'] ?? null;
+                $oldTelegramChannelImagePath = $oldValues['telegram_channel_image_path'] ?? null;
 
                 $locked->fill([
                     'category_id' => $validated['category_id'] ?? null,
@@ -63,6 +69,9 @@ class AdminProductUpdateController extends Controller
                 if ($newTelegramImagePath !== null) {
                     $locked->telegram_image_path = $newTelegramImagePath;
                 }
+                if ($newTelegramChannelImagePath !== null) {
+                    $locked->telegram_channel_image_path = $newTelegramChannelImagePath;
+                }
                 $locked->save();
                 if ($request->hasQuantityPriceTiersInput()) {
                     $tierAudit = $tierPricing->replace($locked, $request->quantityPriceTiers());
@@ -70,7 +79,7 @@ class AdminProductUpdateController extends Controller
                     $tierAudit['after'] = $tierPricing->snapshot($locked);
                 }
                 $oldValues['quantity_price_tiers'] = $tierAudit['before'];
-                $newValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $newValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
                 $newValues['quantity_price_tiers'] = $tierAudit['after'];
 
                 $auditLogger->log(
@@ -91,6 +100,9 @@ class AdminProductUpdateController extends Controller
             if ($newTelegramImagePath !== null) {
                 $images->deleteManagedImage($newTelegramImagePath);
             }
+            if ($newTelegramChannelImagePath !== null) {
+                $images->deleteManagedImage($newTelegramChannelImagePath);
+            }
 
             if ($exception instanceof ProductFamilyCategoryMismatch) {
                 return $forms->productUpdateBusinessValidationError($request, $product, 'category_id', $exception->getMessage());
@@ -104,6 +116,9 @@ class AdminProductUpdateController extends Controller
         }
         if ($newTelegramImagePath !== null) {
             $images->deleteManagedImage($oldTelegramImagePath);
+        }
+        if ($newTelegramChannelImagePath !== null) {
+            $images->deleteManagedImage($oldTelegramChannelImagePath);
         }
 
         if ($event !== null) {

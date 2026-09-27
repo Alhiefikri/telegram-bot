@@ -16,5 +16,6 @@ final class TelegramNavigationSurface
         public readonly string $caption,
         public readonly array $keyboard,
         public readonly array $options = ['parse_mode' => 'HTML'],
+        public readonly ?string $photoUrl = null,
     ) {}
 }

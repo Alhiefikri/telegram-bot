@@ -11,4 +11,5 @@ enum TelegramNavigationScreen: string
     case Orders = 'orders';
     case Support = 'support';
     case Catalog = 'catalog';
+    case Product = 'product';
 }

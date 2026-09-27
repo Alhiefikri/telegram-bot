@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\TelegramNavigationMediaKind;
 use App\Enums\TelegramNavigationRenderOutcome;
+use App\Enums\TelegramNavigationScreen;
 use App\Exceptions\TelegramApiException;
 use App\Models\Customer;
 use App\Models\TelegramNavigationRoot;
@@ -112,12 +113,30 @@ class TelegramNavigationRootService
         return $this->persistRoot($customer, trim($chatId), $surface, $sent);
     }
 
+    public function establishProduct(Customer $customer, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRoot
+    {
+        $sent = $this->sendProduct($chatId, $surface);
+
+        return $this->persistRoot($customer, trim($chatId), $surface, $sent);
+    }
+
     public function render(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRenderOutcome
     {
         $chatId = trim($chatId);
         $claimed = $this->claim($root, $chatId);
         if ($claimed === null) {
             return TelegramNavigationRenderOutcome::Superseded;
+        }
+        if (($surface->screen === TelegramNavigationScreen::Product
+                && ($claimed->screen !== TelegramNavigationScreen::Product
+                    || ($claimed->media_kind === TelegramNavigationMediaKind::Photo
+                        && $surface->photoUrl === null)
+                    || ($claimed->media_kind === TelegramNavigationMediaKind::Text
+                        && $surface->photoUrl !== null
+                        && $this->captions->fitsMediaCaption($surface->caption, $surface->options))))
+            || ($claimed->screen === TelegramNavigationScreen::Product
+                && $surface->screen !== TelegramNavigationScreen::Product)) {
+            return $this->replaceRoot($claimed, $chatId, $surface);
         }
 
         // A photo message can only carry a 1024-character caption. Longer
@@ -274,14 +293,16 @@ class TelegramNavigationRootService
     private function replaceRoot(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRenderOutcome
     {
         try {
-            $sent = $this->banner->send(
-                $chatId,
-                $surface->caption,
-                $surface->keyboard,
-                preferredReference: $root->banner_reference,
-                options: $surface->options,
-                preferredBannerVersion: $root->banner_version,
-            );
+            $sent = $surface->screen === TelegramNavigationScreen::Product
+                ? $this->sendProduct($chatId, $surface)
+                : $this->banner->send(
+                    $chatId,
+                    $surface->caption,
+                    $surface->keyboard,
+                    preferredReference: $root->banner_reference,
+                    options: $surface->options,
+                    preferredBannerVersion: $root->banner_version,
+                );
         } catch (Throwable $exception) {
             $this->releaseClaim($root);
             $this->logAmbiguous($root, $exception);
@@ -313,11 +334,50 @@ class TelegramNavigationRootService
                 'customer_id' => $root->customer_id,
                 'message_id' => $sent->messageId,
             ]);
+        } elseif ($root->screen === TelegramNavigationScreen::Product
+            || $surface->screen === TelegramNavigationScreen::Product) {
+            try {
+                $this->bot->deleteMessage($chatId, $root->message_id);
+            } catch (Throwable $exception) {
+                Log::warning('telegram.navigation_old_message_delete_failed', [
+                    'customer_id' => $root->customer_id,
+                    'message_id' => $root->message_id,
+                    'exception' => $exception::class,
+                ]);
+            }
         }
 
         return $replaced
             ? TelegramNavigationRenderOutcome::Replaced
             : TelegramNavigationRenderOutcome::Superseded;
+    }
+
+    private function sendProduct(string $chatId, TelegramNavigationSurface $surface): TelegramWelcomeBannerSend
+    {
+        if ($surface->photoUrl !== null
+            && $this->captions->fitsMediaCaption($surface->caption, $surface->options)) {
+            $response = $this->bot->sendPhotoReference(
+                $chatId,
+                $surface->photoUrl,
+                $surface->caption,
+                $surface->keyboard,
+                $surface->options,
+            );
+
+            return new TelegramWelcomeBannerSend(
+                $this->responseValidator->messageIdFromResponse($response, 'Telegram product detail'),
+                TelegramNavigationMediaKind::Photo,
+                null,
+            );
+        }
+
+        $response = $this->bot->sendMessage($chatId, $surface->caption, $surface->keyboard, $surface->options);
+
+        return new TelegramWelcomeBannerSend(
+            $this->responseValidator->messageIdFromResponse($response, 'Telegram product detail'),
+            TelegramNavigationMediaKind::Text,
+            null,
+        );
     }
 
     private function editRootMessage(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): void

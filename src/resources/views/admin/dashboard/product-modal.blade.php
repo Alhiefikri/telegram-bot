@@ -8,8 +8,8 @@
                     show="productModalOpen"
                     title="Tambah produk"
                     title-expression="productModalMode === 'edit' ? 'Edit produk' : 'Tambah produk'"
-                    description="Nama, harga, deskripsi, dan gambar WebP otomatis."
-                    class="max-h-[92vh] w-full max-w-xl overflow-y-auto"
+                    description="Atur ikon katalog, gambar Storefront, detail bot, dan poster stok Store Channel secara terpisah."
+                    class="max-h-[92vh] w-full max-w-2xl overflow-y-auto"
                     x-bind:class="productModalMode === 'edit' ? '!bg-[#fee648]' : '!bg-[#7BD10A]'"
                 >
                     @if ($errors->productCreate->any() || $errors->productUpdate->any())
@@ -45,7 +45,7 @@
                         </div>
 
                         <div>
-                            <x-admin-dashboard.field-label for="product-icon">Ikon katalog (opsional)</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.field-label for="product-icon">Ikon katalog · emoji/karakter (opsional)</x-admin-dashboard.field-label>
                             <x-admin-dashboard.input
                                 id="product-icon"
                                 name="icon"
@@ -55,7 +55,7 @@
                                 class="mt-1.5"
                                 x-model="productIcon"
                             />
-                            <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Emoji/karakter ini tampil di katalog Telegram dan Web Storefront. Kosongkan untuk memakai icon default otomatis.</p>
+                            <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Bukan upload gambar. Tampil di katalog bot Telegram dan Web Storefront; kosongkan untuk ikon default.</p>
                             @error('icon', 'productCreate')
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
@@ -240,19 +240,24 @@
                             </div>
                         </x-admin-dashboard.card>
 
+                        <section class="space-y-3" aria-labelledby="product-media-title">
+                            <div>
+                                <h3 id="product-media-title" class="font-display text-sm font-black uppercase text-neo-ink">Upload gambar produk</h3>
+                                <p class="mt-1 text-[11px] font-semibold text-neo-ink/70">JPG, PNG, atau WebP; maksimal 5 MB. Gambar toko menjadi WebP maks. 800px, poster Telegram maks. 1600px.</p>
+                            </div>
                         <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
                             <div class="flex items-start justify-between gap-3">
                                 <div>
-                                    <x-admin-dashboard.field-label for="product-image" class="text-sm normal-case tracking-normal">🖼️ Gambar produk</x-admin-dashboard.field-label>
-                                    <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60">JPG, PNG, atau WebP. Jika belum ada gambar, default akan tampil di toko. Upload gambar untuk menggantinya; otomatis dikompresi jadi WebP maksimal 1600px.</p>
+                                    <x-admin-dashboard.field-label for="product-image" class="text-sm normal-case tracking-normal">Kartu produk · Web Storefront</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-[11px] font-semibold text-neo-ink/65">Gambar kartu produk di toko web. Jika kosong, tampil ikon katalog atau gambar default toko; bukan poster detail bot.</p>
                                 </div>
-                                <div x-show="productImageUrl" class="h-14 w-14 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]">
-                                    <img x-bind:src="productImageUrl" alt="" class="h-full w-full object-cover">
+                                <div x-show="productImageUrl" x-cloak class="h-14 w-14 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]">
+                                    <img x-bind:src="productImageUrl" alt="Gambar kartu Storefront tersimpan" class="h-full w-full object-cover">
                                 </div>
                             </div>
                             <div class="mt-2 flex min-w-0 items-center gap-3 rounded-[1rem] border-[3px] border-neo-ink bg-white p-2 shadow-[4px_4px_0_0_#050505]">
                                 <label for="product-image" class="shrink-0 cursor-pointer rounded-lg bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">
-                                    Pilih gambar
+                                    Pilih gambar toko
                                 </label>
                                 <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="productImageFileName">Tidak ada file yang dipilih</span>
                             </div>
@@ -265,7 +270,7 @@
                                 x-ref="productImage"
                                 x-on:change="productImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'"
                             >
-                            <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Kosongkan kalau gambar lama tetap dipakai.</p>
+                            <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Tanpa upload baru, gambar toko tersimpan tetap dipakai.</p>
                             @error('image', 'productCreate')
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
@@ -276,22 +281,42 @@
                         <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
                             <div class="flex items-start justify-between gap-3">
                                 <div>
-                                    <x-admin-dashboard.field-label for="telegram-product-image" class="text-sm normal-case tracking-normal">📲 Gambar Telegram</x-admin-dashboard.field-label>
-                                    <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60">Opsional. Khusus detail produk di Store Bot Telegram; tidak mengubah gambar Storefront. Gunakan format landscape agar teks pada poster terbaca.</p>
+                                    <x-admin-dashboard.field-label for="telegram-product-image" class="text-sm normal-case tracking-normal">Detail produk · Bot Telegram</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-[11px] font-semibold text-neo-ink/65">Untuk detail saat produk diklik di bot. Disarankan poster landscape 16:9. Jika kosong, gunakan gambar detail family; jika tidak ada, detail tetap berupa teks.</p>
                                 </div>
-                                <div x-show="telegramProductImageUrl" class="h-14 w-20 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]">
-                                    <img x-bind:src="telegramProductImageUrl" alt="" class="h-full w-full object-contain">
+                                <div x-show="telegramProductImageUrl" x-cloak class="h-14 w-20 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]">
+                                    <img x-bind:src="telegramProductImageUrl" alt="Gambar detail bot Telegram tersimpan" class="h-full w-full object-contain">
                                 </div>
                             </div>
                             <div class="mt-2 flex min-w-0 items-center gap-3 rounded-[1rem] border-[3px] border-neo-ink bg-white p-2 shadow-[4px_4px_0_0_#050505]">
-                                <label for="telegram-product-image" class="shrink-0 cursor-pointer rounded-lg bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih gambar</label>
+                                <label for="telegram-product-image" class="shrink-0 cursor-pointer rounded-lg bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih gambar bot</label>
                                 <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="telegramProductImageFileName">Tidak ada file yang dipilih</span>
                             </div>
                             <input type="file" id="telegram-product-image" name="telegram_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-ref="telegramProductImage" x-on:change="updateTelegramProductImageFileName($event)">
-                            <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Kosongkan kalau gambar Telegram lama tetap dipakai.</p>
+                            <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Tanpa upload baru, gambar detail bot tersimpan tetap dipakai.</p>
                             @error('telegram_image', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                             @error('telegram_image', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                         </x-admin-dashboard.card>
+                        <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <x-admin-dashboard.field-label for="telegram-channel-product-image" class="text-sm normal-case tracking-normal">Poster stok bertambah · Store Channel</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-[11px] font-semibold text-neo-ink/65">Hanya untuk posting stok bertambah di Store Channel; bukan sales proof, banner /start, detail bot, pesan pelanggan, atau broadcast. Jika kosong: gambar detail produk, detail family, kartu produk, lalu kartu family.</p>
+                                </div>
+                                <div x-show="telegramChannelImageUrl" x-cloak class="h-14 w-20 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]">
+                                    <img x-bind:src="telegramChannelImageUrl" alt="Poster stok Store Channel tersimpan" class="h-full w-full object-contain">
+                                </div>
+                            </div>
+                            <div class="mt-2 flex min-w-0 items-center gap-3 rounded-[1rem] border-[3px] border-neo-ink bg-white p-2 shadow-[4px_4px_0_0_#050505]">
+                                <label for="telegram-channel-product-image" class="shrink-0 cursor-pointer rounded-lg bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih poster stok</label>
+                                <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="telegramChannelImageFileName">Tidak ada file yang dipilih</span>
+                            </div>
+                            <input type="file" id="telegram-channel-product-image" name="telegram_channel_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-ref="telegramChannelImage" x-on:change="telegramChannelImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
+                            <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Tanpa upload baru, poster tersimpan tetap dipakai.</p>
+                            @error('telegram_channel_image', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                            @error('telegram_channel_image', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                        </x-admin-dashboard.card>
+                        </section>
 
                         <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
                             <x-admin-dashboard.field-label for="product-description" class="text-sm normal-case tracking-normal">📝 Deskripsi produk</x-admin-dashboard.field-label>

@@ -656,34 +656,7 @@ class TelegramCatalogIntents
             $lines[] = '';
             $lines[] = $this->captions->blockquote($this->locale->qrisCrossBorderSupport($customer));
         }
-        $text = implode("\n", $lines);
-        $telegramImagePath = $product->telegram_image_path
-            ?? $product->family?->telegram_image_path
-            ?? $product->image_path
-            ?? $product->family?->image_path;
-        $telegramPhoto = $this->images->telegramPhoto($telegramImagePath);
-
-        // Product photography stays an explicit new-message entry point only
-        // when this chat has no canonical message to edit; on the canonical
-        // message routine navigation must never re-upload media.
-        $options = ['parse_mode' => 'HTML'];
-        if ($messageId === null
-            && $this->captions->fitsMediaCaption($text, $options)
-            && $telegramPhoto !== null
-            && $this->roots->currentForChat($customer, $chatId) === null) {
-            $this->bot->sendPhoto(
-                $chatId,
-                $telegramPhoto['contents'],
-                $telegramPhoto['filename'],
-                $text,
-                ['inline_keyboard' => $keyboard],
-                $options,
-            );
-
-            return;
-        }
-
-        $this->sendCatalogMessage($customer, $chatId, $text, ['inline_keyboard' => $keyboard], $messageId, $options);
+        $this->sendProductMessage($customer, $chatId, $product, implode("\n", $lines), ['inline_keyboard' => $keyboard], $messageId);
     }
 
     /**
@@ -706,12 +679,72 @@ class TelegramCatalogIntents
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.custom_instruction', ['example' => 5]);
 
         $productId = (int) $product->getKey();
-        $this->sendCatalogMessage($customer, $chatId, implode("\n", $lines), [
+        $this->sendProductMessage($customer, $chatId, $product, implode("\n", $lines), [
             'inline_keyboard' => [[[
                 'text' => $this->locale->translate($customer, 'catalog.quantity.cancel'),
                 'callback_data' => 'detail:qty:cancel:'.$productId.':'.$selection['interactionToken'],
             ]]],
-        ]);
+        ], options: []);
+    }
+
+    /**
+     * @param  array<string, mixed>  $keyboard
+     * @param  array<string, mixed>  $options
+     */
+    private function sendProductMessage(Customer $customer, string $chatId, Product $product, string $text, array $keyboard, ?int $messageId = null, array $options = ['parse_mode' => 'HTML']): void
+    {
+        $telegramImagePath = $product->telegram_image_path ?? $product->family?->telegram_image_path;
+        $photoUrl = $this->images->telegramUrl($telegramImagePath);
+        if ($photoUrl === null) {
+            $root = $messageId === null
+                ? $this->roots->currentForChat($customer, $chatId)
+                : $this->roots->match($customer, $chatId, $messageId);
+            if ($root?->screen === TelegramNavigationScreen::Product) {
+                $this->roots->render($root, $chatId, new TelegramNavigationSurface(
+                    TelegramNavigationScreen::Product,
+                    $this->locale->code($customer),
+                    $text,
+                    $keyboard,
+                    $options,
+                ));
+
+                return;
+            }
+
+            $this->sendCatalogMessage($customer, $chatId, $text, $keyboard, $messageId, $options);
+
+            return;
+        }
+
+        $surface = new TelegramNavigationSurface(
+            TelegramNavigationScreen::Product,
+            $this->locale->code($customer),
+            $text,
+            $keyboard,
+            $options,
+            $photoUrl,
+        );
+        $root = $messageId === null
+            ? $this->roots->currentForChat($customer, $chatId)
+            : $this->roots->match($customer, $chatId, $messageId);
+
+        if ($root !== null) {
+            $this->roots->render($root, $chatId, $surface);
+
+            return;
+        }
+
+        if ((string) $customer->telegram_id !== $chatId) {
+            if ($this->captions->fitsMediaCaption($text, $options)) {
+                $this->bot->sendPhotoReference($chatId, $photoUrl, $text, $keyboard, $options);
+            } else {
+                $this->bot->sendMessage($chatId, $text, $keyboard, $options);
+            }
+
+            return;
+        }
+
+        $this->roots->establishProduct($customer, $chatId, $surface);
     }
 
     public function handleCustomQuantityInput(Customer $customer, string $chatId, string $text): void

@@ -3,9 +3,9 @@
                 <x-admin-dashboard.card id="admin-section-telegram-welcome-banner" data-admin-return-target tabindex="-1" as="section" tone="green" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-labelledby="admin-telegram-welcome-banner-title">
                     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0">
-                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Telegram Welcome Banner</p>
+                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Banner sambutan bot Telegram</p>
                             <h2 id="admin-telegram-welcome-banner-title" class="mt-1 font-display text-base font-bold text-neo-ink">Satu banner aktif untuk /start</h2>
-                            <p class="mt-2 max-w-2xl text-xs font-semibold leading-5 text-brand-muted">Upload dari sini tanpa rebuild Docker. File disimpan di persistent storage, lalu Telegram menyimpan file_id agar pengiriman berikutnya tidak upload ulang.</p>
+                            <p class="mt-2 max-w-2xl text-xs font-semibold leading-5 text-brand-muted">Hanya untuk sambutan /start di bot, bukan detail produk atau poster stok Store Channel. Upload tanpa rebuild Docker; file di persistent storage dan file_id di-cache Telegram.</p>
                         </div>
                         <div class="flex h-28 w-44 shrink-0 items-center justify-center overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_#050505]">
                             @if ($welcomeBanner['is_custom'])
@@ -29,9 +29,9 @@
                         <form method="POST" action="{{ $welcomeBanner['update_url'] }}" enctype="multipart/form-data" x-data="{ fileName: 'Belum ada file yang dipilih' }" class="mt-4 flex flex-col gap-3 rounded-xl border-2 border-dashed border-neo-ink/40 bg-white/60 p-3 sm:flex-row sm:items-end">
                             @csrf
                             <div class="min-w-0 flex-1">
-                                <x-admin-dashboard.field-label for="telegram-welcome-banner-image">Ganti gambar banner</x-admin-dashboard.field-label>
+                                <x-admin-dashboard.field-label for="telegram-welcome-banner-image">Gambar banner /start</x-admin-dashboard.field-label>
                                 <div class="mt-2 flex min-w-0 items-center gap-3 rounded-lg border-2 border-neo-ink bg-white p-2 shadow-[2px_2px_0_#050505]">
-                                    <label for="telegram-welcome-banner-image" class="shrink-0 cursor-pointer rounded-md bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih gambar</label>
+                                    <label for="telegram-welcome-banner-image" class="shrink-0 cursor-pointer rounded-md bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih banner /start</label>
                                     <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="fileName">Belum ada file yang dipilih</span>
                                 </div>
                                 <input type="file" id="telegram-welcome-banner-image" name="image" accept="image/jpeg,image/png,image/webp" required class="sr-only" x-on:change="fileName = $event.target.files[0]?.name ?? 'Belum ada file yang dipilih'">
@@ -55,6 +55,7 @@
                         <x-admin-dashboard.badge :tone="$storeChannel['status']['tone']">{{ $storeChannel['status']['label'] }}</x-admin-dashboard.badge>
                     </div>
                     <p class="mt-2 text-xs font-semibold text-brand-muted">{{ $storeChannel['status']['hint'] }}</p>
+                    <p class="mt-2 text-xs font-semibold text-brand-muted">Poster produk untuk posting stok bertambah diatur per produk pada tab Produk → Edit produk → Poster stok bertambah. Tidak dipakai untuk sales proof, banner /start, atau pesan pelanggan.</p>
 
                     @error('channel_username', 'storeChannel')<x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>@enderror
                     @error('channel_link', 'storeChannel')<x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>@enderror

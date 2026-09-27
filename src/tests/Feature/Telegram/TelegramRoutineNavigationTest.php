@@ -24,6 +24,7 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -437,6 +438,83 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->assertSame(4, $this->editCount(45451), 'Catalog navigation must edit the canonical message.');
         $this->assertSame(1, $this->routineMessageCount(45451), 'Catalog navigation must not send a second message.');
         $this->assertSame($messageId, (int) TelegramNavigationRoot::query()->sole()->message_id);
+    }
+
+    public function test_product_photo_replaces_banner_and_quantity_edits_only_the_new_detail(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('telegram-products/first.webp', 'first-image');
+        Storage::disk('public')->put('telegram-products/second.webp', 'second-image');
+        $this->fakeCanonicalTelegram();
+        Customer::factory()->create(['telegram_id' => 45459, 'locale' => 'id']);
+        $category = Category::factory()->create(['name' => 'Design']);
+        $first = Product::factory()->create([
+            'name' => 'Design First',
+            'category_id' => $category->id,
+            'telegram_image_path' => 'telegram-products/first.webp',
+            'stock' => 3,
+        ]);
+        $second = Product::factory()->create([
+            'name' => 'Design Second',
+            'category_id' => $category->id,
+            'telegram_image_path' => 'telegram-products/second.webp',
+            'stock' => 3,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(45459, '/start', [], 45459))->assertOk();
+        $bannerId = TelegramNavigationRoot::query()->sole()->message_id;
+        $this->postTelegramWebhook($this->callbackUpdate(45460, 'open-catalog', 'katalog', [], 45459, 'private', $bannerId))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(45461, 'open-category', 'category:'.$category->id, [], 45459, 'private', $bannerId))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(45462, 'open-first', 'product:'.$first->id, [], 45459, 'private', $bannerId))->assertOk();
+
+        $detail = TelegramNavigationRoot::query()->sole();
+        $this->assertNotSame($bannerId, $detail->message_id);
+        $this->assertSame(TelegramNavigationScreen::Product, $detail->screen);
+        $this->assertSame(TelegramNavigationMediaKind::Photo, $detail->media_kind);
+        $firstPhoto = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->last()[0];
+        $this->assertStringContainsString('/storage/telegram-products/first.webp', $firstPhoto['photo']);
+        $this->assertStringContainsString('Design First', $firstPhoto['caption']);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/deleteMessage')
+            && (int) $request['message_id'] === $bannerId);
+
+        $increase = $firstPhoto['reply_markup']['inline_keyboard'][0][2]['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(45463, 'increase-first', $increase, [], 45459, 'private', $detail->message_id))->assertOk();
+        $this->assertSame($detail->message_id, TelegramNavigationRoot::query()->sole()->message_id);
+        $this->assertStringContainsString('Jumlah: 2', $this->editCopy($this->lastCanonicalEdit(45459)));
+        $updatedDetail = $this->lastCanonicalEdit(45459);
+        $manual = collect($updatedDetail['reply_markup']['inline_keyboard'])->flatten(1)
+            ->first(fn (array $button): bool => str_starts_with($button['callback_data'], 'detail:qty:manual:'))['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(45466, 'manual-first', $manual, [], 45459, 'private', $detail->message_id))->assertOk();
+        $this->assertSame($detail->message_id, TelegramNavigationRoot::query()->sole()->message_id);
+        $prompt = $this->lastCanonicalEdit(45459);
+        $this->assertStringContainsString('Design First', $this->editCopy($prompt));
+        $cancel = $prompt['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(45467, 'cancel-manual', $cancel, [], 45459, 'private', $detail->message_id))->assertOk();
+        $updatedDetail = $this->lastCanonicalEdit(45459);
+        $back = collect($updatedDetail['reply_markup']['inline_keyboard'])->flatten(1)
+            ->first(fn (array $button): bool => str_starts_with($button['callback_data'], 'detail:back:'))['callback_data'];
+        $this->assertSame(2, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->count());
+
+        $this->postTelegramWebhook($this->callbackUpdate(45464, 'back-first', $back, [], 45459, 'private', $detail->message_id))->assertOk();
+        $catalog = TelegramNavigationRoot::query()->sole();
+        $this->assertSame(TelegramNavigationScreen::Catalog, $catalog->screen);
+        $this->assertNotSame($detail->message_id, $catalog->message_id);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/deleteMessage')
+            && (int) $request['message_id'] === $detail->message_id);
+
+        $this->postTelegramWebhook($this->callbackUpdate(45465, 'open-second', 'product:'.$second->id, [], 45459, 'private', $catalog->message_id))->assertOk();
+        $secondPhoto = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->last()[0];
+        $this->assertStringContainsString('/storage/telegram-products/second.webp', $secondPhoto['photo']);
+        $this->assertStringContainsString('Design Second', $secondPhoto['caption']);
+
+        $secondRoot = TelegramNavigationRoot::query()->sole();
+        $second->update(['telegram_image_path' => null]);
+        $increaseSecond = $secondPhoto['reply_markup']['inline_keyboard'][0][2]['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(45468, 'image-removed', $increaseSecond, [], 45459, 'private', $secondRoot->message_id))->assertOk();
+        $textRoot = TelegramNavigationRoot::query()->sole();
+        $this->assertSame(TelegramNavigationMediaKind::Text, $textRoot->media_kind);
+        $this->assertSame(TelegramNavigationScreen::Product, $textRoot->screen);
+        $this->assertNotSame($secondRoot->message_id, $textRoot->message_id);
     }
 
     public function test_long_catalog_screen_replaces_the_photo_root_once_and_keeps_editing(): void
