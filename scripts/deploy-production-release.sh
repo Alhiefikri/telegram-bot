@@ -516,6 +516,7 @@ wait_for_health() {
 }
 
 verify_release_gates() {
+  local candidate_cutover_started_at="${1:?candidate cutover timestamp is required}"
   wait_for_health || return 1
 
   echo "Clearing stale Laravel scheduler mutexes after candidate cutover."
@@ -550,7 +551,7 @@ verify_release_gates() {
     return 1
   fi
 
-  if ! compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null; then
+  if ! compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 --tolerate-errors-since="$candidate_cutover_started_at" </dev/null; then
     echo "Release gate failed: Telegram webhook observation failed." >&2
     return 1
   fi
@@ -660,6 +661,36 @@ reconcile_remote_release() {
         FAILURE_REASON=remote-state-reconcile
         restore_previous_release || true
       fi
+      return 1
+      ;;
+    rollback-succeeded)
+      COMPOSE_CONFIG_STATUS=unvalidated
+      load_previous_release || return 1
+      local current_commit
+      current_commit="$(git rev-parse HEAD)"
+      if [ "$current_commit" != "$PREVIOUS_COMMIT" ]; then
+        echo "Remote release journal records a successful rollback, but the previous release checkout is not active." >&2
+        return 1
+      fi
+      APP_IMAGE="$PREVIOUS_IMAGE"
+      export RELEASE_SHA="$PREVIOUS_COMMIT"
+      if verify_service_images "$PREVIOUS_IMAGE" \
+        && wait_for_health \
+        && verify_app_url \
+        && verify_release_marker "$PREVIOUS_COMMIT"; then
+        echo "Remote release reconciliation confirmed a healthy rollback."
+        printf 'RELEASE_RECONCILIATION_STATE=rollback-succeeded\n'
+        return 0
+      fi
+      echo "Remote release journal records a successful rollback, but the previous release is no longer healthy." >&2
+      return 1
+      ;;
+    rollback-failed)
+      echo "Remote release journal records a failed rollback; manual recovery is required." >&2
+      return 1
+      ;;
+    migration-failed-no-cutover|credential-identity-backfill-failed-no-cutover)
+      echo "Remote release journal records a terminal failure before cutover: $state." >&2
       return 1
       ;;
     deploy-started|previous-release-recorded|candidate-checkout|image-pulled|candidate-migrations-started|migration-succeeded|backup-started|backup-verified)
@@ -794,9 +825,10 @@ write_release_state "migration-succeeded"
 
 echo "Migration succeeded. Cutting over application services."
 write_release_state "candidate-cutover-started"
+cutover_started_at="$(date +%s)"
 if ! APP_IMAGE="$APP_IMAGE" compose up -d --no-build --remove-orphans \
   || ! verify_service_images "$APP_IMAGE" \
-  || ! verify_release_gates \
+  || ! verify_release_gates "$cutover_started_at" \
   || ! verify_app_url \
   || ! write_release_marker "$DEPLOY_SHA" \
   || ! verify_release_marker "$DEPLOY_SHA"; then

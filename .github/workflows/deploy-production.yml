@@ -226,12 +226,17 @@ jobs:
           : "${PRODUCTION_USER:?Missing GitHub secret PRODUCTION_USER}"
           : "${PRODUCTION_PATH:?Missing GitHub secret PRODUCTION_PATH}"
 
-          ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=reconcile APP_IMAGE="$APP_IMAGE" EXPECTED_APP_URL="$EXPECTED_APP_URL" \
-            'bash -s' < scripts/deploy-production-release.sh
+          reconcile_output="$(
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -i ~/.ssh/production_key -p "$PRODUCTION_SSH_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+              PRODUCTION_PATH="$PRODUCTION_PATH" DEPLOY_SHA="$DEPLOY_SHA" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" RELEASE_ARTIFACT_DIR="$RELEASE_ARTIFACT_DIR" RELEASE_OPERATION=reconcile APP_IMAGE="$APP_IMAGE" EXPECTED_APP_URL="$EXPECTED_APP_URL" \
+              'bash -s' < scripts/deploy-production-release.sh | tee /dev/stderr
+          )"
+          if printf '%s\n' "$reconcile_output" | grep -Fqx 'RELEASE_RECONCILIATION_STATE=rollback-succeeded'; then
+            echo "release_state=rollback-succeeded" >> "$GITHUB_OUTPUT"
+          fi
       - name: Run external public smoke checks
         id: external-smoke
-        if: steps.remote-reconcile.outcome == 'success'
+        if: steps.remote-reconcile.outcome == 'success' && steps.remote-reconcile.outputs.release_state != 'rollback-succeeded'
         continue-on-error: true
         env:
           BASE_URL: ${{ vars.PRODUCTION_SMOKE_BASE_URL }}
@@ -324,7 +329,7 @@ jobs:
       - name: Fail release after remote-state reconciliation failure
         if: always() && steps.remote-reconcile.outcome == 'failure'
         run: |
-          echo "Remote deployment state could not prove a healthy candidate release. Inspect release-state.env and release-result.txt in the diagnostics." >&2
+          echo "Remote deployment state could not prove a healthy candidate or a healthy rollback. Inspect release-state.env and release-result.txt in the diagnostics." >&2
           exit 22
 
       - name: Fail release after external smoke rollback
@@ -339,6 +344,12 @@ jobs:
           fi
           echo "External public smoke or its rollback verification failed. Emergency manual recovery is required." >&2
           exit 21
+      - name: Fail release after healthy automatic rollback
+        if: always() && steps.remote-reconcile.outputs.release_state == 'rollback-succeeded'
+        run: |
+          echo "Candidate release failed, but reconciliation confirmed the previous release is healthy." >&2
+          exit 20
+
 
       - name: Remove transient GHCR credentials from VPS
         if: always()

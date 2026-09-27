@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 class ProductionReleaseHardeningTest extends TestCase
@@ -292,6 +293,53 @@ class ProductionReleaseHardeningTest extends TestCase
             ->doesntExpectOutputToContain('https://store.example.com/api/webhook/telegram')
             ->assertFailed();
     }
+
+    public function test_telegram_webhook_check_ignores_only_errors_since_candidate_cutover(): void
+    {
+        config()->set('app.url', 'https://store.example.com');
+        config()->set('services.telegram.token', 'bot-token');
+        config()->set('services.telegram.webhook_secret', 'webhook-secret');
+        config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
+
+        $cutoverStartedAt = time();
+        $baseResponse = [
+            'ok' => true,
+            'result' => [
+                'url' => 'https://store.example.com/api/webhook/telegram',
+                'pending_update_count' => 0,
+                'last_error_message' => 'temporary gateway error',
+            ],
+        ];
+        Http::fakeSequence('https://api.telegram.org/botbot-token/getWebhookInfo')
+            ->push(array_replace_recursive($baseResponse, ['result' => ['last_error_date' => $cutoverStartedAt]]))
+            ->push(array_replace_recursive($baseResponse, ['result' => ['last_error_date' => $cutoverStartedAt - 1]]));
+
+        $this->artisan('ops:check-telegram-webhook', [
+            '--max-pending' => 0,
+            '--tolerate-errors-since' => $cutoverStartedAt,
+        ])->assertSuccessful();
+
+        $this->artisan('ops:check-telegram-webhook', [
+            '--max-pending' => 0,
+            '--tolerate-errors-since' => $cutoverStartedAt,
+        ])->assertFailed();
+    }
+
+    public function test_production_release_reconciliation_recognizes_terminal_journal_states(): void
+    {
+        $script = base_path('../scripts/test-deploy-production-release.sh');
+        $process = new Process(['bash', $script], base_path('..'));
+        $process->setTimeout(120);
+        $process->run();
+
+        $output = $process->getOutput().$process->getErrorOutput();
+        $this->assertSame(0, $process->getExitCode(), $output);
+        $this->assertStringContainsString('PASS: reconcile-rollback-succeeded', $output);
+        $this->assertStringContainsString('PASS: reconcile-rollback-failed', $output);
+        $this->assertStringContainsString('PASS: reconcile-migration-failed', $output);
+        $this->assertStringContainsString('PASS: reconcile-backfill-failed', $output);
+    }
+
 
     public function test_telegram_webhook_observation_accepts_a_transient_pending_update_that_drains(): void
     {
@@ -830,7 +878,6 @@ SH);
         $this->assertStringNotContainsString('up -d --build --remove-orphans', $contents);
         $this->assertStringContainsString('app artisan ops:check-failed-jobs --snapshot', $release);
         $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --baseline-stdin', $release);
-        $this->assertStringContainsString('php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5', $release);
         $this->assertMatchesRegularExpression(
             '/actions\/upload-artifact@[0-9a-f]{40} # v[0-9]+(?:\.[0-9]+)*/',
             $contents,
@@ -848,7 +895,6 @@ SH);
             'scheduler health check is non-interactive' => 'compose_root exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
             'failed jobs check consumes the pre-release baseline non-interactively' => 'compose exec -T app php artisan ops:check-failed-jobs --max=0 --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE"',
             'Telegram update recovery is non-interactive' => 'compose exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable </dev/null',
-            'Telegram webhook check is non-interactive' => 'compose exec -T app php artisan ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 </dev/null',
         ] as $contract => $command) {
             $this->assertStringContainsString($command, $release, $contract);
         }
@@ -862,7 +908,6 @@ SH);
         $this->assertStringContainsString('--queue=telegram-broadcast', $release);
         $this->assertStringContainsString('--queue=telegram-stock', $release);
         $this->assertStringContainsString('--queue=binance-verification', $release);
-        $this->assertStringContainsString('if ! compose exec -T app php artisan ops:check-telegram-webhook', $release);
 
         $this->assertStringContainsString('PREVIOUS_COMMIT="$(git rev-parse HEAD)"', $release);
         $this->assertStringContainsString('PREVIOUS_IMAGE="$(docker inspect', $release);

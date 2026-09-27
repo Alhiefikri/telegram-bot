@@ -12,7 +12,8 @@ class CheckTelegramWebhook extends Command
     protected $signature = 'ops:check-telegram-webhook
         {--max-pending=0 : Maximum acceptable Telegram pending_update_count per sample}
         {--observation-seconds=0 : Bounded period to observe pending updates; zero takes one sample}
-        {--sample-interval=5 : Seconds between pending-update samples}';
+        {--sample-interval=5 : Seconds between pending-update samples}
+        {--tolerate-errors-since= : Ignore webhook errors at or after this Unix timestamp}';
 
     protected $description = 'Verify Telegram webhook registration without printing secrets or private URLs.';
 
@@ -21,6 +22,7 @@ class CheckTelegramWebhook extends Command
         $maxPending = (int) $this->option('max-pending');
         $observationSeconds = (int) $this->option('observation-seconds');
         $sampleInterval = (int) $this->option('sample-interval');
+        $tolerateErrorsSince = $this->option('tolerate-errors-since');
         $token = trim((string) config('services.telegram.token'));
         $secret = trim((string) config('services.telegram.webhook_secret'));
         $appUrl = rtrim(trim((string) config('app.url')), '/');
@@ -31,6 +33,16 @@ class CheckTelegramWebhook extends Command
             $this->error('Telegram webhook: pending-update thresholds must be zero or greater and sample interval must be positive');
 
             return self::FAILURE;
+        }
+
+        if ($tolerateErrorsSince !== null && ! ctype_digit((string) $tolerateErrorsSince)) {
+            $this->error('Telegram webhook: tolerate-errors-since must be a Unix timestamp');
+
+            return self::FAILURE;
+        }
+
+        if ($tolerateErrorsSince !== null) {
+            $tolerateErrorsSince = (int) $tolerateErrorsSince;
         }
 
         if ($token === '') {
@@ -83,12 +95,15 @@ class CheckTelegramWebhook extends Command
         $lastErrorMessage = data_get($body, 'result.last_error_message');
         $lastErrorPresent = $lastErrorMessage !== null;
 
-        // An error is only considered active/blocking if it happened recently (within 5 minutes)
-        // to avoid blocking deployments due to stale historical errors.
+        // Keep blocking recent webhook errors unless they were recorded after this
+        // candidate began cutover; Telegram dates are Unix timestamps in seconds.
         $lastErrorActive = false;
         if ($lastErrorPresent) {
             if (is_numeric($lastErrorDate)) {
-                $lastErrorActive = (time() - (int) $lastErrorDate) <= 300;
+                $errorRecordedSinceCutover = $tolerateErrorsSince !== null
+                    && (int) $lastErrorDate >= $tolerateErrorsSince;
+                $lastErrorActive = ! $errorRecordedSinceCutover
+                    && (time() - (int) $lastErrorDate) <= 300;
             } else {
                 $lastErrorActive = true;
             }

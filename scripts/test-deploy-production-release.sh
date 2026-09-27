@@ -79,7 +79,7 @@ run_scenario() {
   [ "$scenario" = "use-persisted-fingerprint-key" ] && use_persisted_fingerprint_key=true
   case "$scenario" in
     contract-success|contract-failure|backup-failure) operation=contract ;;
-    reconcile-success|reconcile-failure) operation=reconcile ;;
+    reconcile-success|reconcile-failure|reconcile-rollback-succeeded|reconcile-rollback-failed|reconcile-migration-failed|reconcile-backfill-failed) operation=reconcile ;;
   esac
   workspace=$(mktemp -d)
   bin="$workspace/bin"
@@ -88,8 +88,13 @@ run_scenario() {
   : > "$workspace/src/database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php"
   : > "$workspace/src/database/migrations/2026_08_18_000001_contract_telegram_outbound_effects.php"
   if [ "$operation" = "contract" ] || [ "$operation" = "reconcile" ]; then
-    printf '%s\n' "$CANDIDATE_COMMIT" > "$workspace/head"
-    printf '%s\n' "$CANDIDATE_IMAGE" > "$workspace/current-image"
+    if [ "$scenario" = "reconcile-rollback-succeeded" ] || [ "$scenario" = "reconcile-migration-failed" ] || [ "$scenario" = "reconcile-backfill-failed" ]; then
+      printf '%s\n' "$PREVIOUS_COMMIT" > "$workspace/head"
+      printf '%s\n' "$PREVIOUS_IMAGE" > "$workspace/current-image"
+    else
+      printf '%s\n' "$CANDIDATE_COMMIT" > "$workspace/head"
+      printf '%s\n' "$CANDIDATE_IMAGE" > "$workspace/current-image"
+    fi
   else
     printf '%s\n' "$PREVIOUS_COMMIT" > "$workspace/head"
     printf '%s\n' "$previous_image" > "$workspace/current-image"
@@ -103,7 +108,21 @@ run_scenario() {
   if [ "$operation" = "reconcile" ]; then
     printf '%s\n' "$PREVIOUS_COMMIT" > "$artifacts/previous-commit.txt"
     printf '%s\n' "$PREVIOUS_IMAGE" > "$artifacts/previous-image.txt"
-    printf 'state=candidate-cutover-started\n' > "$artifacts/release-state.env"
+    if [ "$scenario" = "reconcile-rollback-succeeded" ]; then
+      printf 'state=rollback-succeeded\n' > "$artifacts/release-state.env"
+      printf 'deploy-failed-rollback-succeeded\n' > "$artifacts/release-result.txt"
+    elif [ "$scenario" = "reconcile-rollback-failed" ]; then
+      printf 'state=rollback-failed\n' > "$artifacts/release-state.env"
+      printf 'deploy-failed-rollback-failed\n' > "$artifacts/release-result.txt"
+    elif [ "$scenario" = "reconcile-migration-failed" ]; then
+      printf 'state=migration-failed-no-cutover\n' > "$artifacts/release-state.env"
+      printf 'migration-failed-no-cutover\n' > "$artifacts/release-result.txt"
+    elif [ "$scenario" = "reconcile-backfill-failed" ]; then
+      printf 'state=credential-identity-backfill-failed-no-cutover\n' > "$artifacts/release-state.env"
+      printf 'credential-identity-backfill-failed-no-cutover\n' > "$artifacts/release-result.txt"
+    else
+      printf 'state=candidate-cutover-started\n' > "$artifacts/release-state.env"
+    fi
   fi
 
 
@@ -279,6 +298,7 @@ SCRIPT
 
   case "$scenario" in
     success)
+      grep -Eq 'ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 --tolerate-errors-since=[0-9]+' "$workspace/commands.log" || fail "success did not pass the candidate cutover timestamp to the webhook gate non-interactively"
       grep -q 'compose .* run .*--rm --no-deps --entrypoint php .*artisan migrate --force' "$workspace/commands.log" || fail "success did not run explicit migration without the application entrypoint"
       grep -q 'credentials:backfill-identity-registry --chunk=100' "$workspace/commands.log" || fail "success did not prepare the credential identity registry"
       grep -q 'database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php' "$workspace/commands.log" || fail "success did not run the additive migration"
@@ -327,6 +347,21 @@ SCRIPT
     reconcile-success)
       grep -q 'Remote release reconciliation proved the candidate is healthy' "$workspace/stdout" || fail "remote reconciliation did not prove the candidate"
       ;;
+    reconcile-rollback-succeeded)
+      grep -q 'Remote release reconciliation confirmed a healthy rollback' "$workspace/stdout" || fail "remote reconciliation did not recognize the completed rollback"
+      grep -qx 'RELEASE_RECONCILIATION_STATE=rollback-succeeded' <(grep '^RELEASE_RECONCILIATION_STATE=' "$workspace/stdout") || fail "remote reconciliation did not expose the rollback terminal state"
+      grep -qx 'state=rollback-succeeded' "$artifacts/release-state.env" || fail "remote reconciliation changed the completed rollback state"
+      ;;
+    reconcile-rollback-failed)
+      grep -q 'Remote release journal records a failed rollback' "$workspace/stderr" || fail "remote reconciliation did not report the failed rollback state"
+      ! grep -q 'unknown state' "$workspace/stderr" || fail "remote reconciliation treated rollback-failed as an unknown state"
+      grep -qx 'state=rollback-failed' "$artifacts/release-state.env" || fail "remote reconciliation changed the failed rollback state"
+      ;;
+    reconcile-migration-failed|reconcile-backfill-failed)
+      grep -q 'Remote release journal records a terminal failure before cutover' "$workspace/stderr" || fail "remote reconciliation did not recognize the pre-cutover terminal failure"
+      ! grep -q 'unknown state' "$workspace/stderr" || fail "remote reconciliation treated a pre-cutover terminal state as unknown"
+      grep -q '^state=.*failed-no-cutover$' "$artifacts/release-state.env" || fail "remote reconciliation changed the pre-cutover terminal state"
+      ;;
     reconcile-failure)
       grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "remote reconciliation failure did not restore previous image"
       grep -q 'remote-state-reconcile' "$workspace/stderr" || fail "remote reconciliation rollback reason was not explicit"
@@ -348,6 +383,10 @@ run_scenario compose-validation-failure 1 unused "$PREVIOUS_IMAGE"
 run_scenario success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario reconcile-success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario reconcile-failure 1 remote-state-reconcile-rollback-succeeded "$PREVIOUS_IMAGE"
+run_scenario reconcile-rollback-succeeded 0 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
+run_scenario reconcile-rollback-failed 1 deploy-failed-rollback-failed "$CANDIDATE_IMAGE"
+run_scenario reconcile-migration-failed 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
+run_scenario reconcile-backfill-failed 1 credential-identity-backfill-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario legacy-image-rejected 1 unused "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
 run_scenario legacy-image-bootstrap 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE" "$LEGACY_PREVIOUS_IMAGE"
 run_scenario legacy-bootstrap-health-failure 20 deploy-failed-rollback-succeeded "$LOCAL_PREVIOUS_IMAGE_ID" "$LEGACY_PREVIOUS_IMAGE"
