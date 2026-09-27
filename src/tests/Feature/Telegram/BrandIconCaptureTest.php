@@ -33,12 +33,13 @@ class BrandIconCaptureTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->callbackUpdate(50105, 'list', 'brandicon:list', ['id' => 999], 999, 'private', 777))->assertOk();
 
-        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
-            && (int) ($request['message_id'] ?? 0) === 777
-            && str_contains((string) ($request['text'] ?? ''), 'Ikon Brand')
-            && str_contains(json_encode($request['reply_markup']), 'brandicon:pick:')
-            && str_contains(json_encode($request['reply_markup'], JSON_UNESCAPED_UNICODE), '✅ Netflix')
-            && str_contains(json_encode($request['reply_markup'], JSON_UNESCAPED_UNICODE), '⬜ ChatGPT'));
+        $request = $this->sentEditRequest(777);
+        $this->assertStringContainsString('Ikon Brand', (string) $request['text']);
+        $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
+        $labels = array_column($buttons, 'text');
+        $this->assertContains('✅ Netflix', $labels);
+        $this->assertContains('⬜ ChatGPT', $labels);
+        $this->assertContains('🧭 Ikon Menu', $labels);
     }
 
     public function test_customer_home_never_exposes_the_brand_icon_entry(): void
@@ -59,10 +60,10 @@ class BrandIconCaptureTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->callbackUpdate(50110, 'pick', 'brandicon:pick:'.$brand->id, ['id' => 999], 999, 'private', 777))->assertOk();
 
-        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
-            && (int) ($request['message_id'] ?? 0) === 777
-            && str_contains((string) ($request['text'] ?? ''), 'Netflix')
-            && str_contains(json_encode($request['reply_markup']), 'brandicon:list'));
+        $request = $this->sentEditRequest(777);
+        $this->assertStringContainsString('Netflix', (string) $request['text']);
+        $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
+        $this->assertSame('brandicon:list', $buttons[0]['callback_data'] ?? null);
     }
 
     public function test_the_emoji_the_admin_sends_is_captured_on_the_brand(): void
@@ -89,10 +90,11 @@ class BrandIconCaptureTest extends TelegramBotTestSupport
 
         $this->assertSame(self::EMOJI_ID, $brand->fresh()->custom_emoji_id);
 
-        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
-            && (int) ($request['message_id'] ?? 0) === 777
-            && str_contains((string) ($request['text'] ?? ''), 'Netflix')
-            && str_contains(json_encode($request['reply_markup']), 'brandicon:clear:'.$brand->id));
+        $request = $this->sentEditRequest(777);
+        $this->assertStringContainsString('Netflix', (string) $request['text']);
+        $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
+        $this->assertSame('brandicon:clear:'.$brand->id, $buttons[0]['callback_data'] ?? null);
+        $this->assertSame('brandicon:list', $buttons[1]['callback_data'] ?? null);
     }
 
     public function test_a_plain_message_while_pending_asks_for_the_emoji_again(): void
@@ -141,9 +143,10 @@ class BrandIconCaptureTest extends TelegramBotTestSupport
 
         $this->assertNull($brand->fresh()->custom_emoji_id);
 
-        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
-            && (int) ($request['message_id'] ?? 0) === 777
-            && str_contains((string) ($request['text'] ?? ''), 'Netflix'));
+        $request = $this->sentEditRequest(777);
+        $this->assertStringContainsString('Netflix', (string) $request['text']);
+        $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
+        $this->assertSame('brandicon:list', $buttons[0]['callback_data'] ?? null);
     }
 
     public function test_a_non_admin_cannot_open_the_brand_list(): void
@@ -168,6 +171,44 @@ class BrandIconCaptureTest extends TelegramBotTestSupport
     private function brand(string $slug): CatalogBrandIcon
     {
         return CatalogBrandIcon::query()->where('slug', $slug)->sole();
+    }
+
+    /**
+     * Telegram answers "Bad Request: expected an Array of InlineKeyboardButton"
+     * when a row is a button object instead of a list of buttons, and the HTTP
+     * fake cannot catch that, so every icon keyboard is asserted structurally.
+     *
+     * @param  array<string, mixed>  $markup
+     * @return list<array<string, mixed>>
+     */
+    private function assertValidInlineKeyboard(array $markup): array
+    {
+        $rows = $markup['inline_keyboard'] ?? null;
+        $this->assertIsArray($rows, 'reply_markup harus punya inline_keyboard');
+        $this->assertNotSame([], $rows, 'inline_keyboard tidak boleh kosong');
+
+        $buttons = [];
+        foreach ($rows as $index => $row) {
+            $this->assertIsArray($row, "Baris {$index} harus berupa array.");
+            $this->assertTrue(array_is_list($row), "Baris {$index} harus berupa daftar tombol, bukan satu tombol.");
+            foreach ($row as $button) {
+                $this->assertIsArray($button);
+                $this->assertArrayHasKey('text', $button);
+                $buttons[] = $button;
+            }
+        }
+
+        return $buttons;
+    }
+
+    private function sentEditRequest(int $messageId): Request
+    {
+        $requests = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
+            && (int) ($request['message_id'] ?? 0) === $messageId);
+
+        $this->assertNotEmpty($requests, 'Tidak ada editMessageText untuk pesan '.$messageId);
+
+        return $requests->last()[0];
     }
 
     /**

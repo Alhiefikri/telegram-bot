@@ -63,7 +63,7 @@ class TelegramIconIntents
         $this->bot->editMessageTextOrSend(
             $chatId,
             $this->locale->translate($customer, 'catalog.brand_icon.prompt', ['label' => $brand->label]),
-            ['inline_keyboard' => [$this->backRow($customer, 'brandicon:list', 'catalog.brand_icon.button_back')]],
+            ['inline_keyboard' => [[$this->backRow($customer, 'brandicon:list', 'catalog.brand_icon.button_back')]]],
             $messageId,
         );
     }
@@ -75,7 +75,7 @@ class TelegramIconIntents
         $this->bot->editMessageTextOrSend(
             $chatId,
             $this->locale->translate($customer, 'catalog.brand_icon.cleared', ['label' => $brand->label]),
-            ['inline_keyboard' => [$this->backRow($customer, 'brandicon:list', 'catalog.brand_icon.button_back')]],
+            ['inline_keyboard' => [[$this->backRow($customer, 'brandicon:list', 'catalog.brand_icon.button_back')]]],
             $messageId,
         );
     }
@@ -110,7 +110,7 @@ class TelegramIconIntents
         $this->bot->editMessageTextOrSend(
             $chatId,
             $this->locale->translate($customer, 'catalog.ui_icon.prompt', ['label' => $icon->label]),
-            ['inline_keyboard' => [$this->backRow($customer, 'menuicon:list', 'catalog.ui_icon.button_back')]],
+            ['inline_keyboard' => [[$this->backRow($customer, 'menuicon:list', 'catalog.ui_icon.button_back')]]],
             $messageId,
         );
     }
@@ -122,7 +122,7 @@ class TelegramIconIntents
         $this->bot->editMessageTextOrSend(
             $chatId,
             $this->locale->translate($customer, 'catalog.ui_icon.cleared', ['label' => $icon->label]),
-            ['inline_keyboard' => [$this->backRow($customer, 'menuicon:list', 'catalog.ui_icon.button_back')]],
+            ['inline_keyboard' => [[$this->backRow($customer, 'menuicon:list', 'catalog.ui_icon.button_back')]]],
             $messageId,
         );
     }
@@ -185,7 +185,7 @@ class TelegramIconIntents
                     'text' => $this->locale->translate($customer, 'catalog.brand_icon.button_clear'),
                     'callback_data' => $target['clear_callback'],
                 ]],
-                $this->backRow($customer, $target['back_callback'], $target['back_key']),
+                [$this->backRow($customer, $target['back_callback'], $target['back_key'])],
             ]],
             $pending['message_id'],
         );

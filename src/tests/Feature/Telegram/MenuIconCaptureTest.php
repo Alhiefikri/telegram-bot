@@ -22,10 +22,26 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->callbackUpdate(50200, 'list', 'menuicon:list', ['id' => 999], 999, 'private', 777))->assertOk();
 
-        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
-            && (int) ($request['message_id'] ?? 0) === 777
-            && str_contains((string) ($request['text'] ?? ''), 'Ikon Menu')
-            && str_contains(json_encode($request['reply_markup']), 'menuicon:pick:'));
+        $request = $this->sentEditRequest(777);
+        $this->assertStringContainsString('Ikon Menu', (string) $request['text']);
+        $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
+        $callbacks = array_column($buttons, 'callback_data');
+        $this->assertContains('menuicon:pick:'.$this->menuIcon('menu.products')->id, $callbacks);
+        $this->assertContains('brandicon:list', $callbacks);
+    }
+
+    public function test_picking_a_menu_slot_prompts_for_that_button_emoji(): void
+    {
+        $this->fakeTelegramHttp();
+        $this->adminCustomer(999);
+        $icon = $this->menuIcon('menu.home');
+
+        $this->postTelegramWebhook($this->callbackUpdate(50205, 'pick', 'menuicon:pick:'.$icon->id, ['id' => 999], 999, 'private', 777))->assertOk();
+
+        $request = $this->sentEditRequest(777);
+        $this->assertStringContainsString('Beranda', (string) $request['text']);
+        $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
+        $this->assertSame('menuicon:list', $buttons[0]['callback_data'] ?? null);
     }
 
     public function test_captured_menu_emoji_replaces_the_glyph_on_the_home_keyboard(): void
@@ -136,6 +152,49 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($update)->assertOk();
 
         $this->assertSame(self::EMOJI_ID, $icon->fresh()->custom_emoji_id);
+    }
+
+    private function menuIcon(string $key): TelegramUiIcon
+    {
+        return TelegramUiIcon::query()->where('key', $key)->sole();
+    }
+
+    /**
+     * Telegram answers "Bad Request: expected an Array of InlineKeyboardButton"
+     * when a row is a button object instead of a list of buttons, and the HTTP
+     * fake cannot catch that, so every icon keyboard is asserted structurally.
+     *
+     * @param  array<string, mixed>  $markup
+     * @return list<array<string, mixed>>
+     */
+    private function assertValidInlineKeyboard(array $markup): array
+    {
+        $rows = $markup['inline_keyboard'] ?? null;
+        $this->assertIsArray($rows, 'reply_markup harus punya inline_keyboard');
+        $this->assertNotSame([], $rows, 'inline_keyboard tidak boleh kosong');
+
+        $buttons = [];
+        foreach ($rows as $index => $row) {
+            $this->assertIsArray($row, "Baris {$index} harus berupa array.");
+            $this->assertTrue(array_is_list($row), "Baris {$index} harus berupa daftar tombol, bukan satu tombol.");
+            foreach ($row as $button) {
+                $this->assertIsArray($button);
+                $this->assertArrayHasKey('text', $button);
+                $buttons[] = $button;
+            }
+        }
+
+        return $buttons;
+    }
+
+    private function sentEditRequest(int $messageId): Request
+    {
+        $requests = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
+            && (int) ($request['message_id'] ?? 0) === $messageId);
+
+        $this->assertNotEmpty($requests, 'Tidak ada editMessageText untuk pesan '.$messageId);
+
+        return $requests->last()[0];
     }
 
     /**
