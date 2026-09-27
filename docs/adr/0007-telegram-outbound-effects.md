@@ -219,7 +219,9 @@ effect while product and stock rows are locked.
 
 The after-commit `telegram-stock` worker snapshots at most 100 customers per
 pass, inserts recipient rows idempotently, materializes missing ledger effects
-in bounded slices, and sends at most one recipient effect per job execution.
+in bounded slices, and sends a bounded batch (currently 25) of recipient
+effects per job execution. Every effect in the batch still goes through the
+shared claim/finalize protocol, so delivery stays idempotent per recipient.
 The job self-dispatches until the event and its effects are complete.
 `telegram:reconcile-stock-notifications` and `telegram:recover-outbound`
 rediscover events whose snapshot marker is null, so a process death before

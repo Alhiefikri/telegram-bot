@@ -407,7 +407,7 @@ Checklist operasional:
 - pastikan queue `default` diproses untuk update Telegram;
 - pastikan queue `telegram-outbound` diproses untuk instruksi pembayaran manual dan notifikasi pending order yang berasal dari checkout;
 - pastikan queue `notifications` diproses oleh worker pool terpisah karena receipt pembayaran, paid/expired notifications, Sales Proof Post, dan cleanup instruksi checkout dikirim melalui queue tersebut;
-- pastikan queue `telegram-stock` diproses oleh worker terpisah untuk restock/added-stock notifications; satu job hanya mengirim satu recipient lalu melanjutkan pekerjaan melalui self-dispatch yang idempotent;
+- pastikan queue `telegram-stock` diproses oleh worker terpisah untuk restock/added-stock notifications; satu job mengirim satu batch recipient terbatas lalu melanjutkan pekerjaan melalui self-dispatch yang idempotent;
 - worker count and sleep settings are pinned in `supervisord.conf`; scale them through a reviewed infrastructure change rather than adding more application `.env` knobs.
 
 Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, `laravel-outbound-worker` handles `telegram-outbound`, `laravel-notification-worker` handles `notifications`, `laravel-broadcast-worker` handles `telegram-broadcast`, and `laravel-stock-worker` handles `telegram-stock`. Stock intake commits only the durable notification handoff; recipient rendering/materialization runs after commit in bounded batches, so admin stock requests do not hold inventory transactions while querying every Telegram customer.
@@ -423,7 +423,7 @@ Manual checkout notification retry behavior:
 
 Admin Broadcast memakai queue telegram-broadcast dengan batch maksimal 25 recipient dan shared cache limiter yang dipatok di application configuration pada `25` pesan/detik, sehingga laju tetap di bawah batas broadcast Telegram 30 pesan/detik. Respons HTTP 429 memakai nilai retry_after yang dibatasi; recipient yang belum due tetap pending dan ditemukan kembali oleh command telegram:recover-outbound setelah window retry aman.
 
-- Restock notification delivery uses the same durable recipient/effect ledger as other Telegram fan-outs. Recipient snapshots are materialized in pages of 100, while the stock queue job sends at most one Telegram effect per execution and requeues remaining work.
+- Restock notification delivery uses the same durable recipient/effect ledger as other Telegram fan-outs. Recipient snapshots are materialized in pages of 100, while the stock queue job sends a bounded batch of Telegram effects per execution and requeues remaining work.
 
 Sebelum release perubahan copy Store Bot, jalankan audit katalog tiga locale:
 

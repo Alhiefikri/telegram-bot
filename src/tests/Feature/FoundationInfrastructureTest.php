@@ -189,7 +189,7 @@ class FoundationInfrastructureTest extends TestCase
             ->first(fn ($candidate): bool => str_contains((string) $candidate->command, 'telegram:recover-outbound'));
 
         $this->assertNotNull($event);
-        $this->assertSame(10, $event->expiresAt);
+        $this->assertSame(45, $event->expiresAt);
         $this->assertTrue($event->runInBackground);
     }
 

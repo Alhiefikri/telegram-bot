@@ -25,7 +25,7 @@ class StockNotificationDeliveryPipeline
 
     public const QUEUE = TelegramOutboundEffectService::STOCK_NOTIFICATION_QUEUE;
 
-    public const JOB_BATCH_SIZE = 1;
+    public const JOB_BATCH_SIZE = 25;
 
     private const RECIPIENT_MATERIALIZATION_BATCH_SIZE = 100;
 
