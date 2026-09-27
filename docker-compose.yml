@@ -155,6 +155,28 @@ services:
 
   db:
     image: postgres:16-alpine
+    command:
+      - postgres
+      - -c
+      - log_min_duration_statement=500ms
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - compute_query_id=on
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - wal_compression=on
+      - -c
+      - max_connections=32
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-telegram_bot}

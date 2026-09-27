@@ -17,6 +17,42 @@ artifacts/production-benchmark/<timestamp>/report.json
 artifacts/production-benchmark/<timestamp>/report.md
 ```
 
+## PostgreSQL Production Observability
+
+The production Compose database enables `pg_stat_statements`, logs statements
+that run for at least 500 ms, and uses bounded Docker log rotation (10 MiB × 3).
+Bind parameter values are excluded from statement logs. Postgres restarts to
+load the shared library; the migration installs the extension in the application
+database.
+
+After the configuration deploy is healthy, start a fresh 24-hour measurement
+window once, as the database owner:
+
+```sql
+SELECT pg_stat_statements_reset();
+SELECT stats_reset FROM pg_stat_statements_info;
+```
+
+Do not reset statistics again during the window. After at least 24 hours, capture
+the top 20 statements for the current database and attach the output, including
+`stats_reset`, to issue #517. Review query text before sharing; redact any
+literal values.
+
+```sql
+SELECT queryid, calls,
+       round(total_exec_time::numeric, 2) AS total_exec_ms,
+       round(mean_exec_time::numeric, 2) AS mean_exec_ms,
+       rows, shared_blks_hit, shared_blks_read, query
+FROM pg_stat_statements
+WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+ORDER BY total_exec_time DESC
+LIMIT 20;
+```
+
+Use `EXPLAIN` without `ANALYZE` when reviewing a candidate query in production;
+it reports the planned index/scan without executing the statement. Do not add a
+candidate index until its query and plan are supported by the captured workload.
+
 ## Paid Invoice Renderer Budget
 
 Run the renderer-only production-equivalent benchmark:
