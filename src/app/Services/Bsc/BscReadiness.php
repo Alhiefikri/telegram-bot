@@ -215,7 +215,7 @@ final class BscReadiness
         // smaller log ranges cannot pass readiness and fail on real Payments.
         // An empty result is healthy; provider errors must keep checkout closed.
         $latestBlockNumber = $this->rpc->latestBlockNumber();
-        $chunkSize = max(1, (int) config('services.bsc.log_scan_chunk_blocks', 2_000));
+        $chunkSize = max(1, (int) config('services.bsc.log_scan_chunk_blocks', 1_000));
 
         $this->rpc->transferLogs(
             tokenContract: $contract,
@@ -244,7 +244,7 @@ final class BscReadiness
             'chain_id' => (int) config('services.bsc.chain_id', 56),
             'contract' => strtolower(trim((string) config('services.bsc.usdt_contract'))),
             'expected_decimals' => (int) config('services.bsc.expected_token_decimals', 18),
-            'log_scan_chunk_blocks' => max(1, (int) config('services.bsc.log_scan_chunk_blocks', 2_000)),
+            'log_scan_chunk_blocks' => max(1, (int) config('services.bsc.log_scan_chunk_blocks', 1_000)),
         ], JSON_THROW_ON_ERROR));
     }
 

@@ -1281,7 +1281,7 @@ final class BscPaymentVerification
             throw new BscRpcException('BSC amount-unique scan window exceeds the configured safety bound.', retryable: false);
         }
 
-        $chunkSize = max(1, (int) config('services.bsc.log_scan_chunk_blocks', 2_000));
+        $chunkSize = max(1, (int) config('services.bsc.log_scan_chunk_blocks', 1_000));
         $fromBlock = max(0, $latestNumber - $requiredBlocks);
         $logs = [];
         for ($chunkStart = $fromBlock; $chunkStart <= $latestNumber; $chunkStart += $chunkSize) {

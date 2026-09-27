@@ -69,7 +69,8 @@ return [
         'late_payment_lookback_hours' => 72,
         'amount_unique_increment_micro' => 100,
         'log_scan_blocks_per_second' => 3,
-        'log_scan_chunk_blocks' => 2_000,
+        // Keep the default within common managed BSC RPC eth_getLogs limits.
+        'log_scan_chunk_blocks' => 1_000,
         'log_scan_max_blocks' => 250_000,
         'log_scan_clock_skew_seconds' => 120,
         'log_scan_reorg_buffer_blocks' => 12,

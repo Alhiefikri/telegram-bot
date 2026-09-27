@@ -46,7 +46,7 @@ final class BscReadinessTest extends TestCase
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
         config()->set('services.bsc.readiness_cache_seconds', 60);
-        config()->set('services.bsc.log_scan_chunk_blocks', 2_000);
+        config()->set('services.bsc.log_scan_chunk_blocks', 1_000);
 
         $this->rpc = new class implements BscTransferLogRpcClientInterface, BscVerificationRpcClientInterface
         {
@@ -202,7 +202,7 @@ final class BscReadinessTest extends TestCase
         $this->assertSame([
             'tokenContract' => self::CONTRACT,
             'receiverAddress' => '0x0000000000000000000000000000000000000001',
-            'fromBlock' => 8_001,
+            'fromBlock' => 9_001,
             'toBlock' => 10_000,
         ], $this->rpc->lastTransferLogQuery);
         $this->assertSame(1, $this->rpc->transferLogCalls);
@@ -278,13 +278,13 @@ final class BscReadinessTest extends TestCase
     {
         $readiness = app(BscReadiness::class);
         $readiness->check();
-        $this->assertSame(8_001, $this->rpc->lastTransferLogQuery['fromBlock']);
+        $this->assertSame(9_001, $this->rpc->lastTransferLogQuery['fromBlock']);
 
-        config()->set('services.bsc.log_scan_chunk_blocks', 1_000);
+        config()->set('services.bsc.log_scan_chunk_blocks', 500);
         $readiness->check();
 
         $this->assertSame(10, $this->rpc->calls);
-        $this->assertSame(9_001, $this->rpc->lastTransferLogQuery['fromBlock']);
+        $this->assertSame(9_501, $this->rpc->lastTransferLogQuery['fromBlock']);
     }
 
     public function test_customer_surfaces_keep_bsc_when_receipt_verification_is_available(): void
