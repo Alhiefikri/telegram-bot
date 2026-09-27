@@ -229,6 +229,7 @@ POST /api/webhook/telegram
 
 `TelegramWebhookIngress` memeriksa secret header, `update_id`, dan bentuk update yang didukung. Payload diperkecil sebelum disimpan. Duplicate update tidak membuat pekerjaan bisnis kedua; update yang belum diproses diklaim oleh processor job.
 `TelegramUpdateProcessor` serializes message and callback routing per Telegram chat with a distributed cache lock. The critical section includes selection/query-session transitions and inline message edits, so parallel workers cannot apply out-of-order UI state for one chat; transport ambiguity is never converted into a blind send fallback.
+`TelegramChatInteractionLock` uses a 55-second lease, below the update worker's 60-second timeout, and acquires non-blockingly. Contention clears the update claim and requeues it after five seconds without incrementing `processing_attempts`; the lock is released in `finally` when a handler exits normally or exceptionally.
 
 `TelegramMessageRouter` menangani command/text/menu. Customer Telegram baru langsung memakai locale Indonesia dan membuka home `/start`; picker bahasa tetap tersedia dari tombol Bahasa. `TelegramCallbackRouter` menjalankan urutan:
 

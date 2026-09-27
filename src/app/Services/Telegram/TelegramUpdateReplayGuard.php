@@ -6,6 +6,8 @@ use App\Models\TelegramUpdate;
 
 class TelegramUpdateReplayGuard
 {
+    private const CHAT_LOCK_RETRY_DELAY_SECONDS = 5;
+
     /**
      * Claim an update for processing, run the handler once, then mark it done.
      * The first processed/claimed checks are cheap replay fast-paths. The
@@ -27,6 +29,13 @@ class TelegramUpdateReplayGuard
 
         try {
             $handler($update);
+        } catch (TelegramChatInteractionLockUnavailable $exception) {
+            $update->update([
+                'processing_started_at' => null,
+                'next_retry_at' => now()->addSeconds(self::CHAT_LOCK_RETRY_DELAY_SECONDS),
+            ]);
+
+            throw $exception;
         } catch (\Throwable $exception) {
             $attempts = $update->processing_attempts + 1;
             $terminal = $attempts >= max(1, (int) config('services.telegram.processing_max_attempts', 3));

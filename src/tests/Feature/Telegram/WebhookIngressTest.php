@@ -6,11 +6,13 @@ use App\Jobs\ProcessTelegramUpdate;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\TelegramUpdate;
+use App\Services\Telegram\TelegramChatInteractionLock;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -190,6 +192,85 @@ class WebhookIngressTest extends TelegramBotTestSupport
         $this->assertNotNull($processedAt);
         $this->assertEquals($processedAt, $update->fresh()->processed_at);
         Http::assertSentCount(1);
+    }
+
+    public function test_chat_interaction_lock_lease_expires_before_update_worker_timeout_after_worker_termination(): void
+    {
+        $this->assertLessThan(60, TelegramChatInteractionLock::LEASE_SECONDS);
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+
+        $startedAt = Carbon::now();
+        // Leave the lock held while advancing time to model a worker killed before release.
+        $workerLock = Cache::lock('telegram:chat-interaction:12345', TelegramChatInteractionLock::LEASE_SECONDS);
+        $this->assertTrue($workerLock->get());
+        $update = TelegramUpdate::create([
+            'update_id' => 105,
+            'payload' => $this->messageUpdate(105, '/start'),
+            'created_at' => $startedAt,
+        ]);
+
+        Carbon::setTestNow($startedAt->copy()->addSeconds(TelegramChatInteractionLock::LEASE_SECONDS + 1));
+        try {
+            (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        $this->assertNotNull($update->fresh()->processed_at);
+        $this->assertSame(0, $update->fresh()->processing_attempts);
+        $this->assertNull($update->fresh()->next_retry_at);
+    }
+
+    public function test_chat_interaction_lock_is_released_when_handler_throws(): void
+    {
+        $lock = app(TelegramChatInteractionLock::class);
+
+        try {
+            $lock->withLock('12345', fn () => throw new \RuntimeException('handler failed'));
+            $this->fail('The handler exception should be rethrown.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('handler failed', $exception->getMessage());
+        }
+
+        $this->assertSame('handled', $lock->withLock('12345', fn (): string => 'handled'));
+    }
+
+    public function test_chat_lock_contention_requeues_without_consuming_a_processing_attempt(): void
+    {
+        Bus::fake();
+        Carbon::setTestNow(Carbon::now());
+
+        try {
+            Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+            $update = TelegramUpdate::create([
+                'update_id' => 104,
+                'payload' => $this->messageUpdate(104, '/start'),
+                'created_at' => now(),
+            ]);
+            $expectedRetryAt = now()->addSeconds(5);
+            $workerLock = Cache::lock('telegram:chat-interaction:12345', TelegramChatInteractionLock::LEASE_SECONDS);
+            $this->assertTrue($workerLock->get());
+
+            try {
+                (new ProcessTelegramUpdate($update->id))->handle(app(TelegramUpdateProcessor::class));
+            } finally {
+                $workerLock->release();
+            }
+
+            $update->refresh();
+            $this->assertNull($update->processed_at);
+            $this->assertNull($update->processing_started_at);
+            $this->assertSame(0, $update->processing_attempts);
+            $this->assertSame($expectedRetryAt->timestamp, $update->next_retry_at->timestamp);
+            $this->assertNull($update->terminal_failed_at);
+
+            Bus::assertDispatched(ProcessTelegramUpdate::class, fn (ProcessTelegramUpdate $job): bool => $job->telegramUpdateId === $update->id
+                && $job->delay instanceof Carbon
+                && $job->delay->timestamp === $expectedRetryAt->timestamp);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_recovery_command_redispatches_only_unprocessed_stored_updates(): void

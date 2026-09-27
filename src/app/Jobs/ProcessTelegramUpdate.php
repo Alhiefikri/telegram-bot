@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\TelegramUpdate;
+use App\Services\Telegram\TelegramChatInteractionLockUnavailable;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use App\Support\DogfoodTiming;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -39,7 +40,11 @@ class ProcessTelegramUpdate implements ShouldQueue
         ]);
 
         try {
-            $processor->process(TelegramUpdate::findOrFail($this->telegramUpdateId));
+            try {
+                $processor->process(TelegramUpdate::findOrFail($this->telegramUpdateId));
+            } catch (TelegramChatInteractionLockUnavailable) {
+                $this->dispatchChatLockRetry();
+            }
         } finally {
             DogfoodTiming::log('dogfood.telegram.handler_finished', DogfoodTiming::queryStats() + [
                 'telegram_update_id' => $this->telegramUpdateId,
@@ -49,5 +54,30 @@ class ProcessTelegramUpdate implements ShouldQueue
                 'memory_after_bytes' => memory_get_usage(true),
             ]);
         }
+    }
+
+    private function dispatchChatLockRetry(): void
+    {
+        $update = TelegramUpdate::query()
+            ->whereKey($this->telegramUpdateId)
+            ->whereNull('processed_at')
+            ->whereNull('processing_started_at')
+            ->whereNull('terminal_failed_at')
+            ->whereNotNull('next_retry_at')
+            ->first();
+
+        if ($update === null) {
+            return;
+        }
+
+        $retry = new self($this->telegramUpdateId, now()->toISOString());
+        if ($this->connection !== null) {
+            $retry->onConnection($this->connection);
+        }
+        if ($this->queue !== null) {
+            $retry->onQueue($this->queue);
+        }
+
+        dispatch($retry->delay($update->next_retry_at));
     }
 }
