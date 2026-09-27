@@ -25,6 +25,22 @@ class BrandIconCaptureTest extends TelegramBotTestSupport
         $this->assertSame('🎨 Ikon Brand', $button['text']);
     }
 
+    public function test_admin_can_open_the_brand_list(): void
+    {
+        $this->fakeTelegramHttp();
+        $this->adminCustomer(999);
+        CatalogBrandIcon::query()->where('slug', 'netflix')->sole()->update(['custom_emoji_id' => self::EMOJI_ID]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(50105, 'list', 'brandicon:list', ['id' => 999], 999, 'private', 777))->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText')
+            && (int) ($request['message_id'] ?? 0) === 777
+            && str_contains((string) ($request['text'] ?? ''), 'Ikon Brand')
+            && str_contains(json_encode($request['reply_markup']), 'brandicon:pick:')
+            && str_contains(json_encode($request['reply_markup'], JSON_UNESCAPED_UNICODE), '✅ Netflix')
+            && str_contains(json_encode($request['reply_markup'], JSON_UNESCAPED_UNICODE), '⬜ ChatGPT'));
+    }
+
     public function test_customer_home_never_exposes_the_brand_icon_entry(): void
     {
         $this->fakeTelegramHttp();

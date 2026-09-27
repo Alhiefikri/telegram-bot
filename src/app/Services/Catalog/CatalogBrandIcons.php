@@ -17,11 +17,33 @@ class CatalogBrandIcons
      */
     public function all(): Collection
     {
-        return Cache::remember(
-            self::CACHE_KEY,
-            now()->addMinutes(self::CACHE_MINUTES),
-            static fn (): Collection => CatalogBrandIcon::query()->catalogOrder()->get(),
-        );
+        return CatalogBrandIcon::query()->hydrate($this->cachedAttributes());
+    }
+
+    /**
+     * Cache raw attributes, not Eloquent objects: cache unserialization rejects
+     * classes, and a payload written by an older release must never break a
+     * read — anything that is not the expected array is rebuilt from the table.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function cachedAttributes(): array
+    {
+        $attributes = Cache::get(self::CACHE_KEY);
+        if (is_array($attributes)) {
+            return $attributes;
+        }
+
+        $attributes = CatalogBrandIcon::query()
+            ->catalogOrder()
+            ->get()
+            ->map(static fn (CatalogBrandIcon $brand): array => $brand->getAttributes())
+            ->values()
+            ->all();
+
+        Cache::put(self::CACHE_KEY, $attributes, now()->addMinutes(self::CACHE_MINUTES));
+
+        return $attributes;
     }
 
     public function match(string $name): ?CatalogBrandIcon

@@ -3,9 +3,11 @@
 namespace Tests\Feature\Telegram;
 
 use App\Models\CatalogBrandIcon;
+use App\Services\Catalog\CatalogBrandIcons;
 use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\ProductBrandIconResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
 
 class ProductBrandIconResolverTest extends TestCase
@@ -80,6 +82,29 @@ class ProductBrandIconResolverTest extends TestCase
         $this->brand('netflix', ['custom_emoji_id' => null]);
 
         $this->assertFalse($this->resolver()->resolve('Netflix Premium')->hasCustomEmoji());
+    }
+
+    public function test_brand_icons_survive_a_database_cache_round_trip(): void
+    {
+        config()->set('cache.default', 'database');
+        config()->set('cache.serializable_classes', false);
+        Cache::purge('database');
+        Cache::store('database')->flush();
+
+        $this->brand('netflix', ['custom_emoji_id' => '5368324170671202286']);
+
+        $brands = app(CatalogBrandIcons::class);
+
+        $this->assertSame('5368324170671202286', $brands->match('Netflix Premium')?->custom_emoji_id);
+        $this->assertSame('5368324170671202286', $brands->match('Netflix Premium')?->custom_emoji_id);
+    }
+
+    public function test_a_foreign_cached_payload_is_rebuilt_instead_of_breaking_the_read(): void
+    {
+        Cache::put(CatalogBrandIcons::CACHE_KEY, 'stale-payload-from-an-older-release', now()->addMinutes(5));
+
+        $this->assertSame('🤖', $this->resolver()->resolve('ChatGPT Plus')->glyph);
+        $this->assertIsArray(Cache::get(CatalogBrandIcons::CACHE_KEY));
     }
 
     /**

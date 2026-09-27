@@ -39,6 +39,11 @@ class CatalogBrandIcon extends Model
         return $query->orderBy('sort_order')->orderBy('label')->orderBy('id');
     }
 
+    public function hasCustomEmoji(): bool
+    {
+        return trim((string) $this->custom_emoji_id) !== '';
+    }
+
     /**
      * The first matching pattern wins, so earlier brands keep priority exactly
      * like the ordered brand list the resolver used before.

@@ -5,7 +5,9 @@ namespace Tests\Feature\Telegram;
 use App\Models\Customer;
 use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramUiIcon;
+use App\Services\Telegram\TelegramUiIcons;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
 
@@ -56,6 +58,30 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
         $this->assertNotNull($button, 'The orders screen must still expose the back button.');
         $this->assertSame('Kembali', $button['text']);
         $this->assertSame(self::EMOJI_ID, $button['icon_custom_emoji_id'] ?? null);
+    }
+
+    public function test_custom_emoji_ids_survive_a_database_cache_round_trip(): void
+    {
+        config()->set('cache.default', 'database');
+        config()->set('cache.serializable_classes', false);
+        Cache::purge('database');
+        Cache::store('database')->flush();
+
+        $icon = TelegramUiIcon::query()->where('key', 'menu.products')->sole();
+        $icon->update(['custom_emoji_id' => self::EMOJI_ID]);
+
+        $icons = app(TelegramUiIcons::class);
+
+        $this->assertSame(self::EMOJI_ID, $icons->customEmojiId('menu.products'));
+        $this->assertSame(self::EMOJI_ID, $icons->customEmojiId('menu.products'));
+    }
+
+    public function test_a_foreign_cached_payload_is_rebuilt_instead_of_breaking_the_read(): void
+    {
+        Cache::put(TelegramUiIcons::CACHE_KEY, 'stale-payload-from-an-older-release', now()->addMinutes(5));
+
+        $this->assertSame(['text' => '🛍️ Lihat Produk'], app(TelegramUiIcons::class)->apply('menu.products', '🛍️ Lihat Produk'));
+        $this->assertIsArray(Cache::get(TelegramUiIcons::CACHE_KEY));
     }
 
     public function test_the_admin_can_clear_a_menu_icon_again(): void
