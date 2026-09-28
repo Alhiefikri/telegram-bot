@@ -276,22 +276,22 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
         $this->assertSame('paid', $payment->fresh()->status->value);
         $this->assertSame('processing', $payment->fresh()->order->order_status->value);
 
-        $receiptEffect = TelegramOutboundEffect::query()
-            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
-            ->sole();
         $receiptJob = null;
-        Queue::assertPushed(SendTelegramReceipt::class, function (SendTelegramReceipt $job) use (&$receiptJob, $order, $receiptEffect): bool {
+        Queue::assertPushed(SendTelegramReceipt::class, function (SendTelegramReceipt $job) use (&$receiptJob, $order): bool {
             $receiptJob = $job;
 
-            return $job->orderId === (string) $order->id
-                && $job->effectId === (string) $receiptEffect->id;
+            return $job->orderId === (string) $order->id;
         });
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
         $this->assertNotNull($receiptJob);
-
         $receiptJob->handle(
             app(TelegramOutboundEffectService::class),
             app(ReceiptDeliveryPipeline::class),
         );
+
+        $receiptEffect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->sole();
 
         $this->assertSame('sent', $receiptEffect->fresh()->state->value);
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);

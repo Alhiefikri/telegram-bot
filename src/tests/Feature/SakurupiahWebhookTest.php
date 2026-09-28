@@ -6,6 +6,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
+use App\Jobs\SendTelegramReceipt;
 use App\Jobs\VerifySakurupiahWebhookPayment;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
@@ -31,10 +32,12 @@ use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahStatus;
 use App\Services\Sakurupiah\SakurupiahStatusUnavailableException;
 use App\Services\Sakurupiah\SakurupiahTransactionStatus;
+use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
 use Tests\TestCase;
@@ -329,6 +332,12 @@ class SakurupiahWebhookTest extends TestCase
     public function test_paid_callback_duplicate_materializes_each_fulfillment_effect_once(): void
     {
         Queue::fake();
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 930002],
+            ]),
+        ]);
         config()->set('services.telegram.token', 'bot-token');
         ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::MANUAL,
@@ -358,6 +367,18 @@ class SakurupiahWebhookTest extends TestCase
         $payload = $this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]);
         $this->postCallback($payload)->assertOk();
         $this->postCallback($payload)->assertOk();
+        $receiptJob = null;
+        Queue::assertPushed(SendTelegramReceipt::class, function (SendTelegramReceipt $job) use (&$receiptJob, $payment): bool {
+            $receiptJob = $job;
+
+            return $job->orderId === (string) $payment->order_id;
+        });
+        $this->assertNotNull($receiptJob);
+        $receiptJob->handle(
+            app(TelegramOutboundEffectService::class),
+            app(ReceiptDeliveryPipeline::class),
+        );
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
 
         $order = $payment->order->fresh();
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
