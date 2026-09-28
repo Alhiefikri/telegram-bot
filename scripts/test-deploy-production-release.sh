@@ -173,6 +173,13 @@ case "$command" in
     if [ "${1:-}" = "-q" ]; then printf '%s-container\n' "${2:-app}"; fi
     ;;
   run)
+    if [ "$scenario" = "redis-dependency-migration" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then
+      if [ ! -f "$MOCK_WORKSPACE/redis-dependency-ready" ]; then
+        printf 'php_network_getaddresses: getaddrinfo for redis failed\n' >&2
+        exit 1
+      fi
+      printf 'migration-started\n' > "$MOCK_WORKSPACE/migration-started"
+    fi
     if [ "$scenario" = "redis-backlog-rollback" ] && printf '%s' "$*" | grep -q 'ops:check-queue-depth.*include-reserved-and-delayed'; then exit 1; fi
     if [ "$scenario" = "migration-failure" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then exit 1; fi
     if [ "$scenario" = "identity-backfill-key-failure" ] && printf '%s' "$*" | grep -q 'credentials:backfill-identity-registry'; then
@@ -192,6 +199,17 @@ case "$command" in
     ;;
   stop) ;;
   up)
+    if [ "$*" = "-d --wait redis" ]; then
+      if [ "$scenario" = "redis-dependency-migration" ]; then
+        [ ! -f "$MOCK_WORKSPACE/migration-started" ] || { printf 'Redis was started after migration\n' >&2; exit 1; }
+        printf 'redis-dependency-ready\n' > "$MOCK_WORKSPACE/redis-dependency-ready"
+      fi
+      exit 0
+    fi
+    if [ "$scenario" = "redis-dependency-migration" ] && [ ! -f "$MOCK_WORKSPACE/migration-started" ]; then
+      printf 'candidate producers started before expand migrations\n' >&2
+      exit 1
+    fi
     printf '%s\n' "${APP_IMAGE:?}" > "$MOCK_WORKSPACE/current-image"
     ;;
   exec)
@@ -268,10 +286,23 @@ SCRIPT
   case "$scenario" in
     success)
       grep -Eq 'ops:check-telegram-webhook --max-pending=25 --observation-seconds=30 --sample-interval=5 --tolerate-errors-since=[0-9]+' "$workspace/commands.log" || fail "success did not pass the candidate cutover timestamp to the webhook gate non-interactively"
-      grep -q 'compose .* run .*--rm --no-deps --entrypoint php .*artisan migrate --force' "$workspace/commands.log" || fail "success did not run explicit migration without the application entrypoint"
+      grep -q 'compose .* run .*--rm --no-deps --entrypoint php .*artisan migrate --force' "$workspace/commands.log" || fail "success did not run an isolated explicit migration"
       grep -q 'credentials:backfill-identity-registry --chunk=100' "$workspace/commands.log" || fail "success did not prepare the credential identity registry"
       grep -q 'database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php' "$workspace/commands.log" || fail "success did not run the additive migration"
       ! grep -q 'database/migrations/2026_08_18_000001_contract_telegram_outbound_effects.php' "$workspace/commands.log" || fail "success ran the deferred contract migration before cutover"
+      ;;
+    redis-dependency-migration)
+      grep -q 'CACHE_STORE: redis' "$workspace/docker-compose.yml" || fail "candidate does not use Redis cache"
+      grep -q 'QUEUE_CONNECTION: redis' "$workspace/docker-compose.yml" || fail "candidate does not use Redis queue"
+      grep -q '^previous_queue_connection=database$' "$artifacts/release-state.env" || fail "old runtime was not database-backed"
+      grep -q 'compose .* up -d --wait redis' "$workspace/commands.log" || fail "candidate Redis was not readied before migration"
+      grep -q 'compose .* run .*--rm --no-deps --entrypoint php .*artisan migrate --force' "$workspace/commands.log" || fail "Redis candidate did not use an isolated explicit migration command"
+      redis_ready_line="$(grep -n 'compose .* up -d --wait redis' "$workspace/commands.log" | sed -n '1s/:.*//p')"
+      migration_line="$(grep -n 'artisan migrate --force' "$workspace/commands.log" | sed -n '1s/:.*//p')"
+      cutover_line="$(grep -n 'compose .* up -d --no-build --remove-orphans' "$workspace/commands.log" | sed -n '1s/:.*//p')"
+      [ "$redis_ready_line" -lt "$migration_line" ] || fail "Redis readiness did not precede migration"
+      [ "$migration_line" -lt "$cutover_line" ] || fail "app and scheduler cutover did not follow migration"
+      ! grep -q 'php_network_getaddresses: getaddrinfo for redis failed' "$workspace/stderr" || fail "Redis candidate migration could not resolve its service dependency"
       ;;
     legacy-image-bootstrap)
       grep -q 'content-addressed local rollback image' "$workspace/stdout" || fail "legacy rollback bootstrap was not explicit"
@@ -284,16 +315,21 @@ SCRIPT
       ! grep -q '^CREDENTIAL_IDENTITY_FINGERPRINT_KEY=' "$workspace/.env" || fail "fingerprint override was not removed"
       grep -q 'Removed CREDENTIAL_IDENTITY_FINGERPRINT_KEY override; using the persisted production key.' "$workspace/stdout" || fail "persisted fingerprint selection was not explicit"
       ;;
+    migration-failure)
+      grep -q 'compose .* up -d --wait redis' "$workspace/commands.log" || fail "migration failure did not ready Redis for the isolated migration"
+      ! grep -q 'compose .* up -d --no-build --remove-orphans' "$workspace/commands.log" || fail "migration failure cut over application services"
+      ;;
     identity-backfill-key-failure)
       grep -q '^status=unavailable reason=fingerprint-key-preparation-failed$' "$artifacts/credential-identity-backfill-summary.txt" || fail "backfill startup failure was not classified without raw output"
-      ! grep -q 'compose .* up -d' "$workspace/commands.log" || fail "backfill startup failure cut over application services"
+      ! grep -q 'compose .* up -d --no-build --remove-orphans' "$workspace/commands.log" || fail "backfill startup failure cut over application services"
       ;;
     identity-backfill-failure)
+      grep -q 'compose .* up -d --wait redis' "$workspace/commands.log" || fail "backfill failure did not retain the Redis dependency required by migration"
       grep -q '^SUMMARY mode=commit scanned=4 registered=1 already_registered=0 skipped_unrecognized=1 conflicts=1 unresolved=1 last_id=4 ready=false$' "$artifacts/credential-identity-backfill-summary.txt" || fail "backfill summary artifact is not sanitized"
       grep -q '^CONFLICT_STOCK_ITEM_IDS 1,2$' "$artifacts/credential-identity-backfill-summary.txt" || fail "backfill conflict IDs were not retained safely"
       grep -q 'credentials:diagnose-identity-conflicts 1,2 --json' "$workspace/commands.log" || fail "read-only conflict diagnostic was not invoked"
       grep -q 'requested_stock_item_ids' "$artifacts/credential-identity-conflicts.json" || fail "sanitized conflict diagnostic artifact is missing"
-      ! grep -q 'compose .* up -d' "$workspace/commands.log" || fail "identity backfill failure cut over application services"
+      ! grep -q 'compose .* up -d --no-build --remove-orphans' "$workspace/commands.log" || fail "identity backfill failure cut over application services"
       ;;
     application-health-failure|legacy-bootstrap-health-failure)
       grep -q "APP_IMAGE=$recorded_previous_image" "$workspace/commands.log" || fail "health failure did not restore previous image"
@@ -353,6 +389,7 @@ SCRIPT
 }
 run_scenario compose-validation-failure 1 unused "$PREVIOUS_IMAGE"
 
+run_scenario redis-dependency-migration 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario reconcile-success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario reconcile-failure 1 remote-state-reconcile-rollback-succeeded "$PREVIOUS_IMAGE"

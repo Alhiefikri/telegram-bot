@@ -283,6 +283,9 @@ run_expand_migrations() {
     return 1
   fi
 
+  echo "Starting the candidate Redis service and waiting for health before isolated expand migrations."
+  compose_root up -d --wait redis
+
   echo "Running expand migrations; deferred contract migration is excluded: $TELEGRAM_OUTBOUND_CONTRACT_MIGRATION"
   APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps --entrypoint php \
     -e APP_AUTO_MIGRATE=false \
