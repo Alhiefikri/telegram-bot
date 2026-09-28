@@ -100,12 +100,12 @@ The benchmark covers:
 - `/admin/login` page concurrency at 10 workers.
 - Valid admin login with a seeded dogfood owner account, plus a follow-up dashboard request to verify the session.
 - Telegram webhook invalid secret, unsupported update, valid update, and duplicate update paths.
-- Telegram handler product, quantity, and checkout happy paths through the real webhook, database queue, and Supervisor worker.
+- Telegram handler product, quantity, and checkout happy paths through the real webhook, Redis queue, and Supervisor worker.
 - Manual checkout queue behavior across the `default` update worker, `telegram-outbound` checkout-instruction worker, and independent `notifications` worker, including the timing events emitted for order checkout, QR file read, customer `sendPhoto`, admin `sendMessage`, receipt, and Sales Proof work.
 - Operational commands: `ops:health --db --queue-schema --queue-depth --supervisor`, scheduler heartbeat health, `orders:expire-pending`, and `ops:check-failed-jobs --max=0`.
 - Final queue depth, failed job count, status counts, p50/p95/max latency, and container memory.
 
-The Docker default uses Laravel's file cache and file session drivers, while the queue remains database-backed for durable worker delivery. Public homepage responses can therefore be cached without writing anonymous cache/session rows to PostgreSQL; stateful admin and checkout flows still use the normal web session and CSRF middleware.
+Docker Compose uses Redis for queue, cache, session, and lock state. Redis has a 96 MiB memory cap, no persistence, and no persistent volume; PostgreSQL remains the durable domain database and failed-job store. Redis restart therefore loses outstanding queue jobs and session/cache/lock state. The release startup gate refuses to start Redis-backed services while database queue rows remain, and automatic rollback to the database driver is blocked until all Redis queues are empty. See [ADR 0014](adr/0014-redis-runtime-state.md) and the [cutover runbook](runbook-redis-runtime-cutover.md).
 
 ## Latest Issue 70 Run
 
@@ -115,7 +115,7 @@ On 2026-07-02, issue #70 was verified with clean dogfood volumes by running:
 BENCHMARK_COMPOSE_PROJECT=telegram-bot-dogfood-issue70 WEB_PORT=18081 BASE_URL=http://127.0.0.1:18081 ./scripts/benchmark-production.sh
 ```
 
-Result: passed. The report measured webhook ACK p95 at 31.049 ms, handler drain at 4133.749 ms, final queue depth at 0, and failed jobs at 0. This run used fake Telegram outbound for safe synthetic handler coverage, but exercised the then-current Docker/Nginx/PostgreSQL/Supervisor queue topology with split `default` and combined `telegram-outbound,notifications` workers. Current runs should show the later issue #171 topology with independent `default`, `telegram-outbound`, `notifications`, `telegram-broadcast`, and `telegram-stock` pools.
+Result: passed. The report measured webhook ACK p95 at 31.049 ms, handler drain at 4133.749 ms, final queue depth at 0, and failed jobs at 0. This run used fake Telegram outbound for safe synthetic handler coverage, but exercised the then-current Docker/Nginx/PostgreSQL/Supervisor queue topology with split `default` and combined `telegram-outbound,notifications` workers. Current runs additionally use Redis for cache/session/locks/queue and the later issue #171 topology with independent `default`, `telegram-outbound`, `notifications`, `telegram-broadcast`, and `telegram-stock` pools.
 
 ## Synthetic Versus Real External Calls
 
@@ -124,7 +124,7 @@ Synthetic Telegram handler scenarios set `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true` b
 The benchmark does not fake inbound webhook validation. It still posts JSON updates to `POST /api/webhook/telegram` with the configured webhook secret through Nginx.
 
 
-Use this benchmark as the default synthetic Docker release gate. Use `src/scripts/perf-dogfood.php` for the broader dogfood scenario matrix: with `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true` it reports `run_mode.mode=synthetic`, uses fake Telegram outbound, blocks absent real-external fixtures, and includes `final_queue_state` for `jobs` depth and failed-job checks. With fake outbound disabled, that script is a real-external harness and should only be run with disposable real Telegram, Store Channel, callback, and photo fixtures.
+Use this benchmark as the default synthetic Docker release gate. Use `src/scripts/perf-dogfood.php` for the broader dogfood scenario matrix: with `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true` it reports `run_mode.mode=synthetic`, uses fake Telegram outbound, blocks absent real-external fixtures, and includes `final_queue_state` for total depth across operational queues and failed-job checks. With fake outbound disabled, that script is a real-external harness and should only be run with disposable real Telegram, Store Channel, callback, and photo fixtures.
 
 ## Budgets
 

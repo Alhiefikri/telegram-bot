@@ -83,7 +83,7 @@ Verified: `php artisan test` → 730 tests, 714 passed, 16 skipped, 0 failed (B6
 
 - **Where:** `ProductStockIntake` records the event inside the inventory transaction and dispatches after commit; `StockNotificationDeliveryPipeline` owns cursor-based snapshotting, effect materialization, claim/finalization, and aggregate projection.
 - **Isolation:** stock notification work no longer shares the admin broadcast worker, so a restock burst cannot head-of-line block admin broadcasts or price notifications.
-- **Timeout safety:** `SendProductStockNotifications` declares a 55-second job timeout, while each execution performs at most one Telegram request. The worker remains below the database queue connection's 180-second `retry_after`.
+- **Timeout safety:** `SendProductStockNotifications` declares a 55-second job timeout, while each execution performs at most one Telegram request. The worker remains below the active queue connection's 180-second `retry_after`.
 - **Recovery:** a null `recipients_snapshotted_at` is a durable deferred handoff. Both `telegram:recover-outbound` and `telegram:reconcile-stock-notifications` rediscover it when after-commit dispatch or worker pickup is lost.
 - **Verify:** `ProductStockIntakeTest` proves the admin transaction commits before recipient rendering; `ProductInventoryRaceTest::test_stock_notification_job_sends_one_effect_and_requeues_remaining_delivery` proves one-effect job bounds and continuation.
 

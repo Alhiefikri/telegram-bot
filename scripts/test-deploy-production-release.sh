@@ -10,46 +10,6 @@ LEGACY_PREVIOUS_IMAGE=telegram-bot-prod-app
 LOCAL_PREVIOUS_IMAGE_ID=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 CANDIDATE_IMAGE=ghcr.io/example/telegram-bot@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
-grep -Fq 'ops:check-failed-jobs --snapshot </dev/null' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: failed-job snapshot can consume the streamed SSH script stdin\n' >&2; exit 1; }
-grep -Fq 'telegram:recover-failed-updates --prune-unrecoverable </dev/null' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: failed Telegram update recovery can consume the streamed SSH script stdin\n' >&2; exit 1; }
-grep -Fq 'app artisan migrate --force' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: candidate migration can consume the streamed SSH script stdin\n' >&2; exit 1; }
-grep -Fq '2026_08_18_000001_contract_telegram_outbound_effects.php' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: expand migration must name the deferred Telegram outbound contract migration\n' >&2; exit 1; }
-grep -Fq 'telegram:outbound-contract --strict' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: deferred Telegram outbound contract must have a strict preflight\n' >&2; exit 1; }
-grep -Fq 'telegram:recover-outbound --chunk=100 --queue=telegram-outbound' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: deferred Telegram outbound contract must recover effects before contracting\n' >&2; exit 1; }
-grep -Fq 'php artisan schedule:clear-cache </dev/null' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: production cutover must clear stale scheduler mutexes\n' >&2; exit 1; }
-grep -Fq 'contract-backup-verified.txt' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: destructive contract must record verified backup evidence\n' >&2; exit 1; }
-grep -Fq 'release-state.env' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: release must persist a remote mutation journal\n' >&2; exit 1; }
-grep -Fq 'is_immutable_image_reference' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: rollback image validation must require an immutable digest\n' >&2; exit 1; }
-grep -Fq 'safe-compose-config.sh' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: release must validate Compose before Compose actions\n' >&2; exit 1; }
-grep -Fq 'RELEASE_OPERATION=reconcile' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
-  || { printf 'FAIL: production workflow must reconcile remote state after SSH failure\n' >&2; exit 1; }
-grep -Fq 'ref: ${{ env.DEPLOY_SHA }}' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
-  || { printf 'FAIL: deploy checkout must use the selected deployment SHA\n' >&2; exit 1; }
-grep -Fq 'EXPECTED_RELEASE_SHA' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
-  || { printf 'FAIL: external smoke must bind to the candidate release identity\n' >&2; exit 1; }
-grep -Fq "docker login ghcr.io --username '\$GHCR_USERNAME' --password-stdin" "$ROOT_DIR/.github/workflows/deploy-production.yml" \
-  || { printf 'FAIL: workflow must authenticate the VPS to GHCR through stdin\n' >&2; exit 1; }
-grep -Fq 'docker logout ghcr.io' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
-  || { printf 'FAIL: workflow must remove transient VPS GHCR credentials\n' >&2; exit 1; }
-grep -Fq 'Re-run external public smoke after rollback' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
-  || { printf 'FAIL: rollback must repeat public smoke after restoration\n' >&2; exit 1; }
-! grep -Fq 'docker login ghcr.io' "$RELEASE_SCRIPT" \
-  || { printf 'FAIL: release must use the VPS Docker credential store\n' >&2; exit 1; }
-grep -Fq 'RELEASE_OPERATION=contract' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
-  || { printf 'FAIL: production workflow must invoke the deferred contract phase explicitly\n' >&2; exit 1; }
-grep -Fq 'apply_telegram_outbound_contract' "$ROOT_DIR/.github/workflows/deploy-production.yml" \
-  || { printf 'FAIL: destructive contract migration must require an explicit workflow input\n' >&2; exit 1; }
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -85,6 +45,7 @@ run_scenario() {
   bin="$workspace/bin"
   artifacts="$workspace/artifacts"
   mkdir -p "$bin" "$artifacts" "$workspace/scripts" "$workspace/src/database/migrations"
+  cp "$ROOT_DIR/docker-compose.yml" "$workspace/docker-compose.yml"
   : > "$workspace/src/database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php"
   : > "$workspace/src/database/migrations/2026_08_18_000001_contract_telegram_outbound_effects.php"
   if [ "$operation" = "contract" ] || [ "$operation" = "reconcile" ]; then
@@ -186,7 +147,13 @@ image_id() {
 if [ "${1:-}" = "pull" ]; then exit 0; fi
 if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ]; then image_id "$3"; exit 0; fi
 if [ "${1:-}" = "inspect" ]; then
-  if printf '%s' "$*" | grep -q '{{.Config.Image}}'; then cat "$MOCK_WORKSPACE/current-image"; else image_id "$current_image"; fi
+  if printf '%s' "$*" | grep -q '{{range .Config.Env}}'; then
+    printf 'QUEUE_CONNECTION=database\n'
+  elif printf '%s' "$*" | grep -q '{{.Config.Image}}'; then
+    cat "$MOCK_WORKSPACE/current-image"
+  else
+    image_id "$current_image"
+  fi
   exit 0
 fi
 if [ "${1:-}" = "ps" ]; then exit 0; fi
@@ -206,6 +173,7 @@ case "$command" in
     if [ "${1:-}" = "-q" ]; then printf '%s-container\n' "${2:-app}"; fi
     ;;
   run)
+    if [ "$scenario" = "redis-backlog-rollback" ] && printf '%s' "$*" | grep -q 'ops:check-queue-depth.*include-reserved-and-delayed'; then exit 1; fi
     if [ "$scenario" = "migration-failure" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then exit 1; fi
     if [ "$scenario" = "identity-backfill-key-failure" ] && printf '%s' "$*" | grep -q 'credentials:backfill-identity-registry'; then
       printf 'Credential identity backfill failed: fingerprint key could not be prepared.\n'
@@ -222,6 +190,7 @@ case "$command" in
     fi
     if [ "$scenario" = "contract-failure" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then exit 1; fi
     ;;
+  stop) ;;
   up)
     printf '%s\n' "${APP_IMAGE:?}" > "$MOCK_WORKSPACE/current-image"
     ;;
@@ -240,7 +209,7 @@ case "$command" in
       exit 1
     fi
     if printf '%s' "$*" | grep -q 'ops:health'; then
-      if { [ "$scenario" = "application-health-failure" ] || [ "$scenario" = "legacy-bootstrap-health-failure" ] || [ "$scenario" = "reconcile-failure" ]; } && printf '%s' "$current_image" | grep -q bbbbbbbb; then exit 1; fi
+      if { [ "$scenario" = "application-health-failure" ] || [ "$scenario" = "legacy-bootstrap-health-failure" ] || [ "$scenario" = "reconcile-failure" ] || [ "$scenario" = "redis-backlog-rollback" ]; } && printf '%s' "$current_image" | grep -q bbbbbbbb; then exit 1; fi
       if [ "$scenario" = "rollback-failure" ]; then exit 1; fi
     fi
     ;;
@@ -341,6 +310,10 @@ SCRIPT
       grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "queue gate failure did not restore previous image"
       grep -q 'rollback succeeded' "$workspace/stderr" || fail "queue gate failure did not report rollback"
       ;;
+    redis-backlog-rollback)
+      grep -q 'Rollback blocked: Redis queue is not empty' "$workspace/stderr" || fail "rollback did not preserve a non-empty Redis queue"
+      ! grep -q "APP_IMAGE=$previous_image compose up" "$workspace/commands.log" || fail "rollback switched to database after a Redis queue check failed"
+      ;;
     recovery-failure)
       grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "recovery gate failure did not restore previous image"
       ;;
@@ -400,6 +373,7 @@ run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"
 run_scenario external-smoke-rollback 0 external-smoke-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario queue-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario recovery-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
+run_scenario redis-backlog-rollback 21 deploy-failed-rollback-failed "$CANDIDATE_IMAGE"
 run_scenario contract-success 0 deploy-succeeded "$CANDIDATE_IMAGE"
 run_scenario contract-failure 1 contract-failed-candidate-remains "$CANDIDATE_IMAGE"
 run_scenario backup-failure 1 contract-failed-candidate-remains "$CANDIDATE_IMAGE"

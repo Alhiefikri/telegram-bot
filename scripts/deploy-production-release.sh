@@ -97,6 +97,7 @@ write_release_state() {
     printf 'app_image=%s\n' "${APP_IMAGE:-}"
     printf 'previous_commit=%s\n' "${PREVIOUS_COMMIT:-}"
     printf 'previous_image=%s\n' "${PREVIOUS_IMAGE:-}"
+    printf 'previous_queue_connection=%s\n' "${PREVIOUS_QUEUE_CONNECTION:-database}"
     printf 'updated_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$temporary"
   chmod 0600 "$temporary"
@@ -560,6 +561,8 @@ verify_release_gates() {
 load_previous_release() {
   PREVIOUS_COMMIT="$(cat "$RELEASE_ARTIFACT_DIR/previous-commit.txt")"
   PREVIOUS_IMAGE="$(cat "$RELEASE_ARTIFACT_DIR/previous-image.txt")"
+  PREVIOUS_QUEUE_CONNECTION="$(release_state_value previous_queue_connection)"
+  PREVIOUS_QUEUE_CONNECTION="${PREVIOUS_QUEUE_CONNECTION:-database}"
   [[ "$PREVIOUS_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
     echo "Recorded rollback commit is invalid." >&2
     return 1
@@ -572,8 +575,45 @@ load_previous_release() {
 
 restore_previous_release() {
   local failure_reason="${FAILURE_REASON:-deploy-failed}"
+  local candidate_queue_connection candidate_queue_image
+  candidate_queue_image="${APP_IMAGE:-$(release_state_value app_image)}"
+  if [ -n "$candidate_queue_image" ]; then
+    APP_IMAGE="$candidate_queue_image"
+  fi
   echo "Release verification failed ($failure_reason). Restoring previous release $PREVIOUS_IMAGE from commit $PREVIOUS_COMMIT." >&2
   write_release_state "rollback-started"
+
+  candidate_queue_connection="$(sed -n 's/^  QUEUE_CONNECTION:[[:space:]]*//p' docker-compose.yml | sed -n '1p')"
+  if [ "${PREVIOUS_QUEUE_CONNECTION:-database}" = "database" ] && [ "$candidate_queue_connection" = "redis" ]; then
+    if [ -z "$candidate_queue_image" ]; then
+      record_result "${failure_reason}-rollback-failed"
+      write_release_state "rollback-failed"
+      echo "Rollback blocked: candidate image identity is unavailable for the Redis queue check." >&2
+      return 1
+    fi
+
+    echo "Stopping candidate producers before checking Redis queue state for a database-driver rollback."
+    if ! compose stop --timeout 150 scheduler app; then
+      echo "Rollback blocked: candidate producers could not be stopped safely." >&2
+      APP_IMAGE="$candidate_queue_image" compose up -d --no-build app scheduler || true
+      record_result "${failure_reason}-rollback-failed"
+      write_release_state "rollback-failed"
+      return 1
+    fi
+
+    if ! APP_IMAGE="$candidate_queue_image" compose run --rm --no-deps --entrypoint php \
+      -e APP_AUTO_MIGRATE=false \
+      -e APP_OPTIMIZE=false \
+      app artisan ops:check-queue-depth --include-reserved-and-delayed --max=0 </dev/null; then
+      echo "Rollback blocked: Redis queue is not empty or could not be inspected; keep Redis available and recover queued work before switching drivers." >&2
+      APP_IMAGE="$candidate_queue_image" compose up -d --no-build app scheduler || true
+      record_result "${failure_reason}-rollback-failed"
+      write_release_state "rollback-failed"
+      return 1
+    fi
+    echo "Redis queue is empty; database-driver rollback is safe."
+  fi
+
   git checkout --detach "$PREVIOUS_COMMIT"
   git reset --hard "$PREVIOUS_COMMIT"
   COMPOSE_CONFIG_STATUS=unvalidated
@@ -762,6 +802,9 @@ PREVIOUS_COMMIT="$(git rev-parse HEAD)"
 previous_app_container="$(compose ps -q app)"
 [ -n "$previous_app_container" ] || { echo "Cannot identify the currently running app container." >&2; exit 1; }
 configured_previous_image="$(docker inspect "$previous_app_container" --format '{{.Config.Image}}')"
+previous_runtime_environment="$(docker inspect "$previous_app_container" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+PREVIOUS_QUEUE_CONNECTION="$(printf '%s\n' "$previous_runtime_environment" | sed -n 's/^QUEUE_CONNECTION=//p' | sed -n '1p')"
+PREVIOUS_QUEUE_CONNECTION="${PREVIOUS_QUEUE_CONNECTION:-database}"
 if is_immutable_image_reference "$configured_previous_image"; then
   PREVIOUS_IMAGE="$configured_previous_image"
 elif [ "${BOOTSTRAP_LOCAL_ROLLBACK_IMAGE:-false}" = "true" ]; then

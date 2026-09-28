@@ -7,6 +7,7 @@ use App\Services\Bsc\BscOperationalMetrics;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\QueueDepthInspector;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Process;
@@ -24,9 +25,10 @@ class HealthCheck extends Command
         {--sakurupiah : Check enabled Sakurupiah readiness, schedule, and bounded verification backlog.}
         {--scheduler-heartbeat= : Maximum scheduler heartbeat age in seconds.}';
 
-    protected $description = 'Check operational health for database, queue schema, supervisor-managed processes, and scheduler liveness.';
+    protected $description = 'Check operational health for database, queue backends, supervisor-managed processes, and scheduler liveness.';
 
     public function handle(
+        QueueDepthInspector $queueDepths,
         BscReadiness $bscReadiness,
         BscOperationalMetrics $bscMetrics,
         BscOperationalAlertNotifier $bscAlerts,
@@ -46,7 +48,18 @@ class HealthCheck extends Command
         }
 
         if ($this->option('queue-schema')) {
-            foreach (['cache', 'cache_locks', 'jobs', 'failed_jobs', 'job_batches', 'migrations', 'sessions'] as $table) {
+            $tables = ['failed_jobs', 'job_batches', 'migrations'];
+            if (config('queue.default') === 'database') {
+                $tables[] = 'jobs';
+            }
+            if (config('cache.default') === 'database') {
+                $tables = [...$tables, 'cache', 'cache_locks'];
+            }
+            if (config('session.driver') === 'database') {
+                $tables[] = 'sessions';
+            }
+
+            foreach (array_unique($tables) as $table) {
                 if (! Schema::hasTable($table)) {
                     $healthy = false;
                     $this->error("Schema: missing {$table}");
@@ -72,16 +85,13 @@ class HealthCheck extends Command
 
         if ($this->option('queue-depth')) {
             try {
-                foreach ($this->operationalQueues() as $queue) {
-                    $query = DB::table('jobs')
-                        ->where('queue', $queue)
-                        ->whereNull('reserved_at')
-                        ->where('available_at', '<=', now()->timestamp);
-                    $count = (int) $query->count();
-                    $oldestAvailableAt = $count > 0 ? $query->min('available_at') : null;
-                    $oldestAge = $oldestAvailableAt === null ? 0 : max(0, now()->timestamp - (int) $oldestAvailableAt);
+                foreach ($queueDepths->operationalQueues() as $queue) {
+                    $snapshot = $queueDepths->runnable($queue);
+                    $oldestAge = $snapshot['oldest_pending_at'] === null
+                        ? 0
+                        : max(0, now()->timestamp - $snapshot['oldest_pending_at']);
 
-                    $this->info("Queue {$queue}: depth={$count} oldest_age={$oldestAge}s");
+                    $this->info("Queue {$queue}: depth={$snapshot['depth']} oldest_age={$oldestAge}s");
                 }
             } catch (Throwable $exception) {
                 $healthy = false;
@@ -168,9 +178,4 @@ class HealthCheck extends Command
         return $healthy ? self::SUCCESS : self::FAILURE;
     }
 
-    /** @return list<string> */
-    private function operationalQueues(): array
-    {
-        return ['payments', 'default', 'telegram-outbound', 'notifications', 'telegram-broadcast', 'telegram-stock', (string) config('services.binance.verification_queue', 'binance-verification')];
-    }
 }

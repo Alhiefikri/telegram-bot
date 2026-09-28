@@ -259,7 +259,7 @@ Use `./scripts/benchmark-production.sh` as the default repeatable synthetic Dock
 
 Use `php scripts/perf-dogfood.php` when you need the broader scenario matrix and per-scenario timing JSON. With `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true`, the broad harness runs in `synthetic` mode: Telegram outbound goes through `FakeTelegramBotClient`, and fixture-dependent real-external scenarios are reported under `blocked_scenarios` when their fixtures are absent. With fake outbound disabled, the harness runs in `real-external` mode and only real disposable Telegram, Store Channel, callback, and photo fixtures should be supplied.
 
-External dogfood scenarios require real disposable fixtures. Leave missing values blank; `php scripts/perf-dogfood.php` records those scenarios as `blocked` before queue work starts instead of using fake Telegram data. Its JSON output includes `run_mode`, `blocked_scenarios`, and `final_queue_state`; after a synthetic run, `final_queue_state.jobs_depth` should be `0` and `final_queue_state.passes_ops_check_failed_jobs_max_0` should be `true`.
+External dogfood scenarios require real disposable fixtures. Leave missing values blank; `php scripts/perf-dogfood.php` records those scenarios as `blocked` before queue work starts instead of using fake Telegram data. Its JSON output includes `run_mode`, `blocked_scenarios`, and `final_queue_state`; after a synthetic run, `final_queue_state.queue_depth` should be `0` and `final_queue_state.passes_ops_check_failed_jobs_max_0` should be `true`.
 
 Dogfood timing logs should use `DOGFOOD_TIMING_LOG_CHANNEL=stderr` for production-like Docker runs, and the broad perf script should be executed with `docker compose exec --user laravel app`. The perf script also forces its own Laravel logger to `stderr`. This keeps benchmark instrumentation in Docker logs instead of writing additional timing records to `storage/logs`, so a CLI timing run cannot make PHP-FPM or the Supervisor queue worker lose write access to Laravel's file logs.
 
@@ -401,14 +401,15 @@ Queue diperlukan untuk pekerjaan background seperti pemrosesan update Telegram, 
 
 Checklist operasional:
 
-- pastikan `QUEUE_CONNECTION` sesuai kebutuhan production; default project menggunakan database queue;
+- Docker Compose production runtime uses the Redis queue; monitor `ops:check-queue-depth` across operational queues and `ops:check-failed-jobs`;
 - jalankan queue worker di process manager seperti Supervisor;
-- monitor tabel/job failed jobs;
 - pastikan queue `default` diproses untuk update Telegram;
 - pastikan queue `telegram-outbound` diproses untuk instruksi pembayaran manual dan notifikasi pending order yang berasal dari checkout;
 - pastikan queue `notifications` diproses oleh worker pool terpisah karena receipt pembayaran, paid/expired notifications, Sales Proof Post, dan cleanup instruksi checkout dikirim melalui queue tersebut;
 - pastikan queue `telegram-stock` diproses oleh worker terpisah untuk restock/added-stock notifications; satu job mengirim satu batch recipient terbatas lalu melanjutkan pekerjaan melalui self-dispatch yang idempotent;
 - worker count and sleep settings are pinned in `supervisord.conf`; scale them through a reviewed infrastructure change rather than adding more application `.env` knobs.
+
+Sebelum cutover queue database ke Redis atau rollback kembali ke database, ikuti [runbook Redis runtime](../docs/runbook-redis-runtime-cutover.md) dan [ADR 0014](../docs/adr/0014-redis-runtime-state.md). Redis tidak memakai persistent volume atau AOF/RDB; jangan memulai rollback database saat queue Redis masih berisi pekerjaan.
 
 Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, `laravel-outbound-worker` handles `telegram-outbound`, `laravel-notification-worker` handles `notifications`, `laravel-broadcast-worker` handles `telegram-broadcast`, and `laravel-stock-worker` handles `telegram-stock`. Stock intake commits only the durable notification handoff; recipient rendering/materialization runs after commit in bounded batches, so admin stock requests do not hold inventory transactions while querying every Telegram customer.
 
@@ -488,7 +489,7 @@ php artisan ops:health --scheduler-heartbeat=180
 Opsi tersedia:
 
 - `--db`: cek koneksi database;
-- `--queue-schema`: cek tabel penting untuk database queue/session/cache;
+- `--queue-schema`: cek schema queue/cache/session sesuai driver aktif; tabel `jobs`, `cache`, `cache_locks`, dan `sessions` hanya diwajibkan bila driver terkait memakai database;
 - `--supervisor`: cek proses yang dikelola Supervisor sesuai konfigurasi command.
 - `--scheduler-heartbeat=<detik>`: cek heartbeat scheduler masih baru.
 
@@ -700,7 +701,7 @@ Kemungkinan penyebab:
 
 - worker tidak berjalan;
 - worker hanya memproses queue tertentu dan melewatkan queue penting;
-- database queue table belum tersedia;
+- Redis tidak tersedia atau mencapai batas memorinya; jika driver database aktif, tabel `jobs` tidak tersedia;
 - timeout atau koneksi eksternal bermasalah.
 - real Telegram/Pakasir outbound lambat dan memperpanjang durasi handler, walaupun queue wait masih rendah.
 
@@ -709,7 +710,7 @@ Langkah cek:
 - jalankan `php artisan ops:health --queue-schema --supervisor`;
 - jalankan `php artisan ops:check-failed-jobs --max=0` atau sesuaikan threshold operasional;
 - cek proses Supervisor/systemd/container;
-- cek tabel `jobs` dan `failed_jobs`;
+- jalankan `php artisan ops:check-queue-depth --include-reserved-and-delayed --max=0` untuk memeriksa queue backend aktif;
 - cek log exception job;
 - bila sedang mendiagnosis burst latency, jalankan dogfood benchmark bersih dan bandingkan `queue_wait_ms`, `worker_processing_ms`, `dogfood.outbound_http`, failed jobs, dan memory sebelum menambah worker atau memisah queue;
 - restart worker setelah deploy/config change sesuai prosedur Laravel.

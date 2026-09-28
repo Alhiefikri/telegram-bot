@@ -29,7 +29,7 @@ The first version uses passwordless email magic links. It deliberately does not 
 - Recovery Key issuance, validation, and temporary per-order grants live in `src/app/Storefront/StorefrontOrderAccess.php`.
 - `/akses-pesanan` validates invoice plus Recovery Key and shows credentials only for paid orders: `src/app/Http/Controllers/StorefrontOrderAccessController.php`.
 - Public storefront routes are in `src/routes/web.php`.
-- Database-backed queues, sessions, and cache are already the production defaults in `docker-compose.yml`; do not add Redis for this feature.
+- Docker Compose production uses Redis for queue, sessions, and cache; PostgreSQL remains the durable domain database. Customer-account work should use the current runtime and must not add a feature-specific Redis service or database-queue assumption.
 
 ## Target Customer Flow
 
@@ -251,7 +251,7 @@ Do not assert plaintext tokens, Recovery Keys, or credentials in logs or snapsho
 
 ## Configuration and Operations
 
-Use an external SMTP transactional-email provider. The VPS should only enqueue and send through Laravel's existing database queue; no extra worker type, Redis, OAuth service, or background daemon is needed.
+Use an external SMTP transactional-email provider. Production Compose already uses the Redis queue and existing Supervisor pools; enqueue email work onto an existing supervised queue rather than adding a feature-specific Redis service or restoring the database queue default. Add a separate worker only if measured contention requires it.
 
 Required production configuration, with provider-specific values kept in `.env` and GitHub secrets only:
 

@@ -104,5 +104,5 @@ Finish with:
 ```bash
 docker compose -p telegram-bot-dogfood-issue74 exec -T app php artisan ops:health --db --queue-schema --supervisor
 docker compose -p telegram-bot-dogfood-issue74 exec -T app php artisan ops:check-failed-jobs --max=0
-docker compose -p telegram-bot-dogfood-issue74 exec -T app php -r 'require "vendor/autoload.php"; $app = require "bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); $db = $app["db"]; echo json_encode(["jobs_depth" => $db->table("jobs")->count(), "failed_jobs" => $db->table("failed_jobs")->count()], JSON_PRETTY_PRINT).PHP_EOL;'
+docker compose -p telegram-bot-dogfood-issue74 exec -T app php artisan ops:check-queue-depth --include-reserved-and-delayed --max=0
 ```

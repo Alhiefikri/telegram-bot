@@ -32,7 +32,6 @@ const env = {
   DOGFOOD_FAKE_TELEGRAM_OUTBOUND: process.env.DOGFOOD_FAKE_TELEGRAM_OUTBOUND ?? 'true',
   DOGFOOD_ADMIN_EMAIL: adminEmail,
   DOGFOOD_ADMIN_PASSWORD: adminPassword,
-  SESSION_DRIVER: process.env.SESSION_DRIVER ?? 'file',
   WEB_PORT: webPort,
 };
 

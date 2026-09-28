@@ -346,12 +346,30 @@ class AdminOrderPaymentOperationsTest extends TestCase
             ->assertSuccessful();
     }
 
-    public function test_ops_health_fails_when_queue_schema_is_missing(): void
+    public function test_ops_health_fails_when_failed_job_schema_is_missing(): void
     {
-        Schema::dropIfExists('jobs');
+        Schema::dropIfExists('failed_jobs');
 
         $this->artisan('ops:health', ['--queue-schema' => true])
             ->assertFailed()
-            ->expectsOutputToContain('Schema: missing jobs');
+            ->expectsOutputToContain('Schema: missing failed_jobs');
     }
+
+    public function test_redis_runtime_health_does_not_require_database_queue_cache_or_session_tables(): void
+    {
+        config([
+            'queue.default' => 'redis',
+            'cache.default' => 'redis',
+            'session.driver' => 'redis',
+        ]);
+        Schema::dropIfExists('jobs');
+        Schema::dropIfExists('cache');
+        Schema::dropIfExists('cache_locks');
+        Schema::dropIfExists('sessions');
+
+        $this->artisan('ops:health', ['--queue-schema' => true])
+            ->expectsOutput('Queue schema: ok')
+            ->assertSuccessful();
+    }
+
 }

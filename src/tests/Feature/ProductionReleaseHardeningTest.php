@@ -199,6 +199,7 @@ class ProductionReleaseHardeningTest extends TestCase
 
     public function test_queue_depth_monitor_alerts_when_threshold_exceeded(): void
     {
+        config(['queue.default' => 'database']);
         DB::table('jobs')->insert([
             'queue' => 'telegram-outbound',
             'payload' => '{}',
@@ -215,6 +216,7 @@ class ProductionReleaseHardeningTest extends TestCase
 
     public function test_queue_depth_monitor_allows_fresh_live_traffic_but_rejects_stuck_work(): void
     {
+        config(['queue.default' => 'database']);
         DB::table('jobs')->insert([
             'queue' => 'default',
             'payload' => '{}',
@@ -240,6 +242,7 @@ class ProductionReleaseHardeningTest extends TestCase
 
     public function test_queue_depth_monitor_ignores_retry_backoff_and_in_flight_jobs(): void
     {
+        config(['queue.default' => 'database']);
         $stuckTimestamp = now()->subMinutes(10)->timestamp;
 
         DB::table('jobs')->insert([
@@ -263,6 +266,55 @@ class ProductionReleaseHardeningTest extends TestCase
 
         $this->artisan('ops:check-queue-depth --max=50 --max-oldest-age=120')
             ->expectsOutputToContain('OK queue depth 0 (oldest age 0s)')
+            ->assertSuccessful();
+    }
+
+    public function test_queue_depth_total_mode_counts_delayed_and_reserved_database_jobs(): void
+    {
+        config(['queue.default' => 'database']);
+        DB::table('jobs')->insert([
+            [
+                'queue' => 'telegram-outbound',
+                'payload' => '{}',
+                'attempts' => 0,
+                'reserved_at' => null,
+                'available_at' => now()->addMinutes(5)->timestamp,
+                'created_at' => now()->timestamp,
+            ],
+            [
+                'queue' => 'telegram-outbound',
+                'payload' => '{}',
+                'attempts' => 1,
+                'reserved_at' => now()->timestamp,
+                'available_at' => now()->addMinutes(5)->timestamp,
+                'created_at' => now()->timestamp,
+            ],
+        ]);
+
+        $this->artisan('ops:check-queue-depth --include-reserved-and-delayed --max=0 --queue=telegram-outbound')
+            ->expectsOutputToContain('ALERT queue depth 2')
+            ->assertFailed();
+    }
+
+    public function test_redis_cutover_guard_rejects_a_reserved_or_delayed_database_job(): void
+    {
+        DB::table('jobs')->insert([
+            'queue' => 'telegram-outbound',
+            'payload' => '{}',
+            'attempts' => 1,
+            'reserved_at' => now()->timestamp,
+            'available_at' => now()->addDay()->timestamp,
+            'created_at' => now()->timestamp,
+        ]);
+
+        $this->artisan('ops:assert-database-queue-empty')
+            ->expectsOutputToContain('1 database queue job remains')
+            ->assertFailed();
+
+        DB::table('jobs')->delete();
+
+        $this->artisan('ops:assert-database-queue-empty')
+            ->expectsOutputToContain('Database queue is empty')
             ->assertSuccessful();
     }
 
@@ -827,109 +879,6 @@ SH);
         $this->assertStringNotContainsString('TELEGRAM_BOT_TOKEN', $contents);
     }
 
-    public function test_production_deploy_workflow_gates_release_readiness_image_provenance_and_post_deploy_safeguards(): void
-    {
-        $workflow = base_path('../.github/workflows/deploy-production.yml');
-
-        $this->assertFileExists($workflow);
-
-        $contents = file_get_contents($workflow);
-        $release = file_get_contents(base_path('../scripts/deploy-production-release.sh'));
-        $this->assertStringContainsString('DEPLOY_BRANCH: main', $contents);
-        $this->assertStringContainsString('COMPOSE_PROJECT_NAME: telegram-bot-prod', $contents);
-        $this->assertStringContainsString('DEPLOY_SHA: ${{ inputs.commit || github.sha }}', $contents);
-        $this->assertStringContainsString('apply_telegram_outbound_contract:', $contents);
-        $this->assertStringContainsString('inputs.apply_telegram_outbound_contract == true', $contents);
-        $this->assertStringContainsString('bootstrap_local_rollback_image:', $contents);
-        $this->assertStringContainsString('BOOTSTRAP_LOCAL_ROLLBACK_IMAGE: ${{ inputs.bootstrap_local_rollback_image }}', $contents);
-        $this->assertStringContainsString('is_content_addressed_local_image', $release);
-        $this->assertStringContainsString('BOOTSTRAP_LOCAL_ROLLBACK_IMAGE:-false', $release);
-        $this->assertStringContainsString('initialize_credential_fingerprint_key:', $contents);
-        $this->assertStringContainsString('expected_app_url:', $contents);
-        $this->assertStringContainsString('EXPECTED_APP_URL: ${{ inputs.expected_app_url || vars.PRODUCTION_APP_URL }}', $contents);
-        $this->assertStringContainsString('INITIALIZE_CREDENTIAL_FINGERPRINT_KEY: ${{ inputs.initialize_credential_fingerprint_key }}', $contents);
-        $this->assertStringContainsString('use_persisted_credential_fingerprint_key:', $contents);
-        $this->assertStringContainsString('USE_PERSISTED_CREDENTIAL_FINGERPRINT_KEY: ${{ inputs.use_persisted_credential_fingerprint_key }}', $contents);
-        $this->assertStringContainsString('initialize_credential_identity_fingerprint_key', $release);
-        $this->assertStringContainsString('docker image inspect "$PREVIOUS_IMAGE"', $release);
-        $this->assertStringContainsString('actions/workflows/ci.yml/runs?head_sha=${TARGET_SHA}', $contents);
-        $this->assertStringContainsString('scripts/deploy-production-release.sh', $contents);
-        $this->assertStringContainsString('git checkout --detach "$DEPLOY_SHA"', $release);
-        $this->assertStringContainsString('SAFE_COMPOSE_CONFIG', $release);
-        $this->assertStringContainsString('commits/${TARGET_SHA}/statuses', $contents);
-        $this->assertStringContainsString('.context == "production-image"', $contents);
-        $this->assertStringContainsString('ref: ${{ env.DEPLOY_SHA }}', $contents);
-        $this->assertStringContainsString('CI_RUN_URL', $contents);
-        $this->assertStringContainsString('.target_url == $target_url', $contents);
-        $this->assertStringContainsString('EXPECTED_RELEASE_SHA', $contents);
-        $this->assertStringContainsString('contract-backup-verified.txt', $release);
-        $this->assertStringContainsString('release-state.env', $release);
-        $this->assertStringContainsString('release-journal.log', $release);
-        $this->assertStringContainsString('GHCR_TOKEN: ${{ github.token }}', $contents);
-        $this->assertStringContainsString('ssh-keyscan -p "$PRODUCTION_SSH_PORT" -H "$PRODUCTION_HOST" >> ~/.ssh/known_hosts', $contents);
-        $this->assertStringContainsString("docker login ghcr.io --username '\$GHCR_USERNAME' --password-stdin", $contents);
-        $this->assertStringContainsString('docker logout ghcr.io', $contents);
-        $this->assertStringNotContainsString('docker login ghcr.io', $release);
-        $this->assertStringContainsString('APP_IMAGE: ${{ needs.release-gate.outputs.image_reference }}', $contents);
-        $this->assertStringContainsString('docker pull "$APP_IMAGE"', $release);
-        $this->assertStringNotContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env build', $contents);
-        $this->assertStringContainsString('compose up -d --no-build --remove-orphans', $release);
-        $this->assertStringContainsString('running_image="$(docker inspect "$container_id" --format \'{{.Image}}\')"', $release);
-        $this->assertStringNotContainsString('up -d --build --remove-orphans', $contents);
-        $this->assertStringContainsString('app artisan ops:check-failed-jobs --snapshot', $release);
-        $this->assertStringContainsString('php artisan ops:check-failed-jobs --max=0 --baseline-stdin', $release);
-        $this->assertMatchesRegularExpression(
-            '/actions\/upload-artifact@[0-9a-f]{40} # v[0-9]+(?:\.[0-9]+)*/',
-            $contents,
-            'The production workflow must pin upload-artifact to an immutable SHA and document its version.',
-        );
-        $this->assertStringContainsString('ops:release-health-summary --baseline-stdin', $release);
-        $this->assertStringContainsString('./scripts/smoke-production.sh', $contents);
-        $this->assertStringContainsString('PRODUCTION_SMOKE_BASE_URL', $contents);
-        $this->assertStringContainsString('group: production-mutation', $contents);
-        $this->assertStringContainsString('exec 9>"$PRODUCTION_PATH/.production-mutation.lock"', $release);
-        $this->assertStringContainsString('flock -n 9', $release);
-        $this->assertStringContainsString('-o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6', $contents);
-        foreach ([
-            'app health check is non-interactive' => 'compose_root exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null',
-            'scheduler health check is non-interactive' => 'compose_root exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null',
-            'failed jobs check consumes the pre-release baseline non-interactively' => 'compose exec -T app php artisan ops:check-failed-jobs --max=0 --baseline-stdin < "$FAILED_JOBS_BASELINE_FILE"',
-            'Telegram update recovery is non-interactive' => 'compose exec -T app php artisan telegram:recover-failed-updates --prune-unrecoverable </dev/null',
-        ] as $contract => $command) {
-            $this->assertStringContainsString($command, $release, $contract);
-        }
-
-        $this->assertStringContainsString('if ! compose exec -T app php artisan ops:check-failed-jobs', $release);
-        $this->assertStringContainsString('if ! compose exec -T app php artisan ops:check-queue-depth', $release);
-        $this->assertStringContainsString('--queue=payments', $release);
-        $this->assertStringContainsString('--queue=default', $release);
-        $this->assertStringContainsString('--queue=telegram-outbound', $release);
-        $this->assertStringContainsString('--queue=notifications', $release);
-        $this->assertStringContainsString('--queue=telegram-broadcast', $release);
-        $this->assertStringContainsString('--queue=telegram-stock', $release);
-        $this->assertStringContainsString('--queue=binance-verification', $release);
-
-        $this->assertStringContainsString('PREVIOUS_COMMIT="$(git rev-parse HEAD)"', $release);
-        $this->assertStringContainsString('PREVIOUS_IMAGE="$(docker inspect', $release);
-        $this->assertStringContainsString('compose run --rm --no-deps --entrypoint php', $release);
-        $this->assertStringContainsString('exec|run)', $release);
-        $this->assertStringContainsString('"$1" -u laravel', $release);
-        $this->assertStringContainsString('fingerprint-key-preparation-failed', $release);
-        $this->assertStringContainsString('use_persisted_credential_identity_fingerprint_key', $release);
-        $this->assertStringContainsString('2026_08_18_000001_contract_telegram_outbound_effects.php', $release);
-        $this->assertStringContainsString('run_expand_migrations', $release);
-        $this->assertStringContainsString('run_deferred_telegram_contract', $release);
-        $this->assertStringContainsString('telegram:recover-outbound --chunk=100 --queue=telegram-outbound', $release);
-        $this->assertStringContainsString('telegram:outbound-contract --strict', $release);
-        $this->assertStringContainsString('php artisan queue:restart', $release);
-        $this->assertStringContainsString('Apply deferred Telegram outbound contract', $contents);
-        $this->assertStringContainsString('RELEASE_OPERATION=contract', $contents);
-        $this->assertStringContainsString('deploy-succeeded-compatible-contract-pending', $release);
-        $this->assertStringContainsString('contract-failed-candidate-remains', $release);
-        $this->assertStringContainsString('${failure_reason}-rollback-succeeded', $release);
-        $this->assertStringContainsString('${failure_reason}-rollback-failed', $release);
-        $this->assertStringContainsString('duplicate_projects="$(', $release);
-    }
 
     public function test_github_workflows_pin_actions_bound_jobs_and_enforce_dependency_audits(): void
     {

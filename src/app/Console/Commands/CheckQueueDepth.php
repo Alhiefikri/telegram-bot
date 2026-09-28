@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Services\QueueDepthInspector;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class CheckQueueDepth extends Command
@@ -11,11 +11,12 @@ class CheckQueueDepth extends Command
     protected $signature = 'ops:check-queue-depth
         {--max=0 : Maximum acceptable runnable queued job count}
         {--max-oldest-age=0 : Maximum seconds the oldest runnable job may wait; zero requires no runnable job}
-        {--queue=* : Queue name to include; repeatable. Defaults to all queues}';
+        {--queue=* : Queue name to include. Defaults to all operational queues}
+        {--include-reserved-and-delayed : Include in-flight and delayed jobs in the depth check}';
 
-    protected $description = 'Alert when runnable queued jobs (not reserved, due now) exceeds the configured threshold.';
+    protected $description = 'Alert when runnable backlog or total queue depth exceeds the configured threshold.';
 
-    public function handle(): int
+    public function handle(QueueDepthInspector $queueDepths): int
     {
         $max = (int) $this->option('max');
         $maxOldestAge = (int) $this->option('max-oldest-age');
@@ -30,30 +31,39 @@ class CheckQueueDepth extends Command
             return self::FAILURE;
         }
 
+        if ($queues === []) {
+            $queues = $queueDepths->operationalQueues();
+        }
+
+        $includeReservedAndDelayed = (bool) $this->option('include-reserved-and-delayed');
+
         try {
-            // Only work a worker could pick up right now counts as backlog:
-            // reserved jobs are in flight, and delayed or retry-backoff jobs
-            // are intentionally sleeping, so their original created_at age
-            // must not be mistaken for an unprocessed queue.
-            $query = DB::table('jobs')
-                ->whereNull('reserved_at')
-                ->where('available_at', '<=', now()->timestamp);
+            $count = 0;
+            $oldestPendingAt = null;
 
-            if ($queues !== []) {
-                $query->whereIn('queue', $queues);
+            foreach ($queues as $queue) {
+                if ($includeReservedAndDelayed) {
+                    $count += $queueDepths->total($queue);
+
+                    continue;
+                }
+
+                $snapshot = $queueDepths->runnable($queue);
+                $count += $snapshot['depth'];
+                if ($snapshot['oldest_pending_at'] !== null) {
+                    $oldestPendingAt = $oldestPendingAt === null
+                        ? $snapshot['oldest_pending_at']
+                        : min($oldestPendingAt, $snapshot['oldest_pending_at']);
+                }
             }
-
-            $count = $query->count();
-            $oldestAvailableAt = $count > 0 ? $query->min('available_at') : null;
         } catch (Throwable $e) {
-            $this->error('ALERT queue depth check could not query database: '.$e->getMessage());
+            $this->error('ALERT queue depth check could not inspect queues: '.$e->getMessage());
 
             return self::FAILURE;
         }
 
-        $scope = $queues === [] ? 'all queues' : 'queues '.implode(',', $queues);
-
-        $oldestAge = $oldestAvailableAt === null ? 0 : max(0, now()->timestamp - (int) $oldestAvailableAt);
+        $scope = 'queues '.implode(',', $queues);
+        $oldestAge = $oldestPendingAt === null ? 0 : max(0, now()->timestamp - $oldestPendingAt);
 
         if ($count > $max || $oldestAge > $maxOldestAge) {
             $this->error("ALERT queue depth {$count} (oldest age {$oldestAge}s) exceeds thresholds max {$max}, max oldest age {$maxOldestAge}s for {$scope}.");

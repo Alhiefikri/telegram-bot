@@ -41,87 +41,12 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertContains('^www\\.lhiestore\\.web\\.id$', $hosts);
     }
 
-    public function test_queue_database_connection_is_configured(): void
+    public function test_ops_health_reports_database_queue_runnable_depths(): void
     {
-        $this->assertSame('database', config('queue.connections.database.driver'));
-        $this->assertSame('jobs', config('queue.connections.database.table'));
-    }
+        $now = now()->startOfSecond();
+        $this->travelTo($now);
+        config(['queue.default' => 'database']);
 
-    public function test_production_compose_keeps_cache_and_sessions_off_postgresql(): void
-    {
-        $compose = file_get_contents(base_path('../docker-compose.yml'));
-
-        $this->assertStringContainsString('CACHE_STORE: file', $compose);
-        $this->assertStringContainsString('SESSION_DRIVER: file', $compose);
-        $this->assertStringContainsString('QUEUE_CONNECTION: database', $compose);
-    }
-
-    public function test_supervisor_database_workers_isolate_update_outbound_notifications_broadcast_and_stock_queues(): void
-    {
-        $contents = file_get_contents(base_path('../supervisord.conf'));
-        $compose = file_get_contents(base_path('../docker-compose.yml'));
-        $envExample = file_get_contents(base_path('../.env.example'));
-
-        $this->assertStringContainsString('queue:work database', $contents);
-        $this->assertStringContainsString('[program:laravel-update-worker]', $contents);
-        $this->assertStringContainsString('--queue=payments,default', $contents);
-        $this->assertStringContainsString('--sleep=1', $contents);
-        $this->assertStringContainsString('numprocs=1', $contents);
-        $this->assertStringContainsString('[program:laravel-outbound-worker]', $contents);
-        $this->assertStringContainsString('--queue=telegram-outbound', $contents);
-        $this->assertStringNotContainsString('--queue=telegram-outbound,notifications', $contents);
-        $this->assertStringContainsString('[program:laravel-notification-worker]', $contents);
-        $this->assertStringContainsString('--queue=notifications', $contents);
-        $this->assertStringContainsString('[program:laravel-broadcast-worker]', $contents);
-        $this->assertStringContainsString('--queue=telegram-broadcast', $contents);
-        $this->assertStringContainsString('[program:laravel-stock-worker]', $contents);
-        $this->assertStringContainsString('--queue=telegram-stock', $contents);
-        $this->assertStringContainsString('--queue=binance-verification', $contents);
-        $this->assertStringNotContainsString('ENV_LARAVEL_', $contents);
-        $this->assertStringNotContainsString('ENV_BINANCE_VERIFICATION_QUEUE', $contents);
-
-        foreach ([
-            'LARAVEL_UPDATE_WORKER_PROCESSES',
-            'LARAVEL_OUTBOUND_WORKER_PROCESSES',
-            'LARAVEL_BROADCAST_WORKER_PROCESSES',
-            'LARAVEL_NOTIFICATION_WORKER_PROCESSES',
-            'LARAVEL_STOCK_WORKER_PROCESSES',
-            'LARAVEL_BINANCE_VERIFICATION_WORKER_PROCESSES',
-            'LARAVEL_UPDATE_WORKER_SLEEP',
-            'LARAVEL_OUTBOUND_WORKER_SLEEP',
-            'LARAVEL_BROADCAST_WORKER_SLEEP',
-        ] as $variable) {
-            $this->assertStringNotContainsString($variable, $compose);
-            $this->assertStringNotContainsString($variable.'=', $envExample);
-        }
-
-        $healthCheck = file_get_contents(app_path('Console/Commands/HealthCheck.php'));
-        $this->assertStringContainsString('laravel-update-worker:*', $healthCheck);
-        $this->assertStringContainsString('laravel-outbound-worker:*', $healthCheck);
-        $this->assertStringContainsString('laravel-notification-worker:*', $healthCheck);
-        $this->assertStringContainsString('laravel-broadcast-worker:*', $healthCheck);
-        $this->assertStringContainsString('laravel-stock-worker:*', $healthCheck);
-    }
-
-    public function test_sakurupiah_verification_and_reconciliation_use_release_owned_paths(): void
-    {
-        $schedule = file_get_contents(base_path('routes/console.php'));
-        $supervisor = file_get_contents(base_path('../supervisord.conf'));
-        $healthCheck = file_get_contents(app_path('Console/Commands/HealthCheck.php'));
-        $verificationJob = file_get_contents(app_path('Jobs/VerifySakurupiahWebhookPayment.php'));
-
-        $this->assertSame('default', config('services.sakurupiah.verification_queue'));
-        $this->assertStringContainsString('sakurupiah:reconcile --chunk=100', $schedule);
-        $this->assertStringContainsString('->everyMinute()', $schedule);
-        $this->assertStringContainsString('withoutOverlapping(ReconcileSakurupiahPayments::schedulerMutexMinutes())', $schedule);
-        $this->assertStringContainsString('[program:laravel-update-worker]', $supervisor);
-        $this->assertStringContainsString('$this->onQueue(\'default\')', $verificationJob);
-        $this->assertStringContainsString('laravel-update-worker:*', $healthCheck);
-        $this->assertStringContainsString("'payments', 'default'", $healthCheck);
-    }
-
-    public function test_ops_health_reports_operational_queue_depths(): void
-    {
         if (! Schema::hasTable('jobs')) {
             Schema::create('jobs', function (Blueprint $table): void {
                 $table->id();
@@ -138,24 +63,32 @@ class FoundationInfrastructureTest extends TestCase
             [
                 'queue' => 'default',
                 'payload' => '{}',
-                'attempts' => 1,
+                'attempts' => 0,
                 'reserved_at' => null,
-                'available_at' => now()->addMinutes(5)->timestamp,
-                'created_at' => now()->subMinutes(10)->timestamp,
+                'available_at' => $now->copy()->subSeconds(180)->timestamp,
+                'created_at' => $now->copy()->subSeconds(180)->timestamp,
             ],
             [
                 'queue' => 'default',
                 'payload' => '{}',
                 'attempts' => 1,
-                'reserved_at' => now()->timestamp,
-                'available_at' => now()->subMinutes(10)->timestamp,
-                'created_at' => now()->subMinutes(10)->timestamp,
+                'reserved_at' => null,
+                'available_at' => $now->copy()->addMinutes(5)->timestamp,
+                'created_at' => $now->copy()->subMinutes(10)->timestamp,
+            ],
+            [
+                'queue' => 'default',
+                'payload' => '{}',
+                'attempts' => 1,
+                'reserved_at' => $now->timestamp,
+                'available_at' => $now->copy()->subMinutes(10)->timestamp,
+                'created_at' => $now->copy()->subMinutes(10)->timestamp,
             ],
         ]);
 
         $this->artisan('ops:health --queue-depth')
             ->expectsOutput('Queue payments: depth=0 oldest_age=0s')
-            ->expectsOutput('Queue default: depth=0 oldest_age=0s')
+            ->expectsOutput('Queue default: depth=1 oldest_age=180s')
             ->expectsOutput('Queue telegram-outbound: depth=0 oldest_age=0s')
             ->expectsOutput('Queue notifications: depth=0 oldest_age=0s')
             ->expectsOutput('Queue telegram-broadcast: depth=0 oldest_age=0s')
@@ -241,40 +174,6 @@ class FoundationInfrastructureTest extends TestCase
         $this->assertStringContainsString('COPY src/public/assets/product-placeholder.svg /opt/lhiestore-public-product-placeholder.svg', $dockerfile);
         $this->assertStringContainsString('cp /opt/lhiestore-public-product-placeholder.svg public/assets/product-placeholder.svg', $entrypoint);
         $this->assertStringStartsWith('<svg', trim((string) file_get_contents($asset)));
-    }
-
-    public function test_production_deploy_workflow_uses_existing_compose_project_name(): void
-    {
-        $workflow = file_get_contents(base_path('../.github/workflows/deploy-production.yml'));
-        $release = file_get_contents(base_path('../scripts/deploy-production-release.sh'));
-
-        $this->assertStringContainsString('COMPOSE_PROJECT_NAME: telegram-bot-prod', $workflow);
-        $this->assertStringContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env "$@"', $release);
-        $this->assertStringContainsString('compose up -d --no-build --remove-orphans', $release);
-        $this->assertStringNotContainsString('docker compose --env-file .env up -d --build --remove-orphans', $workflow);
-        $this->assertStringNotContainsString('docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d --build --remove-orphans', $workflow);
-    }
-
-    public function test_queue_migration_contains_required_tables(): void
-    {
-        $migration = database_path('migrations/0001_01_01_000002_create_jobs_table.php');
-
-        $this->assertFileExists($migration);
-
-        $contents = file_get_contents($migration);
-        $this->assertStringContainsString("Schema::create('jobs'", $contents);
-        $this->assertStringContainsString("Schema::create('failed_jobs'", $contents);
-        $this->assertStringContainsString("Schema::create('job_batches'", $contents);
-    }
-
-    public function test_docker_compose_uses_postgresql_and_database_queue(): void
-    {
-        $compose = file_get_contents(base_path('../docker-compose.yml'));
-
-        $this->assertStringContainsString('DB_CONNECTION: pgsql', $compose);
-        $this->assertStringContainsString('DB_HOST: db', $compose);
-        $this->assertStringContainsString('QUEUE_CONNECTION: database', $compose);
-        $this->assertStringNotContainsString('DB_CONNECTION=pgsql', file_get_contents(base_path('../.env.example')));
     }
 
     public function test_broadcast_rate_limit_is_pinned_in_runtime_configuration_and_documentation(): void

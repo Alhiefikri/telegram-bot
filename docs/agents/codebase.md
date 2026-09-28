@@ -23,18 +23,20 @@ repository root
 ├── src/                    Laravel application
 ├── docs/                   ADR, runbook, specs, agent guidance
 ├── scripts/                release gate, smoke test, benchmark, backup
-├── docker-compose.yml      app + Nginx + PostgreSQL + workers + scheduler
-├── docker-entrypoint.sh    migration/optimization saat container start
+├── docker-compose.yml      app + Nginx + PostgreSQL + Redis + workers + scheduler
+├── docker-entrypoint.sh    migration/optimization/cutover guards saat container start
 └── supervisord.conf        PHP-FPM dan queue worker pools
 ```
 
 `src/` memakai PHP 8.3 dan Laravel 13. Aset frontend dibangun dengan Vite, Tailwind, dan Alpine. Runtime production-like terdiri dari:
 
 - PHP-FPM/Laravel app di belakang Nginx;
-- PostgreSQL sebagai database utama;
-- database-backed queue dengan worker pool terpisah;
+- PostgreSQL sebagai database utama dan penyimpanan durable untuk domain serta failed jobs;
+- Redis untuk queue, cache, session, dan lock; `maxmemory=96mb`, container `128m`, tanpa persistence atau persistent volume (`/data` memakai tmpfs 1 MiB);
 - service scheduler yang menjalankan Laravel scheduler tiap menit;
 - Telegram Bot API, KlikQRIS, Binance, and (until the retirement gate passes) Pakasir legacy settlement as external dependencies.
+
+Queue Redis bersifat volatile: restart Redis dapat menghilangkan queued jobs dan session/cache/lock state. Startup menolak cutover selama tabel database queue berisi job; rollback ke driver database menolak berpindah selama queue Redis tidak kosong atau tidak dapat diperiksa. Lihat [ADR 0014](../adr/0014-redis-runtime-state.md) dan [runbook cutover](../runbook-redis-runtime-cutover.md).
 
 Suite PHPUnit biasa dipaksa menggunakan SQLite in-memory, cache array, queue sync, dan session array lewat [`src/phpunit.xml`](../../src/phpunit.xml). Itu cepat tetapi tidak membuktikan seluruh locking PostgreSQL; gunakan `composer test:concurrency-gate` untuk race yang menyentuh stok, checkout, payment, atau admin mutation.
 

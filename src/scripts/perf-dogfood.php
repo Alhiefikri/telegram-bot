@@ -18,6 +18,7 @@ use App\Models\TelegramUpdate;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\QueueDepthInspector;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Support\AdminDogfoodHttpRunner;
@@ -714,19 +715,17 @@ $results[] = [
     ]],
 ];
 
-$queueDepth = null;
-$failedJobsCount = null;
-if (Schema::hasTable('jobs')) {
-    $queueDepth = DB::table('jobs')->count();
-}
-if (Schema::hasTable('failed_jobs')) {
-    $failedJobsCount = DB::table('failed_jobs')->count();
-}
+$queueDepths = $app->make(QueueDepthInspector::class);
+$queueDepth = array_sum(array_map(
+    fn (string $queue): int => $queueDepths->total($queue),
+    $queueDepths->operationalQueues(),
+));
+$failedJobsCount = Schema::hasTable('failed_jobs') ? DB::table('failed_jobs')->count() : null;
 
 $results[] = [
     'feature' => 'queue integrity',
-    'scenario' => 'final jobs queue depth',
-    'input' => 'jobs table count',
+    'scenario' => 'final operational queue depth',
+    'input' => 'configured queue backend total depth',
     'runs' => 1,
     'cold_ms' => null,
     'warm_avg_ms' => null,
@@ -900,7 +899,7 @@ $output = [
     'external_fixtures' => $fixtures->summary(),
     'blocked_scenarios' => $blockedScenarios,
     'final_queue_state' => [
-        'jobs_depth' => $queueDepth,
+        'queue_depth' => $queueDepth,
         'failed_jobs' => $failedJobsCount,
         'passes_ops_check_failed_jobs_max_0' => $failedJobsCount === 0,
     ],

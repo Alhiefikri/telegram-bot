@@ -124,6 +124,10 @@ if [ "${APP_AUTO_MIGRATE:-false}" = "true" ]; then
         || echo "WARNING: Credential identity backfill did not complete; Account Input remains disabled." >&2
 fi
 
+if [ "${QUEUE_CONNECTION:-database}" = "redis" ]; then
+    artisan ops:assert-database-queue-empty
+fi
+
 if [ "${APP_OPTIMIZE:-true}" = "true" ]; then
     artisan optimize
     artisan storefront:optimize-images

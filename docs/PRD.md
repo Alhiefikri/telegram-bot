@@ -648,13 +648,13 @@ Admin dapat:
 
 ## 14.1 Queue Driver
 
-MVP menggunakan database queue driver PostgreSQL.
+Compose production uses Redis 7 for queue, cache, session, and lock state; PostgreSQL remains the durable domain database and failed-job store. Redis is capped at 96 MiB and has no persistence, so it is not a durable queue across Redis failure. See [ADR 0014](adr/0014-redis-runtime-state.md).
 
-Migration wajib:
+Migration requirements depend on the active queue driver:
 
-- `jobs`
-- `failed_jobs`
-- `job_batches` jika batch digunakan.
+- `jobs` when the database queue driver is active; retained for the guarded rollback path.
+- `failed_jobs` for failed-job records.
+- `job_batches` if batching is used.
 
 ## 14.2 Queue Separation
 
