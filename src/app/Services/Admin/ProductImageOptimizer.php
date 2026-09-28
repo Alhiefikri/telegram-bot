@@ -31,6 +31,25 @@ final class ProductImageOptimizer
 
     private const PRODUCT_WEBP_QUALITY = 78;
 
+    /**
+     * Report the runtime capability gap for deploy and health gates, or null
+     * when uploaded catalog images can be decoded and re-encoded.
+     */
+    public function capabilityFailure(): ?string
+    {
+        if (! extension_loaded('gd')) {
+            return 'Product image processing requires the GD extension.';
+        }
+
+        foreach (['imagecreatefromstring', 'imagecreatefromjpeg', 'imagecreatefromwebp', 'imagewebp', 'imagecopyresampled'] as $function) {
+            if (! function_exists($function)) {
+                return 'Product image processing requires GD with JPEG and WebP support (missing '.$function.').';
+            }
+        }
+
+        return null;
+    }
+
     public function store(UploadedFile $image): string
     {
         return $this->storeInDirectory(

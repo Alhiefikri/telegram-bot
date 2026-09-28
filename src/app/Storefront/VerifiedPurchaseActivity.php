@@ -19,21 +19,36 @@ class VerifiedPurchaseActivity
     /** @return Collection<int, array{id:string,buyer:string,product:string,occurred_at:string,relative_time:string}> */
     public function recent(): Collection
     {
-        return Cache::remember(self::CACHE_KEY, now()->addSeconds(45), function (): Collection {
-            return Order::query()
-                ->select(['id', 'customer_id', 'order_status', 'payment_status', 'created_at'])
-                ->with(['customer:id,first_name', 'orderItems:id,order_id,product_name,product_id,quantity', 'inventoryMovements:id,order_id,product_id,type,quantity,created_at'])
-                ->whereIn('order_status', [OrderStatus::Processing->value, OrderStatus::Completed->value])
-                ->where('payment_status', PaymentStatus::Paid)
-                ->whereHas('inventoryMovements', fn ($query) => $query->where('type', InventoryMovementType::Sale))
-                ->latest('updated_at')
-                ->limit(self::MAX_ITEMS * 5)
-                ->get()
-                ->filter(fn (Order $order) => $this->hasMatchingSaleProof($order))
-                ->take(self::MAX_ITEMS)
-                ->map(fn (Order $order) => $this->project($order))
-                ->values();
-        });
+        $items = Cache::remember(self::CACHE_KEY, now()->addSeconds(45), fn (): array => $this->projectRecentItems());
+
+        return collect(is_array($items) ? $items : $this->projectRecentItems())
+            ->take(self::MAX_ITEMS)
+            ->values();
+    }
+
+    /**
+     * Cache raw arrays, not Collections: cache unserialization rejects classes,
+     * so a stored object reads back as PHP_Incomplete_Class and a payload
+     * written by an older release must never break a read.
+     *
+     * @return list<array{id:string,buyer:string,product:string,occurred_at:string,relative_time:string}>
+     */
+    private function projectRecentItems(): array
+    {
+        return Order::query()
+            ->select(['id', 'customer_id', 'order_status', 'payment_status', 'created_at'])
+            ->with(['customer:id,first_name', 'orderItems:id,order_id,product_name,product_id,quantity', 'inventoryMovements:id,order_id,product_id,type,quantity,created_at'])
+            ->whereIn('order_status', [OrderStatus::Processing->value, OrderStatus::Completed->value])
+            ->where('payment_status', PaymentStatus::Paid)
+            ->whereHas('inventoryMovements', fn ($query) => $query->where('type', InventoryMovementType::Sale))
+            ->latest('updated_at')
+            ->limit(self::MAX_ITEMS * 5)
+            ->get()
+            ->filter(fn (Order $order) => $this->hasMatchingSaleProof($order))
+            ->take(self::MAX_ITEMS)
+            ->map(fn (Order $order) => $this->project($order))
+            ->values()
+            ->all();
     }
 
     private function hasMatchingSaleProof(Order $order): bool

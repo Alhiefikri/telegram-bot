@@ -492,8 +492,15 @@ verify_service_images() {
 
 wait_for_health() {
   local attempt
+  local image_pipeline_flag=""
+  # Older release images predate the image pipeline gate; keep their health
+  # contract unchanged so a rollback still verifies.
+  if compose exec -T app php artisan ops:health --help </dev/null 2>/dev/null | grep -q -- '--image-pipeline'; then
+    image_pipeline_flag="--image-pipeline"
+  fi
+
   for attempt in $(seq 1 "${RELEASE_HEALTH_ATTEMPTS:-36}"); do
-    if compose_root exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null; then
+    if compose_root exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor $image_pipeline_flag </dev/null; then
       break
     fi
     [ "$attempt" -lt "${RELEASE_HEALTH_ATTEMPTS:-36}" ] || return 1

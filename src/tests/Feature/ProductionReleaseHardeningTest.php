@@ -933,6 +933,20 @@ SH);
         }
     }
 
+    public function test_production_image_builds_gd_with_freetype_jpeg_and_webp(): void
+    {
+        $dockerfile = file_get_contents(base_path('../Dockerfile'));
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        $releaseScript = file_get_contents(base_path('../scripts/deploy-production-release.sh'));
+
+        $this->assertStringContainsString('libfreetype6-dev', $dockerfile);
+        $this->assertStringContainsString('libjpeg62-turbo-dev', $dockerfile);
+        $this->assertStringContainsString('libwebp-dev', $dockerfile);
+        $this->assertStringContainsString('docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp', $dockerfile);
+        $this->assertStringContainsString('--image-pipeline', $compose);
+        $this->assertStringContainsString('--image-pipeline', $releaseScript);
+    }
+
     public function test_ci_has_authoritative_postgresql_migration_integration_and_concurrency_release_gate(): void
     {
         $workflow = file_get_contents(base_path('../.github/workflows/ci.yml'));

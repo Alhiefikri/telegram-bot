@@ -2,9 +2,11 @@
 
 namespace App\Console\Commands;
 
+use App\Services\Admin\ProductImageOptimizer;
 use App\Services\Bsc\BscOperationalAlertNotifier;
 use App\Services\Bsc\BscOperationalMetrics;
 use App\Services\Bsc\BscReadiness;
+use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\QueueDepthInspector;
 use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
@@ -21,6 +23,7 @@ class HealthCheck extends Command
         {--queue-schema}
         {--queue-depth : Report queued job count and oldest queued age for operational queues.}
         {--supervisor}
+        {--image-pipeline : Check GD capabilities used by invoice rendering and product image processing.}
         {--bsc : Check enabled BSC readiness and pending verification backlog.}
         {--sakurupiah : Check enabled Sakurupiah readiness, schedule, and bounded verification backlog.}
         {--scheduler-heartbeat= : Maximum scheduler heartbeat age in seconds.}';
@@ -34,6 +37,8 @@ class HealthCheck extends Command
         BscOperationalAlertNotifier $bscAlerts,
         SakurupiahProviderReadiness $sakurupiahReadiness,
         SakurupiahOperationalMetrics $sakurupiahMetrics,
+        PaidInvoiceRenderer $invoiceRenderer,
+        ProductImageOptimizer $imageOptimizer,
     ): int {
         $healthy = true;
 
@@ -96,6 +101,22 @@ class HealthCheck extends Command
             } catch (Throwable $exception) {
                 $healthy = false;
                 $this->error('Queue depth: failed - '.$exception->getMessage());
+            }
+        }
+
+        if ($this->option('image-pipeline')) {
+            $failures = array_values(array_filter([
+                $invoiceRenderer->capabilityFailure(),
+                $imageOptimizer->capabilityFailure(),
+            ], static fn (?string $failure): bool => $failure !== null));
+
+            if ($failures === []) {
+                $this->info('Image pipeline: ok');
+            } else {
+                $healthy = false;
+                foreach ($failures as $failure) {
+                    $this->error('Image pipeline: '.$failure);
+                }
             }
         }
 

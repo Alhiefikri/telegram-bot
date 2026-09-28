@@ -83,6 +83,37 @@ final class PaidInvoiceRenderer
         }
     }
 
+    /**
+     * Report the runtime capability gap for deploy and health gates, or null
+     * when a rendered invoice can be produced by the current PHP runtime.
+     */
+    public function capabilityFailure(): ?string
+    {
+        if (! extension_loaded('gd')
+            || ! function_exists('imagecreatetruecolor')
+            || ! function_exists('imagettftext')
+            || ! function_exists('imagettfbbox')
+            || ! function_exists('imagepng')) {
+            return 'Paid invoice rendering requires GD with FreeType and PNG support.';
+        }
+
+        try {
+            $font = $this->font !== '' ? $this->font : $this->fontPath(false);
+            $boldFont = $this->boldFont !== '' ? $this->boldFont : $this->fontPath(true);
+            $this->logoPath();
+        } catch (RuntimeException $exception) {
+            return $exception->getMessage();
+        }
+
+        foreach (array_unique([$font, $boldFont]) as $candidate) {
+            if (imagettfbbox(12, 0, $candidate, '0') === false) {
+                return 'Paid invoice TrueType font could not be measured.';
+            }
+        }
+
+        return null;
+    }
+
     public function render(PaidInvoicePresentation $presentation): PaidInvoiceRenderResult
     {
         if (! extension_loaded('gd')

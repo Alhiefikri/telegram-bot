@@ -76,6 +76,29 @@ class StorefrontVerifiedPurchaseActivityTest extends TestCase
             ->assertTooManyRequests();
     }
 
+    public function test_it_serves_the_cached_projection_from_a_serializing_cache_store(): void
+    {
+        $this->orderWithItem('Alya', null, OrderStatus::Completed, PaymentStatus::Paid, true);
+
+        config(['cache.default' => 'file']);
+        Cache::forget('storefront.verified-purchase-activity.v1');
+        $this->assertNull(Cache::get('storefront.verified-purchase-activity.v1'));
+
+        $this->getJson(route('storefront.verified-purchase-activity'))
+            ->assertOk()
+            ->assertJsonCount(1, 'items');
+
+        $this->assertIsArray(Cache::get('storefront.verified-purchase-activity.v1'));
+
+        // The second read unserializes that payload; object payloads come back
+        // as __PHP_Incomplete_Class and break the response type contract.
+        $this->getJson(route('storefront.verified-purchase-activity'))
+            ->assertOk()
+            ->assertJsonCount(1, 'items');
+
+        Cache::forget('storefront.verified-purchase-activity.v1');
+    }
+
     private function orderWithItem(string $buyer, ?int $telegramId, OrderStatus $orderStatus, PaymentStatus $paymentStatus, bool $saleProof, int $quantity = 1): Order
     {
         $customer = Customer::factory()->create(['first_name' => $buyer, 'telegram_id' => $telegramId]);
