@@ -42,6 +42,7 @@ class TelegramCatalogIntents
         private TelegramNavigationRootService $roots,
         private ProductImageOptimizer $images,
         private ProductQuantityPricing $pricing,
+        private TelegramCatalogProjectionCache $projectionCache,
     ) {}
 
     public function sendCategoryCatalog(
@@ -71,13 +72,13 @@ class TelegramCatalogIntents
         bool $removeLegacyReplyKeyboard = false,
     ): void {
         $requestedPage = max(1, $page);
-        $result = $this->browse->browsePublic(CatalogBrowseQuery::fromValues(
+        $query = CatalogBrowseQuery::fromValues(
             search: $search,
             category: $category,
             page: $requestedPage,
             perPage: self::FAMILY_LIST_PER_PAGE,
-        ));
-
+        );
+        $result = $this->cachedPublicBrowse($query);
         if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
             $this->sendStaleCatalog($customer, $chatId, $messageId, $establishFreshRoot, $removeLegacyReplyKeyboard);
 
@@ -108,7 +109,11 @@ class TelegramCatalogIntents
 
     public function sendCategoryPicker(Customer $customer, string $chatId, ?int $messageId = null): void
     {
-        $options = $this->browse->publicCategoryOptions(withProductsOnly: true);
+        $options = $this->projectionCache->remember(
+            'category-options',
+            ['with_products_only' => true],
+            fn () => $this->browse->publicCategoryOptions(withProductsOnly: true),
+        );
         $keyboard = collect($options->categories)
             ->map(fn (CatalogCategoryReadModel $category): array => [[
                 'text' => '📂 '.$category->name,
@@ -329,7 +334,7 @@ class TelegramCatalogIntents
             return false;
         }
 
-        $product = Product::query()->withAvailability()->publicVisible()->whereKey($productId)->first();
+        $product = Product::query()->with(['quantityPriceTiers'])->withAvailability()->publicVisible()->whereKey($productId)->first();
         if (! $product || (int) $product->product_family_id !== $familyId) {
             return false;
         }
@@ -393,7 +398,7 @@ class TelegramCatalogIntents
             return $this->openFamilyOptions($customer, $chatId, $intent['id'], 1);
         }
 
-        $product = Product::query()->withAvailability()->publicVisible()->whereKey($intent['id'])->first();
+        $product = Product::query()->with(['quantityPriceTiers'])->withAvailability()->publicVisible()->whereKey($intent['id'])->first();
         if (! $product) {
             return false;
         }
@@ -772,7 +777,7 @@ class TelegramCatalogIntents
                 return;
             }
 
-            $product = Product::query()->withAvailability()->publicVisible()->whereKey($selection['productId'])->first();
+            $product = Product::query()->with(['quantityPriceTiers'])->withAvailability()->publicVisible()->whereKey($selection['productId'])->first();
             $availableStock = $product ? max(0, $product->availableStock()) : 0;
             if (! $product || $availableStock < 1) {
                 $this->session->forget($customer);
@@ -859,11 +864,12 @@ class TelegramCatalogIntents
         }
 
         $requestedPage = max(1, $page);
-        $result = $this->browse->browsePublic(CatalogBrowseQuery::fromValues(
+        $query = CatalogBrowseQuery::fromValues(
             category: $categoryId,
             page: $requestedPage,
             perPage: self::PRODUCTS_PER_PAGE,
-        ));
+        );
+        $result = $this->cachedPublicBrowse($query);
         if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
             $this->sendStaleCatalog($customer, $chatId, $messageId);
 
@@ -902,11 +908,12 @@ class TelegramCatalogIntents
         }
 
         $requestedPage = max(1, $page);
-        $result = $this->browse->browsePublic(CatalogBrowseQuery::fromValues(
+        $query = CatalogBrowseQuery::fromValues(
             search: $search,
             page: $requestedPage,
             perPage: self::PRODUCTS_PER_PAGE,
-        ));
+        );
+        $result = $this->cachedPublicBrowse($query);
         if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
             $this->sendStaleCatalog($customer, $chatId, $messageId);
 
@@ -920,6 +927,25 @@ class TelegramCatalogIntents
         );
         $this->sendBrowseResult($customer, $chatId, $result, 'search.title', 'search', null, $search, null, null, $searchToken, $messageId);
     }
+    private function cachedPublicBrowse(CatalogBrowseQuery $query): CatalogBrowseResult
+    {
+        if ($query->search !== '') {
+            return $this->browse->browsePublic($query);
+        }
+
+        return $this->projectionCache->remember(
+            'browse',
+            [
+                'search' => $query->search,
+                'category' => $query->category,
+                'sort' => $query->sort,
+                'page' => $query->page,
+                'per_page' => $query->perPage,
+            ],
+            fn (): CatalogBrowseResult => $this->browse->browsePublic($query),
+        );
+    }
+
 
     private function sendBrowseResult(
         Customer $customer,

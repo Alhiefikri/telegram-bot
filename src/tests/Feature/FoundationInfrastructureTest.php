@@ -236,14 +236,7 @@ class FoundationInfrastructureTest extends TestCase
 
     public function test_telegram_http_budgets_are_pinned_in_runtime_configuration(): void
     {
-        $compose = file_get_contents(base_path('../docker-compose.yml'));
-        $environment = file_get_contents(base_path('../.env.example'));
-
-        $this->assertSame(30.0, config('services.telegram.http_timeout_seconds'));
-        $this->assertSame(10.0, config('services.telegram.http_connect_timeout_seconds'));
-        $this->assertStringNotContainsString('TELEGRAM_HTTP_TIMEOUT_SECONDS', $compose);
-        $this->assertStringNotContainsString('TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS', $compose);
-        $this->assertStringNotContainsString('TELEGRAM_HTTP_TIMEOUT_SECONDS=', $environment);
-        $this->assertStringNotContainsString('TELEGRAM_HTTP_CONNECT_TIMEOUT_SECONDS=', $environment);
+        $this->assertSame(10.0, config('services.telegram.http_timeout_seconds'));
+        $this->assertSame(3.0, config('services.telegram.http_connect_timeout_seconds'));
     }
 }

@@ -6,6 +6,7 @@ use App\Enums\CredentialAccessMethod;
 use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\UserRole;
 use App\Enums\TelegramOutboundEffectState;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
@@ -18,6 +19,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\User;
 use App\Models\TelegramOutboundEffect;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -26,6 +28,7 @@ use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
@@ -41,6 +44,7 @@ use App\Services\Telegram\TelegramReceiptPlan;
 use App\Services\Telegram\TelegramSupportContact;
 use App\Support\PaymentProvider;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
@@ -51,6 +55,105 @@ use Tests\Support\TelegramBotTestSupport;
 
 class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
 {
+
+    public function test_paid_lifecycle_defers_receipt_planning_and_rendering_until_after_transaction(): void
+    {
+        Queue::fake();
+        $customer = Customer::factory()->create(['telegram_id' => 12346, 'locale' => 'en']);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+        $transactionLevel = DB::transactionLevel();
+        app()->instance(TelegramReceiptNotifier::class, $this->notifierObservingTransactionLevel($transactionLevel));
+
+        app(OrderStateMachine::class)->applyPaymentPaid($order->payments()->sole());
+
+        $this->assertSame(0, $order->telegramOutboundEffects()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->count());
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+
+        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
+        $this->assertNotNull($effect);
+        $this->assertSame(
+            TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->getKey()),
+            $effect->effect_group_key,
+        );
+    }
+
+    public function test_store_balance_checkout_defers_receipt_planning_and_rendering_until_after_transaction(): void
+    {
+        Queue::fake();
+        $customer = Customer::factory()->create(['telegram_id' => 12347, 'locale' => 'en']);
+        $product = Product::factory()->create(['price_amount' => 15_000, 'stock' => 1, 'reserved_stock' => 0]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+        app(StoreBalanceLedger::class)->creditTopUp($customer, 25_000, 'test-top-up', 'test-top-up:receipt-lock');
+        $transactionLevel = DB::transactionLevel();
+        app()->instance(TelegramReceiptNotifier::class, $this->notifierObservingTransactionLevel($transactionLevel));
+
+        $order = app(OrderCheckoutService::class)->checkout(
+            $cart,
+            CheckoutPaymentIntents::storeBalance(),
+            'store-balance-receipt-lock',
+        );
+
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
+        $this->assertNotNull($effect);
+        $this->assertSame(
+            TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->getKey()),
+            $effect->effect_group_key,
+        );
+    }
+
+    public function test_explicit_receipt_resend_prepares_before_order_locks(): void
+    {
+        $order = $this->multiProductStructuredReceiptOrder();
+        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $this->assertNotNull($effect);
+        $effect->forceFill([
+            'state' => TelegramOutboundEffectState::Unknown,
+            'unknown_at' => now(),
+        ])->save();
+        $transactionLevel = DB::transactionLevel();
+        app()->instance(TelegramReceiptNotifier::class, $this->notifierObservingTransactionLevel($transactionLevel));
+
+        $resend = app(TelegramOutboundEffectService::class)->resend(
+            $effect->fresh(),
+            User::factory()->create(['role' => UserRole::Owner]),
+        );
+
+        $this->assertSame(1, $resend->sequence);
+        $this->assertStringContainsString(':resend:v2', (string) $resend->effect_group_key);
+        $this->assertTrue($resend->outcome_metadata['duplicate_risk_acknowledged']);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+    }
+
+    public function test_outbound_recovery_materializes_missing_receipt_after_paid_source_commit(): void
+    {
+        Queue::fake();
+        $order = $this->multiProductStructuredReceiptOrder();
+        $transactionLevel = DB::transactionLevel();
+        app()->instance(TelegramReceiptNotifier::class, $this->notifierObservingTransactionLevel($transactionLevel));
+
+        $this->assertSame(0, Artisan::call('telegram:recover-outbound'));
+
+        $effect = app(TelegramOutboundEffectService::class)
+            ->forOrder($order->id, TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS);
+        $this->assertNotNull($effect);
+        $this->assertSame(
+            TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->id),
+            $effect->effect_group_key,
+        );
+        Queue::assertPushed(
+            SendTelegramReceipt::class,
+            fn (SendTelegramReceipt $job): bool => $job->orderId === (string) $order->id
+                && $job->effectId === (string) $effect->getKey(),
+        );
+    }
+
     public function test_paid_lifecycle_materializes_one_idempotent_receipt_group(): void
     {
         Queue::fake();
@@ -64,11 +167,15 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         app(OrderStateMachine::class)->applyPaymentPaid($payment);
         app(OrderStateMachine::class)->applyPaymentPaid($payment->fresh());
 
+        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $replay = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
         $receiptEffects = $order->telegramOutboundEffects()
             ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
             ->orderBy('sequence')
             ->get();
 
+        $this->assertNotNull($effect);
+        $this->assertSame($effect->getKey(), $replay?->getKey());
         $this->assertCount(1, $receiptEffects);
         $this->assertSame(
             TelegramOutboundEffectService::receiptEffectGroupKey($order->id),
@@ -84,6 +191,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('buyer@example', json_encode($receiptEffects->sole()->getAttributes(), JSON_THROW_ON_ERROR));
         Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
+
 
     #[DataProvider('singleStructuredPhotoCases')]
     public function test_single_structured_account_receipt_is_one_protected_localized_photo(
@@ -1466,6 +1574,39 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         }
 
         return $order->fresh();
+    }
+
+    private function notifierObservingTransactionLevel(int $expectedLevel): TelegramReceiptNotifier
+    {
+        $real = app(TelegramReceiptNotifier::class);
+        $notifier = Mockery::mock(TelegramReceiptNotifier::class, [
+            app(TelegramBotClient::class),
+            app(TelegramLocale::class),
+            app(CredentialDeliveryFormatter::class),
+            app(CredentialDeliveryPresentation::class),
+            app(TelegramCredentialDeliveryRenderer::class),
+            app(TelegramMessageChunker::class),
+            app(TelegramSupportContact::class),
+            app(PaidInvoiceRenderer::class),
+            app(PaidInvoiceOrderPresentationAdapter::class),
+            app(TelegramOutboundEffectLedgerProtocol::class),
+        ])->makePartial();
+        $notifier->shouldReceive('receiptPlan')
+            ->once()
+            ->andReturnUsing(function (Order $order) use ($expectedLevel, $real): TelegramReceiptPlan {
+                \PHPUnit\Framework\Assert::assertSame($expectedLevel, DB::transactionLevel());
+
+                return $real->receiptPlan($order);
+            });
+        $notifier->shouldReceive('renderInvoiceUnit')
+            ->once()
+            ->andReturnUsing(function (Order $order) use ($expectedLevel, $real) {
+                \PHPUnit\Framework\Assert::assertSame($expectedLevel, DB::transactionLevel());
+
+                return $real->renderInvoiceUnit($order);
+            });
+
+        return $notifier;
     }
 
     /** @return array{0: Order, 1: list<string>} */

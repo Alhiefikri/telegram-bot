@@ -169,11 +169,29 @@ touches the order proof counter, because a top-up is not a successful order.
 
 ## Durable handoff and dispatch
 
-For checkout, Order lifecycle, receipts, payment proof, Sales Proof Post,
-and price notifications, the source mutation and the pending effect are
-created in the same database transaction. A queue dispatch happens after the
-transaction commits, but losing that dispatch does not remove the committed
-effect; telegram:recover-outbound can find it.
+For transactional materialization families (checkout instructions, payment
+proof, Sales Proof Post, and price notifications), the source mutation and
+pending effect are created in the same database transaction. Queue dispatch
+happens after commit, but losing that dispatch does not remove the committed
+effect; `telegram:recover-outbound` can find it.
+
+Paid Order receipts use a deferred-materialization exception. The Order
+lifecycle transaction atomically commits paid Order/Payment and inventory
+state, then queues `SendTelegramReceipt` after the outermost commit with only
+the Order ID. The worker builds the transient receipt plan and invoice image
+before acquiring the short Order lock used to revalidate eligibility and write
+the deterministic effect group. Store Balance checkout follows the same path:
+the queued job waits for the outer checkout transaction, not merely the nested
+Order lifecycle transaction. Explicit/admin resend paths likewise prepare
+outside Order/effect locks and revalidate under lock. No credential, caption,
+receipt plan, or image bytes are persisted in job/cache payloads.
+
+The committed paid Order itself is the durable handoff marker. The existing
+source-discovery pass in `telegram:recover-outbound` materializes an eligible
+paid Order with no receipt effect group; the normal effect sweep recovers a
+pending ledger group if the process stops after group commit but before queue
+dispatch. Replaying materialization uses the canonical group key. The plan
+and invoice preflight keep existing render-failure and text-fallback behavior.
 
 Store Balance settlement is a deferred-materialization exception. The
 `StoreBalanceTopUpService` transaction commits the authoritative top-up and
@@ -193,9 +211,12 @@ running Telegram work under financial locks.
 
 The dispatch path is deliberately split into three concerns:
 
-1. the source service atomically records the business state and effect;
-2. the dispatcher maps the effect to a queue job after commit; and
-3. the adapter claims and finalizes through the ledger protocol.
+1. the source transaction commits its durable effect or recoverable handoff;
+2. synchronous families write effects before commit, while deferred families
+   materialize them after commit and use source discovery to close a missed
+   dispatch interval; and
+3. the adapter claims and finalizes each materialized effect through the ledger
+   protocol.
 
 Queue uniqueness and afterCommit reduce duplicate work and ordering hazards.
 They are not remote Telegram idempotency and do not replace the ledger's claim

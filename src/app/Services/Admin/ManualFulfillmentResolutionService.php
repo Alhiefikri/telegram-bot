@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
@@ -16,7 +17,6 @@ use App\Services\GuestOrderNotificationService;
 use App\Services\InventoryLedger;
 use App\Services\OrderLifecycle;
 use App\Services\ProductCredentialAllocator;
-use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\DB;
 
@@ -27,8 +27,6 @@ class ManualFulfillmentResolutionService
         private readonly InventoryLedger $inventory,
         private readonly OrderLifecycle $orders,
         private readonly ProductCredentialAllocator $credentials,
-        private readonly TelegramOutboundEffectService $outboundEffects,
-        private readonly TelegramOutboundEffectDispatcher $dispatcher,
         private readonly GuestOrderNotificationService $guestOrderNotifications,
     ) {}
 
@@ -81,9 +79,9 @@ class ManualFulfillmentResolutionService
         $order->refresh();
         $resolved = $this->markResolved($review, ManualFulfillmentReview::STATE_FULFILLED, $actor, $reason);
         $this->audit->log('manual_fulfillment_review.fulfilled', $review, ['state' => ManualFulfillmentReview::STATE_PENDING], ['reason' => $reason, 'order_status' => OrderStatus::Completed->value], $actor, $ip);
-        $effect = $this->outboundEffects->recordReceipt($order);
-        if ($effect !== null) {
-            $this->dispatcher->dispatch($effect);
+        if (! $isPendingBscReview) {
+            SendTelegramReceipt::dispatch((string) $order->getKey())
+                ->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
         }
 
         return $resolved;

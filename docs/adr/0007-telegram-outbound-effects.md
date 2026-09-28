@@ -166,6 +166,29 @@ The Sales Proof recovery contract is covered by
 and
 `TelegramLifecycleOutboundEffectTest::test_recovery_leaves_unknown_and_manual_review_sales_proof_effects_untouched`.
 
+### Deferred paid-order receipt materialization
+
+Paid Order lifecycle transactions atomically commit the authoritative Order,
+Payment, inventory, and checkout state, but they do not render `receiptPlan()`
+or the paid invoice image, or materialize the customer receipt group while
+Order/Payment rows are locked. `SendTelegramReceipt` is queued after the
+outermost transaction commits and carries only the Order ID. The job prepares
+the transient receipt plan and invoice image before opening the short
+transaction that revalidates eligibility and creates the deterministic effect
+group. Receipt plans, credentials, captions, and image bytes never enter a
+queue or cache payload.
+
+The committed paid Order row is the durable materialization handoff. If the
+process stops after commit and before the job runs, `telegram:recover-outbound`
+discovers eligible paid Orders with no receipt effect group and performs the
+same idempotent materialization. If it stops after effect rows commit, the
+normal due-effect recovery dispatches the pending ledger rows. Replays retain
+the canonical receipt group key. Explicit/admin receipt resends also prepare
+their transient plan and image before acquiring the Order/effect locks, then
+revalidate and write the new acknowledged resend version inside the transaction.
+Planning/render failures retain the existing safe failed-effect and text
+fallback behavior.
+
 ### Deferred Store Balance receipt materialization
 
 A successful Store Balance settlement changes authoritative top-up and ledger

@@ -192,7 +192,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
         }
 
         if (preg_match('/^product:([1-9][0-9]*)$/', $context->data, $matches)) {
-            $product = Product::query()->withAvailability()->publicVisible()->whereKey((int) $matches[1])->first();
+            $product = Product::query()->with(['quantityPriceTiers'])->withAvailability()->publicVisible()->whereKey((int) $matches[1])->first();
             if (! $product) {
                 $this->session->forgetWithLock($context->customer);
                 $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.product_unavailable'));

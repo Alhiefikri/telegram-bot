@@ -45,10 +45,13 @@ RUN groupadd --gid 1000 laravel \
 
 RUN sed -i 's/^user = .*/user = laravel/' /usr/local/etc/php-fpm.d/www.conf \
     && sed -i 's/^group = .*/group = laravel/' /usr/local/etc/php-fpm.d/www.conf \
-    && sed -i 's/^pm.max_children = .*/pm.max_children = 16/' /usr/local/etc/php-fpm.d/www.conf \
-    && sed -i 's/^pm.start_servers = .*/pm.start_servers = 4/' /usr/local/etc/php-fpm.d/www.conf \
-    && sed -i 's/^pm.min_spare_servers = .*/pm.min_spare_servers = 4/' /usr/local/etc/php-fpm.d/www.conf \
-    && sed -i 's/^pm.max_spare_servers = .*/pm.max_spare_servers = 10/' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's/^pm = .*/pm = dynamic/' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's/^pm.max_children = .*/pm.max_children = 6/' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's/^pm.start_servers = .*/pm.start_servers = 2/' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's/^pm.min_spare_servers = .*/pm.min_spare_servers = 2/' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i 's/^pm.max_spare_servers = .*/pm.max_spare_servers = 4/' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i -E 's/^;?[[:space:]]*pm.max_requests[[:space:]]*=.*/pm.max_requests = 500/' /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i -E 's/^;?[[:space:]]*request_terminate_timeout[[:space:]]*=.*/request_terminate_timeout = 60s/' /usr/local/etc/php-fpm.d/www.conf \
     && { \
         echo 'expose_php=0'; \
         echo 'display_errors=0'; \

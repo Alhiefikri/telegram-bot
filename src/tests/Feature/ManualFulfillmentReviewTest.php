@@ -105,8 +105,47 @@ class ManualFulfillmentReviewTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_bsc_review_fulfillment_queues_one_receipt_materialization(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        $payment = Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'USDT_BEP20',
+            'status' => PaymentStatus::Pending,
+            'amount' => $order->total_amount,
+            'provider_total_payment' => $order->total_amount,
+        ]);
+        $review = ManualFulfillmentReview::query()->create([
+            'order_id' => $order->id,
+            'payment_id' => $payment->id,
+            'amount' => $payment->amount,
+            'currency' => $payment->currency,
+            'reason' => ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+            'provider_reference' => 'BSC-MANUAL-REVIEW-ONE-RECEIPT',
+        ]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $resolved = app(ManualFulfillmentResolutionService::class)->resolve(
+            $review,
+            $owner,
+            'fulfill',
+            'BSC payment verified and fulfillment approved.',
+        );
+
+        $this->assertSame(ManualFulfillmentReview::STATE_FULFILLED, $resolved->state);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
     public function test_owner_can_fulfill_a_late_payment_once_and_allocate_available_credential(): void
     {
+        Queue::fake([SendTelegramReceipt::class]);
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
         $credential = ProductStockItem::query()->create(['product_id' => $product->id, 'secret' => 'credential@example.test|password']);
         $order = $this->latePaidOrder($product);
@@ -122,6 +161,7 @@ class ManualFulfillmentReviewTest extends TestCase
         $this->assertSame(0, $product->fresh()->stock);
         $this->assertNotNull($credential->fresh()->order_item_id);
         $this->assertDatabaseHas('audit_logs', ['action' => 'manual_fulfillment_review.fulfilled', 'user_id' => $owner->id]);
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
 
     public function test_successful_refund_retires_delivered_credential_and_never_reallocates_it(): void

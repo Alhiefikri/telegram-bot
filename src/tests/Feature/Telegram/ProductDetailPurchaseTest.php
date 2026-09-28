@@ -21,6 +21,8 @@ use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramIntentSession;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Tests\Support\TelegramBotTestSupport;
 
 class ProductDetailPurchaseTest extends TelegramBotTestSupport
@@ -181,6 +183,38 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
             ->contains(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:qty:tier:')));
         $this->assertSame(0, Cart::count());
         $this->assertSame(0, Order::count());
+    }
+
+    public function test_product_detail_loads_quantity_tiers_once_for_current_and_next_prices(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 318021, 'locale' => 'en']);
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 2, 'price_amount' => 23_000, 'usdt_price_amount' => null],
+            ['minimum_quantity' => 4, 'price_amount' => 20_000, 'usdt_price_amount' => null],
+        ])->create([
+            'name' => 'Eager Tier Detail',
+            'price_amount' => 25_000,
+            'stock' => 5,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $measuring = false;
+        $tierQueries = 0;
+        DB::listen(function (QueryExecuted $query) use (&$measuring, &$tierQueries): void {
+            if ($measuring && str_contains(strtolower($query->sql), 'product_quantity_price_tiers')) {
+                $tierQueries++;
+            }
+        });
+
+        $measuring = true;
+        $this->openDetail($customer, $product);
+        $measuring = false;
+
+        $detail = $this->lastDetailMessage('Eager Tier Detail');
+        $this->assertSame(1, $tierQueries, 'The Product detail entrypoint should eager-load tiers once, not once per quote.');
+        $this->assertStringContainsString('Wholesale 2+: Rp23.000/unit', (string) $detail['text']);
+        $this->assertStringContainsString('Add 1 more units to unlock wholesale pricing.', (string) $detail['text']);
     }
 
     public function test_product_detail_highlights_idr_and_usdt_tier_prices_and_savings(): void

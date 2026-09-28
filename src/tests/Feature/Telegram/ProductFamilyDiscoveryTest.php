@@ -1200,6 +1200,76 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         );
     }
 
+    public function test_public_catalog_projection_is_cached_until_catalog_changes(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41161, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'Cacheable Catalog Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $family = ProductFamily::factory()->create([
+            'name' => 'Cacheable Catalog Family',
+            'slug' => 'cacheable-catalog-family',
+        ]);
+        Product::factory()->create([
+            'name' => 'Catalog Family Member',
+            'product_family_id' => $family->id,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $catalog = app(TelegramCatalogIntents::class);
+        $catalogQueries = [];
+        $measuring = false;
+        DB::listen(function (QueryExecuted $query) use (&$catalogQueries, &$measuring): void {
+            if ($measuring && str_contains(strtolower($query->sql), 'products')) {
+                $catalogQueries[] = $query->sql;
+            }
+        });
+
+        $measuring = true;
+        $catalog->sendCatalogPage($customer, (string) $customer->telegram_id);
+        $measuring = false;
+
+        $catalogQueries = [];
+        $measuring = true;
+        $catalog->sendCatalogPage($customer, (string) $customer->telegram_id);
+        $measuring = false;
+        $this->assertSame([], $catalogQueries, 'A warm catalog read must not scan Products again.');
+        $warmKeyboard = json_encode($this->lastMessageContaining('Choose a family')['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('Cacheable Catalog Product', $warmKeyboard);
+
+        $product->update(['name' => 'Updated Catalog Product']);
+
+        $catalogQueries = [];
+        $measuring = true;
+        $catalog->sendCatalogPage($customer, (string) $customer->telegram_id);
+        $measuring = false;
+        $updatedKeyboard = json_encode($this->lastMessageContaining('Choose a family')['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('Updated Catalog Product', $updatedKeyboard);
+        $this->assertStringNotContainsString('Cacheable Catalog Product', $updatedKeyboard);
+        $family->update(['name' => 'Updated Catalog Family']);
+
+        $catalog->sendCatalogPage($customer, (string) $customer->telegram_id);
+        $updatedFamilyKeyboard = json_encode($this->lastMessageContaining('Choose a family')['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('Updated Catalog Family', $updatedFamilyKeyboard);
+        $this->assertStringNotContainsString('Cacheable Catalog Family', $updatedFamilyKeyboard);
+        $catalogQueries = [];
+        $measuring = true;
+        $catalog->sendSearchResults($customer, (string) $customer->telegram_id, 'Updated Catalog');
+        $measuring = false;
+        $this->assertSame(1, count($catalogQueries), 'The first nonempty search must use a live Product projection.');
+        $this->assertStringContainsString('Updated Catalog Product', (string) $this->lastMessageContaining('Updated Catalog Product')['text']);
+
+        $catalogQueries = [];
+        $measuring = true;
+        $catalog->sendSearchResults($customer, (string) $customer->telegram_id, 'Updated Catalog');
+        $measuring = false;
+        $this->assertSame(1, count($catalogQueries), 'Repeated nonempty searches must not grow the cache by search key.');
+    }
+
     public function test_single_plan_family_entry_opens_detail_without_the_plan_list(): void
     {
         $this->fakeTelegramHttp();

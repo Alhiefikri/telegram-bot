@@ -282,11 +282,35 @@ command/deep-link entry points without a root use their send path, while
 deterministic edit rejection may use a safe new-message fallback and transport
 ambiguity never triggers one.
 
+Telegram public list and product-in-category read models are cached only at
+the bot adapter seam by
+[`TelegramCatalogProjectionCache`](../../src/app/Services/Telegram/TelegramCatalogProjectionCache.php),
+with model-event invalidation for Product, Product Family, Category, and
+quantity-price-tier changes. The cache contains credential-free projections,
+not Telegram markup or customer/session state. Nonempty searches bypass it to
+avoid unbounded search-key cardinality; general `CatalogBrowse` and storefront
+projections remain uncached. Family/product callbacks re-read current public
+eligibility before selection.
+
+
 Catalog icons resolve through [`ProductBrandIconResolver`](../../src/app/Services/Telegram/ProductBrandIconResolver.php): an explicit Product `icon` wins, otherwise the `catalog_brand_icons` registry (admin-managed, cached ten minutes by `CatalogBrandIcons`) matches the Product or Family name and supplies the fallback glyph plus, when captured, the `custom_emoji_id` that inline keyboard buttons carry as `icon_custom_emoji_id`. Named navigation slots resolve separately through [`TelegramUiIcons`](../../src/app/Services/Telegram/TelegramUiIcons.php) and the `telegram_ui_icons` table: `TelegramMenuIntents::navigationRow()` and `homeKeyboard()` are the seams, so screens that reuse them inherit the icon, and a slot without a captured identifier renders the untouched locale copy. Message text always keeps the Unicode glyph, and keyboards sent to the Store Channel stay Unicode because the Premium-owner route covers private, group, and supergroup chats only. Identifiers are captured by the admin icons flow (`TelegramIconIntents`, pending capture in `TelegramIconCaptureSession`, `brandicon:` and `menuicon:` callbacks in `TelegramIconCallbackHandler`) from the `custom_emoji` entities the webhook ingress keeps in its minimized payload. `CustomEmojiCapability` remembers a rejection for thirty minutes and `TelegramBotClient` retries that one send without the icons, so a lapsed Premium degrades to the Unicode glyph instead of failing a customer-visible message. `catalog:brand-icons-check` audits stored identifiers against `getCustomEmojiStickers` and can clear a remembered rejection.
 
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
 
 Untuk delivery durable, [`TelegramOutboundEffectLedgerProtocol`](../../src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php) adalah satu-satunya seam state: claim/lease, token-checked finalization, ambiguity, retry scheduling, terminal failure, dan receipt ordering. [`TelegramOutboundEffectPolicy`](../../src/app/Services/Telegram/TelegramOutboundEffectPolicy.php) memasok limit dan policy family tanpa memindahkan state machine ke adapter. `TelegramOutboundEffectService` hanya mematerialisasi effect, melakukan lookup, dan menyimpan resend history; queue mapping berada di `TelegramOutboundEffectDispatcher`. Delivery/projection adapter per family adalah `CheckoutInstructionDeliveryPipeline`, `ReceiptDeliveryPipeline`, `AdminOrderNotificationDeliveryPipeline`, `ManualPaymentProofDeliveryPipeline`, `SalesProofDeliveryPipeline`, `AdminBroadcastDeliveryPipeline`, `StockNotificationDeliveryPipeline`, `ProductPriceChangeNotificationService`, `BalanceTopUpPaymentProofDeliveryPipeline`, `BalanceTopUpOwnerAlertDeliveryPipeline`, dan `BalanceTopUpChannelProofDeliveryPipeline`. Jangan menambahkan claim/finalization pass-through baru ke service materializer atau job. Boundary lengkap, scope #286, recovery, dan Manual Delivery Review ada di [`telegram-outbound-effect-architecture.md`](../../docs/telegram-outbound-effect-architecture.md); migration/incident runbook ada di [`runbook-telegram-outbound-effect-contract.md`](../../docs/runbook-telegram-outbound-effect-contract.md).
+
+Paid-order receipt materialization has a deliberate after-commit handoff:
+`OrderStateMachine` queues `SendTelegramReceipt` with only the Order ID after
+the outermost payment/checkout transaction commits. The job then asks
+`TelegramOutboundEffectService` to prepare the transient receipt plan and
+invoice image before acquiring the short Order lock, rechecks eligibility,
+and materializes the durable effect group. Explicit and admin resends follow
+the same prepare-before-lock boundary. Pending BSC manual-review completion
+uses `OrderLifecycle` and its receipt handoff exactly once; already-paid late
+fulfillment uses the manual service's fallback handoff. The
+`telegram:recover-outbound` source scan materializes a missing receipt effect
+from the committed paid Order if the after-commit dispatch was lost.
+
 
 `ReceiptDeliveryPipeline` marks only the first successful receipt unit whose transient presentation contains credentials, then asks `TelegramCredentialPinService` to pin that message silently. Pin state is stored on `Order` for idempotency; the outbound-effect recovery command retries only the safe pin side effect and never re-sends credentials. `TelegramOrderIntents` presents up to ten customer-owned successful paid orders (`processing`/`completed`) at a time with deterministic newest-first keyset pagination and compact invoice/status buttons; each selected invoice still resolves through the customer-owned detail query.
 Untuk KlikQRIS, `delivery_outcome=retry_notice_sent` tidak dianggap selesai: ketika customer menekan Check Payment atau reconciliation menemukan Payment yang sama sudah kembali payable, service mematerialisasi effect sequence 2 dan dispatcher mengantrekan ulang QR melalui Payment yang sama. Effect ini hanya dibuat untuk order/payment yang masih pending dan tidak menduplikasi effect awal `qris_sent`.

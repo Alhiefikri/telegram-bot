@@ -1152,25 +1152,35 @@ class TelegramOutboundEffectService
     /**
      * Materialize the paid customer receipt as an ordered effect group.
      *
-     * The caller may already be inside the paid-lifecycle transaction. The
-     * nested transaction keeps direct legacy callers atomic as well, while
-     * Laravel's afterCommit dispatch remains owned by the caller.
+     * Receipt content and invoice-image preflight are prepared before the
+     * transaction takes the Order lock. Paid lifecycle source state is the
+     * durable handoff; recovery discovers Orders whose effect group is still
+     * absent if post-commit queue dispatch is interrupted.
      */
     public function recordReceipt(Order $order, ?Customer $customer = null): ?TelegramOutboundEffect
     {
-        return DB::transaction(function () use ($order, $customer): ?TelegramOutboundEffect {
-            $locked = Order::query()->lockForUpdate()->findOrFail($order->getKey());
-            $customer ??= $locked->customer;
+        $source = Order::query()->with('customer')->findOrFail($order->getKey());
+        $customer ??= $source->customer;
+        if (! $this->receiptEligible($source, $customer)) {
+            return null;
+        }
 
-            if (! $this->receiptEligible($locked, $customer)) {
+        $groupKeys = [
+            self::receiptTextFallbackEffectGroupKey((string) $source->getKey()),
+            self::receiptEffectGroupKey((string) $source->getKey()),
+            self::legacyReceiptEffectGroupKey((string) $source->getKey()),
+        ];
+        $hasExistingGroup = TelegramOutboundEffect::query()->whereIn('effect_group_key', $groupKeys)->exists();
+        $prepared = $hasExistingGroup ? null : $this->prepareReceiptGroup($source);
+
+        return DB::transaction(function () use ($source, $customer, $groupKeys, $prepared): ?TelegramOutboundEffect {
+            $locked = Order::query()->lockForUpdate()->findOrFail($source->getKey());
+            $lockedCustomer = $customer ?? $locked->customer;
+
+            if (! $this->receiptEligible($locked, $lockedCustomer)) {
                 return null;
             }
 
-            $groupKeys = [
-                self::receiptTextFallbackEffectGroupKey((string) $locked->getKey()),
-                self::receiptEffectGroupKey((string) $locked->getKey()),
-                self::legacyReceiptEffectGroupKey((string) $locked->getKey()),
-            ];
             $existingGroups = TelegramOutboundEffect::query()
                 ->whereIn('effect_group_key', $groupKeys)
                 ->orderBy('sequence')
@@ -1189,15 +1199,22 @@ class TelegramOutboundEffectService
                 }
             }
 
-            if ($existingGroups->isNotEmpty()) {
+            if ($existingGroups->isNotEmpty() || $locked->telegram_receipt_sent_at !== null) {
                 return null;
             }
 
-            if ($locked->telegram_receipt_sent_at !== null) {
-                return null;
+            if ($prepared === null) {
+                // Receipt rows are append-only; a group observed before the
+                // lock cannot disappear and leave an unprepared group behind.
+                throw new RuntimeException('Receipt group preparation was skipped unexpectedly.');
             }
 
-            return $this->createReceiptEffectGroup($locked, $customer);
+            return $this->createReceiptEffectGroup(
+                $locked,
+                $lockedCustomer,
+                $prepared['plan'],
+                $prepared['text_fallback'],
+            );
         }, 5);
     }
 
@@ -1478,15 +1495,28 @@ class TelegramOutboundEffectService
      */
     public function recordReceiptResend(Order $order): TelegramOutboundEffect
     {
-        return DB::transaction(function () use ($order): TelegramOutboundEffect {
-            $locked = Order::query()->lockForUpdate()->findOrFail($order->getKey());
-            $customer = $locked->customer;
+        $source = Order::query()->with('customer')->findOrFail($order->getKey());
+        $customer = $source->customer;
+        if (! $this->receiptEligible($source, $customer)) {
+            throw new InvalidArgumentException('Receipt can only be delivered for a paid order with a Telegram customer.');
+        }
+        $prepared = $this->prepareReceiptGroup($source);
 
-            if (! $this->receiptEligible($locked, $customer)) {
+        return DB::transaction(function () use ($source, $prepared): TelegramOutboundEffect {
+            $locked = Order::query()->lockForUpdate()->findOrFail($source->getKey());
+            $lockedCustomer = $locked->customer;
+            if (! $this->receiptEligible($locked, $lockedCustomer)) {
                 throw new InvalidArgumentException('Receipt can only be delivered for a paid order with a Telegram customer.');
             }
 
-            return $this->createReceiptEffectGroup($locked, $customer, explicit: true, supersedes: $this->latestReceiptEffect($locked));
+            return $this->createReceiptEffectGroup(
+                $locked,
+                $lockedCustomer,
+                $prepared['plan'],
+                $prepared['text_fallback'],
+                explicit: true,
+                supersedes: $this->latestReceiptEffect($locked),
+            );
         }, 5);
     }
 
@@ -2008,21 +2038,35 @@ class TelegramOutboundEffectService
 
     private function resendReceiptEffect(TelegramOutboundEffect $effect, User $actor, ?string $ip = null): TelegramOutboundEffect
     {
-        return DB::transaction(function () use ($effect, $actor, $ip): TelegramOutboundEffect {
-            $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($effect->getKey());
+        $initial = TelegramOutboundEffect::query()->findOrFail($effect->getKey());
+        if (! $this->isReviewable($initial)) {
+            throw new InvalidArgumentException('Only unknown or manual-review effects can be resent.');
+        }
+
+        $source = Order::query()->with('customer')->findOrFail($initial->source_id);
+        $customer = $source->customer;
+        if (! $this->receiptEligible($source, $customer) || $customer === null) {
+            throw new InvalidArgumentException('Receipt can only be delivered for a paid order with a Telegram customer.');
+        }
+        $prepared = $this->prepareReceiptGroup($source);
+
+        return DB::transaction(function () use ($initial, $source, $prepared, $actor, $ip): TelegramOutboundEffect {
+            $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($initial->getKey());
             if (! $this->isReviewable($locked)) {
                 throw new InvalidArgumentException('Only unknown or manual-review effects can be resent.');
             }
 
-            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($locked->source_id);
-            $customer = $lockedOrder->customer;
-            if (! $this->receiptEligible($lockedOrder, $customer) || $customer === null) {
+            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($source->getKey());
+            $lockedCustomer = $lockedOrder->customer;
+            if (! $this->receiptEligible($lockedOrder, $lockedCustomer) || $lockedCustomer === null) {
                 throw new InvalidArgumentException('Receipt can only be delivered for a paid order with a Telegram customer.');
             }
 
             $resend = $this->createReceiptEffectGroup(
                 $lockedOrder,
-                $customer,
+                $lockedCustomer,
+                $prepared['plan'],
+                $prepared['text_fallback'],
                 explicit: true,
                 supersedes: $locked,
             );
@@ -2044,9 +2088,34 @@ class TelegramOutboundEffectService
         }, 5);
     }
 
+    /**
+     * Render transient receipt data before acquiring source-row locks. Neither
+     * the plan nor invoice bytes cross the durable effect/queue boundary.
+     *
+     * @return array{plan: ?TelegramReceiptPlan, text_fallback: bool}
+     */
+    private function prepareReceiptGroup(Order $order): array
+    {
+        try {
+            $plan = $this->receiptNotifier->receiptPlan($order);
+        } catch (\Throwable) {
+            return ['plan' => null, 'text_fallback' => false];
+        }
+
+        try {
+            $this->receiptNotifier->renderInvoiceUnit($order);
+
+            return ['plan' => $plan, 'text_fallback' => false];
+        } catch (\Throwable) {
+            return ['plan' => $plan, 'text_fallback' => true];
+        }
+    }
+
     private function createReceiptEffectGroup(
         Order $order,
         Customer $customer,
+        ?TelegramReceiptPlan $plan,
+        bool $textFallback,
         bool $explicit = false,
         ?TelegramOutboundEffect $supersedes = null,
     ): TelegramOutboundEffect {
@@ -2061,17 +2130,8 @@ class TelegramOutboundEffectService
             } while (TelegramOutboundEffect::query()->where('effect_group_key', $groupKey)->exists());
         }
 
-        try {
-            $plan = $this->receiptNotifier->receiptPlan($order);
-        } catch (\Throwable) {
+        if ($plan === null) {
             return $this->createReceiptRenderFailureEffect($order, $customer, $groupKey, $explicit, $supersedes);
-        }
-
-        $textFallback = false;
-        try {
-            $this->receiptNotifier->renderInvoiceUnit($order);
-        } catch (\Throwable) {
-            $textFallback = true;
         }
 
         return $this->createReceiptTransportEffectGroup(

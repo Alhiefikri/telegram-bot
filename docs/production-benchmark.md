@@ -92,6 +92,14 @@ Docker Compose pins application lifecycle, session, queue, and performance
 settings; those are not benchmark `.env` overrides. Override the listed
 dogfood inputs by exporting the variable before running the command.
 
+## Runtime Request and Worker Bounds
+
+Telegram Bot API calls use a 10-second overall HTTP timeout and a 3-second connection-setup timeout. The connection timeout is within the overall budget, not an additional three seconds. The same budget applies to multipart photo/document uploads; there is no separately longer upload timeout. Interactive update jobs retain their existing retry/backoff behavior, while a timeout for a durable Telegram Outbound Effect remains ambiguous and requires Manual Delivery Review rather than automatic resend.
+
+The production app image runs PHP-FPM in dynamic mode with `pm.max_children=6`, `pm.start_servers=2`, `pm.min_spare_servers=2`, `pm.max_spare_servers=4`, `pm.max_requests=500`, and `request_terminate_timeout=60s`. Nginx's FastCGI read timeout is 65 seconds, leaving a five-second margin beyond FPM's request limit. These limits apply to FPM requests; the app container also runs six queue workers under the Compose 1.50-CPU/896-MiB cap.
+
+The pool settings are a resource bound, not proof that peak FPM plus queue-worker memory fits the container. The benchmark records final container memory, not a peak-memory/OOM trace; green `ops:health` does not demonstrate FPM capacity. For production acceptance, capture peak app memory/OOM and restart state, storefront latency/502s under representative load, and PostgreSQL connection counts before and after rollout.
+
 ## Coverage
 
 The benchmark covers:

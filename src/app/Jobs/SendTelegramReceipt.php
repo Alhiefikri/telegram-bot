@@ -7,10 +7,10 @@ use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Foundation\Queue\Queueable;
 
-class SendTelegramReceipt implements ShouldQueue
+class SendTelegramReceipt implements ShouldQueueAfterCommit
 {
     use Queueable;
 

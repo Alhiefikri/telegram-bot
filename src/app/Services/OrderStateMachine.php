@@ -9,6 +9,7 @@ use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\DeleteAdminPendingOrderNotification;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\SendAdminOrderExpiredNotification;
+use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Models\Customer;
 use App\Models\ManualFulfillmentReview;
@@ -319,7 +320,7 @@ class OrderStateMachine implements OrderLifecycle
         $this->recordAndDispatchAdminOrderPaid($order);
 
         $paid = $order->fresh(['payments']);
-        $this->recordAndDispatchReceipt($paid);
+        $this->dispatchReceiptMaterialization($paid);
 
         return new OrderLifecycleResult(
             order: $paid,
@@ -644,13 +645,9 @@ class OrderStateMachine implements OrderLifecycle
         }
     }
 
-    private function recordAndDispatchReceipt(Order $order): void
+    private function dispatchReceiptMaterialization(Order $order): void
     {
-        $outboundEffects = $this->outboundEffects ?? app(TelegramOutboundEffectService::class);
-        $effect = $outboundEffects->recordReceipt($order);
-
-        if ($effect !== null) {
-            ($this->outboundDispatcher ?? app(TelegramOutboundEffectDispatcher::class))->dispatch($effect);
-        }
+        SendTelegramReceipt::dispatch((string) $order->getKey())
+            ->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
     }
 }

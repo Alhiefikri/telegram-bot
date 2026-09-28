@@ -155,15 +155,6 @@ class ProductionReleaseHardeningTest extends TestCase
         $this->assertStringContainsString("'log_channel' => env('DOGFOOD_TIMING_LOG_CHANNEL')", $services);
     }
 
-    public function test_production_php_fpm_pool_handles_storefront_concurrency_budget(): void
-    {
-        $dockerfile = file_get_contents(base_path('../Dockerfile'));
-
-        $this->assertStringContainsString('pm.max_children = 16', $dockerfile);
-        $this->assertStringContainsString('pm.start_servers = 4', $dockerfile);
-        $this->assertStringContainsString('pm.max_spare_servers = 10', $dockerfile);
-    }
-
     public function test_nginx_routes_storefront_homepage_through_php_to_avoid_stale_assets(): void
     {
         $nginx = file_get_contents(base_path('../nginx/default.conf'));

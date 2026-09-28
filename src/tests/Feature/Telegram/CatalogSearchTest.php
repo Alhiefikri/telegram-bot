@@ -351,8 +351,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ! str_contains(json_encode($request->data()), 'Mati ('));
 
         $this->fakeTelegramHttp();
-        Product::query()->delete();
-        Category::query()->delete();
+        Product::query()->get()->each->delete();
+        Category::query()->get()->each->delete();
 
         $this->postTelegramWebhook($this->messageUpdate(120, '/katalog'))->assertOk();
 
