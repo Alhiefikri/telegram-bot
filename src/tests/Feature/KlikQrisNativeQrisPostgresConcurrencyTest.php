@@ -23,13 +23,13 @@ use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
 use Tests\Support\KlikQrisSandboxScenarios;
+use Tests\Support\PostgresTestDatabase;
 use Tests\TestCase;
 
 #[Group('concurrency')]
@@ -477,11 +477,7 @@ class KlikQrisNativeQrisPostgresConcurrencyTest extends TestCase
 
     private function migrateCommittedPostgresFixtureSchema(): void
     {
-        Artisan::call('migrate:fresh', [
-            '--force' => true,
-            '--drop-views' => true,
-            '--drop-types' => true,
-        ]);
+        PostgresTestDatabase::migrateFresh();
     }
 
     /**

@@ -10,9 +10,9 @@ use App\Models\ProductFamily;
 use App\Models\User;
 use App\Services\Admin\ProductFamilyCategoryCoherence;
 use App\Services\Admin\ProductFamilyManagementService;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Group;
+use Tests\Support\PostgresTestDatabase;
 use Tests\TestCase;
 use Throwable;
 
@@ -130,11 +130,7 @@ final class ProductFamilyPostgresConcurrencyTest extends TestCase
             $this->fail('Refusing Product Family concurrency migrations outside APP_ENV=testing.');
         }
 
-        $this->assertSame(0, Artisan::call('migrate:fresh', [
-            '--force' => true,
-            '--drop-views' => true,
-            '--drop-types' => true,
-        ]));
+        $this->assertSame(0, PostgresTestDatabase::migrateFresh());
     }
 
     /** @param list<callable():array<string,mixed>> $callbacks */

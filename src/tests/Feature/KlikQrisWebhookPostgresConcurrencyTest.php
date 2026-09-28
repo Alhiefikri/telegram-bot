@@ -8,11 +8,11 @@ use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\KlikQris\KlikQrisTransaction;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
 use Tests\Support\KlikQrisSandboxScenarios;
+use Tests\Support\PostgresTestDatabase;
 use Tests\TestCase;
 
 #[Group('concurrency')]
@@ -39,7 +39,7 @@ class KlikQrisWebhookPostgresConcurrencyTest extends TestCase
         }
 
         $this->guardIsolatedPostgresTestingDatabase();
-        Artisan::call('migrate:fresh', ['--force' => true, '--drop-views' => true, '--drop-types' => true]);
+        PostgresTestDatabase::migrateFresh();
 
         $payment = KlikQrisSandboxScenarios::klikQrisPayment([
             'amount' => 10000,

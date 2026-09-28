@@ -6,6 +6,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\ManualPaymentSetting;
@@ -29,17 +30,19 @@ use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahStatus;
 use App\Services\Sakurupiah\SakurupiahTransactionStatus;
+use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
+use Tests\Support\PostgresTestDatabase;
 use Tests\TestCase;
 
 /**
@@ -61,11 +64,7 @@ class SakurupiahInvoiceLifecyclePostgresConcurrencyTest extends TestCase
         }
 
         $this->guardIsolatedPostgresTestingDatabase();
-        Artisan::call('migrate:fresh', [
-            '--force' => true,
-            '--drop-views' => true,
-            '--drop-types' => true,
-        ]);
+        PostgresTestDatabase::migrateFresh();
 
         config()->set('cache.default', 'database');
         Cache::purge('database');
@@ -125,6 +124,17 @@ class SakurupiahInvoiceLifecyclePostgresConcurrencyTest extends TestCase
         DB::reconnect();
 
         $this->assertSame(2, $this->successfulWorkerCount($results), json_encode($results, JSON_THROW_ON_ERROR));
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 930003],
+            ]),
+        ]);
+        (new SendTelegramReceipt((string) $payment->order_id))->handle(
+            app(TelegramOutboundEffectService::class),
+            app(ReceiptDeliveryPipeline::class),
+        );
+
         $this->assertFulfillmentCardinalities($payment);
     }
 
@@ -200,11 +210,7 @@ class SakurupiahInvoiceLifecyclePostgresConcurrencyTest extends TestCase
         }
 
         $this->guardIsolatedPostgresTestingDatabase();
-        Artisan::call('migrate:fresh', [
-            '--force' => true,
-            '--drop-views' => true,
-            '--drop-types' => true,
-        ]);
+        PostgresTestDatabase::migrateFresh();
 
         config()->set('queue.default', 'sync');
         config()->set('cache.default', 'database');

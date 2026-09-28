@@ -20,12 +20,12 @@ use App\Services\ProductStockIntake;
 use App\Services\ProductStockIntakeSubmission;
 use App\Services\ProductStockItemManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
+use Tests\Support\PostgresTestDatabase;
 use Tests\TestCase;
 use Throwable;
 
@@ -324,11 +324,7 @@ final class ProductStockIntakePostgresConcurrencyTest extends TestCase
             $this->fail('Refusing PostgreSQL stock concurrency migrations outside APP_ENV=testing.');
         }
 
-        $exitCode = Artisan::call('migrate:fresh', [
-            '--force' => true,
-            '--drop-views' => true,
-            '--drop-types' => true,
-        ]);
+        $exitCode = PostgresTestDatabase::migrateFresh();
         $this->assertSame(0, $exitCode);
         $this->artisan('credentials:backfill-identity-registry')->assertSuccessful();
     }
