@@ -422,9 +422,9 @@ Manual checkout notification retry behavior:
 - if the customer send succeeds and the admin send fails, retry sends only the admin notification;
 - if the customer send fails before the timestamp is written, retry sends the customer instructions again because Telegram delivery was not confirmed durably.
 
-Admin Broadcast memakai queue telegram-broadcast dengan batch maksimal 25 recipient dan shared cache limiter yang dipatok di application configuration pada `25` pesan/detik, sehingga laju tetap di bawah batas broadcast Telegram 30 pesan/detik. Respons HTTP 429 memakai nilai retry_after yang dibatasi; recipient yang belum due tetap pending dan ditemukan kembali oleh command telegram:recover-outbound setelah window retry aman.
+Admin Broadcast memakai queue `telegram-broadcast` dengan batch maksimal 25 recipient dan shared cache limiter yang dipatok di application configuration pada `25` pesan/detik, sehingga laju tetap di bawah batas broadcast Telegram 30 pesan/detik. Rate limiter yang sama membatasi restock; `StockNotificationDeliveryPipeline` mengirim paling banyak 25 request secara concurrent, dan recipient yang belum mendapat slot tetap unclaimed sampai continuation setelah window aman.
 
-- Restock notification delivery uses the same durable recipient/effect ledger as other Telegram fan-outs. Recipient snapshots are materialized in pages of 100, while the stock queue job sends a bounded batch of Telegram effects per execution and requeues remaining work.
+- Restock notification delivery uses the shared durable recipient/effect ledger. Recipient snapshots are materialized in pages of 100; each stock job claims and sends a bounded batch concurrently, then requeues remaining work. `telegram:recover-outbound` leaves stock recipient dispatch to the stock pipeline instead of sending a duplicate generic job.
 
 Sebelum release perubahan copy Store Bot, jalankan audit katalog tiga locale:
 

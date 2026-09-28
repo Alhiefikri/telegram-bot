@@ -36,6 +36,7 @@ class StockNotificationDeliveryPipeline
         private ?TelegramOutboundEffectService $outboundEffects = null,
         private ?TelegramOutboundEffectLedgerProtocol $ledger = null,
         private ?TelegramOutboundResponseValidator $responseValidator = null,
+        private ?TelegramBroadcastRateLimiter $rateLimiter = null,
     ) {}
 
     public function register(int $movementId): ?StockNotificationEvent
@@ -73,7 +74,7 @@ class StockNotificationDeliveryPipeline
         return $event->fresh() ?? $event;
     }
 
-    /** @return array{processed:int, transient_failures:int, has_more:bool} */
+    /** @return array{processed:int, transient_failures:int, retry_after_seconds:?int, has_more:bool} */
     public function deliver(int $movementId, int $batchSize = 100): array
     {
         $startedAt = DogfoodTiming::now();
@@ -90,7 +91,7 @@ class StockNotificationDeliveryPipeline
             ];
             DogfoodTiming::log('dogfood.telegram.broadcast_finished', $timingResult);
 
-            return ['processed' => 0, 'transient_failures' => 0, 'has_more' => false];
+            return ['processed' => 0, 'transient_failures' => 0, 'retry_after_seconds' => null, 'has_more' => false];
         }
 
         if ($event->recipients_snapshotted_at === null) {
@@ -105,11 +106,118 @@ class StockNotificationDeliveryPipeline
                 'duration_ms' => DogfoodTiming::elapsedMs($startedAt),
             ]);
 
-            return ['processed' => 0, 'transient_failures' => 0, 'has_more' => true];
+            return ['processed' => 0, 'transient_failures' => 0, 'retry_after_seconds' => null, 'has_more' => true];
         }
 
         $this->materializeRecipientEffects($movementId, (int) $event->id, max(1, $batchSize));
         $effects = $this->dueEffects($event->id, $batchSize);
+
+        $deliveryResults = [];
+        $prepared = [];
+        $requests = [];
+        $photosByPath = [];
+        $retryAfterSeconds = null;
+
+        foreach ($effects as $effect) {
+            $rateLimit = $this->rateLimiter()->tryAcquire();
+            if (! $rateLimit->allowed) {
+                $retryAfterSeconds = $rateLimit->retryAfterSeconds;
+                break;
+            }
+
+            $claimed = $this->ledger()->claim((string) $effect->getKey());
+            if ($claimed === null) {
+                $deliveryResults[] = ['effect' => $effect, 'outcome' => 'skipped', 'duration_ms' => 0.0];
+
+                continue;
+            }
+
+            try {
+                $recipient = StockNotificationRecipient::query()->find($claimed->source_id);
+                if ($recipient === null) {
+                    throw new \RuntimeException('stock_notification_recipient_missing');
+                }
+
+                if ($this->isStaleSoldOutRecipient($recipient)) {
+                    $finalized = $this->ledger()->finalizeNotDeliverable(
+                        (string) $claimed->getKey(),
+                        (string) $claimed->claim_token,
+                        'sold_out_stale',
+                        'Sold-out notification is stale because the product has stock again.',
+                    );
+                    if ($finalized !== null) {
+                        $this->synchronizeNotDeliverableProjection($finalized);
+                    }
+                    $deliveryResults[] = [
+                        'effect' => $claimed,
+                        'outcome' => $finalized === null ? 'skipped' : 'terminal_failure',
+                        'duration_ms' => 0.0,
+                    ];
+
+                    continue;
+                }
+
+                $photo = null;
+                if (mb_strlen((string) $recipient->text, 'UTF-8') <= 1024) {
+                    $photoPath = (string) $recipient->photo_path;
+                    if (! array_key_exists($photoPath, $photosByPath)) {
+                        $photosByPath[$photoPath] = $this->images->telegramPhoto($recipient->photo_path);
+                    }
+                    $photo = $photosByPath[$photoPath];
+                }
+
+                $requestKey = 'stock-'.$claimed->getKey();
+                $prepared[$requestKey] = ['effect' => $claimed];
+                $requests[$requestKey] = $photo !== null
+                    ? [
+                        'method' => 'sendPhoto',
+                        'chat_id' => $claimed->telegram_chat_id,
+                        'photo_contents' => $photo['contents'],
+                        'filename' => $photo['filename'],
+                        'caption' => (string) $recipient->text,
+                        'reply_markup' => $recipient->reply_markup ?? [],
+                    ]
+                    : [
+                        'method' => 'sendMessage',
+                        'chat_id' => $claimed->telegram_chat_id,
+                        'text' => (string) $recipient->text,
+                        'reply_markup' => $recipient->reply_markup ?? [],
+                    ];
+            } catch (Throwable $exception) {
+                $deliveryResults[] = [
+                    'effect' => $claimed,
+                    'outcome' => $this->finalizeFailedEffect($claimed, $exception),
+                    'duration_ms' => 0.0,
+                ];
+            }
+        }
+
+        try {
+            $sendResults = $this->bot->sendConcurrently(
+                $requests,
+                min(max(1, $batchSize), $this->rateLimiter()->maxMessagesPerWindow()),
+            );
+        } catch (Throwable $exception) {
+            $sendResults = [];
+            foreach ($prepared as $data) {
+                $deliveryResults[] = [
+                    'effect' => $data['effect'],
+                    'outcome' => $this->finalizeFailedEffect($data['effect'], $exception),
+                    'duration_ms' => 0.0,
+                ];
+            }
+            $prepared = [];
+        }
+
+        foreach ($prepared as $requestKey => $data) {
+            $sendResult = $sendResults[$requestKey] ?? null;
+            $response = $sendResult['response'] ?? new \RuntimeException('Telegram batch returned no recipient outcome.');
+            $deliveryResults[] = [
+                'effect' => $data['effect'],
+                'outcome' => $this->finalizeResponse($data['effect'], $response),
+                'duration_ms' => (float) ($sendResult['duration_ms'] ?? 0.0),
+            ];
+        }
 
         $processed = 0;
         $sent = 0;
@@ -117,9 +225,9 @@ class StockNotificationDeliveryPipeline
         $transientFailures = 0;
         $telegramTotalMs = 0.0;
         $perRecipient = [];
-        foreach ($effects as $effect) {
-            $recipientStartedAt = DogfoodTiming::now();
-            $outcome = $this->deliverEffect($effect);
+        foreach ($deliveryResults as $deliveryResult) {
+            $effect = $deliveryResult['effect'];
+            $outcome = $deliveryResult['outcome'];
             $status = match ($outcome) {
                 'sent' => 'ok',
                 'skipped' => 'skipped',
@@ -134,7 +242,7 @@ class StockNotificationDeliveryPipeline
             $recipientLog = [
                 'recipient_correlation_id' => DogfoodTiming::correlation($effect->telegram_chat_id),
                 'status' => $status,
-                'duration_ms' => DogfoodTiming::elapsedMs($recipientStartedAt),
+                'duration_ms' => $deliveryResult['duration_ms'],
             ];
             $telegramTotalMs = round($telegramTotalMs + $recipientLog['duration_ms'], 2);
             $perRecipient[] = $recipientLog;
@@ -143,7 +251,15 @@ class StockNotificationDeliveryPipeline
             ]);
         }
 
-        $hasMore = $transientFailures > 0 || $this->hasPendingEffects($event->id);
+        $hasMore = $retryAfterSeconds !== null
+            || $transientFailures > 0
+            || $this->hasPendingEffects($event->id);
+        if ($hasMore
+            && $retryAfterSeconds === null
+            && $transientFailures === 0
+            && $processed >= $this->rateLimiter()->maxMessagesPerWindow()) {
+            $retryAfterSeconds = 1;
+        }
         $this->syncStockNotificationProjection($movementId);
 
         DogfoodTiming::log('dogfood.telegram.broadcast_finished', [
@@ -159,6 +275,7 @@ class StockNotificationDeliveryPipeline
         return [
             'processed' => $processed,
             'transient_failures' => $transientFailures,
+            'retry_after_seconds' => $retryAfterSeconds,
             'has_more' => $hasMore,
         ];
     }
@@ -452,48 +569,13 @@ class StockNotificationDeliveryPipeline
         );
     }
 
-    private function deliverEffect(TelegramOutboundEffect $effect): string
+    private function finalizeResponse(TelegramOutboundEffect $claimed, array|Throwable $response): string
     {
-        $claimed = $this->ledger()->claim((string) $effect->getKey());
-        if ($claimed === null) {
-            return 'skipped';
-        }
-
         try {
-            $recipient = StockNotificationRecipient::query()->find($claimed->source_id);
-            if ($recipient === null) {
-                throw new \RuntimeException('stock_notification_recipient_missing');
+            if ($response instanceof Throwable) {
+                throw $response;
             }
 
-            if ($this->isStaleSoldOutRecipient($recipient)) {
-                $finalized = $this->ledger()->finalizeNotDeliverable(
-                    (string) $claimed->getKey(),
-                    (string) $claimed->claim_token,
-                    'sold_out_stale',
-                    'Sold-out notification is stale because the product has stock again.',
-                );
-                if ($finalized !== null) {
-                    $this->synchronizeNotDeliverableProjection($finalized);
-                }
-
-                return $finalized === null ? 'skipped' : 'terminal_failure';
-            }
-            $photo = mb_strlen((string) $recipient->text, 'UTF-8') <= 1024
-                ? $this->images->telegramPhoto($recipient->photo_path)
-                : null;
-            $response = $photo !== null
-                ? $this->bot->sendPhoto(
-                    $claimed->telegram_chat_id,
-                    $photo['contents'],
-                    $photo['filename'],
-                    (string) $recipient->text,
-                    $recipient->reply_markup ?? [],
-                )
-                : $this->bot->sendMessage(
-                    $claimed->telegram_chat_id,
-                    (string) $recipient->text,
-                    $recipient->reply_markup ?? [],
-                );
             $messageId = $this->responseValidator()->messageIdFromResponse($response, 'Telegram stock notification');
             $finalized = $this->ledger()->finalizeSent(
                 (string) $claimed->getKey(),
@@ -508,37 +590,42 @@ class StockNotificationDeliveryPipeline
 
             return 'sent';
         } catch (Throwable $exception) {
-            if ($this->ledger()->isAmbiguous($exception)) {
-                $finalized = $this->ledger()->finalizeUnknown(
-                    (string) $claimed->getKey(),
-                    (string) $claimed->claim_token,
-                    $exception,
-                );
-                if ($finalized !== null) {
-                    $this->synchronizeUnknownProjection($finalized);
-                }
-                $this->logEffectFailure($claimed, $exception, 'unknown');
+            return $this->finalizeFailedEffect($claimed, $exception);
+        }
+    }
 
-                return $finalized ? 'unknown' : 'skipped';
-            }
-
-            $finalized = $this->ledger()->finalizeFailed(
+    private function finalizeFailedEffect(TelegramOutboundEffect $claimed, Throwable $exception): string
+    {
+        if ($this->ledger()->isAmbiguous($exception)) {
+            $finalized = $this->ledger()->finalizeUnknown(
                 (string) $claimed->getKey(),
                 (string) $claimed->claim_token,
                 $exception,
             );
-            if (! $finalized) {
-                return 'skipped';
+            if ($finalized !== null) {
+                $this->synchronizeUnknownProjection($finalized);
             }
+            $this->logEffectFailure($claimed, $exception, 'unknown');
 
-            $this->synchronizeFailedProjection($finalized, $exception);
-
-            $fresh = TelegramOutboundEffect::query()->find($claimed->getKey());
-            $terminal = $fresh !== null && $this->ledger()->isTerminalFailure($fresh);
-            $this->logEffectFailure($claimed, $exception, $terminal ? 'terminal_failure' : 'transient_failure');
-
-            return $terminal ? 'terminal_failure' : 'transient_failure';
+            return $finalized ? 'unknown' : 'skipped';
         }
+
+        $finalized = $this->ledger()->finalizeFailed(
+            (string) $claimed->getKey(),
+            (string) $claimed->claim_token,
+            $exception,
+        );
+        if (! $finalized) {
+            return 'skipped';
+        }
+
+        $this->synchronizeFailedProjection($finalized, $exception);
+
+        $fresh = TelegramOutboundEffect::query()->find($claimed->getKey());
+        $terminal = $fresh !== null && $this->ledger()->isTerminalFailure($fresh);
+        $this->logEffectFailure($claimed, $exception, $terminal ? 'terminal_failure' : 'transient_failure');
+
+        return $terminal ? 'terminal_failure' : 'transient_failure';
     }
 
     private function isStaleSoldOutRecipient(StockNotificationRecipient $recipient): bool
@@ -664,6 +751,11 @@ class StockNotificationDeliveryPipeline
     private function ledger(): TelegramOutboundEffectLedgerProtocol
     {
         return $this->ledger ??= app(TelegramOutboundEffectLedgerProtocol::class);
+    }
+
+    private function rateLimiter(): TelegramBroadcastRateLimiter
+    {
+        return $this->rateLimiter ??= app(TelegramBroadcastRateLimiter::class);
     }
 
     private function syncStockNotificationProjection(int|string $movementId): void

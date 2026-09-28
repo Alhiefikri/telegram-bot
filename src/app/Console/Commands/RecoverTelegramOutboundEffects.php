@@ -64,7 +64,6 @@ class RecoverTelegramOutboundEffects extends Command
                 TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
                 TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF,
                 TelegramOutboundEffectService::TYPE_SALES_PROOF,
-                TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION,
                 TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION,
                 TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL,
             ])

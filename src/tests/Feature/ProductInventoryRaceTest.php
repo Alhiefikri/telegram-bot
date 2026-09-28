@@ -28,11 +28,13 @@ use App\Services\OrderStateMachine;
 use App\Services\ProductStockItemManager;
 use App\Services\StockAdjustmentService;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
+use App\Services\Telegram\TelegramBroadcastRateLimiter;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramProductNotificationService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -214,11 +216,77 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
             fn (SendProductStockNotifications $queued): bool => $queued->movementId === $movementId,
         );
 
+        $this->travelTo(now()->addSeconds(1));
         $job->handle(app(StockNotificationDeliveryPipeline::class));
 
         $sendMessages = collect(Http::recorded())
             ->filter(fn (array $request): bool => str_ends_with($request[0]->url(), '/sendMessage'));
         $this->assertCount($recipientCount, $sendMessages);
+    }
+
+    public function test_stock_fanout_defers_without_claiming_when_shared_rate_limit_is_full(): void
+    {
+        config()->set('services.telegram.broadcast_rate_limit_per_second', 1);
+        Cache::flush();
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 399045, 'locale' => 'id']);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product,
+            1,
+            'rate-limited stock notification',
+            $admin,
+            '127.0.0.1',
+            ['rate-limit-secret'],
+        )['movement_id'];
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+        $pipeline->materialize($movementId);
+        $recipient = StockNotificationRecipient::query()->sole();
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION)
+            ->where('source_id', (string) $recipient->id)
+            ->sole();
+
+        $this->assertTrue(app(TelegramBroadcastRateLimiter::class)->tryAcquire()->allowed);
+
+        $result = $pipeline->deliver($movementId);
+
+        $this->assertSame(0, $result['processed']);
+        $this->assertSame(1, $result['retry_after_seconds'] ?? null);
+        $this->assertTrue($result['has_more']);
+        $this->assertSame(0, $recipient->fresh()->attempts);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->fresh()->state);
+        Http::assertNothingSent();
+    }
+
+    public function test_outbound_recovery_dispatches_due_stock_notification_through_its_pipeline_once(): void
+    {
+        Queue::fake();
+        Http::preventStrayRequests();
+        Customer::factory()->create(['telegram_id' => 399046, 'locale' => 'id']);
+        $product = $this->stockedProduct(stock: 0, secrets: []);
+        $admin = User::factory()->create();
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product,
+            1,
+            'recover stock notification',
+            $admin,
+            '127.0.0.1',
+            ['recovery-secret'],
+        )['movement_id'];
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+            ->expectsOutputToContain('dispatched=1')
+            ->assertSuccessful();
+
+        Queue::assertPushedTimes(SendProductStockNotifications::class, 1);
+        Queue::assertPushedOn(
+            StockNotificationDeliveryPipeline::QUEUE,
+            SendProductStockNotifications::class,
+            fn (SendProductStockNotifications $job): bool => $job->movementId === $movementId,
+        );
+        Http::assertNothingSent();
     }
 
     public function test_sold_out_channel_notification_waits_for_confirmed_payment_and_does_not_create_an_order(): void

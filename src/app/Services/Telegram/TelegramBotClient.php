@@ -4,9 +4,13 @@ namespace App\Services\Telegram;
 
 use App\Exceptions\TelegramApiException;
 use App\Support\DogfoodTiming;
+use GuzzleHttp\TransferStats;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class TelegramBotClient
 {
@@ -51,10 +55,7 @@ class TelegramBotClient
 
     public function sendMessage(int|string $chatId, string $text, array $replyMarkup = [], array $options = []): array
     {
-        $payload = array_merge(['chat_id' => $chatId, 'text' => $text], $options);
-        if ($replyMarkup !== []) {
-            $payload['reply_markup'] = $replyMarkup;
-        }
+        $payload = $this->messagePayload($chatId, $text, $replyMarkup, $options);
 
         return $this->timed('sendMessage', fn () => $this->postWithCustomEmojiFallback('sendMessage', 'sendMessage', $payload, wrapFailures: false));
     }
@@ -168,18 +169,7 @@ class TelegramBotClient
     public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): array
     {
         $request = $this->requests->request()->attach('photo', $photoContents, $filename);
-        $payload = array_merge(['chat_id' => $chatId], $options);
-
-        if ($caption !== null && $caption !== '') {
-            $payload['caption'] = $caption;
-        }
-        if (isset($payload['caption_entities']) && is_array($payload['caption_entities'])) {
-            $payload['caption_entities'] = json_encode($payload['caption_entities'], JSON_THROW_ON_ERROR);
-        }
-
-        if ($replyMarkup !== []) {
-            $payload['reply_markup'] = json_encode($replyMarkup, JSON_THROW_ON_ERROR);
-        }
+        $payload = $this->photoPayload($chatId, $caption, $replyMarkup, $options);
 
         $response = $this->timed('sendPhoto', fn () => $request->post($this->requests->url('sendPhoto'), $payload)->throw()->json());
         if (($response['ok'] ?? false) !== true) {
@@ -187,6 +177,89 @@ class TelegramBotClient
         }
 
         return $response;
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $operations
+     * @return array<string, array{response:array<string, mixed>|Throwable, duration_ms:float}>
+     */
+    public function sendConcurrently(array $operations, int $concurrency): array
+    {
+        if ($operations === []) {
+            return [];
+        }
+
+        $startedAt = [];
+        $durations = [];
+        $responses = $this->requests->request()->pool(
+            function (Pool $pool) use ($operations, &$startedAt, &$durations): void {
+                foreach ($operations as $key => $operation) {
+                    $startedAt[$key] = DogfoodTiming::now();
+                    $request = $this->requests->poolRequest($pool, (string) $key);
+                    $request->withOptions([
+                        'on_stats' => function (TransferStats $stats) use (&$durations, $key): void {
+                            $durations[$key] = round($stats->getTransferTime() * 1000, 2);
+                        },
+                    ]);
+
+                    if ($operation['method'] === 'sendMessage') {
+                        $request->post(
+                            $this->requests->url('sendMessage'),
+                            $this->messagePayload(
+                                $operation['chat_id'],
+                                $operation['text'],
+                                $operation['reply_markup'] ?? [],
+                                $operation['options'] ?? [],
+                            ),
+                        );
+
+                        continue;
+                    }
+
+                    if ($operation['method'] !== 'sendPhoto') {
+                        throw new \InvalidArgumentException('Unsupported Telegram batch method.');
+                    }
+
+                    $request->attach('photo', $operation['photo_contents'], $operation['filename'])
+                        ->post(
+                            $this->requests->url('sendPhoto'),
+                            $this->photoPayload(
+                                $operation['chat_id'],
+                                $operation['caption'] ?? null,
+                                $operation['reply_markup'] ?? [],
+                                $operation['options'] ?? [],
+                            ),
+                        );
+                }
+            },
+            concurrency: min(max(1, $concurrency), count($operations)),
+        );
+
+        $results = [];
+        foreach ($operations as $key => $operation) {
+            $response = $responses[$key] ?? new \RuntimeException('Telegram batch returned no response.');
+
+            try {
+                $outcome = $this->normalizeConcurrentResponse($operation, $response);
+            } catch (Throwable $exception) {
+                $outcome = $exception instanceof ConnectionException
+                    ? $this->requests->transportException($operation['method'], $exception)
+                    : $exception;
+            }
+
+            $duration = $durations[$key] ?? DogfoodTiming::elapsedMs($startedAt[$key]);
+            $results[$key] = ['response' => $outcome, 'duration_ms' => $duration];
+            DogfoodTiming::log('dogfood.outbound_http', [
+                'provider' => 'telegram',
+                'operation' => $operation['method'],
+                'status' => $response instanceof Response
+                    ? $response->status()
+                    : ($response instanceof RequestException ? $response->response?->status() : null),
+                'duration_ms' => $duration,
+            ]);
+        }
+
+        return $results;
     }
 
     public function sendDocument(
@@ -310,6 +383,85 @@ class TelegramBotClient
         return $sanitized !== '' ? $sanitized : 'document';
     }
 
+    /** @return array<string, mixed> */
+    private function messagePayload(int|string $chatId, string $text, array $replyMarkup, array $options): array
+    {
+        $payload = array_merge(['chat_id' => $chatId, 'text' => $text], $options);
+        if ($replyMarkup !== []) {
+            $payload['reply_markup'] = $replyMarkup;
+        }
+
+        return $payload;
+    }
+
+    /** @return array<string, mixed> */
+    private function photoPayload(int|string $chatId, ?string $caption, array $replyMarkup, array $options): array
+    {
+        $payload = array_merge(['chat_id' => $chatId], $options);
+
+        if ($caption !== null && $caption !== '') {
+            $payload['caption'] = $caption;
+        }
+        if (isset($payload['caption_entities']) && is_array($payload['caption_entities'])) {
+            $payload['caption_entities'] = json_encode($payload['caption_entities'], JSON_THROW_ON_ERROR);
+        }
+
+        if ($replyMarkup !== []) {
+            $payload['reply_markup'] = json_encode($replyMarkup, JSON_THROW_ON_ERROR);
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $operation
+     * @return array<string, mixed>
+     */
+    private function normalizeConcurrentResponse(array $operation, mixed $response): array
+    {
+        $method = $operation['method'];
+        if ($response instanceof ConnectionException) {
+            throw $this->requests->transportException($method, $response);
+        }
+        if ($response instanceof Throwable) {
+            throw $response;
+        }
+        if (! $response instanceof Response) {
+            throw new \RuntimeException('Telegram API batch returned an invalid response.');
+        }
+
+        try {
+            $response->throw();
+        } catch (RequestException $exception) {
+            if ($method !== 'sendMessage') {
+                throw $exception;
+            }
+
+            return $this->retryWithoutCustomEmoji(
+                'sendMessage',
+                'sendMessage',
+                $this->messagePayload(
+                    $operation['chat_id'],
+                    $operation['text'],
+                    $operation['reply_markup'] ?? [],
+                    $operation['options'] ?? [],
+                ),
+                $exception,
+                wrapFailures: false,
+            );
+        }
+
+        $body = $response->json();
+        if (! is_array($body)) {
+            throw new \RuntimeException('Telegram API batch returned an invalid response body.');
+        }
+        if ($method === 'sendPhoto' && ($body['ok'] ?? false) !== true) {
+            throw new \RuntimeException('Telegram Bot API sendPhoto response was not successful.');
+        }
+
+        return $body;
+    }
+
     /**
      * Custom emoji on buttons need a bot whose owner holds Telegram Premium,
      * and Telegram gives no way to ask for that capability up front. A rejected
@@ -324,23 +476,37 @@ class TelegramBotClient
         try {
             return $this->requests->request()->post($this->requests->url($method), $payload)->throw()->json();
         } catch (RequestException $exception) {
-            $apiException = TelegramApiException::fromRequest($operation, $exception);
-            if (! $apiException->isCustomEmojiRejected()) {
-                throw $wrapFailures ? $apiException : $exception;
-            }
+            return $this->retryWithoutCustomEmoji($operation, $method, $payload, $exception, $wrapFailures);
+        }
+    }
 
-            // The rejected request created no message, so retrying without the
-            // icons cannot duplicate anything the customer can see.
-            $this->customEmoji->markUnavailable($apiException->description);
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function retryWithoutCustomEmoji(
+        string $operation,
+        string $method,
+        array $payload,
+        RequestException $exception,
+        bool $wrapFailures,
+    ): array {
+        $apiException = TelegramApiException::fromRequest($operation, $exception);
+        if (! $apiException->isCustomEmojiRejected()) {
+            throw $wrapFailures ? $apiException : $exception;
+        }
 
-            try {
-                return $this->requests->request()
-                    ->post($this->requests->url($method), $this->withoutCustomEmojiIcons($payload))
-                    ->throw()
-                    ->json();
-            } catch (RequestException $retryException) {
-                throw $wrapFailures ? TelegramApiException::fromRequest($operation, $retryException) : $retryException;
-            }
+        // Telegram rejected this request before creating a message, so retrying
+        // without the icons cannot duplicate a customer-visible delivery.
+        $this->customEmoji->markUnavailable($apiException->description);
+
+        try {
+            return $this->requests->request()
+                ->post($this->requests->url($method), $this->withoutCustomEmojiIcons($payload))
+                ->throw()
+                ->json();
+        } catch (RequestException $retryException) {
+            throw $wrapFailures ? TelegramApiException::fromRequest($operation, $retryException) : $retryException;
         }
     }
 

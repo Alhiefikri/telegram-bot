@@ -218,16 +218,23 @@ transaction does not render every customer message or create every Telegram
 effect while product and stock rows are locked.
 
 The after-commit `telegram-stock` worker snapshots at most 100 customers per
-pass, inserts recipient rows idempotently, materializes missing ledger effects
-in bounded slices, and sends a bounded batch (currently 25) of recipient
-effects per job execution. Every effect in the batch still goes through the
-shared claim/finalize protocol, so delivery stays idempotent per recipient.
-The job self-dispatches until the event and its effects are complete.
+pass, inserts recipient rows idempotently, and materializes missing ledger
+effects in bounded slices. Each job claims at most 25 due recipient effects,
+reserves the shared `TelegramBroadcastRateLimiter` budget also used by Admin
+Broadcast, then sends the batch through a concurrent HTTP pool capped at that
+(25 requests per second by default, below Telegram's 30-per-second broadcast
+cap). Every effect still goes through the shared claim/finalize
+protocol. A rate-limit miss leaves the effect unclaimed and the continuation
+job waits for the next safe window.
+
 `telegram:reconcile-stock-notifications` and `telegram:recover-outbound`
 rediscover events whose snapshot marker is null, so a process death before
-queue pickup cannot lose the committed restock intent. Existing compatibility
-paths that explicitly opt out of notification dispatch retain eager
-materialization.
+queue pickup cannot lose the committed restock intent. Scheduled recovery
+dispatches stock recipient effects through
+`StockNotificationDeliveryPipeline::reconcile()`; the generic due-effect
+sweep excludes them to avoid queuing the same movement through both recovery
+paths. Existing compatibility paths that explicitly opt out of notification
+dispatch retain eager materialization.
 
 ### Deferred deleted-stock Fake Sales Proof
 
@@ -255,7 +262,7 @@ the sold-out event as stale without sending an obsolete sold-out message.
 - Legacy claim columns are removed only after an expand-contract migration proves that the ledger is authoritative for every effect family.
 - The scheduled `telegram:recover-outbound` command is a recovery publisher and
   source-discovery safety net. It first fences expired leases as `unknown`,
-  then dispatches only due `pending` or policy-retryable `failed` effects
-  through the shared dispatcher. It does not automatically resend an
-  Ambiguous Telegram Delivery.
-- Admin Broadcast and canonical Stock Notification remain documented deferred-materialization exceptions: their committed source row/event and null snapshot marker are the durable handoff, and recovery redispatches the handoff through its locked queue boundary until recipient effects are materialized.
+  then dispatches eligible non-stock due `pending` or policy-retryable
+  `failed` effects through the shared dispatcher. It does not automatically
+  resend an Ambiguous Telegram Delivery.
+- Admin Broadcast and canonical Stock Notification remain documented deferred-materialization exceptions: their committed source row/event and null snapshot marker are the durable handoff, and recovery uses their owning pipelines; the generic due-effect sweep never redispatches stock recipient effects.

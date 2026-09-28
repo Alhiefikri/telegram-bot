@@ -5,6 +5,7 @@ namespace App\Services\Telegram;
 use App\Exceptions\TelegramTransportException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -13,6 +14,13 @@ class TelegramBotApiRequestFactory
     public function request(): PendingRequest
     {
         return Http::timeout($this->positiveFloatConfig('services.telegram.http_timeout_seconds', 10.0))
+            ->connectTimeout($this->positiveFloatConfig('services.telegram.http_connect_timeout_seconds', 3.0));
+    }
+
+    public function poolRequest(Pool $pool, string $key): PendingRequest
+    {
+        return $pool->as($key)
+            ->timeout($this->positiveFloatConfig('services.telegram.http_timeout_seconds', 10.0))
             ->connectTimeout($this->positiveFloatConfig('services.telegram.http_connect_timeout_seconds', 3.0));
     }
 

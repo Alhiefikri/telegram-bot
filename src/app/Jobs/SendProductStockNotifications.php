@@ -37,9 +37,14 @@ class SendProductStockNotifications implements ShouldBeUniqueUntilProcessing, Sh
         }
         $result = $pipeline->deliver($this->movementId, StockNotificationDeliveryPipeline::JOB_BATCH_SIZE);
         if ($result['has_more']) {
+            $retryAfterSeconds = (int) ($result['retry_after_seconds'] ?? 0);
+            $delaySeconds = $result['transient_failures'] > 0
+                ? max(30, $retryAfterSeconds)
+                : $retryAfterSeconds;
+
             self::dispatch($this->movementId, now()->toISOString())
                 ->onQueue(StockNotificationDeliveryPipeline::QUEUE)
-                ->delay(now()->addSeconds($result['transient_failures'] > 0 ? 30 : 0));
+                ->delay($delaySeconds > 0 ? now()->addSeconds($delaySeconds) : now());
         }
     }
 }
