@@ -13,7 +13,17 @@ final class TelegramCatalogProjectionCache
 
     private const DESIGN_VERSION = 1;
 
-    public function remember(string $projection, array $dimensions, Closure $build): mixed
+    /**
+     * Cache raw arrays, not read models: a cache store unserializes with
+     * `cache.serializable_classes` set to false, so a stored object reads back
+     * as PHP_Incomplete_Class, and a payload written by an older release must
+     * never break a read — anything that is not the expected array is rebuilt.
+     *
+     * @param  array<string, scalar|null>  $dimensions
+     * @param  Closure(): array<array-key, mixed>  $build
+     * @return array<array-key, mixed>
+     */
+    public function remember(string $projection, array $dimensions, Closure $build): array
     {
         $version = $this->version();
         $key = 'catalog.public.projection.v'.$version.'.'.hash('sha256', json_encode([
@@ -22,7 +32,15 @@ final class TelegramCatalogProjectionCache
             'dimensions' => $dimensions,
         ], JSON_THROW_ON_ERROR));
 
-        return Cache::remember($key, now()->addMinutes(self::TTL_MINUTES), $build);
+        $payload = Cache::get($key);
+        if (is_array($payload)) {
+            return $payload;
+        }
+
+        $payload = $build();
+        Cache::put($key, $payload, now()->addMinutes(self::TTL_MINUTES));
+
+        return $payload;
     }
 
     public function invalidate(): void

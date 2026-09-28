@@ -5,10 +5,12 @@ namespace App\Services\Telegram;
 use App\Catalog\CatalogBrowseEntry;
 use App\Catalog\CatalogBrowseQuery;
 use App\Catalog\CatalogBrowseResult;
+use App\Catalog\CatalogCategoryOptions;
 use App\Catalog\CatalogCategoryReadModel;
 use App\Catalog\CatalogFamilyReadModel;
 use App\Catalog\CatalogIcon;
 use App\Catalog\CatalogProductReadModel;
+use App\Catalog\CatalogProjectionPayload;
 use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\Product;
@@ -109,11 +111,7 @@ class TelegramCatalogIntents
 
     public function sendCategoryPicker(Customer $customer, string $chatId, ?int $messageId = null): void
     {
-        $options = $this->projectionCache->remember(
-            'category-options',
-            ['with_products_only' => true],
-            fn () => $this->browse->publicCategoryOptions(withProductsOnly: true),
-        );
+        $options = $this->cachedCategoryOptions();
         $keyboard = collect($options->categories)
             ->map(fn (CatalogCategoryReadModel $category): array => [[
                 'text' => '📂 '.$category->name,
@@ -934,7 +932,7 @@ class TelegramCatalogIntents
             return $this->browse->browsePublic($query);
         }
 
-        return $this->projectionCache->remember(
+        return CatalogProjectionPayload::unpack(CatalogBrowseResult::class, $this->projectionCache->remember(
             'browse',
             [
                 'search' => $query->search,
@@ -943,8 +941,17 @@ class TelegramCatalogIntents
                 'page' => $query->page,
                 'per_page' => $query->perPage,
             ],
-            fn (): CatalogBrowseResult => $this->browse->browsePublic($query),
-        );
+            fn (): array => CatalogProjectionPayload::pack($this->browse->browsePublic($query)),
+        ));
+    }
+
+    private function cachedCategoryOptions(): CatalogCategoryOptions
+    {
+        return CatalogProjectionPayload::unpack(CatalogCategoryOptions::class, $this->projectionCache->remember(
+            'category-options',
+            ['with_products_only' => true],
+            fn (): array => CatalogProjectionPayload::pack($this->browse->publicCategoryOptions(withProductsOnly: true)),
+        ));
     }
 
     private function sendBrowseResult(

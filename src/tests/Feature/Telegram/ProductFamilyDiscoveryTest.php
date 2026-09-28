@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Cart;
 use App\Models\CatalogBrandIcon;
+use App\Models\Category;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -19,6 +20,7 @@ use App\Services\Telegram\TelegramFamilyCallbackToken;
 use App\Services\Telegram\TelegramIntentSession;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TelegramBotTestSupport;
@@ -1268,6 +1270,52 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $catalog->sendSearchResults($customer, (string) $customer->telegram_id, 'Updated Catalog');
         $measuring = false;
         $this->assertSame(1, count($catalogQueries), 'Repeated nonempty searches must not grow the cache by search key.');
+    }
+
+    public function test_catalog_projection_survives_a_serializing_cache_store(): void
+    {
+        $this->fakeTelegramHttp();
+        config()->set('cache.default', 'database');
+        Cache::purge('database');
+        Cache::store('database')->flush();
+        $customer = Customer::factory()->create(['telegram_id' => 41191, 'locale' => 'en']);
+        Product::factory()->create([
+            'name' => 'Serialized Catalog Product',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $catalog = app(TelegramCatalogIntents::class);
+        $catalog->sendCatalogPage($customer, (string) $customer->telegram_id);
+        $catalog->sendCatalogPage($customer, (string) $customer->telegram_id);
+
+        $warmKeyboard = json_encode($this->lastMessageContaining('Choose a family')['reply_markup'], JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('Serialized Catalog Product', $warmKeyboard);
+    }
+
+    public function test_category_picker_projection_survives_a_serializing_cache_store(): void
+    {
+        $this->fakeTelegramHttp();
+        config()->set('cache.default', 'database');
+        Cache::purge('database');
+        Cache::store('database')->flush();
+        $customer = Customer::factory()->create(['telegram_id' => 41192, 'locale' => 'id']);
+        $category = Category::factory()->create(['name' => 'AI Media', 'slug' => 'ai-media']);
+        Product::factory()->create([
+            'name' => 'Serialized Category Product',
+            'category_id' => $category->id,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $catalog = app(TelegramCatalogIntents::class);
+        $catalog->sendCategoryPicker($customer, (string) $customer->telegram_id);
+        $catalog->sendCategoryPicker($customer, (string) $customer->telegram_id);
+
+        $this->assertSame(2, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request->body(), 'AI Media'))->count());
     }
 
     public function test_single_plan_family_entry_opens_detail_without_the_plan_list(): void
