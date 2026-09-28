@@ -3,12 +3,12 @@
 namespace App\Observers;
 
 use App\Models\BscPaymentReceiver;
-use App\Models\ManualPaymentSetting;
-use App\Services\Bsc\BscReadiness;
 use App\Models\Category;
+use App\Models\ManualPaymentSetting;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductQuantityPriceTier;
+use App\Services\Bsc\BscReadiness;
 use App\Services\Telegram\TelegramCatalogProjectionCache;
 use App\Storefront\StorefrontResponseCache;
 use Illuminate\Contracts\Events\ShouldHandleEventsAfterCommit;

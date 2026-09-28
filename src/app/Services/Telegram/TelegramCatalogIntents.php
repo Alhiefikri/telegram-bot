@@ -927,6 +927,7 @@ class TelegramCatalogIntents
         );
         $this->sendBrowseResult($customer, $chatId, $result, 'search.title', 'search', null, $search, null, null, $searchToken, $messageId);
     }
+
     private function cachedPublicBrowse(CatalogBrowseQuery $query): CatalogBrowseResult
     {
         if ($query->search !== '') {
@@ -945,7 +946,6 @@ class TelegramCatalogIntents
             fn (): CatalogBrowseResult => $this->browse->browsePublic($query),
         );
     }
-
 
     private function sendBrowseResult(
         Customer $customer,

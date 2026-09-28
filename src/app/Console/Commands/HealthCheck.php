@@ -5,9 +5,9 @@ namespace App\Console\Commands;
 use App\Services\Bsc\BscOperationalAlertNotifier;
 use App\Services\Bsc\BscOperationalMetrics;
 use App\Services\Bsc\BscReadiness;
+use App\Services\QueueDepthInspector;
 use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
-use App\Services\QueueDepthInspector;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Process;
@@ -177,5 +177,4 @@ class HealthCheck extends Command
 
         return $healthy ? self::SUCCESS : self::FAILURE;
     }
-
 }

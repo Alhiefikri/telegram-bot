@@ -371,5 +371,4 @@ class AdminOrderPaymentOperationsTest extends TestCase
             ->expectsOutput('Queue schema: ok')
             ->assertSuccessful();
     }
-
 }

@@ -6,8 +6,8 @@ use App\Enums\CredentialAccessMethod;
 use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
-use App\Enums\UserRole;
 use App\Enums\TelegramOutboundEffectState;
+use App\Enums\UserRole;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
@@ -19,8 +19,8 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
-use App\Models\User;
 use App\Models\TelegramOutboundEffect;
+use App\Models\User;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\CredentialDeliveryFormatter;
@@ -28,9 +28,9 @@ use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
-use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCredentialDeliveryRenderer;
@@ -50,12 +50,12 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
+use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
 class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
 {
-
     public function test_paid_lifecycle_defers_receipt_planning_and_rendering_until_after_transaction(): void
     {
         Queue::fake();
@@ -191,7 +191,6 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('buyer@example', json_encode($receiptEffects->sole()->getAttributes(), JSON_THROW_ON_ERROR));
         Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
-
 
     #[DataProvider('singleStructuredPhotoCases')]
     public function test_single_structured_account_receipt_is_one_protected_localized_photo(
@@ -1594,14 +1593,14 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $notifier->shouldReceive('receiptPlan')
             ->once()
             ->andReturnUsing(function (Order $order) use ($expectedLevel, $real): TelegramReceiptPlan {
-                \PHPUnit\Framework\Assert::assertSame($expectedLevel, DB::transactionLevel());
+                Assert::assertSame($expectedLevel, DB::transactionLevel());
 
                 return $real->receiptPlan($order);
             });
         $notifier->shouldReceive('renderInvoiceUnit')
             ->once()
             ->andReturnUsing(function (Order $order) use ($expectedLevel, $real) {
-                \PHPUnit\Framework\Assert::assertSame($expectedLevel, DB::transactionLevel());
+                Assert::assertSame($expectedLevel, DB::transactionLevel());
 
                 return $real->renderInvoiceUnit($order);
             });

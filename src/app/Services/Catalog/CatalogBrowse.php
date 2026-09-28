@@ -31,6 +31,7 @@ final class CatalogBrowse
 
     /** @var list<string> */
     private const FAMILY_COLUMNS = ['id', 'name', 'slug', 'description', 'image_path', 'telegram_image_path', 'sort_order', 'created_at'];
+
     private const PRODUCT_COLUMNS = [
         'id',
         'category_id',

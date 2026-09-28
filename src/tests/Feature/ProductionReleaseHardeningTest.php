@@ -383,7 +383,6 @@ class ProductionReleaseHardeningTest extends TestCase
         $this->assertStringContainsString('PASS: reconcile-backfill-failed', $output);
     }
 
-
     public function test_telegram_webhook_observation_accepts_a_transient_pending_update_that_drains(): void
     {
         config()->set('app.url', 'https://store.example.com');
@@ -869,7 +868,6 @@ SH);
         $this->assertStringContainsString('npm ci', $contents);
         $this->assertStringNotContainsString('TELEGRAM_BOT_TOKEN', $contents);
     }
-
 
     public function test_github_workflows_pin_actions_bound_jobs_and_enforce_dependency_audits(): void
     {
