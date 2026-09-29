@@ -36,6 +36,28 @@ class CatalogIconCheckCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
+    public function test_the_command_sends_numeric_identifiers_as_strings(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        $this->product('QA ChatGPT Plus 1 Bulan', '6134246530380472478');
+
+        Http::fake(function ($request) {
+            $payload = json_decode((string) ($request->data()['custom_emoji_ids'] ?? '[]'), true, flags: JSON_THROW_ON_ERROR);
+            $this->assertSame(['6134246530380472478'], $payload);
+
+            return Http::response([
+                'ok' => true,
+                'result' => [
+                    ['custom_emoji_id' => '6134246530380472478', 'emoji' => '😄'],
+                ],
+            ]);
+        });
+
+        $this->artisan('catalog:icons-check')
+            ->expectsOutputToContain('OK   product #')
+            ->assertExitCode(0);
+    }
+
     public function test_the_command_fails_when_an_identifier_no_longer_resolves(): void
     {
         $this->product('QA Gmail Fresh', '5368324170671202286');

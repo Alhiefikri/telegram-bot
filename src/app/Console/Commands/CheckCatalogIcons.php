@@ -45,15 +45,29 @@ final class CheckCatalogIcons extends Command
             ->catalogOrder()
             ->get(['key', 'custom_emoji_id']);
 
+        // Identifiers are numeric strings, so they must stay in a list: as array
+        // keys PHP casts them to integers and Telegram rejects the request.
         $ids = [];
+        $labels = [];
+        $collect = static function (string $id, string $label) use (&$ids, &$labels): void {
+            $id = trim($id);
+            if ($id === '') {
+                return;
+            }
+            if (! isset($labels[$id])) {
+                $ids[] = $id;
+            }
+            $labels[$id] = $label;
+        };
+
         foreach ($products as $product) {
-            $ids[trim((string) $product->custom_emoji_id)] = 'product #'.$product->getKey().' ('.$product->name.')';
+            $collect((string) $product->custom_emoji_id, 'product #'.$product->getKey().' ('.$product->name.')');
         }
         foreach ($menuIcons as $icon) {
-            $ids[trim((string) $icon->custom_emoji_id)] = 'menu '.$icon->key;
+            $collect((string) $icon->custom_emoji_id, 'menu '.$icon->key);
         }
         foreach ($messageIcons as $icon) {
-            $ids[trim((string) $icon->custom_emoji_id)] = 'message-copy '.$icon->key;
+            $collect((string) $icon->custom_emoji_id, 'message-copy '.$icon->key);
         }
 
         $this->line(sprintf(
@@ -71,7 +85,7 @@ final class CheckCatalogIcons extends Command
         }
 
         try {
-            $resolved = $this->resolveStickers($bot, array_keys($ids));
+            $resolved = $this->resolveStickers($bot, $ids);
         } catch (Throwable $exception) {
             $this->error('Could not verify the identifiers: '.$exception->getMessage());
 
@@ -79,7 +93,8 @@ final class CheckCatalogIcons extends Command
         }
 
         $missing = [];
-        foreach ($ids as $id => $label) {
+        foreach ($ids as $id) {
+            $label = $labels[$id];
             if (isset($resolved[$id])) {
                 $this->info(sprintf('OK   %s → %s %s', $label, $resolved[$id], $id));
 
