@@ -189,8 +189,12 @@ class TelegramCatalogIntents
         }
         $stateToken = $this->catalogQueries->familyState($customer)['token'] ?? null;
         $optionButtons = $pageMembers
-            ->map(function (CatalogProductReadModel $member, int $index) use ($family, $familyIcon, $page, $returnPage): array {
-                $label = $this->iconButton($member, (string) ($index + 1), $familyIcon);
+            ->map(function (CatalogProductReadModel $member, int $index) use ($customer, $family, $page, $returnPage): array {
+                $label = [
+                    'text' => $this->locale->translate($customer, 'catalog.family.option_button', [
+                        'number' => (string) ($index + 1),
+                    ]),
+                ];
                 if (! $member->isAvailable) {
                     // A disabled button is its own button type, so it carries no
                     // callback data and Telegram renders it inert.
@@ -1376,20 +1380,6 @@ class TelegramCatalogIntents
         }
 
         return $this->icons->resolve($glyph);
-    }
-
-    /**
-     * A family plan row always carries the family icon so every variant of one
-     * family reads as the same product; the variant's own icon only applies
-     * outside a family.
-     *
-     * @return array<string, string>
-     */
-    private function iconButton(CatalogProductReadModel $product, string $label, ?CatalogIcon $icon = null): array
-    {
-        $icon ??= $this->catalogIcon($product);
-
-        return ['text' => $icon->buttonText($label), ...$icon->buttonFields()];
     }
 
     /**

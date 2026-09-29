@@ -27,10 +27,12 @@ to mirror the real catalog and for every Product to be configured explicitly.
   `products` table, active first, and each entry captures or clears that
   Product's custom emoji. An empty catalog renders an explicit empty state
   instead of a fixed brand list.
-- A Product Family presents one icon on every Plan row and Plan button. The
-  first member in family order with a captured custom emoji supplies both the
-  identifier and its associated glyph; otherwise the first member with a glyph
-  supplies it, then the shared default glyph `🛍️` is used.
+- A Product Family presents one shared icon in its heading and on every Plan
+  text row. The first member in family order with a captured custom emoji
+  supplies both the identifier and its associated glyph; otherwise the first
+  member with a glyph supplies it, then the shared default glyph `🛍️` is used.
+  Plan-selection buttons use the compact Unicode marker `▸` before their
+  number instead of carrying a Product custom emoji icon.
 - Product-owned custom emoji render as Telegram custom emoji in supported text,
   with the Product's Unicode glyph as fallback; inline catalog buttons use
   `icon_custom_emoji_id`. Product icons remain stored only on Products.

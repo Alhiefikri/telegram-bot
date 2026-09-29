@@ -852,10 +852,10 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('<tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> Pilih Plan ChatGPT', (string) $options['text']);
         $this->assertStringContainsString('01. <tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> Plus 1 Bulan', (string) $options['text']);
         $plans = $options['reply_markup']['inline_keyboard'][0];
-        $this->assertSame('5368324170671202286', $plans[0]['icon_custom_emoji_id']);
-        $this->assertSame('1', $plans[0]['text']);
-        $this->assertSame('5368324170671202286', $plans[1]['icon_custom_emoji_id']);
-        $this->assertSame('2', $plans[1]['text']);
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $plans[0]);
+        $this->assertSame('▸ 1', $plans[0]['text']);
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $plans[1]);
+        $this->assertSame('▸ 2', $plans[1]['text']);
 
         $this->postTelegramWebhook($this->callbackUpdate(41203, 'custom-emoji-plan-select', $plans[0]['callback_data'], [], 41200))->assertOk();
         $detail = $this->lastMessageContaining('ChatGPT Plus 1 Bulan');
@@ -863,7 +863,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('<tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> ChatGPT Plus 1 Bulan', (string) $detail['text']);
     }
 
-    public function test_custom_emoji_on_a_later_plan_supplies_the_icon_for_every_family_plan(): void
+    public function test_custom_emoji_on_a_later_plan_supplies_the_shared_family_copy_icon_but_plan_buttons_use_arrows(): void
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 41220, 'locale' => 'id']);
@@ -899,8 +899,10 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('01. <tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> 1 Bulan', (string) $options['text']);
         $this->assertStringContainsString('02. <tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> 3 Bulan', (string) $options['text']);
         $plans = $options['reply_markup']['inline_keyboard'][0];
-        $this->assertSame('5368324170671202286', $plans[0]['icon_custom_emoji_id']);
-        $this->assertSame('5368324170671202286', $plans[1]['icon_custom_emoji_id']);
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $plans[0]);
+        $this->assertSame('▸ 1', $plans[0]['text']);
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $plans[1]);
+        $this->assertSame('▸ 2', $plans[1]['text']);
     }
 
     public function test_product_detail_opened_without_family_navigation_returns_to_the_plan_list(): void
@@ -989,7 +991,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('Balik ke Kategori', json_encode($options, JSON_THROW_ON_ERROR));
     }
 
-    public function test_family_options_show_per_product_quotes_and_two_column_icon_buttons(): void
+    public function test_family_options_show_per_product_quotes_and_two_column_arrow_buttons(): void
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 41110, 'locale' => 'id']);
@@ -1022,10 +1024,10 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Harga: Rp25.000', (string) $options['text']);
         $keyboard = $options['reply_markup']['inline_keyboard'];
         $this->assertCount(2, $keyboard[0]);
-        $this->assertSame('🟥 1', $keyboard[0][0]['text']);
-        $this->assertSame('🟥 2', $keyboard[0][1]['text']);
+        $this->assertSame('▸ 1', $keyboard[0][0]['text']);
+        $this->assertSame('▸ 2', $keyboard[0][1]['text']);
         $this->assertCount(1, $keyboard[1]);
-        $this->assertSame('🟥 3', $keyboard[1][0]['text']);
+        $this->assertSame('▸ 3', $keyboard[1][0]['text']);
         $this->assertStringStartsWith('family:list:1', $keyboard[2][0]['callback_data']);
     }
 

@@ -264,7 +264,7 @@
   "catalog.family.options_title": ":icon Choose a plan for :name",
   "catalog.family.sold_total": "Sold: :sold",
   "catalog.family.page": "Page :page of :pages",
-  "catalog.family.option_button": ":icon :number",
+  "catalog.family.option_button": "▸ :number",
   "catalog.family.option_price": "Price: Rp:amount",
   "catalog.family.option_usdt_price": "USDT price: :amount USDT",
   "catalog.family.option_stock": "Available stock: :stock",

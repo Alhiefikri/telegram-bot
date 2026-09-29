@@ -263,7 +263,7 @@
   "catalog.family.options_title": ":icon Pilih Plan :name",
   "catalog.family.sold_total": "Terjual: :sold",
   "catalog.family.page": "Halaman :page dari :pages",
-  "catalog.family.option_button": ":icon :number",
+  "catalog.family.option_button": "▸ :number",
   "catalog.family.option_price": "Harga: Rp:amount",
   "catalog.family.option_usdt_price": "Harga USDT: :amount USDT",
   "catalog.family.option_stock": "Stok tersedia: :stock",
