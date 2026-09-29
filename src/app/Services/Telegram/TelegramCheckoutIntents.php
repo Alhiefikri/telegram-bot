@@ -21,6 +21,7 @@ use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahQrisImage;
 use App\Support\DogfoodTiming;
 use App\Support\PakasirCheckoutFlow;
+use Illuminate\Http\Client\RequestException;
 use InvalidArgumentException;
 use RuntimeException;
 use Throwable;
@@ -257,9 +258,6 @@ class TelegramCheckoutIntents
 
         $photoPath = public_path('binance.jpeg');
         $photoContents = is_readable($photoPath) ? file_get_contents($photoPath) : false;
-        if ($photoContents === false) {
-            throw new RuntimeException('Binance Pay image is not readable: '.$photoPath);
-        }
 
         $keyboard = [];
         if ($autoVerify) {
@@ -273,14 +271,50 @@ class TelegramCheckoutIntents
             'callback_data' => 'buyer:cancel-pending:'.$order->id,
         ]];
 
-        return $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, [
-            'inline_keyboard' => $keyboard,
-        ], [
-            'caption_entities' => [
-                $this->codeEntityForLine($text, $amount.' USDT', $amount),
-                $this->codeEntityForLine($text, $receiver, $receiver),
-            ],
-        ]);
+        $replyMarkup = ['inline_keyboard' => $keyboard];
+        if ($photoContents === false) {
+            return $this->sendBinancePaymentTextFallback($chatId, $text, $replyMarkup, $customer);
+        }
+
+        try {
+            return $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, $replyMarkup, [
+                'caption_entities' => [
+                    $this->codeEntityForLine($text, $amount.' USDT', $amount),
+                    $this->codeEntityForLine($text, $receiver, $receiver),
+                ],
+            ]);
+        } catch (Throwable $exception) {
+            if (! $this->canFallbackFromBinancePhotoFailure($exception)) {
+                throw $exception;
+            }
+
+            return $this->sendBinancePaymentTextFallback($chatId, $text, $replyMarkup, $customer);
+        }
+    }
+
+    /** @param array<string, mixed> $replyMarkup
+     * @return array<string, mixed>
+     */
+    private function sendBinancePaymentTextFallback(
+        string $chatId,
+        string $text,
+        array $replyMarkup,
+        Customer $customer,
+    ): array {
+        $fallbackText = $text."\n\n".$this->locale->translate($customer, 'payment.binance.text_fallback');
+
+        return $this->bot->sendMessage($chatId, $fallbackText, $replyMarkup);
+    }
+
+    private function canFallbackFromBinancePhotoFailure(Throwable $exception): bool
+    {
+        if ($exception instanceof RequestException) {
+            // Only explicit rejections are safe; timeouts and server errors stay ambiguous.
+            return in_array($exception->response?->status(), [400, 403], true);
+        }
+
+        return $exception instanceof RuntimeException
+            && $exception->getMessage() === 'Telegram Bot API sendPhoto response was not successful.';
     }
 
     public function sendBscPaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): array

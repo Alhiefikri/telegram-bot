@@ -1170,9 +1170,9 @@ class CatalogSearchTest extends TelegramBotTestSupport
         ]);
 
         $locales = [
-            'id' => ['chat_id' => 45101, 'catalog' => 'DAFTAR PRODUK DIGITAL', 'list' => 'Daftar Produk', 'details' => 'Detail produk', 'quantity' => 'Jumlah: 1', 'search' => 'Hasil pencarian', 'instruction' => 'Pilih keluarga atau produk', 'single_label' => 'Stok 2', 'multi_label' => '▶ 2 Plan »'],
-            'en' => ['chat_id' => 45102, 'catalog' => 'DIGITAL PRODUCT LIST', 'list' => 'Product List', 'details' => 'Product details', 'quantity' => 'Quantity: 1', 'search' => 'Search results', 'instruction' => 'Choose a family or product', 'single_label' => 'Stock 2', 'multi_label' => '▶ 2 Plans »'],
-            'ms' => ['chat_id' => 45103, 'catalog' => 'SENARAI PRODUK DIGITAL', 'list' => 'Senarai Produk', 'details' => 'Butiran produk', 'quantity' => 'Kuantiti: 1', 'search' => 'Hasil carian', 'instruction' => 'Pilih keluarga atau produk', 'single_label' => 'Stok 2', 'multi_label' => '▶ 2 Plan »'],
+            'id' => ['chat_id' => 45101, 'catalog' => 'DAFTAR PRODUK DIGITAL', 'list' => 'Daftar Produk', 'details' => 'Detail produk', 'quantity' => 'Jumlah: 1', 'search' => 'Hasil pencarian', 'instruction' => 'Pilih keluarga atau produk', 'single_label' => 'Stok 2', 'multi_label' => '▸ 2 Plan »'],
+            'en' => ['chat_id' => 45102, 'catalog' => 'DIGITAL PRODUCT LIST', 'list' => 'Product List', 'details' => 'Product details', 'quantity' => 'Quantity: 1', 'search' => 'Search results', 'instruction' => 'Choose a family or product', 'single_label' => 'Stock 2', 'multi_label' => '▸ 2 Plans »'],
+            'ms' => ['chat_id' => 45103, 'catalog' => 'SENARAI PRODUK DIGITAL', 'list' => 'Senarai Produk', 'details' => 'Butiran produk', 'quantity' => 'Kuantiti: 1', 'search' => 'Hasil carian', 'instruction' => 'Pilih keluarga atau produk', 'single_label' => 'Stok 2', 'multi_label' => '▸ 2 Plan »'],
         ];
 
         foreach ($locales as $index => $locale) {

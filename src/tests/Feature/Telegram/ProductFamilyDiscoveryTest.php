@@ -61,7 +61,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $keyboard = $catalog['reply_markup']['inline_keyboard'];
         $familyButton = $keyboard[0][0];
         $this->assertStringContainsString('Netflix', $familyButton['text']);
-        $this->assertStringContainsString('▶ 2 Plan »', $familyButton['text']);
+        $this->assertStringContainsString('▸ 2 Plan »', $familyButton['text']);
         $familyCallback = $familyButton['callback_data'];
         $this->assertStringStartsWith('family:options:v', $familyCallback);
         $this->assertCount(1, $keyboard[0]);
@@ -852,9 +852,9 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('<tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> Pilih Plan ChatGPT', (string) $options['text']);
         $this->assertStringContainsString('01. <tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> Plus 1 Bulan', (string) $options['text']);
         $plans = $options['reply_markup']['inline_keyboard'][0];
-        $this->assertArrayNotHasKey('icon_custom_emoji_id', $plans[0]);
+        $this->assertSame('5368324170671202286', $plans[0]['icon_custom_emoji_id']);
         $this->assertSame('▸ 1', $plans[0]['text']);
-        $this->assertArrayNotHasKey('icon_custom_emoji_id', $plans[1]);
+        $this->assertSame('5368324170671202286', $plans[1]['icon_custom_emoji_id']);
         $this->assertSame('▸ 2', $plans[1]['text']);
 
         $this->postTelegramWebhook($this->callbackUpdate(41203, 'custom-emoji-plan-select', $plans[0]['callback_data'], [], 41200))->assertOk();
@@ -863,7 +863,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('<tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> ChatGPT Plus 1 Bulan', (string) $detail['text']);
     }
 
-    public function test_custom_emoji_on_a_later_plan_supplies_the_shared_family_copy_icon_but_plan_buttons_use_arrows(): void
+    public function test_custom_emoji_on_a_later_plan_supplies_the_shared_family_icon_to_plan_buttons(): void
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 41220, 'locale' => 'id']);
@@ -899,9 +899,9 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('01. <tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> 1 Bulan', (string) $options['text']);
         $this->assertStringContainsString('02. <tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> 3 Bulan', (string) $options['text']);
         $plans = $options['reply_markup']['inline_keyboard'][0];
-        $this->assertArrayNotHasKey('icon_custom_emoji_id', $plans[0]);
+        $this->assertSame('5368324170671202286', $plans[0]['icon_custom_emoji_id']);
         $this->assertSame('▸ 1', $plans[0]['text']);
-        $this->assertArrayNotHasKey('icon_custom_emoji_id', $plans[1]);
+        $this->assertSame('5368324170671202286', $plans[1]['icon_custom_emoji_id']);
         $this->assertSame('▸ 2', $plans[1]['text']);
     }
 
@@ -1230,7 +1230,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(41141, '/product', [], 41140))->assertOk();
         $catalog = $this->lastMessageContaining('Fresh Family');
         $familyCallback = $catalog['reply_markup']['inline_keyboard'][0][0]['callback_data'];
-        $this->assertStringContainsString('▶ 2 Plan »', $catalog['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertStringContainsString('▸ 2 Plan »', $catalog['reply_markup']['inline_keyboard'][0][0]['text']);
 
         $product->forceFill(['stock' => 2])->save();
         $this->postTelegramWebhook($this->callbackUpdate(41142, 'fresh-family-open', $familyCallback, [], 41140))->assertOk();
@@ -1573,9 +1573,9 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         }
 
         foreach ([
-            'id' => [41132, '▶ 2 Plan »', 'Pilih Plan Locale Plans'],
-            'en' => [41133, '▶ 2 Plans »', 'Choose a plan for Locale Plans'],
-            'ms' => [41134, '▶ 2 Plan »', 'Pilih Plan Locale Plans'],
+            'id' => [41132, '▸ 2 Plan »', 'Pilih Plan Locale Plans'],
+            'en' => [41133, '▸ 2 Plans »', 'Choose a plan for Locale Plans'],
+            'ms' => [41134, '▸ 2 Plan »', 'Pilih Plan Locale Plans'],
         ] as $locale => [$chatId, $expectedLabel, $expectedTitle]) {
             Customer::factory()->create(['telegram_id' => $chatId, 'locale' => $locale]);
             $this->postTelegramWebhook($this->messageUpdate(41140 + $chatId, '/product', [], $chatId))->assertOk();

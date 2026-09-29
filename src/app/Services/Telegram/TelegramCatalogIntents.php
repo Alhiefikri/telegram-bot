@@ -189,8 +189,9 @@ class TelegramCatalogIntents
         }
         $stateToken = $this->catalogQueries->familyState($customer)['token'] ?? null;
         $optionButtons = $pageMembers
-            ->map(function (CatalogProductReadModel $member, int $index) use ($customer, $family, $page, $returnPage): array {
+            ->map(function (CatalogProductReadModel $member, int $index) use ($customer, $familyIcon, $family, $page, $returnPage): array {
                 $label = [
+                    ...$familyIcon->buttonFields(),
                     'text' => $this->locale->translate($customer, 'catalog.family.option_button', [
                         'number' => (string) ($index + 1),
                     ]),

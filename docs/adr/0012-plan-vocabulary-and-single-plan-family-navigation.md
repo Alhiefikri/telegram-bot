@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted - 2026-09-26
+Accepted - 2026-09-26; discovery marker updated 2026-09-30
 
 ## Decision
 
@@ -10,7 +10,7 @@ Customer-facing Product Family discovery names one **Product option** a
 **Plan**:
 
 - The Store Bot catalog labels a multi-option family with its Plan total and a
-  forward affordance (`🎬 Netflix ▶ 3 Plan »` / `▶ 3 Plans »` for English).
+  compact forward affordance (`🎬 Netflix ▸ 3 Plan »` / `▸ 3 Plans »` for English).
   The number is the family's total Plan count, not the available count; button
   colour already carries availability.
 - A family whose options are all sold out keeps its existing sold-out label.

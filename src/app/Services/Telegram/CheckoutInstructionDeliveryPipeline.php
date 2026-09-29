@@ -267,17 +267,26 @@ final class CheckoutInstructionDeliveryPipeline
      */
     private function deliveryMetadata(TelegramOutboundEffect $effect, array $response): array
     {
-        if ($effect->effect_type !== TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT) {
+        if (! in_array($effect->effect_type, [
+            TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
+            TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
+        ], true)) {
             return [];
         }
 
         $telegramResult = $response['result'] ?? null;
         $hasPhoto = is_array($telegramResult) && is_array($telegramResult['photo'] ?? null) && $telegramResult['photo'] !== [];
-        $outcome = $hasPhoto ? 'qris_sent' : 'retry_notice_sent';
+        $isBinance = $effect->effect_type === TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT;
+        $outcome = match (true) {
+            $isBinance && $hasPhoto => 'binance_photo_sent',
+            $isBinance => 'binance_text_fallback_sent',
+            $hasPhoto => 'qris_sent',
+            default => 'retry_notice_sent',
+        };
 
         return [
             'delivery_outcome' => $outcome,
-            'delivery_method' => $outcome === 'qris_sent' ? 'sendPhoto' : 'sendMessage',
+            'delivery_method' => $hasPhoto ? 'sendPhoto' : 'sendMessage',
         ];
     }
 

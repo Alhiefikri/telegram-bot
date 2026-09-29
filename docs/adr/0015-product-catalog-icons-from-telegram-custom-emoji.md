@@ -31,8 +31,11 @@ to mirror the real catalog and for every Product to be configured explicitly.
   text row. The first member in family order with a captured custom emoji
   supplies both the identifier and its associated glyph; otherwise the first
   member with a glyph supplies it, then the shared default glyph `🛍️` is used.
-  Plan-selection buttons use the compact Unicode marker `▸` before their
-  number instead of carrying a Product custom emoji icon.
+  Multi-Plan discovery entries and Plan-selection button labels use the compact
+  Unicode marker `▸`. When the family has a captured custom emoji, every
+  Plan-selection button also carries the shared family
+  `icon_custom_emoji_id`; a family without one keeps the Unicode marker as its
+  button indicator.
 - Product-owned custom emoji render as Telegram custom emoji in supported text,
   with the Product's Unicode glyph as fallback; inline catalog buttons use
   `icon_custom_emoji_id`. Product icons remain stored only on Products.

@@ -269,6 +269,41 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame('987654321', $order->payments()->sole()->binance_receiver_value);
     }
 
+    public function test_binance_checkout_falls_back_to_text_after_a_definite_photo_rejection(): void
+    {
+        config()->set('services.binance.pay_id', '987654321');
+        ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'binance_pay_enabled' => true,
+            'is_active' => true,
+        ]);
+        $order = $this->checkout(CheckoutPaymentIntents::binancePay(), usdt: true);
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => false,
+                'error_code' => 400,
+                'description' => 'Bad Request: photo rejected',
+            ], 400),
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 81901],
+            ]),
+        ]);
+
+        (new SendBinanceCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
+
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'BINANCE PAY ID'));
+
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->state);
+        $this->assertSame('binance_text_fallback_sent', $effect->outcome_metadata['delivery_outcome'] ?? null);
+        $this->assertSame('sendMessage', $effect->outcome_metadata['delivery_method'] ?? null);
+    }
+
     public function test_checkout_delivery_pipeline_uses_the_shared_effect_protocol_for_each_payment_rail(): void
     {
         config()->set('services.binance.pay_id', '987654321');
