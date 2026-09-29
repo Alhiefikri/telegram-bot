@@ -66,9 +66,10 @@ final class BscPaymentVerification
      */
     public function queueForStatusRefresh(Payment $payment): bool
     {
-        $payment->loadMissing('bscDetail');
+        $payment->load(['bscDetail', 'order']);
         $detail = $payment->bscDetail;
         if ($payment->status !== PaymentStatus::Pending
+            || $payment->order?->order_status !== OrderStatus::PendingPayment
             || $payment->provider !== 'manual'
             || $payment->method !== 'USDT_BEP20'
             || $detail === null) {
@@ -245,7 +246,7 @@ final class BscPaymentVerification
         $payment = is_string($payment)
             ? Payment::query()->findOrFail($payment)
             : $payment;
-        $payment->loadMissing('order');
+        $payment->load('order');
 
         $detail = $payment->bscDetail()->first();
         $submissionVersion ??= (int) ($detail?->tx_submission_version ?? 0);
@@ -255,57 +256,15 @@ final class BscPaymentVerification
         if ($detail !== null && ! $this->submissionIsCurrent($detail->payment_id, $submissionVersion)) {
             return BscVerificationResult::of(BscVerificationOutcome::StaleSubmission, retryable: false);
         }
-        if ($payment->status !== PaymentStatus::Paid
-            && $payment->provider === 'manual'
+        $terminalOrder = in_array($payment->order?->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true);
+        $reviewableLatePayment = in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true);
+        // A terminal Order never starts an amount-unique history scan. Only an explicit TX hash can take the manual-review path.
+        if ($payment->provider === 'manual'
             && $payment->method === 'USDT_BEP20'
-            && ($payment->status !== PaymentStatus::Pending
-                || $payment->order?->order_status !== OrderStatus::PendingPayment)
-            && ! in_array($payment->status, [PaymentStatus::Refunded], true)
-            && $detail !== null) {
-            if ($lateHash === null && $this->isAmountUnique($detail)) {
-                try {
-                    if (! $this->enabled()
-                        || ! $this->validConfiguredSnapshot($detail)
-                        || $this->rpc->chainId() !== (int) $detail->chain_id) {
-                        return BscVerificationResult::of(BscVerificationOutcome::OrderNotPending, retryable: false);
-                    }
-
-                    $inspection = $this->scanAmountUniqueTransfers($payment, $detail);
-                    if ($inspection->exactTransfers === []) {
-                        return BscVerificationResult::of(BscVerificationOutcome::OrderNotPending, retryable: false);
-                    }
-                    if (count($inspection->exactTransfers) !== 1) {
-                        $result = $this->ambiguousAmountUniqueTransfer(
-                            $payment,
-                            $detail,
-                            $submissionVersion,
-                            $inspection,
-                        );
-
-                        return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
-                    }
-
-                    $lateHash = $inspection->exactTransfers[0]->txHash;
-                } catch (BscRpcException $exception) {
-                    report($exception);
-                    $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, null, [
-                        'reason' => 'amount_unique_scan_rpc_error',
-                    ]);
-
-                    return BscVerificationResult::of(BscVerificationOutcome::ProviderError, retryable: $exception->retryable);
-                } catch (Throwable $exception) {
-                    report($exception);
-                    $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, null, [
-                        'reason' => 'amount_unique_scan_error',
-                    ]);
-
-                    return BscVerificationResult::of(BscVerificationOutcome::ProviderError, retryable: false);
-                }
-            }
-            if ($lateHash === null) {
-                return BscVerificationResult::of(BscVerificationOutcome::OrderNotPending, retryable: false);
-            }
-
+            && $terminalOrder
+            && $reviewableLatePayment
+            && $detail !== null
+            && $lateHash !== null) {
             $result = $this->verifyLateCandidate($payment, $detail, $lateHash, $submissionVersion);
 
             return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
@@ -500,6 +459,13 @@ final class BscPaymentVerification
 
     public function recordQueueFailure(Payment $payment, ?int $submissionVersion = null): BscVerificationResult
     {
+        $payment = Payment::query()->with('order')->find($payment->id);
+        if ($payment === null
+            || $payment->status !== PaymentStatus::Pending
+            || $payment->order?->order_status !== OrderStatus::PendingPayment) {
+            return BscVerificationResult::of(BscVerificationOutcome::OrderNotPending, retryable: false);
+        }
+
         $detail = PaymentBscDetail::query()->whereKey($payment->id)->first();
         if (! $detail) {
             return BscVerificationResult::of(BscVerificationOutcome::NotConfigured, retryable: false);

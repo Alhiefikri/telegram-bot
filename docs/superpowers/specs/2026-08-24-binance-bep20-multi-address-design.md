@@ -414,9 +414,9 @@ The request/webhook path must not perform an unbounded RPC call. If the queue di
 
 ### Reconciliation path
 
-The scheduled BSC reconciler processes only pending or late-payment BSC Payments with a stored customer-submitted TX hash. It dispatches the same targeted receipt verification used by interactive status refreshes and applies a bounded retry cadence to provider failures. Payments without a hash remain `awaiting_transfer` and are not sent to the RPC boundary.
+The scheduled BSC reconciler selects only pending Payments whose Order is still `pending_payment`. Amount-unique Payments use bounded transfer-log discovery while the Order is active; legacy `transaction_hash` Payments use targeted receipt verification when a hash exists. Provider failures retry with a bounded cadence only during the active Order window. Expired, cancelled, completed, failed, or paid Orders are excluded from scheduled reconciliation.
 
-The reconciler does not query receiver history, call `eth_getLogs`, infer transaction hashes, or match by amount alone. A new hash submission increments `tx_submission_version`, so stale jobs cannot persist evidence for a replacement hash.
+Interactive refreshes do not enqueue work for terminal Orders. If a legacy TX-hash job was already queued before expiry or cancellation, it may perform one targeted receipt check and route an exact late transfer to manual review; it does not retry or revive the Order. Amount-unique history scans stop at the terminal transition and do not continue looking for later transfers. A new hash submission increments `tx_submission_version`, so stale jobs cannot persist evidence for a replacement hash.
 
 ### Single claim
 
@@ -444,18 +444,18 @@ Repeated jobs, browser refreshes, Telegram retries, and duplicate hashes must pr
 
 | State | Meaning | Automatic action |
 | --- | --- | --- |
-| `awaiting_transfer` | No customer hash has been submitted. | Remain idle until the customer submits a hash. |
+| `awaiting_transfer` | No transfer has been found for this amount-unique Payment, or no hash has been submitted for a legacy Payment. | Check only while the Order is pending; stop at expiry/cancellation. |
 | `tx_submitted` | A hash is stored for lookup. | Targeted verifier is queued. |
-| `confirming` | Exact transfer found but below threshold. | Retry until threshold/grace. |
+| `confirming` | Exact transfer found but below threshold. | Retry until threshold/grace while the Order remains active. |
 | `confirmed` | Exact transfer passed all predicates. | Claim through OrderLifecycle. |
-| `not_found` | Latest bounded lookup found no valid transfer. | Remain pending/reconcile. |
+| `not_found` | Latest bounded lookup found no valid transfer. | Reconcile while the Order remains pending. |
 | `mismatch` | Evidence exists but amount/address/token/time is wrong. | Do not auto-claim; escalate. |
 | `transaction_already_used` | Hash is already tied to another Payment. | Do not auto-claim; escalate. |
-| `provider_error` | RPC failed or timed out while checking a submitted hash. | Retry with bounded cadence; keep the Payment pending. |
+| `provider_error` | RPC failed or timed out during an active verification. | Retry with bounded cadence while the Order remains pending; stop at terminal status. |
 | `manual_review` | Ambiguous/multiple/late evidence needs an Owner decision. | Existing manual review boundary. |
 | `expired` | Automatic window and any technical grace are closed. | Order expiry releases reservation. |
 
-RPC outage is not `mismatch` and must never release an otherwise eligible Order. It is `Payment Verification Pending` until the bounded retry/reconciliation policy recovers or an owner resolves the case.
+RPC outage is not `mismatch` and must never release an otherwise eligible Order. It is `Payment Verification Pending` while the Order is active. Once the Order expires or is cancelled, automatic BSC checks stop; a late transfer needs explicit evidence and manual review.
 
 ## Expiry, cancellation, and late payment
 
@@ -478,7 +478,7 @@ There are two distinct Cancel actions:
 - **Selector Cancel:** returns to payment choices and creates no Order.
 - **Order Cancel:** uses the existing pending-cancellation lifecycle and releases reserved stock.
 
-After Order Cancel, all BSC verification jobs become no-ops for automatic fulfillment. A later transfer is a Late Payment and requires manual review; it never revives the cancelled Order automatically.
+After Order Cancel, amount-unique discovery and scheduled BSC reconciliation stop. An already-queued legacy TX-hash job may validate only that submitted hash once and route a valid late transfer to manual review; it never fulfills or revives the cancelled Order automatically. Later transfers are not discovered by background scans and require explicit evidence for manual review.
 
 ## Admin and operational configuration
 
@@ -603,8 +603,8 @@ BSC mismatch, late, duplicate, and ambiguous evidence must flow through existing
 | Wrong chain/token/address/amount | Manual review or mismatch | Persist sanitized evidence | Never auto-paid |
 | Failed transaction | Not confirmed | `mismatch`/`not_found` according to evidence | Remains pending until normal expiry |
 | Hash already claimed | Manual review | `transaction_already_used` | Never auto-paid |
-| Exact transfer after expiry | Late Payment | Evidence retained | No automatic revival |
-| Buyer cancels before payment | Cancelled | Verification jobs no-op | Existing cancellation lifecycle |
+| Exact transfer after expiry | Late Payment | Evidence retained when an explicit submitted hash is verified | No automatic revival |
+| Buyer cancels before payment | Cancelled | Background scans stop; an already-queued submitted hash may be checked once for manual review | Existing cancellation lifecycle |
 | Exact transfer confirmed | Success | Atomic claim | Existing fulfillment/delivery |
 
 The copy must clearly distinguish:
@@ -720,7 +720,7 @@ The implementation should be delivered in small, independently testable slices:
 - Confirmed BSC transfer calls `OrderLifecycle` and delivers stock exactly once.
 - Browser polling, Telegram callbacks, reconciler jobs, and queue retries cannot duplicate fulfillment.
 - Transfer included before expiry but confirmed during technical grace can complete.
-- Transfer included after expiry becomes Late Payment/manual review.
+- A late transfer verified from an explicit submitted TX hash becomes Late Payment/manual review; amount-unique background scans stop at expiry.
 - Expired pending BSC Orders release reservations after grace.
 - Cancelled Orders never auto-revive from a later BSC transfer.
 

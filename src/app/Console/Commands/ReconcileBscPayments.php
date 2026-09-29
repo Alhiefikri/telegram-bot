@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
@@ -18,7 +19,7 @@ final class ReconcileBscPayments extends Command
 {
     protected $signature = 'bsc:reconcile {--chunk=100}';
 
-    protected $description = 'Verify pending USDT BEP20 Payments by unique amount or submitted transaction hash.';
+    protected $description = 'Verify active USDT BEP20 Payments by unique amount or submitted transaction hash.';
 
     public function handle(
         BscPaymentVerification $verification,
@@ -56,76 +57,44 @@ final class ReconcileBscPayments extends Command
         $flagged = 0;
         $failed = 0;
 
+        // Terminal Orders are excluded so reconciliation never rescans their transfer history.
         Payment::query()
             ->where('provider', 'manual')
             ->where('method', 'USDT_BEP20')
-            ->where(function ($query): void {
-                $query->where(function ($pending): void {
-                    $pending
-                        ->where('status', PaymentStatus::Pending->value)
-                        ->whereHas('bscDetail', function ($detail): void {
-                            $detail
-                                ->where(function ($mode): void {
-                                    $mode
-                                        ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE)
-                                        ->orWhere(function ($legacy): void {
-                                            $legacy
-                                                ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH)
-                                                ->whereNotNull('current_tx_hash');
-                                        });
-                                })
-                                ->whereNotIn('verification_status', [
-                                    'confirmed',
-                                    'expired',
-                                    'manual_review',
-                                    'mismatch',
-                                    'transaction_already_used',
-                                ])
-                                ->where(function ($retry): void {
-                                    $retry
-                                        ->whereNull('last_verified_at')
-                                        ->orWhere(function ($recent): void {
-                                            $recent
-                                                ->where('verification_status', '!=', 'provider_error')
-                                                ->where('last_verified_at', '<=', now()->subMinute());
-                                        })
-                                        ->orWhere(function ($providerError): void {
-                                            $providerError
-                                                ->where('verification_status', 'provider_error')
-                                                ->where('last_verified_at', '<=', now()->subMinutes(5));
-                                        });
-                                });
-                        });
-                })->orWhere(function ($terminal): void {
-                    $terminal
-                        ->whereIn('status', [PaymentStatus::Expired->value, PaymentStatus::Failed->value])
-                        ->where('created_at', '>=', now()->subHours(max(1, (int) config('services.bsc.late_payment_lookback_hours', 72))))
-                        ->whereHas('bscDetail', function ($detail): void {
-                            $detail
-                                ->where(function ($mode): void {
-                                    $mode
-                                        ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE)
-                                        ->orWhere(function ($legacy): void {
-                                            $legacy
-                                                ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH)
-                                                ->whereNotNull('current_tx_hash');
-                                        });
-                                })
-                                ->whereIn('verification_status', [
-                                    'awaiting_transfer',
-                                    'not_found',
-                                    'tx_submitted',
-                                    'confirming',
-                                    'provider_error',
-                                    'expired',
-                                    'manual_review',
-                                ])
-                                ->where(function ($recent): void {
-                                    $recent->whereNull('last_verified_at')
-                                        ->orWhere('last_verified_at', '<=', now()->subMinutes(5));
-                                });
-                        });
-                });
+            ->where('status', PaymentStatus::Pending->value)
+            ->whereHas('order', fn ($order) => $order->where('order_status', OrderStatus::PendingPayment->value))
+            ->whereHas('bscDetail', function ($detail): void {
+                $detail
+                    ->where(function ($mode): void {
+                        $mode
+                            ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE)
+                            ->orWhere(function ($legacy): void {
+                                $legacy
+                                    ->where('verification_mode', PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH)
+                                    ->whereNotNull('current_tx_hash');
+                            });
+                    })
+                    ->whereNotIn('verification_status', [
+                        'confirmed',
+                        'expired',
+                        'manual_review',
+                        'mismatch',
+                        'transaction_already_used',
+                    ])
+                    ->where(function ($retry): void {
+                        $retry
+                            ->whereNull('last_verified_at')
+                            ->orWhere(function ($recent): void {
+                                $recent
+                                    ->where('verification_status', '!=', 'provider_error')
+                                    ->where('last_verified_at', '<=', now()->subMinute());
+                            })
+                            ->orWhere(function ($providerError): void {
+                                $providerError
+                                    ->where('verification_status', 'provider_error')
+                                    ->where('last_verified_at', '<=', now()->subMinutes(5));
+                            });
+                    });
             })
             ->with(['bscDetail', 'order'])
             ->orderBy('created_at')

@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 use App\Services\Bsc\BscPaymentVerification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -35,12 +37,33 @@ final class VerifyBscPayment implements ShouldBeUnique, ShouldQueue
 
     public function handle(BscPaymentVerification $verification): void
     {
-        $payment = Payment::query()->find($this->paymentId);
-        if (! $payment || $payment->status !== PaymentStatus::Pending) {
+        $payment = Payment::query()->with(['order', 'bscDetail'])->find($this->paymentId);
+        if (! $payment) {
             return;
         }
 
-        $verification->verify($payment, null, $this->submissionVersion);
+        if ($payment->status === PaymentStatus::Pending
+            && $payment->order?->order_status === OrderStatus::PendingPayment) {
+            $verification->verify($payment, null, $this->submissionVersion);
+
+            return;
+        }
+
+        $detail = $payment->bscDetail;
+        $terminalOrder = in_array($payment->order?->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true);
+        $reviewablePayment = in_array($payment->status, [PaymentStatus::Pending, PaymentStatus::Expired, PaymentStatus::Failed], true);
+        if (! $terminalOrder
+            || ! $reviewablePayment
+            || $detail?->verification_mode !== PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH
+            || ! filled($detail->current_tx_hash)) {
+            return;
+        }
+
+        $verification->verify(
+            $payment,
+            $detail->current_tx_hash,
+            (int) $detail->tx_submission_version,
+        );
     }
 
     public function failed(Throwable $exception): void

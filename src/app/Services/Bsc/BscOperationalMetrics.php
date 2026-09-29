@@ -2,6 +2,7 @@
 
 namespace App\Services\Bsc;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
@@ -16,6 +17,7 @@ final class BscOperationalMetrics
                 ->where('provider', 'manual')
                 ->where('method', 'USDT_BEP20')
                 ->where('status', PaymentStatus::Pending->value)
+                ->whereHas('order', fn ($order) => $order->where('order_status', OrderStatus::PendingPayment->value))
                 ->whereHas('bscDetail', fn ($detail) => $detail
                     ->where(function ($mode): void {
                         $mode
