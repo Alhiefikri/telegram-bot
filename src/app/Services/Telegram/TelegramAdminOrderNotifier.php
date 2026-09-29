@@ -17,6 +17,7 @@ class TelegramAdminOrderNotifier
     public function __construct(
         private readonly TelegramBotClient $bot,
         private readonly TelegramAdminAccess $adminAccess,
+        private readonly TelegramUiIcons $uiIcons,
     ) {}
 
     /**
@@ -172,7 +173,7 @@ class TelegramAdminOrderNotifier
     {
         $payment = $this->relevantPayment($order);
         $lines = [
-            '🧾 Checkout belum bayar',
+            $this->uiIcons->renderLegacyIcons('🧾 Checkout belum bayar'),
             '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
             'Pembeli: '.$this->buyerLabel($order),
@@ -201,7 +202,7 @@ class TelegramAdminOrderNotifier
         $payment = $this->relevantPayment($order);
         $expiredAt = $payment?->expired_at ?? $order->expires_at ?? $order->updated_at;
         $lines = [
-            '⌛ Checkout expired belum bayar',
+            $this->uiIcons->renderLegacyIcons('⌛ Checkout expired belum bayar'),
             '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
             'Pembeli: '.$this->buyerLabel($order),

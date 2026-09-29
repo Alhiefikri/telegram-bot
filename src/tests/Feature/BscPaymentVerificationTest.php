@@ -16,7 +16,6 @@ use App\Models\PaymentEvent;
 use App\Models\User;
 use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\Bsc\BscPaymentVerification;
-use App\Services\Bsc\BscRpcClient;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Bsc\BscRpcException;
 use App\Services\Bsc\BscTransferLogRpcClientInterface;

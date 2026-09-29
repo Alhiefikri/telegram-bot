@@ -50,7 +50,7 @@ class TelegramMessageRouter
             return;
         }
 
-        // A pending brand icon capture owns the next private message so the
+        // A pending icon capture owns the next private message so the
         // admin's emoji never falls through to the normal command routing.
         if ($isPrivateChat && $this->icons->hasPendingCapture($customer)) {
             if ($this->adminAccess->isAdmin($customer, $chatId)) {

@@ -7,6 +7,8 @@ use App\Bootstrap\ProductionConfigurationValidator;
 use App\Models\BscPaymentReceiver;
 use App\Models\Category;
 use App\Models\ManualPaymentSetting;
+use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductQuantityPriceTier;
@@ -167,6 +169,8 @@ class AppServiceProvider extends ServiceProvider
         Category::observe(StorefrontCacheInvalidationObserver::class);
         ManualPaymentSetting::observe(StorefrontCacheInvalidationObserver::class);
         BscPaymentReceiver::observe(StorefrontCacheInvalidationObserver::class);
+        Order::observe(StorefrontCacheInvalidationObserver::class);
+        OrderItem::observe(StorefrontCacheInvalidationObserver::class);
         ProductQuantityPriceTier::observe(StorefrontCacheInvalidationObserver::class);
         StorefrontSetting::observe(StorefrontCacheInvalidationObserver::class);
 

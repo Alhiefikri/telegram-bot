@@ -29,6 +29,7 @@ class TelegramKlikQrisRecoveryEscalator
         private TelegramBotClient $bot,
         private TelegramAdminAccess $adminAccess,
         private KlikQrisNativeQrisService $nativeQris,
+        private TelegramUiIcons $uiIcons,
     ) {}
 
     /**
@@ -78,19 +79,19 @@ class TelegramKlikQrisRecoveryEscalator
         $outcome = $alert->outcome();
 
         $lines = [
-            '⚠️ KlikQRIS butuh keputusan owner',
+            $this->uiIcons->renderLegacyIcons('⚠️ KlikQRIS butuh keputusan owner'),
             '━━━━━━━━━━━━━━',
-            '🧾 Invoice: '.($payment->order?->invoice_number ?? '-'),
-            '💰 Tagihan: '.Money::rupiah($payment->amount),
-            '📌 Kondisi: '.$this->outcomeLabel($outcome),
+            $this->uiIcons->renderLegacyIcons('🧾 Invoice: ').($payment->order?->invoice_number ?? '-'),
+            $this->uiIcons->renderLegacyIcons('💰 Tagihan: ').Money::rupiah($payment->amount),
+            $this->uiIcons->renderLegacyIcons('📌 Kondisi: ').$this->outcomeLabel($outcome),
         ];
 
         if ($alert->reason() !== null) {
-            $lines[] = '🔎 Detail: '.$this->reasonLabel($alert->reason());
+            $lines[] = $this->uiIcons->renderLegacyIcons('🔎 Detail: ').$this->reasonLabel($alert->reason());
         }
 
         if ($outcome === KlikQrisNativeQrisOutcome::RecoveryPending) {
-            $lines[] = '🔁 Percobaan pemulihan: '.$alert->observations().'x, batas '.$alert->retryBudget().'x';
+            $lines[] = $this->uiIcons->renderLegacyIcons('🔁 Percobaan pemulihan: ').$alert->observations().'x, batas '.$alert->retryBudget().'x';
         }
 
         $lines[] = '';

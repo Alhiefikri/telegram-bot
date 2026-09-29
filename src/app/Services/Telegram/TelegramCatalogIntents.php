@@ -37,7 +37,7 @@ class TelegramCatalogIntents
         private TelegramIntentSession $session,
         private CheckoutMaintenance $maintenance,
         private CatalogBrowse $browse,
-        private ProductBrandIconResolver $icons,
+        private CatalogIconResolver $icons,
         private TelegramCatalogQuerySession $catalogQueries,
         private TelegramFamilyCallbackToken $familyTokens,
         private TelegramHtmlCaption $captions,
@@ -45,6 +45,7 @@ class TelegramCatalogIntents
         private ProductImageOptimizer $images,
         private ProductQuantityPricing $pricing,
         private TelegramCatalogProjectionCache $projectionCache,
+        private TelegramUiIcons $uiIcons,
     ) {}
 
     public function sendCategoryCatalog(
@@ -114,7 +115,7 @@ class TelegramCatalogIntents
         $options = $this->cachedCategoryOptions();
         $keyboard = collect($options->categories)
             ->map(fn (CatalogCategoryReadModel $category): array => [[
-                'text' => '📂 '.$category->name,
+                'text' => $this->uiIcons->renderLegacyIcons('📂 ').$category->name,
                 'callback_data' => 'category:'.$category->id,
             ]])
             ->values()
@@ -156,12 +157,12 @@ class TelegramCatalogIntents
         $page = min(max(1, $page), $lastPage);
         $returnPage = max(1, $returnPage);
         $pageMembers = $members->forPage($page, self::PRODUCTS_PER_PAGE)->values();
-        $familyIcon = $this->familyIcon($family)->glyph;
+        $familyIcon = $this->familyIcon($family);
         $totalSold = $members->sum(fn (CatalogProductReadModel $member): int => $member->soldQuantity);
         $lines = [
-            $this->escapeHtml($this->locale->translate($customer, 'catalog.family.options_title', [
-                'icon' => $familyIcon,
-                'name' => $family->name,
+            trim($this->locale->translate($customer, 'catalog.family.options_title', [
+                'icon' => $this->captions->icon($familyIcon),
+                'name' => $this->escapeHtml($family->name),
             ])),
             '━━━━━━━━━━━━━━',
             $this->escapeHtml($this->locale->translate($customer, 'catalog.family.sold_total', ['sold' => $totalSold])),
@@ -176,7 +177,7 @@ class TelegramCatalogIntents
         $lines[] = '';
         foreach ($pageMembers as $index => $member) {
             $number = $index + 1;
-            $lines[] = $this->familyOptionBlock($customer, $member, $number);
+            $lines[] = $this->familyOptionBlock($customer, $member, $number, $familyIcon);
             if ($index < $pageMembers->count() - 1) {
                 $lines[] = '';
             }
@@ -188,8 +189,8 @@ class TelegramCatalogIntents
         }
         $stateToken = $this->catalogQueries->familyState($customer)['token'] ?? null;
         $optionButtons = $pageMembers
-            ->map(function (CatalogProductReadModel $member, int $index) use ($family, $page, $returnPage): array {
-                $label = $this->iconButton($member->name, (string) ($index + 1), $member->icon);
+            ->map(function (CatalogProductReadModel $member, int $index) use ($family, $familyIcon, $page, $returnPage): array {
+                $label = $this->iconButton($member, (string) ($index + 1), $familyIcon);
                 if (! $member->isAvailable) {
                     // A disabled button is its own button type, so it carries no
                     // callback data and Telegram renders it inert.
@@ -411,6 +412,21 @@ class TelegramCatalogIntents
      */
     public function sendProductDetail(Customer $customer, string $chatId, Product $product, ?array $navigation = null, ?int $messageId = null): void
     {
+        if ($navigation === null) {
+            $navigation = $this->familyNavigationFromProduct($product);
+            if ($navigation !== []) {
+                // The plan list of a directly opened Product is reachable through
+                // its stateless back button, so the family query state has to be
+                // current for that callback to validate.
+                $this->catalogQueries->putFamily(
+                    $customer,
+                    $navigation['familyId'],
+                    $navigation['familyPage'],
+                    $navigation['familyListPage'],
+                );
+            }
+        }
+
         $availableStock = max(0, $product->availableStock());
         if ($availableStock < 1) {
             $this->session->forget($customer);
@@ -516,9 +532,9 @@ class TelegramCatalogIntents
                     'style' => 'primary',
                 ]];
                 $keyboard[] = [[
-                    'text' => $this->locale->translate($customer, 'catalog.detail.pay_balance', [
+                    ...$this->uiIcons->apply('menu.balance', $this->locale->translate($customer, 'catalog.detail.pay_balance', [
                         'amount' => number_format($quote->idrSubtotal, 0, ',', '.'),
-                    ]),
+                    ])),
                     'callback_data' => 'detail:pay:balance:'.$productId.':'.$token,
                 ]];
                 if ($binanceAvailable) {
@@ -553,8 +569,9 @@ class TelegramCatalogIntents
 
         $baseIdr = $quote?->baseIdrUnitAmount ?? (int) $product->price_amount;
         $showUsdtPricing = $binanceAvailable && $quote?->baseUsdtUnitAmount !== null;
+        $detailIcon = $this->detailIcon($product);
         $lines = [
-            $this->escapeHtml($this->catalogIcon($product->name, $product->icon)->glyph.' '.$product->name),
+            $this->captions->icon($detailIcon).' '.$this->escapeHtml($product->name),
             '',
             $this->locale->translate(
                 $customer,
@@ -970,6 +987,7 @@ class TelegramCatalogIntents
         bool $removeLegacyReplyKeyboard = false,
     ): void {
         $maintenance = $this->maintenance->current();
+        $html = $mode !== 'catalog';
         $title = $this->locale->translate(
             $customer,
             $titleKey,
@@ -979,23 +997,26 @@ class TelegramCatalogIntents
             $title .= $search;
         }
         $pagination = $result->pagination;
-        $lines = [$title];
+        $lines = [$html ? $this->escapeHtml($title) : $title];
         if ($categoryTitle !== null) {
-            $lines[] = $this->locale->translate($customer, 'catalog.category.label').$categoryTitle;
+            $categoryLabel = $this->locale->translate($customer, 'catalog.category.label').$categoryTitle;
+            $lines[] = $html ? $this->escapeHtml($categoryLabel) : $categoryLabel;
         }
         if ($pagination->hasPages()) {
-            $lines[] = $this->locale->translate($customer, 'catalog.family.page', [
+            $pageLine = $this->locale->translate($customer, 'catalog.family.page', [
                 'page' => $pagination->currentPage,
                 'pages' => $pagination->lastPage,
             ]);
+            $lines[] = $html ? $this->escapeHtml($pageLine) : $pageLine;
         }
         if ($categoryDescription !== null && trim($categoryDescription) !== '') {
             $lines[] = '';
-            $lines[] = $categoryDescription;
+            $lines[] = $html ? $this->escapeHtml($categoryDescription) : $categoryDescription;
         }
         if ($maintenance->active && $result->entries !== []) {
             $lines[] = '';
-            $lines[] = $this->maintenanceNotice($customer, $maintenance);
+            $notice = $this->maintenanceNotice($customer, $maintenance);
+            $lines[] = $html ? $this->escapeHtml($notice) : $notice;
         }
 
         if ($result->entries === []) {
@@ -1025,7 +1046,7 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->translate($customer, 'catalog.family.choose');
         } else {
             $lines[] = '';
-            $lines[] = $this->locale->translate($customer, 'catalog.category.choose_product');
+            $lines[] = $this->escapeHtml($this->locale->translate($customer, 'catalog.category.choose_product'));
             foreach ($result->entries as $index => $entry) {
                 $lines[] = '';
                 $lines[] = $this->entryBlock($customer, $entry, $index + 1);
@@ -1034,7 +1055,7 @@ class TelegramCatalogIntents
 
         if ($mode === 'search' && $pagination->hasPages()) {
             $lines[] = '';
-            $lines[] = $this->locale->translate($customer, 'search.more');
+            $lines[] = $this->escapeHtml($this->locale->translate($customer, 'search.more'));
         }
 
         $keyboard = $this->entryKeyboard($customer, $result->entries, $pagination->currentPage, $originToken, $mode);
@@ -1064,6 +1085,7 @@ class TelegramCatalogIntents
             implode("\n", $lines),
             ['inline_keyboard' => $keyboard],
             $messageId,
+            options: $html ? ['parse_mode' => 'HTML'] : [],
             establishFreshRoot: $establishFreshRoot,
             removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
         );
@@ -1148,17 +1170,19 @@ class TelegramCatalogIntents
                         $callback .= ':o'.$originToken;
                     }
                 }
-                $icon = $this->familyIcon($family);
+                $icon = $singleOption instanceof CatalogProductReadModel
+                    ? $this->catalogIcon($singleOption)
+                    : $this->familyIcon($family);
                 $buttons[] = [
                     'text' => $mode === 'catalog'
-                        ? $icon->buttonText($family->name.$this->familyAvailabilitySuffix($customer, $family))
+                        ? $icon->buttonText(($singleOption instanceof CatalogProductReadModel ? $singleOption->name : $family->name).$this->familyAvailabilitySuffix($customer, $family))
                         : $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
                     ...($mode === 'catalog' ? $icon->buttonFields() : []),
                     'callback_data' => $callback,
                     'style' => $family->isAvailable ? 'primary' : 'danger',
                 ];
             } elseif ($product !== null) {
-                $icon = $this->catalogIcon($product->name, $product->icon);
+                $icon = $this->catalogIcon($product);
                 $buttons[] = [
                     'text' => $mode === 'catalog'
                         ? $icon->buttonText($product->name.' · '.$this->productAvailabilityLabel(
@@ -1181,26 +1205,30 @@ class TelegramCatalogIntents
     {
         if ($entry->family !== null) {
             $family = $entry->family;
+            $singleOption = $family->optionCount === 1 ? ($family->members[0] ?? null) : null;
+            $icon = $singleOption instanceof CatalogProductReadModel
+                ? $this->catalogIcon($singleOption)
+                : $this->familyIcon($family);
 
-            return $this->locale->translate($customer, 'catalog.family.list_item', [
-                'number' => sprintf('%02d.', $number),
-                'icon' => $this->familyIcon($family)->glyph,
-                'name' => $family->name,
-                'availability' => $this->familyAvailabilitySuffix($customer, $family),
-            ]);
+            return trim($this->locale->translate($customer, 'catalog.family.list_item', [
+                'number' => $this->escapeHtml(sprintf('%02d.', $number)),
+                'icon' => $this->captions->icon($icon),
+                'name' => $this->escapeHtml($singleOption instanceof CatalogProductReadModel ? $singleOption->name : $family->name),
+                'availability' => $this->escapeHtml($this->familyAvailabilitySuffix($customer, $family)),
+            ]));
         }
 
         $product = $entry->product;
         if ($product === null) {
             return $number.'.';
         }
-        $icon = $this->catalogIcon($product->name, $product->icon)->glyph;
+        $icon = $this->catalogIcon($product);
 
-        return $number.'. '.$icon.' '.$product->name."\n"
-            .$this->locale->translate($customer, 'catalog.family.standalone_summary', [
+        return $number.'. '.$this->captions->icon($icon).' '.$this->escapeHtml($product->name)."\n"
+            .$this->escapeHtml($this->locale->translate($customer, 'catalog.family.standalone_summary', [
                 'price' => number_format($product->priceAmount, 0, ',', '.'),
                 'stock' => $product->availableStock,
-            ]);
+            ]));
     }
 
     private function familyAvailabilitySuffix(Customer $customer, CatalogFamilyReadModel $family): string
@@ -1230,10 +1258,10 @@ class TelegramCatalogIntents
         );
     }
 
-    private function familyOptionBlock(Customer $customer, CatalogProductReadModel $member, int $number): string
+    private function familyOptionBlock(Customer $customer, CatalogProductReadModel $member, int $number, CatalogIcon $icon): string
     {
         $lines = [
-            sprintf('%02d. %s %s', $number, $this->catalogIcon($member->name, $member->icon)->glyph, $member->label),
+            sprintf('%02d. %s %s', $number, $this->captions->icon($icon), $this->escapeHtml($member->label)),
             $this->locale->translate($customer, 'catalog.family.option_price', [
                 'amount' => number_format($member->priceAmount, 0, ',', '.'),
             ]),
@@ -1252,7 +1280,7 @@ class TelegramCatalogIntents
             'sold' => $member->soldQuantity,
         ]);
 
-        return '<blockquote>'.$this->escapeHtml(implode("\n", $lines)).'</blockquote>';
+        return '<blockquote>'.implode("\n", $lines).'</blockquote>';
     }
 
     private function safeQuote(Product $product, int $quantity): ?ProductPriceQuote
@@ -1287,39 +1315,115 @@ class TelegramCatalogIntents
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
-    private function catalogIcon(string $name, ?string $configuredIcon = null): CatalogIcon
+    private function catalogIcon(CatalogProductReadModel $product): CatalogIcon
     {
-        return $this->icons->resolve($name, $configuredIcon);
+        return $this->icons->resolve($product->icon, $product->customEmojiId);
     }
 
+    /**
+     * The detail header follows the family icon when this Product has no captured
+     * custom emoji of its own, so the icon the catalog showed for the family is
+     * the one the customer keeps seeing after opening the detail.
+     */
+    private function detailIcon(Product $product): CatalogIcon
+    {
+        $icon = $this->icons->resolve($product->icon, $product->custom_emoji_id);
+        if ($icon->hasCustomEmoji()) {
+            return $icon;
+        }
+
+        $familyId = $product->product_family_id;
+        if ($familyId === null) {
+            return $icon;
+        }
+
+        $member = Product::query()
+            ->where('product_family_id', $familyId)
+            ->whereNotNull('custom_emoji_id')
+            ->where('custom_emoji_id', '!=', '')
+            ->orderBy('family_sort_order')
+            ->orderBy('id')
+            ->first(['icon', 'custom_emoji_id']);
+
+        if (! $member instanceof Product) {
+            return $icon;
+        }
+
+        $familyIcon = $this->icons->resolve($member->icon, $member->custom_emoji_id);
+
+        return $familyIcon->hasCustomEmoji() ? $familyIcon : $icon;
+    }
+
+    /**
+     * One icon for the whole family. A member with a captured custom emoji owns
+     * the family icon together with the plain glyph that capture stored, so the
+     * family and all of its variants follow the icon the owner set in the bot;
+     * otherwise the first plain glyph among the members is used.
+     */
     private function familyIcon(CatalogFamilyReadModel $family): CatalogIcon
     {
-        return $this->catalogIcon($family->name, $this->familyIconOverride($family));
-    }
-
-    private function familyIconOverride(CatalogFamilyReadModel $family): ?string
-    {
+        $glyph = null;
         foreach ($family->members as $member) {
             if (! $member instanceof CatalogProductReadModel) {
                 continue;
             }
-            $icon = trim((string) $member->icon);
-            if ($icon !== '') {
-                return $icon;
+            if (trim((string) $member->customEmojiId) !== '') {
+                return $this->icons->resolve($member->icon, $member->customEmojiId);
+            }
+            if ($glyph === null && trim((string) $member->icon) !== '') {
+                $glyph = $member->icon;
             }
         }
 
-        return null;
+        return $this->icons->resolve($glyph);
     }
 
     /**
+     * A family plan row always carries the family icon so every variant of one
+     * family reads as the same product; the variant's own icon only applies
+     * outside a family.
+     *
      * @return array<string, string>
      */
-    private function iconButton(string $name, string $label, ?string $configuredIcon = null): array
+    private function iconButton(CatalogProductReadModel $product, string $label, ?CatalogIcon $icon = null): array
     {
-        $icon = $this->catalogIcon($name, $configuredIcon);
+        $icon ??= $this->catalogIcon($product);
 
         return ['text' => $icon->buttonText($label), ...$icon->buttonFields()];
+    }
+
+    /**
+     * Family navigation for a Product opened without an explicit origin: a
+     * Product that belongs to a public family returns to that family's plan
+     * list instead of the category product list.
+     *
+     * @return array{familyId?: int, familyPage?: int, familyListPage?: int}
+     */
+    private function familyNavigationFromProduct(Product $product): array
+    {
+        $familyId = $product->product_family_id === null ? 0 : (int) $product->product_family_id;
+        if ($familyId < 1) {
+            return [];
+        }
+
+        try {
+            $family = $this->browse->showPublicFamily($familyId);
+        } catch (ModelNotFoundException) {
+            return [];
+        }
+
+        // A family with a single public Plan keeps opening that Product Detail
+        // directly, so it has no plan list to return to.
+        if (count($family->members) < 2) {
+            return [];
+        }
+
+        $index = collect($family->members)->search(
+            fn (CatalogProductReadModel $member): bool => $member->id === (int) $product->getKey(),
+        );
+        $page = is_int($index) ? intdiv($index, self::PRODUCTS_PER_PAGE) + 1 : 1;
+
+        return ['familyId' => $familyId, 'familyPage' => $page, 'familyListPage' => 1];
     }
 
     private function familyOptionsCallbackData(

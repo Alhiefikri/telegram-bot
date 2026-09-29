@@ -42,6 +42,7 @@ use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use App\Services\Telegram\TelegramReceiptPlan;
 use App\Services\Telegram\TelegramSupportContact;
+use App\Services\Telegram\TelegramUiIcons;
 use App\Support\PaymentProvider;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
@@ -1234,6 +1235,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             app(PaidInvoiceRenderer::class),
             app(PaidInvoiceOrderPresentationAdapter::class),
             app(TelegramOutboundEffectLedgerProtocol::class),
+            app(TelegramUiIcons::class),
         ])->makePartial();
         $notifier->shouldReceive('renderInvoiceUnit')
             ->andThrow(new TelegramOutboundPreSendException('deterministic invoice image failure'));
@@ -1283,6 +1285,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             app(PaidInvoiceRenderer::class),
             app(PaidInvoiceOrderPresentationAdapter::class),
             app(TelegramOutboundEffectLedgerProtocol::class),
+            app(TelegramUiIcons::class),
         ])->makePartial();
         $notifier->shouldReceive('renderInvoiceUnit')
             ->andThrow(new TelegramOutboundPreSendException('Telegram paid invoice rendering failed before send.'));
@@ -1589,6 +1592,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             app(PaidInvoiceRenderer::class),
             app(PaidInvoiceOrderPresentationAdapter::class),
             app(TelegramOutboundEffectLedgerProtocol::class),
+            app(TelegramUiIcons::class),
         ])->makePartial();
         $notifier->shouldReceive('receiptPlan')
             ->once()

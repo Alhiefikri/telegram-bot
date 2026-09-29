@@ -30,6 +30,7 @@ class TelegramReceiptNotifier
         private PaidInvoiceRenderer $invoiceRenderer,
         private PaidInvoiceOrderPresentationAdapter $invoicePresentation,
         private TelegramOutboundEffectLedgerProtocol $ledger,
+        private TelegramUiIcons $uiIcons,
     ) {}
 
     /**
@@ -361,7 +362,7 @@ class TelegramReceiptNotifier
             $lines[] = $this->locale->translate($customer, 'receipt.save_details');
             foreach ($guides as $guide) {
                 $lines[] = '';
-                $lines[] = '📘 '.$guide['title'];
+                $lines[] = $this->uiIcons->renderLegacyIcons('📘 ').$guide['title'];
                 $lines[] = $guide['url'];
             }
             $lines[] = '';
@@ -519,7 +520,7 @@ class TelegramReceiptNotifier
         ];
         foreach ($guides as $guide) {
             $footerLines[] = '';
-            $footerLines[] = '📘 '.$guide['title'];
+            $footerLines[] = $this->uiIcons->renderLegacyIcons('📘 ').$guide['title'];
             $footerLines[] = $guide['url'];
         }
         $footerLines[] = '';

@@ -11,7 +11,7 @@ final class TelegramCatalogProjectionCache
 
     private const TTL_MINUTES = 30;
 
-    private const DESIGN_VERSION = 1;
+    private const DESIGN_VERSION = 3;
 
     /**
      * Cache raw arrays, not read models: a cache store unserializes with

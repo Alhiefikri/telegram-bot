@@ -27,6 +27,7 @@ final class BalanceTopUpOwnerAlertDeliveryPipeline
         private readonly TelegramOutboundEffectLedgerProtocol $ledger,
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramBotClient $bot,
+        private readonly TelegramUiIcons $uiIcons,
     ) {}
 
     public function deliver(string $topUpId, ?string $effectId = null): void
@@ -125,17 +126,17 @@ final class BalanceTopUpOwnerAlertDeliveryPipeline
     {
         $status = $topUp->status?->value ?? (string) $topUp->getRawOriginal('status');
         $lines = [
-            '⚠️ Top-up saldo butuh keputusan owner',
+            $this->uiIcons->renderLegacyIcons('⚠️ Top-up saldo butuh keputusan owner'),
             '━━━━━━━━━━━━━━',
-            '🧾 Top-up: #'.$topUp->getKey(),
-            '👤 Customer: '.$this->customerLabel($topUp->customer),
-            '💰 Nominal: '.Money::idr($topUp->amount),
-            '📌 Kondisi: '.(self::STATUS_LABELS[$status] ?? $status),
+            $this->uiIcons->renderLegacyIcons('🧾 Top-up: ').'#'.$topUp->getKey(),
+            $this->uiIcons->renderLegacyIcons('👤 Customer: ').$this->customerLabel($topUp->customer),
+            $this->uiIcons->renderLegacyIcons('💰 Nominal: ').Money::idr($topUp->amount),
+            $this->uiIcons->renderLegacyIcons('📌 Kondisi: ').(self::STATUS_LABELS[$status] ?? $status),
         ];
 
         $detail = trim((string) $topUp->provider_create_last_error);
         if ($detail !== '') {
-            $lines[] = '🔎 Detail: '.mb_strimwidth(
+            $lines[] = $this->uiIcons->renderLegacyIcons('🔎 Detail: ').mb_strimwidth(
                 TelegramBotApiRedactor::redactText($detail),
                 0,
                 240,

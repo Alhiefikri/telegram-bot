@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted - 2026-09-26
+Superseded by [ADR-0015](0015-product-catalog-icons-from-telegram-custom-emoji.md) on 2026-09-28 (was Accepted - 2026-09-26).
 
 ## Decision
 

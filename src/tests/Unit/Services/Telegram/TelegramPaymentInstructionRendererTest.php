@@ -16,6 +16,7 @@ use App\Services\Telegram\TelegramPaymentInstruction;
 use App\Services\Telegram\TelegramPaymentInstructionRenderer;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 use App\Services\Telegram\TelegramTranslationCatalog;
+use App\Services\Telegram\TelegramUiIcons;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -339,7 +340,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         });
         $renderer = new TelegramPaymentInstructionRenderer(
             $this->qrCodes,
-            new TelegramTranslationCatalog($translator),
+            new TelegramTranslationCatalog($translator, app(TelegramUiIcons::class)),
         );
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-08-04 16:30:00', 'Asia/Jakarta'));
 

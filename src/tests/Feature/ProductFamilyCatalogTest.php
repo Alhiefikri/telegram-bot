@@ -20,6 +20,7 @@ use App\Models\ProductWaitlistSubscription;
 use App\Models\User;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\ProductWaitlistEmailHasher;
+use App\Services\Telegram\TelegramCatalogProjectionCache;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
@@ -87,6 +88,29 @@ class ProductFamilyCatalogTest extends TestCase
         $this->assertGreaterThan($afterFamily, (int) Cache::get('storefront.response.version'));
     }
 
+    public function test_committed_paid_sales_changes_invalidate_the_public_catalog_projection(): void
+    {
+        $product = Product::factory()->create(['name' => 'Cached Popular Product']);
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Failed,
+        ]);
+        $cache = app(TelegramCatalogProjectionCache::class);
+        $cache->remember('browse', ['page' => 1], static fn (): array => ['entries' => []]);
+        $version = (int) Cache::get('telegram.catalog.projection.version');
+
+        $order->forceFill(['payment_status' => PaymentStatus::Paid])->save();
+        $afterPayment = (int) Cache::get('telegram.catalog.projection.version');
+        $this->assertGreaterThan($version, $afterPayment);
+
+        OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'quantity' => 3,
+        ]);
+        $this->assertGreaterThan($afterPayment, (int) Cache::get('telegram.catalog.projection.version'));
+    }
+
     public function test_public_catalog_collapses_family_members_and_keeps_a_sold_out_family_visible(): void
     {
         $category = Category::factory()->create(['name' => 'Streaming', 'slug' => 'streaming']);
@@ -151,6 +175,54 @@ class ProductFamilyCatalogTest extends TestCase
         $soldOutFamily = app(CatalogBrowse::class)->browsePublic(new CatalogBrowseQuery(perPage: 20))->families[0];
         $this->assertFalse($soldOutFamily->isAvailable);
         $this->assertSame(2, $soldOutFamily->soldOutOptionCount);
+    }
+
+    public function test_public_family_catalog_orders_families_by_total_paid_units_sold(): void
+    {
+        $mostSold = ProductFamily::factory()->create(['name' => 'Most Sold Family', 'slug' => 'most-sold', 'sort_order' => 30]);
+        $middleSold = ProductFamily::factory()->create(['name' => 'Middle Sold Family', 'slug' => 'middle-sold', 'sort_order' => 20]);
+        $leastSold = ProductFamily::factory()->create(['name' => 'Least Sold Family', 'slug' => 'least-sold', 'sort_order' => 10]);
+        $createProduct = static fn (ProductFamily $family, string $name, int $order, int $stock = 10): Product => Product::factory()->create([
+            'name' => $name,
+            'product_family_id' => $family->id,
+            'family_sort_order' => $order,
+            'stock' => $stock,
+            'reserved_stock' => 0,
+        ]);
+        $mostSoldFirst = $createProduct($mostSold, 'Most Sold First Plan', 1, 0);
+        $mostSoldSecond = $createProduct($mostSold, 'Most Sold Second Plan', 2, 0);
+        $middleSoldProduct = $createProduct($middleSold, 'Middle Sold Plan', 1);
+        $leastSoldProduct = $createProduct($leastSold, 'Least Sold Plan', 1);
+
+        $completedPaidOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $processingPaidOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $failedOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Failed,
+        ]);
+        OrderItem::factory()->create(['order_id' => $completedPaidOrder->id, 'product_id' => $mostSoldFirst->id, 'quantity' => 2]);
+        OrderItem::factory()->create(['order_id' => $processingPaidOrder->id, 'product_id' => $mostSoldSecond->id, 'quantity' => 2]);
+        OrderItem::factory()->create(['order_id' => $completedPaidOrder->id, 'product_id' => $middleSoldProduct->id, 'quantity' => 3]);
+        OrderItem::factory()->create(['order_id' => $processingPaidOrder->id, 'product_id' => $leastSoldProduct->id, 'quantity' => 1]);
+        OrderItem::factory()->create(['order_id' => $failedOrder->id, 'product_id' => $leastSoldProduct->id, 'quantity' => 100]);
+
+        $firstPage = app(CatalogBrowse::class)->browsePublic(new CatalogBrowseQuery(page: 1, perPage: 2));
+        $secondPage = app(CatalogBrowse::class)->browsePublic(new CatalogBrowseQuery(page: 2, perPage: 2));
+
+        $this->assertSame(
+            ['Most Sold Family', 'Middle Sold Family'],
+            array_map(static fn ($entry): string => $entry->family?->name ?? '', $firstPage->entries),
+        );
+        $this->assertSame(
+            ['Least Sold Family'],
+            array_map(static fn ($entry): string => $entry->family?->name ?? '', $secondPage->entries),
+        );
     }
 
     public function test_whitespace_only_option_label_falls_back_to_product_name_in_shared_read_models(): void

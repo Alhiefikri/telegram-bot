@@ -15,8 +15,10 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\StoreBalanceEntry;
 use App\Models\TelegramOutboundEffect;
+use App\Models\TelegramUiIcon;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramIntentSession;
 use Illuminate\Database\Events\QueryExecuted;
@@ -27,6 +29,98 @@ use Tests\Support\TelegramBotTestSupport;
 
 class ProductDetailPurchaseTest extends TelegramBotTestSupport
 {
+    public function test_detail_header_follows_the_family_icon_when_the_plan_has_none(): void
+    {
+        $this->fakeTelegramHttp();
+        $family = ProductFamily::factory()->create(['name' => 'Icon Family', 'slug' => 'icon-family']);
+        Product::factory()->create([
+            'name' => 'Icon Family Plan A',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'icon' => '🎬',
+            'custom_emoji_id' => '5368324170671202286',
+            'price_amount' => 10000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 318012, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'Icon Family Plan B',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'icon' => '🤖',
+            'custom_emoji_id' => null,
+            'price_amount' => 10000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+
+        $detail = $this->lastDetailMessage('Icon Family Plan B');
+        $this->assertStringContainsString(
+            '<tg-emoji emoji-id="5368324170671202286">',
+            (string) $detail['text'],
+            'Header detail memakai ikon family saat plan-nya belum punya emoji premium.',
+        );
+    }
+
+    public function test_back_button_follows_the_captured_menu_icon(): void
+    {
+        $this->fakeTelegramHttp();
+        TelegramUiIcon::query()->where('key', 'menu.back')->sole()->update([
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 318013, 'locale' => 'id']);
+        $product = Product::factory()->create([
+            'name' => 'Back Icon Product',
+            'price_amount' => 10000,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+
+        $keyboard = $this->lastDetailMessage('Back Icon Product')['reply_markup']['inline_keyboard'];
+        $back = collect($keyboard)->flatten(1)->first(
+            fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:back:'),
+        );
+
+        $this->assertNotNull($back, 'Detail harus menampilkan tombol kembali.');
+        $this->assertSame('Kembali ke Produk', $back['text']);
+        $this->assertSame('5368324170671202286', $back['icon_custom_emoji_id'] ?? null);
+    }
+
+    public function test_balance_button_previews_the_captured_menu_icon(): void
+    {
+        $this->fakeTelegramHttp();
+        TelegramUiIcon::query()->where('key', 'menu.balance')->sole()->update([
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 318009, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'Balance Icon Product',
+            'price_amount' => 10000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+
+        $keyboard = $this->lastDetailMessage('Balance Icon Product')['reply_markup']['inline_keyboard'];
+        $balance = collect($keyboard)->flatten(1)->first(
+            fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:pay:balance:'),
+        );
+
+        $this->assertNotNull($balance, 'Detail harus menampilkan tombol Saldo.');
+        $this->assertSame('Balance · Rp10.000', $balance['text']);
+        $this->assertSame('5368324170671202286', $balance['icon_custom_emoji_id'] ?? null);
+    }
+
     public function test_product_detail_has_isolated_quantity_and_payment_rows_and_rotates_stale_controls(): void
     {
         $this->fakeTelegramHttp();

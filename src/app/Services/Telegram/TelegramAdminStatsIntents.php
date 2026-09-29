@@ -16,6 +16,7 @@ class TelegramAdminStatsIntents
         private readonly TelegramBotClient $bot,
         private readonly TelegramStoreStatsReport $statsReport,
         private readonly TelegramMessageChunker $messageChunker,
+        private readonly TelegramUiIcons $uiIcons,
     ) {}
 
     public function showProductStock(string $chatId): void
@@ -29,15 +30,15 @@ class TelegramAdminStatsIntents
             ->values();
 
         if ($products->isEmpty()) {
-            $this->bot->sendMessage($chatId, "📦 Stok Produk\n━━━━━━━━━━━━━━\nBelum ada produk aktif.");
+            $this->bot->sendMessage($chatId, $this->uiIcons->renderLegacyIcons("📦 Stok Produk\n━━━━━━━━━━━━━━\nBelum ada produk aktif."));
 
             return;
         }
 
-        $lines = ['📦 Stok Produk', '━━━━━━━━━━━━━━'];
+        $lines = [$this->uiIcons->renderLegacyIcons('📦 Stok Produk'), '━━━━━━━━━━━━━━'];
         foreach ($products as $product) {
             $available = $product->availableStock();
-            $icon = $available <= 0 ? '❌' : ($available <= 2 ? '⚠️' : '✅');
+            $icon = $this->uiIcons->renderLegacyIcons($available <= 0 ? '❌' : ($available <= 2 ? '⚠️' : '✅'));
             $line = $icon.' '.$product->name.': '.($available > 0 ? $available : 'habis');
             if ($product->reserved_stock > 0) {
                 $line .= ' ('.$product->reserved_stock.' direservasi)';
@@ -68,7 +69,7 @@ class TelegramAdminStatsIntents
 
     public function sendAutomatedDailyStats(string $chatId): void
     {
-        $this->sendStats($chatId, $this->calculateYesterdayStats(), '📊 Rekap Kemarin');
+        $this->sendStats($chatId, $this->calculateYesterdayStats(), $this->uiIcons->renderLegacyIcons('📊 Rekap Kemarin'));
     }
 
     /**
@@ -81,7 +82,7 @@ class TelegramAdminStatsIntents
 
     public function sendDashboardLink(string $chatId): void
     {
-        $adminDashboardButton = $this->adminDashboardInlineButton('🌐 Buka Dashboard');
+        $adminDashboardButton = $this->adminDashboardInlineButton($this->uiIcons->renderLegacyIcons('🌐 Buka Dashboard'));
         if ($adminDashboardButton === null) {
             $this->bot->sendMessage($chatId, 'Dashboard admin belum punya URL HTTPS publik yang valid.');
 
@@ -96,7 +97,7 @@ class TelegramAdminStatsIntents
     private function sendMessageWithDashboard(string $chatId, string $message): void
     {
         $keyboard = [];
-        $adminDashboardButton = $this->adminDashboardInlineButton('🌐 Mini App Dashboard');
+        $adminDashboardButton = $this->adminDashboardInlineButton($this->uiIcons->renderLegacyIcons('🌐 Mini App Dashboard'));
         if ($adminDashboardButton !== null) {
             $keyboard[] = [$adminDashboardButton];
         }
@@ -128,7 +129,7 @@ class TelegramAdminStatsIntents
     private function formatMessage(array $stats, string $title): string
     {
         $lines = [
-            $title,
+            $this->uiIcons->renderLegacyIcons($title),
             '━━━━━━━━━━━━━━',
             'Order Baru: '.$stats['new_orders'],
             'Order Dibayar: '.$stats['paid_orders'],
@@ -149,15 +150,15 @@ class TelegramAdminStatsIntents
     {
         $reportEnd = $report['report_end_at']->copy()->timezone('Asia/Jakarta');
         $lines = [
-            '📊 Pertumbuhan Store',
+            $this->uiIcons->renderLegacyIcons('📊 Pertumbuhan Store'),
             '━━━━━━━━━━━━━━',
             'Diperbarui '.$reportEnd->format('d M Y H:i').' WIB',
         ];
 
         foreach ([
-            'today' => '☀️ Hari Ini',
-            'week' => '🗓 Minggu Ini',
-            'month' => '📅 Bulan Ini',
+            'today' => $this->uiIcons->renderLegacyIcons('☀️ Hari Ini'),
+            'week' => $this->uiIcons->renderLegacyIcons('🗓 Minggu Ini'),
+            'month' => $this->uiIcons->renderLegacyIcons('📅 Bulan Ini'),
         ] as $periodKey => $title) {
             $period = $report['periods'][$periodKey];
             $current = $period['current'];
@@ -179,17 +180,19 @@ class TelegramAdminStatsIntents
     private function changeIndicator(int $current, int $previous): string
     {
         if ($previous === 0) {
-            return $current === 0 ? '➖ 0%' : '📈 Baru';
+            return $current === 0 ? $this->uiIcons->renderLegacyIcons('➖').' 0%' : $this->uiIcons->renderLegacyIcons('📈').' Baru';
         }
 
         $percentage = (($current - $previous) / $previous) * 100;
         if (abs($percentage) < 0.05) {
-            return '➖ 0%';
+            return $this->uiIcons->renderLegacyIcons('➖').' 0%';
         }
 
         $formatted = number_format(abs($percentage), fmod(abs($percentage), 1.0) === 0.0 ? 0 : 1, ',', '.');
 
-        return $percentage > 0 ? '📈 +'.$formatted.'%' : '📉 -'.$formatted.'%';
+        return $percentage > 0
+            ? $this->uiIcons->renderLegacyIcons('📈').' +'.$formatted.'%'
+            : $this->uiIcons->renderLegacyIcons('📉').' -'.$formatted.'%';
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Storefront;
 
 use App\Catalog\CatalogFamilyReadModel;
+use App\Catalog\CatalogProductReadModel;
 
 final readonly class StorefrontCatalogFamily
 {
@@ -19,12 +20,16 @@ final readonly class StorefrontCatalogFamily
         public ?int $minimumUsdtPriceAmount,
         public bool $isAvailable,
         public string $familyUrl,
+        public string $displayName,
     ) {}
 
     public static function fromReadModel(CatalogFamilyReadModel $family, string $familyUrl, ?string $fallbackImageUrl = null): self
     {
+        $singleOption = $family->optionCount === 1 ? ($family->members[0] ?? null) : null;
+
         return new self(
             id: $family->id,
+            displayName: $singleOption instanceof CatalogProductReadModel ? $singleOption->name : $family->name,
             name: $family->name,
             slug: $family->slug,
             description: $family->description,

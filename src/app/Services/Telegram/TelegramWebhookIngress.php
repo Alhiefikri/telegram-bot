@@ -126,7 +126,7 @@ class TelegramWebhookIngress
 
     /**
      * Custom emoji are the one inbound entity the bot acts on: the Store Bot
-     * reads them to capture a brand icon identifier. Every other entity is
+     * reads them to capture a catalog icon identifier. Every other entity is
      * dropped, so the stored payload stays as small as the rest of minimize.
      *
      * @return list<array{type: string, custom_emoji_id: string}>

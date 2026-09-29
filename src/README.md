@@ -70,7 +70,8 @@ Catatan:
 - `/cari keyword` mencari product aktif. Hasilnya memakai tombol angka yang sama untuk membuka Product Detail.
 - `/status` dan `/pesanan` menampilkan Order terakhir customer dengan kombinasi status Order dan status Payment.
 - `/riwayat` menampilkan hingga 5 Order terakhir customer Telegram tersebut dengan tombol detail; `/order NOMOR_INVOICE` menampilkan detail Order milik customer yang sama.
-- Ikon katalog family/option disimpan sebagai data Product melalui field opsional `Ikon katalog` di modal Tambah/Edit produk. Kosongkan field untuk memakai icon brand default.
+- Ikon katalog family/option tersimpan pada Product melalui field opsional `Ikon katalog` di modal Tambah/Edit produk; tanpa glyph, Product memakai default bersama `🛍️`.
+- Saat admin menangkap premium emoji lewat Store Bot, glyph Unicode yang terkait ikut disimpan sebagai fallback untuk teks dan Web Storefront. Di dalam family, satu icon dari member dengan custom emoji dipakai oleh seluruh Plan row dan tombol.
 - Nilai icon katalog dapat diubah langsung dari Admin Dashboard tanpa mengubah `.env`, rebuild image, atau clear config.
 - Store Bot memakai `editMessageText` dengan `callback_query.message.message_id` untuk family, category, quote, detail, dan navigasi balik satu pesan. `sendMessage` hanya dipakai bila tidak ada pesan asal atau Telegram menolak edit secara definitif; timeout/connection failure tidak memicu blind resend.
 

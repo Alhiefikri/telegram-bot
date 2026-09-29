@@ -3,15 +3,15 @@
     $catalogReturnUrl = isset($catalogPage) ? $catalogPage->catalogReturnUrl : $storefront->catalogUrl();
     $familyUrl = $storefront->familyUrl($family->slug, $catalogReturnUrl);
 @endphp
-<a href="{{ $familyUrl }}" id="family-{{ $family->id }}" aria-label="Lihat pilihan {{ $family->name }}" class="family-card group block min-w-0 w-full rounded-[0.875rem] text-left reveal-item focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)] focus-visible:ring-offset-4" data-family-id="{{ $family->id }}">
+<a href="{{ $familyUrl }}" id="family-{{ $family->id }}" aria-label="Lihat pilihan {{ $family->displayName }}" class="family-card group block min-w-0 w-full rounded-[0.875rem] text-left reveal-item focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)] focus-visible:ring-offset-4" data-family-id="{{ $family->id }}">
     <article class="neo-panel relative flex h-full min-w-0 flex-col overflow-hidden bg-[var(--sf-surface)] transition-all duration-300 neo-hover">
         <div class="storefront-media-frame relative flex aspect-square w-full items-center justify-center overflow-hidden border-b border-[var(--sf-border)] bg-[var(--sf-yellow)]" data-media-frame>
             <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-10" aria-hidden="true"></div>
             @if ($family->imageUrl)
-                <img src="{{ $family->imageUrl }}" alt="{{ $family->name }}" loading="lazy" decoding="async" class="absolute inset-0 h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.07]">
+                <img src="{{ $family->imageUrl }}" alt="{{ $family->displayName }}" loading="lazy" decoding="async" class="absolute inset-0 h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.07]">
             @else
                 <div class="pointer-events-none absolute h-4/5 w-4/5 rounded-full border border-[var(--sf-accent)] opacity-15" aria-hidden="true"></div>
-                <span class="relative flex h-20 w-20 -rotate-6 items-center justify-center rounded-2xl border-2 border-[var(--sf-accent)] bg-[var(--sf-surface)] font-display text-5xl font-black text-[var(--sf-accent)] shadow-[5px_5px_0_var(--sf-accent)] transition-transform duration-300 group-hover:rotate-0 sm:h-24 sm:w-24 sm:text-6xl" aria-hidden="true">{{ mb_substr($family->name, 0, 1) }}</span>
+                <span class="relative flex h-20 w-20 -rotate-6 items-center justify-center rounded-2xl border-2 border-[var(--sf-accent)] bg-[var(--sf-surface)] font-display text-5xl font-black text-[var(--sf-accent)] shadow-[5px_5px_0_var(--sf-accent)] transition-transform duration-300 group-hover:rotate-0 sm:h-24 sm:w-24 sm:text-6xl" aria-hidden="true">{{ mb_substr($family->displayName, 0, 1) }}</span>
             @endif
             <span class="absolute left-2.5 top-2.5 rounded-md bg-[var(--sf-accent)] px-2 py-1 text-[9px] font-black uppercase tracking-wider text-white">Pilihan</span>
         </div>
@@ -19,7 +19,7 @@
         <div class="flex flex-grow flex-col justify-between space-y-3 p-3 sm:space-y-4 sm:p-4">
             <div class="min-w-0">
                 <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sf-muted)]">{{ $family->optionCount }} pilihan</p>
-                <h3 class="mt-1 min-h-[44px] break-words font-display text-sm font-black leading-snug text-[var(--sf-ink)] sm:min-h-[52px] sm:text-lg"><span class="line-clamp-2">{{ $family->name }}</span></h3>
+                <h3 class="mt-1 min-h-[44px] break-words font-display text-sm font-black leading-snug text-[var(--sf-ink)] sm:min-h-[52px] sm:text-lg"><span class="line-clamp-2">{{ $family->displayName }}</span></h3>
                 @if ($family->description)
                     <p class="mt-2 hidden text-xs font-medium leading-5 text-[var(--sf-muted)] sm:line-clamp-2">{{ $family->description }}</p>
                 @endif

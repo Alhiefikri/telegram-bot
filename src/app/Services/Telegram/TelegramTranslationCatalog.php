@@ -46,7 +46,10 @@ final class TelegramTranslationCatalog
 
     private const CATALOG_KEY_PATTERN = '/^(?:translation|router|language|welcome|menu|balance|maintenance|support|account|status|privacy|callback|catalog|search|cart|checkout|payment|date|order|receipt|notification)\.[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/';
 
-    public function __construct(private Translator $translator) {}
+    public function __construct(
+        private Translator $translator,
+        private TelegramUiIcons $icons,
+    ) {}
 
     public function get(string $key, string $locale): string
     {
@@ -71,6 +74,9 @@ final class TelegramTranslationCatalog
     public function translate(string $key, string $locale, array $replace = []): string
     {
         $translation = $this->get($key, $locale);
+        if (preg_match('/\\p{Extended_Pictographic}/u', $translation) === 1) {
+            $translation = $this->icons->renderLegacyIcons($translation);
+        }
 
         $replacements = [];
         foreach ($replace as $name => $value) {

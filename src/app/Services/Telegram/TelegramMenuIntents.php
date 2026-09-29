@@ -685,19 +685,27 @@ class TelegramMenuIntents
             ]];
         }
         if ($this->adminAccess->isAdmin($customer, $chatId)) {
-            $adminButton = $this->adminDashboardInlineButton('🛠️ Admin Dashboard');
+            $adminButton = $this->adminDashboardInlineButton($this->uiIcons->renderLegacyIcons('🛠️ Admin Dashboard'));
             if ($adminButton !== null) {
                 $keyboard['inline_keyboard'][] = [$adminButton];
             }
             $keyboard['inline_keyboard'][] = [[
-                'text' => '📊 Statistik',
+                'text' => $this->uiIcons->renderLegacyIcons('📊 Statistik'),
                 'callback_data' => 'statistik_harian',
             ]];
             $keyboard['inline_keyboard'][] = [[
-                'text' => '🎨 Ikon Brand',
-                'callback_data' => 'brandicon:list',
+                'text' => $this->uiIcons->renderLegacyIcons('🎨 Ikon Produk'),
+                'callback_data' => 'producticon:list',
             ]];
         }
+
+        foreach ($keyboard['inline_keyboard'] as &$row) {
+            foreach ($row as &$button) {
+                $button['style'] = 'primary';
+            }
+            unset($button);
+        }
+        unset($row);
 
         return $keyboard;
     }
@@ -816,10 +824,10 @@ class TelegramMenuIntents
         $hour = now('Asia/Jakarta')->hour;
 
         return match (true) {
-            $hour >= 5 && $hour < 11 => ['🌅', $this->locale->translate($customer, 'welcome.greeting.morning')],
-            $hour >= 11 && $hour < 15 => ['☀️', $this->locale->translate($customer, 'welcome.greeting.afternoon')],
-            $hour >= 15 && $hour < 18 => ['🌇', $this->locale->translate($customer, 'welcome.greeting.evening')],
-            default => ['🌙', $this->locale->translate($customer, 'welcome.greeting.night')],
+            $hour >= 5 && $hour < 11 => [$this->uiIcons->renderLegacyIcons('🌅'), $this->locale->translate($customer, 'welcome.greeting.morning')],
+            $hour >= 11 && $hour < 15 => [$this->uiIcons->renderLegacyIcons('☀️'), $this->locale->translate($customer, 'welcome.greeting.afternoon')],
+            $hour >= 15 && $hour < 18 => [$this->uiIcons->renderLegacyIcons('🌇'), $this->locale->translate($customer, 'welcome.greeting.evening')],
+            default => [$this->uiIcons->renderLegacyIcons('🌙'), $this->locale->translate($customer, 'welcome.greeting.night')],
         };
     }
 

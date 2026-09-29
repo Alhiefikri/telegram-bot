@@ -22,6 +22,7 @@ use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramUiIcons;
 use App\Storefront\StorefrontUrl;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -704,7 +705,7 @@ class ProductPriceChangeNotificationTest extends TestCase
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
-        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class), app(TelegramLocale::class), app(StorefrontUrl::class)) extends ProductPriceChangeNotificationService
+        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class), app(TelegramLocale::class), app(StorefrontUrl::class), app(TelegramUiIcons::class)) extends ProductPriceChangeNotificationService
         {
             public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
             {

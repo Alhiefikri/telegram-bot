@@ -55,7 +55,7 @@
                                 class="mt-1.5"
                                 x-model="productIcon"
                             />
-                            <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Bukan upload gambar. Tampil di katalog bot Telegram dan Web Storefront; kosongkan untuk ikon default.</p>
+                            <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Bukan upload gambar. Tampil di katalog bot Telegram dan Web Storefront; kosongkan untuk ikon default. Emoji Telegram (Premium) diambil per produk lewat menu 🎨 Ikon Produk di bot.</p>
                             @error('icon', 'productCreate')
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror

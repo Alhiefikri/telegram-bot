@@ -2,17 +2,18 @@
 
 namespace App\Console\Commands;
 
-use App\Models\CatalogBrandIcon;
+use App\Models\Product;
+use App\Models\TelegramUiIcon;
 use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramBotClient;
 use Illuminate\Console\Command;
 use Throwable;
 
-final class CheckCatalogBrandIcons extends Command
+final class CheckCatalogIcons extends Command
 {
-    protected $signature = 'catalog:brand-icons-check {--reset-capability : Forget a remembered custom emoji rejection}';
+    protected $signature = 'catalog:icons-check {--reset-capability : Forget a remembered custom emoji rejection}';
 
-    protected $description = 'Audit captured brand custom emoji identifiers and the custom emoji capability flag.';
+    protected $description = 'Audit captured product, menu, and message-copy custom emoji identifiers and the custom emoji capability flag.';
 
     public function handle(TelegramBotClient $bot, CustomEmojiCapability $customEmoji): int
     {
@@ -26,16 +27,42 @@ final class CheckCatalogBrandIcons extends Command
             $this->warn('Custom emoji is currently disabled after a rejection: '.$reason);
         }
 
-        $brands = CatalogBrandIcon::query()->catalogOrder()->get();
+        $products = Product::query()
+            ->whereNotNull('custom_emoji_id')
+            ->where('custom_emoji_id', '!=', '')
+            ->orderBy('name')
+            ->get(['id', 'name', 'custom_emoji_id']);
+        $menuIcons = TelegramUiIcon::query()
+            ->where('key', 'like', 'menu.%')
+            ->whereNotNull('custom_emoji_id')
+            ->where('custom_emoji_id', '!=', '')
+            ->catalogOrder()
+            ->get(['key', 'custom_emoji_id']);
+        $messageIcons = TelegramUiIcon::query()
+            ->where('key', 'like', 'message.%')
+            ->whereNotNull('custom_emoji_id')
+            ->where('custom_emoji_id', '!=', '')
+            ->catalogOrder()
+            ->get(['key', 'custom_emoji_id']);
+
         $ids = [];
-        foreach ($brands as $brand) {
-            $id = trim((string) $brand->custom_emoji_id);
-            if ($id !== '') {
-                $ids[$id] = (string) $brand->slug;
-            }
+        foreach ($products as $product) {
+            $ids[trim((string) $product->custom_emoji_id)] = 'product #'.$product->getKey().' ('.$product->name.')';
+        }
+        foreach ($menuIcons as $icon) {
+            $ids[trim((string) $icon->custom_emoji_id)] = 'menu '.$icon->key;
+        }
+        foreach ($messageIcons as $icon) {
+            $ids[trim((string) $icon->custom_emoji_id)] = 'message-copy '.$icon->key;
         }
 
-        $this->line(sprintf('Brands: %d, with a captured custom emoji: %d', $brands->count(), count($ids)));
+        $this->line(sprintf(
+            'Captured identifiers: %d (products: %d, menu slots: %d, message-copy slots: %d)',
+            count($ids),
+            $products->count(),
+            $menuIcons->count(),
+            $messageIcons->count(),
+        ));
 
         if ($ids === []) {
             $this->info('No captured custom emoji identifiers to verify.');
@@ -52,15 +79,15 @@ final class CheckCatalogBrandIcons extends Command
         }
 
         $missing = [];
-        foreach ($ids as $id => $slug) {
+        foreach ($ids as $id => $label) {
             if (isset($resolved[$id])) {
-                $this->info(sprintf('OK   %s → %s %s', $slug, $resolved[$id], $id));
+                $this->info(sprintf('OK   %s → %s %s', $label, $resolved[$id], $id));
 
                 continue;
             }
 
-            $missing[] = $slug;
-            $this->error(sprintf('MISS %s → %s', $slug, $id));
+            $missing[] = $label;
+            $this->error(sprintf('MISS %s → %s', $label, $id));
         }
 
         if ($missing !== []) {

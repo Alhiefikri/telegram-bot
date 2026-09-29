@@ -9,11 +9,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * One named Store Bot navigation slot (menu.home, menu.back, …) that may carry
- * a captured Telegram custom emoji. The plain Unicode glyph stays in the locale
- * copy; this record only owns the optional custom emoji identifier.
+ * A named Telegram presentation icon slot. Product icon values remain on
+ * Product; all shared Store Bot menu and static-copy icons live here.
  */
-#[Fillable(['key', 'label', 'fallback_emoji', 'custom_emoji_id', 'sort_order'])]
+#[Fillable(['key', 'label', 'fallback_emoji', 'source_emoji', 'custom_emoji_id', 'sort_order'])]
 class TelegramUiIcon extends Model
 {
     protected function casts(): array

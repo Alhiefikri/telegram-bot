@@ -8,6 +8,7 @@ use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackAckState;
+use App\Services\Telegram\TelegramHtmlCaption;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -144,7 +145,84 @@ class TelegramBotClientTest extends TestCase
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/editMessageText'));
     }
 
-    public function test_custom_emoji_rejection_is_retried_once_without_the_button_icons(): void
+    public function test_custom_emoji_markup_becomes_a_custom_emoji_entity_in_plain_text(): void
+    {
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response([
+            'ok' => true,
+            'result' => ['message_id' => 779],
+        ])]);
+
+        app(TelegramBotClient::class)->sendMessage(
+            12345,
+            'A 😀 <tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">🪙</tg-emoji> & B',
+        );
+
+        $request = Http::recorded()[0][0];
+        $this->assertSame('A 😀 🪙 & B', $request['text']);
+        $this->assertSame([[
+            'type' => 'custom_emoji',
+            'offset' => 5,
+            'length' => 2,
+            'custom_emoji_id' => '5368324170671202286',
+        ]], $request['entities']);
+        $this->assertArrayNotHasKey('parse_mode', $request->data());
+    }
+
+    public function test_untrusted_custom_emoji_markup_remains_literal_in_text_and_buttons(): void
+    {
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response([
+            'ok' => true,
+            'result' => ['message_id' => 781],
+        ])]);
+
+        $literal = '<tg-emoji emoji-id="5368324170671202286">🪙</tg-emoji>';
+        app(TelegramBotClient::class)->sendMessage(12345, 'Admin text '.$literal, [
+            'inline_keyboard' => [[[
+                'text' => $literal,
+                'callback_data' => 'literal',
+            ]]],
+        ]);
+
+        $request = Http::recorded()[0][0];
+        $this->assertSame('Admin text '.$literal, $request['text']);
+        $this->assertSame($literal, $request['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertArrayNotHasKey('entities', $request->data());
+    }
+
+    public function test_custom_emoji_markup_in_inline_button_text_becomes_the_button_icon(): void
+    {
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response([
+            'ok' => true,
+            'result' => ['message_id' => 780],
+        ])]);
+
+        app(TelegramBotClient::class)->sendMessage(12345, 'Choose', [
+            'inline_keyboard' => [[[
+                'text' => '<tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📌</tg-emoji> Status',
+                'callback_data' => 'status',
+            ]]],
+        ]);
+
+        $request = Http::recorded()[0][0];
+        $button = $request['reply_markup']['inline_keyboard'][0][0];
+        $this->assertSame('Status', $button['text']);
+        $this->assertSame('5368324170671202286', $button['icon_custom_emoji_id']);
+    }
+
+    public function test_html_caption_preserves_static_custom_emoji_while_escaping_blockquote_text(): void
+    {
+        $caption = app(TelegramHtmlCaption::class)->htmlWithBlockquotes(
+            'Static <tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📌</tg-emoji> Detail < value >',
+            ['Detail < value >'],
+        );
+
+        $this->assertSame(
+            'Static <tg-emoji emoji-id="5368324170671202286">📌</tg-emoji> <blockquote>Detail &lt; value &gt;</blockquote>',
+            $caption,
+        );
+    }
+
+    public function test_custom_emoji_rejection_retries_without_message_or_button_icons(): void
     {
         $calls = 0;
         Http::fake(function () use (&$calls) {
@@ -163,21 +241,133 @@ class TelegramBotClientTest extends TestCase
         $capability = app(CustomEmojiCapability::class);
         $this->assertTrue($capability->isAvailable());
 
-        app(TelegramBotClient::class)->sendMessage(12345, 'Katalog', [
+        app(TelegramBotClient::class)->sendMessage(12345, 'Katalog <tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📩</tg-emoji>', [
             'inline_keyboard' => [
                 [['text' => 'ChatGPT', 'icon_custom_emoji_id' => '5368324170671202286']],
                 [['text' => 'Netflix', 'icon_custom_emoji_id' => '5368324170671202286']],
             ],
-        ]);
+        ], ['parse_mode' => 'HTML']);
 
         Http::assertSentCount(2);
         $this->assertFalse($capability->isAvailable(), 'A rejected send must disable custom emoji for later sends.');
         $this->assertNotNull($capability->unavailableReason());
 
         $retry = Http::recorded()[1][0];
+        $this->assertSame('Katalog 📩', $retry['text']);
+        $this->assertSame('HTML', $retry['parse_mode']);
         $this->assertSame(
             [[['text' => 'ChatGPT']], [['text' => 'Netflix']]],
             $retry['reply_markup']['inline_keyboard'],
+        );
+    }
+
+    public function test_custom_emoji_rejection_in_existing_photo_caption_retries_without_custom_markup(): void
+    {
+        $calls = 0;
+        Http::fake(function () use (&$calls) {
+            $calls++;
+
+            if ($calls === 1) {
+                return Http::response([
+                    'ok' => false,
+                    'description' => "Bad Request: can't use custom emoji in this chat",
+                ], 400);
+            }
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 782]], 200);
+        });
+
+        app(TelegramBotClient::class)->editMessageCaption(
+            12345,
+            777,
+            'Catalog <tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📩</tg-emoji>',
+            ['inline_keyboard' => [[['text' => 'ChatGPT', 'icon_custom_emoji_id' => '5368324170671202286']]]],
+            ['parse_mode' => 'HTML'],
+        );
+
+        Http::assertSentCount(2);
+        $retry = Http::recorded()[1][0];
+        $this->assertSame('Catalog 📩', $retry['caption']);
+        $this->assertSame('HTML', $retry['parse_mode']);
+        $this->assertSame(
+            ['inline_keyboard' => [[['text' => 'ChatGPT']]]],
+            $retry['reply_markup'],
+        );
+    }
+
+    public function test_custom_emoji_rejection_in_photo_caption_retries_without_text_or_button_icons(): void
+    {
+        $calls = 0;
+        Http::fake(function () use (&$calls) {
+            $calls++;
+
+            if ($calls === 1) {
+                return Http::response([
+                    'ok' => false,
+                    'description' => 'Bad Request: unsupported start tag "tg-emoji"',
+                ], 400);
+            }
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 780]], 200);
+        });
+
+        app(TelegramBotClient::class)->sendPhoto(
+            12345,
+            'binary-photo',
+            'catalog.png',
+            'Catalog <tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📩</tg-emoji>',
+            ['inline_keyboard' => [[
+                ['text' => 'ChatGPT', 'icon_custom_emoji_id' => '5368324170671202286'],
+                ['text' => 'Sold out', 'icon_custom_emoji_id' => '5368324170671202286', 'disabled' => (object) []],
+            ]]],
+            ['parse_mode' => 'HTML'],
+        );
+
+        Http::assertSentCount(2);
+        $retry = Http::recorded()[1][0];
+        $fields = collect($retry->data())->keyBy('name');
+        $this->assertTrue($retry->isMultipart());
+        $this->assertTrue($retry->hasFile('photo', 'binary-photo', 'catalog.png'));
+        $this->assertSame('Catalog 📩', $fields['caption']['contents'] ?? null);
+        $this->assertSame('HTML', $fields['parse_mode']['contents'] ?? null);
+        $markup = json_decode($fields['reply_markup']['contents'] ?? '', flags: JSON_THROW_ON_ERROR);
+        $this->assertFalse(isset($markup->inline_keyboard[0][0]->icon_custom_emoji_id));
+        $this->assertFalse(isset($markup->inline_keyboard[0][1]->icon_custom_emoji_id));
+        $this->assertInstanceOf(\stdClass::class, $markup->inline_keyboard[0][1]->disabled);
+        $this->assertEquals((object) [], $markup->inline_keyboard[0][1]->disabled);
+    }
+
+    public function test_custom_emoji_rejection_in_photo_reference_caption_falls_back_to_unicode(): void
+    {
+        $calls = 0;
+        Http::fake(function () use (&$calls) {
+            $calls++;
+
+            if ($calls === 1) {
+                return Http::response([
+                    'ok' => false,
+                    'description' => "Bad Request: can't use custom emoji in this chat",
+                ], 400);
+            }
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 781]], 200);
+        });
+
+        app(TelegramBotClient::class)->sendPhotoReference(
+            12345,
+            'telegram-file-id',
+            'Catalog <tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📩</tg-emoji>',
+            ['inline_keyboard' => [[['text' => 'ChatGPT', 'icon_custom_emoji_id' => '5368324170671202286']]]],
+            ['parse_mode' => 'HTML'],
+        );
+
+        Http::assertSentCount(2);
+        $retry = Http::recorded()[1][0];
+        $this->assertSame('Catalog 📩', $retry['caption']);
+        $this->assertSame('HTML', $retry['parse_mode']);
+        $this->assertSame(
+            ['inline_keyboard' => [[['text' => 'ChatGPT']]]],
+            $retry['reply_markup'],
         );
     }
 

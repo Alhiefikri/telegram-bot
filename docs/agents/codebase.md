@@ -255,18 +255,26 @@ invoice belum ada. Sebelum Confirm tidak ada Payment, provider HTTP, QRIS
 effect, atau ledger entry; sesudah Confirm, top-up/provider recovery berjalan
 pada top-up dan merchant reference yang sama.
 
-`TelegramCatalogIntents` consumes `CatalogBrowse::browsePublic()` for the Product Family and standalone Product discovery list, while optional category
-filtering and search retain their existing Product projection. The discovery
-list shows up to fifteen entries per page, with entries pressed against their
-divider rule instead of padded by blank lines, while category filtering and
-search keep up to ten; family option callbacks use the signed compact
-`TelegramFamilyCallbackToken` and resolve the existing Product ID only after
-the current public family projection and page are revalidated. Family entries
-label their customer-facing Plan count (`▶ N Plan »`) or the stock of their
-single Plan; a family with exactly one public Product option submits
-`product:<id>` from the discovery list so the Plan list screen is skipped,
-while `/start family_<id>` still opens that list. Product Detail,
-quantity, payment, Cart, Order, and outbound-effect ownership remains unchanged.
+`TelegramCatalogIntents` consumes `CatalogBrowse::browsePublic()` for the
+Product Family and standalone Product discovery list. On the default public
+sort, family entries rank by descending total `sold_quantity` across their
+Product options before pagination. `sold_quantity` counts quantities in paid
+Processing or Completed Orders; ties keep the existing availability and family
+admin-order rules. Other sort modes and Admin ordering are unchanged.
+
+The discovery list shows up to fifteen entries per page, with entries pressed
+against their divider rule instead of padded by blank lines, while category
+filtering and search keep up to ten. Family option callbacks use the signed
+compact `TelegramFamilyCallbackToken` and revalidate the current public family
+projection and page before resolving a Product ID. Multi-option family entries
+show their customer-facing Plan count (`▶ N Plan »`); single-option families
+use their Product's name and icon, with Telegram discovery submitting
+`product:<id>` to skip the Plan list. The Web Storefront family-card list also
+displays the Product name. `/start family_<id>` still opens the Plan list.
+Committed Order and OrderItem changes invalidate the cached catalog projection.
+Product Detail, quantity, payment, Cart, Order, and outbound-effect ownership
+remains unchanged.
+
 Routine catalog navigation from inline controls renders onto the canonical
 message (`editMessageCaption` for a photo root, `editMessageText` for a text
 root) through the same `sendCatalogMessage` seam. Text product-list commands
@@ -293,7 +301,13 @@ projections remain uncached. Family/product callbacks re-read current public
 eligibility before selection.
 
 
-Catalog icons resolve through [`ProductBrandIconResolver`](../../src/app/Services/Telegram/ProductBrandIconResolver.php): an explicit Product `icon` wins, otherwise the `catalog_brand_icons` registry (admin-managed, cached ten minutes by `CatalogBrandIcons`) matches the Product or Family name and supplies the fallback glyph plus, when captured, the `custom_emoji_id` that inline keyboard buttons carry as `icon_custom_emoji_id`. Named navigation slots resolve separately through [`TelegramUiIcons`](../../src/app/Services/Telegram/TelegramUiIcons.php) and the `telegram_ui_icons` table: `TelegramMenuIntents::navigationRow()` and `homeKeyboard()` are the seams, so screens that reuse them inherit the icon, and a slot without a captured identifier renders the untouched locale copy. Message text always keeps the Unicode glyph, and keyboards sent to the Store Channel stay Unicode because the Premium-owner route covers private, group, and supergroup chats only. Identifiers are captured by the admin icons flow (`TelegramIconIntents`, pending capture in `TelegramIconCaptureSession`, `brandicon:` and `menuicon:` callbacks in `TelegramIconCallbackHandler`) from the `custom_emoji` entities the webhook ingress keeps in its minimized payload. `CustomEmojiCapability` remembers a rejection for thirty minutes and `TelegramBotClient` retries that one send without the icons, so a lapsed Premium degrades to the Unicode glyph instead of failing a customer-visible message. `catalog:brand-icons-check` audits stored identifiers against `getCustomEmojiStickers` and can clear a remembered rejection.
+Catalog icons resolve through [`CatalogIconResolver`](../../src/app/Services/Telegram/CatalogIconResolver.php). Each Product owns an optional Unicode `icon` fallback and an optional captured `custom_emoji_id`; nothing is inferred from a Product name. Capture stores Telegram's associated Unicode `emoji` as the fallback, while plain emoji capture stores that glyph directly. The Admin Dashboard may edit the fallback.
+
+Telegram message text and captions render available custom emoji identifiers with `<tg-emoji emoji-id="...">glyph</tg-emoji>`; plain text requests convert those wrappers to custom emoji entities. Inline keyboard labels use Unicode fallback text, while navigation buttons may carry `icon_custom_emoji_id`. Product icons remain Product-owned with the Admin Dashboard editing its Unicode fallback. Rejected custom emoji requests are retried once without wrappers or button identifiers. Every button on the Home inline keyboard sets Telegram Bot API `style=primary` to request blue styling.
+
+A Product Family presents one shared icon on every Plan row and Plan button: the first member in family order with a captured identifier supplies both values; otherwise the first member with a glyph supplies it, with `🛍️` as the final default. Product Detail returns to the family Plan list whenever the Product belongs to a public family with more than one Plan, including when opened without family navigation (deep link, notification, or single-Plan family entry); `TelegramCatalogIntents::familyNavigationFromProduct()` resolves that family page from the Product itself. A standalone Product keeps its category list.
+
+Shared static-copy icons use `message.*` rows beside navigation `menu.*` rows in `telegram_ui_icons`. `TelegramTranslationCatalog::translate()` resolves source glyphs in translation templates before inserting replacements; hardcoded templates call `TelegramUiIcons::renderLegacyIcons()` on static text only, then append customer, Product, payment, credential, or broadcast values unchanged. Admins open Product icons and then choose Menu icons or Message text icons; `menuicon:` and `messageicon:` handle capture. `TelegramBotClient` renders plain text/caption wrappers as custom emoji entities, and inline keyboard labels use Unicode fallbacks. Store Channel promotion captions attempt custom emoji and fall back to Unicode on rejection. `catalog:icons-check` audits Product, menu, and message-copy IDs.
 
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
 
@@ -791,10 +805,10 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/KlikQrisNativeQrisPostgresConcurrencyTest.php` — Payment and Store Balance top-up provider single-flight races, same-target recovery, and one instruction-effect materialization; runs only through the PostgreSQL gate.
 - `tests/Feature/Telegram/StoreBalanceHomeTest.php` — private home greeting → Profile → Store Activity → prompt ordering, fresh Store Balance independent of the global metrics cache, fail-safe unavailable projection, localized missing value, and public-safe group home.
 - `tests/Feature/Telegram/ProductFamilyDiscoveryTest.php` dan `tests/Feature/Telegram/CatalogSearchTest.php` — family discovery entry rendering (label `▶ N Plan »`, label stok dan `product:<id>` untuk family satu Plan), signed family option callbacks, origin/back restoration, dan copy per locale.
-- `tests/Feature/Telegram/ProductBrandIconResolverTest.php` — rantai resolusi ikon katalog: override Product, brand registry, glyph cadangan, pemasangan `custom_emoji_id`, capability yang sedang tidak tersedia, dan invalidasi cache saat brand diubah.
-- `tests/Feature/Telegram/BrandIconCaptureTest.php` — alur admin ikon brand: entri menu hanya untuk admin, prompt per brand, capture `custom_emoji_id` dari entity custom emoji, penolakan ID tak dikenal, penghapusan emoji, dan penolakan non-admin.
-- `tests/Feature/Telegram/MenuIconCaptureTest.php` — alur admin ikon menu: daftar slot navigasi, pemasangan ikon pada home keyboard dan baris navigasi (glyph Unicode hilang, `icon_custom_emoji_id` terpasang), penghapusan emoji, dan penolakan non-admin.
-- `tests/Feature/AdminBrandIconPageTest.php` — halaman Admin Dashboard `/admin/brand-icons`: daftar brand beserta status emoji, update pola/emoji cadangan/urutan, tambah brand, hapus emoji Telegram, dan akses tamu.
+- `tests/Feature/Telegram/CatalogIconResolverTest.php` — rantai resolusi ikon katalog per Product: glyph Product, custom emoji yang di-capture, glyph default, nilai kosong, dan capability yang sedang tidak tersedia.
+- `tests/Feature/Telegram/ProductIconCaptureTest.php` — alur admin ikon produk: entri menu hanya untuk admin, daftar produk dari database (termasuk katalog kosong), prompt per produk, capture `custom_emoji_id` dari entity custom emoji, penolakan ID tak dikenal, penghapusan emoji, dan penolakan non-admin.
+- `tests/Feature/Telegram/MenuIconCaptureTest.php` — admin menu-icon and message-copy icon lists, premium custom-emoji and plain-Unicode capture, translation rendering before dynamic interpolation, navigation application, clearing, and non-admin rejection.
+- `tests/Feature/CatalogIconCheckCommandTest.php` — `catalog:icons-check` verifies Product, menu, and message-copy identifiers against Telegram and can clear a remembered rejection.
 - `tests/Feature/Telegram/TelegramRoutineNavigationTest.php` — webhook-level single-message navigation evidence: Home → Balance → Home → Language → Home → Orders → Support on one canonical message, preset/custom Store Balance confirmation intents, strict amount recovery, confirm/cancel/back/expiry/stale-policy replay behavior, zero pre-confirm provider/Payment/ledger effects, stale/ambiguous/missing-root recovery, catalog navigation on the root, long-screen text-root replacement, group privacy, and id/en/ms screen copy.
 - `tests/Feature/Telegram/TelegramNavigationRootTest.php` dan `TelegramNavigationRootPostgresConcurrencyTest.php` — root establishment/replacement/lease semantics dan race PostgreSQL-nya.
 - `tests/Feature/Telegram/StartMetricsTest.php` — canonical successful Order and Telegram Customer metrics with bounded staleness cache.

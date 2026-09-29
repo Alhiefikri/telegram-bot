@@ -40,6 +40,7 @@ final class CatalogBrowse
         'family_option_label',
         'name',
         'icon',
+        'custom_emoji_id',
         'description',
         'product_type',
         'access_duration',
@@ -240,10 +241,21 @@ final class CatalogBrowse
                 ->sort(fn (CatalogProductReadModel $left, CatalogProductReadModel $right): int => $this->compareProducts($left, $right, $query->sort))
                 ->values();
 
+        $familySoldQuantities = [];
+        if ($public && $query->sort === CatalogBrowseQuery::DEFAULT_SORT) {
+            foreach ($familyModels as $family) {
+                $soldQuantity = 0;
+                foreach ($family->members as $member) {
+                    $soldQuantity += $member->soldQuantity;
+                }
+                $familySoldQuantities[$family->id] = $soldQuantity;
+            }
+        }
+
         $entries = $familyModels
             ->map(fn (CatalogFamilyReadModel $family): CatalogBrowseEntry => CatalogBrowseEntry::family($family))
             ->concat($standalone->map(fn (CatalogProductReadModel $product): CatalogBrowseEntry => CatalogBrowseEntry::product($product)))
-            ->sort(fn (CatalogBrowseEntry $left, CatalogBrowseEntry $right): int => $this->compareEntries($left, $right, $query->sort))
+            ->sort(fn (CatalogBrowseEntry $left, CatalogBrowseEntry $right): int => $this->compareEntries($left, $right, $query->sort, $familySoldQuantities))
             ->values();
 
         $total = $entries->count();
@@ -389,6 +401,7 @@ final class CatalogBrowse
             telegramImagePath: $product->telegram_image_path,
             createdAt: $product->created_at?->toISOString(),
             icon: $product->icon,
+            customEmojiId: $product->custom_emoji_id,
         );
     }
 
@@ -457,8 +470,12 @@ final class CatalogBrowse
         return $value !== null && str_contains($this->lower($value), $search);
     }
 
-    private function compareEntries(CatalogBrowseEntry $left, CatalogBrowseEntry $right, string $sort): int
-    {
+    private function compareEntries(
+        CatalogBrowseEntry $left,
+        CatalogBrowseEntry $right,
+        string $sort,
+        array $familySoldQuantities,
+    ): int {
         if ($sort === 'newest') {
             return $this->compareNullableStrings($right->createdAt(), $left->createdAt())
                 ?: $this->compareNames($left->name(), $right->name())
@@ -469,6 +486,15 @@ final class CatalogBrowse
             $comparison = $this->compareNullableInts($left->minimumPriceAmount(), $right->minimumPriceAmount(), $sort === 'price_desc');
 
             return $comparison ?: $this->compareNames($left->name(), $right->name()) ?: ($left->id() <=> $right->id());
+        }
+
+        if ($sort === CatalogBrowseQuery::DEFAULT_SORT && $left->family !== null && $right->family !== null) {
+            $soldComparison = ($familySoldQuantities[$right->family->id] ?? 0)
+                <=> ($familySoldQuantities[$left->family->id] ?? 0);
+
+            if ($soldComparison !== 0) {
+                return $soldComparison;
+            }
         }
 
         return ((int) ! $left->isAvailable() <=> (int) ! $right->isAvailable())
@@ -582,6 +608,7 @@ final class CatalogBrowse
             telegramImagePath: $product->telegramImagePath,
             createdAt: $product->createdAt,
             icon: $product->icon,
+            customEmojiId: $product->customEmojiId,
             matchesSearch: $matches,
         );
     }

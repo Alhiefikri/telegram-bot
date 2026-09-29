@@ -80,7 +80,7 @@ final class BalanceTopUpChannelProofDeliveryPipeline
                     $this->formatter->formatTopUp($presentation),
                     [
                         'inline_keyboard' => [[[
-                            'text' => '🛒 Shop Now',
+                            'text' => $this->formatter->shoppingButtonLabel(),
                             'url' => $this->shoppingButtonUrl(),
                         ]]],
                     ],

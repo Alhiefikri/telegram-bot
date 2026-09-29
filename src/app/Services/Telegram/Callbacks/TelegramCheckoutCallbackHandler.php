@@ -44,6 +44,7 @@ use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramManualPaymentIntents;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramUiIcons;
 use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -69,6 +70,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         private TelegramOutboundEffectService $outboundEffects,
         private TelegramOutboundEffectDispatcher $dispatcher,
         private TelegramHtmlCaption $captions,
+        private TelegramUiIcons $uiIcons,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -653,9 +655,9 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             'callback_data' => 'checkout:current',
         ]];
         $balanceButton = [[
-            'text' => $this->locale->translate($context->customer, 'checkout.payment.store_balance', [
+            ...$this->uiIcons->apply('menu.balance', $this->locale->translate($context->customer, 'checkout.payment.store_balance', [
                 'amount' => number_format($snapshot->idrTotal(), 0, ',', '.'),
-            ]),
+            ])),
             'callback_data' => 'checkout:balance',
         ]];
         $buttons = [$qrisButton, $balanceButton];

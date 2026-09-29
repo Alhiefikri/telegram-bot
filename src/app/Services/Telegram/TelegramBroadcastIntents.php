@@ -16,6 +16,7 @@ class TelegramBroadcastIntents
         private readonly TelegramBroadcastService $broadcast,
         private readonly TelegramBroadcastDrafts $drafts,
         private readonly TelegramAdminAccess $adminAccess,
+        private readonly TelegramUiIcons $uiIcons,
     ) {}
 
     public function handleCommand(Customer $customer, string $chatId, string $text, array $message = []): void
@@ -122,7 +123,7 @@ class TelegramBroadcastIntents
 
     private function sendHelp(string $chatId): void
     {
-        $this->bot->sendMessage($chatId, "📣 Broadcast Info\n━━━━━━━━━━━━━━\nKetik pesan dengan format:\n\n/broadcast isi pesan\n\nSetelah itu bot menampilkan preview. Kamu bisa menambahkan tombol produk, lalu konfirmasi sebelum pesan dikirim.");
+        $this->bot->sendMessage($chatId, $this->uiIcons->renderLegacyIcons("📣 Broadcast Info\n━━━━━━━━━━━━━━\nKetik pesan dengan format:\n\n/broadcast isi pesan\n\nSetelah itu bot menampilkan preview. Kamu bisa menambahkan tombol produk, lalu konfirmasi sebelum pesan dikirim."));
     }
 
     private function previewCallback(Customer $customer, string $chatId, string $callbackId, string $draftId): bool
@@ -153,7 +154,7 @@ class TelegramBroadcastIntents
         }
 
         $this->bot->answerCallbackQuery($callbackId, 'Draft dibatalkan.');
-        $this->bot->sendMessage($chatId, '❌ Draft broadcast dibatalkan.');
+        $this->bot->sendMessage($chatId, $this->uiIcons->renderLegacyIcons('❌ Draft broadcast dibatalkan.'));
 
         return true;
     }
@@ -228,14 +229,14 @@ class TelegramBroadcastIntents
         $photoFileId = $draft['photo_file_id'] ?? null;
         $lines = $photoFileId !== null
             ? [
-                '📣 Preview broadcast',
+                $this->uiIcons->renderLegacyIcons('📣 Preview broadcast'),
                 '━━━━━━━━━━━━━━',
                 $product ? 'Tombol produk: '.$product->name : 'Tombol produk: tidak ada',
                 '',
                 'Foto di atas belum dikirim. Pilih tindakan di bawah.',
             ]
             : [
-                '📣 Preview broadcast',
+                $this->uiIcons->renderLegacyIcons('📣 Preview broadcast'),
                 '━━━━━━━━━━━━━━',
                 'Pesan:',
                 $draft['message'],
@@ -244,7 +245,7 @@ class TelegramBroadcastIntents
                 '',
                 'Pesan belum dikirim. Pilih tindakan di bawah.',
             ];
-        $productAction = $product ? '🔁 Ganti produk' : '➕ Tambahkan produk';
+        $productAction = $product ? $this->uiIcons->renderLegacyIcons('🔁 Ganti produk') : $this->uiIcons->renderLegacyIcons('➕ Tambahkan produk');
 
         if ($photoFileId !== null) {
             $this->bot->sendPhotoReference(
@@ -258,8 +259,8 @@ class TelegramBroadcastIntents
             'inline_keyboard' => [
                 [['text' => $productAction, 'callback_data' => $this->callbackData('pick', $draft['draft_id'], 1)]],
                 [
-                    ['text' => '✅ Kirim', 'callback_data' => $this->callbackData('send', $draft['draft_id'])],
-                    ['text' => '❌ Batal', 'callback_data' => $this->callbackData('cancel', $draft['draft_id'])],
+                    ['text' => $this->uiIcons->renderLegacyIcons('✅ Kirim'), 'callback_data' => $this->callbackData('send', $draft['draft_id'])],
+                    ['text' => $this->uiIcons->renderLegacyIcons('❌ Batal'), 'callback_data' => $this->callbackData('cancel', $draft['draft_id'])],
                 ],
             ],
         ]);
@@ -293,21 +294,21 @@ class TelegramBroadcastIntents
         $products = $products->take(self::PRODUCTS_PER_PAGE);
         $keyboard = $products
             ->map(fn (Product $product): array => [[
-                'text' => '🛍️ '.Str::limit($product->name, 38, '…').' · Rp'.number_format($product->price_amount, 0, ',', '.'),
+                'text' => $this->uiIcons->renderLegacyIcons('🛍️ ').Str::limit($product->name, 38, '…').' · Rp'.number_format($product->price_amount, 0, ',', '.'),
                 'callback_data' => $this->callbackData('select', $draftId, $product->id),
             ]])
             ->all();
         $navigation = [];
         if ($page > 1) {
-            $navigation[] = ['text' => '⬅️ Sebelumnya', 'callback_data' => $this->callbackData('pick', $draftId, $page - 1)];
+            $navigation[] = ['text' => $this->uiIcons->renderLegacyIcons('⬅️ Sebelumnya'), 'callback_data' => $this->callbackData('pick', $draftId, $page - 1)];
         }
         if ($hasNextPage) {
-            $navigation[] = ['text' => 'Berikutnya ➡️', 'callback_data' => $this->callbackData('pick', $draftId, $page + 1)];
+            $navigation[] = ['text' => $this->uiIcons->renderLegacyIcons('Berikutnya ➡️'), 'callback_data' => $this->callbackData('pick', $draftId, $page + 1)];
         }
         if ($navigation !== []) {
             $keyboard[] = $navigation;
         }
-        $keyboard[] = [['text' => '⬅️ Kembali ke preview', 'callback_data' => $this->callbackData('preview', $draftId)]];
+        $keyboard[] = [['text' => $this->uiIcons->renderLegacyIcons('⬅️ Kembali ke preview'), 'callback_data' => $this->callbackData('preview', $draftId)]];
 
         $this->bot->sendMessage($chatId, $products->isEmpty()
             ? 'Belum ada produk aktif yang siap dibeli untuk ditampilkan di broadcast.'
@@ -325,17 +326,17 @@ class TelegramBroadcastIntents
             $replyMarkup = $product ? [
                 'id' => [
                     'inline_keyboard' => [[
-                        ['text' => '🛍️ Beli: '.Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
+                        ['text' => $this->uiIcons->renderLegacyIcons('🛍️ Beli: ').Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
                     ]],
                 ],
                 'en' => [
                     'inline_keyboard' => [[
-                        ['text' => '🛍️ Buy: '.Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
+                        ['text' => $this->uiIcons->renderLegacyIcons('🛍️ Buy: ').Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
                     ]],
                 ],
                 'ms' => [
                     'inline_keyboard' => [[
-                        ['text' => '🛍️ Beli: '.Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
+                        ['text' => $this->uiIcons->renderLegacyIcons('🛍️ Beli: ').Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
                     ]],
                 ],
             ] : [];
@@ -393,7 +394,7 @@ class TelegramBroadcastIntents
         $this->bot->answerCallbackQuery($callbackId, 'Broadcast sedang dikirim.');
         $this->bot->sendMessage($chatId, $broadcastId === null
             ? 'Broadcast masuk antrean.'
-            : "✅ Broadcast masuk antrean\n━━━━━━━━━━━━━━\nID: {$broadcastId}\nPengiriman berjalan di background. Progres bisa dipantau dari dashboard.");
+            : $this->uiIcons->renderLegacyIcons('✅ Broadcast masuk antrean')."\n━━━━━━━━━━━━━━\nID: {$broadcastId}\nPengiriman berjalan di background. Progres bisa dipantau dari dashboard.");
 
         return true;
     }

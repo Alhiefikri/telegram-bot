@@ -5,6 +5,7 @@ namespace App\Services\Bsc;
 use App\Models\Payment;
 use App\Services\Telegram\TelegramAdminAccess;
 use App\Services\Telegram\TelegramBotClient;
+use App\Services\Telegram\TelegramUiIcons;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -24,6 +25,7 @@ final class BscOperationalAlertNotifier
     public function __construct(
         private readonly TelegramAdminAccess $adminAccess,
         private readonly TelegramBotClient $bot,
+        private readonly TelegramUiIcons $uiIcons,
     ) {}
 
     public function notifyReadiness(BscReadinessReport $report): void
@@ -51,7 +53,8 @@ final class BscOperationalAlertNotifier
 
         $this->sendToChat(
             $chatId,
-            "🚨 BSC readiness gagal\n━━━━━━━━━━━━━━\nMasalah: ".implode(', ', $problems)."\nReceiver aktif: {$report->activeReceiverCount}",
+            $this->uiIcons->renderLegacyIcons("🚨 BSC readiness gagal\n━━━━━━━━━━━━━━\nMasalah: ")
+                .implode(', ', $problems)."\nReceiver aktif: {$report->activeReceiverCount}",
         );
     }
 
@@ -63,7 +66,8 @@ final class BscOperationalAlertNotifier
 
         $this->sendOnce(
             'backlog',
-            "🚨 BSC verification backlog\n━━━━━━━━━━━━━━\nPayment pending: {$pending}\nBatas alert: {$threshold}\nPayment tertua: {$oldestAgeSeconds}s",
+            $this->uiIcons->renderLegacyIcons("🚨 BSC verification backlog\n━━━━━━━━━━━━━━\nPayment pending: ")
+                ."{$pending}\nBatas alert: {$threshold}\nPayment tertua: {$oldestAgeSeconds}s",
         );
     }
 
@@ -115,7 +119,8 @@ final class BscOperationalAlertNotifier
             $invoice = (string) ($payment->order?->invoice_number ?? $payment->id);
             $this->sendToChat(
                 $chatId,
-                "⚠️ BSC payment perlu perhatian\n━━━━━━━━━━━━━━\nInvoice: {$invoice}\nOutcome: {$result->outcome->value}\nPayment ID: ".hash('sha256', (string) $payment->id),
+                $this->uiIcons->renderLegacyIcons("⚠️ BSC payment perlu perhatian\n━━━━━━━━━━━━━━\nInvoice: ")
+                    ."{$invoice}\nOutcome: {$result->outcome->value}\nPayment ID: ".hash('sha256', (string) $payment->id),
             );
         } finally {
             $lock->release();

@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\TelegramBroadcast;
+use App\Models\TelegramUiIcon;
 use App\Models\TelegramUpdate;
 use App\Services\Telegram\TelegramBroadcastDrafts;
 use App\Services\Telegram\TelegramBroadcastIntents;
@@ -35,6 +36,11 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         $home = $this->homeRequest(12345);
         $keyboard = $home->data()['reply_markup']['inline_keyboard'];
+        foreach ($keyboard as $row) {
+            foreach ($row as $button) {
+                $this->assertSame('primary', $button['style'] ?? null);
+            }
+        }
         $this->assertSame('🛠️ Admin Dashboard', $keyboard[3][0]['text'] ?? null);
         $this->assertStringStartsWith('https://store.example/admin?v=', (string) ($keyboard[3][0]['web_app']['url'] ?? ''));
         $this->assertSame('📊 Statistik', $keyboard[4][0]['text'] ?? null);
@@ -181,6 +187,27 @@ class AdminMenuTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), '☀️ Hari Ini')
             && str_contains((string) ($request['text'] ?? ''), '🗓 Minggu Ini')
             && str_contains((string) ($request['text'] ?? ''), '📅 Bulan Ini'));
+    }
+
+    public function test_admin_statistics_shortcut_previews_the_captured_text_icon(): void
+    {
+        config()->set('services.telegram.admin_user_id', '999');
+        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
+        TelegramUiIcon::query()->where('key', 'message.activity')->sole()->update([
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(330, '/start', ['id' => 999], 999))->assertOk();
+
+        $button = collect($this->homeRequest(999)->data()['reply_markup']['inline_keyboard'])
+            ->flatten(1)
+            ->firstWhere('callback_data', 'statistik_harian');
+
+        $this->assertNotNull($button, 'The admin home keyboard must expose the statistics shortcut.');
+        $this->assertSame('Statistik', $button['text'], 'Glyph diganti ikon tombol, bukan ditulis dua kali.');
+        $this->assertSame('5368324170671202286', $button['icon_custom_emoji_id'] ?? null);
     }
 
     private function homeRequest(int $chatId): Request

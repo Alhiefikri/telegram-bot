@@ -13,6 +13,7 @@ class TelegramBinanceVerificationEscalator
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramAdminAccess $adminAccess,
+        private TelegramUiIcons $uiIcons,
     ) {}
 
     public function notify(Order $order, Payment $payment, BinanceVerificationResult $result, ?string $submittedOrderId = null): void
@@ -28,21 +29,21 @@ class TelegramBinanceVerificationEscalator
         }
 
         $lines = [
-            '⚠️ Verifikasi Binance butuh perhatian',
+            $this->uiIcons->renderLegacyIcons('⚠️ Verifikasi Binance butuh perhatian'),
             '━━━━━━━━━━━━━━',
-            "🧾 Invoice: {$order->invoice_number}",
-            '💵 Tagihan: '.$this->formatUsdt((int) $payment->amount).' USDT',
-            '📌 Hasil: '.$result->outcome->value,
+            $this->uiIcons->renderLegacyIcons('🧾 Invoice: ').$order->invoice_number,
+            $this->uiIcons->renderLegacyIcons('💵 Tagihan: ').$this->formatUsdt((int) $payment->amount).' USDT',
+            $this->uiIcons->renderLegacyIcons('📌 Hasil: ').$result->outcome->value,
         ];
 
         if ($submittedOrderId !== null) {
-            $lines[] = '🔢 Order ID dikirim buyer: '.$this->maskIdentifier($submittedOrderId);
+            $lines[] = $this->uiIcons->renderLegacyIcons('🔢 Order ID dikirim buyer: ').$this->maskIdentifier($submittedOrderId);
         }
 
         if ($result->transaction !== null) {
             $transaction = $result->transaction;
             $reference = $transaction->orderId() !== '' ? 'Order ID '.$this->maskIdentifier($transaction->orderId()).' · ' : '';
-            $lines[] = '🔎 Transaksi ditemukan: '.$this->formatUsdt(abs($transaction->amountMicro())).' '.$transaction->currency()
+            $lines[] = $this->uiIcons->renderLegacyIcons('🔎 Transaksi ditemukan: ').$this->formatUsdt(abs($transaction->amountMicro())).' '.$transaction->currency()
                 .' · '.$reference.'Transaction ID '.$this->maskIdentifier($transaction->transactionId());
         }
 

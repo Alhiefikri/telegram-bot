@@ -34,6 +34,7 @@ class ProductPriceChangeNotificationService
         private readonly TelegramBotClient $bot,
         private readonly TelegramLocale $locale,
         private readonly StorefrontUrl $urls,
+        private readonly TelegramUiIcons $uiIcons,
         private ?TelegramOutboundEffectService $outboundEffects = null,
         private ?TelegramOutboundEffectLedgerProtocol $ledger = null,
         private ?TelegramOutboundResponseValidator $responseValidator = null,
@@ -555,7 +556,7 @@ class ProductPriceChangeNotificationService
             $this->locale->translateLocale($locale, $decrease
                 ? 'notification.price.lead.drop'
                 : 'notification.price.lead.update'),
-            '📦 '.$event->product_name,
+            $this->uiIcons->renderLegacyIcons('📦 ').$event->product_name,
             '',
             $this->locale->translateLocale($locale, 'notification.price.qris.label'),
             $this->formatIdr($event->old_price_amount, $locale).' → '.$this->formatIdr($event->new_price_amount, $locale),

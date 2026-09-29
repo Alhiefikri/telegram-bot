@@ -3,9 +3,9 @@
 namespace App\Catalog;
 
 /**
- * A catalog icon as it should be presented: the plain Unicode glyph that plain
- * text always receives, plus an optional Telegram custom emoji identifier that
- * inline keyboard buttons render in front of their label.
+ * A catalog icon with a plain Unicode fallback and an optional Telegram custom
+ * emoji identifier. HTML message text can render that identifier around the
+ * glyph; inline keyboard buttons carry it as their icon.
  */
 final readonly class CatalogIcon
 {

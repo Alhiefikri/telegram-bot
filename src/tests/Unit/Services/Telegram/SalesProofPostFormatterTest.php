@@ -2,13 +2,21 @@
 
 namespace Tests\Unit\Services\Telegram;
 
+use App\Models\TelegramUiIcon;
 use App\Services\PaidInvoice\PaidInvoicePresentation;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\SalesProofPostFormatter;
+use App\Services\Telegram\TelegramHtmlCaption;
+use App\Services\Telegram\TelegramUiIcons;
 use Carbon\CarbonImmutable;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
 
 class SalesProofPostFormatterTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_photo_caption_is_bounded_and_uses_the_public_paid_order_shape(): void
     {
         $presentation = new PaidInvoicePresentation(
@@ -45,6 +53,41 @@ class SalesProofPostFormatterTest extends TestCase
         $this->assertStringContainsString('Thank you for choosing Lhie Store.', $caption);
         $this->assertStringContainsString('…', $caption);
         $this->assertStringNotContainsStringIgnoringCase('fake', $caption);
+    }
+
+    public function test_custom_emoji_tags_remain_intact_under_the_visible_caption_limit(): void
+    {
+        app(CustomEmojiCapability::class)->markAvailable();
+        TelegramUiIcon::query()->where('key', 'message.users')->update([
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
+        Cache::forget(TelegramUiIcons::CACHE_KEY);
+
+        $presentation = new PaidInvoicePresentation(
+            invoiceId: 'INV-CUSTOM-EMOJI-LIMIT',
+            buyerIdentifier: '284*****24',
+            paidAt: CarbonImmutable::parse('2026-08-22 04:00:00 UTC')->setTimezone('Asia/Jakarta'),
+            paymentMethod: 'QRIS',
+            currency: 'IDR',
+            items: [[
+                'product_name' => str_repeat('Long Unicode Product 名 ', 200),
+                'quantity' => 1,
+                'unit_price' => 123456,
+                'subtotal' => 123456,
+            ]],
+            providerFee: 0,
+            totalPaid: 123456,
+            buyerName: 'And***',
+        );
+
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 17);
+
+        $this->assertStringContainsString('emoji-id="5368324170671202286"', $caption);
+        $this->assertStringContainsString('👥</tg-emoji>', $caption);
+        $this->assertLessThanOrEqual(
+            SalesProofPostFormatter::MAX_CAPTION_LENGTH,
+            app(TelegramHtmlCaption::class)->parsedLength($caption, ['parse_mode' => 'HTML']),
+        );
     }
 
     public function test_photo_caption_uses_a_safe_generic_name_instead_of_a_buyer_id_fallback(): void

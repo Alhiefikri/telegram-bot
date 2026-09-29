@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Telegram\TelegramAdminOrderNotifier;
+use App\Services\Telegram\TelegramUiIcons;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -123,6 +124,8 @@ class TelegramAdminOrderNotifierTest extends TestCase
         ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
         Http::preventStrayRequests();
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 321]])]);
+
+        app(TelegramUiIcons::class)->all();
 
         $singleItemQueries = $this->queryCountForExpiredAdminNotification($this->expiredOrderWithItems(1));
         $manyItemQueries = $this->queryCountForExpiredAdminNotification($this->expiredOrderWithItems(8));

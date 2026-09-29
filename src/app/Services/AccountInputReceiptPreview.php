@@ -6,6 +6,7 @@ use App\Models\Product;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramReceiptPlan;
+use App\Services\Telegram\TelegramUiIcons;
 
 /**
  * Produces credential-free metadata for the Account Input review surface.
@@ -15,7 +16,10 @@ use App\Services\Telegram\TelegramReceiptPlan;
  */
 final readonly class AccountInputReceiptPreview
 {
-    public function __construct(private TelegramLocale $locale) {}
+    public function __construct(
+        private TelegramLocale $locale,
+        private TelegramUiIcons $uiIcons,
+    ) {}
 
     /**
      * @param  list<StructuredCredentialPayload>  $accounts
@@ -57,7 +61,7 @@ final readonly class AccountInputReceiptPreview
             $lines[] = $note;
         }
         if ($guideTitle !== '' && $guideUrl !== '') {
-            $lines[] = '📘 '.$guideTitle;
+            $lines[] = $this->uiIcons->renderLegacyIcons('📘 ').$guideTitle;
         }
         $lines[] = $this->locale->translateLocale($locale, 'receipt.save_details');
         $lines[] = $this->locale->translateLocale($locale, 'receipt.copy_guidance');

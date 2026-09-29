@@ -2,6 +2,8 @@
 
 namespace App\Services\Telegram;
 
+use App\Catalog\CatalogIcon;
+
 final class TelegramHtmlCaption
 {
     public const LIMIT = 1024;
@@ -13,12 +15,26 @@ final class TelegramHtmlCaption
      */
     public function html(string $plainText, int $limit = self::LIMIT): string
     {
-        return $this->escape($this->truncate($plainText, $limit));
+        return $this->escapeWithCustomEmoji($plainText, $limit);
     }
 
     public function blockquote(string $plainText): string
     {
-        return '<blockquote>'.$this->escape($plainText).'</blockquote>';
+        return '<blockquote>'.$this->escapeWithCustomEmoji($plainText, PHP_INT_MAX).'</blockquote>';
+    }
+
+    public function icon(CatalogIcon $icon): string
+    {
+        $glyph = $this->escape($icon->glyph);
+        if (! $icon->hasCustomEmoji()) {
+            return $glyph;
+        }
+
+        return sprintf(
+            '<tg-emoji emoji-id="%s" data-omp-icon="1">%s</tg-emoji>',
+            $this->escape((string) $icon->customEmojiId),
+            $glyph,
+        );
     }
 
     /**
@@ -32,7 +48,7 @@ final class TelegramHtmlCaption
         array $blockquoteTexts,
         int $limit = self::LIMIT,
     ): string {
-        $plainText = $this->truncate($plainText, $limit);
+        $plainText = $this->truncateTextPreservingCustomEmoji($plainText, $limit);
         $markers = [];
 
         foreach ($blockquoteTexts as $index => $blockquoteText) {
@@ -53,7 +69,7 @@ final class TelegramHtmlCaption
             $markers[$marker] = $this->blockquote($blockquoteText);
         }
 
-        return strtr($this->escape($plainText), $markers);
+        return strtr($this->escapeWithCustomEmoji($plainText, PHP_INT_MAX), $markers);
     }
 
     /**
@@ -79,14 +95,98 @@ final class TelegramHtmlCaption
         return $this->parsedLength($caption, $options) <= self::LIMIT;
     }
 
-    private function truncate(string $plainText, int $limit): string
+    public function truncateTextPreservingCustomEmoji(string $plainText, int $limit, string $suffix = '…'): string
+    {
+        $pattern = '~<tg-emoji\\b(?=[^>]*\\bdata-omp-icon="1")[^>]*\\bemoji-id="([^"]+)"[^>]*>([^<]*)</tg-emoji>~u';
+        if (preg_match_all($pattern, $plainText, $matches, PREG_OFFSET_CAPTURE) < 1) {
+            return $this->truncate($plainText, $limit, $suffix);
+        }
+
+        $remaining = max(1, $limit);
+        $truncated = '';
+        $cursor = 0;
+        foreach ($matches[0] as $index => [$markup, $byteOffset]) {
+            $before = substr($plainText, $cursor, $byteOffset - $cursor);
+            $beforeLength = mb_strlen($before, 'UTF-8');
+            if ($beforeLength > $remaining) {
+                return $truncated.$this->truncate($before, $remaining, $suffix);
+            }
+
+            $truncated .= $before;
+            $remaining -= $beforeLength;
+
+            $glyph = html_entity_decode($matches[2][$index][0], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $glyphLength = mb_strlen($glyph, 'UTF-8');
+            if ($glyphLength > $remaining) {
+                return $truncated.($remaining > 0 ? $suffix : '');
+            }
+
+            $truncated .= $markup;
+            $remaining -= $glyphLength;
+            $cursor = $byteOffset + strlen($markup);
+        }
+
+        $tail = substr($plainText, $cursor);
+        if ($tail === '' || $remaining === 0) {
+            return $truncated;
+        }
+
+        return $truncated.$this->truncate($tail, $remaining, $suffix);
+    }
+
+    private function escapeWithCustomEmoji(string $plainText, int $limit): string
+    {
+        $pattern = '~<tg-emoji\\b(?=[^>]*\\bdata-omp-icon="1")[^>]*\\bemoji-id="([^"]+)"[^>]*>([^<]*)</tg-emoji>~u';
+        if (preg_match_all($pattern, $plainText, $matches, PREG_OFFSET_CAPTURE) < 1) {
+            return $this->escape($this->truncate($plainText, $limit));
+        }
+
+        $remaining = max(1, $limit);
+        $html = '';
+        $cursor = 0;
+        foreach ($matches[0] as $index => [$markup, $byteOffset]) {
+            $before = substr($plainText, $cursor, $byteOffset - $cursor);
+            $beforeLength = mb_strlen($before, 'UTF-8');
+            if ($beforeLength > $remaining) {
+                return $html.$this->escape($this->truncate($before, $remaining));
+            }
+
+            $html .= $this->escape($before);
+            $remaining -= $beforeLength;
+
+            $glyph = html_entity_decode($matches[2][$index][0], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $glyphLength = mb_strlen($glyph, 'UTF-8');
+            if ($glyphLength > $remaining) {
+                return $html.($remaining > 0 ? '…' : '');
+            }
+
+            $html .= sprintf(
+                '<tg-emoji emoji-id="%s">%s</tg-emoji>',
+                $this->escape($matches[1][$index][0]),
+                $this->escape($glyph),
+            );
+            $remaining -= $glyphLength;
+            $cursor = $byteOffset + strlen($markup);
+        }
+
+        $tail = substr($plainText, $cursor);
+        if ($tail === '' || $remaining === 0) {
+            return $html;
+        }
+
+        return $html.$this->escape($this->truncate($tail, $remaining));
+    }
+
+    private function truncate(string $plainText, int $limit, string $suffix = '…'): string
     {
         $limit = max(1, $limit);
         if (mb_strlen($plainText, 'UTF-8') <= $limit) {
             return $plainText;
         }
 
-        return mb_substr($plainText, 0, $limit - 1, 'UTF-8').'…';
+        $suffixLength = mb_strlen($suffix, 'UTF-8');
+
+        return mb_substr($plainText, 0, max(0, $limit - $suffixLength), 'UTF-8').$suffix;
     }
 
     private function escape(string $plainText): string

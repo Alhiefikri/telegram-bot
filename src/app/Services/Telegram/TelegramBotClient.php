@@ -70,6 +70,7 @@ class TelegramBotClient
         if ($replyMarkup !== []) {
             $payload['reply_markup'] = $replyMarkup;
         }
+        $payload = $this->normalizeCustomEmojiText($payload);
 
         $response = $this->timed('editMessageText', fn () => $this->postWithCustomEmojiFallback('editMessageText', 'editMessageText', $payload, wrapFailures: true));
 
@@ -83,11 +84,12 @@ class TelegramBotClient
             'message_id' => $messageId,
             'caption' => $caption,
         ], $options);
-        if (isset($payload['caption_entities']) && is_array($payload['caption_entities'])) {
-            $payload['caption_entities'] = json_encode($payload['caption_entities'], JSON_THROW_ON_ERROR);
-        }
         if ($replyMarkup !== []) {
             $payload['reply_markup'] = $replyMarkup;
+        }
+        $payload = $this->normalizeCustomEmojiText($payload);
+        if (isset($payload['caption_entities']) && is_array($payload['caption_entities'])) {
+            $payload['caption_entities'] = json_encode($payload['caption_entities'], JSON_THROW_ON_ERROR);
         }
 
         $response = $this->timed('editMessageCaption', fn () => $this->postWithCustomEmojiFallback('editMessageCaption', 'editMessageCaption', $payload, wrapFailures: true));
@@ -106,6 +108,7 @@ class TelegramBotClient
             'message_id' => $messageId,
             'reply_markup' => $replyMarkup,
         ], $options);
+        $payload = $this->normalizeCustomEmojiText($payload);
 
         $response = $this->timed('editMessageReplyMarkup', fn () => $this->postWithCustomEmojiFallback('editMessageReplyMarkup', 'editMessageReplyMarkup', $payload, wrapFailures: true));
 
@@ -168,10 +171,15 @@ class TelegramBotClient
 
     public function sendPhoto(int|string $chatId, string $photoContents, string $filename, ?string $caption = null, array $replyMarkup = [], array $options = []): array
     {
-        $request = $this->requests->request()->attach('photo', $photoContents, $filename);
         $payload = $this->photoPayload($chatId, $caption, $replyMarkup, $options);
 
-        $response = $this->timed('sendPhoto', fn () => $request->post($this->requests->url('sendPhoto'), $payload)->throw()->json());
+        $response = $this->timed('sendPhoto', fn () => $this->postWithCustomEmojiFallback(
+            'sendPhoto',
+            'sendPhoto',
+            $payload,
+            wrapFailures: false,
+            attachment: ['field' => 'photo', 'contents' => $photoContents, 'filename' => $filename],
+        ));
         if (($response['ok'] ?? false) !== true) {
             throw new \RuntimeException('Telegram Bot API sendPhoto response was not successful.');
         }
@@ -270,11 +278,6 @@ class TelegramBotClient
         array $replyMarkup = [],
         array $options = [],
     ): array {
-        $request = $this->requests->request()->attach(
-            'document',
-            $documentContents,
-            $this->sanitizeDocumentFilename($filename),
-        );
         $payload = array_merge($options, ['chat_id' => $chatId]);
         unset($payload['document']);
 
@@ -283,19 +286,32 @@ class TelegramBotClient
         } else {
             unset($payload['caption']);
         }
+        if ($replyMarkup !== []) {
+            $payload['reply_markup'] = $replyMarkup;
+        } else {
+            unset($payload['reply_markup']);
+        }
+        $payload = $this->normalizeCustomEmojiText($payload);
         if (isset($payload['caption_entities']) && is_array($payload['caption_entities'])) {
             $payload['caption_entities'] = json_encode($payload['caption_entities'], JSON_THROW_ON_ERROR);
         }
-
-        if ($replyMarkup !== []) {
-            $payload['reply_markup'] = json_encode($replyMarkup, JSON_THROW_ON_ERROR);
-        } else {
-            unset($payload['reply_markup']);
+        if (is_array($payload['reply_markup'] ?? null)) {
+            $payload['reply_markup'] = json_encode($payload['reply_markup'], JSON_THROW_ON_ERROR);
         }
 
         $response = $this->timed(
             'sendDocument',
-            fn () => $request->post($this->requests->url('sendDocument'), $payload)->throw()->json(),
+            fn () => $this->postWithCustomEmojiFallback(
+                'sendDocument',
+                'sendDocument',
+                $payload,
+                wrapFailures: false,
+                attachment: [
+                    'field' => 'document',
+                    'contents' => $documentContents,
+                    'filename' => $this->sanitizeDocumentFilename($filename),
+                ],
+            ),
         );
         $response = $this->successfulResponse('sendDocument', $response);
         $this->responseValidator->messageIdFromDocumentResponse($response, 'Telegram sendDocument');
@@ -314,8 +330,14 @@ class TelegramBotClient
         if ($replyMarkup !== []) {
             $payload['reply_markup'] = $replyMarkup;
         }
+        $payload = $this->normalizeCustomEmojiText($payload);
 
-        $response = $this->timed('sendPhotoReference', fn () => $this->requests->request()->post($this->requests->url('sendPhoto'), $payload)->throw()->json());
+        $response = $this->timed('sendPhotoReference', fn () => $this->postWithCustomEmojiFallback(
+            'sendPhotoReference',
+            'sendPhoto',
+            $payload,
+            wrapFailures: false,
+        ));
         if (($response['ok'] ?? false) !== true) {
             throw new \RuntimeException('Telegram Bot API sendPhoto response was not successful.');
         }
@@ -334,7 +356,7 @@ class TelegramBotClient
         try {
             $this->timed('answerCallbackQuery', fn () => $this->requests->request()->post($this->requests->url('answerCallbackQuery'), array_filter([
                 'callback_query_id' => $callbackQueryId,
-                'text' => $text,
+                'text' => $text === null ? null : $this->customEmoji->stripTextCustomEmoji($text),
                 'show_alert' => $text !== null,
             ], fn ($value) => $value !== null))->throw());
         } catch (RequestException $e) {
@@ -391,6 +413,42 @@ class TelegramBotClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
+        return $this->normalizeCustomEmojiText($payload);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function normalizeCustomEmojiText(array $payload): array
+    {
+        if (is_array($payload['reply_markup'] ?? null) || is_string($payload['reply_markup'] ?? null)) {
+            $payload['reply_markup'] = $this->customEmoji->iconsFromReplyMarkup($payload['reply_markup']);
+        }
+        if (isset($payload['parse_mode'])) {
+            foreach (['text', 'caption'] as $field) {
+                if (is_string($payload[$field] ?? null)) {
+                    $payload[$field] = $this->customEmoji->canonicalizeTrustedCustomEmojiHtml($payload[$field]);
+                }
+            }
+
+            return $payload;
+        }
+
+        foreach (['text' => 'entities', 'caption' => 'caption_entities'] as $field => $entitiesField) {
+            if (! is_string($payload[$field] ?? null) || ! str_contains($payload[$field], '<tg-emoji')) {
+                continue;
+            }
+
+            $entities = $payload[$entitiesField] ?? [];
+            $entities = is_array($entities) ? $entities : [];
+            $rendered = $this->customEmoji->textAndEntities($payload[$field], $entities);
+            $payload[$field] = $rendered['text'];
+            if ($rendered['entities'] !== []) {
+                $payload[$entitiesField] = $rendered['entities'];
+            }
+        }
+
         return $payload;
     }
 
@@ -402,12 +460,15 @@ class TelegramBotClient
         if ($caption !== null && $caption !== '') {
             $payload['caption'] = $caption;
         }
+        if ($replyMarkup !== []) {
+            $payload['reply_markup'] = $replyMarkup;
+        }
+        $payload = $this->normalizeCustomEmojiText($payload);
         if (isset($payload['caption_entities']) && is_array($payload['caption_entities'])) {
             $payload['caption_entities'] = json_encode($payload['caption_entities'], JSON_THROW_ON_ERROR);
         }
-
-        if ($replyMarkup !== []) {
-            $payload['reply_markup'] = json_encode($replyMarkup, JSON_THROW_ON_ERROR);
+        if (is_array($payload['reply_markup'] ?? null)) {
+            $payload['reply_markup'] = json_encode($payload['reply_markup'], JSON_THROW_ON_ERROR);
         }
 
         return $payload;
@@ -463,25 +524,31 @@ class TelegramBotClient
     }
 
     /**
-     * Custom emoji on buttons need a bot whose owner holds Telegram Premium,
-     * and Telegram gives no way to ask for that capability up front. A rejected
-     * send is retried once without the icons, and the capability stays disabled
-     * for a while so later sends fall back immediately.
+     * Custom emoji entities and inline keyboard button icons require Telegram
+     * to allow this bot to use them. A rejected send is retried once without
+     * custom emoji, and capability remains disabled for later sends.
      *
      * @param  array<string, mixed>  $payload
+     * @param  array{field: string, contents: string, filename: string}|null  $attachment
      * @return array<string, mixed>
      */
-    private function postWithCustomEmojiFallback(string $operation, string $method, array $payload, bool $wrapFailures): array
-    {
+    private function postWithCustomEmojiFallback(
+        string $operation,
+        string $method,
+        array $payload,
+        bool $wrapFailures,
+        ?array $attachment = null,
+    ): array {
         try {
-            return $this->requests->request()->post($this->requests->url($method), $payload)->throw()->json();
+            return $this->post($method, $payload, $attachment);
         } catch (RequestException $exception) {
-            return $this->retryWithoutCustomEmoji($operation, $method, $payload, $exception, $wrapFailures);
+            return $this->retryWithoutCustomEmoji($operation, $method, $payload, $exception, $wrapFailures, $attachment);
         }
     }
 
     /**
      * @param  array<string, mixed>  $payload
+     * @param  array{field: string, contents: string, filename: string}|null  $attachment
      * @return array<string, mixed>
      */
     private function retryWithoutCustomEmoji(
@@ -490,6 +557,7 @@ class TelegramBotClient
         array $payload,
         RequestException $exception,
         bool $wrapFailures,
+        ?array $attachment = null,
     ): array {
         $apiException = TelegramApiException::fromRequest($operation, $exception);
         if (! $apiException->isCustomEmojiRejected()) {
@@ -501,10 +569,7 @@ class TelegramBotClient
         $this->customEmoji->markUnavailable($apiException->description);
 
         try {
-            return $this->requests->request()
-                ->post($this->requests->url($method), $this->withoutCustomEmojiIcons($payload))
-                ->throw()
-                ->json();
+            return $this->post($method, $this->withoutCustomEmojiMarkup($payload), $attachment);
         } catch (RequestException $retryException) {
             throw $wrapFailures ? TelegramApiException::fromRequest($operation, $retryException) : $retryException;
         }
@@ -514,13 +579,50 @@ class TelegramBotClient
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    private function withoutCustomEmojiIcons(array $payload): array
+    private function withoutCustomEmojiMarkup(array $payload): array
     {
-        if (is_array($payload['reply_markup'] ?? null)) {
-            $payload['reply_markup'] = $this->customEmoji->stripIcons($payload['reply_markup']);
+        $isHtml = ($payload['parse_mode'] ?? null) === 'HTML';
+        foreach (['text', 'caption'] as $field) {
+            if (is_string($payload[$field] ?? null)) {
+                $payload[$field] = $isHtml
+                    ? $this->customEmoji->stripHtmlCustomEmoji($payload[$field])
+                    : $this->customEmoji->stripTextCustomEmoji($payload[$field]);
+            }
+        }
+
+        foreach (['entities', 'caption_entities'] as $field) {
+            if (is_array($payload[$field] ?? null) || is_string($payload[$field] ?? null)) {
+                $payload[$field] = $this->customEmoji->stripTextCustomEmojiEntities($payload[$field]);
+            }
+        }
+
+        $replyMarkup = $payload['reply_markup'] ?? null;
+        if (is_array($replyMarkup)) {
+            $payload['reply_markup'] = $this->customEmoji->stripIcons(
+                $this->customEmoji->stripTextCustomEmojiFromReplyMarkup($replyMarkup),
+            );
+        } elseif (is_string($replyMarkup)) {
+            $payload['reply_markup'] = $this->customEmoji->stripTextCustomEmojiFromReplyMarkup(
+                $this->customEmoji->stripEncodedIcons($replyMarkup),
+            );
         }
 
         return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array{field: string, contents: string, filename: string}|null  $attachment
+     * @return array<string, mixed>
+     */
+    private function post(string $method, array $payload, ?array $attachment): array
+    {
+        $request = $this->requests->request();
+        if ($attachment !== null) {
+            $request = $request->attach($attachment['field'], $attachment['contents'], $attachment['filename']);
+        }
+
+        return $request->post($this->requests->url($method), $payload)->throw()->json();
     }
 
     /**

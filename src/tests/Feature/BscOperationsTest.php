@@ -30,6 +30,7 @@ use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramAdminAccess;
+use App\Services\Telegram\TelegramUiIcons;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -273,7 +274,7 @@ class BscOperationsTest extends TestCase
         ManualPaymentSetting::current()->update(['admin_telegram_chat_id' => '123456']);
 
         $bot = new FakeTelegramBotClient;
-        $notifier = new BscOperationalAlertNotifier(new TelegramAdminAccess, $bot);
+        $notifier = new BscOperationalAlertNotifier(new TelegramAdminAccess, $bot, app(TelegramUiIcons::class));
         $failed = new BscReadinessReport(
             enabled: true,
             missing: [],
@@ -311,7 +312,7 @@ class BscOperationsTest extends TestCase
         ManualPaymentSetting::current()->update(['admin_telegram_chat_id' => '123456']);
 
         $bot = new FakeTelegramBotClient;
-        $notifier = new BscOperationalAlertNotifier(new TelegramAdminAccess, $bot);
+        $notifier = new BscOperationalAlertNotifier(new TelegramAdminAccess, $bot, app(TelegramUiIcons::class));
         $hash = '0x'.str_repeat('a', 64);
         $payment = $this->bscPayment(1_000_000, $hash);
         $payment->bscDetail()->update([

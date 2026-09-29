@@ -104,19 +104,20 @@ An existing sellable Product/SKU shown as a member of a Product Family. Its Prod
 _Avoid_: family-level stock, new Variant entity
 
 **Plan**:
-The customer-facing name for one Product option inside a Product Family, used by the Store Bot catalog and the Web Storefront. It is presentation vocabulary only: the sellable identity remains the Product option, and a Product Family with a single Plan opens that Product Detail directly instead of listing its Plans.
+The customer-facing name for one Product option inside a Product Family, used by the Store Bot catalog and the Web Storefront. It is presentation vocabulary only: the sellable identity remains the Product option, and a Product Family with a single Plan opens that Product Detail directly instead of listing its Plans. Product Detail opened from a family's Plan list returns to that Plan list instead of the catalog list.
 _Avoid_: Variant, SKU, subscription tier
 
 **Product catalog icon**:
-An optional plain Unicode presentation value stored on a Product and edited through the Admin Dashboard. It overrides the Catalog Brand Icon for that Product's catalog buttons and plain text. It is not a secret and must not be configured through ENV.
-
-**Catalog Brand Icon**:
-An admin-managed brand registry entry that owns the name patterns, a plain Unicode fallback glyph, and the Telegram custom emoji identifier captured from the owner's own emoji pack. The Store Bot resolves it for any Product or Product Family whose name matches, and inline keyboard buttons carry the captured identifier as their icon while the bot owner holds Telegram Premium. It is presentation only: matching never changes price, stock, checkout, or fulfillment.
-_Avoid_: Product icon, emoji configuration, sticker pack
+The presentation values a Product owns for its catalog entry: an optional Unicode glyph retained as the Web Storefront and Telegram fallback, plus an optional Telegram custom emoji identifier. Telegram message text renders a captured identifier with `<tg-emoji emoji-id="...">glyph</tg-emoji>` and inline keyboard buttons carry it in `icon_custom_emoji_id` when Telegram allows custom emoji; the Web Storefront and rejected/unsupported Telegram sends use the Unicode glyph. Capturing a premium emoji in the Store Bot stores its identifier and Telegram's associated Unicode `emoji` as that fallback; sending a plain emoji stores the glyph directly. The Admin Dashboard can edit the glyph afterward. Telegram permits custom emoji entities in direct private/group/supergroup bot messages when the bot owner has Telegram Premium (or when the bot has a Fragment-purchased additional username); Store Channel posts stay Unicode. Inside a Product Family every Plan row and Plan button presents one shared family icon: the first member in family order with a captured identifier supplies both values; otherwise the first member with a glyph supplies it. It is presentation only: it never changes price, stock, checkout, or fulfillment. It is not a secret and must not be configured through ENV.
+_Avoid_: Brand icon, automatic brand detection, sticker pack
 
 **Telegram UI icon**:
 A named Store Bot navigation slot (home, back, product catalog, balance, orders, support, language, channel) that may carry a captured Telegram custom emoji on its button. The plain Unicode glyph stays in the locale copy and is dropped only while a captured identifier renders. It is presentation only: the callback behaviour of the button never changes.
 _Avoid_: menu sticker, navigation setting
+
+**Telegram message-copy icon**:
+A named `message.*` slot in `telegram_ui_icons` that maps a legacy static-copy glyph to an editable Unicode fallback and optional captured custom emoji ID. `messageicon:` lets an admin capture premium or plain emoji. Translation templates resolve these slots before replacement values are inserted; code templates render static prefixes only, leaving customer, Product, payment, and credential values untouched. Product icons remain Product-owned.
+_Avoid_: Product icon, user-authored text
 
 **Uncategorized Product**:
 An active product that is not assigned to a Product Category. Deleting a Product Category moves its products into this state without changing their active status or sale availability.

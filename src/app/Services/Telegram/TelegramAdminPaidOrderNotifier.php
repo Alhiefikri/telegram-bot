@@ -16,6 +16,7 @@ class TelegramAdminPaidOrderNotifier
         private readonly TelegramBotClient $bot,
         private readonly TelegramAdminAccess $adminAccess,
         private readonly PaymentReceiptReport $receiptReport,
+        private readonly TelegramUiIcons $uiIcons,
     ) {}
 
     /**
@@ -59,7 +60,7 @@ class TelegramAdminPaidOrderNotifier
         $payment = $this->relevantPayment($order);
 
         $lines = [
-            '🔔 Produk terjual!',
+            $this->uiIcons->renderLegacyIcons('🔔 Produk terjual!'),
             '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
             'Pembeli: '.$this->buyerLabel($order),
@@ -71,7 +72,7 @@ class TelegramAdminPaidOrderNotifier
             'Produk:',
             ...$this->itemLines($order),
             '',
-            '📦 Sisa Stok:',
+            $this->uiIcons->renderLegacyIcons('📦 Sisa Stok:'),
             ...$this->stockLines($order),
             '',
             'Paid at: '.$this->timeLabel($payment?->paid_at ?? $order->updated_at),

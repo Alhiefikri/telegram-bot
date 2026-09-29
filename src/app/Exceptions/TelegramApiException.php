@@ -49,7 +49,8 @@ final class TelegramApiException extends RuntimeException
         $description = $this->normalizedDescription();
 
         return str_contains($description, 'custom emoji')
-            || str_contains($description, 'icon_custom_emoji_id');
+            || str_contains($description, 'icon_custom_emoji_id')
+            || str_contains($description, 'tg-emoji');
     }
 
     public function isDefiniteEditFailure(): bool

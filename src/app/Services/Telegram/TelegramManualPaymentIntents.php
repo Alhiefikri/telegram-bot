@@ -28,6 +28,7 @@ class TelegramManualPaymentIntents
         private BinancePaymentVerification $verification,
         private TelegramOutboundEffectService $outboundEffects,
         private TelegramOutboundEffectDispatcher $dispatcher,
+        private TelegramUiIcons $uiIcons,
     ) {}
 
     public function submitManualPaymentProof(Customer $customer, string $chatId, array $message, string $invoice): void
@@ -226,12 +227,12 @@ class TelegramManualPaymentIntents
     {
         $isBinance = $payment->method === 'BINANCE_PAY_ID';
         $caption = [
-            '📸 Bukti pembayaran masuk',
+            $this->uiIcons->renderLegacyIcons('📸 Bukti pembayaran masuk'),
             '━━━━━━━━━━━━━━',
-            '🧾 Invoice: '.$order->invoice_number,
-            '👤 Customer: @'.($order->customer?->username ?: '-').' ('.$order->customer?->telegram_id.')',
-            '💳 Metode: '.($payment->payment_method_label ?: 'manual'),
-            '💰 Total: '.($payment->currency === 'USDT'
+            $this->uiIcons->renderLegacyIcons('🧾 Invoice: ').$order->invoice_number,
+            $this->uiIcons->renderLegacyIcons('👤 Customer: ').'@'.($order->customer?->username ?: '-').' ('.$order->customer?->telegram_id.')',
+            $this->uiIcons->renderLegacyIcons('💳 Metode: ').($payment->payment_method_label ?: 'manual'),
+            $this->uiIcons->renderLegacyIcons('💰 Total: ').($payment->currency === 'USDT'
                 ? number_format($payment->amount / 1_000_000, 6, '.', '').' USDT'
                 : 'Rp '.number_format($order->total_amount, 0, ',', '.')),
             '',
@@ -246,7 +247,7 @@ class TelegramManualPaymentIntents
             && in_array($order->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true);
 
         if ($lateEvidence) {
-            $caption[] = '⚠️ Late Binance evidence: order sudah expired dan stok sudah dilepas.';
+            $caption[] = $this->uiIcons->renderLegacyIcons('⚠️ Late Binance evidence: order sudah expired dan stok sudah dilepas.');
             $caption[] = 'Jangan approve lewat tombol otomatis. Review/refund/fulfill manual sesuai kondisi stok.';
         } else {
             $caption[] = '';
@@ -258,8 +259,8 @@ class TelegramManualPaymentIntents
 
         $replyMarkup = $lateEvidence ? [] : [
             'inline_keyboard' => [[
-                ['text' => '✅ Setujui & Kirim Produk', 'callback_data' => 'admin:approve-payment:'.$order->id],
-                ['text' => '❌ Tolak Pembayaran', 'callback_data' => 'admin:reject-payment:'.$order->id],
+                [...$this->uiIcons->apply('message.success', '✅ Setujui & Kirim Produk'), 'callback_data' => 'admin:approve-payment:'.$order->id],
+                [...$this->uiIcons->apply('message.warning', '❌ Tolak Pembayaran'), 'callback_data' => 'admin:reject-payment:'.$order->id],
             ]],
         ];
 
@@ -316,7 +317,7 @@ class TelegramManualPaymentIntents
 
         $rejected = $this->adminOrders->rejectManualOrder($order);
         $this->bot->answerCallbackQuery($callbackQueryId, 'Pembayaran ditolak. Pembeli sudah diberi info.');
-        $this->bot->sendMessage($chatId, "❌ Pembayaran ditolak\n━━━━━━━━━━━━━━\nInvoice {$rejected->invoice_number} dibatalkan dan stok sudah dilepas kembali.");
+        $this->bot->sendMessage($chatId, $this->uiIcons->renderLegacyIcons("❌ Pembayaran ditolak\n━━━━━━━━━━━━━━\nInvoice ").$rejected->invoice_number.' dibatalkan dan stok sudah dilepas kembali.');
         $this->notifyBuyerPaymentRejected($rejected);
     }
 
@@ -354,7 +355,7 @@ class TelegramManualPaymentIntents
         }
 
         $cancelled = $this->adminOrders->cancelPendingOrder($order);
-        $this->bot->sendMessage($chatId, "✅ Order dibatalkan\n━━━━━━━━━━━━━━\nInvoice {$cancelled->invoice_number} dibatalkan dan stok sudah dilepas kembali.");
+        $this->bot->sendMessage($chatId, $this->uiIcons->renderLegacyIcons("✅ Order dibatalkan\n━━━━━━━━━━━━━━\nInvoice ").$cancelled->invoice_number.' dibatalkan dan stok sudah dilepas kembali.');
     }
 
     public function pendingManualQrisOrderForCustomer(Customer $customer, string $orderId): ?Order

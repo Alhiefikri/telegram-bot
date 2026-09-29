@@ -23,6 +23,7 @@ final class TelegramCredentialDeliveryRenderer
         private readonly CredentialDeliveryFormatter $credentialFormatter,
         private readonly TelegramLocale $locale,
         private readonly TelegramMessageChunker $messageChunker,
+        private readonly TelegramUiIcons $uiIcons,
     ) {}
 
     /**
@@ -95,7 +96,7 @@ final class TelegramCredentialDeliveryRenderer
                 $guideKey = $guide['title']."\n".$guide['url'];
                 if (! isset($emittedGuides[$guideKey])) {
                     $units[] = new TelegramMessageUnit(implode("\n", [
-                        '📘 '.$guide['title'],
+                        $this->uiIcons->renderLegacyIcons('📘 ').$guide['title'],
                         $guide['url'],
                     ]));
                     $emittedGuides[$guideKey] = true;
@@ -153,7 +154,7 @@ final class TelegramCredentialDeliveryRenderer
             $guide = $group->usageGuide();
             if ($guide !== null) {
                 $blocks[] = new TelegramMessageUnit(
-                    text: '📘 '.$guide['title'],
+                    text: $this->uiIcons->renderLegacyIcons('📘 ').$guide['title'],
                     replyMarkup: [
                         'inline_keyboard' => [[[
                             'text' => $guide['title'],

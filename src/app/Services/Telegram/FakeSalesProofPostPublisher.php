@@ -375,7 +375,7 @@ class FakeSalesProofPostPublisher
     private function shoppingButtonMarkup(Product $product): array
     {
         return [
-            'inline_keyboard' => [[['text' => '🛒 Shop Now', 'url' => $this->urls->telegramProductStartUrl($product)]]],
+            'inline_keyboard' => [[['text' => $this->formatter->shoppingButtonLabel(), 'url' => $this->urls->telegramProductStartUrl($product)]]],
         ];
     }
 }

@@ -32,6 +32,7 @@ final readonly class CatalogProductReadModel
         public ?string $imageUrl,
         public ?string $createdAt,
         public ?string $icon = null,
+        public ?string $customEmojiId = null,
         public ?string $telegramImagePath = null,
         public bool $matchesSearch = false,
     ) {}
@@ -63,6 +64,7 @@ final readonly class CatalogProductReadModel
             'image_path' => $this->imagePath,
             'image_url' => $this->imageUrl,
             'icon' => $this->icon,
+            'custom_emoji_id' => $this->customEmojiId,
             'created_at' => $this->createdAt,
             'matches_search' => $this->matchesSearch,
         ];

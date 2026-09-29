@@ -3,6 +3,7 @@
 namespace Tests\Feature\Telegram;
 
 use App\Services\Telegram\TelegramTranslationCatalog;
+use App\Services\Telegram\TelegramUiIcons;
 use Illuminate\Contracts\Translation\Translator;
 use Mockery;
 use Tests\TestCase;
@@ -61,7 +62,7 @@ class TelegramTranslationAuditTest extends TestCase
         $translator->shouldReceive('get')->with('catalog.key', [], 'ms', false)->once()->andReturn('catalog.key');
         $translator->shouldReceive('get')->with('catalog.key', [], 'en', false)->once()->andReturn('English fallback');
 
-        $this->assertSame('English fallback', (new TelegramTranslationCatalog($translator))->translate('catalog.key', 'ms'));
+        $this->assertSame('English fallback', (new TelegramTranslationCatalog($translator, app(TelegramUiIcons::class)))->translate('catalog.key', 'ms'));
     }
 
     public function test_catalog_english_fallback_ignores_application_fallback_locale(): void
@@ -74,7 +75,7 @@ class TelegramTranslationAuditTest extends TestCase
 
         $this->assertSame(
             'English fallback',
-            (new TelegramTranslationCatalog($translator))->translate('catalog.fallback_probe', 'ms'),
+            (new TelegramTranslationCatalog($translator, app(TelegramUiIcons::class)))->translate('catalog.fallback_probe', 'ms'),
         );
     }
 

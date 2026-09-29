@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Models\Customer;
 use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramUiIcon;
+use App\Services\Telegram\TelegramTranslationCatalog;
 use App\Services\Telegram\TelegramUiIcons;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
@@ -27,7 +28,93 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
         $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
         $callbacks = array_column($buttons, 'callback_data');
         $this->assertContains('menuicon:pick:'.$this->menuIcon('menu.products')->id, $callbacks);
-        $this->assertContains('brandicon:list', $callbacks);
+        $this->assertContains('producticon:list', $callbacks);
+        $this->assertContains('messageicon:list', $callbacks);
+    }
+
+    public function test_admin_can_open_the_message_copy_icon_list(): void
+    {
+        $this->fakeTelegramHttp();
+        $this->adminCustomer(999);
+
+        $this->postTelegramWebhook($this->callbackUpdate(50201, 'list', 'messageicon:list', ['id' => 999], 999, 'private', 777))->assertOk();
+
+        $request = $this->sentEditRequest(777);
+        $this->assertStringContainsString('Ikon teks pesan', (string) $request['text']);
+        $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
+        $callbacks = array_column($buttons, 'callback_data');
+        $icon = TelegramUiIcon::query()->where('key', 'message.payment_card')->sole();
+        $this->assertContains('messageicon:pick:'.$icon->id, $callbacks);
+    }
+
+    public function test_message_copy_uses_the_database_icon_and_does_not_rewrite_interpolated_customer_text(): void
+    {
+        $icon = TelegramUiIcon::query()->where('key', 'message.payment_card')->sole();
+        $icon->update([
+            'fallback_emoji' => '🪙',
+            'custom_emoji_id' => self::EMOJI_ID,
+        ]);
+
+        $text = app(TelegramTranslationCatalog::class)->translate(
+            'payment.pay_via',
+            'en',
+            ['method' => 'Customer 💳 choice'],
+        );
+
+        $this->assertSame(
+            '<tg-emoji emoji-id="'.self::EMOJI_ID.'" data-omp-icon="1">🪙</tg-emoji> Pay via: Customer 💳 choice',
+            $text,
+        );
+    }
+
+    public function test_admin_can_save_a_plain_unicode_fallback_for_message_copy(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = $this->adminCustomer(999);
+        $icon = TelegramUiIcon::query()->where('key', 'message.payment_card')->sole();
+        $icon->update(['custom_emoji_id' => self::EMOJI_ID]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            50202,
+            'pick',
+            'messageicon:pick:'.$icon->id,
+            ['id' => 999],
+            999,
+            'private',
+            777,
+        ))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(50203, '🪙', ['id' => 999], 999))->assertOk();
+
+        $this->assertSame('🪙', $icon->fresh()->fallback_emoji);
+        $this->assertNull($icon->fresh()->custom_emoji_id);
+    }
+
+    public function test_admin_can_save_a_premium_custom_emoji_for_message_copy(): void
+    {
+        $this->verifiedEmojiFakes();
+        $this->adminCustomer(999);
+        $icon = TelegramUiIcon::query()->where('key', 'message.payment_card')->sole();
+
+        $this->postTelegramWebhook($this->callbackUpdate(
+            50204,
+            'pick',
+            'messageicon:pick:'.$icon->id,
+            ['id' => 999],
+            999,
+            'private',
+            777,
+        ))->assertOk();
+        $update = $this->messageUpdate(50205, '🏠', ['id' => 999], 999);
+        $update['message']['entities'] = [[
+            'type' => 'custom_emoji',
+            'custom_emoji_id' => self::EMOJI_ID,
+            'offset' => 0,
+            'length' => 2,
+        ]];
+        $this->postTelegramWebhook($update)->assertOk();
+
+        $this->assertSame(self::EMOJI_ID, $icon->fresh()->custom_emoji_id);
+        $this->assertSame('🏠', $icon->fresh()->fallback_emoji);
     }
 
     public function test_picking_a_menu_slot_prompts_for_that_button_emoji(): void
@@ -42,6 +129,85 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Beranda', (string) $request['text']);
         $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
         $this->assertSame('menuicon:list', $buttons[0]['callback_data'] ?? null);
+    }
+
+    public function test_menu_icon_list_previews_a_captured_premium_emoji(): void
+    {
+        $this->verifiedEmojiFakes();
+        $customer = $this->adminCustomer(999);
+        $this->captureEmoji($customer, 'menu.products');
+
+        $this->postTelegramWebhook($this->callbackUpdate(50260, 'list', 'menuicon:list', ['id' => 999], 999, 'private', 777))->assertOk();
+
+        $buttons = $this->assertValidInlineKeyboard((array) $this->sentEditRequest(777)['reply_markup']);
+
+        $preview = collect($buttons)->first(fn (array $button): bool => ($button['callback_data'] ?? null) === 'menuicon:pick:'.$this->menuIcon('menu.products')->id);
+        $this->assertNotNull($preview, 'Slot yang sudah diubah tetap tampil di daftar.');
+        $this->assertSame('✅ Lihat Produk', $preview['text']);
+        $this->assertSame(self::EMOJI_ID, $preview['icon_custom_emoji_id'] ?? null);
+
+        $plain = collect($buttons)->first(fn (array $button): bool => ($button['callback_data'] ?? null) === 'menuicon:pick:'.$this->menuIcon('menu.home')->id);
+        $this->assertNotNull($plain);
+        $this->assertSame('⬜ 🏠 Beranda', $plain['text'], 'Slot yang belum diubah tetap memakai glyph bawaan.');
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $plain);
+    }
+
+    public function test_message_icon_list_previews_a_captured_premium_emoji(): void
+    {
+        $this->verifiedEmojiFakes();
+        $this->adminCustomer(999);
+        $icon = $this->menuIcon('message.payment_card');
+
+        $this->postTelegramWebhook($this->callbackUpdate(50270, 'pick', 'messageicon:pick:'.$icon->id, ['id' => 999], 999, 'private', 777))->assertOk();
+
+        $update = $this->messageUpdate(50271, '🏠', ['id' => 999], 999);
+        $update['message']['entities'] = [['type' => 'custom_emoji', 'custom_emoji_id' => self::EMOJI_ID, 'offset' => 0, 'length' => 2]];
+        $this->postTelegramWebhook($update)->assertOk();
+        $this->assertSame(self::EMOJI_ID, $icon->fresh()->custom_emoji_id);
+
+        $this->postTelegramWebhook($this->callbackUpdate(50272, 'list', 'messageicon:list', ['id' => 999], 999, 'private', 777))->assertOk();
+
+        $buttons = $this->assertValidInlineKeyboard((array) $this->sentEditRequest(777)['reply_markup']);
+        $preview = collect($buttons)->first(fn (array $button): bool => ($button['callback_data'] ?? null) === 'messageicon:pick:'.$icon->id);
+        $this->assertNotNull($preview, 'Slot teks pesan yang sudah diubah tetap tampil di daftar.');
+        $this->assertSame('✅ '.$icon->label, $preview['text']);
+        $this->assertSame(self::EMOJI_ID, $preview['icon_custom_emoji_id'] ?? null);
+    }
+
+    public function test_copy_icons_that_were_hard_coded_are_now_editable_slots(): void
+    {
+        foreach (['message.receipt', 'message.arrow', 'message.account'] as $key) {
+            $this->assertNotNull(TelegramUiIcon::query()->where('key', $key)->first(), $key.' harus terdaftar sebagai slot teks.');
+        }
+
+        // Emoji that already own a menu button slot must not be duplicated in
+        // the text icon list; each emoji stays editable in exactly one list.
+        foreach (['📦', '🛍️', '💰', '💬', '🌐', '📢', '⬅️', '🏠'] as $emoji) {
+            $this->assertNull(
+                TelegramUiIcon::query()->where('key', 'like', 'message.%')->where('source_emoji', $emoji)->first(),
+                $emoji.' sudah punya slot menu, jadi tidak boleh muncul lagi di daftar teks.',
+            );
+        }
+
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/getCustomEmojiStickers' => Http::response([
+                'ok' => true,
+                'result' => [['custom_emoji_id' => self::EMOJI_ID, 'emoji' => '🧾']],
+            ]),
+        ]);
+        $this->adminCustomer(999);
+        $icon = $this->menuIcon('message.receipt');
+
+        $this->postTelegramWebhook($this->callbackUpdate(50280, 'pick', 'messageicon:pick:'.$icon->id, ['id' => 999], 999, 'private', 777))->assertOk();
+
+        $update = $this->messageUpdate(50281, '🧾', ['id' => 999], 999);
+        $update['message']['entities'] = [['type' => 'custom_emoji', 'custom_emoji_id' => self::EMOJI_ID, 'offset' => 0, 'length' => 2]];
+        $this->postTelegramWebhook($update)->assertOk();
+
+        $this->assertSame(
+            '<tg-emoji emoji-id="'.self::EMOJI_ID.'" data-omp-icon="1">🧾</tg-emoji> Invoice: INV-1',
+            app(TelegramUiIcons::class)->renderLegacyIcons('🧾 Invoice: INV-1'),
+        );
     }
 
     public function test_captured_menu_emoji_replaces_the_glyph_on_the_home_keyboard(): void

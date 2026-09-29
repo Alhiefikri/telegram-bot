@@ -92,7 +92,7 @@ final class SalesProofDeliveryPipeline
                         $this->formatter->format($presentation, $postNumber, $remainingStock),
                         [
                             'inline_keyboard' => [[[
-                                'text' => '🛒 Shop Now',
+                                'text' => $this->formatter->shoppingButtonLabel(),
                                 'url' => $this->salesProofShoppingButtonUrl($order),
                             ]]],
                         ],
@@ -107,7 +107,7 @@ final class SalesProofDeliveryPipeline
                     $this->formatter->formatLegacy($order, $postNumber),
                     [
                         'inline_keyboard' => [[[
-                            'text' => '🛒 Shop Now',
+                            'text' => $this->formatter->shoppingButtonLabel(),
                             'url' => $this->salesProofShoppingButtonUrl($order),
                         ]]],
                     ],

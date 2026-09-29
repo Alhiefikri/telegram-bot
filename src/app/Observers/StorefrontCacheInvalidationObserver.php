@@ -5,6 +5,8 @@ namespace App\Observers;
 use App\Models\BscPaymentReceiver;
 use App\Models\Category;
 use App\Models\ManualPaymentSetting;
+use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductQuantityPriceTier;
@@ -41,7 +43,12 @@ class StorefrontCacheInvalidationObserver implements ShouldHandleEventsAfterComm
     {
         app(StorefrontResponseCache::class)->invalidate();
 
-        if ($model instanceof Product || $model instanceof ProductFamily || $model instanceof Category || $model instanceof ProductQuantityPriceTier) {
+        if ($model instanceof Product
+            || $model instanceof ProductFamily
+            || $model instanceof Category
+            || $model instanceof ProductQuantityPriceTier
+            || $model instanceof Order
+            || $model instanceof OrderItem) {
             app(TelegramCatalogProjectionCache::class)->invalidate();
         }
 

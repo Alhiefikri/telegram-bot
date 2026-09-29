@@ -12,6 +12,8 @@ class SalesProofPostFormatter
 
     public function __construct(
         private readonly SalesProofPostNumbering $numbering,
+        private readonly TelegramUiIcons $icons,
+        private readonly TelegramHtmlCaption $captions,
     ) {}
 
     /**
@@ -31,29 +33,28 @@ class SalesProofPostFormatter
             static fn (array $item): int => max(0, (int) ($item['quantity'] ?? 0)),
             $items,
         ));
-
         $lines = [
-            '🎉 ORDER PAYMENT CONFIRMED',
+            $this->icons->renderLegacyIcons('🎉 ORDER PAYMENT CONFIRMED'),
             '',
-            '👤 Buyer: '.$presentation->buyerName,
-            '🧾 Order ID: '.$presentation->invoiceId,
+            $this->icons->renderTextIcon('message.users').' Buyer: '.$presentation->buyerName,
+            $this->icons->renderTextIcon('message.ticket').' Order ID: '.$presentation->invoiceId,
             ...$this->itemSummaryLines($items),
             ...$this->lowStockLines($remainingStock),
-            '💳 Paid via: '.$presentation->paymentMethod,
-            '🕒 Completed: '.$presentation->paidAtWib(),
-            '📦 Quantity: '.$quantity,
-            '💵 Subtotal: '.$this->money($presentation->subtotal(), $presentation->currency),
+            $this->icons->renderLegacyIcons('💳 Paid via: ').$presentation->paymentMethod,
+            $this->icons->renderTextIcon('message.deadline').' Completed: '.$presentation->paidAtWib(),
+            $this->icons->renderTextIcon('message.quantity').' Quantity: '.$quantity,
+            $this->icons->renderLegacyIcons('💵 Subtotal: ').$this->money($presentation->subtotal(), $presentation->currency),
             ...($presentation->providerFee > 0
-                ? ['💸 Fee: '.$this->money($presentation->providerFee, $presentation->currency)]
+                ? [$this->icons->renderLegacyIcons('💸 Fee: ').$this->money($presentation->providerFee, $presentation->currency)]
                 : []),
-            '💰 Amount paid: '.$this->money($presentation->totalPaid, $presentation->currency),
-            '🏆 Successful orders: #'.$successfulPostNumber,
+            $this->icons->renderTextIcon('message.cash').' Amount paid: '.$this->money($presentation->totalPaid, $presentation->currency),
+            $this->icons->renderLegacyIcons('🏆 Successful orders: #').$successfulPostNumber,
         ];
 
         $bulkLines = $this->bulkPricingLines($presentation);
         $lines = $bulkLines === []
-            ? [...$lines, '', '━━━━━━━━━━━━━━', '✨ Thank you for choosing Lhie Store.']
-            : [...$lines, ...$bulkLines, '━━━━━━━━━━━━━━', '✨ Thank you for choosing Lhie Store.'];
+            ? [...$lines, '', '━━━━━━━━━━━━━━', $this->icons->renderLegacyIcons('✨ Thank you for choosing Lhie Store.')]
+            : [...$lines, ...$bulkLines, '━━━━━━━━━━━━━━', $this->icons->renderLegacyIcons('✨ Thank you for choosing Lhie Store.')];
 
         return $this->boundedCaption($lines);
     }
@@ -67,19 +68,24 @@ class SalesProofPostFormatter
     public function formatTopUp(PaidInvoicePresentation $presentation): string
     {
         $lines = [
-            '🎉 BALANCE TOP-UP CONFIRMED',
+            $this->icons->renderLegacyIcons('🎉 BALANCE TOP-UP CONFIRMED'),
             '',
-            '👤 Buyer: '.$presentation->buyerName,
-            '🧾 Top-up ID: '.$presentation->invoiceId,
-            '💳 Paid via: '.$presentation->paymentMethod,
-            '🕒 Completed: '.$presentation->paidAtWib(),
-            '💰 Amount paid: '.$this->money($presentation->totalPaid, $presentation->currency),
+            $this->icons->renderTextIcon('message.users').' Buyer: '.$presentation->buyerName,
+            $this->icons->renderTextIcon('message.ticket').' Top-up ID: '.$presentation->invoiceId,
+            $this->icons->renderLegacyIcons('💳 Paid via: ').$presentation->paymentMethod,
+            $this->icons->renderTextIcon('message.deadline').' Completed: '.$presentation->paidAtWib(),
+            $this->icons->renderTextIcon('message.cash').' Amount paid: '.$this->money($presentation->totalPaid, $presentation->currency),
             '',
             '━━━━━━━━━━━━━━',
-            '✨ Thank you for topping up at Lhie Store.',
+            $this->icons->renderLegacyIcons('✨ Thank you for topping up at Lhie Store.'),
         ];
 
         return $this->boundedCaption($lines);
+    }
+
+    public function shoppingButtonLabel(): string
+    {
+        return $this->icons->renderLegacyIcons('🛒 Shop Now');
     }
 
     /**
@@ -108,16 +114,15 @@ class SalesProofPostFormatter
     private function itemSummaryLines(array $items): array
     {
         if ($items === []) {
-            return ['🛍️ Item: Digital product'];
+            return [$this->icons->renderTextIcon('message.details').' Item: Digital product'];
         }
-
         if (count($items) === 1) {
             $item = $items[0];
 
-            return ['🛍️ Item: '.$this->itemLabel($item)];
+            return [$this->icons->renderTextIcon('message.details').' Item: '.$this->itemLabel($item)];
         }
 
-        $lines = ['🛍️ Items:'];
+        $lines = [$this->icons->renderTextIcon('message.details').' Items:'];
         $visibleItems = array_slice($items, 0, 6);
         foreach ($visibleItems as $item) {
             $lines[] = '• '.$this->itemLabel($item);
@@ -140,10 +145,10 @@ class SalesProofPostFormatter
         }
 
         if (count($presentation->items) === 1 && count($minimums) === 1) {
-            return ['🏷 Bulk pricing applied · '.$minimums[0].'+ units'];
+            return [$this->icons->renderLegacyIcons('🏷 Bulk pricing applied · ').$minimums[0].'+ units'];
         }
 
-        return ['🏷 Bulk pricing applied'];
+        return [$this->icons->renderLegacyIcons('🏷 Bulk pricing applied')];
     }
 
     /** @param array{product_name: string, quantity: int, unit_price?: int, subtotal?: int, quantity_price_tier_minimum?: ?int} $item */
@@ -163,7 +168,7 @@ class SalesProofPostFormatter
     {
         return $remainingStock === null || $remainingStock < 1
             ? []
-            : ['🔥 Only '.$remainingStock.' left in stock'];
+            : [$this->icons->renderLegacyIcons('🔥 Only ').$remainingStock.' left in stock'];
     }
 
     private function nextSuccessfulPostNumber(Order $order): int
@@ -185,14 +190,16 @@ class SalesProofPostFormatter
     private function boundedCaption(array $lines): string
     {
         $caption = implode("\n", $lines);
-        if (mb_strlen($caption, 'UTF-8') <= self::MAX_CAPTION_LENGTH) {
+        if ($this->captions->parsedLength($caption, ['parse_mode' => 'HTML']) <= self::MAX_CAPTION_LENGTH) {
             return $caption;
         }
 
         $tail = implode("\n", array_slice($lines, -4));
         $head = implode("\n", array_slice($lines, 0, -4));
-        $budget = max(1, self::MAX_CAPTION_LENGTH - mb_strlen($tail, 'UTF-8') - 2);
-        $head = rtrim(mb_substr($head, 0, max(1, $budget - 1), 'UTF-8')).'…';
+        $tailLength = $this->captions->parsedLength($tail, ['parse_mode' => 'HTML']);
+        $budget = max(1, self::MAX_CAPTION_LENGTH - $tailLength - 2);
+        $head = $this->captions->truncateTextPreservingCustomEmoji($head, max(1, $budget - 1), '');
+        $head = rtrim($head).'…';
 
         return $head."\n\n".$tail;
     }
@@ -219,12 +226,12 @@ class SalesProofPostFormatter
 
     private function formatLegacyMessage(string $buyerMask, string $productName, int $quantity, int $successfulPostNumber): string
     {
-        return "🎉 SUCCESSFUL PURCHASE 🎉\n\n"
-            .'👤 Buyer: '.$buyerMask."\n"
-            .'🛍️ Product: '.$productName."\n"
-            .'📦 Quantity: '.$quantity."x\n"
-            .'🏆 Successful orders: #'.$successfulPostNumber."\n\n"
-            ."✨ Thank you for shopping with us!\n"
-            .'Want to order too? Tap the button below 👇';
+        return $this->icons->renderLegacyIcons("🎉 SUCCESSFUL PURCHASE 🎉\n\n")
+            .$this->icons->renderTextIcon('message.users').' Buyer: '.$buyerMask."\n"
+            .$this->icons->renderTextIcon('message.details').' Product: '.$productName."\n"
+            .$this->icons->renderTextIcon('message.quantity').' Quantity: '.$quantity."x\n"
+            .$this->icons->renderLegacyIcons('🏆 Successful orders: #').$successfulPostNumber."\n\n"
+            .$this->icons->renderLegacyIcons("✨ Thank you for shopping with us!\n")
+            .'Want to order too? Tap the button below '.$this->icons->renderTextIcon('message.next');
     }
 }

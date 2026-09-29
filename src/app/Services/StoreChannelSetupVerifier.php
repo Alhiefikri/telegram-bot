@@ -5,11 +5,15 @@ namespace App\Services;
 use App\Models\StoreChannelSetting;
 use App\Services\Telegram\TelegramBotApiRedactor;
 use App\Services\Telegram\TelegramBotClient;
+use App\Services\Telegram\TelegramUiIcons;
 use Illuminate\Http\Client\RequestException;
 
 class StoreChannelSetupVerifier
 {
-    public function __construct(private readonly TelegramBotClient $telegram) {}
+    public function __construct(
+        private readonly TelegramBotClient $telegram,
+        private readonly TelegramUiIcons $uiIcons,
+    ) {}
 
     /** @return array{success: bool, chat_id: ?string, message_id: ?string, error: ?string} */
     public function test(StoreChannelSetting $setting): array
@@ -26,7 +30,7 @@ class StoreChannelSetupVerifier
             }
 
             $chatId = (string) data_get($chat, 'result.id', $target);
-            $message = $this->telegram->sendMessage($chatId, "✅ LHIE STORE channel test succeeded.\n\nThe channel can receive test messages. Automatic features are not enabled yet.");
+            $message = $this->telegram->sendMessage($chatId, $this->uiIcons->renderLegacyIcons("✅ LHIE STORE channel test succeeded.\n\nThe channel can receive test messages. Automatic features are not enabled yet."));
             if (data_get($message, 'ok') !== true || ! data_get($message, 'result.message_id')) {
                 return ['success' => false, 'chat_id' => $chatId, 'message_id' => null, 'error' => 'Bot cannot post to channel: Telegram tidak mengembalikan message ID.'];
             }

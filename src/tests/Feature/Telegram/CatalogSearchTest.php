@@ -443,7 +443,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
         $category = Category::factory()->create(['name' => 'Games', 'description' => 'Voucher game']);
-        $product = Product::factory()->create(['name' => 'Diamond', 'description' => 'Voucher MLBB instant.', 'price_amount' => 15000, 'usdt_price_amount' => 1_250_000, 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
+        $product = Product::factory()->create(['name' => 'Diamond', 'description' => 'Voucher MLBB instant.', 'icon' => '💎', 'custom_emoji_id' => '5368324170671202286', 'price_amount' => 15000, 'usdt_price_amount' => 1_250_000, 'category_id' => $category->id, 'stock' => 3, 'reserved_stock' => 0]);
         foreach (range(1, 3) as $index) {
             ProductStockItem::create(['product_id' => $product->id, 'secret' => "akun-diamond-{$index}@example.test | password: Secret-123"]);
         }
@@ -456,6 +456,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
             ->first(fn ($request) => str_ends_with($request->url(), '/sendMessage') && str_contains((string) $request['text'], 'Games'));
         $this->assertNotNull($categoryMessage);
         $categoryData = $categoryMessage->data();
+        $this->assertSame('HTML', $categoryData['parse_mode']);
+        $this->assertStringContainsString('<tg-emoji emoji-id="5368324170671202286">💎</tg-emoji> Diamond', (string) $categoryData['text']);
         $this->assertStringContainsString('Diamond', (string) $categoryData['text']);
         $this->assertStringContainsString('Diamond Habis', (string) $categoryData['text']);
         $this->assertStringContainsString('Rp15.000', (string) $categoryData['text']);
@@ -1203,7 +1205,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
 
             $this->assertCount(3, $selectorButtons);
             $multiFamilyButton = collect($selectorButtons)->first(fn (array $button): bool => str_contains($button['text'], 'Netflix Premium™'));
-            $singleFamilyButton = collect($productEntryButtons)->first(fn (array $button): bool => str_contains($button['text'], 'Single Locale Family'));
+            $singleFamilyButton = collect($productEntryButtons)->first(fn (array $button): bool => str_contains($button['text'], 'Single Locale Option'));
             $this->assertIsArray($multiFamilyButton);
             $this->assertIsArray($singleFamilyButton);
             $this->assertStringContainsString($locale['multi_label'], $multiFamilyButton['text']);
@@ -1221,7 +1223,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             $this->assertStringContainsString($locale['instruction'], $copy);
 
             $this->assertStringContainsString($locale['catalog'], $copy);
-            $this->assertStringContainsString('Single Locale Family', $copy);
+            $this->assertStringContainsString('Single Locale Option', $copy);
             $this->assertStringContainsString($locale['list'], $copy);
             $this->assertStringContainsString($locale['details'], $copy);
             $this->assertStringContainsString($locale['quantity'], $copy);

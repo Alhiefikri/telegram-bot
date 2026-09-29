@@ -15,13 +15,24 @@ use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\PaidInvoice\PaidInvoiceRenderResult;
 use App\Services\PaidInvoice\PaidInvoiceSyntheticPresentationAdapter;
 use App\Services\Telegram\SalesProofPostFormatter;
+use App\Services\Telegram\TelegramUiIcons;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use InvalidArgumentException;
 use Tests\TestCase;
 
 class PaidInvoiceRendererTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // The sales-proof formatter renders copy through the icon registry, so a
+        // primed empty payload keeps this unit suite off the database.
+        Cache::put(TelegramUiIcons::CACHE_KEY, []);
+    }
+
     public function test_it_outputs_a_valid_public_safe_nota_b_png_from_snapshots(): void
     {
         $order = $this->order(

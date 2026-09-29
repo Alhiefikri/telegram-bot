@@ -196,10 +196,10 @@ class StorefrontCatalogPageBuilderTest extends TestCase
 
         $this->assertTrue($page->popularProducts->isEmpty());
         $this->assertSame(
-            ['Family Discovery', 'Standalone Discovery'],
+            ['Family Discovery Option', 'Standalone Discovery'],
             $page->entries()->map(
                 fn ($entry): string => $entry->isFamily()
-                    ? $entry->family->name
+                    ? $entry->family->displayName
                     : $entry->product->presentation->name,
             )->all(),
         );
