@@ -238,7 +238,7 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             'logs' => [[
                 'address' => self::CONTRACT,
                 'topics' => [
-                    BscRpcClient::TRANSFER_TOPIC,
+                    '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
                     $this->topicAddress('0x2222222222222222222222222222222222222222'),
                     $this->topicAddress((string) $detail->receiver_address),
                 ],

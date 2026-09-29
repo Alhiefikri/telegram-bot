@@ -106,7 +106,7 @@ class BscRpcClientTest extends TestCase
                 && data_get($filter, 'fromBlock') === '0x64'
                 && data_get($filter, 'toBlock') === '0x78'
                 && data_get($filter, 'address') === $contract
-                && data_get($filter, 'topics.0') === BscRpcClient::TRANSFER_TOPIC
+                && data_get($filter, 'topics.0') === '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
                 && data_get($filter, 'topics.1') === null
                 && data_get($filter, 'topics.2') === $receiverTopic;
         });

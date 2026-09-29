@@ -48,6 +48,7 @@ The application uses the existing `BINANCE_VERIFICATION_QUEUE` / `binance-verifi
 ## Verification and review
 
 `BscPaymentVerification` is the only authority for receipt decoding and claims. For a new amount-unique Payment, a bounded server-side transfer-log match is only a lookup candidate; the verifier still requires a successful receipt, BNB Smart Chain chain ID 56, the approved USDT contract, the snapshotted receiver, the exact integer token amount, an inclusion block inside the Payment window, and the configured confirmation policy. A legacy submitted TX hash follows the same receipt predicate without the log-discovery step.
+Canonical ERC-20 `Transfer(address,address,uint256)` logs use topic0 `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`. The readiness probe accepts an empty `eth_getLogs` response and checks only a recent scanner chunk, so it verifies provider filter capability but not event-signature correctness or access to older blocks needed by a Payment scan. Use a provider that serves the full scan window and prove the automatic path with a controlled low-value Payment after release.
 
 An exact transfer included before the deadline may use the short technical confirmation grace. `orders:expire-pending` skips only when the detail contains matching authoritative confirming evidence. A future timestamp without that evidence is not a valid grace and the Order expires normally.
 
