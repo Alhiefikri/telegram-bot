@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramAdminPaidOrderNotifier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -97,7 +98,7 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
             'product_custom_emoji_id' => '5368324170671202286',
         ]);
         Product::query()->whereKey($item->product_id)->update(['icon' => '🧾', 'custom_emoji_id' => '5368324170671202287']);
-        app(\App\Services\Telegram\CustomEmojiCapability::class)->markAvailable();
+        app(CustomEmojiCapability::class)->markAvailable();
 
         app(TelegramAdminPaidOrderNotifier::class)->send($order);
 

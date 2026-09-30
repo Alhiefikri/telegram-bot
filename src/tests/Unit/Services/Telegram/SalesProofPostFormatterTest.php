@@ -89,6 +89,7 @@ class SalesProofPostFormatterTest extends TestCase
             app(TelegramHtmlCaption::class)->parsedLength($caption, ['parse_mode' => 'HTML']),
         );
     }
+
     public function test_order_item_icon_snapshot_is_rendered_without_using_static_icon_slots(): void
     {
         app(CustomEmojiCapability::class)->markAvailable();

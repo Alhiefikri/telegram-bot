@@ -14,6 +14,7 @@ use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Telegram\TelegramPaymentInstruction;
 use App\Services\Telegram\TelegramPaymentInstructionRenderer;
+use App\Services\Telegram\TelegramProductNameRenderer;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 use App\Services\Telegram\TelegramTranslationCatalog;
 use App\Services\Telegram\TelegramUiIcons;
@@ -341,7 +342,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $renderer = new TelegramPaymentInstructionRenderer(
             $this->qrCodes,
             new TelegramTranslationCatalog($translator, app(TelegramUiIcons::class)),
-            app(\App\Services\Telegram\TelegramProductNameRenderer::class),
+            app(TelegramProductNameRenderer::class),
         );
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-08-04 16:30:00', 'Asia/Jakarta'));
 

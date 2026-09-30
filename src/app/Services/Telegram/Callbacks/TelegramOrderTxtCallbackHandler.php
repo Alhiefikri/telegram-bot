@@ -11,10 +11,10 @@ use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramProductNameRenderer;
 use App\Services\Telegram\TelegramReceiptObservability;
 use App\Services\Telegram\TelegramReceiptTxtConfirmationSession;
 use App\Services\Telegram\TelegramReceiptTxtRateLimiter;
-use App\Services\Telegram\TelegramProductNameRenderer;
 use App\Support\DogfoodTiming;
 
 /**

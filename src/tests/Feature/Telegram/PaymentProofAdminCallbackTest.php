@@ -30,6 +30,7 @@ use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\StockAdjustmentService;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\SalesProofPostFormatter;
 use App\Services\Telegram\SalesProofPostNumbering;
 use App\Services\Telegram\TelegramBroadcastService;
@@ -1067,7 +1068,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp([
             'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 88]]),
         ]);
-        app(\App\Services\Telegram\CustomEmojiCapability::class)->markAvailable();
+        app(CustomEmojiCapability::class)->markAvailable();
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
         $customer = Customer::factory()->create([
             'telegram_id' => 123456789,
@@ -1262,7 +1263,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         Http::fake([
             'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 701]]),
         ]);
-        app(\App\Services\Telegram\CustomEmojiCapability::class)->markAvailable();
+        app(CustomEmojiCapability::class)->markAvailable();
 
         app()->call([new PublishSalesProofPost($order->id, effectId: $effect->id), 'handle']);
 
