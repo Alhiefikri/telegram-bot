@@ -1441,7 +1441,8 @@ class TelegramOutboundEffectService
 
     /**
      * Materialize a safe text-only replacement after a v2 photo failed before
-     * Telegram was called. The failed photo effect remains immutable history.
+     * Telegram was called or Telegram definitely rejected it. The failed photo
+     * effect remains immutable history.
      */
     public function recordReceiptTextFallback(TelegramOutboundEffect $failed): ?TelegramOutboundEffect
     {
@@ -1450,7 +1451,11 @@ class TelegramOutboundEffectService
             if ($locked->state !== TelegramOutboundEffectState::Failed
                 || $locked->template_version !== self::TEMPLATE_RECEIPT_PHOTO_CAPTION
                 || $locked->sequence !== 1
-                || $locked->last_error_code !== 'receipt_render_changed') {
+                || ! in_array($locked->last_error_code, [
+                    'receipt_render_changed',
+                    'telegram_http_400',
+                    'telegram_http_403',
+                ], true)) {
                 return null;
             }
 

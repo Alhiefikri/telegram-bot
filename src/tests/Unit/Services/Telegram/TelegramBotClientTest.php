@@ -88,6 +88,45 @@ class TelegramBotClientTest extends TestCase
         $this->assertTrue($requests['sendDocument']->hasFile('document', 'binary-document', 'download.txt'));
     }
 
+    public function test_send_photo_encodes_caption_entities_and_keyboard_in_multipart_upload(): void
+    {
+        $contents = "\x89PNG\r\n\x1A\nphoto-bytes";
+        $entities = [['type' => 'code', 'offset' => 0, 'length' => 6]];
+        $replyMarkup = ['inline_keyboard' => [[['text' => 'Check', 'callback_data' => 'check']]]];
+
+        Http::fake(['https://api.telegram.org/*/sendPhoto' => Http::response([
+            'ok' => true,
+            'result' => ['message_id' => 801],
+        ])]);
+
+        app(TelegramBotClient::class)->sendPhoto(
+            12345,
+            $contents,
+            'receipt.png',
+            'ABC123',
+            $replyMarkup,
+            [
+                'caption_entities' => $entities,
+                'protect_content' => true,
+            ],
+        );
+
+        $request = Http::recorded()->sole()[0];
+        $this->assertTrue($request->isMultipart());
+        $this->assertTrue($request->hasFile('photo', $contents, 'receipt.png'));
+        $this->assertSame('12345', (string) $this->multipartField($request, 'chat_id'));
+        $this->assertSame('ABC123', $this->multipartField($request, 'caption'));
+        $this->assertSame(
+            $entities,
+            json_decode((string) $this->multipartField($request, 'caption_entities'), true, 512, JSON_THROW_ON_ERROR),
+        );
+        $this->assertSame(
+            $replyMarkup,
+            json_decode((string) $this->multipartField($request, 'reply_markup'), true, 512, JSON_THROW_ON_ERROR),
+        );
+        $this->assertTrue(filter_var($this->multipartField($request, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
+    }
+
     public function test_not_modified_edit_is_idempotent_without_a_duplicate_send(): void
     {
         Http::fake([
@@ -390,6 +429,26 @@ class TelegramBotClientTest extends TestCase
         }
 
         Http::assertSentCount(1);
+        $this->assertTrue(app(CustomEmojiCapability::class)->isAvailable());
+    }
+
+    public function test_unrelated_send_photo_http_400_is_not_retried_by_the_shared_client(): void
+    {
+        Http::fake(['https://api.telegram.org/*/sendPhoto' => Http::response([
+            'ok' => false,
+            'error_code' => 400,
+            'description' => 'Bad Request: photo rejected',
+        ], 400)]);
+
+        try {
+            app(TelegramBotClient::class)->sendPhoto(12345, 'invalid-photo', 'receipt.png', 'Receipt');
+            $this->fail('An unrelated Telegram photo rejection should be surfaced.');
+        } catch (RequestException $exception) {
+            $this->assertSame(400, $exception->response?->status());
+        }
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
         $this->assertTrue(app(CustomEmojiCapability::class)->isAvailable());
     }
 

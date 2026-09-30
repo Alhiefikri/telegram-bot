@@ -1350,6 +1350,84 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
     }
 
+    #[DataProvider('definitePhotoRejectionStatuses')]
+    public function test_definite_send_photo_rejection_falls_back_to_ordered_text_receipt(int $httpStatus): void
+    {
+        Queue::fake();
+        $order = $this->multiProductStructuredReceiptOrder();
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => false,
+                'error_code' => $httpStatus,
+                'description' => 'Bad Request: photo rejected',
+            ], $httpStatus),
+        ]);
+
+        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $this->assertNotNull($effect);
+
+        app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+
+        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->fresh()->state);
+        $this->assertSame('telegram_http_'.$httpStatus, $effect->fresh()->last_error_code);
+
+        $fallback = TelegramOutboundEffect::query()
+            ->where('effect_group_key', TelegramOutboundEffectService::receiptTextFallbackEffectGroupKey((string) $order->id))
+            ->orderBy('sequence')
+            ->get();
+        $this->assertNotEmpty($fallback);
+        $this->assertTrue($fallback->every(
+            fn (TelegramOutboundEffect $candidate): bool => $candidate->state === TelegramOutboundEffectState::Sent,
+        ));
+        $this->assertSame(
+            TelegramOutboundEffectService::TEMPLATE_RECEIPT_TEXT_FALLBACK,
+            $fallback->first()->template_version,
+        );
+        $this->assertCount(
+            1,
+            Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')),
+        );
+        $this->assertCount(
+            $fallback->count(),
+            Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')),
+        );
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
+    public function test_text_fallback_http_400_keeps_receipt_incomplete_and_blocks_later_chunks(): void
+    {
+        Queue::fake();
+        $order = $this->multiChunkPaidOrder();
+        $rejected = Http::response([
+            'ok' => false,
+            'description' => 'Bad Request: invalid receipt payload',
+        ], 400);
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => $rejected,
+            'https://api.telegram.org/*/sendMessage' => $rejected,
+        ]);
+
+        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $this->assertNotNull($effect);
+
+        app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+
+        $fallback = TelegramOutboundEffect::query()
+            ->where('effect_group_key', TelegramOutboundEffectService::receiptTextFallbackEffectGroupKey((string) $order->id))
+            ->orderBy('sequence')
+            ->get();
+        $this->assertNotEmpty($fallback);
+        $this->assertGreaterThan(1, $fallback->count());
+        $this->assertSame(TelegramOutboundEffectState::Failed, $fallback->first()->state);
+        $this->assertSame('telegram_http_400', $fallback->first()->last_error_code);
+        $this->assertTrue($fallback->skip(1)->every(
+            fn (TelegramOutboundEffect $candidate): bool => $candidate->state === TelegramOutboundEffectState::Pending,
+        ));
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')));
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
+    }
+
     public function test_malformed_credential_creates_safe_failed_review_without_partial_delivery(): void
     {
         Queue::fake();
@@ -1751,6 +1829,13 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             $tutorial,
             $recoveryKey,
         ]];
+    }
+
+    /** @return iterable<string, array{int}> */
+    public static function definitePhotoRejectionStatuses(): iterable
+    {
+        yield 'bad request' => [400];
+        yield 'forbidden' => [403];
     }
 
     /** @return iterable<string, array{TelegramOutboundEffectState}> */

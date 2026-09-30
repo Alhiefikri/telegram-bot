@@ -117,7 +117,9 @@ final class ReceiptDeliveryPipeline
                 (string) $claimed->claim_token,
                 $exception,
             );
-            if ($finalized !== null && $this->isDeterministicImageFailure($claimed, $exception)) {
+            if ($finalized !== null
+                && ($this->isDeterministicImageFailure($claimed, $exception)
+                    || $this->isRejectedInvoicePhoto($claimed, $finalized))) {
                 $fallback = $this->outboundEffects->recordReceiptTextFallback($finalized);
                 if ($fallback !== null) {
                     if ($dispatchNext) {
@@ -309,6 +311,16 @@ final class ReceiptDeliveryPipeline
             && (int) $effect->sequence === 1
             && $exception instanceof TelegramOutboundPreSendException
             && str_contains($exception->getMessage(), 'paid invoice rendering failed before send');
+    }
+
+    private function isRejectedInvoicePhoto(
+        TelegramOutboundEffect $claimed,
+        TelegramOutboundEffect $failed,
+    ): bool {
+        return $claimed->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION
+            && (int) $claimed->sequence === 1
+            && $claimed->telegram_method === 'sendPhoto'
+            && in_array($failed->last_error_code, ['telegram_http_400', 'telegram_http_403'], true);
     }
 
     private function isInvoiceEffect(TelegramOutboundEffect $effect): bool
