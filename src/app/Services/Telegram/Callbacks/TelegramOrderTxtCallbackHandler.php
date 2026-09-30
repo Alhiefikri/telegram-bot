@@ -14,7 +14,7 @@ use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramReceiptObservability;
 use App\Services\Telegram\TelegramReceiptTxtConfirmationSession;
 use App\Services\Telegram\TelegramReceiptTxtRateLimiter;
-use App\Services\Telegram\TelegramUiIcons;
+use App\Services\Telegram\TelegramProductNameRenderer;
 use App\Support\DogfoodTiming;
 
 /**
@@ -45,7 +45,7 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
         private TelegramReceiptTxtConfirmationSession $confirmation,
         private TelegramReceiptObservability $observability,
         private TelegramReceiptTxtRateLimiter $rateLimiter,
-        private TelegramUiIcons $uiIcons,
+        private TelegramProductNameRenderer $productNames,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -341,7 +341,11 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
     {
         $lines = [];
         foreach ($order->orderItems->sortBy('id')->values() as $item) {
-            $lines[] = $this->uiIcons->renderLegacyIcons('📦 ').$item->product_name;
+            $lines[] = $this->productNames->render(
+                (string) $item->product_name,
+                $item->product_icon,
+                $item->product_custom_emoji_id,
+            );
         }
 
         $reference = trim((string) $order->invoice_number);

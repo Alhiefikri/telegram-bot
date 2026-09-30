@@ -17,6 +17,7 @@ class TelegramAdminPaidOrderNotifier
         private readonly TelegramAdminAccess $adminAccess,
         private readonly PaymentReceiptReport $receiptReport,
         private readonly TelegramUiIcons $uiIcons,
+        private readonly TelegramProductNameRenderer $productNames,
     ) {}
 
     /**
@@ -115,13 +116,18 @@ class TelegramAdminPaidOrderNotifier
 
         foreach ($items as $item) {
             $product = $products->get($item->product_id);
+            $productName = $this->productNames->render(
+                (string) $item->product_name,
+                $item->product_icon,
+                $item->product_custom_emoji_id,
+            );
             if (! $product) {
-                $lines[] = '- '.$item->product_name.': (Produk dihapus)';
+                $lines[] = '- '.$productName.': (Produk dihapus)';
 
                 continue;
             }
 
-            $lines[] = '- '.$item->product_name.': '.$product->availableStock();
+            $lines[] = '- '.$productName.': '.$product->availableStock();
         }
 
         if ($lines === []) {
@@ -136,7 +142,11 @@ class TelegramAdminPaidOrderNotifier
         $items = $order->orderItems->values();
         $lines = $items
             ->take(6)
-            ->map(fn ($item): string => '- '.$item->product_name.' x '.$item->quantity)
+            ->map(fn ($item): string => '- '.$this->productNames->render(
+                (string) $item->product_name,
+                $item->product_icon,
+                $item->product_custom_emoji_id,
+            ).' x '.$item->quantity)
             ->all();
 
         $remaining = $items->count() - count($lines);

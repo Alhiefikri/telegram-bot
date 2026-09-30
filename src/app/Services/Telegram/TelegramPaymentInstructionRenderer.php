@@ -23,6 +23,7 @@ class TelegramPaymentInstructionRenderer
     public function __construct(
         private TelegramQrCodeRenderer $qrCodes,
         private TelegramTranslationCatalog $catalog,
+        private TelegramProductNameRenderer $productNames,
     ) {}
 
     /**
@@ -531,7 +532,11 @@ class TelegramPaymentInstructionRenderer
     private function orderItemsSummary(Order $order): string
     {
         return $order->orderItems
-            ->map(fn ($item) => $item->product_name.($item->quantity > 1 ? ' x'.$item->quantity : ''))
+            ->map(fn ($item) => $this->productNames->render(
+                (string) $item->product_name,
+                $item->product_icon,
+                $item->product_custom_emoji_id,
+            ).($item->quantity > 1 ? ' x'.$item->quantity : ''))
             ->join(', ');
     }
 

@@ -90,7 +90,7 @@ class TelegramAdminOrderNotifierTest extends TestCase
         $this->assertStringContainsString('Status: Expired / belum bayar', $text);
         $this->assertStringContainsString('Metode: QRIS', $text);
         $this->assertStringContainsString('Total: Rp32.340', $text);
-        $this->assertStringContainsString('- CHATGPT PLUS x 1', $text);
+        $this->assertStringContainsString('- 🛍️ CHATGPT PLUS x 1', $text);
         $expectedExpiredAt = $order->fresh(['payments'])->payments->first()->expired_at->copy()
             ->timezone((string) config('app.timezone'))
             ->format('d M Y, H:i');

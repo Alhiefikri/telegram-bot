@@ -72,6 +72,8 @@ final class CredentialDeliveryPresentation
                     accounts: $accounts,
                     defaultTutorial: $this->defaultTutorial($item),
                     usageGuide: $this->usageGuides->forItem($item),
+                    productIcon: $item->product_icon,
+                    productCustomEmojiId: $item->product_custom_emoji_id,
                 );
             }
 

@@ -193,6 +193,34 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
 
+    public function test_receipt_uses_the_persisted_product_icon_snapshot_for_its_caption(): void
+    {
+        Queue::fake();
+        [$order] = $this->paidSingleStructuredReceiptOrder('en', CredentialAccessMethod::None);
+        $item = $order->orderItems()->sole();
+        $item->update([
+            'product_icon' => '🧩',
+            'product_custom_emoji_id' => '5368324170671202286',
+        ]);
+        Product::query()->whereKey($item->product_id)->update(['icon' => '🧾', 'custom_emoji_id' => '5368324170671202287']);
+        app(\App\Services\Telegram\CustomEmojiCapability::class)->markAvailable();
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 834099],
+            ]),
+        ]);
+
+        app(TelegramReceiptNotifier::class)->send($order);
+
+        $photo = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->sole()[0];
+        $caption = (string) $this->telegramRequestField($photo, 'caption');
+        $entities = json_decode((string) $this->telegramRequestField($photo, 'caption_entities'), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('🧩 Issue 334 Product', $caption);
+        $this->assertContains('5368324170671202286', array_column($entities, 'custom_emoji_id'));
+        $this->assertNotContains('5368324170671202287', array_column($entities, 'custom_emoji_id'));
+    }
+
     #[DataProvider('singleStructuredPhotoCases')]
     public function test_single_structured_account_receipt_is_one_protected_localized_photo(
         string $locale,
@@ -1236,6 +1264,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             app(PaidInvoiceOrderPresentationAdapter::class),
             app(TelegramOutboundEffectLedgerProtocol::class),
             app(TelegramUiIcons::class),
+            app(\App\Services\Telegram\TelegramProductNameRenderer::class),
         ])->makePartial();
         $notifier->shouldReceive('renderInvoiceUnit')
             ->andThrow(new TelegramOutboundPreSendException('deterministic invoice image failure'));
@@ -1286,6 +1315,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             app(PaidInvoiceOrderPresentationAdapter::class),
             app(TelegramOutboundEffectLedgerProtocol::class),
             app(TelegramUiIcons::class),
+            app(\App\Services\Telegram\TelegramProductNameRenderer::class),
         ])->makePartial();
         $notifier->shouldReceive('renderInvoiceUnit')
             ->andThrow(new TelegramOutboundPreSendException('Telegram paid invoice rendering failed before send.'));
@@ -1593,6 +1623,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             app(PaidInvoiceOrderPresentationAdapter::class),
             app(TelegramOutboundEffectLedgerProtocol::class),
             app(TelegramUiIcons::class),
+            app(\App\Services\Telegram\TelegramProductNameRenderer::class),
         ])->makePartial();
         $notifier->shouldReceive('receiptPlan')
             ->once()

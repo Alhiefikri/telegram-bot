@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['event_key', 'product_id', 'product_name', 'old_price_amount', 'new_price_amount', 'old_usdt_price_amount', 'new_usdt_price_amount', 'recipients_materialized_at', 'store_channel_sent_at', 'store_channel_failed_at', 'store_channel_last_error', 'store_channel_attempts', 'store_channel_message_id'])]
+#[Fillable(['event_key', 'product_id', 'product_name', 'product_icon', 'product_custom_emoji_id', 'old_price_amount', 'new_price_amount', 'old_usdt_price_amount', 'new_usdt_price_amount', 'recipients_materialized_at', 'store_channel_sent_at', 'store_channel_failed_at', 'store_channel_attempts', 'store_channel_message_id'])]
 class ProductPriceChangeEvent extends Model
 {
     use HasFactory;

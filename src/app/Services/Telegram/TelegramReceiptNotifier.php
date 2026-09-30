@@ -31,6 +31,7 @@ class TelegramReceiptNotifier
         private PaidInvoiceOrderPresentationAdapter $invoicePresentation,
         private TelegramOutboundEffectLedgerProtocol $ledger,
         private TelegramUiIcons $uiIcons,
+        private TelegramProductNameRenderer $productNames,
     ) {}
 
     /**
@@ -263,7 +264,11 @@ class TelegramReceiptNotifier
             $this->locale->translate($customer, 'receipt.products'),
         ];
         foreach ($order->orderItems as $item) {
-            $summaryLines[] = '- '.$item->product_name.' x '.$item->quantity;
+            $summaryLines[] = '- '.$this->productNames->render(
+                (string) $item->product_name,
+                $item->product_icon,
+                $item->product_custom_emoji_id,
+            ).' x '.$item->quantity;
         }
         $summaryLines[] = $this->locale->translate($customer, 'receipt.payment_method', [
             'method' => $payment instanceof Payment
@@ -349,7 +354,11 @@ class TelegramReceiptNotifier
             $this->locale->translate($customer, 'receipt.products'),
         ];
         foreach ($order->orderItems as $item) {
-            $lines[] = '- '.$item->product_name.' x '.$item->quantity;
+            $lines[] = '- '.$this->productNames->render(
+                (string) $item->product_name,
+                $item->product_icon,
+                $item->product_custom_emoji_id,
+            ).' x '.$item->quantity;
         }
 
         $accountLines = $this->accountSecretLines($customer, $delivery);
@@ -509,7 +518,11 @@ class TelegramReceiptNotifier
             $this->locale->translate($customer, 'receipt.products'),
         ];
         foreach ($order->orderItems as $item) {
-            $headerLines[] = '- '.$item->product_name.' x '.$item->quantity;
+            $headerLines[] = '- '.$this->productNames->render(
+                (string) $item->product_name,
+                $item->product_icon,
+                $item->product_custom_emoji_id,
+            ).' x '.$item->quantity;
         }
         $headerLines[] = '';
         $headerLines[] = $this->locale->translate($customer, 'receipt.account_details');
@@ -588,7 +601,11 @@ class TelegramReceiptNotifier
             $this->locale->translate($customer, 'receipt.products'),
         ];
         foreach ($order->orderItems->sortBy('id')->values() as $item) {
-            $productLines[] = '- '.$item->product_name.' x '.$item->quantity;
+            $productLines[] = '- '.$this->productNames->render(
+                (string) $item->product_name,
+                $item->product_icon,
+                $item->product_custom_emoji_id,
+            ).' x '.$item->quantity;
         }
         $paymentLines = [
             $this->locale->translate($customer, 'receipt.payment_method', [
@@ -787,7 +804,11 @@ class TelegramReceiptNotifier
     {
         $lines = [];
         foreach ($delivery->groups() as $group) {
-            $lines[] = $group->productName();
+            $lines[] = $this->productNames->render(
+                $group->productName(),
+                $group->productIcon(),
+                $group->productCustomEmojiId(),
+            );
             foreach ($group->accounts() as $account) {
                 $lines[] = $account->number().'. '.$account->text();
 

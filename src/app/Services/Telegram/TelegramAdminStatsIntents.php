@@ -17,6 +17,7 @@ class TelegramAdminStatsIntents
         private readonly TelegramStoreStatsReport $statsReport,
         private readonly TelegramMessageChunker $messageChunker,
         private readonly TelegramUiIcons $uiIcons,
+        private readonly TelegramProductNameRenderer $productNames,
     ) {}
 
     public function showProductStock(string $chatId): void
@@ -39,7 +40,7 @@ class TelegramAdminStatsIntents
         foreach ($products as $product) {
             $available = $product->availableStock();
             $icon = $this->uiIcons->renderLegacyIcons($available <= 0 ? '❌' : ($available <= 2 ? '⚠️' : '✅'));
-            $line = $icon.' '.$product->name.': '.($available > 0 ? $available : 'habis');
+            $line = $icon.' '.$this->productNames->render($product->name, $product->icon, $product->custom_emoji_id).': '.($available > 0 ? $available : 'habis');
             if ($product->reserved_stock > 0) {
                 $line .= ' ('.$product->reserved_stock.' direservasi)';
             }

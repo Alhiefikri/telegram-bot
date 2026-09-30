@@ -137,6 +137,7 @@ class ProductIconCaptureTest extends TelegramBotTestSupport
 
         $request = $this->sentEditRequest(777);
         $this->assertStringContainsString('QA Gmail Fresh', (string) $request['text']);
+        $this->assertStringContainsString('📩 QA Gmail Fresh', (string) $request['text']);
         $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
         $this->assertSame('producticon:list', $buttons[0]['callback_data'] ?? null);
     }
@@ -169,6 +170,11 @@ class ProductIconCaptureTest extends TelegramBotTestSupport
 
         $request = $this->sentEditRequest(777);
         $this->assertStringContainsString('QA Gmail Fresh', (string) $request['text']);
+        $this->assertStringContainsString('📩 QA Gmail Fresh', (string) $request['text']);
+        $this->assertTrue(collect($request->data()['entities'] ?? [])->contains(
+            fn (array $entity): bool => $entity['type'] === 'custom_emoji'
+                && $entity['custom_emoji_id'] === self::EMOJI_ID,
+        ));
         $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
         $this->assertSame('producticon:clear:'.$product->id, $buttons[0]['callback_data'] ?? null);
         $this->assertSame('producticon:list', $buttons[1]['callback_data'] ?? null);

@@ -867,6 +867,31 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains(json_encode($r->data()), 'product:'.$product->id));
     }
 
+    public function test_product_notification_uses_product_icon_and_custom_emoji_entity(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 7010, 'locale' => 'id']);
+        $product = Product::factory()->create([
+            'name' => 'Premium Product Icon',
+            'icon' => '💎',
+            'custom_emoji_id' => '5368324170671202286',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        app(TelegramProductNotificationService::class)->notifyProductCreated($product);
+
+        $request = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), $product->name))->first()[0];
+        $payload = $request->data();
+        $this->assertStringContainsString('💎 Premium Product Icon', (string) $payload['text']);
+        $this->assertTrue(collect($payload['entities'] ?? [])->contains(
+            fn (array $entity): bool => $entity['type'] === 'custom_emoji'
+                && $entity['custom_emoji_id'] === '5368324170671202286',
+        ));
+    }
+
     public function test_product_created_and_restock_notifications_are_localized_for_each_recipient(): void
     {
         $this->fakeTelegramHttp();

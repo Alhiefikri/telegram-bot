@@ -24,6 +24,7 @@ final class TelegramCredentialDeliveryRenderer
         private readonly TelegramLocale $locale,
         private readonly TelegramMessageChunker $messageChunker,
         private readonly TelegramUiIcons $uiIcons,
+        private readonly TelegramProductNameRenderer $productNames,
     ) {}
 
     /**
@@ -84,7 +85,7 @@ final class TelegramCredentialDeliveryRenderer
 
             if ($group->defaultTutorial() !== null) {
                 $units[] = new TelegramMessageUnit(implode("\n", [
-                    $group->productName(),
+                    $this->productName($group),
                     '',
                     $this->locale->translate($customer, $deliveryNoteTranslationKey),
                     $group->defaultTutorial(),
@@ -143,7 +144,7 @@ final class TelegramCredentialDeliveryRenderer
                 array_push(
                     $blocks,
                     ...$this->nonSecretBlocks([
-                        $group->productName(),
+                        $this->productName($group),
                         '',
                         $this->locale->translate($customer, 'receipt.delivery_note'),
                         $defaultTutorial,
@@ -205,6 +206,8 @@ final class TelegramCredentialDeliveryRenderer
         CredentialDeliveryProductGroup $right,
     ): bool {
         return $left->productName() === $right->productName()
+            && $left->productIcon() === $right->productIcon()
+            && $left->productCustomEmojiId() === $right->productCustomEmojiId()
             && $left->defaultTutorial() === $right->defaultTutorial()
             && $left->usageGuide() === $right->usageGuide();
     }
@@ -223,7 +226,7 @@ final class TelegramCredentialDeliveryRenderer
             'number' => $displayNumber,
         ]);
         $lines = $firstAccount
-            ? [$group->productName(), '', $label]
+            ? [$this->productName($group), '', $label]
             : [$label];
         $fields = [];
 
@@ -378,7 +381,7 @@ final class TelegramCredentialDeliveryRenderer
         ]);
         $lines = [];
         if ($firstAccount) {
-            $lines[] = $group->productName();
+            $lines[] = $this->productName($group);
             $lines[] = '';
         }
         $lines[] = $label;
@@ -460,7 +463,7 @@ final class TelegramCredentialDeliveryRenderer
 
         if ($tokenNeedsOwnUnit) {
             $tokenUnitLines = [
-                ...($account->number() === 1 && $firstAccount ? [$group->productName(), ''] : []),
+                ...($account->number() === 1 && $firstAccount ? [$this->productName($group), ''] : []),
                 $label.' — Auth Token Outlook/Hotmail',
                 ...$tokenLines,
             ];
@@ -491,7 +494,7 @@ final class TelegramCredentialDeliveryRenderer
         $number = $account->number();
         $label = 'Data akun #'.$number;
         $lines = [
-            $group->productName(),
+            $this->productName($group),
             '',
             $label,
         ];
@@ -559,7 +562,7 @@ final class TelegramCredentialDeliveryRenderer
 
         if ($tokenNeedsOwnUnit) {
             $tokenUnitText = implode("\n", [
-                $group->productName(),
+                $this->productName($group),
                 '',
                 $label.' — Auth Token Outlook/Hotmail',
                 ...$tokenLines,
@@ -572,7 +575,7 @@ final class TelegramCredentialDeliveryRenderer
 
         if ($accountUnit['tutorial'] !== null) {
             $tutorialText = implode("\n", [
-                $group->productName(),
+                $this->productName($group),
                 '',
                 $label,
                 $this->locale->translate($customer, $deliveryNoteTranslationKey),
@@ -653,6 +656,15 @@ final class TelegramCredentialDeliveryRenderer
                 'url' => $url,
             ]]],
         ];
+    }
+
+    private function productName(CredentialDeliveryProductGroup $group): string
+    {
+        return $this->productNames->render(
+            $group->productName(),
+            $group->productIcon(),
+            $group->productCustomEmojiId(),
+        );
     }
 
     private function validatedDomain(?string $url): ?string

@@ -19,7 +19,7 @@ class TelegramProductNotificationService
         private StorefrontUrl $urls,
         private TelegramLocale $locale,
         private ProductQuantityPricing $pricing,
-        private TelegramUiIcons $uiIcons,
+        private TelegramProductNameRenderer $productNames,
     ) {}
 
     public function notifyProductCreated(Product $product): array
@@ -38,7 +38,7 @@ class TelegramProductNotificationService
         return $this->broadcast->sendToActiveUsers(
             fn (Customer $customer) => implode("\n", [
                 $this->locale->translate($customer, 'notification.product.created.lead'),
-                $this->uiIcons->renderLegacyIcons('📦 ').$product->name,
+                $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
                 $this->locale->translate($customer, 'notification.product.price', [
                     'amount' => number_format($product->price_amount, 0, ',', '.'),
                 ]),
@@ -81,7 +81,7 @@ class TelegramProductNotificationService
             ? $this->broadcast->sendToActiveUsers(
                 fn (Customer $customer) => implode("\n", [
                     $this->locale->translate($customer, 'notification.product.restock.lead'),
-                    $this->uiIcons->renderLegacyIcons('📦 ').$product->name,
+                    $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
                     $this->locale->translate($customer, 'notification.product.price', [
                         'amount' => number_format($product->price_amount, 0, ',', '.'),
                     ]),
@@ -286,7 +286,7 @@ class TelegramProductNotificationService
                 $title,
                 '━━━━━━━━━━━━━━',
                 $lead,
-                $this->uiIcons->renderLegacyIcons('📦 ').$product->name,
+                $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
                 $this->locale->translateLocale($locale, 'notification.product.price', [
                     'amount' => number_format($product->price_amount, 0, ',', '.'),
                 ]),
@@ -330,7 +330,7 @@ class TelegramProductNotificationService
                 'text' => implode("\n", [
                     $this->locale->translateLocale($locale, 'notification.product.sold_out.title'),
                     '━━━━━━━━━━━━━━',
-                    $this->uiIcons->renderLegacyIcons('📦 ').$product->name,
+                    $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
                     $this->locale->translateLocale($locale, 'notification.product.sold_out.message'),
                     '',
                     $this->locale->translateLocale($locale, 'notification.product.sold_out.catalog'),
@@ -463,7 +463,7 @@ class TelegramProductNotificationService
         }
 
         $lines = [
-            $this->locale->translateLocale($locale, 'notification.store_channel.restock.title', ['product' => $product->name]),
+            $this->locale->translateLocale($locale, 'notification.store_channel.restock.title', ['product' => $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id)]),
             $this->locale->translateLocale($locale, 'notification.store_channel.restock.added', [
                 'quantity' => $addedQuantity,
             ]),
@@ -491,7 +491,7 @@ class TelegramProductNotificationService
         $locale = TelegramLocale::STORE_CHANNEL_LOCALE;
 
         return implode("\n", [
-            $this->uiIcons->renderLegacyIcons('📦 ').$product->name,
+            $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
             $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.label'),
             '━━━━━━━━━━━━━━',
             '',

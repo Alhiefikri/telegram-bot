@@ -14,6 +14,7 @@ class SalesProofPostFormatter
         private readonly SalesProofPostNumbering $numbering,
         private readonly TelegramUiIcons $icons,
         private readonly TelegramHtmlCaption $captions,
+        private readonly TelegramProductNameRenderer $productNames,
     ) {}
 
     /**
@@ -95,7 +96,15 @@ class SalesProofPostFormatter
     {
         $order->loadMissing(['customer', 'orderItems']);
         $successfulPostNumber ??= $this->nextSuccessfulPostNumber($order);
-        $primary = $order->orderItems->first()?->product_name ?? 'Digital product';
+        $primaryItem = $order->orderItems->first();
+        $primary = $primaryItem?->product_name ?? 'Digital product';
+        if ($primaryItem !== null) {
+            $primary = $this->productNames->render(
+                (string) $primary,
+                $primaryItem->product_icon,
+                $primaryItem->product_custom_emoji_id,
+            );
+        }
         $otherCount = max(0, $order->orderItems->count() - 1);
         $other = $otherCount > 0 ? " + {$otherCount} other products" : '';
 
@@ -108,7 +117,7 @@ class SalesProofPostFormatter
     }
 
     /**
-     * @param  list<array{product_name: string, quantity: int, unit_price?: int, subtotal?: int, quantity_price_tier_minimum?: ?int}>  $items
+     * @param  list<array{product_name: string, quantity: int, unit_price?: int, subtotal?: int, quantity_price_tier_minimum?: ?int, product_icon?: ?string, product_custom_emoji_id?: ?string}>  $items
      * @return list<string>
      */
     private function itemSummaryLines(array $items): array
@@ -151,7 +160,7 @@ class SalesProofPostFormatter
         return [$this->icons->renderLegacyIcons('🏷 Bulk pricing applied')];
     }
 
-    /** @param array{product_name: string, quantity: int, unit_price?: int, subtotal?: int, quantity_price_tier_minimum?: ?int} $item */
+    /** @param array{product_name: string, quantity: int, unit_price?: int, subtotal?: int, quantity_price_tier_minimum?: ?int, product_icon?: ?string, product_custom_emoji_id?: ?string} $item */
     private function itemLabel(array $item): string
     {
         $name = $this->cleanText((string) ($item['product_name'] ?? 'Digital product'));
@@ -160,7 +169,15 @@ class SalesProofPostFormatter
             $name = mb_substr($name, 0, 69).'…';
         }
 
-        return $name.' × '.max(0, (int) ($item['quantity'] ?? 0));
+        $renderedName = array_key_exists('product_icon', $item) || array_key_exists('product_custom_emoji_id', $item)
+            ? $this->productNames->render(
+                $name,
+                isset($item['product_icon']) ? (string) $item['product_icon'] : null,
+                isset($item['product_custom_emoji_id']) ? (string) $item['product_custom_emoji_id'] : null,
+            )
+            : $name;
+
+        return $renderedName.' × '.max(0, (int) ($item['quantity'] ?? 0));
     }
 
     /** @return list<string> */

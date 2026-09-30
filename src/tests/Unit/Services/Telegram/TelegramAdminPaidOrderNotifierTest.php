@@ -48,7 +48,7 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
         $this->assertStringContainsString('Metode: QRIS', $text);
         $this->assertStringContainsString('Earning: Rp30.000', $text);
         $this->assertStringContainsString('Produk:', $text);
-        $this->assertStringContainsString('- CHATGPT PLUS x 1', $text);
+        $this->assertStringContainsString('- 🛍️ CHATGPT PLUS x 1', $text);
 
         $expectedPaidAt = $order->fresh(['payments'])->payments->first()->paid_at->copy()
             ->timezone((string) config('app.timezone'))
@@ -80,7 +80,31 @@ class TelegramAdminPaidOrderNotifierTest extends TestCase
         $text = $sends->first()[0]['text'];
 
         $this->assertStringContainsString('📦 Sisa Stok:', $text);
-        $this->assertStringContainsString('- Premium Account: 5', $text);
+        $this->assertStringContainsString('- 🛍️ Premium Account: 5', $text);
+
+    }
+
+    public function test_paid_order_message_uses_the_order_item_icon_snapshot_as_a_custom_emoji_entity(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 321]])]);
+
+        $order = $this->paidOrderWithItems(1);
+        $item = $order->orderItems()->firstOrFail();
+        $item->update([
+            'product_icon' => '🧩',
+            'product_custom_emoji_id' => '5368324170671202286',
+        ]);
+        Product::query()->whereKey($item->product_id)->update(['icon' => '🧾', 'custom_emoji_id' => '5368324170671202287']);
+        app(\App\Services\Telegram\CustomEmojiCapability::class)->markAvailable();
+
+        app(TelegramAdminPaidOrderNotifier::class)->send($order);
+
+        $request = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->first()[0];
+        $this->assertStringContainsString('🧩 CHATGPT PLUS', (string) $request['text']);
+        $this->assertContains('5368324170671202286', array_column($request['entities'] ?? [], 'custom_emoji_id'));
+        $this->assertNotContains('5368324170671202287', array_column($request['entities'] ?? [], 'custom_emoji_id'));
     }
 
     public function test_paid_order_notification_is_idempotent(): void

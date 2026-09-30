@@ -272,6 +272,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'Tiered Cart Product'))->last();
         $this->assertNotNull($request);
         $text = (string) $request[0]->data()['text'];
+        $this->assertStringContainsString('🛍️ Tiered Cart Product', $text);
         $this->assertStringContainsString('Subtotal: Rp25.000', $text);
         $this->assertStringContainsString('Base price: Rp25.000/unit', $text);
         $this->assertStringContainsString('Wholesale 2+: Rp23.000/unit', $text);

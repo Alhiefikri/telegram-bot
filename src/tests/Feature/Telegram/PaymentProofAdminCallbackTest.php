@@ -1067,6 +1067,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp([
             'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 88]]),
         ]);
+        app(\App\Services\Telegram\CustomEmojiCapability::class)->markAvailable();
         ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
         $customer = Customer::factory()->create([
             'telegram_id' => 123456789,
@@ -1082,6 +1083,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'delivery_note' => 'Buyer-only product note',
             'usage_guide_title' => 'Buyer-only guide',
             'usage_guide_url' => 'https://guide.example.test/private',
+            'icon' => '🧩',
+            'custom_emoji_id' => '5368324170671202286',
         ]);
         $second = Product::factory()->create(['name' => 'Canva Pro', 'stock' => 5, 'price_amount' => 34000]);
         $cart = app(CartService::class)->activeCartFor($customer);
@@ -1115,8 +1118,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Paid via:', $copy);
         $this->assertStringContainsString('Completed:', $copy);
         $this->assertStringContainsString('Items:', $copy);
-        $this->assertStringContainsString('Email Account × 1', $copy);
-        $this->assertStringContainsString('Canva Pro × 1', $copy);
+        $this->assertStringContainsString('🧩</tg-emoji> Email Account × 1', $copy);
+        $this->assertStringContainsString('🛍️ Canva Pro × 1', $copy);
         $this->assertStringContainsString('Order ID: '.$order->invoice_number, $copy);
         $this->assertStringContainsString('Quantity: 2', $copy);
         $this->assertStringContainsString('Subtotal: Rp 46.000', $copy);
@@ -1138,6 +1141,17 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame('sendPhoto', $channelEffect->telegram_method);
         $channelCaption = (string) $this->telegramRequestField($channelPhotos->first()[0], 'caption');
         $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $channelCaption);
+        $this->assertStringContainsString('🧩 Email Account × 1', $channelCaption);
+        $channelCaptionEntities = json_decode(
+            (string) $this->telegramRequestField($channelPhotos->first()[0], 'caption_entities'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        $this->assertTrue(collect($channelCaptionEntities)->contains(
+            static fn (array $entity): bool => ($entity['type'] ?? null) === 'custom_emoji'
+                && ($entity['custom_emoji_id'] ?? null) === '5368324170671202286',
+        ));
         $this->assertStringContainsString('Buyer: Cia***', $channelCaption);
         $this->assertStringNotContainsString('Buyer ID:', $channelCaption);
         $this->assertStringContainsString('Shop Now', (string) $this->telegramRequestField($channelPhotos->first()[0], 'reply_markup'));
@@ -1219,8 +1233,16 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'telegram_chat_id' => '-100123',
         ]);
         $customer = Customer::factory()->create(['username' => 'LegacyBuyer']);
-        $product = Product::factory()->create(['name' => 'Legacy Product']);
+        $product = Product::factory()->create([
+            'name' => 'Legacy Product',
+            'icon' => '🧩',
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
         $order = $this->paidOrderWithSaleProof($customer, $product, 'Legacy Product');
+        $order->orderItems()->sole()->update([
+            'product_icon' => '🧩',
+            'product_custom_emoji_id' => '5368324170671202286',
+        ]);
         $post = SalesProofPost::create(['order_id' => $order->id, 'status' => SalesProofPost::STATUS_PENDING]);
         $effect = TelegramOutboundEffect::factory()->create([
             'effect_key' => TelegramOutboundEffectService::salesProofEffectKey($order->id),
@@ -1240,6 +1262,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         Http::fake([
             'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 701]]),
         ]);
+        app(\App\Services\Telegram\CustomEmojiCapability::class)->markAvailable();
 
         app()->call([new PublishSalesProofPost($order->id, effectId: $effect->id), 'handle']);
 
@@ -1247,6 +1270,18 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame(TelegramOutboundEffectService::TEMPLATE_SALES_PROOF_LEGACY, $effect->fresh()->template_version);
         $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
         $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')));
+        $channelMessage = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'))->sole()[0];
+        $channelText = (string) $this->telegramRequestField($channelMessage, 'text');
+        $this->assertStringContainsString('🧩 Legacy Product', $channelText);
+        $channelEntities = $this->telegramRequestField($channelMessage, 'entities');
+        if (is_string($channelEntities)) {
+            $channelEntities = json_decode($channelEntities, true, 512, JSON_THROW_ON_ERROR);
+        }
+        $this->assertIsArray($channelEntities);
+        $this->assertTrue(collect($channelEntities)->contains(
+            static fn (array $entity): bool => ($entity['type'] ?? null) === 'custom_emoji'
+                && ($entity['custom_emoji_id'] ?? null) === '5368324170671202286',
+        ));
     }
 
     public function test_migrated_photo_template_effect_is_normalized_before_delivery(): void
@@ -1799,7 +1834,7 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $selectCallback = $picker['reply_markup']['inline_keyboard'][0][0]['callback_data'];
         $this->postTelegramWebhook($this->callbackUpdate(226, 'broadcast-product', $selectCallback, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
-        $selectedPreview = Http::recorded(fn ($record): bool => str_contains((string) ($record['text'] ?? ''), 'Tombol produk: Canva Pro'))->last()[0];
+        $selectedPreview = Http::recorded(fn ($record): bool => str_contains((string) ($record['text'] ?? ''), 'Tombol produk: 🛍️ Canva Pro'))->last()[0];
         $sendCallback = $selectedPreview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
         $this->postTelegramWebhook($this->callbackUpdate(227, 'broadcast-send', $sendCallback, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
@@ -1814,12 +1849,12 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertSame([
             '111' => [
                 'text' => "📣 Info dari Admin\n━━━━━━━━━━━━━━\nStok Canva ready malam ini.\n\nButuh bantuan? Balas /support ya.",
-                'button_text' => '🛍️ Beli: Canva Pro',
+                'button_text' => '🛍️ Canva Pro · 🛍️ Beli',
                 'callback_data' => 'product:'.$product->id,
             ],
             '222' => [
                 'text' => "📣 Info from Admin\n━━━━━━━━━━━━━━\nStok Canva ready malam ini.\n\nNeed help? Reply with /support.",
-                'button_text' => '🛍️ Buy: Canva Pro',
+                'button_text' => '🛍️ Canva Pro · 🛍️ Buy',
                 'callback_data' => 'product:'.$product->id,
             ],
         ], $localizedRecipientMessages

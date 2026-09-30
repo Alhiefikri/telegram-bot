@@ -34,7 +34,7 @@ class ProductPriceChangeNotificationService
         private readonly TelegramBotClient $bot,
         private readonly TelegramLocale $locale,
         private readonly StorefrontUrl $urls,
-        private readonly TelegramUiIcons $uiIcons,
+        private readonly TelegramProductNameRenderer $productNames,
         private ?TelegramOutboundEffectService $outboundEffects = null,
         private ?TelegramOutboundEffectLedgerProtocol $ledger = null,
         private ?TelegramOutboundResponseValidator $responseValidator = null,
@@ -60,6 +60,8 @@ class ProductPriceChangeNotificationService
                 'event_key' => (string) Str::uuid(),
                 'product_id' => $product->id,
                 'product_name' => $product->name,
+                'product_icon' => $product->icon,
+                'product_custom_emoji_id' => $product->custom_emoji_id,
                 'old_price_amount' => $oldIdr,
                 'new_price_amount' => $newIdr,
                 'old_usdt_price_amount' => $oldUsdt,
@@ -543,6 +545,15 @@ class ProductPriceChangeNotificationService
         return $target === '' ? null : $target;
     }
 
+    private function productIconLine(ProductPriceChangeEvent $event): string
+    {
+        return $this->productNames->render(
+            $event->product_name,
+            $event->product_icon,
+            $event->product_custom_emoji_id,
+        );
+    }
+
     private function message(ProductPriceChangeEvent $event, string $locale): string
     {
         $decrease = $this->isPureDecrease($event);
@@ -556,7 +567,7 @@ class ProductPriceChangeNotificationService
             $this->locale->translateLocale($locale, $decrease
                 ? 'notification.price.lead.drop'
                 : 'notification.price.lead.update'),
-            $this->uiIcons->renderLegacyIcons('📦 ').$event->product_name,
+            $this->productIconLine($event),
             '',
             $this->locale->translateLocale($locale, 'notification.price.qris.label'),
             $this->formatIdr($event->old_price_amount, $locale).' → '.$this->formatIdr($event->new_price_amount, $locale),

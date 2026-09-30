@@ -706,8 +706,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertSame(0, Order::count());
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '-100123'
-            && str_contains((string) $request['text'], 'ChatGPT Plus Private')
-            && str_contains((string) $request['text'], '📦 ChatGPT Plus Private')
+            && str_contains((string) $request['text'], '📦 🛍️ ChatGPT Plus Private')
             && str_contains((string) $request['text'], '➕ Added: 3')
             && str_contains((string) $request['text'], '📦 Current stock: 3')
             && str_contains((string) $request['text'], '💵 Unit price: Rp. 35.000 / $1.25')
@@ -727,7 +726,7 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '-100123'
-            && str_contains((string) $request['text'], '📦 ChatGPT Plus Private')
+            && str_contains((string) $request['text'], '📦 🛍️ ChatGPT Plus Private')
             && str_contains((string) $request['text'], '➕ Added: 2')
             && str_contains((string) $request['text'], '📦 Current stock: 5')
             && str_contains((string) $request['text'], '💵 Unit price: Rp. 35.000 / $1.25'));

@@ -379,7 +379,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         $picker = Http::recorded(fn ($request): bool => ($request['text'] ?? null) === 'Pilih produk untuk tombol pembelian broadcast.')->last()[0];
         $select = $picker['reply_markup']['inline_keyboard'][0][0]['callback_data'];
         $intents->handleCallback($customer, '999', 'photo-select', $select);
-        $selectedPreview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Tombol produk: Photo Product'))->last()[0];
+        $selectedPreview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Tombol produk: 🛍️ Photo Product'))->last()[0];
         $send = $selectedPreview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
 
         $intents->handleCallback($customer, '999', 'photo-send', $send);
@@ -459,7 +459,8 @@ class AdminMenuTest extends TelegramBotTestSupport
         $customer = Customer::factory()->create(['telegram_id' => 999]);
         $product = Product::factory()->create([
             'name' => 'Premium Product',
-            'stock' => 3,
+            'icon' => '🎨',
+            'custom_emoji_id' => '5368324170671202286',
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
@@ -473,14 +474,19 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->assertNotNull($draftId);
 
         $intents->handleCallback($customer, '999', 'pick-product', $pick);
-        $picker = Http::recorded(fn ($request): bool => ($request['text'] ?? null) === 'Pilih produk untuk tombol pembelian broadcast.')->last()[0];
+        $pickerRequest = Http::recorded(fn ($request): bool => ($request['text'] ?? null) === 'Pilih produk untuk tombol pembelian broadcast.')->last();
+        $this->assertNotNull($pickerRequest, 'Selecting the broadcast product action must send the product picker.');
+        $picker = $pickerRequest[0];
         $select = $picker['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->assertSame('5368324170671202286', $picker['reply_markup']['inline_keyboard'][0][0]['icon_custom_emoji_id'] ?? null);
 
         $this->assertLessThanOrEqual(64, strlen($select));
         $this->assertMatchesRegularExpression('/^broadcast:select:'.preg_quote($draftId, '/').':'.$product->id.'$/', $select);
 
         $intents->handleCallback($customer, '999', 'select-product', $select);
-        $selectedPreview = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Tombol produk: Premium Product'))->last()[0];
+        $selectedPreviewRequest = Http::recorded(fn ($request): bool => str_contains((string) ($request['text'] ?? ''), 'Tombol produk: 🎨 Premium Product'))->last();
+        $this->assertNotNull($selectedPreviewRequest, 'Selecting a Product must return to the broadcast preview.');
+        $selectedPreview = $selectedPreviewRequest[0];
         $send = $selectedPreview['reply_markup']['inline_keyboard'][1][0]['callback_data'];
 
         $this->assertLessThanOrEqual(64, strlen($send));
@@ -733,7 +739,7 @@ class AdminMenuTest extends TelegramBotTestSupport
     {
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
-        Product::factory()->create(['name' => 'Gemini Pro', 'stock' => 12, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Gemini Pro', 'icon' => '💎', 'custom_emoji_id' => '5368324170671202286', 'stock' => 12, 'reserved_stock' => 0]);
         Product::factory()->create(['name' => 'Netflix Premium', 'stock' => 3, 'reserved_stock' => 1]);
         Product::factory()->create(['name' => 'Canva Pro', 'stock' => 1, 'reserved_stock' => 1]);
         $credentialProduct = Product::factory()->create(['name' => 'ChatGPT Plus', 'stock' => 5, 'reserved_stock' => 0]);
@@ -745,10 +751,11 @@ class AdminMenuTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '999'
             && str_contains($request['text'], '📦 Stok Produk')
-            && str_contains($request['text'], '✅ Gemini Pro: 12')
-            && str_contains($request['text'], '⚠️ Netflix Premium: 2 (1 direservasi)')
-            && str_contains($request['text'], '❌ Canva Pro: habis (1 direservasi)')
-            && str_contains($request['text'], '⚠️ ChatGPT Plus: 1')
+            && str_contains($request['text'], '✅ 💎 Gemini Pro: 12')
+            && str_contains($request['text'], '⚠️ 🛍️ Netflix Premium: 2 (1 direservasi)')
+            && str_contains($request['text'], '❌ 🛍️ Canva Pro: habis (1 direservasi)')
+            && str_contains($request['text'], '⚠️ 🛍️ ChatGPT Plus: 1')
+            && str_contains(json_encode($request->data()['entities'] ?? []), '5368324170671202286')
             && str_contains($request['text'], 'Total produk aktif: 4')
             && ! str_contains($request['text'], 'Produk Mati')
             && strpos($request['text'], 'Canva Pro') < strpos($request['text'], 'Gemini Pro'));

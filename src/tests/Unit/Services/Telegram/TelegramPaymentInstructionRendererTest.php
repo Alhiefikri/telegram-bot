@@ -69,7 +69,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertPakasirActions($instruction, $order, $paymentUrl, 'id');
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invoice: INV-RENDERER-103',
-            '📦 Produk: Sourdough Starter x2, Kefir Kit',
+            '📦 Produk: 🛍️ Sourdough Starter x2, 🛍️ Kefir Kit',
             '🔢 Jumlah: 3',
             '💰 Total: Rp125.000',
             '⏳ Order aktif sampai: 04 Jul 2026 16:30 WIB',
@@ -97,7 +97,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertPakasirActions($instruction, $order, $paymentUrl, 'en');
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invoice: INV-RENDERER-103',
-            '📦 Products: Sourdough Starter x2, Kefir Kit',
+            '📦 Products: 🛍️ Sourdough Starter x2, 🛍️ Kefir Kit',
             '🔢 Quantity: 3',
             '💰 Total: Rp125.000',
             '⏳ Order active until: 04 Jul 2026 16:30 WIB',
@@ -123,7 +123,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             '⚠️ Checkout QRIS dialihkan',
             'QRIS langsung belum bisa dibuat otomatis. Order tetap pending dan stok tetap dipegang.',
             'Gunakan QR/link website di bawah untuk lanjut bayar.',
-            '📦 Produk: Sourdough Starter x2, Kefir Kit',
+            '📦 Produk: 🛍️ Sourdough Starter x2, 🛍️ Kefir Kit',
         ]);
         $this->assertPakasirActions($instruction, $order, $paymentUrl, 'id');
     }
@@ -142,7 +142,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertStringContainsString('QRIS checkout', $instruction->caption());
         $this->assertStringContainsString('could not be created automatically', $instruction->caption());
         $this->assertStringContainsString('payment link below', $instruction->caption());
-        $this->assertContains('📦 Products: Sourdough Starter x2, Kefir Kit', $instruction->captionLines());
+        $this->assertContains('📦 Products: 🛍️ Sourdough Starter x2, 🛍️ Kefir Kit', $instruction->captionLines());
         $this->assertPakasirActions($instruction, $order, $paymentUrl, 'en');
         $this->assertEnglishCaptionOmitsIndonesianPaymentCopy($instruction);
     }
@@ -168,7 +168,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertPakasirActions($instruction, $order, $paymentUrl, 'id');
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invoice: INV-RENDERER-103',
-            '📦 Produk: Sourdough Starter x2, Kefir Kit',
+            '📦 Produk: 🛍️ Sourdough Starter x2, 🛍️ Kefir Kit',
             '🔢 Jumlah: 3',
             '💰 Total produk: Rp125.000',
             '🏷️ Biaya QRIS: Rp875',
@@ -202,7 +202,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertPakasirActions($instruction, $order, $paymentUrl, 'en');
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invoice: INV-RENDERER-103',
-            '📦 Products: Sourdough Starter x2, Kefir Kit',
+            '📦 Products: 🛍️ Sourdough Starter x2, 🛍️ Kefir Kit',
             '🔢 Quantity: 3',
             '💰 Product total: Rp125.000',
             '🏷️ QRIS fee: Rp875',
@@ -341,6 +341,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $renderer = new TelegramPaymentInstructionRenderer(
             $this->qrCodes,
             new TelegramTranslationCatalog($translator, app(TelegramUiIcons::class)),
+            app(\App\Services\Telegram\TelegramProductNameRenderer::class),
         );
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-08-04 16:30:00', 'Asia/Jakarta'));
 
@@ -440,7 +441,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertPakasirActions($instruction, $order, $paymentUrl, 'ms');
         $this->assertCaptionIncludes($instruction, [
             '🧾 Invois: INV-RENDERER-103',
-            '📦 Produk: Sourdough Starter x2, Kefir Kit',
+            '📦 Produk: 🛍️ Sourdough Starter x2, 🛍️ Kefir Kit',
             '🔢 Kuantiti: 3',
             '💰 Jumlah: Rp125.000',
             '⏳ Pesanan aktif sehingga: 04 Jul 2026 16:30 WIB',

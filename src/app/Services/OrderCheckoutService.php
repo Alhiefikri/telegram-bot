@@ -218,6 +218,8 @@ class OrderCheckoutService
                 'order_id' => $order->id,
                 'product_id' => $product->id,
                 'product_name' => $product->name,
+                'product_icon' => $product->icon,
+                'product_custom_emoji_id' => $product->custom_emoji_id,
                 'family_id' => $product->product_family_id,
                 'family_name' => $product->family?->name,
                 'delivery_note' => $product->delivery_note,

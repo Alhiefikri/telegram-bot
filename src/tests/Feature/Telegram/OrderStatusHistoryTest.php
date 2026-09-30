@@ -252,7 +252,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
             && str_contains($r['text'], 'Detail Pesanan')
-            && str_contains($r['text'], 'Canva Pro x 2')
+            && str_contains($r['text'], '🛍️ Canva Pro x 2')
             && str_contains($r['text'], 'Pembayaran: QRIS (Menunggu pembayaran)')
             && str_contains($r['text'], 'Selesaikan pembayaran')
             && ! str_contains($r['text'], 'hosted')

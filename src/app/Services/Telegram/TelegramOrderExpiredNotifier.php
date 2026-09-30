@@ -12,7 +12,11 @@ use Throwable;
 
 class TelegramOrderExpiredNotifier
 {
-    public function __construct(private readonly TelegramBotClient $bot, private readonly TelegramLocale $locale) {}
+    public function __construct(
+        private readonly TelegramBotClient $bot,
+        private readonly TelegramLocale $locale,
+        private readonly TelegramProductNameRenderer $productNames,
+    ) {}
 
     public function send(Order $order): void
     {
@@ -67,7 +71,11 @@ class TelegramOrderExpiredNotifier
                 '━━━━━━━━━━━━━━',
                 $this->locale->translate($order->customer, 'payment.invoice', ['invoice' => $order->invoice_number]),
                 $this->locale->translate($order->customer, 'payment.products', [
-                    'items' => $order->orderItems->map(fn ($item) => $item->product_name.($item->quantity > 1 ? ' x'.$item->quantity : ''))->join(', '),
+                    'items' => $order->orderItems->map(fn ($item) => $this->productNames->render(
+                        (string) $item->product_name,
+                        $item->product_icon,
+                        $item->product_custom_emoji_id,
+                    ).($item->quantity > 1 ? ' x'.$item->quantity : ''))->join(', '),
                 ]),
                 $this->locale->translate($order->customer, 'payment.total', [
                     'amount' => 'Rp'.number_format($order->total_amount, 0, ',', '.'),

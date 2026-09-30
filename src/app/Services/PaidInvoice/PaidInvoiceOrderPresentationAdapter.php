@@ -75,7 +75,7 @@ final class PaidInvoiceOrderPresentationAdapter
     }
 
     /**
-     * @return list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int, quantity_price_tier_minimum: ?int}>
+     * @return list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int, quantity_price_tier_minimum: ?int, product_icon: ?string, product_custom_emoji_id: ?string}>
      */
     private function snapshotItems(Order $order, string $currency): array
     {
@@ -91,6 +91,8 @@ final class PaidInvoiceOrderPresentationAdapter
             ->values()
             ->map(static fn (OrderItem $item) => [
                 'product_name' => (string) $item->product_name,
+                'product_icon' => $item->product_icon,
+                'product_custom_emoji_id' => $item->product_custom_emoji_id,
                 'quantity' => max(0, (int) $item->quantity),
                 'quantity_price_tier_minimum' => $item->quantity_price_tier_minimum === null
                     ? null

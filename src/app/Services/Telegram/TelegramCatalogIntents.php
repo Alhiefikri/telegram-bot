@@ -697,7 +697,7 @@ class TelegramCatalogIntents
         }
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.custom_title');
         $lines[] = '━━━━━━━━━━━━━━';
-        $lines[] = $this->locale->translate($customer, 'catalog.quantity.product').$product->name;
+        $lines[] = $this->locale->translate($customer, 'catalog.quantity.product').$this->captions->icon($this->icons->resolve($product->icon, $product->custom_emoji_id)).' '.$product->name;
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.current', ['quantity' => $selection['quantity']]);
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.available_stock').$availableStock;
         $lines[] = '';

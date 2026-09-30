@@ -406,6 +406,8 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             ['minimum_quantity' => 2, 'price_amount' => 12_000, 'usdt_price_amount' => null],
         ])->create([
             'price_amount' => 15_000,
+            'icon' => '🧩',
+            'custom_emoji_id' => '5368324170671202286',
             'stock' => 2,
             'reserved_stock' => 0,
         ]);
@@ -414,7 +416,11 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             CheckoutPaymentIntents::manualQris(),
         );
 
-        $product->forceFill(['price_amount' => 30_000])->save();
+        $product->forceFill([
+            'price_amount' => 30_000,
+            'icon' => '🧾',
+            'custom_emoji_id' => '5368324170671202287',
+        ])->save();
         $product->quantityPriceTiers()->delete();
         $product->quantityPriceTiers()->create([
             'minimum_quantity' => 2,
@@ -428,6 +434,8 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         $this->assertSame(12_000, $fresh->orderItems->sole()->unit_price);
         $this->assertSame(24_000, $fresh->orderItems->sole()->subtotal);
         $this->assertSame(2, $fresh->orderItems->sole()->quantity_price_tier_minimum);
+        $this->assertSame('🧩', $fresh->orderItems->sole()->product_icon);
+        $this->assertSame('5368324170671202286', $fresh->orderItems->sole()->product_custom_emoji_id);
     }
 
     public static function idrRails(): array

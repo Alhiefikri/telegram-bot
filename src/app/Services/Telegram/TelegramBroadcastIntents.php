@@ -17,6 +17,7 @@ class TelegramBroadcastIntents
         private readonly TelegramBroadcastDrafts $drafts,
         private readonly TelegramAdminAccess $adminAccess,
         private readonly TelegramUiIcons $uiIcons,
+        private readonly TelegramProductNameRenderer $productNames,
     ) {}
 
     public function handleCommand(Customer $customer, string $chatId, string $text, array $message = []): void
@@ -231,7 +232,7 @@ class TelegramBroadcastIntents
             ? [
                 $this->uiIcons->renderLegacyIcons('📣 Preview broadcast'),
                 '━━━━━━━━━━━━━━',
-                $product ? 'Tombol produk: '.$product->name : 'Tombol produk: tidak ada',
+                $product ? 'Tombol produk: '.$this->productNames->render($product->name, $product->icon, $product->custom_emoji_id) : 'Tombol produk: tidak ada',
                 '',
                 'Foto di atas belum dikirim. Pilih tindakan di bawah.',
             ]
@@ -241,7 +242,7 @@ class TelegramBroadcastIntents
                 'Pesan:',
                 $draft['message'],
                 '',
-                $product ? 'Tombol produk: '.$product->name : 'Tombol produk: tidak ada',
+                $product ? 'Tombol produk: '.$this->productNames->render($product->name, $product->icon, $product->custom_emoji_id) : 'Tombol produk: tidak ada',
                 '',
                 'Pesan belum dikirim. Pilih tindakan di bawah.',
             ];
@@ -282,7 +283,7 @@ class TelegramBroadcastIntents
             ->orderBy('id')
             ->offset(($page - 1) * self::PRODUCTS_PER_PAGE)
             ->limit(self::PRODUCTS_PER_PAGE + 1)
-            ->get(['id', 'name', 'price_amount']);
+            ->get(['id', 'name', 'price_amount', 'icon', 'custom_emoji_id']);
 
         if ($products->isEmpty() && $page > 1) {
             $this->sendProductPicker($customer, $chatId, $draftId, $page - 1);
@@ -294,7 +295,7 @@ class TelegramBroadcastIntents
         $products = $products->take(self::PRODUCTS_PER_PAGE);
         $keyboard = $products
             ->map(fn (Product $product): array => [[
-                'text' => $this->uiIcons->renderLegacyIcons('🛍️ ').Str::limit($product->name, 38, '…').' · Rp'.number_format($product->price_amount, 0, ',', '.'),
+                'text' => $this->productNames->render(Str::limit($product->name, 38, '…'), $product->icon, $product->custom_emoji_id).' · '.$this->uiIcons->renderLegacyIcons('🛍️ ').'Rp'.number_format($product->price_amount, 0, ',', '.'),
                 'callback_data' => $this->callbackData('select', $draftId, $product->id),
             ]])
             ->all();
@@ -326,17 +327,17 @@ class TelegramBroadcastIntents
             $replyMarkup = $product ? [
                 'id' => [
                     'inline_keyboard' => [[
-                        ['text' => $this->uiIcons->renderLegacyIcons('🛍️ Beli: ').Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
+                        ['text' => $this->productNames->render(Str::limit($product->name, 38, '…'), $product->icon, $product->custom_emoji_id).' · '.$this->uiIcons->renderLegacyIcons('🛍️ Beli'), 'callback_data' => 'product:'.$product->id],
                     ]],
                 ],
                 'en' => [
                     'inline_keyboard' => [[
-                        ['text' => $this->uiIcons->renderLegacyIcons('🛍️ Buy: ').Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
+                        ['text' => $this->productNames->render(Str::limit($product->name, 38, '…'), $product->icon, $product->custom_emoji_id).' · '.$this->uiIcons->renderLegacyIcons('🛍️ Buy'), 'callback_data' => 'product:'.$product->id],
                     ]],
                 ],
                 'ms' => [
                     'inline_keyboard' => [[
-                        ['text' => $this->uiIcons->renderLegacyIcons('🛍️ Beli: ').Str::limit($product->name, 38, '…'), 'callback_data' => 'product:'.$product->id],
+                        ['text' => $this->productNames->render(Str::limit($product->name, 38, '…'), $product->icon, $product->custom_emoji_id).' · '.$this->uiIcons->renderLegacyIcons('🛍️ Beli'), 'callback_data' => 'product:'.$product->id],
                     ]],
                 ],
             ] : [];
@@ -401,7 +402,7 @@ class TelegramBroadcastIntents
 
     private function eligibleProduct(int $productId): ?Product
     {
-        return Product::query()->publicVisible()->availableForPurchase()->whereKey($productId)->first(['id', 'name', 'price_amount']);
+        return Product::query()->publicVisible()->availableForPurchase()->whereKey($productId)->first(['id', 'name', 'price_amount', 'icon', 'custom_emoji_id']);
     }
 
     /**

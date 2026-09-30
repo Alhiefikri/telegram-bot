@@ -15,7 +15,7 @@ use LogicException;
 final readonly class PaidInvoicePresentation
 {
     /**
-     * @param  list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int, quantity_price_tier_minimum?: ?int}>  $items
+     * @param  list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int, quantity_price_tier_minimum?: ?int, product_icon?: ?string, product_custom_emoji_id?: ?string}>  $items
      */
     public function __construct(
         public string $invoiceId,
@@ -49,7 +49,7 @@ final readonly class PaidInvoicePresentation
     }
 
     /**
-     * @return list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int, quantity_price_tier_minimum?: ?int}>
+     * @return list<array{product_name: string, quantity: int, unit_price: ?int, subtotal: ?int, quantity_price_tier_minimum?: ?int, product_icon?: ?string, product_custom_emoji_id?: ?string}>
      */
     public function displayItems(): array
     {

@@ -89,6 +89,61 @@ class SalesProofPostFormatterTest extends TestCase
             app(TelegramHtmlCaption::class)->parsedLength($caption, ['parse_mode' => 'HTML']),
         );
     }
+    public function test_order_item_icon_snapshot_is_rendered_without_using_static_icon_slots(): void
+    {
+        app(CustomEmojiCapability::class)->markAvailable();
+        $presentation = new PaidInvoicePresentation(
+            invoiceId: 'INV-PRODUCT-ICON-SNAPSHOT',
+            buyerIdentifier: '284*****24',
+            paidAt: CarbonImmutable::parse('2026-08-22 04:00:00 UTC')->setTimezone('Asia/Jakarta'),
+            paymentMethod: 'QRIS',
+            currency: 'IDR',
+            items: [[
+                'product_name' => 'Snapshot Product',
+                'product_icon' => '🧩',
+                'product_custom_emoji_id' => '5368324170671202286',
+                'quantity' => 1,
+                'unit_price' => 10000,
+                'subtotal' => 10000,
+            ]],
+            providerFee: 0,
+            totalPaid: 10000,
+        );
+
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 19);
+
+        $this->assertStringContainsString(
+            '<tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">🧩</tg-emoji> Snapshot Product',
+            $caption,
+        );
+        $this->assertStringNotContainsString('emoji-id="5368324170671202287"', $caption);
+    }
+
+    public function test_product_icon_snapshot_without_custom_emoji_uses_its_plain_glyph(): void
+    {
+        $presentation = new PaidInvoicePresentation(
+            invoiceId: 'INV-PRODUCT-ICON-GLYPH',
+            buyerIdentifier: '284*****24',
+            paidAt: CarbonImmutable::parse('2026-08-22 04:00:00 UTC')->setTimezone('Asia/Jakarta'),
+            paymentMethod: 'QRIS',
+            currency: 'IDR',
+            items: [[
+                'product_name' => 'Snapshot Product',
+                'product_icon' => '🧩',
+                'product_custom_emoji_id' => null,
+                'quantity' => 1,
+                'unit_price' => 10000,
+                'subtotal' => 10000,
+            ]],
+            providerFee: 0,
+            totalPaid: 10000,
+        );
+
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 20);
+
+        $this->assertStringContainsString('🧩 Snapshot Product', $caption);
+        $this->assertStringNotContainsString('<tg-emoji', $caption);
+    }
 
     public function test_photo_caption_uses_a_safe_generic_name_instead_of_a_buyer_id_fallback(): void
     {

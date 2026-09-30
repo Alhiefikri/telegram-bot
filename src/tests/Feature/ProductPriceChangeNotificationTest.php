@@ -15,6 +15,7 @@ use App\Models\Product;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramUiIcon;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
@@ -22,7 +23,7 @@ use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
-use App\Services\Telegram\TelegramUiIcons;
+use App\Services\Telegram\TelegramProductNameRenderer;
 use App\Storefront\StorefrontUrl;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -96,6 +97,50 @@ class ProductPriceChangeNotificationTest extends TestCase
         $this->assertStringNotContainsString('You save', (string) $msRequest['text']);
     }
 
+    public function test_price_drop_uses_the_product_owned_catalog_icon(): void
+    {
+        config()->set('services.telegram.token', 'bot-token');
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 124]])]);
+        Customer::factory()->create(['telegram_id' => 7004, 'locale' => 'id']);
+        $product = Product::factory()->create([
+            'name' => 'Gemini Pro',
+            'icon' => '🧩',
+            'custom_emoji_id' => '5368324170671202286',
+            'price_amount' => 30000,
+            'usdt_price_amount' => 2_250_000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        TelegramUiIcon::query()->where('key', 'menu.orders')->sole()->update([
+            'custom_emoji_id' => '5368324170671202288',
+        ]);
+        $notifications = app(ProductPriceChangeNotificationService::class);
+        $event = $notifications->createEventForCommittedUpdate(
+            $product,
+            ['price_amount' => 35000, 'usdt_price_amount' => 2_500_000],
+            ['price_amount' => 30000, 'usdt_price_amount' => 2_250_000],
+        );
+        $this->assertNotNull($event);
+        $product->update([
+            'icon' => '🧾',
+            'custom_emoji_id' => '5368324170671202287',
+        ]);
+
+        $notifications->processBatch($event->id);
+
+        $request = $this->telegramSendFor(7004);
+        $this->assertStringContainsString('🧩 Gemini Pro', (string) $request['text']);
+        $this->assertContains(
+            '5368324170671202286',
+            array_column($request['entities'] ?? [], 'custom_emoji_id'),
+        );
+        $this->assertNotContains(
+            '5368324170671202288',
+            array_column($request['entities'] ?? [], 'custom_emoji_id'),
+        );
+    }
+
     #[DataProvider('invalidTelegramResponses')]
     public function test_invalid_telegram_responses_never_mark_a_price_change_recipient_sent(array $response): void
     {
@@ -156,7 +201,7 @@ class ProductPriceChangeNotificationTest extends TestCase
 
         $this->assertCount(1, $storeChannelMessages);
         $this->assertSame(
-            "🏷️ Price Drop\n━━━━━━━━━━━━━━\nGood news for you.\n📦 CHATGPT PLUS PRIVATE + CODEX\n\n💵 QRIS\nRp35,000 → Rp30,000\n\n💎 Binance Pay\n2.5 USDT → 2.3 USDT\n\nYou save Rp5,000 + 0.2 USDT.\nThe new price is ready for your next checkout.\n\nNeed help? Reply with /support.",
+            "🏷️ Price Drop\n━━━━━━━━━━━━━━\nGood news for you.\n🛍️ CHATGPT PLUS PRIVATE + CODEX\n\n💵 QRIS\nRp35,000 → Rp30,000\n\n💎 Binance Pay\n2.5 USDT → 2.3 USDT\n\nYou save Rp5,000 + 0.2 USDT.\nThe new price is ready for your next checkout.\n\nNeed help? Reply with /support.",
             $storeChannelMessages->first()[0]['text'],
         );
         $this->assertSame(
@@ -705,7 +750,7 @@ class ProductPriceChangeNotificationTest extends TestCase
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
-        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class), app(TelegramLocale::class), app(StorefrontUrl::class), app(TelegramUiIcons::class)) extends ProductPriceChangeNotificationService
+        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class), app(TelegramLocale::class), app(StorefrontUrl::class), app(TelegramProductNameRenderer::class)) extends ProductPriceChangeNotificationService
         {
             public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
             {

@@ -53,6 +53,7 @@ class TelegramOrderIntents
         private CredentialDeliveryPresentation $credentialPresentation,
         private TelegramCredentialDeliveryRenderer $credentialRenderer,
         private TelegramMessageChunker $messageChunker,
+        private TelegramProductNameRenderer $productNames,
     ) {}
 
     public function sendLatestOrderStatus(Customer $customer, string $chatId): void
@@ -292,7 +293,11 @@ class TelegramOrderIntents
             $this->locale->translate($customer, 'order.detail.items'),
         ];
         foreach ($order->orderItems as $item) {
-            $lines[] = '- '.$item->product_name.' x '.$item->quantity;
+            $lines[] = '- '.$this->productNames->render(
+                (string) $item->product_name,
+                $item->product_icon,
+                $item->product_custom_emoji_id,
+            ).' x '.$item->quantity;
         }
         $lines[] = $this->locale->translate($customer, 'order.detail.total', [
             'amount' => 'Rp '.number_format($order->total_amount, 0, ',', '.'),
@@ -598,7 +603,11 @@ class TelegramOrderIntents
     {
         $lines = [];
         foreach ($delivery->groups() as $group) {
-            $lines[] = $group->productName();
+            $lines[] = $this->productNames->render(
+                $group->productName(),
+                $group->productIcon(),
+                $group->productCustomEmojiId(),
+            );
             foreach ($group->accounts() as $account) {
                 $lines[] = $account->number().'. '.$account->text();
 

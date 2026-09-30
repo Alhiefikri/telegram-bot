@@ -29,6 +29,7 @@ class TelegramManualPaymentIntents
         private TelegramOutboundEffectService $outboundEffects,
         private TelegramOutboundEffectDispatcher $dispatcher,
         private TelegramUiIcons $uiIcons,
+        private TelegramProductNameRenderer $productNames,
     ) {}
 
     public function submitManualPaymentProof(Customer $customer, string $chatId, array $message, string $invoice): void
@@ -239,7 +240,11 @@ class TelegramManualPaymentIntents
             'Item:',
         ];
         foreach ($order->orderItems as $item) {
-            $caption[] = '- '.$item->product_name.' x '.$item->quantity;
+            $caption[] = '- '.$this->productNames->render(
+                (string) $item->product_name,
+                $item->product_icon,
+                $item->product_custom_emoji_id,
+            ).' x '.$item->quantity;
         }
 
         $lateEvidence = $payment->method === 'BINANCE_PAY_ID'

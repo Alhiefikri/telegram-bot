@@ -23,6 +23,7 @@ class TelegramIconIntents
         private TelegramIconCaptureSession $captures,
         private TelegramUiIcons $uiIcons,
         private CatalogIconResolver $catalogIcons,
+        private TelegramProductNameRenderer $productNames,
     ) {}
 
     public function hasPendingCapture(Customer $customer): bool
@@ -163,7 +164,7 @@ class TelegramIconIntents
 
         $this->bot->editMessageTextOrSend(
             $chatId,
-            $this->locale->translate($customer, 'catalog.product_icon.prompt', ['label' => $product->name]),
+            $this->locale->translate($customer, 'catalog.product_icon.prompt', ['label' => $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id)]),
             ['inline_keyboard' => [[$this->backRow($customer, 'producticon:list', 'catalog.product_icon.button_back')]]],
             $messageId,
         );
@@ -175,7 +176,7 @@ class TelegramIconIntents
 
         $this->bot->editMessageTextOrSend(
             $chatId,
-            $this->locale->translate($customer, 'catalog.product_icon.cleared', ['label' => $product->name]),
+            $this->locale->translate($customer, 'catalog.product_icon.cleared', ['label' => $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id)]),
             ['inline_keyboard' => [[$this->backRow($customer, 'producticon:list', 'catalog.product_icon.button_back')]]],
             $messageId,
         );
@@ -360,7 +361,7 @@ class TelegramIconIntents
     }
 
     /**
-     * @param  array{label: string, save_emoji: Closure(string, ?string): void, save_glyph: Closure(string): void|null, clear_callback: string, back_callback: string, back_key: string, saved_key: string, saved_glyph_key: string, not_an_emoji_key: string}  $target
+     * @param  array{label: string, render_label?: Closure(): string, save_emoji: Closure(string, ?string): void, save_glyph: Closure(string): void|null, clear_callback: string, back_callback: string, back_key: string, saved_key: string, saved_glyph_key: string, not_an_emoji_key: string}  $target
      * @param  array{kind: string, target_id: int, message_id: int|null, expires_at: int}  $pending
      */
     private function confirmCapture(Customer $customer, string $chatId, array $target, array $pending, string $messageKey, bool $offerClear): void
@@ -374,9 +375,12 @@ class TelegramIconIntents
         }
         $rows[] = [$this->backRow($customer, $target['back_callback'], $target['back_key'])];
 
+        $label = isset($target['render_label'])
+            ? $target['render_label']()
+            : $target['label'];
         $this->bot->editMessageTextOrSend(
             $chatId,
-            $this->locale->translate($customer, $messageKey, ['label' => $target['label']]),
+            $this->locale->translate($customer, $messageKey, ['label' => $label]),
             ['inline_keyboard' => $rows],
             $pending['message_id'],
         );
@@ -479,6 +483,7 @@ class TelegramIconIntents
 
         return [
             'label' => $product->name,
+            'render_label' => fn (): string => $this->productNames->render($product->refresh()->name, $product->icon, $product->custom_emoji_id),
             'save_emoji' => static function (string $customEmojiId, ?string $emojiGlyph) use ($product): void {
                 $values = ['custom_emoji_id' => $customEmojiId];
                 if ($emojiGlyph !== null) {

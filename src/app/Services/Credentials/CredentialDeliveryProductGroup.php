@@ -18,11 +18,23 @@ final readonly class CredentialDeliveryProductGroup
         private array $accounts,
         private ?string $defaultTutorial,
         private ?array $usageGuide,
+        private ?string $productIcon = null,
+        private ?string $productCustomEmojiId = null,
     ) {}
 
     public function productName(): string
     {
         return $this->productName;
+    }
+
+    public function productIcon(): ?string
+    {
+        return $this->productIcon;
+    }
+
+    public function productCustomEmojiId(): ?string
+    {
+        return $this->productCustomEmojiId;
     }
 
     /** @return list<CredentialDeliveryAccount> */
