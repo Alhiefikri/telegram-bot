@@ -6,8 +6,11 @@ use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramUiIcon;
 use App\Models\User;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramAdminStatsIntents;
+use App\Services\Telegram\TelegramUiIcons;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
@@ -77,6 +80,44 @@ class AdminStoreChannelTest extends TestCase
             'last_test_message_id' => '77',
             'sales_proof_enabled' => false,
         ]);
+    }
+
+    public function test_test_channel_rejection_stays_channel_scoped_and_keeps_bot_message_emoji(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        StoreChannelSetting::create(['channel_username' => '@lhie_store']);
+        TelegramUiIcon::query()->where('key', 'message.success')->update(['custom_emoji_id' => '5368324170671202286']);
+        app(TelegramUiIcons::class)->forget();
+
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.telegram.org/botbot-token/getChat' => Http::response(['ok' => true, 'result' => ['id' => -100123, 'title' => 'LHIE']]),
+            'https://api.telegram.org/botbot-token/sendMessage' => Http::sequence()
+                ->push(['ok' => false, 'error_code' => 400, 'description' => "Bad Request: can't use custom emoji in this chat"], 400)
+                ->push(['ok' => true, 'result' => ['message_id' => 78]]),
+        ]);
+
+        $this->post(route('admin.store-channel.test'))
+            ->assertRedirect('/admin?tab=telegram-channel#admin-store-channel-test');
+
+        $messages = collect(Http::recorded())
+            ->filter(fn (array $record): bool => str_ends_with($record[0]->url(), '/sendMessage'))
+            ->values();
+        $this->assertCount(2, $messages);
+        $this->assertTrue(collect($messages[0][0]['entities'] ?? [])->contains(
+            fn (array $entity): bool => ($entity['type'] ?? null) === 'custom_emoji'
+                && ($entity['custom_emoji_id'] ?? null) === '5368324170671202286',
+        ));
+        $retry = (array) $messages[1][0]->data();
+        $this->assertSame(
+            "✅ LHIE STORE channel test succeeded.\n\nThe channel can receive test messages. Automatic features are not enabled yet.",
+            $retry['text'],
+        );
+        $this->assertSame([], $retry['entities'] ?? []);
+
+        $capability = app(CustomEmojiCapability::class);
+        $this->assertFalse($capability->isAvailable(CustomEmojiCapability::SCOPE_CHANNEL));
+        $this->assertTrue($capability->isAvailable(CustomEmojiCapability::SCOPE_MESSAGES));
     }
 
     public function test_test_channel_failure_records_actionable_reason(): void

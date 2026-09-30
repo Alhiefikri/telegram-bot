@@ -58,14 +58,15 @@ class TelegramCartIntents
                 return true;
             }
 
+            $productLabel = $this->productNames->renderProduct($product);
             $message = $checkoutMaintenanceActive
                 ? $this->locale->translate($customer, 'cart.added_maintenance', [
-                    'product' => $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
+                    'product' => $productLabel,
                     'quantity' => $quantity,
                     'subtotal' => number_format($quote->idrSubtotal, 0, ',', '.'),
                 ]).$this->locale->checkoutMaintenanceNote($customer, $maintenance->publicNote)
                 : $this->locale->translate($customer, 'cart.added', [
-                    'product' => $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
+                    'product' => $productLabel,
                     'quantity' => $quantity,
                     'subtotal' => number_format($quote->idrSubtotal, 0, ',', '.'),
                 ]);

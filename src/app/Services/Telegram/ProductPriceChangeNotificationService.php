@@ -10,6 +10,7 @@ use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Storefront\StorefrontUrl;
 use App\Support\DogfoodTiming;
 use App\Support\Money;
@@ -35,6 +36,7 @@ class ProductPriceChangeNotificationService
         private readonly TelegramLocale $locale,
         private readonly StorefrontUrl $urls,
         private readonly TelegramProductNameRenderer $productNames,
+        private readonly CatalogFamilyIconResolver $familyIcons,
         private ?TelegramOutboundEffectService $outboundEffects = null,
         private ?TelegramOutboundEffectLedgerProtocol $ledger = null,
         private ?TelegramOutboundResponseValidator $responseValidator = null,
@@ -56,12 +58,13 @@ class ProductPriceChangeNotificationService
         }
 
         return DB::transaction(function () use ($product, $oldIdr, $newIdr, $oldUsdt, $newUsdt): ProductPriceChangeEvent {
+            $icon = $this->familyIcons->forProduct($product);
             $event = ProductPriceChangeEvent::create([
                 'event_key' => (string) Str::uuid(),
                 'product_id' => $product->id,
                 'product_name' => $product->name,
-                'product_icon' => $product->icon,
-                'product_custom_emoji_id' => $product->custom_emoji_id,
+                'product_icon' => $icon->icon,
+                'product_custom_emoji_id' => $icon->customEmojiId,
                 'old_price_amount' => $oldIdr,
                 'new_price_amount' => $newIdr,
                 'old_usdt_price_amount' => $oldUsdt,

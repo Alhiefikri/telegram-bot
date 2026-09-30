@@ -2,9 +2,11 @@
 
 namespace App\Services\Telegram;
 
+use App\Catalog\CatalogIconSelection;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
+use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\Pricing\ProductPriceTierQuote;
 use App\Services\Pricing\ProductQuantityPricing;
 use App\Storefront\StorefrontUrl;
@@ -20,6 +22,7 @@ class TelegramProductNotificationService
         private TelegramLocale $locale,
         private ProductQuantityPricing $pricing,
         private TelegramProductNameRenderer $productNames,
+        private CatalogFamilyIconResolver $familyIcons,
     ) {}
 
     public function notifyProductCreated(Product $product): array
@@ -34,11 +37,12 @@ class TelegramProductNotificationService
         }
 
         $promotedTier = $this->promotedTier($product, null, $availableStock);
+        $icon = $this->familyIcons->forProduct($product);
 
         return $this->broadcast->sendToActiveUsers(
             fn (Customer $customer) => implode("\n", [
                 $this->locale->translate($customer, 'notification.product.created.lead'),
-                $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
+                $this->productNames->renderSelection($product->name, $icon),
                 $this->locale->translate($customer, 'notification.product.price', [
                     'amount' => number_format($product->price_amount, 0, ',', '.'),
                 ]),
@@ -71,9 +75,10 @@ class TelegramProductNotificationService
 
         $availableAfter ??= $availableStock;
         $promotedTier = $this->promotedTier($product, $availableBefore, $availableAfter);
+        $icon = $this->familyIcons->forProduct($product);
         $channelChatId = $this->storeChannelChatId();
         $this->sendStoreChannel(
-            $this->storeChannelRestockMessage($product, $addedQuantity, $availableStock, $promotedTier),
+            $this->storeChannelRestockMessage($product, $icon, $addedQuantity, $availableStock, $promotedTier),
             $this->storeChannelProductReplyMarkup($product),
         );
 
@@ -81,7 +86,7 @@ class TelegramProductNotificationService
             ? $this->broadcast->sendToActiveUsers(
                 fn (Customer $customer) => implode("\n", [
                     $this->locale->translate($customer, 'notification.product.restock.lead'),
-                    $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
+                    $this->productNames->renderSelection($product->name, $icon),
                     $this->locale->translate($customer, 'notification.product.price', [
                         'amount' => number_format($product->price_amount, 0, ',', '.'),
                     ]),
@@ -155,6 +160,7 @@ class TelegramProductNotificationService
         if (! $promotedTierResolved) {
             $promotedTier = $this->promotedTier($product, $availableBefore, $availableStock);
         }
+        $icon = $this->familyIcons->forProduct($product);
         $channelChatId = $this->storeChannelChatId();
         $deliveries = [];
         if ($customerCursor === 0 && $channelChatId) {
@@ -163,7 +169,7 @@ class TelegramProductNotificationService
                 'recipient_type' => 'store_channel',
                 'telegram_id' => $channelChatId,
                 'locale' => null,
-                'text' => $this->storeChannelRestockMessage($product, $addedQuantity, $availableStock, $promotedTier),
+                'text' => $this->storeChannelRestockMessage($product, $icon, $addedQuantity, $availableStock, $promotedTier),
                 'reply_markup' => $this->storeChannelProductReplyMarkup($product),
                 'photo_path' => $this->telegramImagePath($product),
             ];
@@ -184,6 +190,7 @@ class TelegramProductNotificationService
             ...$deliveries,
             ...$this->renderCustomerDeliveries(
                 $product,
+                $icon,
                 $availableStock,
                 false,
                 $customerPage->filter(fn (Customer $customer): bool => trim((string) $customer->telegram_id) !== ''),
@@ -230,6 +237,7 @@ class TelegramProductNotificationService
             return ['deliveries' => [], 'next_cursor' => $customerCursor, 'has_more' => false];
         }
 
+        $icon = $this->familyIcons->forProduct($product);
         $deliveries = [];
         if ($customerCursor === 0 && ($channelChatId = $this->storeChannelChatId())) {
             $deliveries[] = [
@@ -237,7 +245,7 @@ class TelegramProductNotificationService
                 'recipient_type' => 'store_channel',
                 'telegram_id' => $channelChatId,
                 'locale' => null,
-                'text' => $this->storeChannelSoldOutMessage($product),
+                'text' => $this->storeChannelSoldOutMessage($product, $icon),
                 'reply_markup' => [],
                 'photo_path' => null,
             ];
@@ -255,6 +263,7 @@ class TelegramProductNotificationService
             ...$deliveries,
             ...$this->renderSoldOutCustomerDeliveries(
                 $product,
+                $icon,
                 $customerPage->filter(fn (Customer $customer): bool => trim((string) $customer->telegram_id) !== ''),
             ),
         ];
@@ -272,6 +281,7 @@ class TelegramProductNotificationService
      */
     private function renderCustomerDeliveries(
         Product $product,
+        CatalogIconSelection $icon,
         int $availableStock,
         bool $created,
         iterable $customers,
@@ -286,7 +296,7 @@ class TelegramProductNotificationService
                 $title,
                 '━━━━━━━━━━━━━━',
                 $lead,
-                $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
+                $this->productNames->renderSelection($product->name, $icon),
                 $this->locale->translateLocale($locale, 'notification.product.price', [
                     'amount' => number_format($product->price_amount, 0, ',', '.'),
                 ]),
@@ -317,7 +327,7 @@ class TelegramProductNotificationService
      * @param  iterable<Customer>  $customers
      * @return list<array{customer_id:?int,recipient_type:string,telegram_id:string,locale:string,text:string,reply_markup:array,photo_path:?string}>
      */
-    private function renderSoldOutCustomerDeliveries(Product $product, iterable $customers): array
+    private function renderSoldOutCustomerDeliveries(Product $product, CatalogIconSelection $icon, iterable $customers): array
     {
         $deliveries = [];
         foreach ($customers as $customer) {
@@ -330,7 +340,7 @@ class TelegramProductNotificationService
                 'text' => implode("\n", [
                     $this->locale->translateLocale($locale, 'notification.product.sold_out.title'),
                     '━━━━━━━━━━━━━━',
-                    $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
+                    $this->productNames->renderSelection($product->name, $icon),
                     $this->locale->translateLocale($locale, 'notification.product.sold_out.message'),
                     '',
                     $this->locale->translateLocale($locale, 'notification.product.sold_out.catalog'),
@@ -448,8 +458,14 @@ class TelegramProductNotificationService
         }
     }
 
+    private function renderStoreChannelProductName(Product $product, CatalogIconSelection $icon): string
+    {
+        return $this->productNames->renderSelection($product->name, $icon, CustomEmojiCapability::SCOPE_CHANNEL);
+    }
+
     private function storeChannelRestockMessage(
         Product $product,
+        CatalogIconSelection $icon,
         int $addedQuantity,
         int $availableStock,
         ?ProductPriceTierQuote $promotedTier = null,
@@ -465,11 +481,9 @@ class TelegramProductNotificationService
         }
 
         $lines = [
-            $this->locale->translateLocale($locale, 'notification.store_channel.restock.title', ['product' => $this->productNames->render(
-                $product->name,
-                $product->icon,
-                $product->custom_emoji_id,
-                CustomEmojiCapability::SCOPE_CHANNEL,
+            $this->locale->translateLocale($locale, 'notification.store_channel.restock.title', ['product' => $this->renderStoreChannelProductName(
+                $product,
+                $icon,
             )]),
             $this->locale->translateLocale($locale, 'notification.store_channel.restock.added', [
                 'quantity' => $addedQuantity,
@@ -493,17 +507,12 @@ class TelegramProductNotificationService
         return implode("\n", $lines);
     }
 
-    private function storeChannelSoldOutMessage(Product $product): string
+    private function storeChannelSoldOutMessage(Product $product, CatalogIconSelection $icon): string
     {
         $locale = TelegramLocale::STORE_CHANNEL_LOCALE;
 
         return implode("\n", [
-            $this->productNames->render(
-                $product->name,
-                $product->icon,
-                $product->custom_emoji_id,
-                CustomEmojiCapability::SCOPE_CHANNEL,
-            ),
+            $this->renderStoreChannelProductName($product, $icon),
             $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.label'),
             '━━━━━━━━━━━━━━',
             '',

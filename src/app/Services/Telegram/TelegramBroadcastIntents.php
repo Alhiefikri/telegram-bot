@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Models\Customer;
 use App\Models\Product;
+use App\Services\Catalog\CatalogFamilyIconResolver;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -18,6 +19,7 @@ class TelegramBroadcastIntents
         private readonly TelegramAdminAccess $adminAccess,
         private readonly TelegramUiIcons $uiIcons,
         private readonly TelegramProductNameRenderer $productNames,
+        private readonly CatalogFamilyIconResolver $familyIcons,
     ) {}
 
     public function handleCommand(Customer $customer, string $chatId, string $text, array $message = []): void
@@ -228,11 +230,14 @@ class TelegramBroadcastIntents
         }
 
         $photoFileId = $draft['photo_file_id'] ?? null;
+        $productLine = $product
+            ? 'Tombol produk: '.$this->productNames->renderProduct($product)
+            : 'Tombol produk: tidak ada';
         $lines = $photoFileId !== null
             ? [
                 $this->uiIcons->renderLegacyIcons('📣 Preview broadcast'),
                 '━━━━━━━━━━━━━━',
-                $product ? 'Tombol produk: '.$this->productNames->render($product->name, $product->icon, $product->custom_emoji_id) : 'Tombol produk: tidak ada',
+                $productLine,
                 '',
                 'Foto di atas belum dikirim. Pilih tindakan di bawah.',
             ]
@@ -242,7 +247,7 @@ class TelegramBroadcastIntents
                 'Pesan:',
                 $draft['message'],
                 '',
-                $product ? 'Tombol produk: '.$this->productNames->render($product->name, $product->icon, $product->custom_emoji_id) : 'Tombol produk: tidak ada',
+                $productLine,
                 '',
                 'Pesan belum dikirim. Pilih tindakan di bawah.',
             ];
@@ -283,7 +288,7 @@ class TelegramBroadcastIntents
             ->orderBy('id')
             ->offset(($page - 1) * self::PRODUCTS_PER_PAGE)
             ->limit(self::PRODUCTS_PER_PAGE + 1)
-            ->get(['id', 'name', 'price_amount', 'icon', 'custom_emoji_id']);
+            ->get(['id', 'product_family_id', 'name', 'price_amount', 'icon', 'custom_emoji_id']);
 
         if ($products->isEmpty() && $page > 1) {
             $this->sendProductPicker($customer, $chatId, $draftId, $page - 1);
@@ -293,9 +298,10 @@ class TelegramBroadcastIntents
 
         $hasNextPage = $products->count() > self::PRODUCTS_PER_PAGE;
         $products = $products->take(self::PRODUCTS_PER_PAGE);
+        $icons = $this->familyIcons->forProducts($products);
         $keyboard = $products
             ->map(fn (Product $product): array => [[
-                'text' => $this->productNames->render(Str::limit($product->name, 38, '…'), $product->icon, $product->custom_emoji_id).' · '.$this->uiIcons->renderLegacyIcons('🛍️ ').'Rp'.number_format($product->price_amount, 0, ',', '.'),
+                'text' => $this->productNames->renderSelection(Str::limit($product->name, 38, '…'), $icons[(int) $product->getKey()]).' · '.$this->uiIcons->renderLegacyIcons('🛍️ ').'Rp'.number_format($product->price_amount, 0, ',', '.'),
                 'callback_data' => $this->callbackData('select', $draftId, $product->id),
             ]])
             ->all();
@@ -324,23 +330,26 @@ class TelegramBroadcastIntents
                 return ['action' => 'keep', 'value' => 'invalid_product'];
             }
 
-            $replyMarkup = $product ? [
+            $productLabel = $product
+                ? $this->productNames->renderSelection(Str::limit($product->name, 38, '…'), $this->familyIcons->forProduct($product))
+                : null;
+            $replyMarkup = $productLabel === null ? [] : [
                 'id' => [
                     'inline_keyboard' => [[
-                        ['text' => $this->productNames->render(Str::limit($product->name, 38, '…'), $product->icon, $product->custom_emoji_id).' · '.$this->uiIcons->renderLegacyIcons('🛍️ Beli'), 'callback_data' => 'product:'.$product->id],
+                        ['text' => $productLabel.' · '.$this->uiIcons->renderLegacyIcons('🛍️ Beli'), 'callback_data' => 'product:'.$product->id],
                     ]],
                 ],
                 'en' => [
                     'inline_keyboard' => [[
-                        ['text' => $this->productNames->render(Str::limit($product->name, 38, '…'), $product->icon, $product->custom_emoji_id).' · '.$this->uiIcons->renderLegacyIcons('🛍️ Buy'), 'callback_data' => 'product:'.$product->id],
+                        ['text' => $productLabel.' · '.$this->uiIcons->renderLegacyIcons('🛍️ Buy'), 'callback_data' => 'product:'.$product->id],
                     ]],
                 ],
                 'ms' => [
                     'inline_keyboard' => [[
-                        ['text' => $this->productNames->render(Str::limit($product->name, 38, '…'), $product->icon, $product->custom_emoji_id).' · '.$this->uiIcons->renderLegacyIcons('🛍️ Beli'), 'callback_data' => 'product:'.$product->id],
+                        ['text' => $productLabel.' · '.$this->uiIcons->renderLegacyIcons('🛍️ Beli'), 'callback_data' => 'product:'.$product->id],
                     ]],
                 ],
-            ] : [];
+            ];
 
             try {
                 $queued = $this->broadcast->queueAdminBroadcast(

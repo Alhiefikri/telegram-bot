@@ -31,9 +31,11 @@ to mirror the real catalog and for every Product to be configured explicitly.
   text row. The first member in family order with a captured custom emoji
   supplies both the identifier and its associated glyph; otherwise the first
   member with a glyph supplies it, then the shared default glyph `🛍️` is used.
-  The same public-member selection is used by each variant's Telegram detail
-  and quantity prompts and is snapshotted onto Order Items for receipt and
-  Sales Proof presentation.
+  The same public-member selection is used by every live-Product Telegram copy,
+  including each variant's detail and quantity prompts, product notifications,
+  cart, broadcast previews and buttons, the admin stock list, and price-change
+  snapshots, and it is snapshotted onto Order Items for receipt and Sales Proof
+  presentation.
   Multi-Plan discovery entries and Plan-selection button labels use the compact
   Unicode marker `▸`. When the family has a captured custom emoji, every
   Plan-selection button also carries the shared family
@@ -69,11 +71,14 @@ to mirror the real catalog and for every Product to be configured explicitly.
 
 ## Consequences
 
-- Telegram allows custom emoji entities in supported bot text, including
-  channel posts when the bot has the required Fragment-purchased additional
-  username entitlement. Bot-owner Premium alone permits direct private, group,
-  and supergroup messages, not channel posts. Rejected requests are retried with
-  the configured Unicode fallback.
+- Telegram allows custom emoji entities in supported bot text when the bot owner
+  has a Telegram Premium subscription, which covers direct private, group, and
+  supergroup messages. Channel posts additionally require the bot's
+  Fragment-purchased additional username entitlement. Without it Telegram
+  accepts the post with HTTP 200 and silently drops every `custom_emoji` entity
+  and `icon_custom_emoji_id`, so a Store Channel post keeps its Unicode glyph
+  and no rejection is observable. Rejected requests are retried with the
+  configured Unicode fallback.
 - Degradation stays reactive: `CustomEmojiCapability` remembers message and
   channel rejections separately for thirty minutes, and
   `TelegramBotClient` retries once with message wrappers and button identifiers

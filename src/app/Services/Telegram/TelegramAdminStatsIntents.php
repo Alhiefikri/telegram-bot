@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Models\Customer;
 use App\Models\Product;
+use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
@@ -18,6 +19,7 @@ class TelegramAdminStatsIntents
         private readonly TelegramMessageChunker $messageChunker,
         private readonly TelegramUiIcons $uiIcons,
         private readonly TelegramProductNameRenderer $productNames,
+        private readonly CatalogFamilyIconResolver $familyIcons,
     ) {}
 
     public function showProductStock(string $chatId): void
@@ -36,11 +38,12 @@ class TelegramAdminStatsIntents
             return;
         }
 
+        $icons = $this->familyIcons->forProducts($products);
         $lines = [$this->uiIcons->renderLegacyIcons('📦 Stok Produk'), '━━━━━━━━━━━━━━'];
         foreach ($products as $product) {
             $available = $product->availableStock();
             $icon = $this->uiIcons->renderLegacyIcons($available <= 0 ? '❌' : ($available <= 2 ? '⚠️' : '✅'));
-            $line = $icon.' '.$this->productNames->render($product->name, $product->icon, $product->custom_emoji_id).': '.($available > 0 ? $available : 'habis');
+            $line = $icon.' '.$this->productNames->renderSelection($product->name, $icons[(int) $product->getKey()]).': '.($available > 0 ? $available : 'habis');
             if ($product->reserved_stock > 0) {
                 $line .= ' ('.$product->reserved_stock.' direservasi)';
             }

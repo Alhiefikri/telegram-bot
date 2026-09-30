@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\StoreChannelSetting;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramBotApiRedactor;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramUiIcons;
@@ -30,7 +31,14 @@ class StoreChannelSetupVerifier
             }
 
             $chatId = (string) data_get($chat, 'result.id', $target);
-            $message = $this->telegram->sendMessage($chatId, $this->uiIcons->renderLegacyIcons("✅ LHIE STORE channel test succeeded.\n\nThe channel can receive test messages. Automatic features are not enabled yet."));
+            $message = $this->telegram->sendMessage(
+                $chatId,
+                $this->uiIcons->renderLegacyIcons(
+                    "✅ LHIE STORE channel test succeeded.\n\nThe channel can receive test messages. Automatic features are not enabled yet.",
+                    CustomEmojiCapability::SCOPE_CHANNEL,
+                ),
+                options: [TelegramBotClient::CUSTOM_EMOJI_SCOPE_OPTION => CustomEmojiCapability::SCOPE_CHANNEL],
+            );
             if (data_get($message, 'ok') !== true || ! data_get($message, 'result.message_id')) {
                 return ['success' => false, 'chat_id' => $chatId, 'message_id' => null, 'error' => 'Bot cannot post to channel: Telegram tidak mengembalikan message ID.'];
             }

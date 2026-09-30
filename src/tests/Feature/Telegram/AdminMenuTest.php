@@ -761,7 +761,7 @@ class AdminMenuTest extends TelegramBotTestSupport
             && strpos($request['text'], 'Canva Pro') < strpos($request['text'], 'Gemini Pro'));
     }
 
-    public function test_admin_can_open_stock_overview_with_english_command_alias(): void
+    public function test_stock_command_sends_the_public_snapshot_in_a_private_chat(): void
     {
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
@@ -771,11 +771,13 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '999'
+            && ($request['parse_mode'] ?? null) === 'HTML'
             && str_contains($request['text'], '📦 Stok Produk')
-            && str_contains($request['text'], 'Canva Pro: 3'));
+            && str_contains($request['text'], 'Canva Pro — Rp10.000 · stok 3 · terjual 0')
+            && str_contains($request['text'], 'start=product_'));
     }
 
-    public function test_english_stock_command_stays_private_chat_only(): void
+    public function test_stock_command_answers_group_chats_with_the_public_snapshot(): void
     {
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
@@ -788,9 +790,9 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '-100123'
-            && str_contains($request['text'], 'Lanjut di chat pribadi'));
+            && str_contains((string) ($request['text'] ?? ''), 'Canva Pro — Rp10.000 · stok 3 · terjual 0'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'Stok Produk'));
+            && str_contains((string) ($request['text'] ?? ''), 'direservasi'));
     }
 
     public function test_non_admin_cannot_open_product_stock_overview(): void

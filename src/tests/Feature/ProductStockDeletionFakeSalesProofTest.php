@@ -9,6 +9,7 @@ use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use App\Models\StockNotificationEvent;
 use App\Models\StockNotificationRecipient;
@@ -186,6 +187,70 @@ class ProductStockDeletionFakeSalesProofTest extends TelegramBotTestSupport
         $this->assertCount(0, $this->telegramMessageRequests('999999'));
         $this->assertSame(1, InventoryMovement::query()->where('product_id', $product->id)->where('type', InventoryMovementType::Adjustment)->count());
         $this->assertSame(0, InventoryMovement::query()->where('product_id', $product->id)->where('type', InventoryMovementType::Sale)->count());
+    }
+
+    public function test_sold_out_delivery_uses_the_family_icon_for_a_variant_without_its_own_emoji(): void
+    {
+        Queue::fake();
+        $this->fakeTelegramHttp();
+        $this->configureChannel();
+        $customer = Customer::factory()->create(['telegram_id' => 710011, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'ChatGPT']);
+        Product::factory()->create([
+            'name' => 'ChatGPT PLUS PRIVATE',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'family_option_label' => 'Private',
+            'icon' => '😄',
+            'custom_emoji_id' => '6134246530380472478',
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $product = Product::factory()->create([
+            'name' => 'ChatGPT PLUS K12 Edu 2 Years (NW)',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'family_option_label' => 'K12',
+            'icon' => '🌸',
+            'custom_emoji_id' => null,
+            'stock' => 1,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'family-icon-secret']);
+        $admin = User::factory()->create();
+
+        app(ProductStockItemManager::class)->deleteAvailable(
+            $product,
+            ProductStockItem::query()->where('product_id', $product->id)->firstOrFail(),
+            $admin,
+        );
+        $this->captureDeletionJob($product->id)->handle(
+            app(ProductStockDeletionFakeSalesProofAggregator::class),
+            app(FakeSalesProofPostPublisher::class),
+        );
+
+        $movement = InventoryMovement::query()->where('product_id', $product->id)->latest('id')->firstOrFail();
+        app(StockNotificationDeliveryPipeline::class)->deliver($movement->id, 100);
+
+        $customerMessage = $this->telegramMessageRequests((string) $customer->telegram_id)->first();
+        $this->assertNotNull($customerMessage);
+        $this->assertFamilyIconPayload((array) $customerMessage[0]->data());
+
+        $channelMessage = $this->telegramMessageRequests('-100123')->first();
+        $this->assertNotNull($channelMessage);
+        $this->assertFamilyIconPayload((array) $channelMessage[0]->data());
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function assertFamilyIconPayload(array $payload): void
+    {
+        $this->assertStringContainsString('😄 ChatGPT PLUS K12 Edu 2 Years (NW)', (string) ($payload['text'] ?? ''));
+        $this->assertTrue(collect($payload['entities'] ?? [])->contains(
+            fn (array $entity): bool => ($entity['type'] ?? null) === 'custom_emoji'
+                && ($entity['custom_emoji_id'] ?? null) === '6134246530380472478',
+        ), 'Expected the shared family custom emoji entity.');
     }
 
     public function test_restock_before_flush_suppresses_stale_sold_out_delivery(): void

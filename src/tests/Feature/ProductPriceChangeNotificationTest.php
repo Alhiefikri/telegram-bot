@@ -18,6 +18,7 @@ use App\Models\StoreChannelSetting;
 use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUiIcon;
 use App\Models\User;
+use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramLocale;
@@ -750,7 +751,7 @@ class ProductPriceChangeNotificationTest extends TestCase
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
-        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class), app(TelegramLocale::class), app(StorefrontUrl::class), app(TelegramProductNameRenderer::class)) extends ProductPriceChangeNotificationService
+        $this->app->instance(ProductPriceChangeNotificationService::class, new class(app(TelegramBotClient::class), app(TelegramLocale::class), app(StorefrontUrl::class), app(TelegramProductNameRenderer::class), app(CatalogFamilyIconResolver::class)) extends ProductPriceChangeNotificationService
         {
             public function createEventForCommittedUpdate(Product $product, array $oldValues, array $newValues): ?ProductPriceChangeEvent
             {
