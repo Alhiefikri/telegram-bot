@@ -24,6 +24,7 @@ class TelegramMessageRouter
         private TelegramCatalogQuerySession $catalogQueries,
         private TelegramMenuIntents $menu,
         private TelegramCatalogIntents $catalog,
+        private TelegramStockIntents $stock,
         private TelegramOrderIntents $orders,
         private TelegramManualPaymentIntents $manualPayments,
         private TelegramManualTopUpIntents $manualTopUps,
@@ -125,7 +126,17 @@ class TelegramMessageRouter
             return;
         }
 
-        if ($text === '📦 Cek Stok' || $text === '/stok' || $text === '/stock') {
+        if ($this->isPublicStockCommand($text)) {
+            // Stock is a public catalog snapshot; it contains no customer or
+            // payment data and is safe to request from group chats.
+            $this->session->forgetWithLock($customer);
+            $this->catalogQueries->forget($customer);
+            $this->stock->send($customer, $chatId);
+
+            return;
+        }
+
+        if ($text === '📦 Cek Stok' || $text === '/stok') {
             $this->session->forgetWithLock($customer);
             if (! $this->adminAccess->isAdmin($customer, $chatId)) {
                 $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.access_denied'));
@@ -336,7 +347,6 @@ class TelegramMessageRouter
             '📊 Statistik Harian',
             '📦 Cek Stok',
             '/stok',
-            '/stock',
         ], true)
             || $this->balanceFunding->isDepositCommand($text)
             || str_starts_with($text, '/payment ')
@@ -360,5 +370,10 @@ class TelegramMessageRouter
     private function isBroadcastCommand(string $text): bool
     {
         return TelegramBroadcastCommand::matches($text);
+    }
+
+    private function isPublicStockCommand(string $text): bool
+    {
+        return preg_match('/^\/stock(?:@[A-Za-z0-9_]{1,32})?$/', $text) === 1;
     }
 }

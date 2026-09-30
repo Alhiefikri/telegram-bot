@@ -290,6 +290,15 @@ command/deep-link entry points without a root use their send path, while
 deterministic edit rejection may use a safe new-message fallback and transport
 ambiguity never triggers one.
 
+The public `/stock` command is handled by
+[`TelegramStockIntents`](../../src/app/Services/Telegram/TelegramStockIntents.php).
+It reads the uncached public catalog availability projection, groups available
+Products by Product Family, renders each family-effective icon (including a
+captured Telegram custom emoji), and sends masked HTML links to
+`/start product_<id>`. It is safe for every customer chat, including groups;
+the legacy admin-only `/stok` command and `📦 Cek Stok` button keep their
+operator stock report.
+
 Telegram public list and product-in-category read models are cached only at
 the bot adapter seam by
 [`TelegramCatalogProjectionCache`](../../src/app/Services/Telegram/TelegramCatalogProjectionCache.php),
