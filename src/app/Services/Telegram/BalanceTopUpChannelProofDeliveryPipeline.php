@@ -84,6 +84,7 @@ final class BalanceTopUpChannelProofDeliveryPipeline
                             'url' => $this->shoppingButtonUrl(),
                         ]]],
                     ],
+                    [TelegramBotClient::CUSTOM_EMOJI_SCOPE_OPTION => CustomEmojiCapability::SCOPE_CHANNEL],
                 );
             } finally {
                 unset($invoice, $presentation);

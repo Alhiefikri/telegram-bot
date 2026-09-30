@@ -15,11 +15,11 @@ Komponen utama:
 - **Store Bot**: antarmuka Telegram untuk customer. Update dari Telegram diterima melalui webhook `POST /api/webhook/telegram`.
 - **Web Storefront**: katalog publik dan guest checkout melalui `/shop`, signed invoice, dan Recovery Key; tidak bergantung pada Telegram.
 - **Laravel backend**: menyimpan customer, catalog, cart, order, payment, audit log, dan menjalankan business flow.
-- **Payment Provider Switch**: owner memilih `Manual` atau `KlikQRIS` untuk checkout baru. Setting Pakasir aktif dimigrasikan ke KlikQRIS; Payment lama tetap memakai provider asal.
-- **Payment rails**: Manual QR, KlikQRIS Native QRIS, Binance Pay ID, dan USDT BEP20 pada BNB Smart Chain. Pakasir hanya menjadi compatibility lane untuk Payment lama sampai retirement gate lulus.
+- **Payment Provider Switch**: owner memilih `Manual`, `KlikQRIS`, atau `Sakurupiah` untuk checkout baru ketika readiness provider lulus. Sakurupiah production memerlukan pasangan kredensial production lengkap; Payment lama tetap memakai provider asal.
+- **Payment rails**: Manual QR, KlikQRIS Native QRIS, Sakurupiah QRIS, Binance Pay ID, dan USDT BEP20 pada BNB Smart Chain. Pakasir hanya menjadi compatibility lane untuk Payment lama sampai retirement gate lulus.
 - **Admin operations**: operasi manual oleh admin/support/finance, seperti validasi pembayaran manual, resend receipt, dan rekonsiliasi payment legacy.
-- **Queue**: memproses update Telegram, instruksi checkout, notification, receipt, Sales Proof Post, broadcast, dan verifikasi Binance/BSC pada queue terpisah yang sama.
-- **Scheduler**: menjalankan expiry order, reconciliation KlikQRIS/Pakasir legacy/Binance/BSC, recovery Telegram, cleanup, dan statistik harian.
+- **Queue**: memproses update Telegram, instruksi checkout, notification, receipt, Sales Proof Post, broadcast, dan verifikasi Binance/BSC/Sakurupiah pada queue terpisah yang sama.
+- **Scheduler**: menjalankan expiry order, reconciliation KlikQRIS/Pakasir legacy/Binance/BSC, Sakurupiah saat readiness production lulus, recovery Telegram, cleanup, dan statistik harian.
 
 Batasan dokumen: fokus pada pemahaman sistem dan operasional production. Detail implementasi, schema database, dan API internal sebaiknya dibaca langsung dari codebase/test.
 

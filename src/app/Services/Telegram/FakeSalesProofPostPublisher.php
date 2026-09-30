@@ -245,6 +245,7 @@ class FakeSalesProofPostPublisher
                 $invoice->filename,
                 $this->formatter->format($presentation, $this->fakeOrderNumber(), $this->stockSignal->forProduct($product)),
                 $this->shoppingButtonMarkup($product),
+                [TelegramBotClient::CUSTOM_EMOJI_SCOPE_OPTION => CustomEmojiCapability::SCOPE_CHANNEL],
             );
             $this->responseValidator->messageIdFromResponse($response, 'Telegram fake Sales Proof');
         } finally {

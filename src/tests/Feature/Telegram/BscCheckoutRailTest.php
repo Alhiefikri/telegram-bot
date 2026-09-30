@@ -125,6 +125,18 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
         $effect = TelegramOutboundEffect::query()->sole();
         (new SendBscCheckoutInstructions($order->id, null, $effect->id))->handle(app(TelegramCheckoutIntents::class));
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+        $instructionRequest = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->last()[0];
+        $instructionPayload = $instructionRequest->data();
+        $entities = $instructionPayload['entities'] ?? [];
+        $this->assertSame(['code', 'code'], array_column($entities, 'type'));
+        $this->assertSame(
+            ['2.5', '0x1111111111111111111111111111111111111111'],
+            array_map(
+                fn (array $entity): string => $this->telegramEntityText((string) $instructionPayload['text'], $entity),
+                $entities,
+            ),
+        );
+
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'USDT BEP20 Payment')
             && str_contains((string) ($request['text'] ?? ''), '0x1111111111111111111111111111111111111111')

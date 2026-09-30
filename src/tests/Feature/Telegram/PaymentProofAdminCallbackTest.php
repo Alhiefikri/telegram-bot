@@ -18,6 +18,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
@@ -1087,7 +1088,26 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'icon' => '🧩',
             'custom_emoji_id' => '5368324170671202286',
         ]);
-        $second = Product::factory()->create(['name' => 'Canva Pro', 'stock' => 5, 'price_amount' => 34000]);
+        $family = ProductFamily::factory()->create(['name' => 'Canva', 'slug' => 'canva-family-icon-proof']);
+        Product::factory()->create([
+            'name' => 'Canva Family Icon',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'family_option_label' => 'Family Icon',
+            'icon' => '🧩',
+            'custom_emoji_id' => '5368324170671202286',
+            'stock' => 0,
+            'reserved_stock' => 0,
+        ]);
+        $second = Product::factory()->create([
+            'name' => 'Canva Pro',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'family_option_label' => 'Pro',
+            'icon' => '🌸',
+            'stock' => 5,
+            'price_amount' => 34000,
+        ]);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $first, 1);
         app(CartService::class)->addItem($cart, $second, 1);
@@ -1102,6 +1122,10 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         ]);
         $this->postTelegramWebhook($this->paymentPhotoUpdate(302, $order->invoice_number, $telegramFrom, chatId: 123456789))->assertOk();
         $this->postTelegramWebhook($this->callbackUpdate(303, 'approve-proof', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
+        app(CustomEmojiCapability::class)->markUnavailable(
+            'Bad Request: custom emoji is unavailable in this bot chat',
+            CustomEmojiCapability::SCOPE_MESSAGES,
+        );
         app()->call([new PublishSalesProofPost($order->id), 'handle']);
         $this->postTelegramWebhook($this->callbackUpdate(304, 'approve-proof-again', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 
@@ -1120,7 +1144,10 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Completed:', $copy);
         $this->assertStringContainsString('Items:', $copy);
         $this->assertStringContainsString('🧩</tg-emoji> Email Account × 1', $copy);
-        $this->assertStringContainsString('🛍️ Canva Pro × 1', $copy);
+        $this->assertStringContainsString('🧩</tg-emoji> Canva Pro × 1', $copy);
+        $familyOrderItem = $order->orderItems()->where('product_id', $second->id)->sole();
+        $this->assertSame('🧩', $familyOrderItem->product_icon);
+        $this->assertSame('5368324170671202286', $familyOrderItem->product_custom_emoji_id);
         $this->assertStringContainsString('Order ID: '.$order->invoice_number, $copy);
         $this->assertStringContainsString('Quantity: 2', $copy);
         $this->assertStringContainsString('Subtotal: Rp 46.000', $copy);
@@ -1143,16 +1170,18 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $channelCaption = (string) $this->telegramRequestField($channelPhotos->first()[0], 'caption');
         $this->assertStringContainsString('ORDER PAYMENT CONFIRMED', $channelCaption);
         $this->assertStringContainsString('🧩 Email Account × 1', $channelCaption);
+        $this->assertStringContainsString('🧩 Canva Pro × 1', $channelCaption);
         $channelCaptionEntities = json_decode(
             (string) $this->telegramRequestField($channelPhotos->first()[0], 'caption_entities'),
             true,
             512,
             JSON_THROW_ON_ERROR,
         );
-        $this->assertTrue(collect($channelCaptionEntities)->contains(
+        $familyAndProductEmojiEntities = collect($channelCaptionEntities)->filter(
             static fn (array $entity): bool => ($entity['type'] ?? null) === 'custom_emoji'
                 && ($entity['custom_emoji_id'] ?? null) === '5368324170671202286',
-        ));
+        );
+        $this->assertCount(2, $familyAndProductEmojiEntities);
         $this->assertStringContainsString('Buyer: Cia***', $channelCaption);
         $this->assertStringNotContainsString('Buyer ID:', $channelCaption);
         $this->assertStringContainsString('Shop Now', (string) $this->telegramRequestField($channelPhotos->first()[0], 'reply_markup'));

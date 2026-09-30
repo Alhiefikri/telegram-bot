@@ -168,6 +168,9 @@ class StockNotificationDeliveryPipeline
 
                 $requestKey = 'stock-'.$claimed->getKey();
                 $prepared[$requestKey] = ['effect' => $claimed];
+                $options = $recipient->recipient_type === 'store_channel'
+                    ? [TelegramBotClient::CUSTOM_EMOJI_SCOPE_OPTION => CustomEmojiCapability::SCOPE_CHANNEL]
+                    : [];
                 $requests[$requestKey] = $photo !== null
                     ? [
                         'method' => 'sendPhoto',
@@ -176,12 +179,14 @@ class StockNotificationDeliveryPipeline
                         'filename' => $photo['filename'],
                         'caption' => (string) $recipient->text,
                         'reply_markup' => $recipient->reply_markup ?? [],
+                        'options' => $options,
                     ]
                     : [
                         'method' => 'sendMessage',
                         'chat_id' => $claimed->telegram_chat_id,
                         'text' => (string) $recipient->text,
                         'reply_markup' => $recipient->reply_markup ?? [],
+                        'options' => $options,
                     ];
             } catch (Throwable $exception) {
                 $deliveryResults[] = [

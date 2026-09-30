@@ -9,9 +9,13 @@ final class TelegramProductNameRenderer
         private readonly TelegramHtmlCaption $html,
     ) {}
 
-    public function render(string $name, ?string $glyph, ?string $customEmojiId): string
-    {
-        $icon = $this->icons->resolve($glyph, $customEmojiId);
+    public function render(
+        string $name,
+        ?string $glyph,
+        ?string $customEmojiId,
+        string $scope = CustomEmojiCapability::SCOPE_MESSAGES,
+    ): string {
+        $icon = $this->icons->resolve($glyph, $customEmojiId, $scope);
 
         return $this->html->icon($icon).' '.$name;
     }

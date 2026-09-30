@@ -101,11 +101,11 @@ class TelegramUiIcons
         return $attributes;
     }
 
-    public function customEmojiId(string $key): ?string
+    public function customEmojiId(string $key, string $scope = CustomEmojiCapability::SCOPE_MESSAGES): ?string
     {
         $icon = $this->icon($key);
 
-        return $icon instanceof TelegramUiIcon ? $this->customEmojiIdForIcon($icon) : null;
+        return $icon instanceof TelegramUiIcon ? $this->customEmojiIdForIcon($icon, $scope) : null;
     }
 
     /**
@@ -118,28 +118,28 @@ class TelegramUiIcons
         return $this->memoMessageIcons;
     }
 
-    public function renderTextIcon(string $key): string
+    public function renderTextIcon(string $key, string $scope = CustomEmojiCapability::SCOPE_MESSAGES): string
     {
         $icon = $this->icon($key);
 
-        return $icon instanceof TelegramUiIcon ? $this->renderIcon($icon) : '';
+        return $icon instanceof TelegramUiIcon ? $this->renderIcon($icon, $scope) : '';
     }
 
     /**
      * Resolve only static tokens in trusted copy. Call before inserting dynamic
      * customer, Product, credential, or broadcast values.
      */
-    public function renderLegacyIcons(string $text): string
+    public function renderLegacyIcons(string $text, string $scope = CustomEmojiCapability::SCOPE_MESSAGES): string
     {
         $render = $this->legacyRender();
         if ($render === null) {
             return $text;
         }
 
-        return preg_replace_callback($render['pattern'], function (array $match) use ($render): string {
+        return preg_replace_callback($render['pattern'], function (array $match) use ($render, $scope): string {
             $icon = $render['icons']->get($match[0]);
 
-            return $icon instanceof TelegramUiIcon ? $this->renderIcon($icon) : $match[0];
+            return $icon instanceof TelegramUiIcon ? $this->renderIcon($icon, $scope) : $match[0];
         }, $text) ?? $text;
     }
 
@@ -179,7 +179,7 @@ class TelegramUiIcons
      *
      * @return array{text: string}|array{text: string, icon_custom_emoji_id: string}
      */
-    public function apply(string $key, string $label): array
+    public function apply(string $key, string $label, string $scope = CustomEmojiCapability::SCOPE_MESSAGES): array
     {
         $icon = $this->icon($key);
         if (! $icon instanceof TelegramUiIcon) {
@@ -187,7 +187,7 @@ class TelegramUiIcons
         }
 
         $text = $this->withoutLeadingGlyph($label);
-        $id = $this->customEmojiIdForIcon($icon);
+        $id = $this->customEmojiIdForIcon($icon, $scope);
         if ($id === null) {
             return ['text' => trim($icon->fallback_emoji.' '.$text)];
         }
@@ -210,9 +210,11 @@ class TelegramUiIcons
         return $this->memoIconsByKey[$key] ?? null;
     }
 
-    private function customEmojiIdForIcon(TelegramUiIcon $icon): ?string
-    {
-        if (! $this->customEmoji->isAvailable()) {
+    private function customEmojiIdForIcon(
+        TelegramUiIcon $icon,
+        string $scope = CustomEmojiCapability::SCOPE_MESSAGES,
+    ): ?string {
+        if (! $this->customEmoji->isAvailable($scope)) {
             return null;
         }
 
@@ -221,10 +223,10 @@ class TelegramUiIcons
         return $id !== '' ? $id : null;
     }
 
-    private function renderIcon(TelegramUiIcon $icon): string
+    private function renderIcon(TelegramUiIcon $icon, string $scope = CustomEmojiCapability::SCOPE_MESSAGES): string
     {
         $glyph = trim((string) $icon->fallback_emoji);
-        $id = $this->customEmojiIdForIcon($icon);
+        $id = $this->customEmojiIdForIcon($icon, $scope);
         if ($id === null) {
             return $glyph;
         }

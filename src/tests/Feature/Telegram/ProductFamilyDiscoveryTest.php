@@ -13,6 +13,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramCatalogIntents;
 use App\Services\Telegram\TelegramFamilyCallbackToken;
 use App\Services\Telegram\TelegramIntentSession;
@@ -861,6 +862,44 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $detail = $this->lastMessageContaining('ChatGPT Plus 1 Bulan');
         $this->assertSame('HTML', $detail['parse_mode']);
         $this->assertStringContainsString('<tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> ChatGPT Plus 1 Bulan', (string) $detail['text']);
+    }
+
+    public function test_variant_detail_keeps_the_family_icon_fallback_after_custom_emoji_is_rejected(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41230, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'ChatGPT', 'slug' => 'chatgpt-fallback']);
+        Product::factory()->create([
+            'name' => 'ChatGPT Plus',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'family_option_label' => 'Plus',
+            'icon' => '📩',
+            'custom_emoji_id' => '5368324170671202286',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        Product::factory()->create([
+            'name' => 'ChatGPT Go',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'family_option_label' => 'Go',
+            'icon' => '🌸',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->openFamilyFromDeepLink($customer, 41231, $family);
+        $options = $this->lastMessageContaining('Pilih Plan ChatGPT');
+        app(CustomEmojiCapability::class)
+            ->markUnavailable('Bad Request: custom emoji cannot be used in this channel');
+
+        $variantButton = $options['reply_markup']['inline_keyboard'][0][1];
+        $this->postTelegramWebhook($this->callbackUpdate(41232, 'select-variant-after-channel-fallback', $variantButton['callback_data'], [], 41230))->assertOk();
+
+        $detail = $this->lastMessageContaining('ChatGPT Go');
+        $this->assertStringContainsString('📩 ChatGPT Go', (string) $detail['text']);
+        $this->assertStringNotContainsString('🌸 ChatGPT Go', (string) $detail['text']);
     }
 
     public function test_custom_emoji_on_a_later_plan_supplies_the_shared_family_icon_to_plan_buttons(): void

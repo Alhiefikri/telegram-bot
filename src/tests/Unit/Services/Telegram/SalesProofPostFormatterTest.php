@@ -57,11 +57,14 @@ class SalesProofPostFormatterTest extends TestCase
 
     public function test_custom_emoji_tags_remain_intact_under_the_visible_caption_limit(): void
     {
-        app(CustomEmojiCapability::class)->markAvailable();
         TelegramUiIcon::query()->where('key', 'message.users')->update([
             'custom_emoji_id' => '5368324170671202286',
         ]);
         Cache::forget(TelegramUiIcons::CACHE_KEY);
+        app(CustomEmojiCapability::class)->markUnavailable(
+            'Bad Request: custom emoji is unavailable in this bot chat',
+            CustomEmojiCapability::SCOPE_MESSAGES,
+        );
 
         $presentation = new PaidInvoicePresentation(
             invoiceId: 'INV-CUSTOM-EMOJI-LIMIT',

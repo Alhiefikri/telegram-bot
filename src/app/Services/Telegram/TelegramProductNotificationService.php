@@ -440,7 +440,9 @@ class TelegramProductNotificationService
         }
 
         try {
-            $this->bot->sendMessage($channelChatId, $text, $replyMarkup);
+            $this->bot->sendMessage($channelChatId, $text, $replyMarkup, [
+                TelegramBotClient::CUSTOM_EMOJI_SCOPE_OPTION => CustomEmojiCapability::SCOPE_CHANNEL,
+            ]);
         } catch (Throwable $e) {
             report($e);
         }
@@ -463,7 +465,12 @@ class TelegramProductNotificationService
         }
 
         $lines = [
-            $this->locale->translateLocale($locale, 'notification.store_channel.restock.title', ['product' => $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id)]),
+            $this->locale->translateLocale($locale, 'notification.store_channel.restock.title', ['product' => $this->productNames->render(
+                $product->name,
+                $product->icon,
+                $product->custom_emoji_id,
+                CustomEmojiCapability::SCOPE_CHANNEL,
+            )]),
             $this->locale->translateLocale($locale, 'notification.store_channel.restock.added', [
                 'quantity' => $addedQuantity,
             ]),
@@ -491,7 +498,12 @@ class TelegramProductNotificationService
         $locale = TelegramLocale::STORE_CHANNEL_LOCALE;
 
         return implode("\n", [
-            $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id),
+            $this->productNames->render(
+                $product->name,
+                $product->icon,
+                $product->custom_emoji_id,
+                CustomEmojiCapability::SCOPE_CHANNEL,
+            ),
             $this->locale->translateLocale($locale, 'notification.store_channel.sold_out.label'),
             '━━━━━━━━━━━━━━',
             '',

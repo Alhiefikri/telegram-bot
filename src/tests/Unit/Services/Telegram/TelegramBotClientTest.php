@@ -376,6 +376,112 @@ class TelegramBotClientTest extends TestCase
         $this->assertEquals((object) [], $markup->inline_keyboard[0][1]->disabled);
     }
 
+    public function test_channel_custom_emoji_rejection_does_not_disable_custom_emoji_for_bot_chats(): void
+    {
+        $calls = 0;
+        Http::fake(function () use (&$calls) {
+            $calls++;
+
+            if ($calls === 1) {
+                return Http::response([
+                    'ok' => false,
+                    'description' => "Bad Request: custom emoji can't be used in this channel",
+                ], 400);
+            }
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 783]], 200);
+        });
+
+        $client = app(TelegramBotClient::class);
+        $client->sendPhoto(
+            '@store_channel',
+            'binary-photo',
+            'proof.png',
+            '<tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📩</tg-emoji> Order confirmed',
+            options: [
+                'parse_mode' => 'HTML',
+                '_telegram_custom_emoji_scope' => 'channel',
+            ],
+        );
+        $client->sendPhoto(
+            '@store_channel',
+            'binary-photo-2',
+            'proof-2.png',
+            '<tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📩</tg-emoji> Order confirmed',
+            options: [
+                'parse_mode' => 'HTML',
+                '_telegram_custom_emoji_scope' => 'channel',
+            ],
+        );
+        $client->sendMessage(
+            12345,
+            'Direct <tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📩</tg-emoji>',
+        );
+
+        Http::assertSentCount(4);
+        $capability = app(CustomEmojiCapability::class);
+        $this->assertTrue(
+            $capability->isAvailable(),
+            'A channel-specific rejection must not disable custom emoji in supported bot chats.',
+        );
+        $this->assertFalse($capability->isAvailable(CustomEmojiCapability::SCOPE_CHANNEL));
+
+        $requests = Http::recorded()->all();
+        foreach (array_slice($requests, 0, 3) as [$request]) {
+            $fields = collect($request->data())->keyBy('name');
+            $this->assertFalse($fields->has('_telegram_custom_emoji_scope'));
+        }
+        $secondChannelFields = collect($requests[2][0]->data())->keyBy('name');
+        $this->assertSame('📩 Order confirmed', $secondChannelFields['caption']['contents'] ?? null);
+        $this->assertFalse($secondChannelFields->has('caption_entities'));
+
+        $directRequest = $requests[3][0];
+        $this->assertSame('Direct 📩', $directRequest['text']);
+        $this->assertSame('custom_emoji', $directRequest['entities'][0]['type']);
+        $this->assertSame('5368324170671202286', $directRequest['entities'][0]['custom_emoji_id']);
+    }
+
+    public function test_concurrent_channel_photo_rejection_uses_channel_capability_scope(): void
+    {
+        $calls = 0;
+        Http::fake(function () use (&$calls) {
+            $calls++;
+
+            if ($calls === 1) {
+                return Http::response([
+                    'ok' => false,
+                    'description' => "Bad Request: custom emoji can't be used in this channel",
+                ], 400);
+            }
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 784]], 200);
+        });
+
+        $result = app(TelegramBotClient::class)->sendConcurrently([
+            'channel-proof' => [
+                'method' => 'sendPhoto',
+                'chat_id' => '@store_channel',
+                'photo_contents' => 'binary-photo',
+                'filename' => 'proof.png',
+                'caption' => '<tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📩</tg-emoji> Order confirmed',
+                'options' => [
+                    'parse_mode' => 'HTML',
+                    TelegramBotClient::CUSTOM_EMOJI_SCOPE_OPTION => CustomEmojiCapability::SCOPE_CHANNEL,
+                ],
+            ],
+        ], 1);
+
+        Http::assertSentCount(2);
+        $this->assertIsArray($result['channel-proof']['response']);
+        $this->assertTrue(app(CustomEmojiCapability::class)->isAvailable());
+        $this->assertFalse(app(CustomEmojiCapability::class)->isAvailable(CustomEmojiCapability::SCOPE_CHANNEL));
+
+        $retry = Http::recorded()[1][0];
+        $fields = collect($retry->data())->keyBy('name');
+        $this->assertSame('📩 Order confirmed', $fields['caption']['contents'] ?? null);
+        $this->assertFalse($fields->has(TelegramBotClient::CUSTOM_EMOJI_SCOPE_OPTION));
+    }
+
     public function test_custom_emoji_rejection_in_photo_reference_caption_falls_back_to_unicode(): void
     {
         $calls = 0;

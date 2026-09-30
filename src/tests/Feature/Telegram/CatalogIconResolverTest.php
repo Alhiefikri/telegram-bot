@@ -65,6 +65,24 @@ class CatalogIconResolverTest extends TestCase
         $this->assertSame('📩 Gmail Fresh', $icon->buttonText('Gmail Fresh'));
     }
 
+    public function test_channel_icon_resolution_uses_its_capability_scope(): void
+    {
+        app(CustomEmojiCapability::class)->markUnavailable(
+            'Bad Request: custom emoji is unavailable in this bot chat',
+            CustomEmojiCapability::SCOPE_MESSAGES,
+        );
+
+        $messageIcon = $this->resolver()->resolve('📩', '5368324170671202286');
+        $channelIcon = $this->resolver()->resolve(
+            '📩',
+            '5368324170671202286',
+            CustomEmojiCapability::SCOPE_CHANNEL,
+        );
+
+        $this->assertNull($messageIcon->customEmojiId);
+        $this->assertSame('5368324170671202286', $channelIcon->customEmojiId);
+    }
+
     private function resolver(): CatalogIconResolver
     {
         return app(CatalogIconResolver::class);

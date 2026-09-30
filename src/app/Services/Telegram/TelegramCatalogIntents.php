@@ -16,6 +16,7 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Services\Admin\ProductImageOptimizer;
 use App\Services\Catalog\CatalogBrowse;
+use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use App\Services\Pricing\ProductPriceQuote;
@@ -40,6 +41,7 @@ class TelegramCatalogIntents
         private CatalogIconResolver $icons,
         private TelegramCatalogQuerySession $catalogQueries,
         private TelegramFamilyCallbackToken $familyTokens,
+        private CatalogFamilyIconResolver $familyIcons,
         private TelegramHtmlCaption $captions,
         private TelegramNavigationRootService $roots,
         private ProductImageOptimizer $images,
@@ -697,7 +699,7 @@ class TelegramCatalogIntents
         }
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.custom_title');
         $lines[] = '━━━━━━━━━━━━━━';
-        $lines[] = $this->locale->translate($customer, 'catalog.quantity.product').$this->captions->icon($this->icons->resolve($product->icon, $product->custom_emoji_id)).' '.$product->name;
+        $lines[] = $this->locale->translate($customer, 'catalog.quantity.product').$this->captions->icon($this->detailIcon($product)).' '.$product->name;
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.current', ['quantity' => $selection['quantity']]);
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.available_stock').$availableStock;
         $lines[] = '';
@@ -1332,31 +1334,9 @@ class TelegramCatalogIntents
      */
     private function detailIcon(Product $product): CatalogIcon
     {
-        $icon = $this->icons->resolve($product->icon, $product->custom_emoji_id);
-        if ($icon->hasCustomEmoji()) {
-            return $icon;
-        }
+        $selection = $this->familyIcons->forProduct($product);
 
-        $familyId = $product->product_family_id;
-        if ($familyId === null) {
-            return $icon;
-        }
-
-        $member = Product::query()
-            ->where('product_family_id', $familyId)
-            ->whereNotNull('custom_emoji_id')
-            ->where('custom_emoji_id', '!=', '')
-            ->orderBy('family_sort_order')
-            ->orderBy('id')
-            ->first(['icon', 'custom_emoji_id']);
-
-        if (! $member instanceof Product) {
-            return $icon;
-        }
-
-        $familyIcon = $this->icons->resolve($member->icon, $member->custom_emoji_id);
-
-        return $familyIcon->hasCustomEmoji() ? $familyIcon : $icon;
+        return $this->icons->resolve($selection->icon, $selection->customEmojiId);
     }
 
     /**
@@ -1367,20 +1347,16 @@ class TelegramCatalogIntents
      */
     private function familyIcon(CatalogFamilyReadModel $family): CatalogIcon
     {
-        $glyph = null;
-        foreach ($family->members as $member) {
-            if (! $member instanceof CatalogProductReadModel) {
-                continue;
-            }
-            if (trim((string) $member->customEmojiId) !== '') {
-                return $this->icons->resolve($member->icon, $member->customEmojiId);
-            }
-            if ($glyph === null && trim((string) $member->icon) !== '') {
-                $glyph = $member->icon;
-            }
-        }
+        $members = array_map(
+            static fn (CatalogProductReadModel $member): array => [
+                'icon' => $member->icon,
+                'customEmojiId' => $member->customEmojiId,
+            ],
+            array_values(array_filter($family->members, static fn (mixed $member): bool => $member instanceof CatalogProductReadModel)),
+        );
+        $selection = $this->familyIcons->fromMembers($members);
 
-        return $this->icons->resolve($glyph);
+        return $this->icons->resolve($selection->icon, $selection->customEmojiId);
     }
 
     /**

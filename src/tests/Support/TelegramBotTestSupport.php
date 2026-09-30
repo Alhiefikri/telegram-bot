@@ -73,6 +73,15 @@ abstract class TelegramBotTestSupport extends TestCase
         return null;
     }
 
+    protected function telegramEntityText(string $text, array $entity): string
+    {
+        $utf16 = mb_convert_encoding($text, 'UTF-16LE', 'UTF-8');
+        $start = (int) ($entity['offset'] ?? 0) * 2;
+        $length = (int) ($entity['length'] ?? 0) * 2;
+
+        return mb_convert_encoding(substr($utf16, $start, $length), 'UTF-8', 'UTF-16LE');
+    }
+
     protected function messageUpdate(int $id, string $text, array $from = [], int $chatId = 12345, string $chatType = 'private'): array
     {
         $fromId = $from['id'] ?? $chatId;

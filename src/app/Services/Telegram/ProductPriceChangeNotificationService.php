@@ -301,8 +301,13 @@ class ProductPriceChangeNotificationService
             } else {
                 $response = $this->bot->sendMessage(
                     $claimed->telegram_chat_id,
-                    $this->message($event, TelegramLocale::STORE_CHANNEL_LOCALE),
+                    $this->message(
+                        $event,
+                        TelegramLocale::STORE_CHANNEL_LOCALE,
+                        CustomEmojiCapability::SCOPE_CHANNEL,
+                    ),
                     $this->storeChannelReplyMarkup($event),
+                    [TelegramBotClient::CUSTOM_EMOJI_SCOPE_OPTION => CustomEmojiCapability::SCOPE_CHANNEL],
                 );
             }
 
@@ -545,17 +550,23 @@ class ProductPriceChangeNotificationService
         return $target === '' ? null : $target;
     }
 
-    private function productIconLine(ProductPriceChangeEvent $event): string
-    {
+    private function productIconLine(
+        ProductPriceChangeEvent $event,
+        string $scope = CustomEmojiCapability::SCOPE_MESSAGES,
+    ): string {
         return $this->productNames->render(
             $event->product_name,
             $event->product_icon,
             $event->product_custom_emoji_id,
+            $scope,
         );
     }
 
-    private function message(ProductPriceChangeEvent $event, string $locale): string
-    {
+    private function message(
+        ProductPriceChangeEvent $event,
+        string $locale,
+        string $scope = CustomEmojiCapability::SCOPE_MESSAGES,
+    ): string {
         $decrease = $this->isPureDecrease($event);
         $title = $this->locale->translateLocale($locale, $decrease
             ? 'notification.price.title.drop'
@@ -567,7 +578,7 @@ class ProductPriceChangeNotificationService
             $this->locale->translateLocale($locale, $decrease
                 ? 'notification.price.lead.drop'
                 : 'notification.price.lead.update'),
-            $this->productIconLine($event),
+            $this->productIconLine($event, $scope),
             '',
             $this->locale->translateLocale($locale, 'notification.price.qris.label'),
             $this->formatIdr($event->old_price_amount, $locale).' → '.$this->formatIdr($event->new_price_amount, $locale),

@@ -6,36 +6,54 @@ use Illuminate\Support\Facades\Cache;
 
 /**
  * Custom emoji entities in bot messages and inline keyboard button icons
- * require Telegram to allow that bot to use them. The first rejection marks
- * the capability unavailable for a while, so later sends use Unicode
- * fallbacks instead of paying for another rejected request.
+ * require Telegram to allow that bot to use them. Message and channel
+ * rejections are remembered separately, so one unsupported destination does
+ * not suppress custom emoji where Telegram still permits them.
  */
 class CustomEmojiCapability
 {
     public const CACHE_KEY = 'telegram.custom-emoji-unavailable';
 
+    public const CHANNEL_CACHE_KEY = 'telegram.custom-emoji-channel-unavailable';
+
+    public const SCOPE_MESSAGES = 'messages';
+
+    public const SCOPE_CHANNEL = 'channel';
+
     private const RETRY_AFTER_MINUTES = 30;
 
-    public function isAvailable(): bool
+    public function isAvailable(string $scope = self::SCOPE_MESSAGES): bool
     {
-        return ! Cache::has(self::CACHE_KEY);
+        return ! Cache::has($this->cacheKey($scope));
     }
 
-    public function unavailableReason(): ?string
+    public function unavailableReason(string $scope = self::SCOPE_MESSAGES): ?string
     {
-        $reason = Cache::get(self::CACHE_KEY);
+        $reason = Cache::get($this->cacheKey($scope));
 
         return is_string($reason) && $reason !== '' ? $reason : null;
     }
 
-    public function markUnavailable(?string $reason): void
+    public function markUnavailable(?string $reason, string $scope = self::SCOPE_MESSAGES): void
     {
-        Cache::put(self::CACHE_KEY, (string) $reason, now()->addMinutes(self::RETRY_AFTER_MINUTES));
+        Cache::put($this->cacheKey($scope), (string) $reason, now()->addMinutes(self::RETRY_AFTER_MINUTES));
     }
 
-    public function markAvailable(): void
+    public function markAvailable(?string $scope = null): void
     {
-        Cache::forget(self::CACHE_KEY);
+        if ($scope === null) {
+            Cache::forget(self::CACHE_KEY);
+            Cache::forget(self::CHANNEL_CACHE_KEY);
+
+            return;
+        }
+
+        Cache::forget($this->cacheKey($scope));
+    }
+
+    private function cacheKey(string $scope): string
+    {
+        return $scope === self::SCOPE_CHANNEL ? self::CHANNEL_CACHE_KEY : self::CACHE_KEY;
     }
 
     /**

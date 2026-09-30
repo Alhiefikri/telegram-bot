@@ -18,18 +18,21 @@ class CatalogIconResolver
 {
     public function __construct(private CustomEmojiCapability $customEmoji) {}
 
-    public function resolve(?string $glyph, ?string $customEmojiId = null): CatalogIcon
-    {
+    public function resolve(
+        ?string $glyph,
+        ?string $customEmojiId = null,
+        string $scope = CustomEmojiCapability::SCOPE_MESSAGES,
+    ): CatalogIcon {
         return new CatalogIcon(
             glyph: $this->normalized($glyph) ?? $this->defaultFallback(),
-            customEmojiId: $this->customEmojiId($customEmojiId),
+            customEmojiId: $this->customEmojiId($customEmojiId, $scope),
         );
     }
 
-    private function customEmojiId(?string $value): ?string
+    private function customEmojiId(?string $value, string $scope): ?string
     {
         $id = $this->normalized($value);
-        if ($id === null || ! $this->customEmoji->isAvailable()) {
+        if ($id === null || ! $this->customEmoji->isAvailable($scope)) {
             return null;
         }
 

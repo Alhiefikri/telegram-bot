@@ -158,12 +158,53 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertStringContainsString('buyer:cancel-pending:'.$order->id, $body);
         $this->assertStringContainsString('caption_entities', $body);
         $this->assertStringContainsString('"type":"code"', $body);
+        $photoRequest = $photoSends->first()[0];
+        $caption = (string) $this->telegramRequestField($photoRequest, 'caption');
+        $captionEntities = json_decode(
+            (string) $this->telegramRequestField($photoRequest, 'caption_entities'),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        $this->assertSame(['code', 'code'], array_column($captionEntities, 'type'));
+        $this->assertSame(
+            ['5', '987654321'],
+            array_map(
+                fn (array $entity): string => $this->telegramEntityText($caption, $entity),
+                $captionEntities,
+            ),
+        );
         $this->assertStringContainsString('⚠️ Important: Send exactly', $body);
         $this->assertStringContainsString('including every decimal digit', $body);
         $this->assertStringContainsString('Do not round or change the amount.', $body);
         $this->assertStringContainsString('Order Details', $body);
         $this->assertStringContainsString('send it in this chat', $body);
         $this->assertStringNotContainsString('screenshot', $body);
+    }
+
+    public function test_binance_text_fallback_keeps_the_receiver_and_amount_copyable_when_photo_is_rejected(): void
+    {
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => false,
+                'description' => 'Bad Request: photo rejected',
+            ], 400),
+        ]);
+        $this->enableBinancePay();
+        [$order, $payment, $customer] = $this->createBinanceOrder();
+
+        app(TelegramCheckoutIntents::class)->sendBinancePaymentInstructions('12345', $order, $payment, $customer);
+
+        $request = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'))->last()[0];
+        $payload = $request->data();
+        $entities = $payload['entities'] ?? [];
+        $this->assertSame(['code', 'code'], array_column($entities, 'type'));
+        $this->assertSame(
+            ['5', '987654321'],
+            array_map(
+                fn (array $entity): string => $this->telegramEntityText((string) $payload['text'], $entity),
+                $entities,
+            ),
+        );
     }
 
     public function test_amount_unique_auto_checkout_instructions_offer_an_ive_paid_check_instead_of_payment_proof(): void

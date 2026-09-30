@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\CheckoutPaymentPlanWriter;
@@ -37,6 +38,7 @@ class OrderCheckoutService
     public function __construct(
         private readonly InvoiceNumberGenerator $numbers,
         private readonly InventoryLedger $inventory,
+        private readonly CatalogFamilyIconResolver $familyIcons,
         private readonly ProductCredentialAllocator $credentials,
         private readonly PaymentProviderResolver $providerResolver,
         private readonly CheckoutPaymentPreparationResolver $paymentPreparations,
@@ -208,18 +210,21 @@ class OrderCheckoutService
 
         $payment = $this->paymentPlanWriter->persist($order, $paymentPlan);
 
+        $productIcons = $this->familyIcons->forProducts($products);
+
         foreach ($items as $item) {
             $product = $products[$item->product_id];
             $quote = $pricing->quoteForItem($item);
             $isUsdtPayment = $paymentPlan->paymentCurrency() === 'USDT';
             $usdtUnitPrice = $isUsdtPayment ? $quote->effectiveUsdtUnitAmount : null;
             $usdtSubtotal = $isUsdtPayment ? $quote->usdtSubtotal : null;
+            $productIcon = $productIcons[(int) $product->getKey()] ?? $this->familyIcons->forProduct($product);
             $orderItem = OrderItem::create([
                 'order_id' => $order->id,
                 'product_id' => $product->id,
                 'product_name' => $product->name,
-                'product_icon' => $product->icon,
-                'product_custom_emoji_id' => $product->custom_emoji_id,
+                'product_icon' => $productIcon->icon,
+                'product_custom_emoji_id' => $productIcon->customEmojiId,
                 'family_id' => $product->product_family_id,
                 'family_name' => $product->family?->name,
                 'delivery_note' => $product->delivery_note,

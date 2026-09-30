@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\PaymentProviderSelection;
@@ -253,6 +254,10 @@ class TelegramCheckoutIntents
             : ($payment->binance_receiver_type === 'pay_id' ? 'BINANCE PAY ID' : (filled(config('services.binance.pay_id')) ? 'BINANCE PAY ID' : 'BINANCE UID'));
         $text = $this->paymentInstructions->binancePay($order, $payment, $receiver, $this->locale->code($customer), $autoVerify, $receiverLabel);
         $amount = $this->formatUsdt($payment->amount);
+        $copyEntities = [
+            $this->codeEntityForLine($text, $amount.' USDT', $amount),
+            $this->codeEntityForLine($text, $receiver, $receiver),
+        ];
 
         $photoPath = public_path('binance.jpeg');
         $photoContents = is_readable($photoPath) ? file_get_contents($photoPath) : false;
@@ -271,25 +276,24 @@ class TelegramCheckoutIntents
 
         $replyMarkup = ['inline_keyboard' => $keyboard];
         if ($photoContents === false) {
-            return $this->sendBinancePaymentTextFallback($chatId, $text, $replyMarkup, $customer);
+            return $this->sendBinancePaymentTextFallback($chatId, $text, $replyMarkup, $customer, $copyEntities);
         }
 
         try {
             return $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, $replyMarkup, [
-                'caption_entities' => [
-                    $this->codeEntityForLine($text, $amount.' USDT', $amount),
-                    $this->codeEntityForLine($text, $receiver, $receiver),
-                ],
+                'caption_entities' => $copyEntities,
             ]);
         } catch (Throwable) {
             // Prefer delivering the copyable payment details even if the photo
             // result is ambiguous; this can duplicate instructions if Telegram
             // accepted the photo before the connection failed.
-            return $this->sendBinancePaymentTextFallback($chatId, $text, $replyMarkup, $customer);
+            return $this->sendBinancePaymentTextFallback($chatId, $text, $replyMarkup, $customer, $copyEntities);
         }
     }
 
-    /** @param array<string, mixed> $replyMarkup
+    /**
+     * @param  array<string, mixed>  $replyMarkup
+     * @param  list<array{type: 'code', offset: int, length: int}>  $copyEntities
      * @return array<string, mixed>
      */
     private function sendBinancePaymentTextFallback(
@@ -297,10 +301,11 @@ class TelegramCheckoutIntents
         string $text,
         array $replyMarkup,
         Customer $customer,
+        array $copyEntities,
     ): array {
         $fallbackText = $text."\n\n".$this->locale->translate($customer, 'payment.binance.text_fallback');
 
-        return $this->bot->sendMessage($chatId, $fallbackText, $replyMarkup);
+        return $this->bot->sendMessage($chatId, $fallbackText, $replyMarkup, ['entities' => $copyEntities]);
     }
 
     public function sendBscPaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): array
@@ -310,11 +315,20 @@ class TelegramCheckoutIntents
             $payment,
             $this->locale->code($customer),
         );
+        $detail = $payment->bscDetail;
+        if (! $detail instanceof PaymentBscDetail) {
+            throw new \LogicException('BSC Payment detail snapshot is missing.');
+        }
+        $amount = $this->formatUsdt((int) $detail->payable_amount_micro);
 
         return $this->bot->sendMessage(
             $chatId,
             $instruction['text'],
             $instruction['reply_markup'],
+            ['entities' => [
+                $this->codeEntityForLine($instruction['text'], $amount.' USDT', $amount),
+                $this->codeEntityForLine($instruction['text'], $detail->receiver_address, $detail->receiver_address),
+            ]],
         );
     }
 
@@ -323,7 +337,7 @@ class TelegramCheckoutIntents
     {
         $lineOffset = strpos($text, "\n{$line}\n");
         if ($lineOffset === false) {
-            throw new \LogicException('Binance payment value was not found in the instruction.');
+            throw new \LogicException('Copyable payment value was not found in the instruction.');
         }
 
         $valueOffset = $lineOffset + 1;

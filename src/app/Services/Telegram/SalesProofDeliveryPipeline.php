@@ -96,6 +96,7 @@ final class SalesProofDeliveryPipeline
                                 'url' => $this->salesProofShoppingButtonUrl($order),
                             ]]],
                         ],
+                        [TelegramBotClient::CUSTOM_EMOJI_SCOPE_OPTION => CustomEmojiCapability::SCOPE_CHANNEL],
                     );
                 } finally {
                     unset($invoice, $presentation);
@@ -111,6 +112,7 @@ final class SalesProofDeliveryPipeline
                             'url' => $this->salesProofShoppingButtonUrl($order),
                         ]]],
                     ],
+                    [TelegramBotClient::CUSTOM_EMOJI_SCOPE_OPTION => CustomEmojiCapability::SCOPE_CHANNEL],
                 );
             }
             $messageId = $this->responseValidator->messageIdFromResponse($response, 'Telegram Sales Proof');
