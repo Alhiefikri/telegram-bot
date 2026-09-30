@@ -100,21 +100,13 @@ final class ReceiptDeliveryPipeline
                     (string) $claimed->claim_token,
                     $exception,
                 );
-                if ($finalized !== null && $this->isInitialInvoicePhoto($claimed)) {
-                    $fallback = $this->outboundEffects->recordReceiptTextFallback($finalized);
-                    if ($fallback !== null) {
-                        $this->deliverReceiptTextFallback(
-                            $fallback,
-                            $notifier,
-                            $dispatchNext,
-                            $throwOnAmbiguous,
-                        );
 
-                        return;
-                    }
-                }
-
-                if ($finalized !== null && $dispatchNext && $this->isInvoiceEffect($finalized)) {
+                // New photo-caption receipts can contain credentials; an
+                // uncertain delivery must block both fallback and successors.
+                if ($finalized !== null
+                    && ! $this->isInitialInvoicePhoto($claimed)
+                    && $dispatchNext
+                    && $this->isInvoiceEffect($finalized)) {
                     $this->dispatchNextReceiptEffect($finalized);
                 }
 

@@ -390,7 +390,10 @@ urutan sampai operator menandainya `sent` atau membuat explicit resend.
 Group baru `receipt-photo-caption-v1` memakai `invoice_caption` yang dapat
 memuat credential, sehingga seluruh child strict ordered sejak sequence
 pertama. `failed`, `unknown`, atau `manual_review` pada photo maupun
-continuation memblokir child berikutnya. Explicit text-fallback memakai aturan
+continuation memblokir child berikutnya. Only a definite render/send failure
+may materialize a text fallback; an unknown photo result containing credentials
+blocks both fallback and successors until operator review. Explicit
+text-fallback memakai aturan
 strict yang sama. Buyer completion untuk group baru terjadi setelah semua
 child `sent`; group legacy tetap memakai aturan non-invoice lama. Pipeline lalu
 mengisi `orders.telegram_receipt_sent_at` dan mengantrekan
@@ -422,6 +425,11 @@ Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):
 - Recovery Key order access: `/akses-pesanan`;
 - customer account/login link: `/akun/*`;
 - admin: `/admin/*` behind `admin.access`.
+Cart checkout replay identity is based on the Cart and its Product/quantity
+composition; the submitted Cart snapshot separately validates mutable pricing
+and availability before a new Order is created. This keeps duplicate submits
+resolvable after reservations update Product timestamps without accepting a
+stale snapshot for a new checkout.
 
 `StorefrontShopCheckoutReviewController` and `StorefrontCartPageBuilder` own the page-based checkout review module. The Blade page
 [`storefront/shop-checkout.blade.php`](../../src/resources/views/storefront/shop-checkout.blade.php)

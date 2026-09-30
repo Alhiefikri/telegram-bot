@@ -1395,7 +1395,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
     }
 
     #[DataProvider('ambiguousPhotoFailures')]
-    public function test_ambiguous_send_photo_failure_falls_back_to_ordered_text_receipt(int|string $failure): void
+    public function test_ambiguous_send_photo_failure_keeps_receipt_unknown_without_fallback(int|string $failure): void
     {
         Queue::fake();
         $order = $this->multiProductStructuredReceiptOrder();
@@ -1419,24 +1419,23 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order);
         $this->assertNotNull($effect);
 
-        app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+        app(ReceiptDeliveryPipeline::class)->deliver($effect);
 
         $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
         $this->assertSame('telegram_transport_ambiguous', $effect->fresh()->last_error_code);
-        $fallback = TelegramOutboundEffect::query()
-            ->where('effect_group_key', TelegramOutboundEffectService::receiptTextFallbackEffectGroupKey((string) $order->id))
-            ->orderBy('sequence')
-            ->get();
-        $this->assertNotEmpty($fallback);
-        $this->assertTrue($fallback->every(
-            fn (TelegramOutboundEffect $candidate): bool => $candidate->state === TelegramOutboundEffectState::Sent,
-        ));
         $this->assertSame(1, $photoAttempts);
         $this->assertCount(
-            $fallback->count(),
+            0,
             Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')),
         );
-        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertSame(
+            0,
+            TelegramOutboundEffect::query()
+                ->where('effect_group_key', TelegramOutboundEffectService::receiptTextFallbackEffectGroupKey((string) $order->id))
+                ->count(),
+        );
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+        Queue::assertNotPushed(SendTelegramReceipt::class);
     }
 
     public function test_text_fallback_http_400_keeps_receipt_incomplete_and_blocks_later_chunks(): void

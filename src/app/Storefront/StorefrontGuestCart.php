@@ -92,24 +92,18 @@ final class StorefrontGuestCart
         ]);
     }
 
+    /**
+     * Keep checkout replay identity stable after Product stock reservations
+     * update mutable Product timestamps. The submitted snapshot separately
+     * validates pricing and availability before a new checkout is created.
+     */
     public function fingerprint(Cart $cart): string
     {
         $cart = $this->load($cart);
 
         return (string) $cart->getKey().'|'.$cart->cartItems
             ->sortBy('product_id')
-            ->map(function ($item): string {
-                $pricingFingerprint = hash(
-                    'sha256',
-                    json_encode($this->productPricingState($item->product), JSON_THROW_ON_ERROR),
-                );
-
-                return implode(':', [
-                    (int) $item->product_id,
-                    (int) $item->quantity,
-                    $pricingFingerprint,
-                ]);
-            })
+            ->map(static fn ($item): string => (int) $item->product_id.':'.(int) $item->quantity)
             ->implode(';');
     }
 
