@@ -237,7 +237,7 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         Queue::assertNotPushed(SendManualCheckoutNotifications::class);
     }
 
-    public function test_binance_effect_uses_the_payment_snapshot_and_does_not_retry_ambiguous_telegram_delivery(): void
+    public function test_binance_effect_falls_back_after_ambiguous_photo_delivery_and_keeps_the_payment_snapshot(): void
     {
         config()->set('services.binance.pay_id', '987654321');
         ManualPaymentSetting::create([
@@ -255,7 +255,10 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
                 $sendCount++;
                 throw new ConnectionException('connection closed after Telegram accepted the request');
             },
-            'https://api.telegram.org/*' => Http::response(['ok' => true]),
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 81900],
+            ]),
         ]);
 
         $job = new SendBinanceCheckoutInstructions($order->id);
@@ -263,9 +266,12 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         $job->handle(app(TelegramCheckoutIntents::class));
 
         $effect = TelegramOutboundEffect::query()->sole();
-        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->state);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->state);
         $this->assertSame(1, $sendCount);
-        $this->assertNotNull($effect->unknown_at);
+        $this->assertSame('binance_text_fallback_sent', $effect->outcome_metadata['delivery_outcome'] ?? null);
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), '987654321'));
         $this->assertSame('987654321', $order->payments()->sole()->binance_receiver_value);
     }
 
@@ -304,7 +310,7 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame('sendMessage', $effect->outcome_metadata['delivery_method'] ?? null);
     }
 
-    public function test_binance_checkout_does_not_fallback_after_ambiguous_photo_http_500(): void
+    public function test_binance_checkout_falls_back_after_ambiguous_photo_http_500(): void
     {
         config()->set('services.binance.pay_id', '987654321');
         ManualPaymentSetting::create([
@@ -330,10 +336,11 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         (new SendBinanceCheckoutInstructions($order->id))->handle(app(TelegramCheckoutIntents::class));
 
         $effect = TelegramOutboundEffect::query()->sole();
-        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->state);
-        Http::assertSentCount(1);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->state);
+        $this->assertSame('binance_text_fallback_sent', $effect->outcome_metadata['delivery_outcome'] ?? null);
+        Http::assertSentCount(2);
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
-        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'));
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'));
     }
 
     public function test_checkout_delivery_pipeline_uses_the_shared_effect_protocol_for_each_payment_rail(): void

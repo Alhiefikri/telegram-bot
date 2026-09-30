@@ -1440,22 +1440,22 @@ class TelegramOutboundEffectService
     }
 
     /**
-     * Materialize a safe text-only replacement after a v2 photo failed before
-     * Telegram was called or Telegram definitely rejected it. The failed photo
-     * effect remains immutable history.
+     * Materialize a text-only replacement after a v2 photo failed before send,
+     * was rejected, or has an ambiguous delivery outcome. An ambiguous photo
+     * may have reached Telegram, so the fallback can duplicate the receipt;
+     * both effects remain visible in immutable history.
      */
     public function recordReceiptTextFallback(TelegramOutboundEffect $failed): ?TelegramOutboundEffect
     {
         return DB::transaction(function () use ($failed): ?TelegramOutboundEffect {
             $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($failed->getKey());
-            if ($locked->state !== TelegramOutboundEffectState::Failed
+            $fallbackEligibleFailure = $locked->state === TelegramOutboundEffectState::Failed;
+            $fallbackEligibleUnknown = $locked->state === TelegramOutboundEffectState::Unknown
+                && $locked->last_error_code === 'telegram_transport_ambiguous';
+            if ((! $fallbackEligibleFailure && ! $fallbackEligibleUnknown)
                 || $locked->template_version !== self::TEMPLATE_RECEIPT_PHOTO_CAPTION
                 || $locked->sequence !== 1
-                || ! in_array($locked->last_error_code, [
-                    'receipt_render_changed',
-                    'telegram_http_400',
-                    'telegram_http_403',
-                ], true)) {
+                || $locked->telegram_method !== 'sendPhoto') {
                 return null;
             }
 

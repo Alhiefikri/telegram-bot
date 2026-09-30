@@ -1394,6 +1394,51 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
     }
 
+    #[DataProvider('ambiguousPhotoFailures')]
+    public function test_ambiguous_send_photo_failure_falls_back_to_ordered_text_receipt(int|string $failure): void
+    {
+        Queue::fake();
+        $order = $this->multiProductStructuredReceiptOrder();
+        $photoAttempts = 0;
+        $photoFailure = function () use ($failure, &$photoAttempts) {
+            $photoAttempts++;
+            if ($failure === 'transport') {
+                throw new ConnectionException('connection closed after Telegram may have accepted the photo');
+            }
+
+            return Http::response([
+                'ok' => false,
+                'error_code' => $failure,
+                'description' => 'Temporary Telegram failure',
+            ], $failure);
+        };
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendPhoto' => $photoFailure,
+        ]);
+
+        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $this->assertNotNull($effect);
+
+        app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+        $this->assertSame('telegram_transport_ambiguous', $effect->fresh()->last_error_code);
+        $fallback = TelegramOutboundEffect::query()
+            ->where('effect_group_key', TelegramOutboundEffectService::receiptTextFallbackEffectGroupKey((string) $order->id))
+            ->orderBy('sequence')
+            ->get();
+        $this->assertNotEmpty($fallback);
+        $this->assertTrue($fallback->every(
+            fn (TelegramOutboundEffect $candidate): bool => $candidate->state === TelegramOutboundEffectState::Sent,
+        ));
+        $this->assertSame(1, $photoAttempts);
+        $this->assertCount(
+            $fallback->count(),
+            Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')),
+        );
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
     public function test_text_fallback_http_400_keeps_receipt_incomplete_and_blocks_later_chunks(): void
     {
         Queue::fake();
@@ -1836,6 +1881,13 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
     {
         yield 'bad request' => [400];
         yield 'forbidden' => [403];
+    }
+
+    /** @return iterable<string, array{int|string}> */
+    public static function ambiguousPhotoFailures(): iterable
+    {
+        yield 'server error' => [500];
+        yield 'transport error' => ['transport'];
     }
 
     /** @return iterable<string, array{TelegramOutboundEffectState}> */

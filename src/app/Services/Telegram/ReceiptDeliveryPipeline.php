@@ -6,7 +6,6 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
-use App\Exceptions\TelegramOutboundPreSendException;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
@@ -101,6 +100,20 @@ final class ReceiptDeliveryPipeline
                     (string) $claimed->claim_token,
                     $exception,
                 );
+                if ($finalized !== null && $this->isInitialInvoicePhoto($claimed)) {
+                    $fallback = $this->outboundEffects->recordReceiptTextFallback($finalized);
+                    if ($fallback !== null) {
+                        $this->deliverReceiptTextFallback(
+                            $fallback,
+                            $notifier,
+                            $dispatchNext,
+                            $throwOnAmbiguous,
+                        );
+
+                        return;
+                    }
+                }
+
                 if ($finalized !== null && $dispatchNext && $this->isInvoiceEffect($finalized)) {
                     $this->dispatchNextReceiptEffect($finalized);
                 }
@@ -117,29 +130,15 @@ final class ReceiptDeliveryPipeline
                 (string) $claimed->claim_token,
                 $exception,
             );
-            if ($finalized !== null
-                && ($this->isDeterministicImageFailure($claimed, $exception)
-                    || $this->isRejectedInvoicePhoto($claimed, $finalized))) {
+            if ($finalized !== null && $this->isInitialInvoicePhoto($claimed)) {
                 $fallback = $this->outboundEffects->recordReceiptTextFallback($finalized);
                 if ($fallback !== null) {
-                    if ($dispatchNext) {
-                        $this->dispatcher->dispatch($fallback);
-                    } else {
-                        $current = $fallback;
-                        do {
-                            $this->deliver(
-                                $current,
-                                $notifier,
-                                dispatchNext: false,
-                                throwOnAmbiguous: $throwOnAmbiguous,
-                            );
-                            $current = $current->fresh();
-                            $current = $this->ledger->nextReceiptEffect(
-                                $current->effect_group_key,
-                                (int) $current->sequence,
-                            );
-                        } while ($current !== null);
-                    }
+                    $this->deliverReceiptTextFallback(
+                        $fallback,
+                        $notifier,
+                        $dispatchNext,
+                        $throwOnAmbiguous,
+                    );
                 }
 
                 return;
@@ -303,24 +302,39 @@ final class ReceiptDeliveryPipeline
         }
     }
 
-    private function isDeterministicImageFailure(
-        TelegramOutboundEffect $effect,
-        Throwable $exception,
-    ): bool {
+    private function isInitialInvoicePhoto(TelegramOutboundEffect $effect): bool
+    {
         return $effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION
             && (int) $effect->sequence === 1
-            && $exception instanceof TelegramOutboundPreSendException
-            && str_contains($exception->getMessage(), 'paid invoice rendering failed before send');
+            && $effect->telegram_method === 'sendPhoto';
     }
 
-    private function isRejectedInvoicePhoto(
-        TelegramOutboundEffect $claimed,
-        TelegramOutboundEffect $failed,
-    ): bool {
-        return $claimed->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION
-            && (int) $claimed->sequence === 1
-            && $claimed->telegram_method === 'sendPhoto'
-            && in_array($failed->last_error_code, ['telegram_http_400', 'telegram_http_403'], true);
+    private function deliverReceiptTextFallback(
+        TelegramOutboundEffect $fallback,
+        ?TelegramReceiptNotifier $notifier,
+        bool $dispatchNext,
+        bool $throwOnAmbiguous,
+    ): void {
+        if ($dispatchNext) {
+            $this->dispatcher->dispatch($fallback);
+
+            return;
+        }
+
+        $current = $fallback;
+        do {
+            $this->deliver(
+                $current,
+                $notifier,
+                dispatchNext: false,
+                throwOnAmbiguous: $throwOnAmbiguous,
+            );
+            $current = $current->fresh();
+            $current = $this->ledger->nextReceiptEffect(
+                $current->effect_group_key,
+                (int) $current->sequence,
+            );
+        } while ($current !== null);
     }
 
     private function isInvoiceEffect(TelegramOutboundEffect $effect): bool

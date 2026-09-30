@@ -21,9 +21,7 @@ use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahQrisImage;
 use App\Support\DogfoodTiming;
 use App\Support\PakasirCheckoutFlow;
-use Illuminate\Http\Client\RequestException;
 use InvalidArgumentException;
-use RuntimeException;
 use Throwable;
 
 class TelegramCheckoutIntents
@@ -283,11 +281,10 @@ class TelegramCheckoutIntents
                     $this->codeEntityForLine($text, $receiver, $receiver),
                 ],
             ]);
-        } catch (Throwable $exception) {
-            if (! $this->canFallbackFromBinancePhotoFailure($exception)) {
-                throw $exception;
-            }
-
+        } catch (Throwable) {
+            // Prefer delivering the copyable payment details even if the photo
+            // result is ambiguous; this can duplicate instructions if Telegram
+            // accepted the photo before the connection failed.
             return $this->sendBinancePaymentTextFallback($chatId, $text, $replyMarkup, $customer);
         }
     }
@@ -304,17 +301,6 @@ class TelegramCheckoutIntents
         $fallbackText = $text."\n\n".$this->locale->translate($customer, 'payment.binance.text_fallback');
 
         return $this->bot->sendMessage($chatId, $fallbackText, $replyMarkup);
-    }
-
-    private function canFallbackFromBinancePhotoFailure(Throwable $exception): bool
-    {
-        if ($exception instanceof RequestException) {
-            // Only explicit rejections are safe; timeouts and server errors stay ambiguous.
-            return in_array($exception->response?->status(), [400, 403], true);
-        }
-
-        return $exception instanceof RuntimeException
-            && $exception->getMessage() === 'Telegram Bot API sendPhoto response was not successful.';
     }
 
     public function sendBscPaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): array
