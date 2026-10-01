@@ -47,6 +47,44 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
         $this->assertContains('messageicon:pick:'.$icon->id, $callbacks);
     }
 
+    public function test_success_icon_backfill_restores_the_missing_slot_in_the_message_icon_list(): void
+    {
+        TelegramUiIcon::query()->where('key', 'message.success')->delete();
+        app(TelegramUiIcons::class)->messageCopyIcons();
+
+        $migration = require database_path('migrations/2026_10_01_000001_restore_telegram_success_message_icon.php');
+        $migration->up();
+
+        $this->fakeTelegramHttp();
+        $this->adminCustomer(999);
+        $this->postTelegramWebhook($this->callbackUpdate(50300, 'list', 'messageicon:list', ['id' => 999], 999, 'private', 777))->assertOk();
+
+        $icon = TelegramUiIcon::query()->where('key', 'message.success')->sole();
+        $buttons = $this->assertValidInlineKeyboard((array) $this->sentEditRequest(777)['reply_markup']);
+        $button = collect($buttons)->first(fn (array $button): bool => ($button['callback_data'] ?? null) === 'messageicon:pick:'.$icon->id);
+        $this->assertNotNull($button);
+        $this->assertSame('⬜ ✅ Berhasil', $button['text']);
+        $this->assertSame('✅', $icon->source_emoji);
+        $this->assertSame('✅ Berhasil', app(TelegramUiIcons::class)->renderLegacyIcons('✅ Berhasil'));
+    }
+
+    public function test_success_icon_backfill_preserves_an_existing_custom_icon(): void
+    {
+        $icon = $this->menuIcon('message.success');
+        $icon->update(['fallback_emoji' => '🪙', 'custom_emoji_id' => self::EMOJI_ID]);
+        $attributes = $icon->fresh()->getAttributes();
+
+        $migration = require database_path('migrations/2026_10_01_000001_restore_telegram_success_message_icon.php');
+        $migration->up();
+        $migration->up();
+
+        $this->assertSame($attributes, $icon->fresh()->getAttributes());
+        $this->assertSame(
+            '<tg-emoji emoji-id="'.self::EMOJI_ID.'" data-omp-icon="1">🪙</tg-emoji> Berhasil',
+            app(TelegramUiIcons::class)->renderLegacyIcons('✅ Berhasil'),
+        );
+    }
+
     public function test_message_copy_uses_the_database_icon_and_does_not_rewrite_interpolated_customer_text(): void
     {
         $icon = TelegramUiIcon::query()->where('key', 'message.payment_card')->sole();
