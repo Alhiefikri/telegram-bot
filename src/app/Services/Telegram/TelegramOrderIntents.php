@@ -23,6 +23,7 @@ use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Storefront\StorefrontInvoiceUrl;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\RateLimiter;
@@ -54,38 +55,103 @@ class TelegramOrderIntents
         private TelegramCredentialDeliveryRenderer $credentialRenderer,
         private TelegramMessageChunker $messageChunker,
         private TelegramProductNameRenderer $productNames,
+        private StorefrontInvoiceUrl $invoiceUrls,
     ) {}
 
     public function sendLatestOrderStatus(Customer $customer, string $chatId): void
     {
         $order = $customer->orders()
+            ->with(['orderItems' => fn ($query) => $query->orderBy('id'), 'payments' => fn ($query) => $query->latest()->orderByDesc('id')])
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->first();
-        if (! $order) {
-            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'order.status.empty'));
+        $month = now()->startOfMonth();
+        $previousMonth = $month->copy()->subMonth();
+        $lines = [$this->locale->translate($customer, 'order.status.title'), ''];
+        $keyboard = [];
+        if ($order) {
+            $payment = $order->payments->first();
+            $paymentStatus = $payment?->status ?? $order->payment_status;
+            $lines[] = $this->locale->translate($customer, 'order.status.latest');
+            $lines[] = $order->invoice_number.' · '.$this->locale->formatShortDate($customer, $order->created_at);
+            foreach ($order->orderItems->take(3) as $item) {
+                $lines[] = mb_strimwidth(preg_replace('/\s+/u', ' ', (string) $item->product_name), 0, 100, '…').' × '.$item->quantity;
+            }
+            if ($order->orderItems->count() > 3) {
+                $lines[] = $this->locale->translate($customer, 'order.status.more_items', ['count' => $order->orderItems->count() - 3]);
+            }
+            $lines[] = $this->locale->translate($customer, 'order.detail.total', ['amount' => $this->locale->idr($order->total_amount)]);
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'order.status.states', [
+                'payment_status' => $this->locale->paymentStatus($customer, $paymentStatus),
+                'order_status' => $this->locale->orderStatus($customer, $order->order_status),
+            ]);
+            $lines[] = $this->orderInstruction($customer, $order, $payment);
+            $deadline = $payment?->expired_at ?? $order->expires_at;
+            if ($order->order_status === OrderStatus::PendingPayment && $paymentStatus === PaymentStatus::Pending && $deadline) {
+                $lines[] = $this->locale->translate($customer, 'order.detail.deadline', ['date' => $this->locale->formatDate($customer, $deadline)]);
+                if ($deadline->isFuture() && $order->created_at->copy()->addDays(max(1, (int) config('services.storefront.invoice_url_ttl_days', 7)))->isFuture()) {
+                    $keyboard[] = [[
+                        'text' => $this->locale->translate($customer, 'order.status.pay_button'),
+                        'url' => url($this->invoiceUrls->show($order)),
+                    ]];
+                }
+            }
+            $keyboard[] = [[
+                'text' => $this->locale->translate($customer, 'order.status.detail_button'),
+                'callback_data' => 'order:'.$order->invoice_number,
+            ]];
+        } else {
+            $lines[] = $this->locale->translate($customer, 'order.status.empty');
+        }
+        $lines[] = '';
+        $lines[] = $this->locale->translate($customer, 'order.status.summary');
+        foreach ([$month, $previousMonth] as $index => $period) {
+            $lines[] = $this->monthLabel($customer, $period).' · '.$this->locale->translate($customer, $index === 0 ? 'order.status.this_month' : 'order.status.last_month');
+            $lines[] = $this->monthlySpending($customer, $period);
+            if ($index === 0) {
+                $lines[] = '';
+            }
+        }
+        $lines[] = $this->locale->translate($customer, 'order.status.summary_basis');
+        $keyboard[] = array_map(fn ($period, $key) => [
+            'text' => $this->locale->translate($customer, $key),
+            'callback_data' => 'om:'.$period->format('Ym'),
+        ], [$month, $previousMonth], ['order.status.this_month_button', 'order.status.last_month_button']);
+        $keyboard[] = [
+            ['text' => $this->locale->translate($customer, 'order.status.history_button'), 'callback_data' => 'orders:open'],
+            ['text' => $this->locale->translate($customer, 'order.status.home_button'), 'callback_data' => 'status:home'],
+        ];
+        $this->bot->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $keyboard]);
+    }
 
-            return;
+    private function monthLabel(Customer $customer, Carbon $month): string
+    {
+        return $this->locale->translate($customer, 'date.month.'.(int) $month->format('n')).' '.$month->format('Y');
+    }
+
+    private function monthlySpending(Customer $customer, Carbon $month): string
+    {
+        $totals = $customer->orders()
+            ->where('created_at', '>=', $month)
+            ->where('created_at', '<', $month->copy()->addMonth())
+            ->where('payment_status', PaymentStatus::Paid)
+            ->selectRaw('COUNT(*) as paid_count, COALESCE(SUM(total_amount), 0) as paid_total')
+            ->first();
+
+        return $this->locale->translate($customer, 'order.status.month_totals', [
+            'count' => (int) $totals->paid_count,
+            'amount' => $this->locale->idr((int) $totals->paid_total),
+        ]);
+    }
+
+    public function monthFromCallback(string $data): ?Carbon
+    {
+        if (preg_match('/\Aom:([0-9]{4})(0[1-9]|1[0-2])(?::[on]:[0-9]{14}:[0-9a-f-]{36})?\z/D', $data, $matches) !== 1 || (int) $matches[1] < 1) {
+            return null;
         }
 
-        $this->bot->sendMessage(
-            $chatId,
-            $this->locale->translate($customer, 'order.status.message', [
-                'invoice' => $order->invoice_number,
-                'order_status' => $this->locale->orderStatus($customer, $order->order_status),
-                'payment_status' => $this->locale->paymentStatus($customer, $order->payment_status),
-            ]),
-            ['inline_keyboard' => [
-                [[
-                    'text' => $this->locale->translate($customer, 'order.status.history_button'),
-                    'callback_data' => 'orders:open',
-                ]],
-                [[
-                    'text' => $this->locale->translate($customer, 'order.status.detail_button'),
-                    'callback_data' => 'order:'.$order->invoice_number,
-                ]],
-            ]],
-        );
+        return Carbon::create((int) $matches[1], (int) $matches[2], 1, 0, 0, 0, config('app.timezone'));
     }
 
     /**
@@ -93,8 +159,11 @@ class TelegramOrderIntents
      * customer-owned message; the callback and menu adapters never re-run the
      * order query themselves.
      */
-    public function orderHistorySurface(Customer $customer, ?string $cursor = null): TelegramNavigationSurface
+    public function orderHistorySurface(Customer $customer, ?string $cursor = null, ?Carbon $month = null): TelegramNavigationSurface
     {
+        if ($month !== null && $cursor !== null && preg_match('/\Aom:[0-9]{6}:([on]):([0-9]{14}):([0-9a-f-]{36})\z/D', $cursor, $matches) === 1) {
+            $cursor = 'orders:'.($matches[1] === 'o' ? 'older' : 'newer').':'.$matches[2].':'.$matches[3];
+        }
         $historyCursor = $this->decodeHistoryCursor($cursor);
         $ordersQuery = $customer->orders()
             ->select([
@@ -105,11 +174,17 @@ class TelegramOrderIntents
                 'created_at',
                 'telegram_receipt_sent_at',
             ])
-            ->where('payment_status', PaymentStatus::Paid)
-            ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
+        if ($month !== null) {
+            $ordersQuery->where('created_at', '>=', $month)->where('created_at', '<', $month->copy()->addMonth());
+        } else {
+            $ordersQuery->where('payment_status', PaymentStatus::Paid)
+                ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed]);
+        }
+        $title = $month === null ? $this->locale->translate($customer, 'order.history.title')
+            : $this->locale->translate($customer, 'order.status.month_title', ['month' => $this->monthLabel($customer, $month)])."\n".$this->monthlySpending($customer, $month);
         if ($historyCursor !== null) {
             $operator = $historyCursor['direction'] === 'older' ? '<' : '>';
             $ordersQuery->where(function ($query) use ($historyCursor, $operator): void {
@@ -121,6 +196,9 @@ class TelegramOrderIntents
             });
         }
 
+        if ($historyCursor !== null && $historyCursor['direction'] === 'newer') {
+            $ordersQuery->reorder('created_at')->orderBy('id');
+        }
         $orders = $ordersQuery
             ->take(self::ORDER_HISTORY_PAGE_SIZE + 1)
             ->get();
@@ -129,9 +207,12 @@ class TelegramOrderIntents
             $orders = $orders->take(self::ORDER_HISTORY_PAGE_SIZE);
         }
 
+        if ($historyCursor !== null && $historyCursor['direction'] === 'newer') {
+            $orders = $orders->reverse()->values();
+        }
         $hasNewer = $historyCursor !== null
-            && $historyCursor['direction'] === 'older';
-        $hasOlder = $hasMore
+            && ($historyCursor['direction'] === 'older' || $hasMore);
+        $hasOlder = ($hasMore && ($historyCursor === null || $historyCursor['direction'] === 'older'))
             || ($historyCursor !== null && $historyCursor['direction'] === 'newer');
 
         if ($orders->isEmpty()) {
@@ -144,7 +225,7 @@ class TelegramOrderIntents
             if ($historyCursor !== null) {
                 $keyboard[] = [[
                     'text' => $this->locale->translate($customer, 'order.history.previous'),
-                    'callback_data' => 'orders:open',
+                    'callback_data' => $month === null ? 'orders:open' : 'om:'.$month->format('Ym'),
                 ]];
             }
             $keyboard[] = $this->menu->navigationRow($customer);
@@ -152,7 +233,7 @@ class TelegramOrderIntents
             return new TelegramNavigationSurface(
                 TelegramNavigationScreen::Orders,
                 $this->locale->code($customer),
-                $this->locale->translate($customer, 'order.history.empty'),
+                $month === null ? $this->locale->translate($customer, 'order.history.empty') : $title."\n\n".$this->locale->translate($customer, 'order.status.month_empty'),
                 ['inline_keyboard' => $keyboard],
             );
         }
@@ -160,9 +241,9 @@ class TelegramOrderIntents
         $keyboard = [];
         foreach ($orders as $order) {
             $keyboard[] = [[
-                'text' => $this->locale->translate($customer, 'order.history.item_button', [
+                'text' => ($month === null ? '' : $order->created_at->format('d/m').' · ').$this->locale->translate($customer, 'order.history.item_button', [
                     'invoice' => $order->invoice_number,
-                    'status' => $this->historyButtonStatus($customer, $order),
+                    'status' => $this->historyButtonStatus($customer, $order).($month === null ? '' : ' / '.$this->locale->paymentStatus($customer, $order->payment_status)),
                 ]),
                 'callback_data' => 'order:'.$order->invoice_number,
             ]];
@@ -172,13 +253,13 @@ class TelegramOrderIntents
         if ($hasNewer) {
             $pagination[] = [
                 'text' => $this->locale->translate($customer, 'order.history.previous'),
-                'callback_data' => $this->historyCursor('newer', $orders->first()),
+                'callback_data' => $this->historyCursor('newer', $orders->first(), $month),
             ];
         }
         if ($hasOlder) {
             $pagination[] = [
                 'text' => $this->locale->translate($customer, 'order.history.next'),
-                'callback_data' => $this->historyCursor('older', $orders->last()),
+                'callback_data' => $this->historyCursor('older', $orders->last(), $month),
             ];
         }
         if ($pagination !== []) {
@@ -189,14 +270,17 @@ class TelegramOrderIntents
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::Orders,
             $this->locale->code($customer),
-            $this->locale->translate($customer, 'order.history.title'),
+            $title,
             ['inline_keyboard' => $keyboard],
         );
     }
 
-    private function historyCursor(string $direction, Order $order): string
+    private function historyCursor(string $direction, Order $order, ?Carbon $month = null): string
     {
         $cursor = 'orders:'.$direction.':'.$order->created_at->format('YmdHis').':'.$order->getKey();
+        if ($month !== null) {
+            $cursor = 'om:'.$month->format('Ym').':'.($direction === 'older' ? 'o' : 'n').':'.$order->created_at->format('YmdHis').':'.$order->getKey();
+        }
         if (strlen($cursor) > 64) {
             throw new \LogicException('Order history callback data exceeded Telegram limit.');
         }

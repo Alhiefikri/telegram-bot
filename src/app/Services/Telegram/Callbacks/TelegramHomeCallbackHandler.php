@@ -32,6 +32,8 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
 
     private const ORDER_HISTORY_CURSOR_PATTERN = '/\Aorders:(older|newer):([0-9]{14}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\z/D';
 
+    private const MONTH_CURSOR_PATTERN = '/\Aom:[0-9]{4}(0[1-9]|1[0-2]):[on]:[0-9]{14}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/D';
+
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramMenuIntents $menu,
@@ -56,7 +58,8 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
     public function supports(TelegramCallbackContext $context): bool
     {
         return in_array($context->data, self::ACTIONS, true)
-            || preg_match(self::ORDER_HISTORY_CURSOR_PATTERN, $context->data) === 1;
+            || preg_match(self::ORDER_HISTORY_CURSOR_PATTERN, $context->data) === 1
+            || preg_match(self::MONTH_CURSOR_PATTERN, $context->data) === 1;
     }
 
     public function handle(TelegramCallbackContext $context): bool
@@ -109,6 +112,9 @@ class TelegramHomeCallbackHandler implements TelegramCallbackHandler
 
     private function surfaceFor(TelegramCallbackContext $context): TelegramNavigationSurface
     {
+        if (preg_match(self::MONTH_CURSOR_PATTERN, $context->data) === 1) {
+            return $this->orders->orderHistorySurface($context->customer, $context->data, $this->orders->monthFromCallback($context->data));
+        }
         if (preg_match(self::ORDER_HISTORY_CURSOR_PATTERN, $context->data) === 1) {
             return $this->orders->orderHistorySurface($context->customer, $context->data);
         }

@@ -12,6 +12,7 @@ use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramOrderIntents;
 
@@ -21,6 +22,7 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
         private TelegramBotClient $bot,
         private TelegramIntentSession $session,
         private TelegramLocale $locale,
+        private TelegramMenuIntents $menu,
         private TelegramOrderIntents $orders,
         private TelegramNavigationPresenter $navigation,
         private CustomerPendingOrderCancellation $cancellation,
@@ -39,6 +41,8 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
     public function supports(TelegramCallbackContext $context): bool
     {
         return $context->data === 'status'
+            || $context->data === 'status:home'
+            || preg_match('/\Aom:[0-9]{4}(0[1-9]|1[0-2])\z/D', $context->data) === 1
             || $context->data === 'orders:open'
             || preg_match('/^order:([^\s:]+)$/', $context->data) === 1
             || preg_match('/^buyer:cancel-pending:([0-9a-fA-F-]+)$/', $context->data) === 1
@@ -49,6 +53,25 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
     {
         if (str_starts_with($context->data, 'txt:')) {
             return false;
+        }
+
+        if ($context->data === 'status:home' || str_starts_with($context->data, 'om:')) {
+            $month = $this->orders->monthFromCallback($context->data);
+            if ($context->data !== 'status:home' && $month === null) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+                return true;
+            }
+            $this->session->forgetWithLock($context->customer);
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->navigation->presentOrEstablish(
+                $context->customer,
+                $context->chatId,
+                $month === null ? $this->menu->homeSurface($context->customer, $context->chatId)
+                    : $this->orders->orderHistorySurface($context->customer, month: $month),
+            );
+
+            return true;
         }
 
         if ($context->data === 'orders:open') {

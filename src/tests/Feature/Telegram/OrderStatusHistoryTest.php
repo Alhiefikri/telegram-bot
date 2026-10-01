@@ -53,7 +53,7 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
 
         $this->postTelegramWebhook($this->messageUpdate(117, '/status'))->assertOk();
         $status = $this->sentMessageRequestContaining($order->invoice_number);
-        $historyCallback = $status['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $historyCallback = collect($status['reply_markup']['inline_keyboard'])->flatten(1)->firstWhere('callback_data', 'orders:open')['callback_data'];
 
         $this->postTelegramWebhook($this->callbackUpdate(
             118,
@@ -544,9 +544,9 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
 
         $text = $this->sentMessageContaining($order->invoice_number);
         $this->assertStringContainsString($copy['statusTitle'], $text);
-        $this->assertStringContainsString('📌 '.$copy['orderStatusLabel'].' '.$copy['orderPending'], $text);
+        $this->assertStringContainsString('📦 '.$copy['orderStatusLabel'].' '.$copy['orderPending'], $text);
         $this->assertStringContainsString('💳 '.$copy['paymentStatusLabel'].' '.$copy['paymentPending'], $text);
-        $this->assertStringContainsString($copy['historyCommand'], $text);
+        $this->assertStringContainsString('orders:open', json_encode($this->sentMessageRequestContaining($order->invoice_number)['reply_markup'], JSON_THROW_ON_ERROR));
         $this->assertStringNotContainsString('pending_payment', $text);
         $this->assertStringNotContainsString($copy['otherStatusTitle'], $text);
     }
@@ -967,8 +967,8 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             'Indonesian' => [[
                 'locale' => 'id',
                 'historyCommand' => '/riwayat',
-                'statusTitle' => 'Status pesanan',
-                'otherStatusTitle' => 'Order status',
+                'statusTitle' => 'PESANAN SAYA',
+                'otherStatusTitle' => 'MY ORDERS',
                 'orderStatusLabel' => 'Pesanan:',
                 'paymentStatusLabel' => 'Pembayaran:',
                 'orderPending' => 'Menunggu pembayaran',
@@ -1001,8 +1001,8 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             'English' => [[
                 'locale' => 'en',
                 'historyCommand' => '/history',
-                'statusTitle' => 'Order status',
-                'otherStatusTitle' => 'Status pesanan',
+                'statusTitle' => 'MY ORDERS',
+                'otherStatusTitle' => 'PESANAN SAYA',
                 'orderStatusLabel' => 'Order:',
                 'paymentStatusLabel' => 'Payment:',
                 'orderPending' => 'Awaiting payment',
@@ -1035,8 +1035,8 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
             'Malay' => [[
                 'locale' => 'ms',
                 'historyCommand' => '/sejarah',
-                'statusTitle' => 'Status pesanan',
-                'otherStatusTitle' => 'Order status',
+                'statusTitle' => 'PESANAN SAYA',
+                'otherStatusTitle' => 'MY ORDERS',
                 'orderStatusLabel' => 'Pesanan:',
                 'paymentStatusLabel' => 'Bayaran:',
                 'orderPending' => 'Menunggu bayaran',
