@@ -80,12 +80,15 @@ test("storefront navigation: header remains reachable after scrolling", async ({
     .toBeGreaterThanOrEqual(0);
 });
 
-test("theme preference toggles and survives a page reload", async ({
+test("theme defaults to light on a dark system and preserves explicit choices", async ({
   page,
 }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => window.localStorage.removeItem("lhie-store-theme"));
   await page.reload({ waitUntil: "domcontentloaded" });
+
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
   const themeToggle = page.locator("[data-theme-toggle]").first();
   await expect(themeToggle).toBeVisible();

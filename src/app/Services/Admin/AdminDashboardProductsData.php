@@ -15,6 +15,7 @@ use App\Models\ProductStockItem;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\Pricing\ProductQuantityPricing;
+use App\Storefront\StorefrontBanners;
 use App\Storefront\StorefrontProductPlaceholder;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -27,6 +28,7 @@ final class AdminDashboardProductsData
         private readonly ProductImageOptimizer $images,
         private readonly StorefrontProductPlaceholder $placeholder,
         private readonly CatalogBrowse $catalog,
+        private readonly StorefrontBanners $banners,
     ) {}
 
     /**
@@ -38,6 +40,7 @@ final class AdminDashboardProductsData
         $familyOptions = $this->familyOptions();
 
         return [
+            'banners' => $this->banners->dashboard(),
             'canManage' => $canManageProducts,
             'productStoreUrl' => route('admin.products.store'),
             'products' => $productPage['products'],

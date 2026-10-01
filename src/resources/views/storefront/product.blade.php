@@ -34,6 +34,7 @@
                             'isAvailable' => $isAvailable,
                             'isPopular' => false,
                             'priority' => true,
+                            'context' => 'detail',
                         ])
                     </div>
 
@@ -156,6 +157,7 @@
             </div>
         @endif
 
+        @include('storefront.partials.image-preview', ['previewImage' => $presentation->cover->imageUrl, 'previewName' => $presentation->name])
         @include('storefront.partials.footer')
         @include('storefront.partials.verified-purchase-activity')
     </div>

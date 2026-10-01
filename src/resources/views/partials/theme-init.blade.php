@@ -4,15 +4,12 @@
         const storedTheme = (() => {
             try {
                 const value = window.localStorage.getItem(storageKey);
-                return value === 'light' || value === 'dark' ? value : 'system';
+                return value === 'light' || value === 'dark' ? value : 'light';
             } catch {
-                return 'system';
+                return 'light';
             }
         })();
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        const resolvedTheme = storedTheme === 'system'
-            ? (prefersDark ? 'dark' : 'light')
-            : storedTheme;
+        const resolvedTheme = storedTheme;
         const root = document.documentElement;
 
         root.dataset.theme = resolvedTheme;

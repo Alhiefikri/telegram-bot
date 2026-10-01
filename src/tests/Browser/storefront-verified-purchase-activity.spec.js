@@ -40,6 +40,15 @@ test.beforeAll(async () => {
   await waitForServer(`${baseUrl}/`);
 });
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/assets/storefront-banner-test.svg", (route) =>
+    route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="400"><defs><linearGradient id="bg"><stop stop-color="#dbeafe"/><stop offset="1" stop-color="#eef5ff"/></linearGradient></defs><rect width="1600" height="400" fill="url(#bg)"/><text x="100" y="200" fill="#2563eb" font-family="sans-serif" font-size="60">Banner toko · 1600 × 400</text></svg>',
+    })
+  );
+});
+
 test.afterAll(async () => {
   if (serverProcess && !serverProcess.killed) serverProcess.kill();
   if (dbPath) rmSync(path.dirname(dbPath), { recursive: true, force: true });
@@ -112,6 +121,119 @@ test("does not rotate verified activity for reduced-motion users", async ({
   await expect(message).toHaveText(initialMessage ?? "");
 });
 
+test("carousel supports navigation, pause, reduced motion and mobile layout", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  const carousel = page.locator(".storefront-banner-carousel");
+  const dots = carousel.locator("[data-carousel-dot]");
+  await expect(dots).toHaveCount(3);
+  await expect(dots.first()).toHaveAttribute("aria-current", "true");
+  await page.waitForTimeout(6500);
+  await expect(dots.first()).toHaveAttribute("aria-current", "true");
+  await carousel.getByRole("button", { name: "Banner berikutnya" }).click();
+  await expect(dots.nth(1)).toHaveAttribute("aria-current", "true");
+  await carousel
+    .getByRole("button", { name: "Jeda pergantian otomatis" })
+    .click();
+  await expect(carousel.locator("[data-carousel-pause]")).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth
+    )
+  ).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath("storefront-mobile.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+  await page.screenshot({
+    path: testInfo.outputPath("storefront-desktop.png"),
+    fullPage: true,
+  });
+});
+
+test("carousel advances automatically and pauses on hover", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  const carousel = page.locator(".storefront-banner-carousel");
+  await carousel.scrollIntoViewIfNeeded();
+  await page.mouse.move(0, 0);
+  const dots = carousel.locator("[data-carousel-dot]");
+  await expect(dots.nth(1)).toHaveAttribute("aria-current", "true", {
+    timeout: 9000,
+  });
+  await carousel.hover();
+  await page.waitForTimeout(6500);
+  await expect(dots.nth(1)).toHaveAttribute("aria-current", "true");
+});
+
+test("family image stays contained and preview closes with Escape", async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(`${baseUrl}/pilihan/preview-family`, {
+      waitUntil: "domcontentloaded",
+    });
+    const image = page.locator(".family-hero-art img");
+    await expect(image).toBeVisible();
+    await expect
+      .poll(() =>
+        image.evaluate((node) => node.complete && node.naturalWidth > 0)
+      )
+      .toBe(true);
+    expect(
+      await image.evaluate((node) => getComputedStyle(node).objectFit)
+    ).toBe("contain");
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth
+      )
+    ).toBe(true);
+    await expect(page.locator("#verified-purchase-activity")).toBeVisible();
+    const toastBox = await page
+      .locator("#verified-purchase-activity")
+      .boundingBox();
+    const stickyBox = await page
+      .locator("[data-family-quick-buy]")
+      .boundingBox();
+    expect(toastBox.y + toastBox.height).toBeLessThan(stickyBox.y);
+    const button = page.getByRole("button", {
+      name: "Perbesar gambar Preview Family",
+    });
+    await button.click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(button).toBeFocused();
+    await page.screenshot({
+      path: testInfo.outputPath(`family-${width}.png`),
+      fullPage: true,
+    });
+  }
+});
+
+test("purchase activity can be dismissed", async ({ page }) => {
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  const activity = page.locator("#verified-purchase-activity");
+  await expect(activity).toHaveAttribute("data-activity-state", "visible");
+  await activity
+    .getByRole("button", { name: "Tutup aktivitas pembelian" })
+    .click();
+  await expect(activity).not.toBeVisible();
+  await expect(activity).toHaveAttribute("data-activity-state", "hidden");
+});
+
 function runArtisan(args) {
   const result = spawnSync("php", ["artisan", ...args], {
     cwd: appDir,
@@ -179,10 +301,17 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 
+\App\Models\StorefrontSetting::current()->update(['homepage_banners' => [
+    ['path' => '/assets/storefront-banner-test.svg', 'title' => 'Banner Satu', 'link' => '/katalog'],
+    ['path' => '/assets/storefront-banner-test.svg', 'title' => 'Banner Dua', 'link' => null],
+    ['path' => '/assets/storefront-banner-test.svg', 'title' => 'Banner Tiga', 'link' => null],
+]]);
 $customer = Customer::factory()->create(['first_name' => 'Alya']);
+$family = \App\Models\ProductFamily::factory()->create(['name' => 'Preview Family', 'slug' => 'preview-family', 'image_path' => '/assets/lhie-store-logo-512.png']);
+Product::factory()->create(['name' => 'Preview Package', 'product_family_id' => $family->id, 'family_option_label' => 'Private', 'is_active' => true, 'stock' => 5]);
 
 foreach (['Produk Aktivitas Satu', 'Produk Aktivitas Dua'] as $name) {
-    $product = Product::factory()->create(['name' => $name]);
+    $product = Product::factory()->create(['name' => $name, 'is_active' => true, 'stock' => 5, 'image_path' => '/assets/lhie-store-logo-512.png']);
     $order = Order::factory()->create([
         'customer_id' => $customer->id,
         'order_status' => OrderStatus::Processing,

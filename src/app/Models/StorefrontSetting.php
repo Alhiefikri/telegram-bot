@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 
 #[Fillable([
     'singleton_key',
+    'homepage_banners',
+    'homepage_banners_version',
     'product_placeholder_image_path',
     'telegram_welcome_banner_path',
     'telegram_welcome_banner_file_id',
@@ -15,6 +17,11 @@ use Illuminate\Database\Eloquent\Model;
 class StorefrontSetting extends Model
 {
     public const SINGLETON_KEY = 'storefront';
+
+    protected function casts(): array
+    {
+        return ['homepage_banners' => 'array', 'homepage_banners_version' => 'integer'];
+    }
 
     public static function current(): self
     {

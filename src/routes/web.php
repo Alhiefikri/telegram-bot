@@ -35,6 +35,7 @@ use App\Http\Controllers\Admin\AdminStoreBalanceFundingPolicyController;
 use App\Http\Controllers\Admin\AdminStoreBalanceTopUpCompensationController;
 use App\Http\Controllers\Admin\AdminStoreChannelController;
 use App\Http\Controllers\Admin\AdminStoreChannelTestController;
+use App\Http\Controllers\Admin\AdminStorefrontBannersController;
 use App\Http\Controllers\Admin\AdminStorefrontPlaceholderController;
 use App\Http\Controllers\Admin\AdminSupportSettingsController;
 use App\Http\Controllers\Admin\AdminTelegramOutboundEffectController;
@@ -167,6 +168,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 ->middleware('admin.store-balance-owner')
                 ->name('store-balance.top-ups.compensate');
             Route::post('support-settings', AdminSupportSettingsController::class)->name('support-settings.update');
+            Route::post('storefront-banners', AdminStorefrontBannersController::class)->name('storefront-banners.update');
             Route::post('storefront-placeholder', AdminStorefrontPlaceholderController::class)->name('storefront-placeholder.update');
             Route::post('telegram-welcome-banner', AdminTelegramWelcomeBannerController::class)->name('telegram-welcome-banner.update');
             Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');

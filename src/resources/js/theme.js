@@ -4,24 +4,14 @@ const VALID_THEMES = new Set(["light", "dark"]);
 function readStoredTheme() {
   try {
     const value = window.localStorage.getItem(THEME_STORAGE_KEY);
-    return VALID_THEMES.has(value) ? value : "system";
+    return VALID_THEMES.has(value) ? value : "light";
   } catch {
-    return "system";
+    return "light";
   }
 }
 
-function systemTheme() {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-
-function resolveTheme(preference) {
-  return preference === "system" ? systemTheme() : preference;
-}
-
 export function applyTheme(preference = readStoredTheme()) {
-  const resolvedTheme = resolveTheme(preference);
+  const resolvedTheme = VALID_THEMES.has(preference) ? preference : "light";
   const root = document.documentElement;
 
   root.dataset.theme = resolvedTheme;
@@ -54,7 +44,6 @@ function updateToggle(toggle, resolvedTheme) {
 }
 
 export default function initTheme() {
-  const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
   const toggles = Array.from(document.querySelectorAll("[data-theme-toggle]"));
   let preference = readStoredTheme();
   let resolvedTheme = applyTheme(preference);
@@ -77,27 +66,12 @@ export default function initTheme() {
     updateToggle(toggle, resolvedTheme);
   });
 
-  const handleSystemThemeChange = () => {
-    if (preference !== "system") {
-      return;
-    }
-
-    resolvedTheme = applyTheme(preference);
-    syncToggles();
-  };
-
-  if (typeof mediaQuery.addEventListener === "function") {
-    mediaQuery.addEventListener("change", handleSystemThemeChange);
-  } else if (typeof mediaQuery.addListener === "function") {
-    mediaQuery.addListener(handleSystemThemeChange);
-  }
-
   window.addEventListener("storage", (event) => {
     if (event.key !== THEME_STORAGE_KEY) {
       return;
     }
 
-    preference = VALID_THEMES.has(event.newValue) ? event.newValue : "system";
+    preference = VALID_THEMES.has(event.newValue) ? event.newValue : "light";
     resolvedTheme = applyTheme(preference);
     syncToggles();
   });

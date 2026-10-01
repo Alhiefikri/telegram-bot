@@ -13,17 +13,17 @@
     $searchMaxLength = \App\Storefront\StorefrontCatalogSearch::MAX_LENGTH;
 @endphp
 
-<header class="storefront-header sticky top-4 z-50 mx-auto mb-4 mt-4 w-[calc(100%-2rem)] max-w-6xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.1)] transition-all duration-300" data-storefront-header x-data="mobileMenu">
+<header class="storefront-header sticky top-4 z-50 mx-auto mb-4 mt-4 w-[calc(100%-2rem)] max-w-7xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.1)] transition-all duration-300" data-storefront-header x-data="mobileMenu">
     <div class="flex min-h-[88px] w-full flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:flex-nowrap">
-        <a href="{{ $homeUrl }}" class="order-1 flex min-w-0 shrink-0 items-center gap-2 lg:w-[10rem] xl:w-[9rem]" aria-label="Beranda {{ $brand }}">
+        <a href="{{ $homeUrl }}" class="order-1 flex min-w-0 shrink-0 items-center gap-2 lg:w-[8rem] xl:w-[9rem]" aria-label="Beranda {{ $brand }}">
             @include('storefront.components.brand-mark', ['brand' => $brand])
         </a>
 
-        <form action="{{ $shopUrl }}" method="GET" class="order-3 min-w-0 basis-full md:order-2 md:flex md:flex-1 md:basis-auto lg:min-w-[8rem]" role="search">
+        <form action="{{ $shopUrl }}" method="GET" class="order-3 min-w-0 basis-full md:order-2 md:flex md:flex-1 md:basis-auto lg:min-w-[6rem]" role="search">
             <label for="header-search" class="sr-only">Cari produk</label>
             <div class="storefront-search relative flex h-14 w-full items-center rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-1 shadow-[0_6px_18px_rgb(18_35_63_/_0.08)]">
                 <button type="submit" class="inline-flex h-12 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--sf-muted)] transition-colors hover:bg-[var(--sf-surface)] hover:text-[var(--sf-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" aria-label="Cari produk">
-                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                    <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.35-4.35m1.35-5.15a6.5 6.5 0 1 1-13 0Z" />
                     </svg>
                 </button>
@@ -34,42 +34,42 @@
             </div>
         </form>
 
-        <nav class="order-4 hidden shrink-0 items-center gap-1 rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-1 text-[11px] font-black text-[var(--sf-ink)] lg:order-3 lg:flex xl:p-2" aria-label="Navigasi utama">
-            <a href="{{ $shopUrl }}" class="storefront-nav-link group relative grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)] xl:h-10 xl:w-10" aria-label="Produk" title="Produk">
-                <svg class="h-5 w-5 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <nav class="order-4 hidden shrink-0 items-center gap-1 rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-1 text-[11px] font-black text-[var(--sf-ink)] lg:order-3 lg:flex" aria-label="Navigasi utama">
+            <a href="{{ $shopUrl }}" class="storefront-nav-link group relative grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)]" aria-label="Produk" title="Produk">
+                <svg class="h-7 w-7 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />
                 </svg>
                 <span class="sr-only">Produk</span>
             </a>
-            <a href="{{ $homeUrl }}#kategori" class="storefront-nav-link group relative grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)] xl:h-10 xl:w-10" aria-label="Kategori" title="Kategori">
-                <svg class="h-5 w-5 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <a href="{{ $homeUrl }}#kategori" class="storefront-nav-link group relative grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)]" aria-label="Kategori" title="Kategori">
+                <svg class="h-7 w-7 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="m4 6 6-2 10 10-6 6L4 10V6Z" />
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 8h.01" />
                 </svg>
                 <span class="sr-only">Kategori</span>
             </a>
-            <a href="{{ $homeUrl }}#trending" class="storefront-nav-link group relative grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)] xl:h-10 xl:w-10" aria-label="Trending" title="Trending">
-                <svg class="h-5 w-5 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <a href="{{ $homeUrl }}#trending" class="storefront-nav-link group relative grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)]" aria-label="Trending" title="Trending">
+                <svg class="h-7 w-7 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M13 3c.5 3-1.5 4.5-3 6.5C8.5 11.5 9 14 11 15c-.5-2 1-3.5 2.5-4.5C15 12 16 14 16 16a4 4 0 1 1-7.5-1.9C6.8 16.8 8.8 21 13 21a6 6 0 0 0 5.8-7.5C18.1 10.3 15.6 6 13 3Z" />
                 </svg>
                 <span class="sr-only">Trending</span>
             </a>
-            <a href="{{ $homeUrl }}#cara-beli" class="storefront-nav-link group relative grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)] xl:h-10 xl:w-10" aria-label="Cara beli" title="Cara beli">
-                <svg class="h-5 w-5 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <a href="{{ $homeUrl }}#cara-beli" class="storefront-nav-link group relative grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)]" aria-label="Cara beli" title="Cara beli">
+                <svg class="h-7 w-7 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M5 6h14M5 12h14M5 18h9" />
                     <path stroke-linecap="round" stroke-linejoin="round" d="m16 16 2 2 3-3" />
                 </svg>
                 <span class="sr-only">Cara beli</span>
             </a>
-            <a href="{{ route('storefront.order-access.create') }}" class="storefront-nav-link group relative grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)] xl:h-10 xl:w-10" aria-label="Akses pesanan" title="Akses pesanan">
-                <svg class="h-5 w-5 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <a href="{{ route('storefront.order-access.create') }}" class="storefront-nav-link group relative grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)]" aria-label="Akses pesanan" title="Akses pesanan">
+                <svg class="h-7 w-7 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M7 3h10v18l-2-1.5L12 21l-3-1.5L7 21V3Z" />
                     <path stroke-linecap="round" stroke-linejoin="round" d="M10 8h4M10 12h4" />
                 </svg>
                 <span class="sr-only">Akses pesanan</span>
             </a>
-            <a href="{{ $cartUrl }}" class="storefront-nav-link group relative grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)] xl:h-10 xl:w-10" aria-label="{{ $cartLabel }}" title="Keranjang">
-                <svg class="h-5 w-5 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <a href="{{ $cartUrl }}" class="storefront-nav-link group relative grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)]" aria-label="{{ $cartLabel }}" title="Keranjang">
+                <svg class="h-7 w-7 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 7h12l-1 13H7L6 7Zm3 0a3 3 0 0 1 6 0" />
                 </svg>
                 <span class="sr-only">Keranjang</span>
@@ -77,33 +77,33 @@
                     <span class="storefront-badge-pulse absolute -right-1 -top-1 min-w-5 rounded-full bg-[var(--sf-accent)] px-1 py-0.5 text-center text-[10px] font-black leading-4 text-white">{{ $cartCount }}</span>
                 @endif
             </a>
-            <a href="{{ route('storefront.guides.index') }}" class="storefront-nav-link group relative grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)] xl:h-10 xl:w-10" aria-label="Panduan" title="Panduan">
-                <svg class="h-5 w-5 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <a href="{{ route('storefront.guides.index') }}" class="storefront-nav-link group relative grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)]" aria-label="Panduan" title="Panduan">
+                <svg class="h-7 w-7 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M5 5.5A2.5 2.5 0 0 1 7.5 3H20v16H7.5A2.5 2.5 0 0 0 5 21V5.5Z" />
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h8M8 11h7" />
                 </svg>
                 <span class="sr-only">Panduan</span>
             </a>
-            <x-theme-toggle class="h-9 w-9 shrink-0 rounded-xl text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] xl:h-10 xl:w-10" />
+            <x-theme-toggle icon-class="h-7 w-7" class="h-11 w-11 shrink-0 rounded-xl text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" />
         </nav>
 
         <div class="order-2 ml-auto flex shrink-0 items-center gap-2 lg:order-4">
-            <x-theme-toggle class="h-11 w-11 shrink-0 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:hidden" />
+            <x-theme-toggle icon-class="h-7 w-7" class="h-11 w-11 shrink-0 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:hidden" />
             <a href="{{ route('storefront.order-access.create') }}" class="hidden min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--sf-accent)] bg-transparent px-2 text-[10px] font-black text-[var(--sf-accent)] transition-colors hover:bg-[var(--sf-accent-soft)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:inline-flex xl:px-3 xl:text-[11px]" aria-label="Akses pesanan">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M7 3h10v18l-2-1.5L12 21l-3-1.5L7 21V3Z" />
                     <path stroke-linecap="round" stroke-linejoin="round" d="M10 8h4M10 12h4" />
                 </svg>
                 <span>Akses Pesanan</span>
             </a>
             <a href="{{ $accountUrl }}" class="neo-button hidden min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap bg-[var(--sf-accent)] px-2 text-[10px] font-black text-white lg:inline-flex xl:px-3 xl:text-[11px]" aria-label="Daftar atau masuk ke akun pelanggan">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8-7v6m3-3h-6" />
                 </svg>
                 <span>Daftar / Masuk</span>
             </a>
             <a href="{{ $cartUrl }}" class="relative inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:hidden" aria-label="{{ $cartLabel }}">
-                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 7h12l-1 13H7L6 7Zm3 0a3 3 0 0 1 6 0" />
                 </svg>
                 @if ($cartCount !== null)

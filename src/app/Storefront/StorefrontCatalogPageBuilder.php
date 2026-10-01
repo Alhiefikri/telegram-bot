@@ -20,6 +20,7 @@ class StorefrontCatalogPageBuilder
         private readonly CheckoutMaintenance $maintenance,
         private readonly StorefrontSeo $seo,
         private readonly CatalogBrowse $catalog,
+        private readonly StorefrontBanners $banners,
     ) {}
 
     public function home(StorefrontCatalogQuery|string|null $query): StorefrontCatalogPage
@@ -37,7 +38,7 @@ class StorefrontCatalogPageBuilder
      */
     public function homeViewData(StorefrontCatalogQuery|string|null $query): array
     {
-        return $this->home($query)->viewData();
+        return $this->home($query)->viewData() + ['homepageBanners' => $this->banners->published()];
     }
 
     /**

@@ -8,10 +8,10 @@
                     <span>Katalog aktif · {{ $catalogPage->totalProductCount() }} item katalog</span>
                 </div>
                 <h2 class="text-balance font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-3xl">
-                    Pilih akun, cek stok, lanjut checkout.
+                    Temukan produk pilihan Anda.
                 </h2>
                 <p class="mt-2 max-w-2xl text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                    Produk aktif dari Admin Dashboard muncul otomatis di sini. Filter kategori atau cari produk yang siap dibeli.
+                    Temukan paket sesuai kebutuhan Anda. Bandingkan pilihan, cek ketersediaan, dan belanja dengan mudah.
                 </p>
             </div>
 

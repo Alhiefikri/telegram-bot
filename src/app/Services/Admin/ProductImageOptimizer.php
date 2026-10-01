@@ -21,6 +21,8 @@ final class ProductImageOptimizer
 
     private const TELEGRAM_FAMILY_DIRECTORY = 'telegram-product-families';
 
+    private const STOREFRONT_BANNER_DIRECTORY = 'storefront/banners';
+
     private const WELCOME_BANNER_DIRECTORY = 'telegram/welcome-banners';
 
     private const MAX_DIMENSION = 1600;
@@ -83,6 +85,11 @@ final class ProductImageOptimizer
     public function storePlaceholder(UploadedFile $image): string
     {
         return $this->storeInDirectory($image, self::PLACEHOLDER_DIRECTORY);
+    }
+
+    public function storeStorefrontBanner(UploadedFile $image): string
+    {
+        return $this->storeInDirectory($image, self::STOREFRONT_BANNER_DIRECTORY, 2400);
     }
 
     public function storeWelcomeBanner(UploadedFile $image): string
@@ -332,6 +339,7 @@ final class ProductImageOptimizer
             || (! str_starts_with($path, self::DIRECTORY.'/')
                 && ! str_starts_with($path, self::FAMILY_DIRECTORY.'/')
                 && ! str_starts_with($path, self::PLACEHOLDER_DIRECTORY.'/')
+                && ! str_starts_with($path, self::STOREFRONT_BANNER_DIRECTORY.'/')
                 && ! str_starts_with($path, self::TELEGRAM_DIRECTORY.'/')
                 && ! str_starts_with($path, self::TELEGRAM_CHANNEL_DIRECTORY.'/')
                 && ! str_starts_with($path, self::TELEGRAM_FAMILY_DIRECTORY.'/')

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./storefront-enhancements.css";
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
@@ -1719,13 +1720,6 @@
     .storefront-checkout-page .checkout-payment-panel {
       position: sticky;
       top: 1.5rem;
-    }
-  }
-
-  @media (min-width: 1024px) {
-    .family-page .family-hero-art {
-      height: 100%;
-      aspect-ratio: auto;
     }
   }
 }

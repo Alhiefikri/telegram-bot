@@ -46,6 +46,8 @@
                     <span class="font-black uppercase">Dipesan</span> berarti stok yang sedang ditahan untuk order aktif/pending. Kelola hanya menampilkan akun yang masih tersedia.
                 </x-admin-dashboard.notice>
 
+                @include('admin.dashboard.storefront-banners')
+
                 <section id="admin-product-placeholder" class="rounded-[1.125rem] border-[3px] border-neo-ink bg-white/80 p-4 shadow-[4px_4px_0_#111827] sm:p-5" aria-labelledby="admin-product-placeholder-title">
                     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0">

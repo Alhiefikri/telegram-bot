@@ -74,7 +74,7 @@
         @endif
     @endif
     @if ($catalogPage->popularProducts->isNotEmpty())
-        <section id="trending" class="storefront-trending-panel reveal-item mx-auto mb-10 max-w-7xl overflow-hidden rounded-2xl border border-[var(--sf-trend-border)] bg-[var(--sf-trend-panel)] text-[var(--sf-trend-text)]" aria-labelledby="trending-title">
+        <section id="trending" class="storefront-trending-panel reveal-item mx-auto mb-10 max-w-7xl overflow-hidden rounded-2xl border border-[var(--sf-trend-border)] bg-[var(--sf-trend-panel)] text-[var(--sf-trend-text)]" aria-labelledby="trending-title" data-storefront-carousel>
             <div class="storefront-trending-header flex items-center justify-between gap-3 border-b border-[var(--sf-trend-border)] px-3 py-2.5 sm:px-4">
                 <div class="flex min-w-0 items-center gap-2.5">
                     <span class="storefront-trending-header__icon grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--sf-trend-accent)] text-[var(--sf-trend-panel)]" aria-hidden="true">
@@ -85,11 +85,15 @@
                         <h3 id="trending-title" class="truncate font-display text-sm font-black tracking-tight text-[var(--sf-trend-text)] sm:text-base">Best sellers today</h3>
                     </div>
                 </div>
-                <span class="shrink-0 text-[10px] font-semibold text-[var(--sf-trend-muted)] sm:text-xs">Geser untuk melihat lainnya</span>
+                <div class="carousel-controls" data-carousel-controls hidden>
+                    <button type="button" data-carousel-prev aria-label="Produk terlaris sebelumnya">←</button>
+                    <button type="button" data-carousel-next aria-label="Produk terlaris berikutnya">→</button>
+                    <button type="button" data-carousel-pause aria-label="Jeda pergantian otomatis" aria-pressed="false">Ⅱ</button>
+                </div>
             </div>
-            <div class="storefront-trending-grid" role="list" aria-label="Produk trending">
+            <div class="storefront-trending-grid" data-carousel-track role="list" aria-label="Produk trending">
                 @foreach ($catalogPage->popularProducts as $catalogProduct)
-                    <div role="listitem">
+                    <div role="listitem" data-carousel-slide>
                         @include('storefront.components.trending-card', [
                             'catalogProduct' => $catalogProduct,
                             'rank' => $loop->iteration,

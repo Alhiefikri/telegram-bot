@@ -34,15 +34,21 @@
                     <span aria-hidden="true">&larr;</span> Kembali ke katalog
                 </a>
 
-                <section class="family-product-panel mt-5 overflow-hidden rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.08)]" aria-labelledby="family-title">
-                    <div class="grid lg:grid-cols-[minmax(17rem,0.82fr)_minmax(0,1.18fr)]">
-                        <div class="family-hero-art relative flex aspect-[16/10] items-center justify-center overflow-hidden border-b border-[var(--sf-border)] bg-[var(--sf-yellow)] lg:aspect-auto lg:border-b-0 lg:border-r">
-                            @if ($family->imageUrl)
-                                <img src="{{ $family->imageUrl }}" alt="{{ $family->name }}" loading="eager" decoding="async" class="absolute inset-0 h-full w-full object-cover">
-                            @else
-                                <span class="font-display text-7xl font-black text-[var(--sf-accent)]" aria-hidden="true">{{ mb_substr($family->name, 0, 1) }}</span>
-                                <span class="sr-only">Gambar {{ $family->name }}</span>
-                            @endif
+                <section class="family-product-panel mt-5 rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.08)]" aria-labelledby="family-title">
+                    <div class="family-detail-grid grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+                        <div class="family-media-column">
+                            <div class="family-hero-art">
+                                @if ($family->imageUrl)
+                                    <button type="button" class="product-image-zoom" data-image-preview-open aria-haspopup="dialog" aria-controls="product-image-preview" aria-label="Perbesar gambar {{ $family->name }}">
+                                        <img src="{{ $family->imageUrl }}" alt="{{ $family->name }}" width="800" height="800" loading="eager" fetchpriority="high" decoding="async">
+                                        <span class="image-zoom-hint">⤢ Perbesar gambar</span>
+                                    </button>
+                                @else
+                                    <span class="font-display text-7xl font-black text-[var(--sf-accent)]" aria-hidden="true">{{ mb_substr($family->name, 0, 1) }}</span>
+                                    <span class="sr-only">Gambar {{ $family->name }}</span>
+                                @endif
+                            </div>
+                            <p class="product-media-caption">{{ $family->name }} <span>· {{ $family->optionCount }} pilihan paket</span></p>
                         </div>
 
                         <div class="min-w-0 p-5 sm:p-7">
@@ -194,6 +200,8 @@
             </section>
         </main>
 
+        @include('storefront.partials.image-preview', ['previewImage' => $family->imageUrl, 'previewName' => $family->name])
+        @include('storefront.partials.verified-purchase-activity')
         @include('storefront.partials.footer')
     </div>
 </body>

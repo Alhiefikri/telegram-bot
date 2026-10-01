@@ -1,3 +1,5 @@
+import initCarousels, { initImagePreview } from "./storefront/carousels.js";
+
 const STOREFRONT_EVENT_URL = "/storefront/events";
 
 function trackStorefrontEvent(action, payload = {}) {
@@ -133,6 +135,17 @@ function initVerifiedPurchaseActivity() {
   const live = container?.querySelector("[data-activity-live]");
   if (!container || !endpoint || !message) return;
 
+  const stickyAction = document.querySelector(
+    "[data-family-quick-buy], [data-product-sticky-action]"
+  );
+  if (stickyAction && typeof ResizeObserver === "function") {
+    const stickyObserver = new ResizeObserver(([entry]) => {
+      const height = entry.target.getBoundingClientRect().height;
+      container.style.setProperty("--sf-sticky-height", `${height}px`);
+    });
+    stickyObserver.observe(stickyAction);
+  }
+
   const DISPLAY_MS = 4_500;
   const TRANSITION_MS = 300;
   const NEXT_GAP_MS = 700;
@@ -140,6 +153,7 @@ function initVerifiedPurchaseActivity() {
   let position = 0;
   let paused = false;
   let initialized = false;
+  let dismissed = false;
   let hideTimer = null;
   let nextTimer = null;
   const reducedMotion = window.matchMedia(
@@ -204,6 +218,7 @@ function initVerifiedPurchaseActivity() {
     scheduleHide();
   };
   const refresh = async () => {
+    if (dismissed || document.hidden) return;
     try {
       const response = await window.fetch(endpoint, {
         credentials: "same-origin",
@@ -261,7 +276,28 @@ function initVerifiedPurchaseActivity() {
       { passive: true }
     )
   );
-  window.setInterval(refresh, 60000);
+  container
+    .querySelector("[data-activity-dismiss]")
+    ?.addEventListener("click", () => {
+      dismissed = true;
+      clearTimers();
+      container.classList.add("hidden");
+      container.dataset.activityState = "hidden";
+      container.setAttribute("aria-hidden", "true");
+    });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) clearTimers();
+    else if (!dismissed) refresh();
+  });
+  const refreshTimer = window.setInterval(refresh, 60000);
+  window.addEventListener(
+    "pagehide",
+    () => {
+      clearTimers();
+      window.clearInterval(refreshTimer);
+    },
+    { once: true }
+  );
   refresh();
 }
 
@@ -1091,6 +1127,8 @@ export default function initStorefront() {
     initScrollProgress();
     initHeaderElevation();
     initMediaFrames();
+    initCarousels();
+    initImagePreview();
     initVerifiedPurchaseActivity();
     initRevealStagger();
     initFaqAccordion();

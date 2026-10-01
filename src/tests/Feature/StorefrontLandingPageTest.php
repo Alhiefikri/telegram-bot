@@ -93,7 +93,7 @@ class StorefrontLandingPageTest extends TestCase
         $heroHtml = $this->htmlBetween($html, '<section class="storefront-hero-card', '</section>');
 
         $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Produk', 'Desktop product nav should send customers to the catalog grid.');
-        $this->assertHtmlContainsLink($heroHtml, $shopUrl, 'Lihat Produk', 'Hero primary CTA should send customers to the catalog.');
+        $this->assertStringContainsString('storefront-banner-track', $heroHtml);
         $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Katalog Web', 'Desktop header should expose the website checkout path.');
         $this->assertHtmlContainsLink($headerHtml, $homeUrl.'#kategori', 'Kategori', 'Desktop header should expose category browsing.');
         $this->assertHtmlContainsLink($headerHtml, $homeUrl.'#trending', 'Trending', 'Desktop header should expose trending products.');
@@ -103,7 +103,7 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertHtmlContainsLink($mobileMenuHtml, $shopUrl, 'Katalog Web', 'Mobile menu should expose the website checkout path.');
         $this->assertHtmlContainsLink($mobileMenuHtml, $accessUrl, 'Akses Pesanan', 'Mobile menu should expose repeat order access.');
 
-        $this->assertHtmlContainsLink($heroHtml, '#cara-beli', 'Cara beli', 'Hero secondary CTA should explain the web checkout flow.');
+        $this->assertStringNotContainsString('hero-showcase-caption', $heroHtml);
     }
 
     public function test_storefront_omits_admin_dashboard_ctas_from_public_landing_page(): void
@@ -201,12 +201,12 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertSame(1, substr_count($html, 'id="cara-beli"'));
         $this->assertSame(1, substr_count($html, 'id="faq"'));
         $this->assertSame(1, substr_count($html, 'id="support"'));
-        $this->assertSame(1, substr_count($heroHtml, 'href="'.$shopUrl.'"'));
-        $this->assertSame(1, substr_count($heroHtml, 'href="#cara-beli"'));
+        $this->assertStringContainsString('storefront-banner-empty', $heroHtml);
+        $this->assertStringNotContainsString('Dari katalog', $heroHtml);
         $this->assertStringNotContainsString('id="featured-offer"', $html);
         $this->assertStringNotContainsString('id="features"', $html);
         $this->assertStringNotContainsString('neo-marquee', $html);
-        $this->assertStringNotContainsString('fixed', $activityHtml);
+        $this->assertStringContainsString('storefront-purchase-toast', $activityHtml);
         $this->assertStringContainsString('data-endpoint="'.route('storefront.verified-purchase-activity').'"', $activityHtml);
         $this->assertStringContainsString('Lihat ringkasan checkout dan akses ulang', $html);
         $this->assertStringContainsString('QRIS final muncul di halaman invoice setelah checkout.', $html);
