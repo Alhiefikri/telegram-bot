@@ -124,22 +124,99 @@ class CustomEmojiCapability
 
         $rendered = '';
         $cursor = 0;
+        $removals = [];
+        $added = [];
         foreach ($matches[0] as $index => [$markup, $byteOffset]) {
             $rendered .= substr($text, $cursor, $byteOffset - $cursor);
             $glyph = html_entity_decode($matches[2][$index][0], ENT_QUOTES | ENT_HTML5, 'UTF-8');
             $offset = $this->utf16Length($rendered);
             $rendered .= $glyph;
-            $entities[] = [
+            $added[] = [
                 'type' => 'custom_emoji',
                 'offset' => $offset,
                 'length' => $this->utf16Length($glyph),
                 'custom_emoji_id' => $matches[1][$index][0],
             ];
+            $markupStart = $this->utf16Length(substr($text, 0, $byteOffset));
+            $markupUnits = $this->utf16Length($markup);
+            $removals[] = [
+                'start' => $markupStart,
+                'end' => $markupStart + $markupUnits,
+                'delta' => $markupUnits - $this->utf16Length($glyph),
+            ];
             $cursor = $byteOffset + strlen($markup);
         }
         $rendered .= substr($text, $cursor);
 
-        return ['text' => $rendered, 'entities' => array_values($entities)];
+        $entities = $this->sortEntities([
+            ...$this->reoffsetEntities($entities, $removals),
+            ...$added,
+        ]);
+
+        return ['text' => $rendered, 'entities' => $entities];
+    }
+
+    /**
+     * Rebase caller-supplied entity offsets after custom-emoji markup is removed.
+     *
+     * Copyable values such as a Binance receiver or amount are located on the
+     * pre-replacement text, so every entity that sits after a removed tag must
+     * move back by the removed length. Entities that would land inside or out of
+     * range are dropped instead of sending an offset Telegram cannot parse.
+     *
+     * @param  list<array<string, mixed>>  $entities
+     * @param  list<array{start: int, end: int, delta: int}>  $removals
+     * @return list<array<string, mixed>>
+     */
+    private function reoffsetEntities(array $entities, array $removals): array
+    {
+        if ($removals === [] || $entities === []) {
+            return $this->sortEntities($entities);
+        }
+
+        $shifted = [];
+        foreach ($entities as $entity) {
+            if (! isset($entity['offset'], $entity['length'])) {
+                $shifted[] = $entity;
+
+                continue;
+            }
+
+            $offset = (int) $entity['offset'];
+            $length = (int) $entity['length'];
+            $delta = 0;
+            $overlap = false;
+            foreach ($removals as $removal) {
+                if ($removal['end'] <= $offset) {
+                    $delta += $removal['delta'];
+                } elseif ($removal['start'] < $offset + $length) {
+                    $overlap = true;
+
+                    break;
+                }
+            }
+
+            if ($overlap || $offset - $delta < 0) {
+                continue;
+            }
+
+            $entity['offset'] = $offset - $delta;
+            $shifted[] = $entity;
+        }
+
+        return $this->sortEntities($shifted);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $entities
+     * @return list<array<string, mixed>>
+     */
+    private function sortEntities(array $entities): array
+    {
+        $entities = array_values($entities);
+        usort($entities, static fn (array $left, array $right): int => (int) ($left['offset'] ?? 0) <=> (int) ($right['offset'] ?? 0));
+
+        return $entities;
     }
 
     /**

@@ -254,10 +254,11 @@ class TelegramCheckoutIntents
             : ($payment->binance_receiver_type === 'pay_id' ? 'BINANCE PAY ID' : (filled(config('services.binance.pay_id')) ? 'BINANCE PAY ID' : 'BINANCE UID'));
         $text = $this->paymentInstructions->binancePay($order, $payment, $receiver, $this->locale->code($customer), $autoVerify, $receiverLabel);
         $amount = $this->formatUsdt($payment->amount);
-        $copyEntities = [
-            $this->codeEntityForLine($text, $amount.' USDT', $amount),
-            $this->codeEntityForLine($text, $receiver, $receiver),
-        ];
+        $copyEntities = $this->copyableEntities($text, [
+            [$amount.' USDT', $amount],
+            [$receiver, $receiver],
+        ]);
+        $captionOptions = $copyEntities === [] ? [] : ['caption_entities' => $copyEntities];
 
         $photoPath = public_path('binance.jpeg');
         $photoContents = is_readable($photoPath) ? file_get_contents($photoPath) : false;
@@ -280,9 +281,7 @@ class TelegramCheckoutIntents
         }
 
         try {
-            return $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, $replyMarkup, [
-                'caption_entities' => $copyEntities,
-            ]);
+            return $this->bot->sendPhoto($chatId, $photoContents, 'binance.jpeg', $text, $replyMarkup, $captionOptions);
         } catch (Throwable) {
             // Prefer delivering the copyable payment details even if the photo
             // result is ambiguous; this can duplicate instructions if Telegram
@@ -304,8 +303,9 @@ class TelegramCheckoutIntents
         array $copyEntities,
     ): array {
         $fallbackText = $text."\n\n".$this->locale->translate($customer, 'payment.binance.text_fallback');
+        $options = $copyEntities === [] ? [] : ['entities' => $copyEntities];
 
-        return $this->bot->sendMessage($chatId, $fallbackText, $replyMarkup, ['entities' => $copyEntities]);
+        return $this->bot->sendMessage($chatId, $fallbackText, $replyMarkup, $options);
     }
 
     public function sendBscPaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): array
@@ -320,24 +320,51 @@ class TelegramCheckoutIntents
             throw new \LogicException('BSC Payment detail snapshot is missing.');
         }
         $amount = $this->formatUsdt((int) $detail->payable_amount_micro);
+        $copyEntities = $this->copyableEntities($instruction['text'], [
+            [$amount.' USDT', $amount],
+            [$detail->receiver_address, $detail->receiver_address],
+        ]);
 
         return $this->bot->sendMessage(
             $chatId,
             $instruction['text'],
             $instruction['reply_markup'],
-            ['entities' => [
-                $this->codeEntityForLine($instruction['text'], $amount.' USDT', $amount),
-                $this->codeEntityForLine($instruction['text'], $detail->receiver_address, $detail->receiver_address),
-            ]],
+            $copyEntities === [] ? [] : ['entities' => $copyEntities],
         );
     }
 
-    /** @return array{type: 'code', offset: int, length: int} */
-    private function codeEntityForLine(string $text, string $line, string $value): array
+    /**
+     * Build the copyable `code` entities for the payment values that should be
+     * tappable. A value that is not on its own line is skipped instead of
+     * aborting the whole instruction: the customer must always receive the
+     * receiver id and amount, even as plain text.
+     *
+     * @param  list<array{0: string, 1: string}>  $values
+     * @return list<array{type: 'code', offset: int, length: int}>
+     */
+    private function copyableEntities(string $text, array $values): array
     {
+        $entities = [];
+        foreach ($values as [$line, $value]) {
+            $entity = $this->codeEntityForLine($text, $line, $value);
+            if ($entity !== null) {
+                $entities[] = $entity;
+            }
+        }
+
+        return $entities;
+    }
+
+    /** @return array{type: 'code', offset: int, length: int}|null */
+    private function codeEntityForLine(string $text, string $line, string $value): ?array
+    {
+        if ($line === '' || $value === '') {
+            return null;
+        }
+
         $lineOffset = strpos($text, "\n{$line}\n");
         if ($lineOffset === false) {
-            throw new \LogicException('Copyable payment value was not found in the instruction.');
+            return null;
         }
 
         $valueOffset = $lineOffset + 1;
