@@ -160,9 +160,9 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(41124, '/status', ['id' => 41124], 41124))->assertOk();
 
         $copy = $this->visibleCopy($this->customerPayload('/sendMessage', 41124));
-        $this->assertStringContainsString('Status pesanan', $copy);
+        $this->assertStringContainsString('PESANAN SAYA', $copy);
         $this->assertStringContainsString('Menunggu pembayaran', $copy);
-        $this->assertStringNotContainsString('Order status', $copy);
+        $this->assertStringNotContainsString('MY ORDERS', $copy);
         $this->assertDatabaseHas('customers', ['telegram_id' => 41124, 'locale' => 'id']);
     }
 
