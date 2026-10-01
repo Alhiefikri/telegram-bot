@@ -257,7 +257,7 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->get(route('storefront.products.show', $product))
             ->assertOk()
             ->assertSee('Stok habis')
-            ->assertSee('Restock segera')
+            ->assertSee('data-image-preview-open', false)
             ->assertDontSee(route('storefront.shop.checkout.product', ['product' => $product]), false)
             ->assertDontSee('data-checkout-product=', false)
             ->assertDontSee('data-product=', false)
