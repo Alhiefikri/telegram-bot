@@ -27,6 +27,7 @@ use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 final class BscReadinessTest extends TestCase
@@ -406,8 +407,12 @@ final class BscReadinessTest extends TestCase
         $this->assertSame(0, $this->rpc->callsUnderCheckoutTransaction);
     }
 
-    public function test_stale_bsc_readiness_is_rejected_against_the_locked_setting_snapshot(): void
+    #[DataProvider('staleSettingTimestamps')]
+    public function test_stale_bsc_readiness_is_rejected_against_the_locked_setting_snapshot(bool $advanceTimestamp): void
     {
+        // Database timestamps have second precision. Pin both cases rather
+        // than letting wall-clock timing decide which safety guard fires.
+        $this->travelTo(ManualPaymentSetting::current()->updated_at->copy()->addSeconds($advanceTimestamp ? 1 : 0));
         $this->rpc->disableSettingOnFirstCall = true;
         $product = Product::factory()->create([
             'stock' => 1,
@@ -434,15 +439,27 @@ final class BscReadinessTest extends TestCase
             );
             $this->fail('Expected stale BSC readiness to reject checkout.');
         } catch (InvalidCheckout $exception) {
-            $this->assertStringContainsString('BSC payment rail', $exception->getMessage());
+            $this->assertSame(
+                $advanceTimestamp
+                    ? 'Checkout payment preflight is stale.'
+                    : 'BSC payment rail is no longer enabled. Try again.',
+                $exception->getMessage(),
+            );
         }
 
+        $this->assertFalse(ManualPaymentSetting::current()->bsc_payment_enabled);
         $this->assertSame(0, Order::query()->count());
         $this->assertSame(0, Payment::query()->count());
         $this->assertSame(0, InventoryMovement::query()->count());
         $this->assertSame(0, TelegramOutboundEffect::query()->count());
         $this->assertSame(0, $product->fresh()->reserved_stock);
         $this->assertSame(0, $this->rpc->callsUnderCheckoutTransaction);
+    }
+
+    public static function staleSettingTimestamps(): iterable
+    {
+        yield 'same database timestamp' => [false];
+        yield 'changed database timestamp' => [true];
     }
 
     public function test_binance_pay_id_checkout_does_not_preflight_bsc_readiness(): void

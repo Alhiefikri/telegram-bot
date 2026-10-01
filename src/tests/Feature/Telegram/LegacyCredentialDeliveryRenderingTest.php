@@ -10,14 +10,79 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\TelegramUiIcon;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramMessageUnit;
 use App\Services\Telegram\TelegramOrderIntents;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
 class LegacyCredentialDeliveryRenderingTest extends TelegramBotTestSupport
 {
+    #[DataProvider('premiumIconReceiptCases')]
+    public function test_paid_legacy_receipt_with_premium_icons_delivers_copyable_credentials(
+        string $productName,
+        bool $rejectPhoto,
+    ): void {
+        Queue::fake();
+        $customer = Customer::factory()->create(['telegram_id' => 445568, 'locale' => 'id']);
+        $email = 'buyer@example.test';
+        $password = 'Päss😀word<&>';
+        $order = $this->legacyPaidOrder($customer, $email.'|'.$password);
+        $order->orderItems()->sole()->update([
+            'product_name' => $productName,
+            'product_icon' => '🎵',
+            'product_custom_emoji_id' => '5368324170671202286',
+        ]);
+        foreach (['message.receipt', 'message.payment_card', 'message.account'] as $key) {
+            TelegramUiIcon::query()->where('key', $key)->sole()->update([
+                'custom_emoji_id' => '5368324170671202286',
+            ]);
+        }
+        app(CustomEmojiCapability::class)->markAvailable();
+
+        $deliveredMethods = [];
+        Http::preventStrayRequests();
+        Http::fake(function ($request) use ($rejectPhoto, $email, $password, &$deliveredMethods) {
+            $photo = str_ends_with($request->url(), '/sendPhoto');
+            $text = (string) $this->telegramRequestField($request, $photo ? 'caption' : 'text');
+            $entities = $this->telegramRequestField($request, $photo ? 'caption_entities' : 'entities') ?? [];
+            $entities = is_string($entities) ? json_decode($entities, true, flags: JSON_THROW_ON_ERROR) : $entities;
+            $codes = array_values(array_filter($entities, fn (array $entity): bool => $entity['type'] === 'code'));
+            $values = array_map(fn (array $entity): string => $this->telegramEntityText($text, $entity), $codes);
+
+            // Telegram rejects invalid ranges in both captions and text. Model
+            // that response so a swallowed send error still fails completion.
+            if ($values !== [$email, $password] || ($photo && $rejectPhoto)) {
+                return Http::response(['ok' => false, 'description' => 'Bad Request: invalid message entities'], 400);
+            }
+
+            $this->assertStringNotContainsString('<tg-emoji', $text);
+            $this->assertTrue(collect($entities)->contains(fn (array $entity): bool => $entity['type'] === 'custom_emoji'));
+            $this->assertTrue(filter_var($this->telegramRequestField($request, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
+            $deliveredMethods[] = $photo ? 'sendPhoto' : 'sendMessage';
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 123458]]);
+        });
+
+        app(TelegramReceiptNotifier::class)->send($order->fresh());
+
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertSame([$rejectPhoto ? 'sendMessage' : 'sendPhoto'], $deliveredMethods);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+    }
+
+    public static function premiumIconReceiptCases(): iterable
+    {
+        foreach (['SPOTIFY 2 MONTH PRIVATE', 'PRIME VIDEO PRIVATE'] as $productName) {
+            yield $productName.' photo' => [$productName, false];
+            yield $productName.' text fallback' => [$productName, true];
+        }
+    }
+
     public function test_legacy_receipt_and_order_detail_do_not_format_auth_token_tutorial_text(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 445566, 'locale' => 'id']);
