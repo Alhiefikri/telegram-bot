@@ -14,6 +14,7 @@ use App\Services\Credentials\CredentialIdentityFingerprint;
 use App\Services\Credentials\CredentialIdentityKind;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -149,30 +150,58 @@ class ProductStockItemManager
 
     public function deleteAvailable(Product $product, ProductStockItem $stockItem, User $user, ?string $ip = null): Product
     {
-        return DB::transaction(function () use ($product, $stockItem, $user, $ip): Product {
+        return $this->deleteAvailableBatch($product, [(int) $stockItem->id], $user, $ip, single: true);
+    }
+
+    /** @param list<int> $ids */
+    public function deleteAvailableBatch(Product $product, array $ids, User $user, ?string $ip = null, bool $single = false): Product
+    {
+        if ($ids === [] || count($ids) > 100 || count(array_unique($ids)) !== count($ids)
+            || array_filter($ids, fn ($id) => ! is_int($id) || $id < 1) !== []) {
+            throw ValidationException::withMessages([
+                'stock_item_ids' => 'Pilih 1 sampai 100 stok yang berbeda.',
+            ]);
+        }
+
+        sort($ids);
+        $count = count($ids);
+
+        return DB::transaction(function () use ($product, $ids, $count, $user, $ip, $single): Product {
             /** @var Product $lockedProduct */
             $lockedProduct = Product::query()
                 ->whereKey($product->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            /** @var ProductStockItem $lockedItem */
-            $lockedItem = ProductStockItem::query()
-                ->whereKey($stockItem->getKey())
+            // Lock Product before items, matching checkout. Do not decrypt credentials.
+            $items = ProductStockItem::query()
+                ->select('id')
+                ->whereIn('id', $ids)
                 ->where('product_id', $lockedProduct->id)
                 ->whereNull('order_item_id')
                 ->whereNull('retired_at')
+                ->orderBy('id')
                 ->lockForUpdate()
-                ->firstOrFail();
+                ->get();
+
+            if ($items->count() !== $count) {
+                if ($single) {
+                    throw (new ModelNotFoundException)->setModel(ProductStockItem::class, $ids);
+                }
+
+                throw ValidationException::withMessages([
+                    'stock_item_ids' => 'Pilihan stok berubah atau tidak tersedia. Muat ulang dan pilih kembali. Tidak ada stok dihapus.',
+                ]);
+            }
 
             $availableBefore = $lockedProduct->availableStock();
             $old = [
                 'stock' => $lockedProduct->stock,
                 'reserved_stock' => $lockedProduct->reserved_stock,
                 'available_stock' => $availableBefore,
-                'stock_item_id' => $lockedItem->id,
+                ...($single ? ['stock_item_id' => $ids[0]] : ['stock_item_ids' => $ids]),
             ];
-            $newStock = $lockedProduct->stock - 1;
+            $newStock = $lockedProduct->stock - $count;
 
             if ($newStock < $lockedProduct->reserved_stock) {
                 throw ValidationException::withMessages([
@@ -180,7 +209,7 @@ class ProductStockItemManager
                 ]);
             }
 
-            $lockedItem->delete();
+            ProductStockItem::query()->whereIn('id', $ids)->delete();
             $lockedProduct->forceFill(['stock' => $newStock])->save();
             $availableAfter = $lockedProduct->refresh()->availableStock();
             $becameUnavailable = $availableBefore > 0 && $availableAfter === 0;
@@ -188,12 +217,12 @@ class ProductStockItemManager
             $movement = InventoryMovement::create([
                 'product_id' => $lockedProduct->id,
                 'type' => InventoryMovementType::Adjustment,
-                'quantity' => -1,
+                'quantity' => -$count,
                 'stock_before' => $old['stock'],
                 'became_unavailable' => $becameUnavailable,
                 'available_before' => $availableBefore,
                 'available_after' => $availableAfter,
-                'notes' => 'Hapus stok manual dashboard (1 item).',
+                'notes' => 'Hapus stok manual dashboard ('.$count.' item).',
                 'created_at' => now(),
             ]);
 
@@ -202,15 +231,15 @@ class ProductStockItemManager
             }
 
             $this->auditLogger->log(
-                'product_stock_item.deleted',
+                $single ? 'product_stock_item.deleted' : 'product_stock_items.bulk_deleted',
                 $lockedProduct,
                 $old,
                 [
                     'stock' => $newStock,
                     'reserved_stock' => $lockedProduct->reserved_stock,
                     'available_stock' => $availableAfter,
-                    'stock_item_id' => $lockedItem->id,
-                    'delta' => -1,
+                    ...($single ? ['stock_item_id' => $ids[0]] : ['stock_item_ids' => $ids]),
+                    'delta' => -$count,
                 ],
                 $user,
                 $ip,
@@ -218,16 +247,16 @@ class ProductStockItemManager
 
             $productId = (int) $lockedProduct->id;
             $movementId = (int) $movement->id;
-            DB::afterCommit(function () use ($productId, $movementId, $becameUnavailable): void {
+            DB::afterCommit(function () use ($productId, $movementId, $becameUnavailable, $count): void {
                 $this->deletionFakeSalesProof->record(
                     $productId,
-                    1,
+                    $count,
                     $becameUnavailable ? $movementId : null,
                 );
             });
 
             return $lockedProduct->refresh();
-        });
+        }, attempts: 5);
     }
 
     /**

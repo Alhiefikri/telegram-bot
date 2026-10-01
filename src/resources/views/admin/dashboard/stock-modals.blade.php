@@ -380,6 +380,19 @@
                             </x-admin-dashboard.button>
                         </div>
 
+                        <p x-show="manageStockDeleteMessage" x-text="manageStockDeleteMessage" role="status" class="mb-3 text-sm font-bold"></p>
+                        <p x-show="manageStockDeleteError" x-text="manageStockDeleteError" role="alert" class="mb-3 text-sm font-bold text-[#b91c1c]"></p>
+                        <div x-show="!manageStockLoading && !manageStockLoadError && manageStockSelectableItems().length" class="sticky top-0 z-10 mb-3 flex flex-wrap items-center gap-3 rounded-lg border-2 border-neo-ink bg-white p-3">
+                            <label class="flex min-h-11 items-center gap-2 text-xs font-bold">
+                                <input type="checkbox" class="h-5 w-5 accent-[#050505]" x-bind:disabled="manageStockDeleting" x-bind:checked="manageStockSelectableItems().length > 0 && manageStockSelectedIds.length === manageStockSelectableItems().length" x-on:change="toggleAllManageStockSelection()">
+                                Pilih semua yang tampil
+                            </label>
+                            <x-admin-dashboard.button type="button" variant="pink" size="sm" x-bind:disabled="manageStockDeleting || manageStockSelectedIds.length === 0" x-on:click="deleteSelectedManageStock()">
+                                <span x-text="manageStockDeleting ? 'Menghapus…' : `Hapus terpilih (${manageStockSelectedIds.length})`">Hapus terpilih (0)</span>
+                            </x-admin-dashboard.button>
+                            <p class="w-full text-[11px] font-bold">Hanya akun tersedia yang bisa dipilih. Setelah dihapus, daftar berikutnya dimuat otomatis.</p>
+                        </div>
+
                         <div x-show="!manageStockLoading && !manageStockLoadError" class="space-y-3">
                             <template x-for="group in manageStockGroups()" :key="group.key">
                                 <section class="rounded-[0.55rem] border-2 border-neo-ink bg-white/80 p-2 shadow-[3px_3px_0_0_#050505]">
@@ -398,6 +411,7 @@
                                                 <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
                                                     <div class="min-w-0">
                                                         <div class="flex flex-wrap items-center gap-1.5">
+                                                            <input type="checkbox" x-show="item.editable && item.delete_url" class="h-5 w-5 accent-[#050505]" x-bind:aria-label="`Pilih akun stok #${item.displayIndex}`" x-bind:checked="manageStockSelectedIds.includes(item.id)" x-bind:disabled="manageStockDeleting" x-on:change="toggleManageStockSelection(item.id)">
                                                             <span class="font-display text-[11px] font-black text-neo-ink" x-text="`#${item.displayIndex}`">#1</span>
                                                             <span class="rounded-[0.35rem] border-2 border-neo-ink px-1.5 py-0.5 text-[8px] font-black uppercase shadow-none" x-bind:class="{ 'bg-[#38bdf8]': item.status === 'TERSEDIA', 'bg-[#facc15]': item.status === 'DIPESAN', 'bg-[#7BD10A]': item.status === 'PAID', 'bg-[#fb7185] text-white': item.status === 'EXPIRED' || item.status === 'CANCELLED' || item.status === 'REPAIR', 'bg-[#cbd5e1]': item.status === 'RETIRED' }" x-text="item.status">TERSEDIA</span>
                                                             <span x-show="item.metadata" class="text-[9px] font-extrabold normal-case text-[#475569]" x-text="item.metadata"></span>
@@ -412,15 +426,15 @@
                                                         <p x-show="item.credential_format === 'structured_account' && !item.credential_payload" class="mt-1.5 text-[10px] font-black text-[#b91c1c]">Payload tidak dapat dibaca. Read-only.</p>
                                                     </div>
                                                     <div class="flex flex-row gap-1.5 sm:flex-col">
-                                                        <x-admin-dashboard.button type="button" variant="secondary" size="icon" class="rounded-[0.35rem]" aria-label="Ubah akun stok" x-bind:aria-expanded="item.editing" x-on:click="item.editing = ! item.editing" x-show="item.editable">✏️</x-admin-dashboard.button>
-                                                        <form method="POST" x-bind:action="item.delete_url" x-show="item.editable" x-on:submit="if (! confirm('Hapus akun stok ini?')) $event.preventDefault()">
+                                                        <x-admin-dashboard.button type="button" variant="secondary" size="icon" class="rounded-[0.35rem]" aria-label="Ubah akun stok" x-bind:aria-expanded="item.editing" x-bind:disabled="manageStockDeleting" x-on:click="item.editing = ! item.editing" x-show="item.editable">✏️</x-admin-dashboard.button>
+                                                        <form method="POST" x-bind:action="item.delete_url" x-show="item.editable" x-on:submit="if (manageStockDeleting || ! confirm('Hapus akun stok ini?')) $event.preventDefault()">
                                                             @csrf
                                                             <input type="hidden" name="_method" value="DELETE">
-                                                            <x-admin-dashboard.button type="submit" variant="pink" size="icon" class="rounded-[0.35rem]" aria-label="Hapus akun stok">🗑️</x-admin-dashboard.button>
+                                                            <x-admin-dashboard.button type="submit" variant="pink" size="icon" class="rounded-[0.35rem]" x-bind:disabled="manageStockDeleting" aria-label="Hapus akun stok">🗑️</x-admin-dashboard.button>
                                                         </form>
-                                                        <form method="POST" x-bind:action="item.cancel_release_url" x-show="item.cancel_release_url" x-on:submit="if (! confirm('Batalkan order dan lepas stok ini?')) $event.preventDefault()">
+                                                        <form method="POST" x-bind:action="item.cancel_release_url" x-show="item.cancel_release_url" x-on:submit="if (manageStockDeleting || ! confirm('Batalkan order dan lepas stok ini?')) $event.preventDefault()">
                                                             @csrf
-                                                            <x-admin-dashboard.button type="submit" variant="warning" size="icon" class="rounded-[0.35rem]" aria-label="Batalkan order dan lepas stok ini">↩</x-admin-dashboard.button>
+                                                            <x-admin-dashboard.button type="submit" variant="warning" size="icon" class="rounded-[0.35rem]" x-bind:disabled="manageStockDeleting" aria-label="Batalkan order dan lepas stok ini">↩</x-admin-dashboard.button>
                                                         </form>
                                                     </div>
                                                 </div>
@@ -457,7 +471,7 @@
                                                             <p x-show="manageStockError('access_value')" x-bind:id="'stock-item-' + item.id + '-access-value-error'" x-text="manageStockError('access_value')" role="alert" class="mt-1 text-xs font-black text-[#b91c1c]"></p>
                                                         </div>
                                                         <div class="grid grid-cols-2 gap-2 sm:justify-end">
-                                                            <x-admin-dashboard.button type="submit" variant="secondary" size="sm">Simpan</x-admin-dashboard.button>
+                                                            <x-admin-dashboard.button type="submit" variant="secondary" size="sm" x-bind:disabled="manageStockDeleting">Simpan</x-admin-dashboard.button>
                                                             <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-on:click="item.editing = false">Batal</x-admin-dashboard.button>
                                                         </div>
                                                     </form>
@@ -469,7 +483,7 @@
                                                         <input type="hidden" name="_method" value="PATCH">
                                                         <x-admin-dashboard.textarea name="secret" rows="2" class="min-h-16 font-mono text-[11px]" x-model="item.secret" />
                                                         <div class="grid grid-cols-2 gap-2 sm:grid-cols-1">
-                                                            <x-admin-dashboard.button type="submit" variant="secondary" size="sm" class="self-start">Simpan</x-admin-dashboard.button>
+                                                            <x-admin-dashboard.button type="submit" variant="secondary" size="sm" class="self-start" x-bind:disabled="manageStockDeleting">Simpan</x-admin-dashboard.button>
                                                             <x-admin-dashboard.button type="button" variant="neutral" size="sm" class="self-start" x-on:click="item.editing = false">Batal</x-admin-dashboard.button>
                                                         </div>
                                                     </form>
@@ -483,7 +497,7 @@
 
                         <x-admin-dashboard.empty-state title="Belum ada akun tersedia." body="Tambahkan stok baru." x-show="!manageStockLoading && !manageStockLoadError && manageStockItems.length === 0" class="rounded-neo-md p-4 text-sm font-bold text-neo-ink" />
 
-                        <x-admin-dashboard.button type="button" variant="primary" class="mt-4 w-full" x-show="!manageStockLoading && !manageStockLoadError" x-bind:disabled="!manageStockAddPayload" x-on:click="openStockModalFromManage()">
+                        <x-admin-dashboard.button type="button" variant="primary" class="mt-4 w-full" x-show="!manageStockLoading && !manageStockLoadError" x-bind:disabled="!manageStockAddPayload || manageStockDeleting" x-on:click="openStockModalFromManage()">
                             ➕ Tambah stok baru
                         </x-admin-dashboard.button>
                     </x-admin-dashboard.modal-shell>

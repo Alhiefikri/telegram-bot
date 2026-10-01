@@ -30,6 +30,27 @@ use Tests\Support\TelegramBotTestSupport;
 
 class ProductStockDeletionFakeSalesProofTest extends TelegramBotTestSupport
 {
+    public function test_bulk_deletion_records_one_movement_and_aggregates_the_full_quantity_after_commit(): void
+    {
+        Queue::fake();
+        $this->fakeTelegramHttp();
+        $this->configureChannel();
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0, 'name' => 'Bulk deletion product']);
+        $ids = collect(range(1, 2))->map(fn () => ProductStockItem::create([
+            'product_id' => $product->id, 'secret' => 'private-bulk',
+        ])->id)->all();
+        app(ProductStockItemManager::class)->deleteAvailableBatch($product, $ids, User::factory()->create());
+        $this->assertSame(-2, InventoryMovement::sole()->quantity);
+        $this->assertSame(0, $product->fresh()->stock);
+        Queue::assertNotPushed(SendProductStockNotifications::class);
+        $job = $this->captureDeletionJob($product->id);
+        $this->assertCount(0, Http::recorded());
+        $job->handle(app(ProductStockDeletionFakeSalesProofAggregator::class), app(FakeSalesProofPostPublisher::class));
+        $photo = $this->telegramPhotoRequests()->sole()[0];
+        $this->assertStringContainsString('Bulk deletion product × 2', (string) $this->telegramRequestField($photo, 'caption'));
+        Queue::assertPushedOn(StockNotificationDeliveryPipeline::QUEUE, SendProductStockNotifications::class);
+    }
+
     public function test_same_product_deletions_share_one_tiered_fee_aware_fake_proof_job(): void
     {
         Queue::fake();

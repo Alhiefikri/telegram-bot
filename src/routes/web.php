@@ -26,6 +26,7 @@ use App\Http\Controllers\Admin\AdminProductFamilyMembershipController;
 use App\Http\Controllers\Admin\AdminProductFamilyUpdateController;
 use App\Http\Controllers\Admin\AdminProductStockController;
 use App\Http\Controllers\Admin\AdminProductStockItemDeleteController;
+use App\Http\Controllers\Admin\AdminProductStockItemsBulkDeleteController;
 use App\Http\Controllers\Admin\AdminProductStockItemsController;
 use App\Http\Controllers\Admin\AdminProductStockItemUpdateController;
 use App\Http\Controllers\Admin\AdminProductUpdateController;
@@ -221,6 +222,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('{product}/stock', AdminProductStockController::class)->name('stock.store');
                 Route::post('{product}/stock/accounts/review', [AdminProductAccountStockController::class, 'review'])->name('stock.accounts.review');
                 Route::post('{product}/stock/accounts', AdminProductAccountStockController::class)->name('stock.accounts.store');
+                Route::delete('{product}/stock-items', AdminProductStockItemsBulkDeleteController::class)->name('stock-items.bulk-destroy');
                 Route::patch('{product}/stock-items/{stockItem}', AdminProductStockItemUpdateController::class)->name('stock-items.update');
                 Route::delete('{product}/stock-items/{stockItem}', AdminProductStockItemDeleteController::class)->name('stock-items.destroy');
             });

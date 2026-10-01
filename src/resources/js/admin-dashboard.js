@@ -253,6 +253,12 @@ export default function adminDashboard(initialState = {}) {
     manageStockLoadPayload: null,
     manageStockLoadEditingItemId: null,
     manageStockRequestId: 0,
+    stockCountSnapshots: {},
+    manageStockSelectedIds: [],
+    manageStockBulkDeleteUrl: "",
+    manageStockDeleting: false,
+    manageStockDeleteMessage: "",
+    manageStockDeleteError: "",
     manageStockInitialPayload: initialState.manageStockPayload ?? null,
     manageStockInitialEditingItemId:
       initialState.manageStockEditingItemId ?? null,
@@ -935,10 +941,99 @@ export default function adminDashboard(initialState = {}) {
       this.productModalOpen = false;
     },
 
+    manageStockSelectableItems() {
+      return this.manageStockItems.filter(
+        (item) => item.editable && item.delete_url
+      );
+    },
+
+    toggleManageStockSelection(id) {
+      if (this.manageStockDeleting) return;
+      this.manageStockSelectedIds = this.manageStockSelectedIds.includes(id)
+        ? this.manageStockSelectedIds.filter((selected) => selected !== id)
+        : [...this.manageStockSelectedIds, id];
+    },
+
+    toggleAllManageStockSelection() {
+      if (this.manageStockDeleting) return;
+      const ids = this.manageStockSelectableItems().map((item) => item.id);
+      this.manageStockSelectedIds = ids.every((id) =>
+        this.manageStockSelectedIds.includes(id)
+      )
+        ? []
+        : ids;
+    },
+
+    async deleteSelectedManageStock() {
+      const ids = [...this.manageStockSelectedIds];
+      if (
+        this.manageStockDeleting ||
+        this.manageStockLoading ||
+        !ids.length ||
+        !this.manageStockBulkDeleteUrl
+      )
+        return;
+      if (
+        !confirm(
+          `Hapus ${ids.length} akun stok terpilih? Tindakan ini permanen dan tidak dapat dibatalkan.`
+        )
+      )
+        return;
+
+      this.manageStockDeleting = true;
+      this.manageStockDeleteMessage = "";
+      this.manageStockDeleteError = "";
+      try {
+        const response = await fetch(this.manageStockBulkDeleteUrl, {
+          method: "DELETE",
+          credentials: "same-origin",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "X-CSRF-TOKEN":
+              document.querySelector('meta[name="csrf-token"]')?.content ?? "",
+          },
+          body: JSON.stringify({ stock_item_ids: ids }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (
+          !response.ok ||
+          response.redirected ||
+          body.deleted_count !== ids.length
+        ) {
+          this.manageStockDeleteError =
+            response.status === 422
+              ? "Pilihan stok berubah atau tidak dapat dihapus. Tidak ada stok dihapus. Pilih kembali setelah data dimuat ulang."
+              : "Penghapusan belum dapat dipastikan. Periksa data terbaru sebelum mencoba lagi.";
+        } else {
+          this.manageStockDeleteMessage = `${ids.length} akun stok berhasil dihapus.`;
+        }
+      } catch {
+        this.manageStockDeleteError =
+          "Koneksi terputus. Periksa data terbaru sebelum mencoba lagi.";
+      } finally {
+        this.manageStockSelectedIds = [];
+        await this.retryManageStockLoad();
+        this.manageStockDeleting = false;
+      }
+    },
+
     applyManageStockPayload(product, editingItemId = null) {
       const editingId = editingItemId === null ? null : String(editingItemId);
+      if (
+        Number.isInteger(product.availableStock) &&
+        Number.isInteger(product.reservedStock)
+      ) {
+        this.stockCountSnapshots[product.id] = {
+          stock: product.stock,
+          available: product.availableStock,
+          reserved: product.reservedStock,
+        };
+      }
 
       Object.assign(this, {
+        manageStockBulkDeleteUrl: product.bulkDeleteUrl ?? "",
+        manageStockSelectedIds: [],
         manageStockProductName: product.name,
         manageStockProductStock: product.stock,
         manageStockItems: editableStockItems(product.stockItems).map(
@@ -973,6 +1068,7 @@ export default function adminDashboard(initialState = {}) {
       this.manageStockLoadEditingItemId = editingItemId;
       this.manageStockLoadError = "";
       this.manageStockLoading = true;
+      this.manageStockSelectedIds = [];
       this.manageStockItems = [];
       this.manageStockSummary = { available: 0, reserved: 0, paid: 0 };
       this.manageStockTruncated = false;
@@ -1023,6 +1119,9 @@ export default function adminDashboard(initialState = {}) {
     },
 
     async openManageStockModal(product) {
+      if (this.manageStockDeleting) return;
+      this.manageStockDeleteMessage = "";
+      this.manageStockDeleteError = "";
       this.manageStockModalOpener = document.activeElement;
       this.manageStockInitialPayload = null;
       this.manageStockInitialEditingItemId = null;
@@ -1046,6 +1145,11 @@ export default function adminDashboard(initialState = {}) {
     },
 
     closeManageStockModal(restoreFocus = true) {
+      if (this.manageStockDeleting) return;
+      this.manageStockSelectedIds = [];
+      this.manageStockBulkDeleteUrl = "";
+      this.manageStockDeleteMessage = "";
+      this.manageStockDeleteError = "";
       const opener = this.manageStockModalOpener;
       this.manageStockRequestId += 1;
       this.manageStockModalOpen = false;
@@ -1067,7 +1171,11 @@ export default function adminDashboard(initialState = {}) {
     },
 
     openStockModalFromManage() {
-      if (!this.manageStockAddPayload || this.manageStockLoading) {
+      if (
+        !this.manageStockAddPayload ||
+        this.manageStockLoading ||
+        this.manageStockDeleting
+      ) {
         return;
       }
 

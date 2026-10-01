@@ -3830,6 +3830,82 @@ async function submitProductFromMiniAppModal(page) {
   await expectPrimaryActionsAtLeast44px(page);
 }
 
+test("bulk stock deletion keeps mobile modal open and refreshes remaining accounts", async ({
+  page,
+}) => {
+  runArtisan([
+    "tinker",
+    "--execute",
+    `
+    $product = \\App\\Models\\Product::factory()->create(['name' => 'Bulk Stock QA', 'stock' => 30, 'reserved_stock' => 0]);
+    foreach (range(1, 30) as $index) {
+      \\App\\Models\\ProductStockItem::create(['product_id' => $product->id, 'secret' => 'bulk-fixture-'.$index]);
+    }
+  `,
+  ]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+  const card = await getAdminProductCard(page, "Bulk Stock QA");
+  await card.getByRole("button", { name: "Kelola", exact: true }).click();
+  const modal = page.getByRole("dialog", { name: "Kelola Stok" });
+  const selection = modal.getByRole("checkbox", { name: /Pilih akun stok/ });
+  await expect(selection).toHaveCount(25);
+  await expect(card.locator('span[x-text*="stockCountSnapshots"]')).toHaveText([
+    "30",
+    "30",
+    "0",
+  ]);
+  await modal
+    .getByRole("checkbox", { name: "Pilih semua yang tampil" })
+    .check();
+  await expect(
+    modal.getByRole("button", { name: "Hapus terpilih (25)" })
+  ).toBeEnabled();
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await modal.getByRole("button", { name: "Hapus terpilih (25)" }).click();
+  await expect(selection).toHaveCount(25);
+  await modal
+    .getByRole("checkbox", { name: "Pilih semua yang tampil" })
+    .uncheck();
+  await selection.first().check();
+  let mutationBody;
+  page.on("request", (request) => {
+    if (request.method() === "DELETE" && request.url().includes("stock-items"))
+      mutationBody = request.postDataJSON();
+  });
+  page.once("dialog", (dialog) => dialog.accept());
+  await modal.getByRole("button", { name: "Hapus terpilih (1)" }).click();
+  await expect(modal.getByText("1 akun stok berhasil dihapus.")).toBeVisible();
+  await expect(selection).toHaveCount(25);
+  await expect(selection.first()).not.toBeChecked();
+  await expect(modal).toBeVisible();
+  expect(Object.keys(mutationBody)).toEqual(["stock_item_ids"]);
+  expect(mutationBody.stock_item_ids).toHaveLength(1);
+  await modal
+    .getByRole("checkbox", { name: "Pilih semua yang tampil" })
+    .check();
+  page.once("dialog", (dialog) => dialog.accept());
+  await modal.getByRole("button", { name: "Hapus terpilih (25)" }).click();
+  await expect(modal.getByText("25 akun stok berhasil dihapus.")).toBeVisible();
+  await expect(selection).toHaveCount(4);
+  await expect(selection.first()).not.toBeChecked();
+  await modal
+    .getByRole("checkbox", { name: "Pilih semua yang tampil" })
+    .check();
+  page.once("dialog", (dialog) => dialog.accept());
+  await modal.getByRole("button", { name: "Hapus terpilih (4)" }).click();
+  await expect(modal.getByText("4 akun stok berhasil dihapus.")).toBeVisible();
+  await expect(selection).toHaveCount(0);
+  await expect(modal.getByText("Belum ada akun tersedia.")).toBeVisible();
+  await expect(card.locator('span[x-text*="stockCountSnapshots"]')).toHaveText([
+    "0",
+    "0",
+    "0",
+  ]);
+  await expectNoDocumentOverflow(page);
+});
+
 async function login(page) {
   await page.goto(`${baseUrl}/admin/login`);
   await page.getByLabel("Username / email admin").fill("test@example.com");

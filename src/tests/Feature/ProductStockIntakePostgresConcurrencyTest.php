@@ -210,6 +210,78 @@ final class ProductStockIntakePostgresConcurrencyTest extends TestCase
         }
     }
 
+    public function test_bulk_delete_racing_checkout_never_deletes_allocated_credentials(): void
+    {
+        $this->requireConcurrencyLane();
+        $this->freshConcurrencySchema();
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+        $admin = User::factory()->create(['role' => 'admin']);
+        app(ProductStockIntake::class)->submit($product, ProductStockIntakeSubmission::structured([
+            $this->account('bulk-a@example.test', 'private-a'),
+            $this->account('bulk-b@example.test', 'private-b'),
+        ]), $admin, dispatchNotifications: false);
+        $product->refresh();
+        $ids = ProductStockItem::orderBy('id')->pluck('id')->all();
+        $cart = $this->cartFor($product, 781010);
+        $results = $this->runConcurrently([
+            fn (): array => $this->runBulkDeleteWorker($product->id, $ids, $admin->id),
+            fn (): array => $this->runCheckoutWorker($cart->id),
+        ]);
+        $outcomes = array_column($this->successfulWorkerResults($results), 'outcome');
+        $this->assertCount(2, $outcomes, $this->safeResultsJson($results));
+        if (in_array('deleted', $outcomes, true)) {
+            $this->assertContains('checkout_rejected', $outcomes);
+            $this->assertSame(0, ProductStockItem::count());
+            $this->assertSame(0, $product->fresh()->stock);
+            $this->assertSame(0, $product->fresh()->reserved_stock);
+        } else {
+            $this->assertContains('checkout_created', $outcomes);
+            $this->assertContains('delete_rejected', $outcomes);
+            $this->assertSame(2, ProductStockItem::count());
+            $this->assertSame(1, ProductStockItem::whereNotNull('order_item_id')->count());
+            $this->assertSame(2, $product->fresh()->stock);
+            $this->assertSame(1, $product->fresh()->reserved_stock);
+        }
+        $this->assertSame(in_array('deleted', $outcomes, true) ? 1 : 0,
+            InventoryMovement::where('quantity', -2)->count());
+    }
+
+    public function test_overlapping_bulk_deletes_commit_only_one_whole_batch(): void
+    {
+        $this->requireConcurrencyLane();
+        $this->freshConcurrencySchema();
+        $product = Product::factory()->create(['stock' => 3, 'reserved_stock' => 0]);
+        $admin = User::factory()->create(['role' => 'admin']);
+        $ids = collect(range(1, 3))->map(fn () => ProductStockItem::create([
+            'product_id' => $product->id, 'secret' => 'private',
+        ])->id)->all();
+        $results = $this->runConcurrently([
+            fn (): array => $this->runBulkDeleteWorker($product->id, [$ids[0], $ids[1]], $admin->id),
+            fn (): array => $this->runBulkDeleteWorker($product->id, [$ids[1], $ids[2]], $admin->id),
+        ]);
+        $outcomes = array_column($this->successfulWorkerResults($results), 'outcome');
+        sort($outcomes);
+        $this->assertSame(['delete_rejected', 'deleted'], $outcomes, $this->safeResultsJson($results));
+        $this->assertSame(1, ProductStockItem::count());
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(-2, InventoryMovement::sole()->quantity);
+    }
+
+    /** @param list<int> $ids */
+    private function runBulkDeleteWorker(int $productId, array $ids, int $adminId): array
+    {
+        try {
+            app(ProductStockItemManager::class)->deleteAvailableBatch(
+                Product::findOrFail($productId), $ids, User::findOrFail($adminId),
+            );
+
+            return ['outcome' => 'deleted'];
+        } catch (ValidationException) {
+            return ['outcome' => 'delete_rejected'];
+        }
+    }
+
     /** @return array{email:string,password:string,access_method:string,access_value:null} */
     private function account(string $email, string $password): array
     {

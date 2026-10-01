@@ -218,6 +218,7 @@ final class AdminDashboardProductsData
                         'stockSummary' => $stockSummary,
                         'stockItemsTruncated' => (int) ($summary?->total ?? 0) > count($stockItems),
                         'stockItems' => $stockItems,
+                        'bulkDeleteUrl' => route('admin.products.stock-items.bulk-destroy', $product),
                         'stockItemsUrl' => route('admin.products.stock-items.index', ['product' => $product]),
                     ],
                 ]];
@@ -295,6 +296,9 @@ final class AdminDashboardProductsData
     public function stockManagementFor(Product $product): array
     {
         $summary = $this->stockItemSummaries(collect([(int) $product->getKey()]))->get($product->getKey());
+        // Availability must use full counts, not the bounded history relation.
+        $product->setAttribute('stock_items_exists', (int) ($summary?->total ?? 0) > 0);
+        $product->setAttribute('available_stock_items_count', (int) ($summary?->available ?? 0));
         $products = new EloquentCollection([$product]);
         $this->loadOrderedStockItems($products);
         $stockItems = $product->stockItems
@@ -303,7 +307,11 @@ final class AdminDashboardProductsData
         $total = (int) ($summary?->total ?? 0);
 
         return [
+            'stock' => (int) $product->stock,
+            'reservedStock' => (int) $product->reserved_stock,
+            'availableStock' => $product->availableStock(),
             'stockItems' => $stockItems,
+            'bulkDeleteUrl' => route('admin.products.stock-items.bulk-destroy', $product),
             'availableStockItemCount' => (int) ($summary?->available ?? 0),
             'stockSummary' => [
                 'available' => (int) ($summary?->available ?? 0),

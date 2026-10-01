@@ -49,9 +49,9 @@
 
                             {{-- Stock info --}}
                             <div class="mt-3 grid grid-cols-3 gap-2">
-                                <x-admin-dashboard.mini-stat label="Stok" :value="$product['stock']" />
-                                <x-admin-dashboard.mini-stat label="Tersedia" :value="$product['available_stock']" tone="cyan" />
-                                <x-admin-dashboard.mini-stat label="Dipesan" :value="$product['reserved_stock']" tone="amber" />
+                                <x-admin-dashboard.mini-stat label="Stok" :value="$product['stock']"><span x-text="stockCountSnapshots[{{ $product['id'] }}]?.stock ?? {{ $product['stock'] }}">{{ $product['stock'] }}</span></x-admin-dashboard.mini-stat>
+                                <x-admin-dashboard.mini-stat label="Tersedia" :value="$product['available_stock']" tone="cyan"><span x-text="stockCountSnapshots[{{ $product['id'] }}]?.available ?? {{ $product['available_stock'] }}">{{ $product['available_stock'] }}</span></x-admin-dashboard.mini-stat>
+                                <x-admin-dashboard.mini-stat label="Dipesan" :value="$product['reserved_stock']" tone="amber"><span x-text="stockCountSnapshots[{{ $product['id'] }}]?.reserved ?? {{ $product['reserved_stock'] }}">{{ $product['reserved_stock'] }}</span></x-admin-dashboard.mini-stat>
                             </div>
 
                             {{-- Visibility status --}}
