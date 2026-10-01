@@ -1727,12 +1727,10 @@ test("customer checkout: proves the Storefront release matrix at required viewpo
       page.locator('header a[href*="/shop/cart"]:visible')
     ).toHaveCount(1);
     await expectNoDocumentOverflow(page);
-    await expect(page.locator("#storefront-promise-title")).toBeVisible();
-    if (viewport.width === 320) {
-      await expect(
-        page.getByRole("link", { name: "Lihat Produk", exact: true })
-      ).toBeVisible();
-    }
+    await expect(
+      page.locator('[data-storefront-carousel][aria-label="Banner toko"]')
+    ).toBeVisible();
+    await expect(page.locator("#storefront-search")).toBeVisible();
 
     const menuButton = page.getByRole("button", {
       name: "Buka menu navigasi",
@@ -1746,7 +1744,7 @@ test("customer checkout: proves the Storefront release matrix at required viewpo
     await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
     await expectNoDocumentOverflow(page);
     const catalogHeading = page.locator("#products").getByRole("heading", {
-      name: "Pilih akun, cek stok, lanjut checkout.",
+      name: "Temukan produk pilihan Anda.",
     });
     await expect(catalogHeading).toBeVisible();
     if (viewport.width === 390) {
