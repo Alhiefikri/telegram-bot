@@ -226,6 +226,7 @@ final class KlikQrisStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLifec
                 'status' => StoreBalanceTopUpStatus::Pending,
                 'provider_create_state' => null,
                 'provider_create_last_error' => null,
+                'provider_create_initial_error' => null,
             ])->save();
         }, attempts: 5);
     }

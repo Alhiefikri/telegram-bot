@@ -20,6 +20,7 @@ class TelegramAdminStatsIntents
         private readonly TelegramUiIcons $uiIcons,
         private readonly TelegramProductNameRenderer $productNames,
         private readonly CatalogFamilyIconResolver $familyIcons,
+        private readonly TelegramHtmlCaption $html,
     ) {}
 
     public function showProductStock(string $chatId): void
@@ -68,12 +69,12 @@ class TelegramAdminStatsIntents
             $this->bot->answerCallbackQuery($callbackQueryId);
         }
 
-        $this->sendMessageWithDashboard($chatId, $this->formatGrowthMessage($this->statsReport->growth()));
+        $this->sendMessageWithDashboard($chatId, $this->formatGrowthMessage($this->statsReport->growth()), ['parse_mode' => 'HTML']);
     }
 
     public function sendAutomatedDailyStats(string $chatId): void
     {
-        $this->sendStats($chatId, $this->calculateYesterdayStats(), $this->uiIcons->renderLegacyIcons('📊 Rekap Kemarin'));
+        $this->sendStats($chatId, $this->calculateYesterdayStats(), '📊 Rekap Kemarin');
     }
 
     /**
@@ -98,7 +99,7 @@ class TelegramAdminStatsIntents
         ]);
     }
 
-    private function sendMessageWithDashboard(string $chatId, string $message): void
+    private function sendMessageWithDashboard(string $chatId, string $message, array $options = []): void
     {
         $keyboard = [];
         $adminDashboardButton = $this->adminDashboardInlineButton($this->uiIcons->renderLegacyIcons('🌐 Mini App Dashboard'));
@@ -108,7 +109,7 @@ class TelegramAdminStatsIntents
 
         $replyMarkup = $keyboard === [] ? [] : ['inline_keyboard' => $keyboard];
 
-        $this->bot->sendMessage($chatId, $message, $replyMarkup);
+        $this->bot->sendMessage($chatId, $message, $replyMarkup, $options);
     }
 
     /**
@@ -152,30 +153,47 @@ class TelegramAdminStatsIntents
      */
     private function formatGrowthMessage(array $report): string
     {
-        $reportEnd = $report['report_end_at']->copy()->timezone('Asia/Jakarta');
+        $reportEnd = $report['report_end_at']->copy()->timezone('Asia/Jakarta')->locale('id');
+        $previousMonth = $reportEnd->copy()->subMonthNoOverflow();
         $lines = [
-            $this->uiIcons->renderLegacyIcons('📊 Pertumbuhan Store'),
-            '━━━━━━━━━━━━━━',
-            'Diperbarui '.$reportEnd->format('d M Y H:i').' WIB',
+            '<b>'.$this->html->html($this->uiIcons->renderLegacyIcons('📊 Pertumbuhan Store'), PHP_INT_MAX).'</b>',
+            'Diperbarui '.$reportEnd->translatedFormat('d M Y').' · '.$reportEnd->format('H:i').' WIB',
         ];
 
         foreach ([
-            'today' => $this->uiIcons->renderLegacyIcons('☀️ Hari Ini'),
-            'week' => $this->uiIcons->renderLegacyIcons('🗓 Minggu Ini'),
-            'month' => $this->uiIcons->renderLegacyIcons('📅 Bulan Ini'),
-        ] as $periodKey => $title) {
+            'today' => [
+                '☀️ Hari Ini · '.$reportEnd->translatedFormat('d M'),
+                'vs kemarin · hingga '.$reportEnd->format('H:i').' WIB',
+            ],
+            'week' => [
+                '🗓 Minggu Ini · '.$reportEnd->copy()->startOfWeek(Carbon::MONDAY)->translatedFormat('d M').'–'.$reportEnd->translatedFormat('d M'),
+                'vs minggu lalu · durasi setara',
+            ],
+            'month' => [
+                '📅 Bulan Ini · '.$reportEnd->translatedFormat('F Y'),
+                'vs '.$previousMonth->translatedFormat('F Y').' · durasi setara',
+            ],
+            'last_month' => [
+                '🗓 Bulan Kemarin · '.$previousMonth->translatedFormat('F Y'),
+                'vs '.$previousMonth->copy()->subMonthNoOverflow()->translatedFormat('F Y').' · bulan penuh',
+            ],
+        ] as $periodKey => [$title, $comparison]) {
             $period = $report['periods'][$periodKey];
             $current = $period['current'];
             $previous = $period['previous'];
 
             $lines[] = '';
-            $lines[] = $title;
-            $lines[] = 'Order Baru: '.$current['new_orders'].' ('.$this->changeIndicator($current['new_orders'], $previous['new_orders']).')';
-            $lines[] = 'Order Dibayar: '.$current['paid_orders'].' ('.$this->changeIndicator($current['paid_orders'], $previous['paid_orders']).')';
-            $lines[] = 'Produk Terjual: '.$current['sold_products'].' ('.$this->changeIndicator($current['sold_products'], $previous['sold_products']).')';
-            $lines[] = 'Nilai Penjualan: '.Money::rupiah($current['sales_value']).' ('.$this->changeIndicator($current['sales_value'], $previous['sales_value']).')';
-            $lines[] = 'Pembayaran Diterima:';
-            array_push($lines, ...$this->growthReceiptLines($current['receipts'], $previous['receipts']));
+            $lines[] = '<b>'.$this->html->html($this->uiIcons->renderLegacyIcons($title), PHP_INT_MAX).'</b>';
+            $lines[] = '<i>'.$this->html->html($comparison, PHP_INT_MAX).'</i>';
+            $body = [
+                'Order Baru: '.$current['new_orders'].' ('.$this->changeIndicator($current['new_orders'], $previous['new_orders']).')',
+                'Order Dibayar: '.$current['paid_orders'].' ('.$this->changeIndicator($current['paid_orders'], $previous['paid_orders']).')',
+                'Produk Terjual: '.$current['sold_products'].' ('.$this->changeIndicator($current['sold_products'], $previous['sold_products']).')',
+                'Nilai Penjualan: '.Money::rupiah($current['sales_value']).' ('.$this->changeIndicator($current['sales_value'], $previous['sales_value']).')',
+                'Pembayaran Diterima:',
+                ...$this->growthReceiptLines($current['receipts'], $previous['receipts']),
+            ];
+            $lines[] = $this->html->blockquote(implode("\n", $body));
         }
 
         return implode("\n", $lines);

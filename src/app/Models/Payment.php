@@ -35,6 +35,7 @@ use Illuminate\Database\Eloquent\Model;
     'provider_create_state',
     'provider_create_attempted_at',
     'provider_create_last_error',
+    'provider_create_initial_error',
     'method',
     'binance_auto_verification_enabled',
     'binance_verification_mode',

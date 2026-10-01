@@ -16,6 +16,9 @@ use App\Models\StoreBalanceTopUpEvent;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
+use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
+use App\Services\KlikQris\KlikQrisNativeQrisService;
+use App\Services\KlikQris\KlikQrisStatusResponseException;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
@@ -364,6 +367,45 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
         $this->assertSame(StoreBalanceTopUpStatus::RecoveryPending, $topUp->fresh()->status);
         $this->assertSame('recovery_unconfirmed', $topUp->fresh()->provider_create_state);
         $this->assertSame(0, StoreBalanceEntry::query()->count());
+    }
+
+    public function test_top_up_keeps_create_diagnosis_when_status_recovery_returns_not_found(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        $topUp = $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Pending,
+            'provider_create_state' => null,
+            'provider_payload' => null,
+            'provider_qris_url' => null,
+        ]);
+        Http::fake(fn ($request) => Http::response(
+            ['message' => 'secret-provider-body'],
+            $request->method() === 'POST' ? 422 : 404,
+        ));
+        $service = app(KlikQrisNativeQrisService::class);
+        $this->assertSame(
+            KlikQrisNativeQrisOutcome::RecoveryPending,
+            $service->lifecycleForTopUp($topUp)->outcome(),
+        );
+
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            try {
+                $service->reconcileTopUp($topUp, function (): void {
+                    $this->fail('A missing transaction cannot authorize settlement.');
+                });
+                $this->fail('Expected the provider status HTTP 404.');
+            } catch (KlikQrisStatusResponseException $exception) {
+                $this->assertSame(404, $exception->httpStatus);
+            }
+        }
+
+        $fresh = $topUp->fresh();
+        $this->assertSame('create_http_422', $fresh->provider_create_initial_error);
+        $this->assertSame('status_http_404', $fresh->provider_create_last_error);
+        $this->assertSame(StoreBalanceTopUpStatus::RecoveryPending, $fresh->status);
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+        Http::assertSentCount(3);
     }
 
     public function test_late_success_reconciliation_after_compensation_records_evidence_without_credit_or_paid_status(): void

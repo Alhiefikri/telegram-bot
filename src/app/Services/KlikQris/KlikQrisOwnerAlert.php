@@ -15,7 +15,8 @@ final readonly class KlikQrisOwnerAlert
         private KlikQrisNativeQrisOutcome $outcome,
         private int $observations,
         private int $retryBudget,
-        private ?string $reason = null,
+        private ?string $reason,
+        private ?string $createReason,
     ) {}
 
     public function outcome(): KlikQrisNativeQrisOutcome
@@ -36,5 +37,10 @@ final readonly class KlikQrisOwnerAlert
     public function reason(): ?string
     {
         return $this->reason;
+    }
+
+    public function createReason(): ?string
+    {
+        return $this->createReason;
     }
 }

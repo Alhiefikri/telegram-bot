@@ -9,12 +9,15 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\TelegramUiIcon;
 use App\Services\Telegram\TelegramAdminStatsIntents;
 use App\Services\Telegram\TelegramStoreStatsReport;
+use App\Services\Telegram\TelegramUiIcons;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class TelegramAdminStatsIntentsTest extends TestCase
@@ -102,6 +105,55 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $this->assertSame(22000, $report['periods']['month']['current']['sales_value']);
     }
 
+    #[DataProvider('completedMonthWindows')]
+    public function test_last_month_compares_complete_calendar_months_without_counting_next_month(
+        string $reportAt,
+        string $lastStart,
+        string $lastEnd,
+        string $beforeStart,
+        string $beforeEnd,
+        string $currentStart,
+        string $older,
+    ): void {
+        config()->set('app.timezone', 'Asia/Jakarta');
+        $this->createPaidOrderAt($lastStart, 11000, 1);
+        $this->createPaidOrderAt($lastEnd, 12000, 2);
+        $this->createPaidOrderAt($beforeStart, 21000, 3);
+        $this->createPaidOrderAt($beforeEnd, 22000, 4);
+        $this->createPaidOrderAt($currentStart, 33000, 5);
+        $this->createPaidOrderAt($older, 44000, 6);
+
+        $report = app(TelegramStoreStatsReport::class)->growth(Carbon::parse($reportAt, 'Asia/Jakarta'));
+        $period = $report['periods']['last_month'];
+
+        $this->assertSame(2, $period['current']['new_orders']);
+        $this->assertSame(2, $period['current']['paid_orders']);
+        $this->assertSame(3, $period['current']['sold_products']);
+        $this->assertSame(23000, $period['current']['sales_value']);
+        $this->assertSame(['IDR' => 23000], $period['current']['receipts']);
+        $this->assertSame(2, $period['previous']['paid_orders']);
+        $this->assertSame(7, $period['previous']['sold_products']);
+        $this->assertSame(43000, $period['previous']['sales_value']);
+    }
+
+    public static function completedMonthWindows(): array
+    {
+        return [
+            'different month lengths' => [
+                '2026-10-02 00:36:00', '2026-09-01 00:00:00', '2026-09-30 23:59:59',
+                '2026-08-01 00:00:00', '2026-08-31 23:59:59', '2026-10-01 00:00:00', '2026-07-31 23:59:59',
+            ],
+            'year boundary' => [
+                '2026-01-02 00:36:00', '2025-12-01 00:00:00', '2025-12-31 23:59:59',
+                '2025-11-01 00:00:00', '2025-11-30 23:59:59', '2026-01-01 00:00:00', '2025-10-31 23:59:59',
+            ],
+            'leap February' => [
+                '2024-03-02 00:36:00', '2024-02-01 00:00:00', '2024-02-29 23:59:59',
+                '2024-01-01 00:00:00', '2024-01-31 23:59:59', '2024-03-01 00:00:00', '2023-12-31 23:59:59',
+            ],
+        ];
+    }
+
     public function test_growth_uses_canonical_paid_payment_and_keeps_genuine_currencies_separate(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));
@@ -125,40 +177,28 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $this->assertSame(2_500_000, $current['receipts']['USDT']);
     }
 
-    public function test_show_store_growth_sends_one_readable_report_with_sections_timestamp_and_dashboard_button(): void
+    public function test_interactive_statistics_show_full_prior_month_receipts_and_compare_currencies_separately(): void
     {
-        Carbon::setTestNow(Carbon::parse('2026-07-08 15:00:00', 'Asia/Jakarta'));
+        Carbon::setTestNow(Carbon::parse('2026-10-02 00:36:00', 'Asia/Jakarta'));
         config()->set('app.timezone', 'Asia/Jakarta');
         config()->set('services.telegram.token', 'bot-token');
-        config()->set('app.url', 'https://admin.example.com');
-        config()->set('services.telegram.mini_app_url', 'https://admin.example.com/admin');
-
         Http::fake([
-            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 111]]),
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => true, 'result' => ['message_id' => 111],
+            ]),
         ]);
+        $this->createPaidOrderAt('2026-09-29 10:00:00', 10000, 1, 'IDR', 1000);
+        $this->createPaidOrderAt('2026-09-30 23:59:59', 2_000_000, 1, 'USDT');
+        $this->createPaidOrderAt('2026-08-29 10:00:00', 20000, 1, 'IDR', 2000);
+        $this->createPaidOrderAt('2026-08-31 23:59:59', 1_000_000, 1, 'USDT');
 
-        $customer = Customer::factory()->create();
-        $this->createPaidOrderAt('2026-07-08 10:00:00', 10000, 1);
-        $this->createPaidOrderAt('2026-07-07 10:00:00', 10000, 1);
+        app(TelegramAdminStatsIntents::class)->showStoreGrowth(Customer::factory()->create(), '12345');
 
-        app(TelegramAdminStatsIntents::class)->showStoreGrowth($customer, 'admin-chat-123');
-
-        $sends = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
-        $this->assertCount(1, $sends);
-
-        $request = $sends->first()[0];
-        $text = (string) $request['text'];
-
-        $this->assertStringContainsString('📊 Pertumbuhan Store', $text);
-        $this->assertStringContainsString('Diperbarui 08 Jul 2026 15:00 WIB', $text);
-        $this->assertStringContainsString('☀️ Hari Ini', $text);
-        $this->assertStringContainsString('🗓 Minggu Ini', $text);
-        $this->assertStringContainsString('📅 Bulan Ini', $text);
-        $this->assertLessThanOrEqual(4096, mb_strlen($text));
-
-        $replyMarkup = json_encode($request['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
-        $this->assertStringContainsString('🌐 Mini App Dashboard', $replyMarkup);
-        $this->assertStringContainsString('web_app', $replyMarkup);
+        $request = Http::recorded()->sole()[0];
+        $text = html_entity_decode(strip_tags((string) $request['text']), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $this->assertStringContainsString('Rp9.000 (📉 -50%)', $text);
+        $this->assertStringContainsString('2 USDT (📈 +100%)', $text);
+        $this->assertStringNotContainsString('Rp2.000.000', $text);
     }
 
     public function test_ngrok_dashboard_uses_regular_url_button_for_local_testing(): void
@@ -546,6 +586,36 @@ class TelegramAdminStatsIntentsTest extends TestCase
         $this->assertSame(0, $stats['paid_orders']);
         $this->assertSame(0, $stats['sold_products']);
         $this->assertSame(0, $stats['earning']);
+    }
+
+    public function test_automated_recap_sends_captured_icon_as_entity_without_leaking_markup(): void
+    {
+        Carbon::setTestNow('2026-07-08 22:00:00');
+        config()->set('services.telegram.token', 'bot-token');
+        $emojiId = '5231200819986047254';
+        TelegramUiIcon::query()->where('key', 'message.activity')->update([
+            'fallback_emoji' => '📊',
+            'custom_emoji_id' => $emojiId,
+        ]);
+        app(TelegramUiIcons::class)->forget();
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => Http::response([
+                'ok' => true, 'result' => ['message_id' => 111],
+            ]),
+        ]);
+
+        app(TelegramAdminStatsIntents::class)->sendAutomatedDailyStats('12345');
+
+        $request = Http::recorded()->sole()[0];
+        $this->assertStringNotContainsString('<tg-emoji', $request['text']);
+        $this->assertStringNotContainsString('</tg-emoji>', $request['text']);
+        $this->assertStringNotContainsString('data-omp-icon', $request['text']);
+        $this->assertSame([[
+            'type' => 'custom_emoji',
+            'offset' => 0,
+            'length' => 2,
+            'custom_emoji_id' => $emojiId,
+        ]], $request['entities']);
     }
 
     public function test_send_automated_daily_stats_formats_and_sends_correctly(): void

@@ -1,7 +1,7 @@
 # Desain Statistik Pertumbuhan Telegram
 
 **Tanggal:** 2026-07-27
-**Status:** Disetujui untuk direncanakan
+**Status:** Diimplementasikan; tampilan empat periode diperbarui 2026-10-02
 **Ruang lingkup:** Tombol statistik admin Telegram dan respons statistik interaktif
 
 ## Tujuan
@@ -10,17 +10,18 @@ Mengubah tombol `📊 Statistik Harian` menjadi `📊 Statistik` dan membuat has
 
 ## Keputusan desain
 
-Satu kali menekan tombol akan mengirim satu ringkasan yang memuat tiga periode:
+Satu kali menekan tombol akan mengirim satu ringkasan yang memuat empat periode:
 
 1. **Hari Ini**, dibandingkan durasi yang sama kemarin.
 2. **Minggu Ini**, dibandingkan durasi yang sama pada minggu sebelumnya. Minggu dimulai Senin.
 3. **Bulan Ini**, dibandingkan tanggal dan waktu setara pada bulan sebelumnya. Jika bulan sebelumnya lebih pendek, ujung periode pembanding dibatasi pada akhir bulan tersebut.
+4. **Bulan Kemarin**, satu bulan kalender penuh dibandingkan satu bulan kalender penuh sebelumnya. Ujung rentang eksklusif di awal bulan berikutnya, sehingga transaksi tepat pada awal bulan tidak dihitung dua kali.
 
 Seluruh rentang menggunakan zona waktu aplikasi, yaitu `Asia/Jakarta`, dan dihitung dari satu timestamp akhir laporan yang ditangkap sekali. Ini mencegah perbedaan batas waktu antarbagiannya.
 
 ## Bentuk respons
 
-Respons tetap berupa satu pesan agar cepat dipindai dan tidak memenuhi chat. Setiap bagian menampilkan:
+Respons tetap berupa satu pesan agar cepat dipindai dan tidak memenuhi chat. Judul periode tebal, keterangan pembanding miring, dan metrik dikelompokkan dalam blockquote Telegram. Bulan ditulis dalam bahasa Indonesia; bagian minggu mencantumkan tanggal awal dan tanggal laporan. Setiap bagian menampilkan:
 
 - Order baru.
 - Order dibayar.
@@ -29,26 +30,49 @@ Respons tetap berupa satu pesan agar cepat dipindai dan tidak memenuhi chat. Set
 - Pembayaran bersih yang diterima, dikelompokkan menurut mata uang.
 - Perubahan terhadap periode pembanding dengan indikator `📈`, `📉`, atau `➖` dan persentase.
 
-Contoh struktur:
+Contoh dari smoke lokal dengan data fixture (bukan angka production):
 
 ```text
 📊 Pertumbuhan Store
-Diperbarui 27 Jul 2026 19:30 WIB
-━━━━━━━━━━━━━━
-☀️ Hari Ini
-Order Baru: 6  📈 +20%
-Order Dibayar: 4  📈 +33,3%
-Produk Terjual: 7  📈 +40%
-Nilai Penjualan: Rp350.000  📈 +25%
-Diterima: Rp332.500  📈 +24%
+Diperbarui 02 Okt 2026 · 00:36 WIB
 
-🗓 Minggu Ini
-Order Dibayar: 18  📈 +12,5%
-Nilai Penjualan: Rp1.450.000  📈 +8,2%
+☀️ Hari Ini · 02 Okt
+vs kemarin · hingga 00:36 WIB
+Order Baru: 1 (📈 Baru)
+Order Dibayar: 1 (📈 Baru)
+Produk Terjual: 1 (📈 Baru)
+Nilai Penjualan: Rp10.000 (📈 Baru)
+Pembayaran Diterima:
+• Rupiah: Rp10.000 (📈 Baru)
 
-📅 Bulan Ini
-Order Dibayar: 61  📉 -4,7%
-Nilai Penjualan: Rp5.275.000  📈 +6,1%
+🗓 Minggu Ini · 28 Sep–02 Okt
+vs minggu lalu · durasi setara
+Order Baru: 3 (📈 Baru)
+Order Dibayar: 3 (📈 Baru)
+Produk Terjual: 4 (📈 Baru)
+Nilai Penjualan: Rp70.000 (📈 Baru)
+Pembayaran Diterima:
+• Rupiah: Rp19.000 (📈 Baru)
+• USDT: 2 USDT (📈 Baru)
+
+📅 Bulan Ini · Oktober 2026
+vs September 2026 · durasi setara
+Order Baru: 2 (📈 +100%)
+Order Dibayar: 2 (📈 +100%)
+Produk Terjual: 2 (📈 +100%)
+Nilai Penjualan: Rp20.000 (📉 -33,3%)
+Pembayaran Diterima:
+• Rupiah: Rp19.000 (📉 -35,6%)
+
+🗓 Bulan Kemarin · September 2026
+vs Agustus 2026 · bulan penuh
+Order Baru: 2 (➖ 0%)
+Order Dibayar: 2 (➖ 0%)
+Produk Terjual: 3 (📈 +50%)
+Nilai Penjualan: Rp80.000 (📈 +77,8%)
+Pembayaran Diterima:
+• Rupiah: Rp29.500 (📈 +18%)
+• USDT: 2 USDT (📈 +100%)
 ```
 
 Perubahan pembayaran dihitung secara terpisah untuk setiap mata uang. Nilai IDR dan USDT tidak pernah dijumlahkan atau dibandingkan silang.
@@ -73,7 +97,7 @@ Persentase ditampilkan ringkas, tanpa desimal jika bulat dan maksimal satu angka
 
 ### Perhitungan periode
 
-`TelegramAdminStatsIntents` menangkap satu `reportEndAt`, kemudian membangun pasangan rentang saat ini dan sebelumnya untuk hari, minggu, dan bulan. Rentang aktif menggunakan interval awal inklusif sampai `reportEndAt` yang sama. Ujung setiap rentang pembanding digeser ke waktu setara pada hari, minggu, atau bulan sebelumnya sehingga durasi yang dibandingkan adil.
+`TelegramStoreStatsReport::growth()` menangkap satu `reportEndAt`, kemudian membangun pasangan rentang saat ini dan sebelumnya untuk hari, minggu, bulan aktif, dan bulan kalender yang sudah selesai. Rentang aktif memakai awal inklusif sampai timestamp laporan yang sama, dengan ujung pembanding pada durasi setara. Bulan Kemarin memakai dua interval kalender dengan awal inklusif dan akhir eksklusif: September dibanding Agustus pada laporan Oktober, termasuk seluruh transaksi di akhir bulan tetapi tidak termasuk transaksi tepat pada 1 Oktober.
 
 Perhitungan statistik dasar tetap memakai sumber kebenaran yang sudah ada:
 
@@ -111,11 +135,12 @@ Implementasi dilakukan test-first. Regression test harus terlebih dahulu gagal k
 Pengujian wajib mencakup:
 
 1. Keyboard menampilkan `📊 Statistik` dan tidak menampilkan label lama.
-2. Label baru membuka ringkasan tiga periode.
+2. Statistik interaktif menyertakan metrik empat periode.
 3. Label dan callback lama masih berfungsi.
 4. Non-admin dan group chat tidak dapat memperoleh data statistik.
 5. Record hari ini, awal minggu, awal bulan, dan bulan sebelumnya masuk hanya ke rentang yang benar.
 6. Pembanding menggunakan durasi setara, minggu dimulai Senin, dan zona waktu Asia/Jakarta.
+   Batas Bulan Kemarin mencakup pergantian tahun, Februari kabisat, dan pengecualian transaksi tepat pada awal bulan berikutnya.
 7. Baseline nol menghasilkan `Baru` atau `0%`, bukan pembagian nol.
 8. Pembayaran duplikat tetap memakai pembayaran kanonis.
 9. IDR, USDT, dan mata uang lain tetap terpisah.

@@ -392,7 +392,10 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter, KlikQris
             return;
         }
 
-        throw new KlikQrisCreateOutcomeUnknownException(sprintf('KlikQRIS create outcome is unknown after HTTP %d.', $response->status()));
+        throw new KlikQrisCreateOutcomeUnknownException(
+            sprintf('KlikQRIS create outcome is unknown after HTTP %d.', $response->status()),
+            httpStatus: $response->status(),
+        );
     }
 
     private function parseCreateResponse(Response $response, Payment $payment): KlikQrisTransaction

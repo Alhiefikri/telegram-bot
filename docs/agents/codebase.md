@@ -741,6 +741,10 @@ Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php)
 
 Scheduler service hanya menjalankan `php artisan schedule:run`; jangan menggandakan jadwal dengan menjalankan command reconciliation sebagai daemon lain.
 
+`SendDailyAdminStatsNotification` mengirim Rekap Kemarin melalui `TelegramAdminStatsIntents`. Judul diberikan sebagai teks Unicode mentah ke formatter, yang merender icon tepat sekali. Jangan memanggil `renderLegacyIcons()` lagi pada judul yang sudah dirender: fallback glyph dapat cocok dengan source icon yang sama dan menghasilkan wrapper `<tg-emoji>` bersarang. `TelegramBotClient` mengubah wrapper internal yang valid menjadi entity `custom_emoji` untuk pesan plain text, atau Unicode fallback jika Telegram menolak custom emoji; marker `data-omp-icon` tidak boleh tampil kepada admin. Perhitungan statistik dan tombol Mini App Dashboard tetap terpisah dari rendering icon.
+
+Statistik interaktif admin memakai `TelegramStoreStatsReport::growth()` untuk Hari Ini, Minggu Ini, Bulan Ini, dan Bulan Kemarin. Tiga periode aktif memakai pembanding durasi setara; Bulan Kemarin membandingkan dua bulan kalender penuh dengan akhir eksklusif. `TelegramAdminStatsIntents` mengirim satu pesan HTML dengan heading tebal, keterangan pembanding, dan blockquote per periode melalui `TelegramHtmlCaption`; nilai dinamis di-escape dan icon hanya dirender sekali. Receipt tetap terpisah per mata uang. Rework ini tidak mengubah recap otomatis kemarin, statistik publik, atau metrik Mini App Dashboard.
+
 ### Queue ownership
 
 - `default` — Telegram update processing and bounded Sakurupiah webhook verification.

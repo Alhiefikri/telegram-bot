@@ -151,7 +151,10 @@ class KlikQrisOwnerAlertTest extends TestCase
     {
         config()->set('services.klikqris.recovery_alert_max_attempts', 1);
         config()->set('services.klikqris.sandbox_api_key', 'secret-api-key');
-        $payment = $this->klikQrisPayment(['merchant_ref' => 'MERCHANT-SECRET-REF']);
+        $payment = $this->klikQrisPayment([
+            'merchant_ref' => 'MERCHANT-SECRET-REF',
+            'provider_create_initial_error' => 'create_http_422 secret-api-key opaque-test-signature',
+        ]);
         $customer = $payment->order->customer;
         $this->fakeProvider($payment);
         $this->statusOutage();

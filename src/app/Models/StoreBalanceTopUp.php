@@ -36,6 +36,7 @@ use Illuminate\Database\Eloquent\Model;
     'provider_create_state',
     'provider_create_attempted_at',
     'provider_create_last_error',
+    'provider_create_initial_error',
     'payment_proof_file_id',
     'payment_proof_submitted_at',
     'payment_proof_admin_chat_id',

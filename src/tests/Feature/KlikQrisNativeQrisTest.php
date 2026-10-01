@@ -345,6 +345,49 @@ class KlikQrisNativeQrisTest extends TestCase
         $this->assertSame(1, $payment->fresh()->paymentEvents()->where('event_type', PaymentEventType::ProviderCreate->value)->count());
     }
 
+    public function test_owner_diagnosis_preserves_create_failure_across_status_recovery(): void
+    {
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 10000]);
+        $recovered = false;
+        Http::fake(function ($request) use ($payment, &$recovered) {
+            if ($request->method() === 'POST') {
+                return Http::response(['message' => 'secret-api-key opaque-test-signature'], 422);
+            }
+
+            return $recovered
+                ? Http::response(KlikQrisSandboxScenarios::statusPayload($payment, [
+                    'status' => 'PENDING',
+                    'qris_url' => 'https://klikqris.com/storage/sandbox/qris_recovered.png',
+                    'expired_at' => now()->addMinutes(10)->toAtomString(),
+                ]))
+                : Http::response(['message' => 'secret transaction not found'], 404);
+        });
+        $service = app(KlikQrisNativeQrisService::class);
+        $this->assertSame(KlikQrisNativeQrisOutcome::RecoveryPending, $service->lifecycle($payment)->outcome());
+
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            $this->assertSame(KlikQrisNativeQrisOutcome::RecoveryPending, $service->lifecycle($payment)->outcome());
+            $alert = $service->ownerAlert($payment);
+            if ($attempt < 3) {
+                $this->assertNull($alert);
+            }
+        }
+
+        $this->assertNotNull($alert);
+        $this->assertSame('create_http_422', $alert->createReason());
+        $this->assertSame('status_http_404', $alert->reason());
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        Http::assertSentCount(4);
+        $this->assertSame(1, Payment::query()->count());
+
+        $recovered = true;
+        $this->assertTrue($service->lifecycle($payment)->isPayable());
+        $this->assertSame('create_http_422', $payment->fresh()->provider_create_initial_error);
+        $this->assertNull($payment->fresh()->provider_create_last_error);
+        $this->assertNull($service->ownerAlert($payment));
+        Http::assertSentCount(5);
+    }
+
     public function test_invalid_final_amount_is_invalid_provider_result_and_never_payable(): void
     {
         $payment = KlikQrisSandboxScenarios::klikQrisPayment(['amount' => 1000]);
@@ -413,6 +456,7 @@ class KlikQrisNativeQrisTest extends TestCase
             $this->fail('Expected readiness failure.');
         } catch (KlikQrisCreatePreRequestException) {
             $this->assertSame('create_failed', $payment->fresh()->provider_create_state);
+            $this->assertSame('create_request_not_sent', $payment->fresh()->provider_create_initial_error);
         }
 
         config()->set('services.klikqris.sandbox_api_key', 'test-only-key');
@@ -420,6 +464,7 @@ class KlikQrisNativeQrisTest extends TestCase
 
         $this->assertTrue($result->isPayable());
         $this->assertSame('created', $payment->fresh()->provider_create_state);
+        $this->assertNull($payment->fresh()->provider_create_initial_error);
         Http::assertSentCount(1);
     }
 

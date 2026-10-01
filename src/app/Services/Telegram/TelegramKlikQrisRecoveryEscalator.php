@@ -90,6 +90,10 @@ class TelegramKlikQrisRecoveryEscalator
             $lines[] = $this->uiIcons->renderLegacyIcons('🔎 Detail: ').$this->reasonLabel($alert->reason());
         }
 
+        if ($alert->createReason() !== null) {
+            $lines[] = $this->uiIcons->renderLegacyIcons('🔎 Create awal: ').$this->createReasonLabel($alert->createReason());
+        }
+
         if ($outcome === KlikQrisNativeQrisOutcome::RecoveryPending) {
             $lines[] = $this->uiIcons->renderLegacyIcons('🔁 Percobaan pemulihan: ').$alert->observations().'x, batas '.$alert->retryBudget().'x';
         }
@@ -105,6 +109,17 @@ class TelegramKlikQrisRecoveryEscalator
         return match ($outcome) {
             KlikQrisNativeQrisOutcome::RecoveryPending => 'Status QR belum bisa dipastikan setelah pemulihan berulang.',
             KlikQrisNativeQrisOutcome::InvalidProviderResult => 'Data QR dari provider tidak valid untuk dibayar.',
+        };
+    }
+
+    private function createReasonLabel(string $reason): string
+    {
+        return match (true) {
+            preg_match('/\Acreate_http_[45][0-9]{2}\z/', $reason) === 1 => 'Provider mengembalikan HTTP '.substr($reason, strlen('create_http_')).' saat membuat QR.',
+            $reason === 'create_connection_error' => 'Koneksi terputus saat membuat QR; hasil create belum dapat dipastikan.',
+            $reason === 'create_response_invalid' => 'Respons create provider tidak valid; hasil create belum dapat dipastikan.',
+            $reason === 'create_request_not_sent' => 'Request create belum dikirim karena kesiapan provider gagal.',
+            default => 'Hasil create awal belum dapat dipastikan.',
         };
     }
 

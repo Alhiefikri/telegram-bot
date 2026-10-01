@@ -15,6 +15,7 @@ use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Support\PaymentProvider;
 use Closure;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -139,6 +140,7 @@ class KlikQrisNativeQrisService
                 $observation['observations'],
                 $this->ownerAlertRetryBudget(),
                 $this->recoveryDiagnostic($payment->provider_create_last_error),
+                $this->createDiagnostic($payment->provider_create_initial_error),
             );
         });
 
@@ -1000,6 +1002,8 @@ class KlikQrisNativeQrisService
             $lockedPayment->update([
                 'provider_create_state' => 'creating',
                 'provider_create_attempted_at' => now(),
+                'provider_create_initial_error' => null,
+                'provider_create_last_error' => null,
             ]);
 
             return true;
@@ -1015,8 +1019,9 @@ class KlikQrisNativeQrisService
     private function markCreationOutcomeUnknown(Payment $payment, Throwable $exception): void
     {
         $providerException = $exception->getPrevious() ?? $exception;
+        $diagnostic = $this->createDiagnostic($exception);
 
-        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($providerException): void {
+        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($providerException, $diagnostic): void {
             if ($this->hasPayablePersistedQris($lockedPayment)) {
                 return;
             }
@@ -1024,6 +1029,7 @@ class KlikQrisNativeQrisService
             $lockedPayment->update([
                 'provider_create_state' => 'outcome_unknown',
                 'provider_create_last_error' => substr($providerException::class, 0, 500),
+                'provider_create_initial_error' => $diagnostic,
             ]);
         });
 
@@ -1033,8 +1039,9 @@ class KlikQrisNativeQrisService
     private function markCreationDefinitivelyFailed(Payment $payment, Throwable $exception): void
     {
         $providerException = $exception->getPrevious() ?? $exception;
+        $diagnostic = $this->createDiagnostic($exception);
 
-        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($providerException): void {
+        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($providerException, $diagnostic): void {
             if ($this->hasPayablePersistedQris($lockedPayment)) {
                 return;
             }
@@ -1042,6 +1049,7 @@ class KlikQrisNativeQrisService
             $lockedPayment->update([
                 'provider_create_state' => 'create_failed',
                 'provider_create_last_error' => substr($providerException::class, 0, 500),
+                'provider_create_initial_error' => $diagnostic,
             ]);
         });
 
@@ -1058,6 +1066,7 @@ class KlikQrisNativeQrisService
             $lockedPayment->update([
                 'provider_create_state' => null,
                 'provider_create_last_error' => null,
+                'provider_create_initial_error' => null,
             ]);
         });
 
@@ -1080,6 +1089,40 @@ class KlikQrisNativeQrisService
         });
 
         $payment->refresh();
+    }
+
+    private function createDiagnostic(Throwable|string|null $value): ?string
+    {
+        if ($value instanceof KlikQrisCreatePreRequestException) {
+            return 'create_request_not_sent';
+        }
+
+        if ($value instanceof KlikQrisCreateOutcomeUnknownException
+            && $value->httpStatus !== null
+            && $value->httpStatus >= 400
+            && $value->httpStatus <= 599) {
+            return 'create_http_'.$value->httpStatus;
+        }
+
+        if ($value instanceof Throwable) {
+            $cause = $value->getPrevious() ?? $value;
+
+            return match (true) {
+                $cause instanceof ConnectionException => 'create_connection_error',
+                $cause instanceof \UnexpectedValueException, $cause instanceof \JsonException => 'create_response_invalid',
+                default => 'create_outcome_unknown',
+            };
+        }
+
+        if ($value === null) {
+            return null;
+        }
+
+        return in_array($value, [
+            'create_request_not_sent', 'create_connection_error', 'create_response_invalid', 'create_outcome_unknown',
+        ], true) || preg_match('/\Acreate_http_[45][0-9]{2}\z/', $value) === 1
+            ? $value
+            : 'create_outcome_unknown';
     }
 
     private function recoveryDiagnostic(Throwable|string|null $value): string
@@ -1465,6 +1508,7 @@ class KlikQrisNativeQrisService
                 'provider_create_state' => 'creating',
                 'provider_create_attempted_at' => now(),
                 'provider_create_last_error' => null,
+                'provider_create_initial_error' => null,
             ])->save();
 
             return true;
@@ -1480,8 +1524,9 @@ class KlikQrisNativeQrisService
     private function markTopUpCreationOutcomeUnknown(StoreBalanceTopUp $topUp, Throwable $exception): void
     {
         $providerException = $exception->getPrevious() ?? $exception;
+        $diagnostic = $this->createDiagnostic($exception);
 
-        DB::transaction(function () use ($topUp, $providerException): void {
+        DB::transaction(function () use ($topUp, $providerException, $diagnostic): void {
             $locked = StoreBalanceTopUp::query()
                 ->whereKey($topUp->getKey())
                 ->lockForUpdate()
@@ -1497,6 +1542,7 @@ class KlikQrisNativeQrisService
                 'status' => StoreBalanceTopUpStatus::RecoveryPending,
                 'provider_create_state' => 'outcome_unknown',
                 'provider_create_last_error' => substr($providerException::class, 0, 500),
+                'provider_create_initial_error' => $diagnostic,
             ])->save();
         }, 5);
 
@@ -1506,8 +1552,9 @@ class KlikQrisNativeQrisService
     private function markTopUpCreationDefinitivelyFailed(StoreBalanceTopUp $topUp, Throwable $exception): void
     {
         $providerException = $exception->getPrevious() ?? $exception;
+        $diagnostic = $this->createDiagnostic($exception);
 
-        DB::transaction(function () use ($topUp, $providerException): void {
+        DB::transaction(function () use ($topUp, $providerException, $diagnostic): void {
             $locked = StoreBalanceTopUp::query()
                 ->whereKey($topUp->getKey())
                 ->lockForUpdate()
@@ -1523,6 +1570,7 @@ class KlikQrisNativeQrisService
                 'status' => StoreBalanceTopUpStatus::Failed,
                 'provider_create_state' => 'create_failed',
                 'provider_create_last_error' => substr($providerException::class, 0, 500),
+                'provider_create_initial_error' => $diagnostic,
             ])->save();
         }, 5);
 
@@ -1544,6 +1592,7 @@ class KlikQrisNativeQrisService
                 'status' => StoreBalanceTopUpStatus::Pending,
                 'provider_create_state' => null,
                 'provider_create_last_error' => null,
+                'provider_create_initial_error' => null,
             ])->save();
         }, 5);
     }

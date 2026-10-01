@@ -62,7 +62,7 @@ final class TelegramStoreStatsReport
     }
 
     /**
-     * @return array{report_end_at: Carbon, periods: array{today: array{current: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}, previous: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}}, week: array{current: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}, previous: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}}, month: array{current: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}, previous: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}}}}
+     * @return array{report_end_at: Carbon, periods: array<string, array{current: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}, previous: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}}>}
      */
     public function growth(?Carbon $reportEndAt = null): array
     {
@@ -85,6 +85,13 @@ final class TelegramStoreStatsReport
                 'today' => $this->pair($dayStart, $end, $dayStart->copy()->subDay(), $end->copy()->subDay()),
                 'week' => $this->pair($weekStart, $end, $weekStart->copy()->subWeek(), $end->copy()->subWeek()),
                 'month' => $this->pair($monthStart, $end, $previousMonthStart, $previousMonthEnd),
+                'last_month' => $this->pair(
+                    $previousMonthStart,
+                    $monthStart,
+                    $previousMonthStart->copy()->subMonthNoOverflow(),
+                    $previousMonthStart,
+                    false,
+                ),
             ],
         ];
     }
@@ -92,11 +99,11 @@ final class TelegramStoreStatsReport
     /**
      * @return array{current: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}, previous: array{new_orders: int, paid_orders: int, sold_products: int, sales_value: int, receipts: array<string, int>, earning: int}}
      */
-    private function pair(Carbon $currentStart, Carbon $currentEnd, Carbon $previousStart, Carbon $previousEnd): array
+    private function pair(Carbon $currentStart, Carbon $currentEnd, Carbon $previousStart, Carbon $previousEnd, bool $includeEnd = true): array
     {
         return [
-            'current' => $this->calculateStats($currentStart, $currentEnd, true),
-            'previous' => $this->calculateStats($previousStart, $previousEnd, true),
+            'current' => $this->calculateStats($currentStart, $currentEnd, $includeEnd),
+            'previous' => $this->calculateStats($previousStart, $previousEnd, $includeEnd),
         ];
     }
 
