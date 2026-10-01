@@ -52,7 +52,7 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
         TelegramUiIcon::query()->where('key', 'message.success')->delete();
         app(TelegramUiIcons::class)->messageCopyIcons();
 
-        $migration = require database_path('migrations/2026_10_01_000001_restore_telegram_success_message_icon.php');
+        $migration = require database_path('migrations/2026_10_01_000002_restore_telegram_success_message_icon.php');
         $migration->up();
 
         $this->fakeTelegramHttp();
@@ -74,7 +74,7 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
         $icon->update(['fallback_emoji' => '🪙', 'custom_emoji_id' => self::EMOJI_ID]);
         $attributes = $icon->fresh()->getAttributes();
 
-        $migration = require database_path('migrations/2026_10_01_000001_restore_telegram_success_message_icon.php');
+        $migration = require database_path('migrations/2026_10_01_000002_restore_telegram_success_message_icon.php');
         $migration->up();
         $migration->up();
 
