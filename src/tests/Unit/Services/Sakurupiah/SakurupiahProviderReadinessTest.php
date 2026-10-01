@@ -7,6 +7,7 @@ use App\Services\Sakurupiah\SakurupiahChannel;
 use App\Services\Sakurupiah\SakurupiahChannelAddition;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class SakurupiahProviderReadinessTest extends TestCase
@@ -225,6 +226,102 @@ class SakurupiahProviderReadinessTest extends TestCase
         $this->assertTrue($report->channelObserved());
         $this->assertSame('QRISC', $report->qrisChannel()?->code);
         Http::assertSentCount(1);
+    }
+
+    public function test_production_supervisor_gate_accepts_the_shipped_release_worker_configuration(): void
+    {
+        $this->app->instance('env', 'production');
+        $this->configureProduction();
+
+        $report = app(SakurupiahProviderReadiness::class)->observe(
+            SakurupiahEnvironment::Production,
+            static fn (): array => [new SakurupiahChannel('QRISC', 'QRISC Custom Merchant', 200, 20_000_000, 'DIRECT', 'Aktif')],
+        );
+
+        $this->assertArrayNotHasKey('SAKURUPIAH_SUPERVISOR_QUEUE', $report->invalid());
+    }
+
+    #[DataProvider('supervisorReleaseWorkerCommands')]
+    public function test_production_supervisor_gate_evaluates_the_release_worker_command(
+        string $contents,
+        string $queueConnection,
+        bool $ready,
+    ): void {
+        $this->app->instance('env', 'production');
+        $this->configureProduction();
+        config()->set('queue.default', $queueConnection);
+
+        $path = tempnam(sys_get_temp_dir(), 'sakurupiah-supervisor-');
+        if ($path === false) {
+            $this->fail('Unable to create a supervisor configuration fixture.');
+        }
+        file_put_contents($path, $contents);
+
+        try {
+            $report = (new SakurupiahProviderReadiness(
+                SakurupiahEnvironment::Production,
+                [$path],
+            ))->observe(
+                SakurupiahEnvironment::Production,
+                static fn (): array => [new SakurupiahChannel('QRISC', 'QRISC Custom Merchant', 200, 20_000_000, 'DIRECT', 'Aktif')],
+            );
+        } finally {
+            @unlink($path);
+        }
+
+        $this->assertSame(
+            $ready,
+            ! array_key_exists('SAKURUPIAH_SUPERVISOR_QUEUE', $report->invalid()),
+        );
+    }
+
+    /** @return array<string, array{string, string, bool}> */
+    public static function supervisorReleaseWorkerCommands(): array
+    {
+        $program = "[program:laravel-update-worker]\nprocess_name=%(program_name)s_%(process_num)02d\n";
+
+        return [
+            'runtime connection inherited' => [
+                $program.'command=php /var/www/html/artisan queue:work --queue=payments,default --sleep=1 --tries=3 --timeout=60 --max-time=3600',
+                'redis',
+                true,
+            ],
+            'explicit runtime connection' => [
+                $program.'command=php /var/www/html/artisan queue:work redis --queue=payments,default --sleep=1',
+                'redis',
+                true,
+            ],
+            'legacy connection matching the runtime' => [
+                $program.'command=php /var/www/html/artisan queue:work database --queue=payments,default --sleep=1',
+                'database',
+                true,
+            ],
+            'hard-coded foreign connection after a driver migration' => [
+                $program.'command=php /var/www/html/artisan queue:work database --queue=payments,default --sleep=1',
+                'redis',
+                false,
+            ],
+            'missing supervised default queue' => [
+                $program.'command=php /var/www/html/artisan queue:work --queue=payments --sleep=1',
+                'redis',
+                false,
+            ],
+            'verification queue priority reversed' => [
+                $program.'command=php /var/www/html/artisan queue:work --queue=default,payments --sleep=1',
+                'redis',
+                false,
+            ],
+            'listener instead of a release worker' => [
+                $program.'command=php /var/www/html/artisan queue:listen --queue=payments,default',
+                'redis',
+                false,
+            ],
+            'release worker program missing' => [
+                "[program:laravel-outbound-worker]\ncommand=php /var/www/html/artisan queue:work --queue=telegram-outbound --sleep=1",
+                'redis',
+                false,
+            ],
+        ];
     }
 
     private function configureProduction(): void

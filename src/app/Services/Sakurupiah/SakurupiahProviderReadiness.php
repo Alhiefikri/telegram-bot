@@ -33,7 +33,13 @@ final class SakurupiahProviderReadiness
 
     private const SUPERVISED_VERIFICATION_QUEUE = 'default';
 
-    public function __construct(private readonly ?SakurupiahEnvironment $environment = null) {}
+    /**
+     * @param  list<string>|null  $supervisorConfigPaths
+     */
+    public function __construct(
+        private readonly ?SakurupiahEnvironment $environment = null,
+        private readonly ?array $supervisorConfigPaths = null,
+    ) {}
 
     /**
      * Return the complete report for the production environment.
@@ -572,7 +578,7 @@ final class SakurupiahProviderReadiness
 
     private function supervisorOwnsVerificationQueue(): bool
     {
-        foreach ([
+        foreach ($this->supervisorConfigPaths ?? [
             '/etc/supervisor/conf.d/supervisord.conf',
             base_path('../supervisord.conf'),
         ] as $path) {
@@ -581,15 +587,51 @@ final class SakurupiahProviderReadiness
             }
 
             $contents = file_get_contents($path);
-            if (is_string($contents)
-                && str_contains($contents, '[program:laravel-update-worker]')
-                && str_contains($contents, 'queue:work database --queue=payments,default')
-            ) {
+            if (is_string($contents) && $this->supervisorWorkerServesVerificationQueue($contents)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private function supervisorWorkerServesVerificationQueue(string $contents): bool
+    {
+        $program = '[program:laravel-update-worker]';
+        $start = strpos($contents, $program);
+        if ($start === false) {
+            return false;
+        }
+
+        $block = substr($contents, $start + strlen($program));
+        $nextProgram = strpos($block, '[program:');
+        if ($nextProgram !== false) {
+            $block = substr($block, 0, $nextProgram);
+        }
+
+        if (preg_match('/^\s*command\s*=\s*(.+)$/m', $block, $matches) !== 1) {
+            return false;
+        }
+
+        $command = trim($matches[1]);
+        if (! str_contains($command, 'queue:work')
+            || ! str_contains($command, '--queue=payments,default')
+        ) {
+            return false;
+        }
+
+        // The release worker must consume the runtime queue connection:
+        // omit the connection to inherit QUEUE_CONNECTION, or name that
+        // same connection. A hard-coded foreign connection silently
+        // consumes the wrong queue after a driver migration.
+        if (preg_match('/queue:work\s+(\S+)/', $command, $matches) === 1
+            && ! str_starts_with($matches[1], '-')
+            && $matches[1] !== trim((string) config('queue.default'))
+        ) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
