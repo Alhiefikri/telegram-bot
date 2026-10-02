@@ -103,8 +103,8 @@ class Product extends Model
         }
 
         return $query
-            ->withExists(['stockItems' => fn (Builder $items) => $items->whereNull('supplier_purchase_id')])
-            ->withCount(['stockItems as available_stock_items_count' => fn (Builder $items) => $items->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')]);
+            ->withExists(['stockItems as local_stock_items_exists' => fn (Builder $items) => $items->whereNull('supplier_purchase_id')])
+            ->withCount(['stockItems as local_available_stock_items_count' => fn (Builder $items) => $items->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')]);
     }
 
     public function availableStock(): int
@@ -137,8 +137,8 @@ class Product extends Model
 
     public function isCredentialManaged(): bool
     {
-        if (array_key_exists('stock_items_exists', $this->attributes)) {
-            return (bool) $this->attributes['stock_items_exists'];
+        if (array_key_exists('local_stock_items_exists', $this->attributes)) {
+            return (bool) $this->attributes['local_stock_items_exists'];
         }
 
         if ($this->relationLoaded('stockItems')) {
@@ -150,8 +150,8 @@ class Product extends Model
 
     public function availableStockItemCount(): int
     {
-        if (array_key_exists('available_stock_items_count', $this->attributes)) {
-            return (int) $this->attributes['available_stock_items_count'];
+        if (array_key_exists('local_available_stock_items_count', $this->attributes)) {
+            return (int) $this->attributes['local_available_stock_items_count'];
         }
 
         if ($this->relationLoaded('stockItems')) {

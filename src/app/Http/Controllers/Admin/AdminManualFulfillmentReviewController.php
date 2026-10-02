@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\ManualFulfillmentReview;
 use App\Services\Admin\ManualFulfillmentResolutionService;
+use App\Services\Admin\SupplierOperationConfirmation;
 use App\Support\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -47,6 +48,9 @@ class AdminManualFulfillmentReviewController extends Controller
             'refund_provider_reference' => ['nullable', 'string', 'max:255'],
             'refund_provider_result' => ['nullable', 'in:success,failure,uncertain'],
         ]);
+        if ($data['action'] === 'fulfill' && $review->reason === 'supplier_fulfillment') {
+            app(SupplierOperationConfirmation::class)->requireRecent($request);
+        }
 
         try {
             $resolved = $resolutions->resolve(

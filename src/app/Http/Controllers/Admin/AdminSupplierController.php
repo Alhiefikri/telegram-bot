@@ -13,11 +13,11 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Services\Admin\SupplierOperationConfirmation;
 use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierManager;
-use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
@@ -25,7 +25,7 @@ final class AdminSupplierController extends Controller
 {
     public function store(SupplierAdminRequest $request, SupplierManager $manager)
     {
-        $this->reauthenticate($request);
+        app(SupplierOperationConfirmation::class)->requireRecent($request);
         $manager->save(null, $request->validated(), $request->attributes->get('adminUser'), $request->ip());
 
         return $this->saved('Supplier dibuat. Sinkronkan sebelum mengaktifkan pemetaan.');
@@ -34,7 +34,7 @@ final class AdminSupplierController extends Controller
     public function update(SupplierAdminRequest $request, Supplier $supplier, SupplierManager $manager)
     {
         if ($request->filled('api_key') || $request->input('provider') !== $supplier->provider) {
-            $this->reauthenticate($request);
+            app(SupplierOperationConfirmation::class)->requireRecent($request);
         }
 
         return $this->mutate(fn () => $manager->save($supplier, $request->validated(), $request->attributes->get('adminUser'), $request->ip()), 'Supplier diperbarui. Sinkronisasi ulang diperlukan.');
@@ -104,7 +104,7 @@ final class AdminSupplierController extends Controller
 
     public function operate(SupplierAdminRequest $request, SupplierFulfillment $fulfillment, SupplierFulfillmentService $service)
     {
-        $this->reauthenticate($request);
+        app(SupplierOperationConfirmation::class)->requireRecent($request);
         try {
             match ($request->input('action')) {
                 'retry' => $service->retryAfterTopup((int) $fulfillment->id),
@@ -122,15 +122,6 @@ final class AdminSupplierController extends Controller
     private function authorizeManager(Request $request): void
     {
         abort_unless($request->attributes->get('adminUser')?->role?->canManageStoreOperations() === true, 403);
-    }
-
-    private function reauthenticate(Request $request): void
-    {
-        $confirmed = (int) $request->session()->get('auth.password_confirmed_at', 0);
-        if ($confirmed <= 0 || $confirmed > time() || time() - $confirmed > 900) {
-            $request->session()->put('url.intended', route('admin.dashboard', ['tab' => 'suppliers']));
-            throw new HttpResponseException(response()->json(['message' => 'Konfirmasi password dahulu, lalu masukkan ulang data rahasia.', 'confirmation_url' => route('password.confirm')], 428));
-        }
     }
 
     private function mutate(callable $mutation, string $message)

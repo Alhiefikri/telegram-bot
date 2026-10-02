@@ -138,7 +138,7 @@ final class SupplierFulfillmentService
         }
         [$purchase, $supplier, $sku, $token, $read] = $request;
         try {
-            $result = $read ? $this->client->order($supplier, $purchase->supplier_order_id) : $this->client->purchase($supplier, $sku, $purchase->quantity, $purchase->reference);
+            $result = $read ? $this->client->order($supplier, $purchase->supplier_order_id, $sku->external_id, $purchase->reference) : $this->client->purchase($supplier, $sku, $purchase->quantity, $purchase->reference);
         } catch (Throwable) {
             $result = new SupplierOrderResult('ambiguous', null, null, null, [], 'transport_unavailable');
         }
@@ -231,7 +231,7 @@ final class SupplierFulfillmentService
             return;
         }
         $purchase->forceFill(['claim_token' => null, 'lease_expires_at' => null, 'last_error' => $result->errorCode]);
-        if ($result->orderId !== null) {
+        if ($result->identityTrusted && $result->orderId !== null) {
             $collision = SupplierPurchase::query()->where('supplier_id', $purchase->supplier_id)->where('supplier_order_id', $result->orderId)->where('id', '!=', $purchase->id)->exists();
             if ($collision || ($purchase->supplier_order_id !== null && $purchase->supplier_order_id !== $result->orderId)) {
                 $purchase->update(['state' => 'review', 'last_error' => 'order_identity_mismatch']);
@@ -241,27 +241,40 @@ final class SupplierFulfillmentService
             }
             $purchase->supplier_order_id = $result->orderId;
         }
-        if ($result->deliveries !== []) {
+        $previous = $purchase->delivery_payload ?? [];
+        $conflictingDelivery = $previous !== [] && $result->deliveries !== []
+            && array_diff($result->deliveries, $previous) !== []
+            && array_diff($previous, $result->deliveries) !== [];
+        // A subset observation cannot erase acquired units; unrelated sets
+        // require review rather than a heuristic union.
+        if ($result->deliveries !== [] && ($previous === [] || (! $conflictingDelivery && count($result->deliveries) > count($previous)))) {
             $purchase->delivery_payload = $result->deliveries;
         }
-        if ($result->costMicros !== null) {
+        if ($conflictingDelivery) {
+            $purchase->trusted_delivery_payload = null;
+        } elseif ($result->identityTrusted && $result->deliveryTrusted && $result->deliveries !== []) {
+            $trusted = $purchase->trusted_delivery_payload ?? [];
+            if (count($result->deliveries) >= count($trusted)) {
+                $purchase->trusted_delivery_payload = $result->deliveries;
+            }
+        }
+        if ($result->identityTrusted && $result->costMicros !== null) {
             $purchase->actual_cost_micros = $result->costMicros;
         }
-        if ($result->quantity !== null) {
+        if ($result->identityTrusted && $result->quantity !== null) {
             $purchase->observed_quantity = $result->quantity;
-        } elseif ($purchase->observed_quantity === null && count($result->deliveries) === $purchase->quantity) {
+        } elseif ($result->identityTrusted && $result->deliveryTrusted && $purchase->observed_quantity === null && count($result->deliveries) === $purchase->quantity) {
             // Complete acquired-unit evidence establishes delivered quantity
             // when the provider omits its redundant numeric field.
             $purchase->observed_quantity = count($result->deliveries);
         }
-        $deliveries = $purchase->delivery_payload ?? [];
+        $deliveries = $purchase->trusted_delivery_payload ?? [];
         $quantityMatches = $purchase->observed_quantity === $purchase->quantity;
-        if ($purchase->committed_at === null && $purchase->actual_cost_micros !== null
-            && ($purchase->supplier_order_id !== null || $result->outcome === 'delivered')
-            && $quantityMatches) {
+        $economicProof = $result->identityTrusted && $purchase->supplier_order_id !== null && $quantityMatches;
+        if ($purchase->committed_at === null && $purchase->actual_cost_micros !== null && $economicProof) {
             $this->commitDebit($f, $purchase, $suppliers, $catalog);
         }
-        if ($f->state === 'delivered' && $quantityMatches && $purchase->committed_at !== null && $purchase->actual_cost_micros !== null) {
+        if ($f->state === 'delivered' && $economicProof && $purchase->committed_at !== null && $purchase->actual_cost_micros !== null) {
             // Manual replacement already satisfied customer delivery. Recover
             // only the original acquisition's economics, never reopen delivery
             // or allocate a second set of credentials.
@@ -275,7 +288,7 @@ final class SupplierFulfillmentService
             return;
         }
         // A GET cannot erase evidence of a POST or prove that an existing order was never debited.
-        if ($result->outcome === 'rejected' && ! $read && $result->deliveries === [] && $result->orderId === null && ($result->costMicros === null || $result->costMicros === 0) && $purchase->committed_at === null) {
+        if ($result->outcome === 'rejected' && ! $read && $purchase->replay_count === 0 && $result->deliveries === [] && $result->orderId === null && ($result->costMicros === null || $result->costMicros === 0) && $purchase->committed_at === null) {
             $purchase->state = 'rejected';
             $purchase->save();
             $this->unhold($f, $suppliers, $catalog);
@@ -284,7 +297,7 @@ final class SupplierFulfillmentService
             } else {
                 $this->review($f, $order, $result->errorCode ?? 'purchase_rejected');
             }
-        } elseif ($result->outcome !== 'rejected' && $quantityMatches && count($deliveries) === $purchase->quantity && $purchase->actual_cost_micros !== null && $order->payment_status === PaymentStatus::Paid && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
+        } elseif ($result->identityTrusted && $result->deliveryTrusted && ! $conflictingDelivery && $quantityMatches && count($deliveries) === $purchase->quantity && $purchase->committed_at !== null && $order->payment_status === PaymentStatus::Paid && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
             $cost = $purchase->actual_cost_micros;
             if ($cost < 0 || SupplierMoney::costIdr($cost, $purchase->exchange_rate_idr) > $f->maximum_cost_idr) {
                 $purchase->state = 'review';
@@ -298,17 +311,17 @@ final class SupplierFulfillmentService
                 $this->materialize($f, $purchase, $deliveries);
                 $this->finish($f, $order);
             }
-        } elseif ($quantityMatches && count($deliveries) === $purchase->quantity && $purchase->actual_cost_micros === null && $purchase->supplier_order_id !== null) {
+        } elseif ($result->identityTrusted && $result->deliveryTrusted && ! $conflictingDelivery && $quantityMatches && count($deliveries) === $purchase->quantity && $purchase->actual_cost_micros === null && $purchase->supplier_order_id !== null) {
             // Retain complete delivery evidence, but recover actual debit
             // before releasing its financial hold or completing fulfillment.
             $purchase->forceFill(['state' => 'awaiting_delivery', 'next_attempt_at' => now()->addMinute()])->save();
             if ($f->state !== 'delivered') {
                 $f->update(['state' => 'awaiting_delivery', 'next_attempt_at' => now()->addMinute()]);
             }
-        } elseif ($deliveries !== [] || ($purchase->observed_quantity !== null && ! $quantityMatches)) {
-            $purchase->state = 'review';
+        } elseif (($purchase->delivery_payload ?? []) !== [] || ($purchase->observed_quantity !== null && ! $quantityMatches) || ! $result->identityTrusted) {
+            $purchase->state = $purchase->supplier_order_id === null && ($purchase->delivery_payload ?? []) === [] ? 'ambiguous' : 'review';
             $purchase->save();
-            $this->review($f, $order, 'delivery_incomplete');
+            $this->review($f, $order, $conflictingDelivery ? 'delivery_evidence_conflict' : ($result->errorCode ?? 'delivery_incomplete'));
         } elseif ($purchase->supplier_order_id !== null) {
             $purchase->forceFill(['state' => 'awaiting_delivery', 'next_attempt_at' => now()->addMinute()])->save();
             if ($f->state !== 'delivered') {
@@ -512,7 +525,7 @@ final class SupplierFulfillmentService
         }, 5);
         [$purchase, $supplier, $token] = $request;
         try {
-            $result = $this->client->order($supplier, $orderId);
+            $result = $this->client->order($supplier, $orderId, $purchase->catalogItem->external_id, $purchase->reference);
         } catch (Throwable) {
             $result = new SupplierOrderResult('ambiguous', null, null, null, [], 'transport_unavailable');
         }
@@ -563,6 +576,10 @@ final class SupplierFulfillmentService
                 $purchase = SupplierPurchase::create(['supplier_fulfillment_id' => $f->id, 'supplier_id' => $candidate['supplier_id'], 'supplier_catalog_item_id' => $candidate['catalog_item_id'], 'reference' => (string) Str::uuid(), 'quantity' => $f->quantity, 'expected_cost_micros' => 0, 'exchange_rate_idr' => $candidate['exchange_rate_idr'], 'state' => 'delivered', 'delivery_payload' => $credentials, 'last_error' => 'manual_delivery']);
                 $f->update(['current_purchase_id' => $purchase->id]);
                 $this->unhold($f, $suppliers, $catalog);
+            }
+            if ($purchase->committed_at !== null && $purchase->supplier_order_id !== null
+                && $purchase->observed_quantity === $purchase->quantity && $purchase->actual_cost_micros !== null) {
+                $purchase->update(['state' => 'settled', 'next_attempt_at' => null]);
             }
             // Manual replacement satisfies customer delivery, not unknown supplier debit. Preserve its hold and refund guard.
             $this->materialize($f, $purchase, $credentials);

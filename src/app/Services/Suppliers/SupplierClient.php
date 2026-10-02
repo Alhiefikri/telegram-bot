@@ -103,13 +103,13 @@ final class SupplierClient
         }
     }
 
-    public function order(Supplier $supplier, string $orderId): SupplierOrderResult
+    public function order(Supplier $supplier, string $orderId, ?string $productId = null, ?string $reference = null): SupplierOrderResult
     {
         $provider = $this->ready($supplier, allowInactive: true);
         $orderId = $this->identifier($orderId);
         $payload = $this->read($supplier, ($provider === SupplierProvider::ProdSeller ? '/orders/' : '/order/').rawurlencode($orderId), allowInactive: true);
 
-        return $this->result($supplier, $payload, null, $orderId);
+        return $this->result($supplier, $payload, null, $orderId, $productId, $reference);
     }
 
     private function ready(Supplier $supplier, bool $allowInactive = false): SupplierProvider
@@ -358,21 +358,28 @@ final class SupplierClient
         $success = in_array($status, ['delivered', 'success'], true) || ($status === null && ($row['success'] ?? $payload['success'] ?? false) === true);
         $productId = $row['service_id'] ?? $row['product']['id'] ?? null;
         $mismatch = ($expectedOrderId !== null && $id !== $expectedOrderId)
-            || ($expectedQuantity !== null && ($quantity !== $expectedQuantity || $cost === null))
             || ($expectedProductId !== null && $productId !== null && $this->identifier($productId) !== $expectedProductId)
             || ($reference !== null && isset($row['external_order_id']) && $row['external_order_id'] !== $reference);
         $count = $quantity ?? $expectedQuantity;
         if ($mismatch || $id === null || ($count !== null && count($deliveries) > $count)) {
             return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'payload_mismatch');
         }
-        if ($success && $deliveries !== [] && ($count === null || count($deliveries) === $count)) {
-            return new SupplierOrderResult('delivered', $id, $quantity, $cost, $deliveries);
+        $recognized = $success || in_array($status, ['pending', 'paid', 'queued', 'undelivered', 'processing'], true);
+        if (! $recognized) {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'invalid_order_status');
         }
-        if (in_array($status, ['pending', 'paid', 'queued', 'undelivered', 'processing'], true)) {
-            return new SupplierOrderResult('pending', $id, $quantity, $cost, $deliveries);
+        if (count(array_unique($deliveries, SORT_STRING)) !== count($deliveries)) {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'duplicate_delivery', identityTrusted: true);
         }
+        $complete = $success && $deliveries !== [] && ($count === null || count($deliveries) === $count);
+        $metadataMatches = $expectedQuantity === null || ($quantity === $expectedQuantity && $cost !== null);
 
-        return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'incomplete_delivery');
+        return new SupplierOrderResult(
+            $complete && $metadataMatches ? 'delivered' : ($success ? 'ambiguous' : 'pending'),
+            $id, $quantity, $cost, $deliveries,
+            $complete && $metadataMatches ? null : ($success ? 'incomplete_delivery' : null),
+            identityTrusted: true, deliveryTrusted: $success,
+        );
     }
 
     private function noPurchase(SupplierProvider $provider, Response $response): bool

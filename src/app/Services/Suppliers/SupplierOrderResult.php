@@ -12,5 +12,7 @@ final readonly class SupplierOrderResult
         public ?int $costMicros = null,
         public array $deliveries = [],
         public ?string $errorCode = null,
+        public bool $identityTrusted = false,
+        public bool $deliveryTrusted = false,
     ) {}
 }

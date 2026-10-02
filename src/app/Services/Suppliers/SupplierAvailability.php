@@ -46,8 +46,8 @@ final class SupplierAvailability
     public function refreshLocked(Collection $products, Collection $suppliers, Collection $catalogItems, Collection $sources): void
     {
         $products->loadMissing(['supplierPricePolicy', 'quantityPriceTiers']);
-        $products->loadExists(['stockItems' => fn ($query) => $query->whereNull('supplier_purchase_id')]);
-        $products->loadCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')]);
+        $products->loadExists(['stockItems as local_stock_items_exists' => fn ($query) => $query->whereNull('supplier_purchase_id')]);
+        $products->loadCount(['stockItems as local_available_stock_items_count' => fn ($query) => $query->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')]);
         $supplierMap = $suppliers->keyBy('id');
         $itemMap = $catalogItems->keyBy('id');
         $byProduct = $sources->sortBy([['priority', 'asc'], ['id', 'asc']])->groupBy('product_id');

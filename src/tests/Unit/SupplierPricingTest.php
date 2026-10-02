@@ -131,7 +131,7 @@ final class SupplierPricingTest extends TestCase
     private function resources(): array
     {
         $product = new Product(['price_amount' => 20000]);
-        $product->forceFill(['id' => 1, 'stock' => 0, 'reserved_stock' => 0, 'stock_items_exists' => false]);
+        $product->forceFill(['id' => 1, 'stock' => 0, 'reserved_stock' => 0, 'local_stock_items_exists' => false]);
         $product->setRelation('quantityPriceTiers', new Collection);
         $supplier = new Supplier(['currency' => 'USDT', 'currency_confirmed' => true, 'exchange_rate_idr' => 16000, 'is_active' => true]);
         $supplier->forceFill(['id' => 1, 'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5), 'balance_micros' => 100000000, 'reserved_balance_micros' => 0]);
