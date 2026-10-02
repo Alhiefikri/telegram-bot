@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Models\Product;
 use App\Models\ProductQuantityPriceTier;
+use App\Models\ProductStockItem;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
 use App\Models\SupplierPricePolicy;
@@ -111,12 +112,12 @@ final class SupplierPricingTest extends TestCase
     {
         $product = new Product;
         $product->forceFill(['stock' => 2, 'reserved_stock' => 0]);
-        $delivered = new \App\Models\ProductStockItem;
+        $delivered = new ProductStockItem;
         $delivered->forceFill(['supplier_purchase_id' => 1, 'order_item_id' => 9, 'retired_at' => now()]);
         $product->setRelation('stockItems', new Collection([$delivered]));
         $this->assertFalse($product->isCredentialManaged());
         $this->assertSame(2, $product->localAvailableStock());
-        $local = new \App\Models\ProductStockItem;
+        $local = new ProductStockItem;
         $local->forceFill(['supplier_purchase_id' => null, 'order_item_id' => null, 'retired_at' => null]);
         $product->setRelation('stockItems', new Collection([$delivered, $local]));
         $this->assertTrue($product->isCredentialManaged());
@@ -137,6 +138,7 @@ final class SupplierPricingTest extends TestCase
         $supplier->forceFill(['id' => 1, 'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5), 'balance_micros' => 100000000, 'reserved_balance_micros' => 0]);
         $item = new SupplierCatalogItem(['supplier_id' => 1, 'currency' => 'USDT', 'unit_price_micros' => 1000000, 'stock' => 10, 'orderable' => true, 'requires_input' => false, 'synced_at' => now()]);
         $item->forceFill(['reserved_quantity' => 0]);
+
         return [$product, $supplier, $item];
     }
 }

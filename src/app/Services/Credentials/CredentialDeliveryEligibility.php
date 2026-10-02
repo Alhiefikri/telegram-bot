@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\ProductStockItem;
 use App\Services\OrderLifecycleProjection;
+use App\Services\Suppliers\SupplierFulfillmentService;
 
 /**
  * Decides whether a Customer may receive an Order's paid credentials without
@@ -39,7 +40,7 @@ final class CredentialDeliveryEligibility
             return 'payment_not_paid';
         }
 
-        if (app(\App\Services\Suppliers\SupplierFulfillmentService::class)->hasPending($order)) {
+        if (app(SupplierFulfillmentService::class)->hasPending($order)) {
             return 'fulfillment_processing';
         }
 

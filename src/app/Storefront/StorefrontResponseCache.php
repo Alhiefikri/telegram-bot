@@ -6,6 +6,7 @@ use App\Models\Product;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Support\DogfoodTiming;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Throwable;
@@ -74,8 +75,8 @@ class StorefrontResponseCache
             $expires = now()->addMinutes(self::CACHE_TTL_MINUTES);
             $supplierUntil = Product::query()->where('supplier_available_stock', '>', 0)
                 ->where('supplier_available_until', '>', $snapshotAt)->min('supplier_available_until');
-            if ($supplierUntil !== null && \Illuminate\Support\Carbon::parse($supplierUntil)->lessThan($expires)) {
-                $expires = \Illuminate\Support\Carbon::parse($supplierUntil);
+            if ($supplierUntil !== null && Carbon::parse($supplierUntil)->lessThan($expires)) {
+                $expires = Carbon::parse($supplierUntil);
             }
             Cache::put($key, $html, $expires);
             $this->log($startedAt, $querySnapshot, $search, false, strlen($html));

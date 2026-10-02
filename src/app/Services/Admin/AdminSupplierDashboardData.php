@@ -13,6 +13,7 @@ final class AdminSupplierDashboardData
         $connections = Supplier::query()->orderBy('id')->paginate(15, ['*'], 'suppliers_page');
         $connections->setCollection($connections->getCollection()->map(function (Supplier $supplier): array {
             $available = $supplier->balance_micros === null ? null : max(0, (int) $supplier->balance_micros - (int) $supplier->reserved_balance_micros);
+
             return [
                 ...$supplier->only(['id', 'name', 'provider', 'currency', 'currency_confirmed', 'exchange_rate_idr', 'is_active', 'version', 'low_balance_threshold_micros']),
                 'balance' => $supplier->balance_micros === null ? 'Belum diketahui' : SupplierMoney::decimal((int) $supplier->balance_micros),

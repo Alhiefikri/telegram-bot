@@ -4,9 +4,11 @@ namespace Tests\Feature;
 
 use App\Enums\OrderStatus;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\ProcessSupplierFulfillment;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\ProductSupplierSource;
@@ -15,14 +17,18 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Models\User;
+use App\Services\Admin\AdminDashboardProductsData;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\RateLimiter;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
@@ -118,15 +124,15 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
     public function test_locally_blocked_replay_cannot_prove_original_dispatched_purchase_rejected(): void
     {
         [$order, $fulfillment] = $this->paidSupplierOrder();
-        Http::fake(fn () => throw new \Illuminate\Http\Client\ConnectionException('Disposable timeout after possible debit'));
+        Http::fake(fn () => throw new ConnectionException('Disposable timeout after possible debit'));
         app(SupplierFulfillmentService::class)->process($fulfillment->id);
         $purchase = SupplierPurchase::sole();
         $purchase->update(['state' => 'sending', 'lease_expires_at' => now()->subSecond(), 'dispatched_at' => now()->subMinute(), 'replay_count' => 0]);
         $fulfillment->update(['state' => 'purchasing', 'next_attempt_at' => now()->subSecond()]);
         $before = Supplier::findOrFail($purchase->supplier_id)->reserved_balance_micros;
-        \Illuminate\Support\Facades\RateLimiter::hit('supplier:budget:aivault', 60);
+        RateLimiter::hit('supplier:budget:aivault', 60);
         for ($i = 1; $i < 60; $i++) {
-            \Illuminate\Support\Facades\RateLimiter::hit('supplier:budget:aivault', 60);
+            RateLimiter::hit('supplier:budget:aivault', 60);
         }
         app(SupplierFulfillmentService::class)->process($fulfillment->id);
         $this->assertNotSame('rejected', $purchase->fresh()->state);
@@ -144,7 +150,7 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         ProductSupplierSource::where('product_id', $product->id)->update(['is_active' => false]);
         $product->forceFill(['stock' => 2, 'reserved_stock' => 0, 'supplier_available_stock' => 0])->save();
         $this->assertSame(2, $product->fresh()->localAvailableStock());
-        $modal = app(\App\Services\Admin\AdminDashboardProductsData::class)->stockManagementFor($product->fresh());
+        $modal = app(AdminDashboardProductsData::class)->stockManagementFor($product->fresh());
         $this->assertSame(2, $modal['availableStock']);
     }
 
@@ -162,8 +168,8 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         app(SupplierFulfillmentService::class)->process($fulfillment->id);
         $this->assertSame('review', $fulfillment->fresh()->state);
         $sku->update(['orderable' => true]);
-        $owner = \App\Models\User::factory()->create(['role' => 'owner']);
-        $review = \App\Models\ManualFulfillmentReview::where('order_id', $order->id)->sole();
+        $owner = User::factory()->create(['role' => 'owner']);
+        $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
         // Settlement queued its wakeup before this HTTP action. Observe only
         // jobs produced by the attempted retry, not fixture setup.
         Queue::fake();
@@ -171,7 +177,7 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
             ->post(route('admin.manual-fulfillment-reviews.resolve', $review), ['action' => 'fulfill', 'reason' => 'Disposable operator retry'])
             ->assertStatus(428);
         $this->assertSame('review', $fulfillment->fresh()->state);
-        Queue::assertNotPushed(\App\Jobs\ProcessSupplierFulfillment::class);
+        Queue::assertNotPushed(ProcessSupplierFulfillment::class);
     }
 
     public function test_untrusted_delivery_cannot_be_laundered_by_metadata_only_recovery(): void
@@ -224,14 +230,14 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         $sku->update(['orderable' => false]);
         app(SupplierFulfillmentService::class)->process($fulfillment->id);
         $sku->update(['orderable' => true]);
-        $owner = \App\Models\User::factory()->create(['role' => 'owner']);
-        $review = \App\Models\ManualFulfillmentReview::where('order_id', $order->id)->sole();
+        $owner = User::factory()->create(['role' => 'owner']);
+        $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
         Queue::fake();
         $this->actingAs($owner)->withSession(['auth.password_confirmed_at' => time()])
             ->post(route('admin.manual-fulfillment-reviews.resolve', $review), ['action' => 'fulfill', 'reason' => 'Confirmed original source retry'])
             ->assertRedirect();
         $this->assertSame('pending', $fulfillment->fresh()->state);
-        Queue::assertPushed(\App\Jobs\ProcessSupplierFulfillment::class);
+        Queue::assertPushed(ProcessSupplierFulfillment::class);
         Http::assertNothingSent();
     }
 

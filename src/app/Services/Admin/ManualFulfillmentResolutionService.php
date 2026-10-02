@@ -11,12 +11,15 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\SupplierFulfillment;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\GuestOrderNotificationService;
 use App\Services\InventoryLedger;
 use App\Services\OrderLifecycle;
 use App\Services\ProductCredentialAllocator;
+use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\DB;
 
@@ -37,11 +40,11 @@ class ManualFulfillmentResolutionService
             $initialPayment = Payment::query()->findOrFail($initial->payment_id);
             if ($action === 'refund' && $initialPayment->provider === 'store_balance') {
                 $customer = Order::findOrFail($initial->order_id)->customer;
-                app(\App\Services\StoreBalance\StoreBalanceLedger::class)->lockForTransaction($customer);
+                app(StoreBalanceLedger::class)->lockForTransaction($customer);
             }
             Order::query()->lockForUpdate()->findOrFail($initial->order_id);
             Payment::query()->where('order_id', $initial->order_id)->orderBy('id')->lockForUpdate()->get();
-            app(\App\Services\Suppliers\SupplierFulfillmentService::class)->lockForReview(Order::findOrFail($initial->order_id));
+            app(SupplierFulfillmentService::class)->lockForReview(Order::findOrFail($initial->order_id));
             $locked = ManualFulfillmentReview::query()->lockForUpdate()->findOrFail($review->id);
             if ($locked->state !== ManualFulfillmentReview::STATE_PENDING) {
                 return $locked;
@@ -59,9 +62,9 @@ class ManualFulfillmentResolutionService
     private function fulfill(ManualFulfillmentReview $review, User $actor, string $reason, ?string $ip): ManualFulfillmentReview
     {
         if ($review->reason === 'supplier_fulfillment') {
-            $fulfillments = \App\Models\SupplierFulfillment::query()->where('order_id', $review->order_id)->where('state', 'review')->pluck('id');
+            $fulfillments = SupplierFulfillment::query()->where('order_id', $review->order_id)->where('state', 'review')->pluck('id');
             foreach ($fulfillments as $id) {
-                app(\App\Services\Suppliers\SupplierFulfillmentService::class)->retryAfterTopup($id);
+                app(SupplierFulfillmentService::class)->retryAfterTopup($id);
             }
 
             return $review->fresh();
@@ -109,7 +112,7 @@ class ManualFulfillmentResolutionService
 
     private function refund(ManualFulfillmentReview $review, User $actor, string $reason, ?string $reference, ?string $result, ?string $ip): ManualFulfillmentReview
     {
-        app(\App\Services\Suppliers\SupplierFulfillmentService::class)->assertRefundable(Order::findOrFail($review->order_id));
+        app(SupplierFulfillmentService::class)->assertRefundable(Order::findOrFail($review->order_id));
         $payment = Payment::query()->findOrFail($review->payment_id);
         if ($payment->provider === 'store_balance') {
             $this->orders->applyPaymentRefunded($payment);
