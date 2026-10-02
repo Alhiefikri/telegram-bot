@@ -375,7 +375,7 @@ class StockNotificationDeliveryPipeline
                 ['kind' => $movement->type->value],
             );
             if ($event->recipients_snapshotted_at === null) {
-                if ($movement->type === InventoryMovementType::Adjustment && $movement->quantity > 0) {
+                if (in_array($movement->type, [InventoryMovementType::Adjustment, InventoryMovementType::Availability], true) && $movement->quantity > 0) {
                     $promotionSnapshotResolved = $event->tier_promotion_snapshotted_at !== null;
                     $promotedTier = $promotionSnapshotResolved
                         ? $this->promotedTierFromSnapshot($event)
@@ -821,6 +821,11 @@ class StockNotificationDeliveryPipeline
     {
         if ($movement->product === null) {
             return false;
+        }
+
+        if ($movement->type === InventoryMovementType::Availability) {
+            return ($movement->quantity > 0 && (int) $movement->available_before === 0 && (int) $movement->available_after > 0)
+                || ($movement->quantity < 0 && $movement->became_unavailable === true);
         }
 
         if ($movement->type === InventoryMovementType::Adjustment) {

@@ -1,0 +1,36 @@
+{
+  "account": { "balance": 42.75 },
+  "catalog": {
+    "services": [
+      {
+        "service_id": "sku-1",
+        "name": "License",
+        "description": "Generic license delivery",
+        "price": 5.0,
+        "stock": 7
+      }
+    ]
+  },
+  "purchase": {
+    "success": true,
+    "order_id": "order-1",
+    "service_id": "sku-1",
+    "quantity": 2,
+    "total_cost": 10.0,
+    "products": ["LICENSE-ONE", "LICENSE-TWO"]
+  },
+  "order": {
+    "success": true,
+    "order": {
+      "order_id": "order-1",
+      "quantity": 2,
+      "amount": 10.0,
+      "status": "success",
+      "delivered_products": ["LICENSE-ONE", "LICENSE-TWO"]
+    }
+  },
+  "balance_micros": 42750000,
+  "price_micros": 5000000,
+  "cost_micros": 10000000,
+  "stock": 7
+}

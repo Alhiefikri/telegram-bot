@@ -84,8 +84,7 @@ final class AdminDashboardProductsData
             ->keyBy('id');
         $products = Product::query()
             ->with(['category:id,name', 'family:id,name,telegram_image_path', 'quantityPriceTiers:id,product_id,minimum_quantity,price_amount,usdt_price_amount'])
-            ->withExists('stockItems')
-            ->withCount(['stockItems as available_stock_items_count' => fn ($query) => $query->whereNull('order_item_id')->whereNull('retired_at')])
+            ->withAvailability()
             ->whereIn('id', $productIds->all())
             ->get()
             ->keyBy('id');
@@ -297,8 +296,8 @@ final class AdminDashboardProductsData
     {
         $summary = $this->stockItemSummaries(collect([(int) $product->getKey()]))->get($product->getKey());
         // Availability must use full counts, not the bounded history relation.
-        $product->setAttribute('stock_items_exists', (int) ($summary?->total ?? 0) > 0);
-        $product->setAttribute('available_stock_items_count', (int) ($summary?->available ?? 0));
+        $product->loadExists(['stockItems as local_stock_items_exists' => fn ($query) => $query->whereNull('supplier_purchase_id')]);
+        $product->loadCount(['stockItems as local_available_stock_items_count' => fn ($query) => $query->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')]);
         $products = new EloquentCollection([$product]);
         $this->loadOrderedStockItems($products);
         $stockItems = $product->stockItems
@@ -312,7 +311,7 @@ final class AdminDashboardProductsData
             'availableStock' => $product->availableStock(),
             'stockItems' => $stockItems,
             'bulkDeleteUrl' => route('admin.products.stock-items.bulk-destroy', $product),
-            'availableStockItemCount' => (int) ($summary?->available ?? 0),
+            'availableStockItemCount' => $product->availableStockItemCount(),
             'stockSummary' => [
                 'available' => (int) ($summary?->available ?? 0),
                 'reserved' => (int) ($summary?->reserved ?? 0),
@@ -335,7 +334,7 @@ final class AdminDashboardProductsData
             ->leftJoin('orders', 'order_items.order_id', '=', 'orders.id')
             ->select('product_stock_items.product_id')
             ->selectRaw('count(*) as total')
-            ->selectRaw('sum(case when product_stock_items.order_item_id is null and product_stock_items.retired_at is null then 1 else 0 end) as available')
+            ->selectRaw('sum(case when product_stock_items.supplier_purchase_id is null and product_stock_items.order_item_id is null and product_stock_items.retired_at is null then 1 else 0 end) as available')
             ->selectRaw('sum(case when orders.order_status = ? and orders.payment_status <> ? and not exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as reserved', [OrderStatus::PendingPayment->value, PaymentStatus::Paid->value, PaymentStatus::Paid->value])
             ->selectRaw('sum(case when orders.payment_status = ? or exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as paid', [PaymentStatus::Paid->value, PaymentStatus::Paid->value])
             ->groupBy('product_stock_items.product_id')

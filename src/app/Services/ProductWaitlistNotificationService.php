@@ -375,7 +375,8 @@ final class ProductWaitlistNotificationService
 
     private function isRestockMovement(InventoryMovement $movement): bool
     {
-        return $movement->type === InventoryMovementType::Adjustment
+        return ($movement->type === InventoryMovementType::Adjustment
+                || ($movement->type === InventoryMovementType::Availability && (int) $movement->available_before === 0))
             && (int) $movement->quantity > 0
             && (int) $movement->available_after > 0;
     }

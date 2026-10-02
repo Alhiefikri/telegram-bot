@@ -40,6 +40,7 @@ class VerifiedPurchaseActivity
             ->with(['customer:id,first_name', 'orderItems:id,order_id,product_name,product_id,quantity', 'inventoryMovements:id,order_id,product_id,type,quantity,created_at'])
             ->whereIn('order_status', [OrderStatus::Processing->value, OrderStatus::Completed->value])
             ->where('payment_status', PaymentStatus::Paid)
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('supplier_fulfillments')->whereColumn('supplier_fulfillments.order_id', 'orders.id')->where('state', '!=', 'delivered'))
             ->whereHas('inventoryMovements', fn ($query) => $query->where('type', InventoryMovementType::Sale))
             ->latest('updated_at')
             ->limit(self::MAX_ITEMS * 5)

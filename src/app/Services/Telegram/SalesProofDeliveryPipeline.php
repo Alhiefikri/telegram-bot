@@ -13,6 +13,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Services\InventoryLedger;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
+use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Storefront\StorefrontUrl;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\Client\RequestException;
@@ -193,6 +194,9 @@ final class SalesProofDeliveryPipeline
 
     private function paidOrderProofInvariantFailure(Order $order): ?string
     {
+        if (app(SupplierFulfillmentService::class)->hasPending($order)) {
+            return 'Order fulfillment is processing.';
+        }
         $isPaid = $order->payment_status === PaymentStatus::Paid
             && $order->payments->contains(fn ($payment): bool => $payment->status === PaymentStatus::Paid);
         $isProcessable = in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true);

@@ -19,6 +19,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\Bsc\BscConfirmationGrace;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
@@ -82,6 +83,12 @@ class OrderStateMachine implements OrderLifecycle
                     );
                 }
 
+                if ($lockedOrder->order_status === OrderStatus::Processing
+                    && $lockedOrder->payment_status === PaymentStatus::Paid
+                    && $manualPayment?->status === PaymentStatus::Paid) {
+                    return $this->applyPaidTransition($manualPayment, $lockedOrder);
+                }
+
                 $payment = $payments
                     ->where('provider', 'manual')
                     ->where('status', PaymentStatus::Pending)
@@ -97,6 +104,9 @@ class OrderStateMachine implements OrderLifecycle
                 }
 
                 $lockedOrder->refresh();
+                if ($this->supplierFulfillment()->hasPending($lockedOrder)) {
+                    return $paidOrder;
+                }
                 $lockedOrder->update(['order_status' => OrderStatus::Completed]);
                 $this->recordGuestNotification($lockedOrder, GuestOrderNotificationEvent::FulfillmentCompleted);
 
@@ -156,6 +166,7 @@ class OrderStateMachine implements OrderLifecycle
                     throw new InvalidOrderTransition('Payment is not attached to order.');
                 }
 
+                $this->supplierFulfillment()->assertRefundable($order);
                 $this->refundStoreBalance($order, $lockedPayment, $storeBalanceCustomerId);
                 $wasAlreadyRefunded = $lockedPayment->status === PaymentStatus::Refunded
                     && $order->payment_status === PaymentStatus::Refunded;
@@ -280,8 +291,8 @@ class OrderStateMachine implements OrderLifecycle
                 order: $fresh,
                 payment: $fresh->payments->firstWhere('id', $payment->id),
                 newlyApplied: false,
-                receiptEligible: true,
-                salesProofEligible: true,
+                receiptEligible: ! $this->supplierFulfillment()->hasPending($order),
+                salesProofEligible: ! $this->supplierFulfillment()->hasPending($order),
             );
         }
 
@@ -290,11 +301,12 @@ class OrderStateMachine implements OrderLifecycle
         }
 
         $this->inventory->recordOrderSales($order);
+        $this->supplierFulfillment()->paid($order);
 
         $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
         $order->update([
             'payment_status' => PaymentStatus::Paid,
-            'order_status' => $this->paidOrderStatus($payment),
+            'order_status' => $this->supplierFulfillment()->hasPending($order) ? OrderStatus::Processing : $this->paidOrderStatus($payment),
         ]);
         $this->recordGuestNotification($order, GuestOrderNotificationEvent::PaymentConfirmed);
         if ($order->order_status === OrderStatus::Completed) {
@@ -302,7 +314,7 @@ class OrderStateMachine implements OrderLifecycle
         }
         $this->dispatchAdminPendingNotificationDelete($order);
 
-        $salesProofEnabled = (bool) StoreChannelSetting::current()->sales_proof_enabled;
+        $salesProofEnabled = ! $this->supplierFulfillment()->hasPending($order) && (bool) StoreChannelSetting::current()->sales_proof_enabled;
 
         if ($salesProofEnabled) {
             $salesProofPost = SalesProofPost::query()->firstOrCreate(
@@ -320,13 +332,15 @@ class OrderStateMachine implements OrderLifecycle
         $this->recordAndDispatchAdminOrderPaid($order);
 
         $paid = $order->fresh(['payments']);
-        $this->dispatchReceiptMaterialization($paid);
+        if (! $this->supplierFulfillment()->hasPending($paid)) {
+            $this->dispatchReceiptMaterialization($paid);
+        }
 
         return new OrderLifecycleResult(
             order: $paid,
             payment: $paid->payments->firstWhere('id', $payment->id),
             newlyApplied: true,
-            receiptEligible: in_array($paid->order_status, [OrderStatus::Processing, OrderStatus::Completed], true),
+            receiptEligible: ! $this->supplierFulfillment()->hasPending($paid) && in_array($paid->order_status, [OrderStatus::Processing, OrderStatus::Completed], true),
             salesProofEligible: $salesProofEnabled,
         );
     }
@@ -448,6 +462,7 @@ class OrderStateMachine implements OrderLifecycle
         }
 
         $this->inventory->releaseOrderReservations($order);
+        $this->supplierFulfillment()->release($order);
         $this->credentials()->release($order);
 
         foreach ($payments->where('status', PaymentStatus::Pending) as $payment) {
@@ -573,6 +588,7 @@ class OrderStateMachine implements OrderLifecycle
 
     private function releaseRefundedOrderResources(Order $order): void
     {
+        $this->supplierFulfillment()->release($order);
         if (! $this->inventory->hasSaleProofForOrder($order)) {
             $this->inventory->releaseOrderReservations($order);
             $this->credentials()->release($order);
@@ -581,6 +597,11 @@ class OrderStateMachine implements OrderLifecycle
         }
 
         $this->credentials()->retire($order);
+    }
+
+    private function supplierFulfillment(): SupplierFulfillmentService
+    {
+        return app(SupplierFulfillmentService::class);
     }
 
     private function credentials(): ProductCredentialAllocator

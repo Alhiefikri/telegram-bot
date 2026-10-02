@@ -2,9 +2,11 @@
 
 namespace App\Storefront;
 
+use App\Models\Product;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Support\DogfoodTiming;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Throwable;
@@ -19,7 +21,7 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
-    private const DESIGN_VERSION = 19;
+    private const DESIGN_VERSION = 20;
 
     public function __construct(
         private readonly StorefrontCatalogPageBuilder $catalogPages,
@@ -68,8 +70,15 @@ class StorefrontResponseCache
                 return $cached;
             }
 
+            $snapshotAt = now();
             $html = $this->render($search);
-            Cache::put($key, $html, now()->addMinutes(self::CACHE_TTL_MINUTES));
+            $expires = now()->addMinutes(self::CACHE_TTL_MINUTES);
+            $supplierUntil = Product::query()->where('supplier_available_stock', '>', 0)
+                ->where('supplier_available_until', '>', $snapshotAt)->min('supplier_available_until');
+            if ($supplierUntil !== null && Carbon::parse($supplierUntil)->lessThan($expires)) {
+                $expires = Carbon::parse($supplierUntil);
+            }
+            Cache::put($key, $html, $expires);
             $this->log($startedAt, $querySnapshot, $search, false, strlen($html));
 
             return $html;

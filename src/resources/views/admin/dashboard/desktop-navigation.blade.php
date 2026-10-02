@@ -28,6 +28,11 @@
                     </svg>
                     <span class="text-[11px] font-black uppercase tracking-wide">Produk</span>
                 </x-admin-dashboard.button>
+                @if ($canManageSuppliers)
+                    <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-on:click="goToTab('suppliers')" class="py-3" x-bind:class="activeTab === 'suppliers' ? 'bottom-nav-active' : ''" x-bind:aria-current="activeTab === 'suppliers' ? 'page' : null">
+                        <span class="text-[11px] font-black uppercase tracking-wide">Supplier</span>
+                    </x-admin-dashboard.button>
+                @endif
 
                 <x-admin-dashboard.button
                     type="button"

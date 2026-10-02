@@ -26,6 +26,7 @@ use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use DateTimeInterface;
@@ -48,6 +49,7 @@ class OrderCheckoutService
         private readonly TelegramOutboundEffectService $outboundEffects,
         private readonly StoreBalanceLedger $storeBalance,
         private readonly OrderLifecycle $lifecycle,
+        private readonly SupplierFulfillmentService $supplierFulfillment,
     ) {}
 
     public function checkout(
@@ -143,6 +145,7 @@ class OrderCheckoutService
         }
 
         $products = $this->inventory->lockedCheckoutProducts($items);
+        $this->supplierFulfillment->lockCheckoutResources($products);
         $this->assertWebReservationBudget($lockedCart, $items, $products);
 
         // Provider switch mutations and checkout creation share this lock so a
@@ -219,6 +222,8 @@ class OrderCheckoutService
             $usdtUnitPrice = $isUsdtPayment ? $quote->effectiveUsdtUnitAmount : null;
             $usdtSubtotal = $isUsdtPayment ? $quote->usdtSubtotal : null;
             $productIcon = $productIcons[(int) $product->getKey()] ?? $this->familyIcons->forProduct($product);
+            $localQuantity = min($item->quantity, $product->localAvailableStock());
+            $supplierQuantity = $item->quantity - $localQuantity;
             $orderItem = OrderItem::create([
                 'order_id' => $order->id,
                 'product_id' => $product->id,
@@ -233,13 +238,18 @@ class OrderCheckoutService
                 'usage_guide_url' => $product->usage_guide_url,
                 'usage_guide_snapshotted' => true,
                 'quantity' => $item->quantity,
+                'local_quantity' => $localQuantity,
+                'supplier_quantity' => $supplierQuantity,
                 'quantity_price_tier_minimum' => $quote->appliedTierMinimum,
                 'unit_price' => $quote->effectiveIdrUnitAmount,
                 'usdt_unit_price' => $usdtUnitPrice,
                 'subtotal' => $quote->idrSubtotal,
                 'usdt_subtotal' => $usdtSubtotal,
             ]);
-            $this->credentials->allocate($orderItem, $product, $item->quantity);
+            $this->credentials->allocate($orderItem, $product, $localQuantity);
+            if ($supplierQuantity > 0) {
+                $this->supplierFulfillment->reserve($orderItem, $product, $supplierQuantity, $quote->idrSubtotal);
+            }
             $this->inventory->reserveOrderItem($order, $product, $item->quantity);
         }
 

@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable(['category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'family_id', 'family_order', 'option_label', 'name', 'icon', 'custom_emoji_id', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank'])]
@@ -16,9 +17,11 @@ class Product extends Model
     /** @use HasFactory<ProductFactory> */
     use HasFactory, SoftDeletes;
 
+    protected $hidden = ['supplier_available_stock', 'supplier_available_until', 'supplierSources', 'supplierPricePolicy'];
+
     protected function casts(): array
     {
-        return ['category_id' => 'integer', 'product_family_id' => 'integer', 'family_sort_order' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'is_active' => 'boolean', 'featured_rank' => 'integer'];
+        return ['category_id' => 'integer', 'product_family_id' => 'integer', 'family_sort_order' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'supplier_available_stock' => 'integer', 'supplier_available_until' => 'datetime', 'is_active' => 'boolean', 'featured_rank' => 'integer'];
     }
 
     /**
@@ -45,22 +48,26 @@ class Product extends Model
 
         return $query
             ->orderByRaw(
-                "CASE WHEN {$productsTable}.stock > {$productsTable}.reserved_stock
+                "CASE WHEN ({$productsTable}.supplier_available_stock > 0 AND {$productsTable}.supplier_available_until > ?)
+                    OR ({$productsTable}.stock > {$productsTable}.reserved_stock
                     AND (
                         NOT EXISTS (
                             SELECT 1
                             FROM {$stockItemsTable}
                             WHERE {$stockItemsTable}.product_id = {$productsTable}.id
+                                AND {$stockItemsTable}.supplier_purchase_id IS NULL
                         )
                         OR EXISTS (
                             SELECT 1
                             FROM {$stockItemsTable}
                             WHERE {$stockItemsTable}.product_id = {$productsTable}.id
+                                AND {$stockItemsTable}.supplier_purchase_id IS NULL
                                 AND {$stockItemsTable}.order_item_id IS NULL
                                 AND {$stockItemsTable}.retired_at IS NULL
                         )
-                    )
-                THEN 0 ELSE 1 END"
+                    ))
+                THEN 0 ELSE 1 END",
+                [now()],
             )
             ->orderBy('name')
             ->orderBy('id');
@@ -72,11 +79,16 @@ class Product extends Model
      */
     public function scopeAvailableForPurchase(Builder $query): Builder
     {
-        return $query
-            ->whereColumn('stock', '>', 'reserved_stock')
-            ->where(fn (Builder $query) => $query
-                ->whereDoesntHave('stockItems')
-                ->orWhereHas('stockItems', fn (Builder $stockItems) => $stockItems->whereNull('order_item_id')->whereNull('retired_at')));
+        return $query->where(function (Builder $available): void {
+            $available->where(function (Builder $local): void {
+                $local->whereColumn('stock', '>', 'reserved_stock')
+                    ->where(fn (Builder $query) => $query
+                        ->whereDoesntHave('stockItems', fn (Builder $items) => $items->whereNull('supplier_purchase_id'))
+                        ->orWhereHas('stockItems', fn (Builder $items) => $items->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')));
+            })->orWhere(fn (Builder $external) => $external
+                ->where('supplier_available_stock', '>', 0)
+                ->where('supplier_available_until', '>', now()));
+        });
     }
 
     /**
@@ -87,12 +99,28 @@ class Product extends Model
      */
     public function scopeWithAvailability(Builder $query): Builder
     {
+        if ($query->getQuery()->columns !== null) {
+            $query->addSelect($this->qualifyColumn('supplier_available_stock'), $this->qualifyColumn('supplier_available_until'));
+        }
+
         return $query
-            ->withExists('stockItems')
-            ->withCount(['stockItems as available_stock_items_count' => fn (Builder $stockItems) => $stockItems->whereNull('order_item_id')->whereNull('retired_at')]);
+            ->withExists(['stockItems as local_stock_items_exists' => fn (Builder $items) => $items->whereNull('supplier_purchase_id')])
+            ->withCount(['stockItems as local_available_stock_items_count' => fn (Builder $items) => $items->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')]);
     }
 
     public function availableStock(): int
+    {
+        return $this->localAvailableStock() + $this->supplierAvailableStock();
+    }
+
+    public function supplierAvailableStock(): int
+    {
+        return $this->supplier_available_until?->isFuture()
+            ? max(0, (int) $this->supplier_available_stock)
+            : 0;
+    }
+
+    public function localAvailableStock(): int
     {
         $numericAvailable = max(0, $this->stock - $this->reserved_stock);
 
@@ -110,28 +138,28 @@ class Product extends Model
 
     public function isCredentialManaged(): bool
     {
-        if (array_key_exists('stock_items_exists', $this->attributes)) {
-            return (bool) $this->attributes['stock_items_exists'];
+        if (array_key_exists('local_stock_items_exists', $this->attributes)) {
+            return (bool) $this->attributes['local_stock_items_exists'];
         }
 
         if ($this->relationLoaded('stockItems')) {
-            return $this->stockItems->isNotEmpty();
+            return $this->stockItems->whereNull('supplier_purchase_id')->isNotEmpty();
         }
 
-        return $this->stockItems()->exists();
+        return $this->stockItems()->whereNull('supplier_purchase_id')->exists();
     }
 
     public function availableStockItemCount(): int
     {
-        if (array_key_exists('available_stock_items_count', $this->attributes)) {
-            return (int) $this->attributes['available_stock_items_count'];
+        if (array_key_exists('local_available_stock_items_count', $this->attributes)) {
+            return (int) $this->attributes['local_available_stock_items_count'];
         }
 
         if ($this->relationLoaded('stockItems')) {
-            return $this->stockItems->whereNull('order_item_id')->whereNull('retired_at')->count();
+            return $this->stockItems->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')->count();
         }
 
-        return $this->stockItems()->whereNull('order_item_id')->whereNull('retired_at')->count();
+        return $this->stockItems()->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')->count();
     }
 
     public function isPublicVisible(): bool
@@ -204,6 +232,16 @@ class Product extends Model
     public function quantityPriceTiers(): HasMany
     {
         return $this->hasMany(ProductQuantityPriceTier::class)->orderBy('minimum_quantity');
+    }
+
+    public function supplierSources(): HasMany
+    {
+        return $this->hasMany(ProductSupplierSource::class);
+    }
+
+    public function supplierPricePolicy(): HasOne
+    {
+        return $this->hasOne(SupplierPricePolicy::class);
     }
 
     public function inventoryMovements()

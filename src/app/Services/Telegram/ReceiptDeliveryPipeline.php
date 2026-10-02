@@ -9,6 +9,7 @@ use App\Enums\TelegramOutboundEffectType;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Support\DogfoodTiming;
 use InvalidArgumentException;
 use Throwable;
@@ -280,7 +281,8 @@ final class ReceiptDeliveryPipeline
     {
         return $order->payment_status === PaymentStatus::Paid
             && in_array($order->order_status, [OrderStatus::PendingPayment, OrderStatus::Processing, OrderStatus::Completed], true)
-            && $order->customer?->telegram_id !== null;
+            && $order->customer?->telegram_id !== null
+            && ! app(SupplierFulfillmentService::class)->hasPending($order);
     }
 
     private function dispatchNextReceiptEffect(TelegramOutboundEffect $effect): void

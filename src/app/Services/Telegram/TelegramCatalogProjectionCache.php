@@ -2,7 +2,9 @@
 
 namespace App\Services\Telegram;
 
+use App\Models\Product;
 use Closure;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 
 final class TelegramCatalogProjectionCache
@@ -11,7 +13,7 @@ final class TelegramCatalogProjectionCache
 
     private const TTL_MINUTES = 30;
 
-    private const DESIGN_VERSION = 3;
+    private const DESIGN_VERSION = 4;
 
     /**
      * Cache raw arrays, not read models: a cache store unserializes with
@@ -37,8 +39,15 @@ final class TelegramCatalogProjectionCache
             return $payload;
         }
 
+        $snapshotAt = now();
         $payload = $build();
-        Cache::put($key, $payload, now()->addMinutes(self::TTL_MINUTES));
+        $expires = now()->addMinutes(self::TTL_MINUTES);
+        $supplierUntil = Product::query()->where('supplier_available_stock', '>', 0)
+            ->where('supplier_available_until', '>', $snapshotAt)->min('supplier_available_until');
+        if ($supplierUntil !== null && Carbon::parse($supplierUntil)->lessThan($expires)) {
+            $expires = Carbon::parse($supplierUntil);
+        }
+        Cache::put($key, $payload, $expires);
 
         return $payload;
     }

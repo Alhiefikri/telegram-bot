@@ -38,6 +38,7 @@ use App\Http\Controllers\Admin\AdminStoreChannelController;
 use App\Http\Controllers\Admin\AdminStoreChannelTestController;
 use App\Http\Controllers\Admin\AdminStorefrontBannersController;
 use App\Http\Controllers\Admin\AdminStorefrontPlaceholderController;
+use App\Http\Controllers\Admin\AdminSupplierController;
 use App\Http\Controllers\Admin\AdminSupportSettingsController;
 use App\Http\Controllers\Admin\AdminTelegramOutboundEffectController;
 use App\Http\Controllers\Admin\AdminTelegramWelcomeBannerController;
@@ -173,6 +174,19 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::post('storefront-placeholder', AdminStorefrontPlaceholderController::class)->name('storefront-placeholder.update');
             Route::post('telegram-welcome-banner', AdminTelegramWelcomeBannerController::class)->name('telegram-welcome-banner.update');
             Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');
+            Route::prefix('suppliers')->name('suppliers.')->group(function (): void {
+                Route::post('/', [AdminSupplierController::class, 'store'])->name('store');
+                Route::patch('{supplier}', [AdminSupplierController::class, 'update'])->name('update');
+                Route::post('{supplier}/sync', [AdminSupplierController::class, 'sync'])->middleware('throttle:10,1')->name('sync');
+                Route::get('{supplier}/catalog', [AdminSupplierController::class, 'catalog'])->name('catalog');
+                Route::post('catalog/{catalogItem}/import', [AdminSupplierController::class, 'import'])->name('import');
+                Route::post('catalog/{catalogItem}/map', [AdminSupplierController::class, 'map'])->name('map');
+                Route::get('monitor/purchases', [AdminSupplierController::class, 'purchases'])->name('purchases');
+                Route::post('fulfillments/{fulfillment}/operate', [AdminSupplierController::class, 'operate'])->middleware('throttle:10,1')->name('operate');
+            });
+            Route::get('products/{product}/suppliers', [AdminSupplierController::class, 'product'])->name('products.suppliers');
+            Route::post('products/{product}/supplier-pricing', [AdminSupplierController::class, 'price'])->name('products.supplier-pricing');
+            Route::post('products/{product}/supplier-pricing/preview', [AdminSupplierController::class, 'preview'])->name('products.supplier-pricing.preview');
             Route::post('categories', AdminCategoryCreateController::class)->name('categories.store');
             Route::patch('categories/{category}', AdminCategoryUpdateController::class)->name('categories.update');
             Route::delete('categories/{category}', AdminCategoryDeleteController::class)->name('categories.destroy');

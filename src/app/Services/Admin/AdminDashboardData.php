@@ -26,6 +26,7 @@ final class AdminDashboardData
         private readonly AdminDashboardReportingData $reportingData,
         private readonly StorefrontFunnelReport $funnelReport,
         private readonly StoreBalanceOwnerCompensationService $ownerCompensation,
+        private readonly AdminSupplierDashboardData $supplierData,
     ) {}
 
     /**
@@ -87,6 +88,7 @@ final class AdminDashboardData
             'withdrawTab' => $withdrawTab,
             'funnelTab' => $funnelTab,
             'balanceIssuesTab' => $balanceIssuesTab,
+            'suppliersTab' => $navigation['activeTab'] === 'suppliers' ? $this->supplierData->forTab() : [],
         ];
     }
 
@@ -150,6 +152,7 @@ final class AdminDashboardData
             'withdrawTab' => $this->reportingData->emptyWithdraw($user),
             'funnelTab' => $this->funnelReport->empty($user),
             'balanceIssuesTab' => $this->ownerCompensation->emptyQueue($user),
+            'suppliersTab' => [],
         ];
 
         match ($activeTab) {
@@ -162,6 +165,7 @@ final class AdminDashboardData
             'withdraw' => $data['withdrawTab'] = $this->reportingData->forWithdraw($user, $reportingFilters),
             StorefrontFunnelReport::TAB => $data['funnelTab'] = $this->funnelReport->forAdmin($user, $reportingFilters),
             StoreBalanceOwnerCompensationService::TAB => $data['balanceIssuesTab'] = $this->ownerCompensation->queue($user, $reportingFilters),
+            'suppliers' => $data['suppliersTab'] = $this->supplierData->forTab(),
             default => null,
         };
 
@@ -211,6 +215,9 @@ final class AdminDashboardData
             ['id' => 'riwayat', 'label' => 'Riwayat'],
             ['id' => StorefrontFunnelReport::TAB, 'label' => 'Funnel'],
         ];
+        if ($user->role?->canManageStoreOperations() === true) {
+            $tabs[] = ['id' => 'suppliers', 'label' => 'Supplier'];
+        }
         if ($user->role?->canCompensateStoreBalance() === true) {
             $tabs[] = ['id' => StoreBalanceOwnerCompensationService::TAB, 'label' => 'Kompensasi Top-up'];
         }
