@@ -29,7 +29,13 @@ class AdminProductVisibilityController extends Controller
             $request->ip(),
         );
 
+        $status = $product->is_active ? "Produk {$product->name} ditampilkan." : "Produk {$product->name} dipause.";
+
+        if (($validated['return'] ?? null) === 'supplier') {
+            return redirect()->route('admin.products.suppliers', $product)->with('status', $status);
+        }
+
         return $redirector->product($product)
-            ->with('status', $product->is_active ? "Produk {$product->name} ditampilkan." : "Produk {$product->name} dipause.");
+            ->with('status', $status);
     }
 }

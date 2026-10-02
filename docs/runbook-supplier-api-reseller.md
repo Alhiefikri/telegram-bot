@@ -8,15 +8,17 @@ Supplier Balance is the operator's money at the external shop, not Customer Stor
 
 ## Setup through Admin
 
-1. Open **Admin → Supplier Reseller**. Confirm password first; credential changes and operational recovery require recent confirmation.
-2. Add a connection: private name, supported provider, API key, currency confirmation, whole-IDR conversion rate, active flag and low-balance threshold.
+1. Open **Admin → Supplier**. If the password-confirmation session is older than 15 minutes the page shows a **Konfirmasi password** button; complete it before saving credentials or running recovery.
+2. Add a connection through **+ Tambah supplier**: private name, supported provider, API key, currency confirmation, whole-IDR conversion rate, low-balance threshold (entered in the supplier currency) and active flag.
 3. Do not put supplier API keys in ENV. The database stores encrypted credentials using the application's encryption key; saved keys are not displayed back. Keep APP_KEY and encrypted database backups together under the existing backup policy. Losing the key makes those credentials unreadable.
 4. For ARRS/Warzone, confirm the actual account currency with the supplier. Dollar-like presentation is not currency evidence. ProdSeller uses USDT; CSxStore and AI Vault use USD.
-5. Activate the connection and click **Sinkron katalog dan saldo**. The local button is a CSRF-protected POST, but provider catalog/balance requests are GET-only. Read-only catalog fetching must not buy anything.
-6. Open the private catalog. Select a SKU to import as a draft Product, or map it to an existing Product with explicit equivalent-product confirmation.
-7. Give the draft store-owned name, description, tutorial, warranty and support terms through normal Product editing. Import does not publish the supplier description or activate the Product automatically.
-8. Enable the source mapping and set priority. Lower priority sorts first. Only map products whose entitlement, region, account requirements, redemption deadline and warranty promises are equivalent.
-9. Set Product-owned pricing: manual, percentage, fixed profit or hybrid percentage/minimum profit; configure buffer, rounding and minimum-profit guard. Preview the cost/retail calculation before enabling public sales.
+5. Activate the connection and click **Sinkronkan sekarang**. The local button is a CSRF-protected POST, but provider catalog/balance requests are GET-only. Read-only catalog fetching must not buy anything.
+6. Open **Buka katalog & jual**. Use the search box and status filters (semua, belum dijual, sudah dijual, bisa instan, perlu input manual) to find the SKU.
+7. On the SKU press **Jual produk ini** and pick one path:
+   - **Buat produk baru** — enter the store-owned name, retail price (prefilled with cost + 20% suggestion) and an optional short description. The description can be typed, copied from the supplier SKU as a draft (must be edited), or copied from an existing store product through the **Salin deskripsi dari produk yang ada** picker. The product is created inactive and you are taken straight to its supplier page.
+   - **Hubungkan ke produk yang ada** — search for the existing store product, confirm equivalence, and link the SKU.
+8. On the **Produk & harga** page complete the checklist: activate the supplier source, set the price rule (live calculator: Manual, Tambah untung %, Tambah untung Rp, or Persentase dengan minimum; advanced settings hold rounding, cost buffer and the minimum-profit guard), then publish the product. Use **Edit produk lengkap** to open the product edit modal (photos, icon, category, description, tutorial, warranty) without leaving the supplier workspace, and the **Katalog & family** card to assign a Product Family — every family member must share the same category or the save is rejected.
+9. Only map products whose entitlement, region, account requirements, redemption deadline and warranty promises are equivalent. Lower priority sorts first when several sources exist.
 10. Top up the external supplier account through that supplier's own supported payment flow. This application does not create a supplier funding transaction. Sync after funding to update availability.
 
 An account supports multiple SKUs with one credential. Adding another SKU from an implemented provider is an Admin operation, not a code change. A new provider contract or an unsupported fulfillment/input type still needs implementation and qualification.

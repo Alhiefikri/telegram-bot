@@ -175,6 +175,13 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         Queue::fake();
         $this->actingAs($owner)->withSession($session)
             ->post(route('admin.manual-fulfillment-reviews.resolve', $review), ['action' => 'fulfill', 'reason' => 'Disposable operator retry'])
+            ->assertRedirect(route('password.confirm'));
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        Queue::assertNotPushed(ProcessSupplierFulfillment::class);
+
+        // Fetch/AJAX callers keep the machine-readable confirmation contract.
+        $this->actingAs($owner)->withSession($session)
+            ->postJson(route('admin.manual-fulfillment-reviews.resolve', $review), ['action' => 'fulfill', 'reason' => 'Disposable operator retry'])
             ->assertStatus(428);
         $this->assertSame('review', $fulfillment->fresh()->state);
         Queue::assertNotPushed(ProcessSupplierFulfillment::class);

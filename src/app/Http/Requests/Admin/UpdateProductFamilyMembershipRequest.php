@@ -35,6 +35,7 @@ class UpdateProductFamilyMembershipRequest extends FormRequest
             'product_family_id' => ['nullable', 'integer', Rule::exists('product_families', 'id')->whereNull('deleted_at')],
             'family_sort_order' => ['nullable', 'integer', 'min:0', 'max:999999'],
             'family_option_label' => ['nullable', 'string', 'max:160'],
+            'return' => ['nullable', Rule::in(['supplier'])],
         ];
     }
 

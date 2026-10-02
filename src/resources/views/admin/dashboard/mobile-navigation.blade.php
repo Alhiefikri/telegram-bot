@@ -104,7 +104,7 @@
                             <span class="mr-2" aria-hidden="true">📢</span> Siaran
                         </button>
                         @if ($canManageSuppliers)
-                            <button type="button" class="admin-dashboard-action min-h-11 rounded-neo-2xl border-[3px] border-neo-ink bg-white px-3 py-2 text-left text-xs font-black uppercase tracking-wide shadow-neo-sm" x-on:click="goToTabFromMore('suppliers')">Supplier</button>
+                            <button type="button" class="admin-dashboard-action min-h-11 rounded-neo-2xl border-[3px] border-neo-ink bg-white px-3 py-2 text-left text-xs font-black uppercase tracking-wide shadow-neo-sm" x-on:click="goToTabFromMore('suppliers')"><span class="mr-2" aria-hidden="true">🏭</span>Supplier</button>
                         @endif
                         <button
                             type="button"

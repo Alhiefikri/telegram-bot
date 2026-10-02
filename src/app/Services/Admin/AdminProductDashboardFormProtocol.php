@@ -150,7 +150,7 @@ class AdminProductDashboardFormProtocol
 
     public function productFamilyMembershipValidationErrors(Request $request, Validator $validator, Product $product): RedirectResponse
     {
-        return $this->productTabRedirect()
+        return $this->membershipRedirect($request, $product)
             ->withErrors($validator, self::PRODUCT_FAMILY_MEMBERSHIP_BAG)
             ->withInput([
                 'family_product_id' => $product->id,
@@ -162,7 +162,7 @@ class AdminProductDashboardFormProtocol
 
     public function productFamilyMembershipBusinessValidationError(Request $request, Product $product, string $message): RedirectResponse
     {
-        return $this->redirector->product($product)
+        return $this->membershipRedirect($request, $product)
             ->withErrors(['product_family_id' => $message], self::PRODUCT_FAMILY_MEMBERSHIP_BAG)
             ->withInput([
                 'family_product_id' => $product->id,
@@ -228,9 +228,9 @@ class AdminProductDashboardFormProtocol
             ->with('status', "Product Family {$familyName} dihapus. {$productCount} Product tidak lagi tergabung dalam family; state Product tetap dipertahankan.");
     }
 
-    public function productFamilyMembershipUpdated(Product $product): RedirectResponse
+    public function productFamilyMembershipUpdated(Product $product, ?Request $request = null): RedirectResponse
     {
-        return $this->redirector->product($product)
+        return $this->membershipRedirect($request, $product)
             ->with('status', "Grouping Product {$product->name} berhasil diperbarui.");
     }
 
@@ -278,6 +278,15 @@ class AdminProductDashboardFormProtocol
     private function productTabRedirect(): RedirectResponse
     {
         return redirect()->route('admin.dashboard', ['tab' => self::PRODUCT_TAB]);
+    }
+
+    private function membershipRedirect(?Request $request, Product $product): RedirectResponse
+    {
+        if ($request?->input('return') === 'supplier') {
+            return redirect()->route('admin.products.suppliers', $product);
+        }
+
+        return $this->redirector->product($product);
     }
 
     private function categoryManagementRedirect(?string $form = null, ?int $categoryId = null): RedirectResponse

@@ -12,9 +12,13 @@
         <x-theme-toggle showLabel class="fixed right-4 top-4 z-30 rounded-neo-xl border-[3px] border-neo-ink bg-white px-3 text-xs font-black text-neo-ink shadow-neo-sm transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-neo-focus" />
         <main class="w-full max-w-md">
             <x-admin-dashboard.card as="section" padding="compact" shadow="md" class="rounded-neo-5xl border-4 bg-white p-6 shadow-neo-3xl">
-                <p class="font-display text-[11px] font-black uppercase tracking-[0.2em] text-brand-muted">Sensitive Owner action</p>
+                <p class="font-display text-[11px] font-black uppercase tracking-[0.2em] text-brand-muted">Aksi sensitif owner</p>
                 <h1 class="mt-2 font-display text-2xl font-black uppercase">Konfirmasi password</h1>
-                <p class="mt-3 text-sm font-semibold leading-6 text-brand-muted">Masukkan password admin lagi untuk melanjutkan perubahan BSC Receiving Address.</p>
+                <p class="mt-3 text-sm font-semibold leading-6 text-brand-muted">Masukkan password admin lagi untuk melanjutkan aksi sensitif: mengubah alamat BSC, kredensial supplier, atau pemulihan pembelian supplier.</p>
+
+                @if (session('status'))
+                    <x-admin-dashboard.notice tone="warning" class="mt-4" role="status">{{ session('status') }}</x-admin-dashboard.notice>
+                @endif
 
                 @if ($errors->any())
                     <x-admin-dashboard.notice tone="danger" class="mt-4">

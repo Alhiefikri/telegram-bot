@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Models\AuditLog;
+use App\Models\Category;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductQuantityPriceTier;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
@@ -58,12 +60,53 @@ final class SupplierAdminTest extends TestCase
     public function test_validation_and_reauthentication_do_not_flash_supplier_secret(): void
     {
         $this->owner();
-        $this->post(route('admin.suppliers.store'), $this->connectionInput(['name' => '', 'provider' => self::KEY]))->assertStatus(422)->assertDontSee(self::KEY);
+        $this->post(route('admin.suppliers.store'), $this->connectionInput(['name' => '', 'provider' => self::KEY, 'api_key' => self::KEY]))
+            ->assertRedirect()
+            ->assertSessionHasErrors(['name', 'provider']);
+        $oldInput = session('_old_input', []);
+        $this->assertArrayNotHasKey('api_key', $oldInput);
+        $this->assertArrayNotHasKey('provider', $oldInput);
         $this->assertStringNotContainsString(self::KEY, json_encode(session()->all()));
-        $this->post(route('admin.suppliers.store'), $this->connectionInput())->assertStatus(428)->assertDontSee(self::KEY);
+
+        $this->post(route('admin.suppliers.store'), $this->connectionInput())->assertRedirect(route('password.confirm'));
         $this->assertStringNotContainsString(self::KEY, json_encode(session()->all()));
-        $this->withSession(['auth.password_confirmed_at' => time() - 901])->post(route('admin.suppliers.store'), $this->connectionInput())->assertStatus(428);
+        $this->withSession(['auth.password_confirmed_at' => time() - 901])->post(route('admin.suppliers.store'), $this->connectionInput())->assertRedirect(route('password.confirm'));
         $this->assertSame(0, Supplier::query()->count());
+    }
+
+    public function test_html_forms_redirect_with_safe_errors_while_fetch_receives_json(): void
+    {
+        $this->owner();
+        $this->withSession(['auth.password_confirmed_at' => time()]);
+
+        $this->post(route('admin.suppliers.store'), $this->connectionInput(['name' => '']))
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'suppliers']).'#admin-section-suppliers')
+            ->assertSessionHasErrors(['name']);
+
+        $this->postJson(route('admin.suppliers.store'), $this->connectionInput(['name' => '']))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Data supplier tidak valid.')
+            ->assertJsonStructure(['errors' => ['name']])
+            ->assertDontSee(self::KEY);
+
+        $this->withSession(['auth.password_confirmed_at' => 0])
+            ->postJson(route('admin.suppliers.store'), $this->connectionInput())
+            ->assertStatus(428)
+            ->assertJsonPath('confirmation_url', route('password.confirm'));
+    }
+
+    public function test_password_redirect_returns_to_the_working_context(): void
+    {
+        $this->owner();
+
+        $this->post(route('admin.suppliers.store'), $this->connectionInput())->assertRedirect(route('password.confirm'));
+        $this->assertSame(route('admin.dashboard', ['tab' => 'suppliers']), session('url.intended'));
+
+        $item = OrderItem::factory()->create();
+        $fulfillment = SupplierFulfillment::query()->create(['order_id' => $item->order_id, 'order_item_id' => $item->id, 'quantity' => 1, 'state' => 'review', 'maximum_cost_idr' => 5000, 'sources_snapshot' => []]);
+        $this->post(route('admin.suppliers.operate', $fulfillment), ['action' => 'recover', 'supplier_order_id' => 'ORDER-1', 'context' => 'purchases'])
+            ->assertRedirect(route('password.confirm'));
+        $this->assertSame(route('admin.suppliers.purchases'), session('url.intended'));
     }
 
     public function test_blank_secret_preserves_key_without_reauth_but_account_changes_require_fresh_confirmation(): void
@@ -72,8 +115,8 @@ final class SupplierAdminTest extends TestCase
         $supplier = $this->supplier();
         $this->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['name' => 'Edited metadata', 'api_key' => '', 'version' => 1]))->assertRedirect();
         $this->assertSame(self::KEY, $supplier->refresh()->api_key);
-        $this->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => 'replacement-secret', 'version' => 2]))->assertStatus(428)->assertDontSee('replacement-secret');
-        $this->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => '', 'provider' => 'csxstore', 'currency' => 'USD', 'version' => 2]))->assertStatus(428);
+        $this->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => 'replacement-secret', 'version' => 2]))->assertRedirect(route('password.confirm'));
+        $this->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => '', 'provider' => 'csxstore', 'currency' => 'USD', 'version' => 2]))->assertRedirect(route('password.confirm'));
         $this->assertSame('prodseller', $supplier->refresh()->provider);
         $this->assertSame(self::KEY, $supplier->api_key);
         $this->assertStringNotContainsString('replacement-secret', json_encode(session()->all()));
@@ -82,8 +125,13 @@ final class SupplierAdminTest extends TestCase
     public function test_currency_confirmation_and_arbitrary_urls_fail_closed(): void
     {
         $this->owner();
-        $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $this->connectionInput(['provider' => 'warzone', 'currency_confirmed' => 0]))->assertStatus(422);
-        $this->post(route('admin.suppliers.store'), $this->connectionInput(['base_url' => 'https://attacker.example']))->assertStatus(422);
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.suppliers.store'), $this->connectionInput(['provider' => 'warzone', 'currency_confirmed' => 0]))
+            ->assertRedirect()
+            ->assertSessionHasErrors(['currency_confirmed']);
+        $this->post(route('admin.suppliers.store'), $this->connectionInput(['base_url' => 'https://attacker.example']))
+            ->assertRedirect()
+            ->assertSessionHasErrors(['base_url']);
         $this->assertSame(0, Supplier::query()->count());
     }
 
@@ -108,9 +156,14 @@ final class SupplierAdminTest extends TestCase
     {
         $this->owner();
         $supplier = $this->supplier(['balance_micros' => 9000000, 'reserved_balance_micros' => 2000000]);
-        $this->withSession(['auth.password_confirmed_at' => time()])->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => 'other-account', 'version' => 1]))->assertStatus(409);
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => 'other-account', 'version' => 1]))
+            ->assertRedirect()
+            ->assertSessionHasErrors(['connection']);
         $this->assertSame(self::KEY, $supplier->refresh()->api_key);
-        $this->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => '', 'exchange_rate_idr' => 17000, 'version' => 1]))->assertStatus(409);
+        $this->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => '', 'exchange_rate_idr' => 17000, 'version' => 1]))
+            ->assertRedirect()
+            ->assertSessionHasErrors(['connection']);
         $this->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => '', 'is_active' => 0, 'version' => 1]))->assertRedirect();
         $this->assertFalse($supplier->refresh()->is_active);
         $this->assertSame(2000000, $supplier->reserved_balance_micros);
@@ -124,7 +177,10 @@ final class SupplierAdminTest extends TestCase
         $orderItem = OrderItem::factory()->create();
         $fulfillment = SupplierFulfillment::query()->create(['order_id' => $orderItem->order_id, 'order_item_id' => $orderItem->id, 'quantity' => 1, 'state' => 'awaiting_delivery', 'maximum_cost_idr' => 20000, 'sources_snapshot' => []]);
         SupplierPurchase::query()->create(['supplier_fulfillment_id' => $fulfillment->id, 'supplier_id' => $supplier->id, 'supplier_catalog_item_id' => $catalog->id, 'reference' => (string) Str::uuid(), 'quantity' => 1, 'expected_cost_micros' => 1000000, 'exchange_rate_idr' => 16000, 'state' => 'awaiting_delivery']);
-        $this->withSession(['auth.password_confirmed_at' => time()])->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => 'other-account', 'version' => 1]))->assertStatus(409);
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['api_key' => 'other-account', 'version' => 1]))
+            ->assertRedirect()
+            ->assertSessionHasErrors(['connection']);
         $this->assertSame(self::KEY, $supplier->refresh()->api_key);
         $this->assertSame(1, $supplier->version);
     }
@@ -133,7 +189,10 @@ final class SupplierAdminTest extends TestCase
     {
         $this->owner();
         $supplier = $this->supplier(['version' => 3]);
-        $this->withSession(['auth.password_confirmed_at' => time()])->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['name' => 'Stale', 'version' => 2]))->assertStatus(409)->assertDontSee(self::KEY);
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['name' => 'Stale', 'version' => 2]))
+            ->assertRedirect()
+            ->assertSessionHasErrors(['version']);
         $this->assertSame('Private Supplier', $supplier->refresh()->name);
         $this->assertSame(0, AuditLog::query()->where('action', 'supplier.updated')->count());
     }
@@ -144,9 +203,10 @@ final class SupplierAdminTest extends TestCase
         $supplier = $this->supplier();
         $item = $this->item($supplier, ['description' => 'PRIVATE supplier raw marketing copy']);
         $input = ['supplier_version' => 1, 'name' => 'Store-owned name', 'description' => 'Editable draft copy', 'price_amount' => 25000];
-        $this->post(route('admin.suppliers.import', $item), $input)->assertRedirect();
-        $this->post(route('admin.suppliers.import', $item), $input)->assertRedirect();
+        $first = $this->post(route('admin.suppliers.import', $item), $input);
         $product = Product::query()->sole();
+        $first->assertRedirect(route('admin.products.suppliers', $product));
+        $this->post(route('admin.suppliers.import', $item), $input)->assertRedirect(route('admin.products.suppliers', $product));
         $this->assertFalse($product->is_active);
         $this->assertSame('Editable draft copy', $product->description);
         $this->assertSame(0, $product->stock);
@@ -162,10 +222,15 @@ final class SupplierAdminTest extends TestCase
         $item = $this->item($supplier, ['requires_input' => true]);
         $product = Product::factory()->create();
         $input = ['product_id' => $product->id, 'supplier_version' => 1, 'version' => 0, 'priority' => 10, 'is_active' => 1];
-        $this->post(route('admin.suppliers.map', $item), $input)->assertStatus(422);
-        $this->post(route('admin.suppliers.map', $item), $input + ['equivalent_confirmed' => 1])->assertStatus(422);
+        $this->post(route('admin.suppliers.map', $item), $input)
+            ->assertRedirect()
+            ->assertSessionHasErrors(['equivalent_confirmed']);
+        $this->post(route('admin.suppliers.map', $item), $input + ['equivalent_confirmed' => 1])
+            ->assertRedirect()
+            ->assertSessionHasErrors(['is_active']);
         $input['is_active'] = 0;
-        $this->post(route('admin.suppliers.map', $item), $input + ['equivalent_confirmed' => 1])->assertRedirect();
+        $this->post(route('admin.suppliers.map', $item), $input + ['equivalent_confirmed' => 1])
+            ->assertRedirect(route('admin.products.suppliers', $product));
         $this->assertFalse(ProductSupplierSource::query()->sole()->is_active);
     }
 
@@ -176,11 +241,15 @@ final class SupplierAdminTest extends TestCase
         $item = $this->item($supplier);
         $product = Product::factory()->create(['price_amount' => 45000]);
         $source = $this->source($product, $item, ['version' => 4, 'priority' => 25]);
-        $this->post(route('admin.suppliers.map', $item), ['product_id' => $product->id, 'supplier_version' => 1, 'version' => 3, 'priority' => 1, 'is_active' => 0, 'equivalent_confirmed' => 1])->assertStatus(409);
+        $this->post(route('admin.suppliers.map', $item), ['product_id' => $product->id, 'supplier_version' => 1, 'version' => 3, 'priority' => 1, 'is_active' => 0, 'equivalent_confirmed' => 1])
+            ->assertRedirect()
+            ->assertSessionHasErrors(['version']);
         $this->assertSame(25, $source->refresh()->priority);
         $policy = new SupplierPricePolicy;
         $policy->forceFill(['product_id' => $product->id, 'mode' => 'manual', 'version' => 2])->save();
-        $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput(['version' => 1]))->assertStatus(409);
+        $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput(['version' => 1]))
+            ->assertRedirect()
+            ->assertSessionHasErrors(['version']);
         $this->assertSame(45000, $product->refresh()->price_amount);
     }
 
@@ -191,10 +260,21 @@ final class SupplierAdminTest extends TestCase
         $item = $this->item($supplier, ['unit_price_micros' => 1250000]);
         $product = Product::factory()->create(['price_amount' => 45000]);
         $this->source($product, $item);
-        $this->post(route('admin.products.supplier-pricing.preview', $product), $this->pricingInput(['mode' => 'hybrid', 'markup_basis_points' => 1000, 'profit_idr' => 3000, 'buffer_idr' => 250, 'rounding_idr' => 1000, 'catalog_item_id' => $item->id]))->assertOk()->assertExactJson(['cost_idr' => 20000, 'retail_idr' => 24000])->assertDontSee(self::KEY);
-        $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput())->assertRedirect();
+        $this->post(route('admin.products.supplier-pricing.preview', $product), $this->pricingInput(['mode' => 'hybrid', 'markup_basis_points' => 1000, 'profit_idr' => 3000, 'buffer_idr' => 250, 'rounding_idr' => 1000, 'catalog_item_id' => $item->id]))
+            ->assertOk()
+            ->assertExactJson([
+                'cost_idr' => 20000,
+                'retail_idr' => 24000,
+                'profit_idr' => 4000,
+                'profit_percent_basis_points' => 2000,
+                'tier_schedule_valid' => true,
+            ])
+            ->assertDontSee(self::KEY);
+        $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput())->assertRedirect(route('admin.products.suppliers', $product));
         $this->assertSame(45000, $product->refresh()->price_amount);
-        $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput(['mode' => 'fixed']))->assertStatus(409);
+        $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput(['mode' => 'fixed']))
+            ->assertRedirect()
+            ->assertSessionHasErrors(['version']);
     }
 
     public function test_manual_delivery_errors_never_flash_or_echo_credentials(): void
@@ -202,9 +282,30 @@ final class SupplierAdminTest extends TestCase
         $this->owner();
         $item = OrderItem::factory()->create();
         $fulfillment = SupplierFulfillment::query()->create(['order_id' => $item->order_id, 'order_item_id' => $item->id, 'quantity' => 1, 'state' => 'review', 'maximum_cost_idr' => 5000, 'sources_snapshot' => []]);
-        $this->post(route('admin.suppliers.operate', $fulfillment), ['action' => 'manual', 'credentials' => self::KEY])->assertStatus(428)->assertDontSee(self::KEY);
-        $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.operate', $fulfillment), ['action' => 'manual', 'credentials' => self::KEY])->assertStatus(409)->assertDontSee(self::KEY);
-        $this->post(route('admin.suppliers.operate', $fulfillment), ['action' => self::KEY, 'credentials' => self::KEY])->assertStatus(422)->assertDontSee(self::KEY);
+
+        $this->post(route('admin.suppliers.operate', $fulfillment), ['action' => 'manual', 'credentials' => self::KEY])
+            ->assertRedirect(route('password.confirm'));
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.suppliers.operate', $fulfillment), ['action' => 'manual', 'credentials' => self::KEY])
+            ->assertRedirect()
+            ->assertSessionHasErrors(['action']);
+        $this->post(route('admin.suppliers.operate', $fulfillment), ['action' => self::KEY, 'credentials' => self::KEY])
+            ->assertRedirect()
+            ->assertSessionHasErrors(['action']);
+
+        $this->withSession(['auth.password_confirmed_at' => 0])
+            ->postJson(route('admin.suppliers.operate', $fulfillment), ['action' => 'manual', 'credentials' => self::KEY])
+            ->assertStatus(428)
+            ->assertDontSee(self::KEY);
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson(route('admin.suppliers.operate', $fulfillment), ['action' => 'manual', 'credentials' => self::KEY])
+            ->assertStatus(409)
+            ->assertDontSee(self::KEY);
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson(route('admin.suppliers.operate', $fulfillment), ['action' => self::KEY, 'credentials' => self::KEY])
+            ->assertStatus(422)
+            ->assertDontSee(self::KEY);
+
         $this->assertStringNotContainsString(self::KEY, json_encode(session()->all()));
         $this->get(route('admin.suppliers.purchases'))->assertOk()->assertDontSee(self::KEY);
         $this->assertSame('review', $fulfillment->refresh()->state);
@@ -217,11 +318,11 @@ final class SupplierAdminTest extends TestCase
         $item = $this->item($supplier);
         $product = Product::factory()->create(['price_amount' => 45000]);
         $input = ['product_id' => $product->id, 'supplier_version' => 1, 'version' => 0, 'priority' => 15, 'is_active' => 1, 'equivalent_confirmed' => 1];
-        $this->post(route('admin.suppliers.map', $item), $input)->assertRedirect();
+        $this->post(route('admin.suppliers.map', $item), $input)->assertRedirect(route('admin.products.suppliers', $product));
         $this->assertSame('manual', SupplierPricePolicy::query()->where('product_id', $product->id)->sole()->mode);
         $input['supplier_version'] = 2;
         $input['version'] = 1;
-        $this->post(route('admin.suppliers.map', $item), $input)->assertRedirect();
+        $this->post(route('admin.suppliers.map', $item), $input)->assertRedirect(route('admin.products.suppliers', $product));
         $this->assertSame(2, Supplier::query()->findOrFail($supplier->id)->version);
         $this->assertSame(1, ProductSupplierSource::query()->count());
         $this->assertSame(1, AuditLog::query()->where('action', 'supplier.source_saved')->count());
@@ -236,10 +337,156 @@ final class SupplierAdminTest extends TestCase
         $product = Product::factory()->create(['price_amount' => 40000, 'usdt_price_amount' => null]);
         ProductQuantityPriceTier::factory()->create(['product_id' => $product->id, 'minimum_quantity' => 2, 'price_amount' => 20000, 'usdt_price_amount' => null]);
         $this->source($product, $item, ['is_active' => true]);
-        $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput(['mode' => 'fixed']))->assertStatus(422);
+        $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput(['mode' => 'fixed']))
+            ->assertRedirect()
+            ->assertSessionHasErrors(['mode']);
         $this->assertSame(40000, $product->refresh()->price_amount);
         $this->assertSame(0, SupplierPricePolicy::query()->count());
         $this->assertSame(20000, $product->quantityPriceTiers->sole()->price_amount);
+    }
+
+    public function test_product_search_endpoint_is_bounded_and_role_guarded(): void
+    {
+        $this->owner();
+        $netflix = Product::factory()->create(['name' => 'Netflix Premium']);
+        Product::factory()->create(['name' => 'Spotify Family']);
+
+        $this->getJson(route('admin.products.search', ['q' => 'Net']))
+            ->assertOk()
+            ->assertJsonCount(1, 'products')
+            ->assertJsonPath('products.0.id', $netflix->id)
+            ->assertJsonPath('products.0.name', 'Netflix Premium');
+
+        $this->getJson(route('admin.products.search', ['q' => 'N']))->assertOk()->assertExactJson(['products' => []]);
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Finance]));
+        $this->getJson(route('admin.products.search', ['q' => 'Net']))->assertForbidden();
+    }
+
+    public function test_catalog_filters_and_counts(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier();
+        $unmapped = $this->item($supplier, ['external_id' => 'sku-new', 'name' => 'Netflix Bulan']);
+        $mapped = $this->item($supplier, ['external_id' => 'sku-old', 'name' => 'Spotify Family']);
+        $this->source(Product::factory()->create(), $mapped);
+
+        $all = $this->get(route('admin.suppliers.catalog', $supplier))->assertOk();
+        $all->assertSee('Netflix Bulan')->assertSee('Spotify Family');
+
+        $this->get(route('admin.suppliers.catalog', ['supplier' => $supplier, 'status' => 'belum-dijual']))
+            ->assertOk()
+            ->assertSee('Netflix Bulan')
+            ->assertDontSee('Spotify Family');
+
+        $this->get(route('admin.suppliers.catalog', ['supplier' => $supplier, 'q' => 'spotify']))
+            ->assertOk()
+            ->assertSee('Spotify Family')
+            ->assertDontSee('Netflix Bulan');
+    }
+
+    public function test_supplier_dashboard_lists_only_supplier_products_with_economics(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['exchange_rate_idr' => 16000]);
+        $item = $this->item($supplier, ['unit_price_micros' => 1250000]);
+        $mapped = Product::factory()->create(['name' => 'Produk Supplier Andalan', 'price_amount' => 30000]);
+        $this->source($mapped, $item, ['is_active' => true]);
+        Product::factory()->create(['name' => 'Produk Lokal Biasa']);
+
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))
+            ->assertOk()
+            ->assertSee('Produk Supplier Andalan')
+            ->assertDontSee('Produk Lokal Biasa')
+            ->assertSee('Rp30.000')
+            ->assertSee('Rp20.000');
+    }
+
+    public function test_visibility_toggle_can_return_to_supplier_product_page(): void
+    {
+        $this->owner();
+        $product = Product::factory()->create(['is_active' => false]);
+        $this->patch(route('admin.products.visibility.update', $product), ['is_active' => 1, 'return' => 'supplier'])
+            ->assertRedirect(route('admin.products.suppliers', $product));
+        $this->assertTrue($product->refresh()->is_active);
+    }
+
+    public function test_product_search_can_include_description_for_copy_picker(): void
+    {
+        $this->owner();
+        Product::factory()->create(['name' => 'Netflix Premium', 'description' => 'Deskripsi contoh untuk disalin.']);
+
+        $this->getJson(route('admin.products.search', ['q' => 'Netflix', 'include' => 'description']))
+            ->assertOk()
+            ->assertJsonPath('products.0.description', 'Deskripsi contoh untuk disalin.');
+
+        $this->getJson(route('admin.products.search', ['q' => 'Netflix']))
+            ->assertOk()
+            ->assertJsonMissingPath('products.0.description');
+
+        $this->getJson(route('admin.products.search', ['q' => 'Netflix', 'include' => 'unknown_field']))
+            ->assertOk()
+            ->assertJsonMissingPath('products.0.description');
+    }
+
+    public function test_supplier_product_page_can_assign_a_product_family(): void
+    {
+        $this->owner();
+        $category = Category::factory()->create();
+        $family = ProductFamily::factory()->create();
+        $product = Product::factory()->create(['category_id' => $category->id]);
+
+        $this->patch(route('admin.products.family.update', $product), [
+            'product_family_id' => $family->id,
+            'family_sort_order' => 3,
+            'family_option_label' => 'Option QA',
+            'return' => 'supplier',
+        ])->assertRedirect(route('admin.products.suppliers', $product));
+
+        $product->refresh();
+        $this->assertSame($family->id, (int) $product->product_family_id);
+        $this->assertSame(3, (int) $product->family_sort_order);
+        $this->assertSame('Option QA', $product->family_option_label);
+
+        $page = $this->get(route('admin.products.suppliers', $product))->assertOk();
+        $page->assertSee('Katalog & family', false);
+        $page->assertSee($family->name);
+    }
+
+    public function test_supplier_product_page_family_mismatch_returns_there_with_errors(): void
+    {
+        $this->owner();
+        $family = ProductFamily::factory()->create();
+        $memberCategory = Category::factory()->create();
+        $otherCategory = Category::factory()->create();
+        $member = Product::factory()->create(['category_id' => $memberCategory->id]);
+        $candidate = Product::factory()->create(['category_id' => $otherCategory->id]);
+
+        $this->patch(route('admin.products.family.update', $member), ['product_family_id' => $family->id])->assertRedirect();
+
+        $this->patch(route('admin.products.family.update', $candidate), [
+            'product_family_id' => $family->id,
+            'return' => 'supplier',
+        ])
+            ->assertRedirect(route('admin.products.suppliers', $candidate))
+            ->assertSessionHasErrors(['product_family_id'], null, 'productFamilyMembership');
+
+        $this->assertNull($candidate->refresh()->product_family_id);
+    }
+
+    public function test_deep_link_edit_product_opens_the_edit_modal(): void
+    {
+        $this->owner();
+        $product = Product::factory()->create(['name' => 'Produk Deep Link']);
+
+        $this->get(route('admin.dashboard', ['tab' => 'produk', 'edit_product' => $product->id]))
+            ->assertOk()
+            ->assertSee('Produk Deep Link')
+            ->assertSee('\u0022productModalOpen\u0022:true', false)
+            ->assertSee('\u0022productModalMode\u0022:\u0022edit\u0022', false)
+            ->assertSee(route('admin.products.update', ['product' => $product]), false);
+
+        $this->get(route('admin.dashboard', ['tab' => 'produk', 'edit_product' => 999999]))->assertOk();
     }
 
     public function test_production_csrf_rejects_supplier_mutation_without_token(): void

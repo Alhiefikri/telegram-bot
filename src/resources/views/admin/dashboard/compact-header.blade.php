@@ -8,6 +8,7 @@
         'withdraw' => 'Withdraw Order Status',
         'funnel' => 'Funnel Storefront',
         'balance-issues' => 'Kompensasi Top-up',
+        'suppliers' => 'Supplier',
     ];
     $internalTabLabel = $internalTabLabels[$navigation['activeTab']] ?? 'Dashboard';
 @endphp

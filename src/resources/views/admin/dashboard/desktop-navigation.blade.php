@@ -30,6 +30,9 @@
                 </x-admin-dashboard.button>
                 @if ($canManageSuppliers)
                     <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-on:click="goToTab('suppliers')" class="py-3" x-bind:class="activeTab === 'suppliers' ? 'bottom-nav-active' : ''" x-bind:aria-current="activeTab === 'suppliers' ? 'page' : null">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 21h18M5 21V8l7-4 7 4v13M9 21v-5h6v5M9 11h.01M15 11h.01" />
+                        </svg>
                         <span class="text-[11px] font-black uppercase tracking-wide">Supplier</span>
                     </x-admin-dashboard.button>
                 @endif

@@ -5,6 +5,7 @@ namespace App\Http\Requests\Admin;
 use App\Models\Product;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 
 class UpdateProductVisibilityRequest extends FormRequest
 {
@@ -20,6 +21,7 @@ class UpdateProductVisibilityRequest extends FormRequest
     {
         return [
             'is_active' => ['required', 'boolean'],
+            'return' => ['nullable', Rule::in(['supplier'])],
         ];
     }
 

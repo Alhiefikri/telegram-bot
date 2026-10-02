@@ -2776,7 +2776,10 @@ test("keeps responsive navigation and utility actions usable", async ({
     })
   );
 
-  await expect(desktopButtons).toHaveCount(10);
+  await expect(desktopButtons).toHaveCount(11);
+  await expect(
+    desktopNav.getByRole("button", { name: "Supplier", exact: true })
+  ).toBeVisible();
   expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
   expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
   await expect(
@@ -2825,7 +2828,7 @@ for (const width of [768, 1024, 1280, 1440, 1920]) {
       })
     );
 
-    await expect(desktopButtons).toHaveCount(10);
+    await expect(desktopButtons).toHaveCount(11);
     if (width >= 1024) {
       expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
       expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
@@ -3903,6 +3906,125 @@ test("bulk stock deletion keeps mobile modal open and refreshes remaining accoun
     "0",
     "0",
   ]);
+  await expectNoDocumentOverflow(page);
+});
+
+test("supplier selling flow: catalog to product pricing calculator", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+
+  await page.goto(`${baseUrl}/admin?tab=suppliers`, {
+    waitUntil: "domcontentloaded",
+  });
+  await expect(
+    page.getByRole("heading", { name: "Browser QA Supplier" })
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Buka katalog & jual" }).first().click();
+
+  await expect(
+    page.getByRole("heading", { name: "Pilih SKU yang mau dijual" })
+  ).toBeVisible();
+  const skuCard = page
+    .locator("article")
+    .filter({ hasText: "Browser QA SKU Netflix" })
+    .first();
+  await expect(skuCard.getByText("Rp20.000")).toBeVisible();
+  await skuCard.getByRole("button", { name: "Jual produk ini" }).click();
+
+  const dialog = page.locator("#supplier-sell-modal");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Nama produk toko")).toHaveValue(
+    "Browser QA SKU Netflix"
+  );
+  await expect(dialog.getByLabel("Harga jual (IDR)")).toHaveValue("24000");
+
+  await dialog
+    .getByRole("button", { name: "Salin deskripsi supplier sebagai draf" })
+    .click();
+  await expect(dialog.getByLabel("Deskripsi singkat (opsional)")).toHaveValue(
+    "Private supplier copy that must never be published automatically."
+  );
+
+  await dialog
+    .getByText("Salin deskripsi dari produk yang ada (opsional)")
+    .click();
+  await dialog
+    .getByLabel("Cari produk untuk disalin")
+    .fill("Browser QA Produk A");
+  const copyResult = dialog.locator("[data-supplier-copy-result]").first();
+  await expect(copyResult).toBeVisible();
+  await copyResult.click();
+  await expect(dialog.getByLabel("Deskripsi singkat (opsional)")).toHaveValue(
+    /.+/
+  );
+  await expect(dialog.getByText("Deskripsi disalin dari")).toContainText(
+    "Browser QA Produk A"
+  );
+
+  await dialog.locator('input[name="sell_mode"][value="link"]').check();
+  await dialog.getByLabel("Cari produk toko").fill("Browser QA Produk A");
+  const searchResult = dialog
+    .getByRole("button", { name: /Browser QA Produk A/ })
+    .first();
+  await expect(searchResult).toBeVisible();
+  await searchResult.click();
+  await dialog.locator('input[name="equivalent_confirmed"]').check();
+  await dialog
+    .getByRole("button", { name: "Hubungkan & lanjut atur harga" })
+    .click();
+
+  await page.waitForURL(/\/admin\/products\/\d+\/suppliers/);
+  await expect(
+    page.getByRole("heading", { name: "Langkah agar produk siap dijual" })
+  ).toBeVisible();
+  await expect(page.getByText("Ringkasan untung")).toBeVisible();
+  await expect(page.locator("[data-supplier-current-price]")).toContainText(
+    "Rp45.000"
+  );
+
+  await page.locator('input[name="mode"][value="percent"]').check();
+  await page.locator("#supplier-pricing-percent").fill("20");
+  await expect(page.locator("[data-supplier-preview-retail]")).toHaveText(
+    "Rp24.000"
+  );
+
+  await page.getByRole("button", { name: "Simpan aturan harga" }).click();
+  await page.waitForURL(/\/admin\/products\/\d+\/suppliers/);
+  await expect(page.getByText("Aturan harga disimpan.")).toBeVisible();
+  await expect(page.locator("[data-supplier-current-price]")).toContainText(
+    "Rp24.000"
+  );
+
+  const productPath = new URL(page.url()).pathname;
+  await page.getByRole("link", { name: "Edit produk lengkap" }).click();
+  await page.waitForURL(/\/admin\?tab=produk&edit_product=\d+/);
+  const editDialog = page.getByRole("dialog", { name: "Edit produk" });
+  await expect(editDialog).toBeVisible();
+  await expect(editDialog.getByLabel("Nama produk")).toHaveValue(
+    "Browser QA Produk A"
+  );
+  await page.keyboard.press("Escape");
+  await expect(editDialog).toBeHidden();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${baseUrl}${productPath}`, {
+    waitUntil: "domcontentloaded",
+  });
+  await expect(page.getByRole("heading", { name: "Atur harga" })).toBeVisible();
+  await expectNoDocumentOverflow(page);
+
+  await page.goto(`${baseUrl}/admin?tab=suppliers`, {
+    waitUntil: "domcontentloaded",
+  });
+  await expectNoDocumentOverflow(page);
+
+  await page.getByRole("link", { name: "Buka katalog & jual" }).first().click();
+  await expect(
+    page.getByRole("heading", { name: "Pilih SKU yang mau dijual" })
+  ).toBeVisible();
   await expectNoDocumentOverflow(page);
 });
 
@@ -5021,6 +5143,9 @@ use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductFamilySlugRedirect;
 use App\Models\ProductStockItem;
+use App\Models\ProductSupplierSource;
+use App\Models\Supplier;
+use App\Models\SupplierCatalogItem;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\URL;
@@ -5392,6 +5517,60 @@ Payment::factory()->create([
     'provider_payment_method' => 'qris',
     'amount' => 56000,
     'status' => PaymentStatus::Failed,
+]);
+
+$browserSupplier = new Supplier;
+$browserSupplier->forceFill([
+    'name' => 'Browser QA Supplier',
+    'provider' => 'prodseller',
+    'api_key' => 'browser-supplier-key',
+    'currency' => 'USDT',
+    'currency_confirmed' => true,
+    'exchange_rate_idr' => 16000,
+    'balance_micros' => 12_500_000,
+    'reserved_balance_micros' => 0,
+    'is_active' => true,
+    'version' => 1,
+    'synced_at' => now(),
+    'sync_expires_at' => now()->addHours(1),
+    'low_balance_threshold_micros' => 0,
+])->save();
+
+$unmappedSku = SupplierCatalogItem::query()->create([
+    'supplier_id' => $browserSupplier->id,
+    'external_id' => 'browser-sku-new',
+    'name' => 'Browser QA SKU Netflix',
+    'description' => 'Private supplier copy that must never be published automatically.',
+    'currency' => 'USDT',
+    'unit_price_micros' => 1_250_000,
+    'stock' => 5,
+    'orderable' => true,
+    'requires_input' => false,
+    'price_tiers' => [],
+    'bulk_discounts' => [],
+    'synced_at' => now(),
+]);
+
+$mappedSku = SupplierCatalogItem::query()->create([
+    'supplier_id' => $browserSupplier->id,
+    'external_id' => 'browser-sku-mapped',
+    'name' => 'Browser QA SKU Spotify',
+    'description' => 'Mapped supplier copy for pricing calculator coverage.',
+    'currency' => 'USDT',
+    'unit_price_micros' => 1_250_000,
+    'stock' => 5,
+    'orderable' => true,
+    'requires_input' => false,
+    'price_tiers' => [],
+    'bulk_discounts' => [],
+    'synced_at' => now(),
+]);
+
+ProductSupplierSource::query()->create([
+    'product_id' => $productA->id,
+    'supplier_catalog_item_id' => $mappedSku->id,
+    'priority' => 100,
+    'is_active' => true,
 ]);
 
 echo json_encode([

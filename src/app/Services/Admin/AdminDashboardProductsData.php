@@ -61,6 +61,34 @@ final class AdminDashboardProductsData
         ];
     }
 
+    /**
+     * Minimal Product payload used to open the edit modal from a deep link,
+     * including products that are not part of the current page window.
+     *
+     * @return array<string, mixed>
+     */
+    public function productFormPayload(Product $product): array
+    {
+        $product->loadMissing(['quantityPriceTiers:id,product_id,minimum_quantity,price_amount,usdt_price_amount']);
+
+        return [
+            'id' => $product->id,
+            'name' => $product->name,
+            'icon' => $product->icon,
+            'price_amount' => $product->price_amount,
+            'usdt_price_amount' => $this->formatUsdtPrice($product->usdt_price_amount),
+            'quantity_price_tiers' => $this->quantityPriceTierPayload($product),
+            'category_id' => $product->category_id,
+            'description' => $product->description,
+            'warranty_policy' => $product->warranty_policy,
+            'delivery_note' => $product->delivery_note,
+            'usage_guide_title' => $product->usage_guide_title,
+            'usage_guide_url' => $product->usage_guide_url,
+            'update_url' => route('admin.products.update', ['product' => $product]),
+            'telegram_channel_image_url' => $this->images->telegramUrl($product->telegram_channel_image_path),
+        ];
+    }
+
     private function latestProducts(bool $includeManageableStockItems, int $productsPage, bool $includeStockItems): array
     {
         $catalog = $this->catalog->browseAdmin(new CatalogBrowseQuery(page: max(1, $productsPage), perPage: 20));

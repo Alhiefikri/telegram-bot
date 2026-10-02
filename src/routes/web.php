@@ -24,6 +24,7 @@ use App\Http\Controllers\Admin\AdminProductFamilyCreateController;
 use App\Http\Controllers\Admin\AdminProductFamilyDeleteController;
 use App\Http\Controllers\Admin\AdminProductFamilyMembershipController;
 use App\Http\Controllers\Admin\AdminProductFamilyUpdateController;
+use App\Http\Controllers\Admin\AdminProductSearchController;
 use App\Http\Controllers\Admin\AdminProductStockController;
 use App\Http\Controllers\Admin\AdminProductStockItemDeleteController;
 use App\Http\Controllers\Admin\AdminProductStockItemsBulkDeleteController;
@@ -187,6 +188,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::get('products/{product}/suppliers', [AdminSupplierController::class, 'product'])->name('products.suppliers');
             Route::post('products/{product}/supplier-pricing', [AdminSupplierController::class, 'price'])->name('products.supplier-pricing');
             Route::post('products/{product}/supplier-pricing/preview', [AdminSupplierController::class, 'preview'])->name('products.supplier-pricing.preview');
+            Route::get('product-search', AdminProductSearchController::class)->middleware('throttle:60,1')->name('products.search');
             Route::post('categories', AdminCategoryCreateController::class)->name('categories.store');
             Route::patch('categories/{category}', AdminCategoryUpdateController::class)->name('categories.update');
             Route::delete('categories/{category}', AdminCategoryDeleteController::class)->name('categories.destroy');

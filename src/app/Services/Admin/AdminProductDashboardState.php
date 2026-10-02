@@ -39,7 +39,7 @@ class AdminProductDashboardState
      * @param  array<string, mixed>  $navigation
      * @return array<string, mixed>
      */
-    public function build(array $productsTab, array $statsTab, array $navigation, ViewErrorBag $errors, ?string $categoryFormMode = null, ?int $categoryId = null, ?string $familyFormMode = null, ?int $familyId = null): array
+    public function build(array $productsTab, array $statsTab, array $navigation, ViewErrorBag $errors, ?string $categoryFormMode = null, ?int $categoryId = null, ?string $familyFormMode = null, ?int $familyId = null, ?int $editProductId = null): array
     {
         $products = collect($productsTab['products']);
         $categoryManagement = $productsTab['categoryManagement'] ?? ['createUrl' => '', 'categories' => []];
@@ -48,7 +48,9 @@ class AdminProductDashboardState
         $families = collect($familyManagement['families']);
         $stockModalProduct = $products->firstWhere('id', (int) old('stock_product_id'));
         $stockItemUpdateProduct = $products->firstWhere('id', (int) old('stock_item_product_id'));
-        $editingProduct = $products->firstWhere('id', (int) old('product_id'));
+        $requestedEditProduct = $editProductId === null ? null : $products->firstWhere('id', $editProductId);
+        $editingProduct = $products->firstWhere('id', (int) old('product_id')) ?? $requestedEditProduct;
+        $isRequestedEdit = $requestedEditProduct !== null;
         $editingCategory = $categories->firstWhere('id', $categoryId ?? (int) old('category_id'));
         $editingFamily = $families->firstWhere('id', $familyId ?? (int) old('family_id'));
         $productStoreUrl = $productsTab['productStoreUrl'];
@@ -88,14 +90,15 @@ class AdminProductDashboardState
             || $categoryDeleteErrors->count() > 0
             || $stockItemUpdateErrors->count() > 0
             || $hasFamilyErrors
-            || $familyMembershipErrors->count() > 0;
+            || $familyMembershipErrors->count() > 0
+            || $isRequestedEdit;
 
         return [
             'activeTab' => $hasProductTabErrors ? self::PRODUCT_TAB : $navigation['activeTab'],
             'storeLink' => $statsTab['storeLink']['url'],
             'productStoreUrl' => $productStoreUrl,
             'categoryCreateUrl' => $categoryManagement['createUrl'],
-            'productModalOpen' => $hasProductErrors,
+            'productModalOpen' => $hasProductErrors || $isRequestedEdit,
             'categoryModalOpen' => $hasCategoryFormState || $categoryCreateErrors->count() > 0 || $hasCategoryUpdateErrors || $categoryDeleteErrors->count() > 0,
             'categoryForm' => [
                 'categoryFormMode' => $isCategoryEdit ? 'edit' : 'create',
@@ -124,9 +127,9 @@ class AdminProductDashboardState
             'familyMembershipProductId' => old('family_product_id'),
             'familyMembershipErrors' => $familyMembershipErrors->toArray(),
             'productForm' => [
-                'productModalMode' => $hasProductUpdateErrors ? 'edit' : 'create',
-                'productFormAction' => $hasProductUpdateErrors ? ($editingProduct['update_url'] ?? $productStoreUrl) : $productStoreUrl,
-                'productFormMethod' => $hasProductUpdateErrors ? 'PATCH' : '',
+                'productModalMode' => ($hasProductUpdateErrors || $isRequestedEdit) ? 'edit' : 'create',
+                'productFormAction' => ($hasProductUpdateErrors || $isRequestedEdit) ? ($editingProduct['update_url'] ?? $productStoreUrl) : $productStoreUrl,
+                'productFormMethod' => ($hasProductUpdateErrors || $isRequestedEdit) ? 'PATCH' : '',
                 'productId' => old('product_id', $editingProduct['id'] ?? null),
                 'productName' => old('name', $editingProduct['name'] ?? ''),
                 'productIcon' => old('icon', $editingProduct['icon'] ?? ''),

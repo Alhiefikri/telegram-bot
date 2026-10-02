@@ -116,8 +116,10 @@ final class ProductSupplierManager
                     }
                     try {
                         $base = $this->pricing->retailPrice($policy, SupplierMoney::costIdr($micros, (int) $supplier->exchange_rate_idr));
-                        app(ProductQuantityPricing::class)->validateSchedule($base, $locked->usdt_price_amount, $locked->quantityPriceTiers->map(fn ($tier) => ['minimum_quantity' => $tier->minimum_quantity, 'price_amount' => $tier->price_amount, 'usdt_price_amount' => $tier->usdt_price_amount])->all());
                     } catch (\InvalidArgumentException) {
+                        throw ValidationException::withMessages(['mode' => 'Harga retail baru harus mempertahankan tier kuantitas yang valid.']);
+                    }
+                    if (! $this->tierScheduleValid($locked, $base)) {
                         throw ValidationException::withMessages(['mode' => 'Harga retail baru harus mempertahankan tier kuantitas yang valid.']);
                     }
                     break;
@@ -144,14 +146,39 @@ final class ProductSupplierManager
     {
         $micros = $this->pricing->costMicros($item, 1);
         if ($micros === null) {
-            return ['cost_idr' => null, 'retail_idr' => null];
+            return [
+                'cost_idr' => null,
+                'retail_idr' => null,
+                'profit_idr' => null,
+                'profit_percent_basis_points' => null,
+                'tier_schedule_valid' => null,
+            ];
         }
         $supplier = Supplier::query()->findOrFail($item->supplier_id);
         $cost = SupplierMoney::costIdr($micros, (int) $supplier->exchange_rate_idr);
         $policy = new SupplierPricePolicy;
         $policy->forceFill($input);
+        $retail = $input['mode'] === 'manual' ? (int) $product->price_amount : $this->pricing->retailPrice($policy, $cost);
+        $profit = $retail - $cost;
 
-        return ['cost_idr' => $cost, 'retail_idr' => $input['mode'] === 'manual' ? (int) $product->price_amount : $this->pricing->retailPrice($policy, $cost)];
+        return [
+            'cost_idr' => $cost,
+            'retail_idr' => $retail,
+            'profit_idr' => $profit,
+            'profit_percent_basis_points' => $cost > 0 ? (int) round($profit * 10000 / $cost) : null,
+            'tier_schedule_valid' => $this->tierScheduleValid($product, $retail),
+        ];
+    }
+
+    private function tierScheduleValid(Product $product, int $baseIdr): bool
+    {
+        try {
+            app(ProductQuantityPricing::class)->validateSchedule($baseIdr, $product->usdt_price_amount, $product->quantityPriceTiers->map(fn ($tier) => ['minimum_quantity' => $tier->minimum_quantity, 'price_amount' => $tier->price_amount, 'usdt_price_amount' => $tier->usdt_price_amount])->all());
+
+            return true;
+        } catch (\InvalidArgumentException) {
+            return false;
+        }
     }
 
     private function version(int $actual, int $expected): void

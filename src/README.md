@@ -211,7 +211,8 @@ Receipt hanya bisa dikirim ulang untuk order yang sudah paid, memiliki seluruh c
 
 Owner/Admin mengelola nama supplier dan API key melalui **Admin → Supplier**; key disimpan terenkripsi di database, tidak di ENV, dan tidak ditampilkan kembali. Satu koneksi mendukung banyak SKU dari ProdSeller, CSxStore, ARRS, Warzone, atau AI Vault Hub.
 
-- Sinkronisasi katalog/saldo, impor draft nonaktif dengan copy milik toko, dan pemetaan SKU ekuivalen ke Product yang sudah ada.
+- Sinkronisasi katalog/saldo; katalog privat punya pencarian dan filter status (belum dijual/sudah dijual/instan/perlu input) dengan satu aksi **Jual produk ini** per SKU: buat produk baru atau hubungkan ke produk toko yang sudah ada, lalu lanjut ke halaman **Produk & harga** berisi checklist jual dan kalkulator untung langsung (modal → harga jual → untung). Deskripsi bisa diketik, disalin dari SKU supplier sebagai draf, atau disalin dari produk toko yang sudah ada; tombol **Edit produk lengkap** membuka modal edit produk (foto/ikon/kategori/deskripsi/panduan) lewat deep link `?edit_product=`, dan kartu **Katalog & family** memasukkan produk ke Product Family dengan aturan kategori yang sama.
+- Semua form supplier memakai redirect konteks + pesan error di halaman (bukan JSON mentah); pemanggil fetch tetap menerima kontrak JSON 409/422/428. Halaman ini tetap Owner/Admin-only dan tidak pernah memantulkan API key/kredensial.
 - Harga manual atau otomatis (persentase, profit tetap, hybrid), kurs modal, buffer, pembulatan dan minimum profit; snapshot harga order serta quantity tiers tetap berwenang.
 - Stok lokal dipakai dahulu. Kapasitas eksternal dibatasi stok/saldo supplier, freshness, komitmen berjalan dan profit guard; bukan inventori lokal.
 - Pembelian hanya setelah pembayaran terverifikasi. Delivery supplier dan biaya aktual harus terbukti sebelum fulfillment otomatis selesai; hasil parsial/ambigu tidak memicu pembelian ulang atau refund yang balapan.

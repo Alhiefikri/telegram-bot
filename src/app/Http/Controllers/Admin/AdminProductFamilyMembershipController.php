@@ -31,6 +31,6 @@ class AdminProductFamilyMembershipController extends Controller
             return $forms->productFamilyMembershipBusinessValidationError($request, $product, $exception->getMessage());
         }
 
-        return $forms->productFamilyMembershipUpdated($updated);
+        return $forms->productFamilyMembershipUpdated($updated, $request);
     }
 }
