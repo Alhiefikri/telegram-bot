@@ -39,6 +39,10 @@ final class CredentialDeliveryEligibility
             return 'payment_not_paid';
         }
 
+        if (app(\App\Services\Suppliers\SupplierFulfillmentService::class)->hasPending($order)) {
+            return 'fulfillment_processing';
+        }
+
         if ($order->hasOpenLatePaymentReview()) {
             return 'late_payment_review';
         }

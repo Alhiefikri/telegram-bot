@@ -188,7 +188,7 @@ Jika manual: validasi bukti bayar
         ↓
 Klik/eksekusi complete manual order
         ↓
-Receipt dikirim ke customer via queue
+Jika seluruh fulfillment lengkap: receipt dikirim ke customer via queue
         ↓
 Audit log operasi admin tersimpan
 ```
@@ -205,7 +205,23 @@ Status internal diperbarui bila payload valid
 Audit log manual reconciliation tersimpan
 ```
 
-Receipt hanya bisa dikirim ulang untuk order yang sudah paid dan masih dalam status operasional yang sesuai (`processing` atau `completed`) serta memiliki customer Telegram.
+Receipt hanya bisa dikirim ulang untuk order yang sudah paid, memiliki seluruh credential yang diperlukan, masih dalam status operasional yang sesuai (`processing` atau `completed`), serta memiliki customer Telegram. Order supplier/mixed yang belum lengkap tetap Paid/Processing tanpa receipt prematur.
+
+### 4.1 Supplier API Reseller — release 2026-10-02
+
+Owner/Admin mengelola nama supplier dan API key melalui **Admin → Supplier**; key disimpan terenkripsi di database, tidak di ENV, dan tidak ditampilkan kembali. Satu koneksi mendukung banyak SKU dari ProdSeller, CSxStore, ARRS, Warzone, atau AI Vault Hub.
+
+- Sinkronisasi katalog/saldo, impor draft nonaktif dengan copy milik toko, dan pemetaan SKU ekuivalen ke Product yang sudah ada.
+- Harga manual atau otomatis (persentase, profit tetap, hybrid), kurs modal, buffer, pembulatan dan minimum profit; snapshot harga order serta quantity tiers tetap berwenang.
+- Stok lokal dipakai dahulu. Kapasitas eksternal dibatasi stok/saldo supplier, freshness, komitmen berjalan dan profit guard; bukan inventori lokal.
+- Pembelian hanya setelah pembayaran terverifikasi. Delivery supplier dan biaya aktual harus terbukti sebelum fulfillment otomatis selesai; hasil parsial/ambigu tidak memicu pembelian ulang atau refund yang balapan.
+- Fallback hanya setelah bukti tidak terjadi pembelian/debit. Recovery memakai order supplier yang sama; customer tetap memakai invoice, receipt dan akses credential toko.
+- Penggantian manual dapat menyelesaikan delivery customer tanpa menghapus hold pembelian asli yang ambigu. Monitor tetap menawarkan recovery bukti debit asli; settlement tidak membuka ulang delivery atau mengalokasikan kredensial kedua.
+- Mutasi akun yang memiliki komitmen ditolak; API key/provider dan operasi recovery memerlukan konfirmasi password terbaru. Finance/Support tidak mempunyai akses supplier privat.
+
+Release memerlukan migration `2026_10_02_000002_create_supplier_reseller_tables`, worker queue `default` yang sudah ada, dan scheduler. Jalankan migration melalui proses deployment GitHub Actions yang disetujui, bukan `migrate:fresh` di production. API live/warranty/idempotency belum dikualifikasi lewat pembelian nyata; aktivasi production bukan bagian implementasi ini.
+
+Setup dan pemulihan: [supplier runbook](../docs/runbook-supplier-api-reseller.md). Desain/invariant dan referensi Context7: [implementation plan](../docs/supplier-api-reseller-implementation-plan.md) dan [ADR-0016](../docs/adr/0016-private-supplier-fulfillment-and-capacity.md).
 
 ## 5. Operational Guide
 
@@ -461,6 +477,8 @@ orders:expire-pending           setiap menit
 telegram:recover-updates        setiap menit
 telegram:forward-payment-proofs setiap menit
 telegram:recover-outbound       setiap menit
+suppliers:sync --limit=5         setiap menit; renew snapshot yang due, bukan semua akun segar
+suppliers:recover --limit=25     setiap menit; recovery durable tanpa pembelian ulang ambigu
 cleanup login links              setiap jam
 cleanup retained data            setiap hari
 ```
@@ -771,6 +789,9 @@ Langkah cek:
 - `src/app/Console/Commands/ReconcilePakasirPayments.php` — command `pakasir:reconcile {--chunk=100}`.
 - `src/app/Console/Commands/ReconcileBinancePayments.php` — command `binance:reconcile {--chunk=100}`.
 - `src/routes/console.php` — jadwal scheduler untuk expire pending orders dan reconciliation payment.
+- `src/app/Services/Suppliers/` — private connections, normalized provider APIs, integer pricing, external availability, ordered wallet commitments and paid fulfillment/recovery.
+- `src/app/Http/Controllers/Admin/AdminSupplierController.php` — Owner/Admin supplier management, catalog/import/mapping/pricing and reviewed recovery adapters.
+- `src/tests/Feature/Supplier*Test.php` dan `src/tests/Unit/Suppliers/` — HTTP/privacy/query/financial boundaries, decimal/overflow and PostgreSQL race coverage.
 - `src/config/orders.php` — konfigurasi TTL pending payment.
 - `scripts/concurrency-deploy-gate.sh` — deploy gate PostgreSQL untuk race test inventory/cart/checkout/payment/admin stock.
 - `src/phpunit.concurrency.xml` — konfigurasi PHPUnit khusus concurrency gate tanpa override SQLite default.

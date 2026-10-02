@@ -59,6 +59,10 @@ Schedule::command('telegram:recover-outbound --chunk=25 --queue=notifications')
     ->runInBackground();
 Schedule::command('telegram:reconcile-stock-notifications --chunk=25')->everyMinute()->withoutOverlapping();
 Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
+// Supplier observations and fulfillment are recoverable from PostgreSQL. The
+// Redis queue is only a wakeup path; neither command creates customer payments.
+Schedule::command('suppliers:sync --limit=5')->everyMinute()->withoutOverlapping(2)->runInBackground();
+Schedule::command('suppliers:recover --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('ops:payment-lifecycle-rollout-report')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping();
 Schedule::command('customers:cleanup-login-links --chunk=500')->hourly()->withoutOverlapping();

@@ -33,6 +33,15 @@ class ManualFulfillmentResolutionService
     public function resolve(ManualFulfillmentReview $review, User $actor, string $action, string $reason, ?string $refundReference = null, ?string $refundResult = null, ?string $ip = null): ManualFulfillmentReview
     {
         return DB::transaction(function () use ($review, $actor, $action, $reason, $refundReference, $refundResult, $ip) {
+            $initial = ManualFulfillmentReview::query()->findOrFail($review->id);
+            $initialPayment = Payment::query()->findOrFail($initial->payment_id);
+            if ($action === 'refund' && $initialPayment->provider === 'store_balance') {
+                $customer = Order::findOrFail($initial->order_id)->customer;
+                app(\App\Services\StoreBalance\StoreBalanceLedger::class)->lockForTransaction($customer);
+            }
+            Order::query()->lockForUpdate()->findOrFail($initial->order_id);
+            Payment::query()->where('order_id', $initial->order_id)->orderBy('id')->lockForUpdate()->get();
+            app(\App\Services\Suppliers\SupplierFulfillmentService::class)->lockForReview(Order::findOrFail($initial->order_id));
             $locked = ManualFulfillmentReview::query()->lockForUpdate()->findOrFail($review->id);
             if ($locked->state !== ManualFulfillmentReview::STATE_PENDING) {
                 return $locked;
@@ -49,6 +58,14 @@ class ManualFulfillmentResolutionService
 
     private function fulfill(ManualFulfillmentReview $review, User $actor, string $reason, ?string $ip): ManualFulfillmentReview
     {
+        if ($review->reason === 'supplier_fulfillment') {
+            $fulfillments = \App\Models\SupplierFulfillment::query()->where('order_id', $review->order_id)->where('state', 'review')->pluck('id');
+            foreach ($fulfillments as $id) {
+                app(\App\Services\Suppliers\SupplierFulfillmentService::class)->retryAfterTopup($id);
+            }
+
+            return $review->fresh();
+        }
         $order = Order::query()->lockForUpdate()->findOrFail($review->order_id);
         $payment = Payment::query()->lockForUpdate()->findOrFail($review->payment_id);
         $isPendingBscReview = $payment->status === PaymentStatus::Pending
@@ -67,6 +84,9 @@ class ManualFulfillmentResolutionService
             }
 
             [$items, $movements, $products] = $this->inventory->orderInventoryState($order);
+            if ($items->contains(fn ($item) => $item->supplier_quantity > 0)) {
+                throw new InvalidOrderTransition('This order needs explicit manual delivery through the fulfillment review.');
+            }
             $this->inventory->recordLatePaymentSales($order, $items, $products, $movements);
             foreach ($items as $item) {
                 $product = $products[$item->product_id] ?? throw new InsufficientStock('Ordered product is no longer available.');
@@ -89,6 +109,13 @@ class ManualFulfillmentResolutionService
 
     private function refund(ManualFulfillmentReview $review, User $actor, string $reason, ?string $reference, ?string $result, ?string $ip): ManualFulfillmentReview
     {
+        app(\App\Services\Suppliers\SupplierFulfillmentService::class)->assertRefundable(Order::findOrFail($review->order_id));
+        $payment = Payment::query()->findOrFail($review->payment_id);
+        if ($payment->provider === 'store_balance') {
+            $this->orders->applyPaymentRefunded($payment);
+
+            return $this->markResolved($review, ManualFulfillmentReview::STATE_REFUNDED, $actor, $reason, null, 'success');
+        }
         if (! filled($reference) || ! in_array($result, ['success', 'failure', 'uncertain'], true)) {
             throw new InvalidOrderTransition('A provider reference and explicit refund result are required.');
         }
@@ -100,7 +127,6 @@ class ManualFulfillmentResolutionService
             return $this->markRefundUncertain($review, $actor, $reason, $reference, $ip);
         }
 
-        $payment = Payment::query()->findOrFail($review->payment_id);
         $this->orders->applyPaymentRefunded($payment);
         $resolved = $this->markResolved($review, ManualFulfillmentReview::STATE_REFUNDED, $actor, $reason, $reference, $result);
         $this->audit->log('manual_fulfillment_review.refunded', $review, ['state' => ManualFulfillmentReview::STATE_PENDING], ['reason' => $reason, 'amount' => $review->amount, 'currency' => $review->currency, 'provider_reference' => $reference, 'provider_result' => $result], $actor, $ip);

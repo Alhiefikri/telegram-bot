@@ -1,0 +1,35 @@
+{
+  "account": { "wallet_balance": 150.5 },
+  "catalog": {
+    "services": [
+      {
+        "service_id": "sku-1",
+        "name": "Generic Digital Key",
+        "price": 10.0,
+        "stock": 42
+      }
+    ]
+  },
+  "purchase": {
+    "success": true,
+    "order_id": "order-1",
+    "service_id": "sku-1",
+    "quantity": 2,
+    "total_cost": 20.0,
+    "products": ["CODE-ONE", "CODE-TWO"]
+  },
+  "order": {
+    "success": true,
+    "order": {
+      "order_id": "order-1",
+      "quantity": 2,
+      "amount": 20.0,
+      "status": "success",
+      "delivered_products": ["CODE-ONE", "CODE-TWO"]
+    }
+  },
+  "balance_micros": 150500000,
+  "price_micros": 10000000,
+  "cost_micros": 20000000,
+  "stock": 42
+}

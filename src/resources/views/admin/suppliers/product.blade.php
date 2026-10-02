@@ -1,0 +1,18 @@
+@extends('admin.suppliers.layout')
+@section('title', 'Supplier & harga · '.$product->name)
+@section('content')
+<p>Produk #{{ $product->id }} · retail IDR {{ number_format($product->price_amount, 0, ',', '.') }}. Mode manual tidak mengubah retail. Mode otomatis mengubah harga dasar IDR saja; tier kuantitas tetap berwenang dan harus valid. Snapshot pesanan tidak berubah.</p>
+@foreach($sources as $source)
+@php($item = $source->catalogItem)
+@php($supplier = $item->supplier)
+<article class="rounded-2xl border-2 bg-white p-4"><h2 class="font-bold">{{ $supplier->name }} · {{ $item->name }} · SKU {{ $item->external_id }}</h2><p>Versi pemetaan {{ $source->version }} · versi supplier {{ $supplier->version }}</p>
+<form method="POST" action="{{ route('admin.suppliers.map', $item) }}" class="mt-3 grid gap-3">@csrf<input type="hidden" name="supplier_version" value="{{ $supplier->version }}"><input type="hidden" name="version" value="{{ $source->version }}"><input type="hidden" name="product_id" value="{{ $product->id }}"><label>Prioritas <input class="rounded border p-2" name="priority" type="number" min="0" max="10000" value="{{ $source->priority }}" required></label><input type="hidden" name="is_active" value="0"><label><input type="checkbox" name="is_active" value="1" @checked($source->is_active) @disabled($item->requires_input || !$item->orderable)> Aktif (SKU manual/input tidak didukung)</label><label><input type="checkbox" name="equivalent_confirmed" value="1" required> Konfirmasi SKU masih ekuivalen.</label><button class="rounded border-2 px-3 py-2 font-bold">Simpan sumber</button></form></article>
+@endforeach
+<section class="rounded-2xl border-2 bg-white p-4"><h2 class="font-bold">Kebijakan harga</h2>
+<form method="POST" action="{{ route('admin.products.supplier-pricing', $product) }}" class="mt-3 grid gap-3 sm:grid-cols-2">@csrf<input type="hidden" name="version" value="{{ $policy?->version ?? 0 }}">
+<label>Mode <select class="w-full rounded border p-2" name="mode">@foreach(['manual' => 'Manual', 'percent' => 'Persentase', 'fixed' => 'Profit tetap', 'hybrid' => 'Persentase / profit minimum'] as $value => $label)<option value="{{ $value }}" @selected(($policy?->mode ?? 'manual') === $value)>{{ $label }}</option>@endforeach</select></label>
+<label>Pembulatan naik IDR <select class="w-full rounded border p-2" name="rounding_idr">@foreach([1,100,500,1000] as $rounding)<option @selected(($policy?->rounding_idr ?? 1) === $rounding)>{{ $rounding }}</option>@endforeach</select></label>
+@foreach(['markup_basis_points' => 'Markup basis points (100 = 1%)', 'profit_idr' => 'Profit tetap / minimum hybrid IDR', 'minimum_profit_idr' => 'Batas minimum profit pembelian IDR per unit', 'buffer_idr' => 'Buffer biaya IDR per unit'] as $field => $label)<label>{{ $label }} <input class="w-full rounded border p-2" name="{{ $field }}" type="number" min="0" max="{{ $field === 'markup_basis_points' ? 100000 : 1000000000 }}" required value="{{ $policy?->$field ?? 0 }}"></label>@endforeach
+@if($sources->isNotEmpty())<label>SKU untuk preview <select class="w-full rounded border p-2" name="catalog_item_id">@foreach($sources as $source)<option value="{{ $source->supplier_catalog_item_id }}">{{ $source->catalogItem->name }}</option>@endforeach</select></label><button type="submit" formaction="{{ route('admin.products.supplier-pricing.preview', $product) }}" class="rounded border px-3 py-2 font-bold">Preview biaya / retail (JSON privat)</button>@endif
+<button type="submit" class="rounded border-2 px-3 py-2 font-bold sm:col-span-2">Simpan kebijakan harga</button></form></section>
+@endsection

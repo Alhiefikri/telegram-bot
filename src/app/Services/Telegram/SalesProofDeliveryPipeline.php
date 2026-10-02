@@ -193,6 +193,9 @@ final class SalesProofDeliveryPipeline
 
     private function paidOrderProofInvariantFailure(Order $order): ?string
     {
+        if (app(\App\Services\Suppliers\SupplierFulfillmentService::class)->hasPending($order)) {
+            return 'Order fulfillment is processing.';
+        }
         $isPaid = $order->payment_status === PaymentStatus::Paid
             && $order->payments->contains(fn ($payment): bool => $payment->status === PaymentStatus::Paid);
         $isProcessable = in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true);

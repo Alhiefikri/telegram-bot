@@ -1,0 +1,43 @@
+{
+  "account": { "balance": 25.5 },
+  "catalog": {
+    "products": [
+      {
+        "id": "sku-1",
+        "name": "Account Bundle",
+        "description": "Email and password delivery",
+        "price": 4.99,
+        "inStock": true,
+        "requiresEmailActivation": false,
+        "delivery": { "type": "instant" }
+      }
+    ]
+  },
+  "product_detail": {
+    "id": "sku-1",
+    "name": "Account Bundle",
+    "price": 4.99,
+    "stock": 47,
+    "requiresEmailActivation": false,
+    "delivery": { "type": "instant" }
+  },
+  "purchase": {
+    "orderId": "order-1",
+    "status": "delivered",
+    "product": { "id": "sku-1" },
+    "quantity": 2,
+    "amount": 9.98,
+    "deliveredKeys": ["account@example.test:password-one", "LICENSE-TWO"]
+  },
+  "order": {
+    "orderId": "order-1",
+    "status": "delivered",
+    "quantity": 2,
+    "amount": 9.98,
+    "deliveredKeys": ["account@example.test:password-one", "LICENSE-TWO"]
+  },
+  "balance_micros": 25500000,
+  "price_micros": 4990000,
+  "cost_micros": 9980000,
+  "stock": 47
+}

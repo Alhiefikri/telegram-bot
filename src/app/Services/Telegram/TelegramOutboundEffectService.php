@@ -2482,7 +2482,8 @@ class TelegramOutboundEffectService
     {
         return $order->payment_status === PaymentStatus::Paid
             && in_array($order->order_status, [OrderStatus::PendingPayment, OrderStatus::Processing, OrderStatus::Completed], true)
-            && $customer?->telegram_id !== null;
+            && $customer?->telegram_id !== null
+            && ! app(\App\Services\Suppliers\SupplierFulfillmentService::class)->hasPending($order);
     }
 
     private function receiptActionPanelSource(TelegramOutboundEffect $effect): bool

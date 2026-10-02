@@ -44,6 +44,7 @@
             $canViewFunnel = (bool) ($funnelTab['can_view'] ?? false);
             $canViewWithdraw = (bool) ($withdrawTab['can_view'] ?? false);
             $canManageBalanceIssues = ($admin['role'] ?? '') === 'owner';
+            $canManageSuppliers = in_array($admin['role'] ?? '', ['owner', 'admin'], true);
             $canViewBalanceIssues = ($navigation['activeTab'] ?? '') === 'balance-issues'
                 && ($balanceIssuesTab['state'] ?? null) === 'ready';
             $structuredStockInputEnabled = (bool) ($dashboardState['structuredStockInputEnabled'] ?? false);
@@ -84,6 +85,8 @@
                 @include('admin.dashboard.funnel-tab')
             @elseif ($navigation['activeTab'] === 'balance-issues')
                 @include('admin.dashboard.balance-issues-tab')
+            @elseif ($navigation['activeTab'] === 'suppliers')
+                @include('admin.dashboard.suppliers-tab')
             @endif
             @include('admin.dashboard.mobile-navigation')
         </main>

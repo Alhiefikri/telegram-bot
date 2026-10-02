@@ -24,6 +24,9 @@ class AdminDashboardController extends Controller
         if ($requestedTab === StoreBalanceOwnerCompensationService::TAB) {
             abort_unless($user?->role?->canCompensateStoreBalance() === true, 403);
         }
+        if ($requestedTab === 'suppliers') {
+            abort_unless($user?->role?->canManageStoreOperations() === true, 403);
+        }
         $viewData = $dashboardData->forActiveTab(
             $user,
             $requestedTab,

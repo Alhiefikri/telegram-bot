@@ -206,3 +206,31 @@ _Avoid_: Menu message, home message, reply keyboard menu, pinned message
 **Quantity Price Tier**:
 A Product-owned pricing rule that replaces the base per-unit catalog amount when one Cart Item reaches its minimum quantity; the applicable rule with the greatest reached minimum wins. It may define paired IDR and USDT amounts, applies only to that Product's quantity, and becomes immutable commercial history only through the Order Item snapshot created at checkout.
 _Avoid_: coupon, percentage discount, customer membership tier, Product variant, cart-wide bulk total
+
+**Supplier**:
+A private external shop connection from which the store acquires digital products for customer Orders. Its identity, credentials, prices and account balance are operator information, not customer catalog content.
+_Avoid_: Payment Provider, customer shop
+
+**Supplier Balance**:
+The store operator's prepaid funds held by a Supplier and available for acquiring products. It is distinct from Customer-owned Store Balance and is not a customer refund destination.
+_Avoid_: Store Balance, customer deposit
+
+**Product Supplier Source**:
+An operator-approved mapping from one store Product to an equivalent Supplier product, with a purchasing priority. It supplies fulfillment without replacing the Product's customer-facing identity or commercial history.
+_Avoid_: duplicated Product, supplier-branded Plan
+
+**Supplier Availability**:
+A time-limited estimate of external units that the store can acquire, constrained by supplier stock, Supplier Balance, existing commitments and the store's pricing policy. It is not locally owned stock or a supplier-guaranteed reservation.
+_Avoid_: Stock Intake, owned inventory
+
+**Supplier Fulfillment**:
+The acquisition and delivery obligation for the externally sourced units of an Order Item after customer payment. Payment confirmation and fulfillment completion are separate facts.
+_Avoid_: Payment, supplier checkout
+
+**Supplier Purchase**:
+One durable acquisition attempt against a specific Supplier for a Supplier Fulfillment, retaining its identity and observed economic outcome. Recovering or replaying that attempt is not permission to create another purchase.
+_Avoid_: customer Order, automatic retry order
+
+**Ambiguous Supplier Purchase**:
+A Supplier Purchase for which purchase or debit may have occurred but the outcome cannot yet be established. It blocks automatic replacement purchasing and refund until reliable evidence resolves the uncertainty.
+_Avoid_: rejected purchase, presumed no debit

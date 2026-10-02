@@ -1,0 +1,41 @@
+{
+  "account": { "balance": 145.5, "currency": "USD" },
+  "catalog": {
+    "currency": "USD",
+    "products": [
+      {
+        "service_id": "sku-1",
+        "name": "Streaming Voucher",
+        "stock": 482,
+        "custom_pricing": false,
+        "pricing_tiers": [
+          { "min": 1, "max": 99, "price": 0.5 },
+          { "min": 100, "max": 1000, "price": 0.45 }
+        ],
+        "bulk_discounts": [{ "min_qty": 500, "discount_pct": 5 }]
+      }
+    ]
+  },
+  "purchase": {
+    "success": true,
+    "order_id": "order-1",
+    "external_order_id": "checkout-1",
+    "service_id": "sku-1",
+    "quantity": 2,
+    "total_cost": 1.0,
+    "currency": "USD",
+    "products": ["VOUCHER-ONE", "VOUCHER-TWO"]
+  },
+  "order": {
+    "order_id": "order-1",
+    "status": "delivered",
+    "quantity": 2,
+    "total_cost": 1.0,
+    "currency": "USD",
+    "products": ["VOUCHER-ONE", "VOUCHER-TWO"]
+  },
+  "balance_micros": 145500000,
+  "price_micros": 500000,
+  "cost_micros": 1000000,
+  "stock": 482
+}

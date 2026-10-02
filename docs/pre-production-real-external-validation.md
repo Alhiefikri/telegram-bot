@@ -83,7 +83,10 @@ Record pass/fail for each row in the run report.
 | Admin Telegram | Admin dashboard button visibility, checkout notification to admin, `/broadcast ...` only when scoped to disposable recipients, Store Channel test send, Sales Proof Post publish, and Sales Proof Post retry when in release scope. |
 | Store Channel | `/start` menampilkan CTA channel yang dapat dibuka tanpa membership check; Store Channel test send dan Sales Proof Post tetap memakai target yang sudah diuji. |
 | Pakasir legacy settlement | If the compatibility lane is in release scope, run reconcile/webhook/payment-detail only against an existing historical Payment fixture; never create a new Pakasir checkout. |
+| Supplier API Reseller | Only with separate explicit spending approval: enter a rotated key through Owner/Admin, verify currency/equivalent SKU, authorize one controlled funded order, verify actual debit/quantity/retrieval and customer-owned delivery, and assess duplicate safety only for documented idempotent providers. Never use heuristic name/time matching or buy again after ambiguity. |
 | Final operations | `jobs` queue depth is `0`, `failed_jobs` is `0`, and Docker logs show no unexplained Telegram/Pakasir errors from the run window. |
+
+Supplier development verification uses disposable databases and fake provider HTTP; it proves application behavior, not a live supplier debit, warranty, resale rights or delivery validity. Follow the [supplier runbook](runbook-supplier-api-reseller.md) before enabling production mappings. No supplier purchase or funding is authorized by running the ordinary dogfood harness.
 
 ## Harness Commands
 
