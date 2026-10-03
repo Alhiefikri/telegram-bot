@@ -16,7 +16,7 @@ final class AdminSupplierDashboardData
 
             return [
                 ...$supplier->only(['id', 'name', 'provider', 'currency', 'currency_confirmed', 'exchange_rate_idr', 'is_active', 'version', 'low_balance_threshold_micros']),
-                'balance' => $supplier->balance_micros === null ? 'Belum diketahui' : SupplierMoney::decimal((int) $supplier->balance_micros),
+                'balance' => $supplier->balance_micros === null ? 'Belum diketahui' : SupplierMoney::balanceDecimal((int) $supplier->balance_micros),
                 'held_balance' => SupplierMoney::decimal((int) $supplier->reserved_balance_micros),
                 'available_balance' => $available === null ? 'Belum diketahui' : SupplierMoney::decimal($available),
                 'low_balance' => $available !== null && $available <= (int) $supplier->low_balance_threshold_micros,

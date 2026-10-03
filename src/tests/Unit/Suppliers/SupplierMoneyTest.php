@@ -25,6 +25,18 @@ class SupplierMoneyTest extends TestCase
         ];
     }
 
+    #[DataProvider('balances')]
+    public function test_signed_wallet_display_is_exact(int $balance, string $expected): void
+    {
+        $this->assertSame($expected, SupplierMoney::balanceDecimal($balance));
+    }
+
+    public static function balances(): array
+    {
+        return [[0, '0.000000'], [-1, '-0.000001'], [-3_800_000_000, '-3800.000000'],
+            [PHP_INT_MIN, '-9223372036854.775808'], [PHP_INT_MAX, '9223372036854.775807']];
+    }
+
     #[DataProvider('invalidAmounts')]
     public function test_invalid_precision_and_overflow_fail_closed(int|float|string $amount): void
     {

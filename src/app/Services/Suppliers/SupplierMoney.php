@@ -41,6 +41,15 @@ final class SupplierMoney
         return intdiv($micros, self::SCALE).'.'.str_pad((string) ($micros % self::SCALE), 6, '0', STR_PAD_LEFT);
     }
 
+    /** Signed wallet projection; provider amounts and costs remain nonnegative. */
+    public static function balanceDecimal(int $micros): string
+    {
+        // Format each component separately, including PHP_INT_MIN, without abs
+        // on the entire signed amount (which could overflow into a float).
+        return ($micros < 0 ? '-' : '').abs(intdiv($micros, self::SCALE)).'.'
+            .str_pad((string) abs($micros % self::SCALE), 6, '0', STR_PAD_LEFT);
+    }
+
     public static function checkedAdd(int $left, int $right): int
     {
         if ($left < 0 || $right < 0 || $left > PHP_INT_MAX - $right) {

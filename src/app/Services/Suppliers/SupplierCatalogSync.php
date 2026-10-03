@@ -73,13 +73,11 @@ final class SupplierCatalogSync
                         return false;
                     }
                 }
-                // A provider balance may already include an in-flight debit. Do
-                // not replace the local pre-debit observation before that purchase
-                // settles, or finalization would subtract the same debit twice.
-                if ($locked->provider === 'buymail' && SupplierPurchase::query()->where('supplier_id', $locked->id)
-                    ->whereNull('committed_at')->whereIn('state', ['sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists()) {
-                    return false;
-                }
+                // A profile wallet may already include an unsettled purchase's
+                // debit. Keep the pre-debit wallet until local finalization, but
+                // refresh catalog observations and freshness independently.
+                $balanceBlocked = $locked->provider === 'buymail' && SupplierPurchase::query()->where('supplier_id', $locked->id)
+                    ->whereNull('committed_at')->whereIn('state', ['sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists();
                 SupplierCatalogItem::query()->where(fn ($query) => $query->where('supplier_id', $locked->id)->orWhereIn('id', $mappedItems))
                     ->orderBy('id')->lockForUpdate()->get();
                 $now = now();
@@ -112,10 +110,11 @@ final class SupplierCatalogSync
                 SupplierCatalogItem::query()->where('supplier_id', $locked->id)
                     ->whereNotIn('external_id', array_column($rows, 'external_id'))
                     ->update(['stock' => 0, 'orderable' => false, 'synced_at' => $now, 'updated_at' => $now]);
-                $freeBalance = max(0, $snapshot->balanceMicros - $locked->reserved_balance_micros);
+                $balance = $balanceBlocked ? $locked->balance_micros : $snapshot->balanceMicros;
+                $freeBalance = max(0, ($balance ?? 0) - $locked->reserved_balance_micros);
                 $low = $locked->low_balance_threshold_micros > 0 && $freeBalance < $locked->low_balance_threshold_micros;
                 $locked->forceFill([
-                    'balance_micros' => $snapshot->balanceMicros,
+                    'balance_micros' => $balance,
                     'synced_at' => $now,
                     'sync_expires_at' => $now->copy()->addSeconds(self::FRESHNESS_SECONDS),
                     'sync_token' => null,

@@ -514,7 +514,13 @@ final class WarrantyClaimTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
     }
 
-    public function test_verified_replacement_buys_one_new_account_once_without_charging_the_buyer(): void
+    public static function replacementBalances(): array
+    {
+        return ['ordinary wallet' => [100_000_000_000, 95_200_000_000], 'wallet deficit' => [1_000_000_000, -3_800_000_000]];
+    }
+
+    #[DataProvider('replacementBalances')]
+    public function test_verified_replacement_buys_one_new_account_once_without_charging_the_buyer(int $balance, int $expectedBalance): void
     {
         [$customer, $unit] = $this->fixture();
         $claim = app(WarrantyClaimService::class)->submit($customer, $unit->public_id, $this->proof(), 'Wrong password');
@@ -530,7 +536,8 @@ final class WarrantyClaimTest extends NonTransactionalDatabaseTestCase
         $settlements->choose($customer, $claim->public_id, 'replacement');
         Http::swap(new Factory);
         Http::preventStrayRequests();
-        Http::fake(function ($request) {
+        Http::fake(function ($request) use ($unit, $balance) {
+            $unit->supplier->fresh()->forceFill(['balance_micros' => $balance])->save();
             $this->assertSame(1, $request['quantity']);
             $this->assertNotSame('original-reference', $request['reference']);
             $this->assertTrue($request->hasHeader('Idempotency-Key', $request['reference']));
@@ -557,7 +564,7 @@ final class WarrantyClaimTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(8000, $replacement->retail_amount);
         $this->assertSame('replacement@gmail.com', $replacement->stockItem->credential_payload['email']);
         $this->assertSame(0, $unit->supplier->fresh()->reserved_balance_micros);
-        $this->assertSame(95_200_000_000, $unit->supplier->fresh()->balance_micros);
+        $this->assertSame($expectedBalance, $unit->supplier->fresh()->balance_micros);
     }
 
     public function test_durable_claims_are_rediscovered_when_the_original_queue_wakeup_is_lost(): void

@@ -21,6 +21,7 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\User;
+use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\OrderCheckoutService;
@@ -31,12 +32,14 @@ use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Warranty\MissingFulfillmentRefundService;
 use App\Services\Warranty\WarrantySettlementService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Queue\Connectors\DatabaseConnector;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
@@ -159,9 +162,87 @@ final class BuyMailFulfillmentTest extends NonTransactionalDatabaseTestCase
             return Http::response($this->delivery($request['reference'], 2, 2), 201);
         });
         app(SupplierFulfillmentService::class)->process($fulfillment->id);
-        $this->assertFalse($syncApplied);
+        $this->assertTrue($syncApplied);
         $this->assertSame(90_400_000_000, $supplier->fresh()->balance_micros);
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+    }
+
+    public function test_actual_supplier_cost_preserves_a_visible_deficit_once(): void
+    {
+        [$supplier, $order] = $this->fixture(1);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        Http::fake(function ($request) use ($supplier) {
+            // The recorded wallet can be lower than the actual acquired cost.
+            $supplier->fresh()->forceFill(['balance_micros' => 1_000_000_000])->save();
+
+            return Http::response($this->delivery($request['reference'], 1, 1), 201);
+        });
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $this->assertSame(-3_800_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(0, $order->orderItems()->sole()->product->fresh()->availableStock());
+        $row = app(AdminSupplierDashboardData::class)->forTab()['connections']->items()[0];
+        $this->assertSame('-3800.000000', $row['balance']);
+        $this->assertSame('0.000000', $row['available_balance']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_unexpected_price_increase_retains_deficit_even_when_delivery_needs_review(): void
+    {
+        [$supplier, $order] = $this->fixture(1);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        Http::fake(function ($request) {
+            $payload = $this->delivery($request['reference'], 1, 1);
+            $payload['order']['unit_price'] = 120000;
+            $payload['order']['amount_charged'] = 120000;
+            $payload['order']['accounts'][0]['price'] = 120000;
+
+            return Http::response($payload, 201);
+        });
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $this->assertSame(-20_000_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $this->assertNotNull($fulfillment->purchases()->sole()->committed_at);
+        Http::assertSentCount(1);
+    }
+
+    public static function unsettledPurchaseStates(): array
+    {
+        return array_map(fn (string $state): array => [$state], ['sending', 'ambiguous', 'awaiting_delivery', 'review']);
+    }
+
+    #[DataProvider('unsettledPurchaseStates')]
+    public function test_review_purchase_refreshes_catalog_and_freshness_without_replacing_wallet_or_holds(string $state): void
+    {
+        [$supplier, $order] = $this->fixture(1);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        Http::fake(fn () => throw new ConnectionException('Lost supplier response'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $purchase = $fulfillment->purchases()->sole();
+        $purchase->update(['state' => $state]);
+        $this->assertNull($purchase->committed_at);
+        $this->travel(6)->minutes();
+        Http::swap(new Factory);
+        Http::fake(fn () => Http::response([
+            'id' => '123', 'currency' => 'IDR', 'balance' => 95200,
+            'price_per_account' => 5000, 'stock_available' => 19, 'refunds_enabled' => true,
+            'refund_window_minutes' => 120, 'limits' => ['max_quantity_per_order' => 50],
+        ]));
+        $this->assertTrue(app(SupplierCatalogSync::class)->sync($supplier->fresh()));
+        $sku = SupplierCatalogItem::where('supplier_id', $supplier->id)->sole();
+        $this->assertSame(5_000_000_000, $sku->unit_price_micros);
+        $this->assertSame(19, $sku->stock);
+        $this->assertSame(1, $sku->reserved_quantity);
+        $this->assertSame(100_000_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(4_800_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertTrue($supplier->fresh()->sync_expires_at->isFuture());
+        $this->assertGreaterThan(0, $order->orderItems()->sole()->product->fresh()->availableStock());
+        $this->assertNull($supplier->fresh()->sync_token);
     }
 
     public function test_a_proven_missing_unit_refunds_only_its_retail_price_and_preserves_delivered_accounts(): void

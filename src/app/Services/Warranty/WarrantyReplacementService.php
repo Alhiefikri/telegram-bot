@@ -153,7 +153,7 @@ final class WarrantyReplacementService
                 'state' => $result->quantity === 1 ? 'delivered' : 'settled', 'next_attempt_at' => null,
             ]);
             if ($attempt->committed_at === null) {
-                $supplier->forceFill(['balance_micros' => max(0, $supplier->balance_micros - $result->costMicros), 'version' => $supplier->version + 1])->save();
+                $supplier->forceFill(['balance_micros' => $supplier->balance_micros - $result->costMicros, 'version' => $supplier->version + 1])->save();
                 $sku->update(['stock' => max(0, $sku->stock - $result->quantity)]);
                 $attempt->committed_at = now();
             }

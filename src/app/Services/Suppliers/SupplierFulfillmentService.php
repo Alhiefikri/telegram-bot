@@ -420,7 +420,7 @@ final class SupplierFulfillmentService
         $supplier = $suppliers->get($purchase->supplier_id);
         $sku = $catalog->get($purchase->supplier_catalog_item_id);
         $this->unhold($f, $suppliers, $catalog);
-        $supplier->forceFill(['balance_micros' => max(0, ($supplier->balance_micros ?? 0) - $purchase->actual_cost_micros), 'version' => $supplier->version + 1])->save();
+        $supplier->forceFill(['balance_micros' => ($supplier->balance_micros ?? 0) - $purchase->actual_cost_micros, 'version' => $supplier->version + 1])->save();
         $sku->update(['stock' => $sku->stock === null ? null : max(0, $sku->stock - ($purchase->observed_quantity ?? $purchase->quantity))]);
         $purchase->committed_at = now();
     }
