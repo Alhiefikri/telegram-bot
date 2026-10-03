@@ -13,10 +13,10 @@
         <header class="grid gap-3">
             <a href="{{ route('storefront.home') }}" class="font-bold">Lhie Store</a>
             <h1 class="text-2xl font-bold">{{ __('order.warranty.title', [], $locale) }}</h1>
-            <p class="break-all font-mono">Invoice {{ $order->invoice_number }}</p>
-            <nav class="flex gap-3" aria-label="Language">
-                <a href="{{ route('warranty.show', ['order' => $order->id, 'locale' => 'id']) }}" lang="id">Bahasa Indonesia</a>
-                <a href="{{ route('warranty.show', ['order' => $order->id, 'locale' => 'en']) }}" lang="en">English</a>
+            <p class="break-all font-mono">{{ __('order.warranty.invoice', ['number' => $order->invoice_number], $locale) }}</p>
+            <nav class="flex gap-3" aria-label="{{ __('order.warranty.language', [], $locale) }}">
+                <a href="{{ route('warranty.show', ['order' => $order->id, 'locale' => 'id']) }}" lang="id">{{ __('order.warranty.language_id', [], $locale) }}</a>
+                <a href="{{ route('warranty.show', ['order' => $order->id, 'locale' => 'en']) }}" lang="en">{{ __('order.warranty.language_en', [], $locale) }}</a>
             </nav>
         </header>
         @if(session('status'))<p role="status" class="rounded border border-green-700 bg-green-50 p-4">{{ session('status') }}</p>@endif
@@ -25,7 +25,7 @@
             <p>{{ __('order.warranty.proof', [], $locale) }}</p>
             <p>{{ __('order.warranty.eligibility', [], $locale) }}</p>
             <p>{{ __('order.warranty.support', [], $locale) }}</p>
-            @if($supportUrl)<a class="font-bold underline" href="{{ $supportUrl }}" rel="noreferrer">Support</a>@endif
+            @if($supportUrl)<a class="font-bold underline" href="{{ $supportUrl }}" rel="noreferrer">{{ __('order.warranty.support_link', [], $locale) }}</a>@endif
             @if($order->order_status->value === 'processing')<p>{{ __('order.warranty.partial', [], $locale) }}</p>@endif
         </section>
         @foreach($missingFulfillments as $missing)
@@ -48,11 +48,36 @@
             <article class="grid min-w-0 gap-3 rounded-xl border bg-white p-4">
                 <h2 class="font-bold">{{ $unit->orderItem->product_name }} · {{ __('receipt.account_label', ['number' => $unit->unit_number], $locale) }}</h2>
                 <p>{{ __('order.warranty.window', ['deadline' => $unit->refund_deadline->timezone(config('app.timezone'))->format('Y-m-d H:i T')], $locale) }}</p>
-                @if($canRevealCredentials && $unit->stockItem->retired_at === null && $unit->replaces_unit_id !== null)
+                @if(array_key_exists($unit->id, $replacementCredentials))
                     @php
-                        $credential = $unit->stockItem->credential_payload;
+                        $credential = $replacementCredentials[$unit->id];
                     @endphp
-                    <div class="grid gap-2 rounded bg-slate-100 p-3"><p class="break-all">Email: {{ $credential['email'] }}</p><p class="break-all">Password: <code>{{ $credential['password'] }}</code></p></div>
+                    <div class="grid gap-2 rounded bg-slate-100 p-3">
+                        @if($credential !== null)
+                            @if($credential->email() !== null)
+                                <p class="break-all">{{ __('order.warranty.email', [], $locale) }}: {{ $credential->email() }}</p>
+                                <p class="break-all">{{ __('order.warranty.password', [], $locale) }}: <code>{{ $credential->password() }}</code></p>
+                                @if($credential->legacyParts()['mfa'] ?? null)
+                                    <p class="break-all">{{ __('order.warranty.mfa', [], $locale) }}: <code>{{ $credential->legacyParts()['mfa'] }}</code></p>
+                                @endif
+                            @else
+                                <pre class="whitespace-pre-wrap break-all">{{ $credential->text() }}</pre>
+                            @endif
+                            @if($credential->accessMethod() === \App\Enums\CredentialAccessMethod::AuthToken)
+                                <p class="break-all">{{ __('order.warranty.auth_token', [], $locale) }}: <code>{{ $credential->accessValue() }}</code></p>
+                            @elseif($credential->accessMethod() === \App\Enums\CredentialAccessMethod::OtpMailLink)
+                                <a class="font-bold underline" href="{{ $credential->accessValue() }}" rel="noreferrer">{{ __('order.warranty.otp_mail', [], $locale) }}</a>
+                            @endif
+                            @if($credential->readerMailLink() !== null)
+                                <a class="font-bold underline" href="{{ $credential->readerMailLink() }}" rel="noreferrer">{{ __('order.warranty.reader_mail', [], $locale) }}</a>
+                            @endif
+                            @if($credential->tutorial() !== null)
+                                <p class="whitespace-pre-wrap break-all">{{ $credential->tutorial() }}</p>
+                            @endif
+                        @else
+                            <p>{{ __('order.warranty.credentials_unavailable', [], $locale) }}</p>
+                        @endif
+                    </div>
                 @endif
                 @if($claim)
                     @php

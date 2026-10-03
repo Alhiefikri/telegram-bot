@@ -60,6 +60,25 @@ class CredentialDeliveryPresentationTest extends TestCase
         $this->assertFalse($presentation->forCustomer($order->customer, $order->fresh())->isEmpty());
     }
 
+    public function test_single_account_projection_requires_paid_allocation_and_excludes_retired_credentials(): void
+    {
+        [$order, $item] = $this->paidOrderWithItem();
+        $stock = ProductStockItem::create([
+            'product_id' => $item->product_id, 'order_item_id' => $item->id,
+            'secret' => 'allocated@example.test|allocated-password',
+        ]);
+        $presentation = app(CredentialDeliveryPresentation::class);
+        $this->assertSame('allocated-password', $presentation->forStockItem($order, $stock)?->password());
+
+        [$otherOrder] = $this->paidOrderWithItem();
+        $this->assertNull($presentation->forStockItem($otherOrder, $stock));
+        $order->update(['payment_status' => PaymentStatus::Pending]);
+        $this->assertNull($presentation->forStockItem($order, $stock));
+        $order->update(['payment_status' => PaymentStatus::Paid]);
+        $stock->update(['retired_at' => now()]);
+        $this->assertNull($presentation->forStockItem($order, $stock));
+    }
+
     public function test_paid_orders_preserve_item_and_stock_item_order_and_legacy_formatting(): void
     {
         $customer = Customer::factory()->create();

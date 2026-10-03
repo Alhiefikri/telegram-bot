@@ -984,5 +984,17 @@
   "order.warranty.change_to_refund": "Pilihan hanya dapat diubah ke refund jika pembelian pengganti belum berjalan atau hasilnya sudah dipastikan tidak membeli.",
   "order.warranty.missing_review": "Sebagian unit belum berhasil diperoleh. Support harus memastikan pembelian yang belum pasti sebelum sisa unit dapat direfund. Akun yang sudah dikirim tetap milik kamu.",
   "order.warranty.refund_missing": "Refund unit yang terbukti belum diperoleh",
-  "order.warranty.missing_refunded": ":amount sudah dikembalikan untuk unit yang belum diperoleh. Akun yang sudah dikirim tetap tersedia."
+  "order.warranty.missing_refunded": ":amount sudah dikembalikan untuk unit yang belum diperoleh. Akun yang sudah dikirim tetap tersedia.",
+  "order.warranty.invoice": "Invoice :number",
+  "order.warranty.language": "Bahasa",
+  "order.warranty.language_id": "Bahasa Indonesia",
+  "order.warranty.language_en": "English",
+  "order.warranty.support_link": "Hubungi dukungan",
+  "order.warranty.email": "Email",
+  "order.warranty.password": "Kata sandi",
+  "order.warranty.mfa": "MFA",
+  "order.warranty.auth_token": "Auth Token",
+  "order.warranty.otp_mail": "Buka OTP Mail",
+  "order.warranty.reader_mail": "Buka Reader Mail",
+  "order.warranty.credentials_unavailable": "Data akun pengganti belum tersedia. Hubungi dukungan."
 }

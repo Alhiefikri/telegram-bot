@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Enums\PaymentStatus;
 use App\Models\Customer;
+use App\Models\ProductStockItem;
+use App\Models\SupplierAccountUnit;
 use App\Models\WarrantyClaim;
 use App\Services\Telegram\TelegramReceiptActionPanel;
 use App\Services\Warranty\WarrantyOrderAccess;
@@ -78,6 +80,105 @@ final class WarrantyWebTest extends NonTransactionalDatabaseTestCase
         $replacement->save();
         $unit->order->update(['payment_status' => PaymentStatus::Pending]);
         $this->actingAs($customer, 'customer')->get(route('warranty.show', $unit->order))->assertOk()->assertDontSee('synthetic-password');
+    }
+
+    public function test_malformed_replacement_credentials_render_a_safe_fallback(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $replacement = $this->replacement($unit);
+        ProductStockItem::withoutEvents(fn () => $replacement->stockItem->update([
+            'credential_payload' => ['version' => 99, 'email' => 'partial@example.test', 'password' => 'partial-secret'],
+        ]));
+
+        $this->actingAs($customer, 'customer')->get(route('warranty.show', ['order' => $unit->order, 'locale' => 'en']))
+            ->assertOk()->assertSee('Replacement account details are unavailable. Contact support.')
+            ->assertDontSee('partial@example.test')->assertDontSee('partial-secret');
+    }
+
+    public function test_replacement_auth_token_is_delivered_and_escaped(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $replacement = $this->replacement($unit);
+        $replacement->stockItem->update(['credential_payload' => [
+            'version' => 1, 'email' => 'replacement@example.test', 'password' => '<replacement-password>',
+            'access_method' => 'auth_token', 'access_value' => '<synthetic-token>', 'tutorial_override' => 'Replacement tutorial',
+        ]]);
+
+        $this->actingAs($customer, 'customer')->get(route('warranty.show', ['order' => $unit->order, 'locale' => 'en']))
+            ->assertOk()->assertSee('replacement@example.test')->assertSee('<replacement-password>')
+            ->assertSee('<synthetic-token>')->assertDontSee('<synthetic-token>', false)->assertSee('Replacement tutorial');
+    }
+
+    public function test_replacement_otp_link_is_delivered_as_a_private_https_action(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $replacement = $this->replacement($unit);
+        $replacement->stockItem->update(['credential_payload' => [
+            'version' => 1, 'email' => 'replacement@example.test', 'password' => 'replacement-password',
+            'access_method' => 'otp_mail_link', 'access_value' => 'https://mail.example.test/otp?key=synthetic',
+            'tutorial_override' => null,
+        ]]);
+
+        $this->actingAs($customer, 'customer')->get(route('warranty.show', ['order' => $unit->order, 'locale' => 'en']))
+            ->assertOk()->assertSee('href="https://mail.example.test/otp?key=synthetic"', false)
+            ->assertSee('Open OTP Mail')->assertSee('rel="noreferrer"', false)
+            ->assertHeader('Cache-Control', 'no-store, private');
+    }
+
+    public function test_missing_and_unsafe_replacement_payloads_fail_closed(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $replacement = $this->replacement($unit);
+        foreach ([
+            ['version' => 1],
+            ['version' => 1, 'email' => 'unsafe@example.test', 'password' => 'unsafe-password',
+                'access_method' => 'otp_mail_link', 'access_value' => 'javascript:alert(1)'],
+        ] as $payload) {
+            ProductStockItem::withoutEvents(fn () => $replacement->stockItem->update(['credential_payload' => $payload]));
+            $this->actingAs($customer, 'customer')->get(route('warranty.show', ['order' => $unit->order, 'locale' => 'en']))
+                ->assertOk()->assertSee('Replacement account details are unavailable. Contact support.')
+                ->assertDontSee('unsafe-password')->assertDontSee('javascript:alert(1)');
+        }
+    }
+
+    public function test_replacement_page_localizes_labels_in_all_supported_locales(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $this->replacement($unit);
+        foreach ([
+            'id' => ['Bahasa', 'Kata sandi', 'Hubungi dukungan'],
+            'en' => ['Language', 'Password', 'Contact support'],
+            'ms' => ['Bahasa', 'Kata laluan', 'Hubungi sokongan'],
+        ] as $locale => [$language, $password, $support]) {
+            $this->actingAs($customer, 'customer')->get(route('warranty.show', ['order' => $unit->order, 'locale' => $locale]))
+                ->assertOk()->assertSee('aria-label="'.$language.'"', false)
+                ->assertSee($password.':')->assertSee($support)->assertDontSee('order.warranty.');
+        }
+    }
+
+    public function test_retired_replacement_secrets_are_not_rendered(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $replacement = $this->replacement($unit);
+        $replacement->stockItem->update(['retired_at' => now()]);
+        $this->actingAs($customer, 'customer')->get(route('warranty.show', $unit->order))
+            ->assertOk()->assertDontSee('synthetic-password')->assertDontSee('fixture@gmail.com');
+    }
+
+    private function replacement(SupplierAccountUnit $unit): SupplierAccountUnit
+    {
+        $stock = $unit->stockItem->replicate();
+        $stock->supplier_unit_index = 2;
+        $stock->save();
+        $replacement = $unit->replicate();
+        $replacement->public_id = (string) Str::uuid();
+        $replacement->external_id = 'PR2';
+        $replacement->product_stock_item_id = $stock->id;
+        $replacement->replaces_unit_id = $unit->id;
+        $replacement->save();
+        $unit->stockItem->update(['retired_at' => now()]);
+
+        return $replacement->fresh();
     }
 
     public function test_a_guest_buyer_can_open_warranty_with_the_existing_recovery_key_flow(): void

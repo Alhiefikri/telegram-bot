@@ -53,6 +53,29 @@ final class CredentialDeliveryPresentation
         return $this->project($order);
     }
 
+    /**
+     * Project one allocated account without exposing persistence parsing to
+     * private per-account pages such as warranty replacement delivery.
+     */
+    public function forStockItem(Order $order, ProductStockItem $stockItem): ?CredentialDeliveryAccount
+    {
+        if ($this->eligibility->rejectionReason($order) !== null || $stockItem->retired_at !== null) {
+            return null;
+        }
+
+        $order->loadMissing('orderItems.product');
+        $item = $order->orderItems->firstWhere('id', $stockItem->order_item_id);
+        if ($item === null) {
+            return null;
+        }
+
+        try {
+            return $this->account($stockItem, $stockItem->supplierAccountUnit?->unit_number ?? 1, $this->defaultTutorial($item));
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
     private function project(Order $order): CredentialDelivery
     {
         try {

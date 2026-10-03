@@ -985,5 +985,17 @@
   "order.warranty.change_to_refund": "You can switch to a refund only while no replacement purchase is in progress or unresolved.",
   "order.warranty.missing_review": "Some units could not be acquired. Support must resolve any uncertain purchase before the missing units can be refunded. Accounts already delivered stay yours.",
   "order.warranty.refund_missing": "Refund the proven missing units",
-  "order.warranty.missing_refunded": ":amount has been refunded for the missing units. Accounts already delivered remain available."
+  "order.warranty.missing_refunded": ":amount has been refunded for the missing units. Accounts already delivered remain available.",
+  "order.warranty.invoice": "Invoice :number",
+  "order.warranty.language": "Language",
+  "order.warranty.language_id": "Bahasa Indonesia",
+  "order.warranty.language_en": "English",
+  "order.warranty.support_link": "Contact support",
+  "order.warranty.email": "Email",
+  "order.warranty.password": "Password",
+  "order.warranty.mfa": "MFA",
+  "order.warranty.auth_token": "Auth Token",
+  "order.warranty.otp_mail": "Open OTP Mail",
+  "order.warranty.reader_mail": "Open Reader Mail",
+  "order.warranty.credentials_unavailable": "Replacement account details are unavailable. Contact support."
 }

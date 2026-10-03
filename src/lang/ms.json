@@ -983,5 +983,17 @@
   "order.warranty.change_to_refund": "Anda boleh menukar kepada bayaran balik hanya jika tiada pembelian pengganti sedang berjalan atau belum dipastikan.",
   "order.warranty.missing_review": "Sebahagian unit tidak diperoleh. Support perlu menyelesaikan pembelian yang belum pasti sebelum baki unit boleh dibayar balik. Akaun yang dihantar kekal milik anda.",
   "order.warranty.refund_missing": "Bayaran balik unit yang terbukti tidak diperoleh",
-  "order.warranty.missing_refunded": ":amount dibayar balik untuk unit yang tidak diperoleh. Akaun yang telah dihantar kekal tersedia."
+  "order.warranty.missing_refunded": ":amount dibayar balik untuk unit yang tidak diperoleh. Akaun yang telah dihantar kekal tersedia.",
+  "order.warranty.invoice": "Invois :number",
+  "order.warranty.language": "Bahasa",
+  "order.warranty.language_id": "Bahasa Indonesia",
+  "order.warranty.language_en": "English",
+  "order.warranty.support_link": "Hubungi sokongan",
+  "order.warranty.email": "E-mel",
+  "order.warranty.password": "Kata laluan",
+  "order.warranty.mfa": "MFA",
+  "order.warranty.auth_token": "Auth Token",
+  "order.warranty.otp_mail": "Buka OTP Mail",
+  "order.warranty.reader_mail": "Buka Reader Mail",
+  "order.warranty.credentials_unavailable": "Butiran akaun pengganti belum tersedia. Hubungi sokongan."
 }

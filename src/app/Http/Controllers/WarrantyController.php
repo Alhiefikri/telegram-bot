@@ -8,7 +8,7 @@ use App\Models\OrderRefund;
 use App\Models\SupplierAccountUnit;
 use App\Models\SupplierFulfillment;
 use App\Models\WarrantyClaim;
-use App\Services\Credentials\CredentialDeliveryEligibility;
+use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramSupportContact;
 use App\Services\Warranty\MissingFulfillmentRefundService;
@@ -24,16 +24,24 @@ use InvalidArgumentException;
 
 final class WarrantyController extends Controller
 {
-    public function show(Request $request, Order $order, WarrantyOrderAccess $access)
+    public function show(Request $request, Order $order, WarrantyOrderAccess $access, CredentialDeliveryPresentation $credentials)
     {
         $access->authorize($request, $order, allowSignedGrant: true);
         $units = SupplierAccountUnit::query()->where('order_id', $order->id)->with(['stockItem', 'orderItem'])->orderBy('unit_number')->orderBy('id')->paginate(50)->appends(['locale' => $access->locale($request, $order)]);
         $claims = WarrantyClaim::query()->whereIn('supplier_account_unit_id', $units->pluck('id'))->get()->keyBy('supplier_account_unit_id');
 
+        $replacementCredentials = [];
+        foreach ($units as $unit) {
+            if ($unit->replaces_unit_id !== null && $unit->stockItem !== null && $unit->stockItem->retired_at === null) {
+                $unit->stockItem->setRelation('supplierAccountUnit', $unit);
+                $replacementCredentials[$unit->id] = $credentials->forStockItem($order, $unit->stockItem);
+            }
+        }
+
         return response()->view('warranty.show', [
             'order' => $order, 'units' => $units, 'claims' => $claims, 'locale' => $access->locale($request, $order),
             'supportUrl' => app(TelegramSupportContact::class)->resolve()['url'] ?? null,
-            'canRevealCredentials' => app(CredentialDeliveryEligibility::class)->allows($order, $order->customer),
+            'replacementCredentials' => $replacementCredentials,
             'missingFulfillments' => SupplierFulfillment::query()->where('order_id', $order->id)->where('state', 'review')->with('orderItem')->get(),
             'missingRefunds' => OrderRefund::where('order_id', $order->id)->whereNotNull('supplier_fulfillment_id')->get(),
         ])->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer')->header('X-Robots-Tag', 'noindex, nofollow');
