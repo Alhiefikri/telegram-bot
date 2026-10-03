@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\ProductStockItem;
+use App\Models\SupplierPurchase;
 use App\Services\OrderLifecycleProjection;
 use App\Services\Suppliers\SupplierFulfillmentService;
 
@@ -40,7 +41,10 @@ final class CredentialDeliveryEligibility
             return 'payment_not_paid';
         }
 
-        if (app(SupplierFulfillmentService::class)->hasPending($order)) {
+        if (app(SupplierFulfillmentService::class)->hasPending($order)
+            && ! SupplierPurchase::query()->whereHas('fulfillment', fn ($q) => $q->where('order_id', $order->id))
+                ->whereHas('supplier', fn ($q) => $q->where('provider', 'buymail'))
+                ->whereNotNull('committed_at')->where('observed_quantity', '>', 0)->whereColumn('observed_quantity', '<', 'quantity')->exists()) {
             return 'fulfillment_processing';
         }
 

@@ -378,7 +378,7 @@ final class TelegramPaidOrderTxtExporter
     {
         $count = 0;
         foreach ($order->orderItems as $item) {
-            $count += $item->stockItems->count();
+            $count += $item->stockItems->whereNull('retired_at')->count();
         }
 
         return $count;

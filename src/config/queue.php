@@ -31,6 +31,18 @@ return [
 
     'connections' => [
 
+        // Supplier requests can take >=90 seconds. Keep this connection's
+        // visibility timeout independent of short Telegram/payment workers.
+        'supplier' => [
+            'driver' => env('QUEUE_CONNECTION', 'database'),
+            'connection' => env('QUEUE_CONNECTION', 'database') === 'redis' ? env('REDIS_QUEUE_CONNECTION', 'default') : env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'suppliers',
+            'retry_after' => 180,
+            'block_for' => null,
+            'after_commit' => true,
+        ],
+
         'sync' => [
             'driver' => 'sync',
         ],

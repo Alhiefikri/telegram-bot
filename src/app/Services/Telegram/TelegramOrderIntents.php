@@ -8,6 +8,8 @@ use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\SupplierAccountUnit;
+use App\Models\SupplierFulfillment;
 use App\Services\CredentialDeliveryFormatter;
 use App\Services\Credentials\CredentialDelivery;
 use App\Services\Credentials\CredentialDeliveryPresentation;
@@ -23,6 +25,7 @@ use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\Warranty\WarrantyOrderAccess;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Carbon;
@@ -437,6 +440,17 @@ class TelegramOrderIntents
             $lines[] = '';
             $lines[] = $this->orderInstruction($customer, $order, $payment);
             $units = $this->unitsFromLines($lines, withCredentialEntities: true);
+        }
+
+        if (SupplierAccountUnit::query()->where('order_id', $order->id)->exists()
+            || SupplierFulfillment::query()->where('order_id', $order->id)->whereHas('reservedSupplier', fn ($q) => $q->where('provider', 'buymail'))->exists()) {
+            $units[] = new TelegramMessageUnit(
+                $this->locale->translate($customer, 'order.warranty.support'),
+                replyMarkup: ['inline_keyboard' => [[[
+                    'text' => $this->locale->translate($customer, 'order.warranty.title'),
+                    'url' => app(WarrantyOrderAccess::class)->telegramUrl($order, $this->locale->code($customer)),
+                ]]]],
+            );
         }
 
         $lastResponse = null;

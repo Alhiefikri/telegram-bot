@@ -90,6 +90,12 @@
                         </div>
                     </details>
                 @elseif ($isPaid)
+                    @if($warrantyUrl ?? null)
+                        <section class="mt-5 rounded-lg border-2 bg-white p-4">
+                            <a class="font-bold underline" href="{{ $warrantyUrl }}">{{ __('order.warranty.title', [], $storefrontLocale) }}</a>
+                            <p class="mt-2 text-sm">{{ __('order.warranty.support', [], $storefrontLocale) }}</p>
+                        </section>
+                    @endif
                     @include('storefront.partials.shop.account-delivery')
                     @include('storefront.partials.support-chooser', [
                         'supportContext' => $supportContext,

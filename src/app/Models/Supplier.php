@@ -8,13 +8,16 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable(['name', 'provider', 'api_key', 'currency', 'currency_confirmed', 'exchange_rate_idr', 'is_active', 'low_balance_threshold_micros'])]
-#[Hidden(['api_key', 'sync_token'])]
+#[Hidden(['api_key', 'sync_token', 'webhook_secret', 'external_account_id', 'account_metadata'])]
 class Supplier extends Model
 {
     protected function casts(): array
     {
         return [
             'api_key' => 'encrypted',
+            'webhook_secret' => 'encrypted',
+            'account_metadata' => 'array',
+            'purchase_paused_until' => 'immutable_datetime',
             'currency_confirmed' => 'boolean',
             'exchange_rate_idr' => 'integer',
             'balance_micros' => 'integer',

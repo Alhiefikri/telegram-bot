@@ -5,6 +5,8 @@ namespace App\Storefront;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\PaymentBscDetail;
+use App\Models\SupplierAccountUnit;
+use App\Models\SupplierFulfillment;
 use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\Bsc\BscVerificationOutcome;
@@ -149,6 +151,9 @@ class StorefrontShopOrderPresenter
             'paidDeliveryType' => $invoice->paidDeliveryType,
             'manualFulfillmentStatus' => $invoice->manualFulfillmentStatus,
             'canRevealCredentials' => $canRevealCredentials,
+            'warrantyUrl' => $canRevealCredentials && (SupplierAccountUnit::query()->where('order_id', $order->id)->exists()
+                || SupplierFulfillment::query()->where('order_id', $order->id)->whereHas('reservedSupplier', fn ($q) => $q->where('provider', 'buymail'))->exists())
+                ? route('warranty.show', ['order' => $order->id, 'locale' => $this->terminalCopy->locale()]) : null,
 
             'accessKey' => $accessKey,
             'orderAccessUrl' => route('storefront.order-access.create'),

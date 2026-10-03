@@ -59,7 +59,8 @@ class SupplierClientTest extends TestCase
 
     public static function providers(): array
     {
-        return array_map(static fn ($provider) => [$provider->value], SupplierProvider::cases());
+        // BuyMail has account/partial contracts covered by BuyMailClientTest.
+        return array_map(static fn ($provider) => [$provider->value], array_filter(SupplierProvider::cases(), fn ($provider) => $provider !== SupplierProvider::BuyMail));
     }
 
     #[DataProvider('providers')]

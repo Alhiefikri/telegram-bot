@@ -21,9 +21,10 @@ final class SupplierAdminRequest extends FormRequest
         return match ($action) {
             'store', 'update' => [
                 'name' => ['required', 'string', 'max:120', 'not_regex:/[\x00-\x1F\x7F]/'],
-                'provider' => ['required', Rule::in(['prodseller', 'csxstore', 'arrs', 'warzone', 'aivault'])],
+                'provider' => ['required', Rule::in(['prodseller', 'csxstore', 'arrs', 'warzone', 'aivault', 'buymail'])],
                 'api_key' => [$action === 'store' ? 'required' : 'nullable', 'string', 'max:2048', 'not_regex:/[\x00-\x20\x7F]/'],
-                'currency' => ['required', Rule::in(['USD', 'USDT'])],
+                'webhook_secret' => ['nullable', 'string', 'max:256', 'regex:/\Awhsec_[A-Za-z0-9_-]{8,240}\z/D'],
+                'currency' => ['required', Rule::in(['USD', 'USDT', 'IDR'])],
                 'currency_confirmed' => ['required', 'boolean'],
                 'exchange_rate_idr' => ['required', 'integer', 'min:1', 'max:1000000'],
                 'is_active' => ['required', 'boolean'],
@@ -67,6 +68,9 @@ final class SupplierAdminRequest extends FormRequest
     public function after(): array
     {
         return [function (Validator $validator): void {
+            if ($this->input('provider') === 'buymail' && ($this->input('currency') !== 'IDR' || (int) $this->input('exchange_rate_idr') !== 1)) {
+                $validator->errors()->add('currency', 'BuyMail menggunakan IDR dengan kurs 1.');
+            }
             if (in_array($this->input('provider'), ['arrs', 'warzone'], true) && ! $this->boolean('currency_confirmed')) {
                 $validator->errors()->add('currency_confirmed', 'Konfirmasi mata uang supplier diperlukan.');
             }

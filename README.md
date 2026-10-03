@@ -11,6 +11,7 @@ Untuk memahami codebase dengan cepat, baca berurutan:
 3. [Architecture Decision Records](docs/adr/) — keputusan yang tidak boleh diubah diam-diam.
 4. [Panduan operasional aplikasi](src/README.md) — setup, Docker, scheduler, webhook, dan troubleshooting.
 5. [Issue tracker guide](docs/agents/issue-tracker.md) — cara membaca dan mengerjakan issue GitHub repo ini.
+6. [BuyMail reseller dan garansi Gmail](docs/runbook-buymail.md) — API key terenkripsi lewat Dashboard, pembelian setelah pembayaran buyer terverifikasi, klaim per akun, refund/penggantian, dan pemulihan transaksi.
 
 ## Struktur repository
 

@@ -37,6 +37,7 @@ final class TelegramOutboundEffectPolicy
 
     /** @var list<string> */
     private const NON_RETRYABLE_FAILURE_CODES = [
+        'warranty_notification_unavailable',
         'checkout_expired',
         'checkout_not_pending',
         'checkout_payment_missing',
@@ -79,6 +80,7 @@ final class TelegramOutboundEffectPolicy
 
     /** @var array<string, int> */
     private const MAX_ATTEMPTS = [
+        TelegramOutboundEffectType::WarrantyNotification->value => 3,
         TelegramOutboundEffectType::ReceiptCredentials->value => self::RECEIPT_MAX_ATTEMPTS,
         TelegramOutboundEffectType::ReceiptTxtDownload->value => self::RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS,
         TelegramOutboundEffectType::ReceiptOrderActions->value => self::RECEIPT_ACTIONS_MAX_ATTEMPTS,

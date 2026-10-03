@@ -24,6 +24,36 @@ final class SupplierAdminTest extends TestCase
 {
     private const KEY = 'supplier-secret-canary-never-return-7a39';
 
+    public function test_buymail_key_is_managed_in_dashboard_with_idr_and_no_conversion_markup(): void
+    {
+        $this->owner();
+        $input = $this->connectionInput(['provider' => 'buymail', 'currency' => 'IDR', 'exchange_rate_idr' => 1]);
+        $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $input)->assertRedirect();
+        $supplier = Supplier::query()->sole();
+        $this->assertSame('IDR', $supplier->currency);
+        $this->assertSame(1, $supplier->exchange_rate_idr);
+        $this->assertSame(self::KEY, $supplier->api_key);
+        $this->assertStringNotContainsString(self::KEY, DB::table('suppliers')->value('api_key'));
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertSee('BuyMail')->assertDontSee(self::KEY);
+        $this->patch(route('admin.suppliers.update', $supplier), array_replace($input, ['api_key' => '', 'version' => 1, 'exchange_rate_idr' => 16000]))->assertStatus(422);
+        $this->assertSame(1, $supplier->fresh()->exchange_rate_idr);
+    }
+
+    public function test_buymail_webhook_secret_is_saved_privately_and_blank_updates_preserve_it(): void
+    {
+        $this->owner();
+        $secret = 'whsec_synthetic-fixture-secret';
+        $input = $this->connectionInput(['provider' => 'buymail', 'currency' => 'IDR', 'exchange_rate_idr' => 1, 'webhook_secret' => $secret]);
+        $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $input)->assertRedirect();
+        $supplier = Supplier::query()->sole();
+        $this->assertSame($secret, $supplier->webhook_secret);
+        $this->assertStringNotContainsString($secret, DB::table('suppliers')->value('webhook_secret'));
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertDontSee($secret)->assertSee(route('buymail.webhook', $supplier));
+        $this->patch(route('admin.suppliers.update', $supplier), array_replace($input, ['api_key' => '', 'webhook_secret' => '', 'version' => 1]))->assertRedirect();
+        $this->assertSame($secret, $supplier->fresh()->webhook_secret);
+        $this->assertStringNotContainsString($secret, json_encode(AuditLog::query()->get()->toArray()));
+    }
+
     public function test_only_owner_and_admin_can_manage_connections_catalog_and_monitor(): void
     {
         $supplier = $this->supplier();

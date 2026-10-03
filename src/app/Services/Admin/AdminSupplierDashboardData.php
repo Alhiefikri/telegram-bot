@@ -22,6 +22,10 @@ final class AdminSupplierDashboardData
                 'low_balance' => $available !== null && $available <= (int) $supplier->low_balance_threshold_micros,
                 'synced_at' => $supplier->synced_at?->toIso8601String(),
                 'expires_at' => $supplier->sync_expires_at?->toIso8601String(),
+                'webhook_url' => $supplier->provider === 'buymail' ? route('buymail.webhook', $supplier->id) : null,
+                'webhook_configured' => $supplier->getRawOriginal('webhook_secret') !== null,
+                'refunds_disabled' => $supplier->provider === 'buymail' && ($supplier->account_metadata['refunds_enabled'] ?? true) === false,
+                'purchase_paused_until' => $supplier->purchase_paused_until?->isFuture() ? $supplier->purchase_paused_until->timezone(config('app.timezone'))->format('Y-m-d H:i T') : null,
             ];
         }));
 

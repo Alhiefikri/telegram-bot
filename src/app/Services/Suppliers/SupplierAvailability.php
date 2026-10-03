@@ -64,6 +64,7 @@ final class SupplierAvailability
                 $item = $itemMap->get($source->supplier_catalog_item_id);
                 $supplier = $item === null ? null : $supplierMap->get($item->supplier_id);
                 if ($policy === null || ! $source->is_active || $supplier === null || ! $supplier->is_active
+                    || $supplier->purchase_paused_until?->isFuture()
                     || ! $supplier->currency_confirmed
                     || ($item->currency !== null && $item->currency !== $supplier->currency) || ! $item->orderable || $item->requires_input) {
                     continue;

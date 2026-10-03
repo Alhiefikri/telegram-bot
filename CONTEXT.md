@@ -211,6 +211,18 @@ _Avoid_: coupon, percentage discount, customer membership tier, Product variant,
 A private external shop connection from which the store acquires digital products for customer Orders. Its identity, credentials, prices and account balance are operator information, not customer catalog content.
 _Avoid_: Payment Provider, customer shop
 
+**Supplier Account Unit**:
+One provider-identified digital account acquired for an Order Item, bound to its allocated Product Stock Item, individual supplier warranty deadline and immutable retail entitlement. A replacement retains the same logical entitlement while the original credential remains retired.
+_Avoid_: reusable refunded account, supplier stock pool
+
+**Warranty Claim**:
+A Customer-owned case about one delivered Supplier Account Unit, with private original proof and an independently verified supplier decision. Claim acceptance is not buyer compensation; an approved claim permits one buyer-selected refund or replacement.
+_Avoid_: automatic refund approval, Payment refund
+
+**Order Refund**:
+One immutable buyer refund entitlement and settlement record for a verified account claim or definitively missing fulfillment units. Supplier Balance recovery is separate. A partial Order Refund does not mark the entire Payment Refunded until the complete paid amount is returned.
+_Avoid_: supplier credit, proof of bank transfer, direct balance mutation
+
 **Supplier Balance**:
 The store operator's prepaid funds held by a Supplier and available for acquiring products. It is distinct from Customer-owned Store Balance and is not a customer refund destination.
 _Avoid_: Store Balance, customer deposit

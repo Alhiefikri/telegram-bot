@@ -2,6 +2,8 @@
 
 namespace App\Services\Suppliers;
 
+use App\Enums\CredentialAccessMethod;
+use App\Enums\CredentialFormat;
 use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
@@ -13,6 +15,7 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\OrderRefund;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
@@ -20,15 +23,21 @@ use App\Models\ProductSupplierSource;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Models\Supplier;
+use App\Models\SupplierAccountUnit;
 use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Models\WarrantyClaim;
+use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\GuestOrderNotificationService;
 use App\Services\InventoryLedger;
+use App\Services\OrderLifecycle;
 use App\Services\ProductCredentialAllocator;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Warranty\RefundAllocation;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -104,6 +113,13 @@ final class SupplierFulfillmentService
     public function assertRefundable(Order $order): void
     {
         $this->lockedOrderResources($order);
+        if (SupplierAccountUnit::query()->where('order_id', $order->id)->whereIn('confirmation_state', ['requested', 'sending', 'unknown'])->exists()) {
+            throw new InvalidOrderTransition('Account confirmation must be resolved before a full Order refund.');
+        }
+        if (WarrantyClaim::query()->where('order_id', $order->id)
+            ->whereIn('settlement_state', ['replacement_pending', 'replacement_sending', 'replacement_unknown', 'replacement_review'])->exists()) {
+            throw new InvalidOrderTransition('A warranty replacement must be resolved before a full Order refund.');
+        }
         if (SupplierPurchase::query()->whereHas('fulfillment', fn ($q) => $q->where('order_id', $order->id))->whereIn('state', ['sending', 'awaiting_delivery', 'ambiguous', 'review'])->exists()) {
             throw new InvalidOrderTransition('Fulfillment is being reviewed. Contact support before refunding.');
         }
@@ -138,7 +154,12 @@ final class SupplierFulfillmentService
         }
         [$purchase, $supplier, $sku, $token, $read] = $request;
         try {
-            $result = $read ? $this->client->order($supplier, $purchase->supplier_order_id, $sku->external_id, $purchase->reference) : $this->client->purchase($supplier, $sku, $purchase->quantity, $purchase->reference);
+            if ($supplier->provider === 'buymail' && ! $read && $purchase->replay_count > 0) {
+                $result = app(BuyMailClient::class)->recoverPurchase($supplier, $purchase->quantity, $purchase->reference, $purchase->dispatched_at,
+                    allowReplay: $purchase->credential_fingerprint !== null && hash_equals($purchase->credential_fingerprint, hash('sha256', $supplier->api_key)));
+            } else {
+                $result = $read ? $this->client->order($supplier, $purchase->supplier_order_id, $sku->external_id, $purchase->reference) : $this->client->purchase($supplier, $sku, $purchase->quantity, $purchase->reference);
+            }
         } catch (Throwable) {
             $result = new SupplierOrderResult('ambiguous', null, null, null, [], 'transport_unavailable');
         }
@@ -154,7 +175,12 @@ final class SupplierFulfillmentService
             if (microtime(true) - $started >= 45) {
                 break;
             }
-            $this->process($id);
+            if (SupplierFulfillment::query()->whereKey($id)->whereHas('purchases.supplier', fn ($query) => $query->where('provider', 'buymail'))->exists()
+                || SupplierFulfillment::query()->whereKey($id)->whereHas('reservedSupplier', fn ($query) => $query->where('provider', 'buymail'))->exists()) {
+                ProcessSupplierFulfillment::dispatch($id);
+            } else {
+                $this->process($id);
+            }
             $processed++;
         }
 
@@ -168,10 +194,11 @@ final class SupplierFulfillmentService
             return null;
         }
         $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
-        Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+        $payments = Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
         [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
         $f = $fulfillments->get($id);
-        if ($order->payment_status !== PaymentStatus::Paid || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true) || $f === null || ! in_array($f->state, ['pending', 'purchasing', 'awaiting_delivery'], true)) {
+        if ($order->payment_status !== PaymentStatus::Paid || ! $payments->contains(fn (Payment $payment) => $payment->status === PaymentStatus::Paid && $payment->paid_at !== null)
+            || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true) || $f === null || ! in_array($f->state, ['pending', 'purchasing', 'awaiting_delivery'], true)) {
             return null;
         }
         $purchase = $f->current_purchase_id ? SupplierPurchase::query()->lockForUpdate()->findOrFail($f->current_purchase_id) : null;
@@ -180,7 +207,9 @@ final class SupplierFulfillmentService
         }
         if ($purchase?->state === 'sending' && $purchase->supplier_order_id === null) {
             $provider = SupplierProvider::tryFrom($suppliers->get($purchase->supplier_id)->provider);
-            if ($suppliers->get($purchase->supplier_id)->is_active && $provider?->supportsIdempotency() && $purchase->replay_count === 0 && $purchase->dispatched_at?->gte(now()->subMinutes(10))) {
+            if ($provider === SupplierProvider::BuyMail && $purchase->dispatched_at !== null) {
+                $purchase->update(['state' => 'reserved', 'replay_count' => $purchase->replay_count + 1]);
+            } elseif ($suppliers->get($purchase->supplier_id)->is_active && $provider?->supportsIdempotency() && $purchase->replay_count === 0 && $purchase->dispatched_at?->gte(now()->subMinutes(10))) {
                 $purchase->update(['state' => 'reserved', 'replay_count' => 1]);
             } else {
                 $purchase->update(['state' => 'ambiguous', 'last_error' => 'dispatch_outcome_unknown', 'claim_token' => null, 'lease_expires_at' => null]);
@@ -200,21 +229,26 @@ final class SupplierFulfillmentService
                 return null;
             }
             // Never POST a request whose current documented price exceeds its immutable cap.
-            $cost = $this->pricing->costMicros($sku, $f->quantity);
-            if ($cost === null || $cost > $f->reserved_cost_micros || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $f->maximum_cost_idr) {
+            $quantity = $f->reserved_quantity;
+            $cost = $this->pricing->costMicros($sku, $quantity);
+            if ($quantity < 1 || $cost === null || $cost > $f->reserved_cost_micros || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $this->remainingCostLimit($f)) {
                 $this->review($f, $order, 'cost_changed');
 
                 return null;
             }
-            $purchase = SupplierPurchase::create(['supplier_fulfillment_id' => $f->id, 'supplier_id' => $supplier->id, 'supplier_catalog_item_id' => $sku->id, 'reference' => (string) Str::uuid(), 'quantity' => $f->quantity, 'expected_cost_micros' => $f->reserved_cost_micros, 'exchange_rate_idr' => $candidate['exchange_rate_idr'], 'state' => 'reserved']);
+            $purchase = SupplierPurchase::create(['supplier_fulfillment_id' => $f->id, 'supplier_id' => $supplier->id, 'supplier_catalog_item_id' => $sku->id, 'reference' => (string) Str::uuid(), 'quantity' => $quantity, 'expected_cost_micros' => $f->reserved_cost_micros, 'exchange_rate_idr' => $candidate['exchange_rate_idr'], 'state' => 'reserved']);
+            if ($supplier->provider === 'buymail') {
+                $purchase->forceFill(['credential_fingerprint' => hash('sha256', $supplier->api_key)])->save();
+            }
             $f->update(['current_purchase_id' => $purchase->id]);
         }
         if (! $read && ! in_array($purchase->state, ['reserved'], true)) {
             return null;
         }
         $token = (string) Str::uuid();
-        $purchase->update(['state' => $read ? 'awaiting_delivery' : 'sending', 'claim_token' => $token, 'lease_expires_at' => now()->addMinutes(2), 'dispatched_at' => $purchase->dispatched_at ?? now()]);
-        $f->update(['state' => $read ? 'awaiting_delivery' : 'purchasing', 'next_attempt_at' => now()->addMinutes(2)]);
+        $lease = $suppliers->get($purchase->supplier_id)->provider === 'buymail' ? now()->addMinutes(5) : now()->addMinutes(2);
+        $purchase->update(['state' => $read ? 'awaiting_delivery' : 'sending', 'claim_token' => $token, 'lease_expires_at' => $lease, 'dispatched_at' => $purchase->dispatched_at ?? now()]);
+        $f->update(['state' => $read ? 'awaiting_delivery' : 'purchasing', 'next_attempt_at' => $lease]);
 
         return [$purchase, $suppliers->get($purchase->supplier_id), $catalog->get($purchase->supplier_catalog_item_id), $token, $read];
     }
@@ -231,6 +265,19 @@ final class SupplierFulfillmentService
             return;
         }
         $purchase->forceFill(['claim_token' => null, 'lease_expires_at' => null, 'last_error' => $result->errorCode]);
+        if ($suppliers->get($purchase->supplier_id)->provider === 'buymail' && ! $result->identityTrusted
+            && in_array($result->errorCode, ['transport', 'transport_unavailable', 'invalid_payload', 'idempotency_in_progress', 'order_in_progress', 'reference_already_used'], true)
+            && $purchase->replay_count < 5 && $purchase->dispatched_at?->gte(now()->subDays(7)->addMinutes(5))) {
+            $purchase->forceFill(['state' => 'sending', 'next_attempt_at' => now()->addMinute()])->save();
+            $f->update(['state' => 'purchasing', 'next_attempt_at' => now()->addMinute()]);
+
+            return;
+        }
+        if ($suppliers->get($purchase->supplier_id)->provider === 'buymail' && $result->identityTrusted && $result->deliveryTrusted) {
+            $this->finalizeBuyMail($f, $order, $purchase, $result, $suppliers, $catalog);
+
+            return;
+        }
         if ($result->identityTrusted && $result->orderId !== null) {
             $collision = SupplierPurchase::query()->where('supplier_id', $purchase->supplier_id)->where('supplier_order_id', $result->orderId)->where('id', '!=', $purchase->id)->exists();
             if ($collision || ($purchase->supplier_order_id !== null && $purchase->supplier_order_id !== $result->orderId)) {
@@ -268,6 +315,9 @@ final class SupplierFulfillmentService
             // when the provider omits its redundant numeric field.
             $purchase->observed_quantity = count($result->deliveries);
         }
+        if ($result->identityTrusted && $result->deliveryTrusted && $result->accountUnits !== []) {
+            $purchase->account_units = $result->accountUnits;
+        }
         $deliveries = $purchase->trusted_delivery_payload ?? [];
         $quantityMatches = $purchase->observed_quantity === $purchase->quantity;
         $economicProof = $result->identityTrusted && $purchase->supplier_order_id !== null && $quantityMatches;
@@ -289,6 +339,10 @@ final class SupplierFulfillmentService
         }
         // A GET cannot erase evidence of a POST or prove that an existing order was never debited.
         if ($result->outcome === 'rejected' && ! $read && $purchase->replay_count === 0 && $result->deliveries === [] && $result->orderId === null && ($result->costMicros === null || $result->costMicros === 0) && $purchase->committed_at === null) {
+            if ($suppliers->get($purchase->supplier_id)->provider === 'buymail' && $result->errorCode === 'daily_limit_reached') {
+                $limited = $suppliers->get($purchase->supplier_id);
+                $limited->forceFill(['purchase_paused_until' => now('Asia/Jakarta')->addDay()->startOfDay()->timezone(config('app.timezone')), 'version' => $limited->version + 1])->save();
+            }
             $purchase->state = 'rejected';
             $purchase->save();
             $this->unhold($f, $suppliers, $catalog);
@@ -337,6 +391,10 @@ final class SupplierFulfillmentService
 
     private function fallback(SupplierFulfillment $f, Collection $suppliers, Collection $catalog): bool
     {
+        $quantity = $this->outstandingQuantity($f);
+        if ($quantity < 1) {
+            return false;
+        }
         $attempted = SupplierPurchase::query()->where('supplier_fulfillment_id', $f->id)->pluck('supplier_catalog_item_id')->all();
         foreach ($f->sources_snapshot as $candidate) {
             if (in_array($candidate['catalog_item_id'], $attempted, true)) {
@@ -345,11 +403,11 @@ final class SupplierFulfillmentService
             $sku = $catalog->get($candidate['catalog_item_id']);
             $supplier = $suppliers->get($candidate['supplier_id']);
             $source = ProductSupplierSource::find($candidate['source_id']);
-            $cost = $sku ? $this->pricing->costMicros($sku, $f->quantity) : null;
-            if (! $source?->is_active || ! $supplier?->is_active || ! $supplier->currency_confirmed || ! $sku?->orderable || $sku->requires_input || $sku->external_id !== $candidate['external_id'] || $supplier->currency !== $candidate['currency'] || ! $supplier->synced_at || $supplier->synced_at->lt(now()->subMinutes(5)) || ! $sku->synced_at || $sku->synced_at->lt(now()->subMinutes(5)) || $cost === null || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $f->maximum_cost_idr || ($sku->stock ?? 0) - $sku->reserved_quantity < $f->quantity || ($supplier->balance_micros ?? 0) - $supplier->reserved_balance_micros < $cost) {
+            $cost = $sku ? $this->pricing->costMicros($sku, $quantity) : null;
+            if (! $source?->is_active || ! $supplier?->is_active || ! $supplier->currency_confirmed || ! $sku?->orderable || $sku->requires_input || $sku->external_id !== $candidate['external_id'] || $supplier->currency !== $candidate['currency'] || ! $supplier->synced_at || $supplier->synced_at->lt(now()->subMinutes(5)) || ! $sku->synced_at || $sku->synced_at->lt(now()->subMinutes(5)) || $cost === null || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $this->remainingCostLimit($f) || ($sku->stock ?? 0) - $sku->reserved_quantity < $quantity || ($supplier->balance_micros ?? 0) - $supplier->reserved_balance_micros < $cost) {
                 continue;
             }
-            $this->hold($f, $supplier, $sku, $cost);
+            $this->hold($f, $supplier, $sku, $cost, $quantity);
 
             return true;
         }
@@ -363,17 +421,18 @@ final class SupplierFulfillmentService
         $sku = $catalog->get($purchase->supplier_catalog_item_id);
         $this->unhold($f, $suppliers, $catalog);
         $supplier->forceFill(['balance_micros' => max(0, ($supplier->balance_micros ?? 0) - $purchase->actual_cost_micros), 'version' => $supplier->version + 1])->save();
-        $sku->update(['stock' => $sku->stock === null ? null : max(0, $sku->stock - $purchase->quantity)]);
+        $sku->update(['stock' => $sku->stock === null ? null : max(0, $sku->stock - ($purchase->observed_quantity ?? $purchase->quantity))]);
         $purchase->committed_at = now();
     }
 
-    private function hold(SupplierFulfillment $f, Supplier $supplier, SupplierCatalogItem $sku, int $cost): void
+    private function hold(SupplierFulfillment $f, Supplier $supplier, SupplierCatalogItem $sku, int $cost, ?int $quantity = null): void
     {
+        $quantity ??= $f->quantity;
         $supplier->increment('reserved_balance_micros', $cost);
         $supplier->increment('version');
-        $sku->increment('reserved_quantity', $f->quantity);
+        $sku->increment('reserved_quantity', $quantity);
         $this->refreshSharedWalletAfterCommit($supplier->id);
-        $f->update(['reserved_supplier_id' => $supplier->id, 'reserved_catalog_item_id' => $sku->id, 'reserved_cost_micros' => $cost, 'reserved_quantity' => $f->quantity]);
+        $f->update(['reserved_supplier_id' => $supplier->id, 'reserved_catalog_item_id' => $sku->id, 'reserved_cost_micros' => $cost, 'reserved_quantity' => $quantity]);
     }
 
     private function unhold(SupplierFulfillment $f, Collection $suppliers, Collection $catalog): void
@@ -437,13 +496,167 @@ final class SupplierFulfillmentService
         }
     }
 
-    private function materialize(SupplierFulfillment $f, SupplierPurchase $purchase, array $deliveries): void
+    private function materialize(SupplierFulfillment $f, SupplierPurchase $purchase, array $deliveries, bool $complete = true): void
     {
         $item = OrderItem::findOrFail($f->order_item_id);
         foreach (array_values($deliveries) as $index => $secret) {
-            ProductStockItem::firstOrCreate(['supplier_purchase_id' => $purchase->id, 'supplier_unit_index' => $index + 1], ['product_id' => $item->product_id, 'order_item_id' => $item->id, 'secret' => $secret]);
+            $unit = ($purchase->account_units ?? [])[$index] ?? null;
+            $structured = $unit !== null && $secret === $unit['email'].' | '.$unit['password'];
+            $attributes = ['product_id' => $item->product_id, 'order_item_id' => $item->id];
+            if ($structured) {
+                $attributes += [
+                    'credential_format' => CredentialFormat::StructuredAccount,
+                    'credential_payload' => StructuredCredentialPayload::fromValues($unit['email'], $unit['password'], CredentialAccessMethod::None)->toArray(),
+                ];
+            } else {
+                $attributes['secret'] = $secret;
+            }
+            $stockItem = ProductStockItem::firstOrCreate(['supplier_purchase_id' => $purchase->id, 'supplier_unit_index' => $index + 1], $attributes);
+            if ($structured) {
+                $number = SupplierAccountUnit::query()->where('order_item_id', $item->id)->whereNull('replaces_unit_id')->count() + $item->localQuantity() + 1;
+                $subtotal = $item->order->currency === 'USDT' ? $item->usdt_subtotal : $item->subtotal;
+                SupplierAccountUnit::firstOrCreate(['supplier_id' => $purchase->supplier_id, 'external_id' => $unit['id']], [
+                    'public_id' => (string) Str::uuid(), 'supplier_purchase_id' => $purchase->id,
+                    'product_stock_item_id' => $stockItem->id, 'order_id' => $item->order_id,
+                    'order_item_id' => $item->id, 'provider_state' => $unit['status'],
+                    'refund_deadline' => CarbonImmutable::parse($unit['refund_deadline'])->timezone(config('app.timezone')), 'cost_idr' => $unit['price'],
+                    'retail_amount' => RefundAllocation::unit($subtotal, $item->quantity, $number),
+                    'retail_currency' => $item->order->currency, 'unit_number' => $number,
+                ]);
+            }
         }
-        $f->update(['state' => 'delivered', 'delivered_at' => now(), 'next_attempt_at' => null]);
+        if ($complete) {
+            $f->update(['state' => 'delivered', 'delivered_at' => now(), 'next_attempt_at' => null]);
+        }
+    }
+
+    private function remainingCostLimit(SupplierFulfillment $f): int
+    {
+        $spent = 0;
+        foreach ($f->purchases()->whereNull('warranty_claim_id')->whereNotNull('committed_at')->get(['actual_cost_micros', 'exchange_rate_idr']) as $purchase) {
+            $spent = SupplierMoney::checkedAdd($spent, SupplierMoney::costIdr($purchase->actual_cost_micros, $purchase->exchange_rate_idr));
+        }
+
+        return max(0, $f->maximum_cost_idr - $spent);
+    }
+
+    private function outstandingQuantity(SupplierFulfillment $f): int
+    {
+        $acquired = ProductStockItem::query()->where('order_item_id', $f->order_item_id)
+            ->whereHas('supplierPurchase', fn ($q) => $q->where('supplier_fulfillment_id', $f->id)->whereNull('warranty_claim_id'))->count();
+
+        return max(0, $f->quantity - $acquired - (int) $f->refunded_quantity);
+    }
+
+    public function completeMissingRefund(SupplierFulfillment $initial, OrderRefund $refund): void
+    {
+        if (DB::transactionLevel() === 0 || $refund->state !== 'confirmed' || (int) $refund->supplier_fulfillment_id !== (int) $initial->id) {
+            throw new InvalidOrderTransition('Missing-unit completion requires confirmed refund evidence.');
+        }
+        $order = Order::query()->whereKey($initial->order_id)->lockForUpdate()->firstOrFail();
+        [$fulfillments] = $this->lockedOrderResources($order);
+        $f = $fulfillments->get($initial->id);
+        if ($f->state === 'delivered' && (int) $f->refunded_quantity === (int) $refund->missing_quantity) {
+            return;
+        }
+        if ($f->state !== 'refund_pending' || $f->reserved_quantity !== 0 || $this->outstandingQuantity($f) !== (int) $refund->missing_quantity) {
+            throw new InvalidOrderTransition('Missing-unit refund does not match the remaining fulfillment.');
+        }
+        $f->forceFill(['state' => 'delivered', 'refunded_quantity' => $refund->missing_quantity, 'next_attempt_at' => null, 'last_error' => 'missing_units_refunded'])->save();
+        $payment = Payment::findOrFail($refund->payment_id);
+        if ((int) OrderRefund::where('payment_id', $payment->id)->where('state', 'confirmed')->sum('amount') === $payment->amount) {
+            app(OrderLifecycle::class)->applyPaymentRefunded($payment);
+
+            return;
+        }
+        $this->finish($f, $order);
+    }
+
+    /** BuyMail terminal partial results prove both delivered quantity and actual debit. */
+    private function finalizeBuyMail(SupplierFulfillment $f, Order $order, SupplierPurchase $purchase, SupplierOrderResult $result, Collection $suppliers, Collection $catalog): void
+    {
+        $supplier = $suppliers->get($purchase->supplier_id);
+        $sku = $catalog->get($purchase->supplier_catalog_item_id);
+        $collision = SupplierPurchase::query()->where('supplier_id', $purchase->supplier_id)->where('supplier_order_id', $result->orderId)->whereKeyNot($purchase->id)->exists();
+        if ($result->orderId === null || $result->requestedQuantity !== $purchase->quantity
+            || $result->quantity === null || $result->costMicros === null
+            || $result->quantity < 0 || $result->quantity > $purchase->quantity
+            || count($result->accountUnits) !== $result->quantity || count($result->deliveries) !== $result->quantity
+            || $collision || ($purchase->supplier_order_id !== null && $purchase->supplier_order_id !== $result->orderId)
+            || ($purchase->committed_at !== null && ($purchase->actual_cost_micros !== $result->costMicros || $purchase->observed_quantity !== $result->quantity))) {
+            $purchase->update(['state' => 'review', 'last_error' => 'order_identity_mismatch']);
+            $this->review($f, $order, 'order_identity_mismatch');
+
+            return;
+        }
+        if (($purchase->account_units ?? []) !== [] && array_column($purchase->account_units, 'id') !== array_column($result->accountUnits, 'id')) {
+            $purchase->update(['state' => 'review', 'last_error' => 'delivery_evidence_conflict']);
+            $this->review($f, $order, 'delivery_evidence_conflict');
+
+            return;
+        }
+        foreach ($purchase->account_units ?? [] as $index => $existingUnit) {
+            $observedUnit = $result->accountUnits[$index] ?? null;
+            if ($observedUnit === null || $existingUnit['email'] !== $observedUnit['email'] || $existingUnit['password'] !== $observedUnit['password'] || $existingUnit['price'] !== $observedUnit['price']) {
+                $purchase->update(['state' => 'review', 'last_error' => 'delivery_evidence_conflict']);
+                $this->review($f, $order, 'delivery_evidence_conflict');
+
+                return;
+            }
+        }
+        $withinLimit = $purchase->committed_at !== null || SupplierMoney::costIdr($result->costMicros, 1) <= $this->remainingCostLimit($f);
+        $purchase->forceFill([
+            'supplier_order_id' => $result->orderId, 'observed_quantity' => $result->quantity,
+            'actual_cost_micros' => $result->costMicros, 'delivery_payload' => $result->deliveries,
+            'trusted_delivery_payload' => $result->deliveries, 'account_units' => $result->accountUnits,
+            'state' => $result->outcome === 'partial' ? 'settled' : 'delivered', 'next_attempt_at' => null,
+        ]);
+        if ($purchase->committed_at === null) {
+            $this->commitDebit($f, $purchase, $suppliers, $catalog);
+        }
+        $purchase->save();
+        $reusedUnit = SupplierAccountUnit::query()->where('supplier_id', $purchase->supplier_id)
+            ->whereIn('external_id', array_column($result->accountUnits, 'id'))->where('supplier_purchase_id', '!=', $purchase->id)->exists();
+        if ($reusedUnit) {
+            $this->review($f, $order, 'duplicate_account_identity');
+
+            return;
+        }
+        if (! $withinLimit) {
+            $this->review($f, $order, 'cost_mismatch');
+
+            return;
+        }
+        if ($f->state === 'delivered') {
+            // Manual replacement already satisfied the customer; only settle original economics.
+            $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
+
+            return;
+        }
+        $this->assertActive($order);
+        $this->materialize($f, $purchase, $result->deliveries, false);
+        $remaining = $this->outstandingQuantity($f);
+        if ($remaining === 0) {
+            $f->update(['state' => 'delivered', 'delivered_at' => now(), 'next_attempt_at' => null]);
+            $this->finish($f, $order);
+        } elseif ($remaining > 0) {
+            $cost = $this->pricing->costMicros($sku, $remaining);
+            if ($result->quantity > 0 && $f->purchases()->count() < 3 && $cost !== null
+                && $supplier->is_active && $supplier->currency_confirmed && $supplier->sync_expires_at?->isFuture()
+                && $sku->orderable && ! $sku->requires_input
+                && $cost <= max(0, $supplier->balance_micros - $supplier->reserved_balance_micros)
+                && $sku->stock - $sku->reserved_quantity >= $remaining
+                && SupplierMoney::costIdr($cost, 1) <= $this->remainingCostLimit($f)) {
+                $this->hold($f, $supplier, $sku, $cost, $remaining);
+                $f->update(['state' => 'pending', 'current_purchase_id' => null, 'next_attempt_at' => now(), 'last_error' => null]);
+                DB::afterCommit(fn () => ProcessSupplierFulfillment::dispatch($f->id));
+            } else {
+                $this->review($f, $order, 'partial_unfulfilled');
+            }
+        } else {
+            throw new InvalidOrderTransition('Supplier quantity invariant violated.');
+        }
+        $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
     }
 
     private function finish(SupplierFulfillment $f, Order $order): void
@@ -488,11 +701,12 @@ final class SupplierFulfillmentService
             }
             $sku = $catalog->get($candidate['catalog_item_id']);
             $supplier = $suppliers->get($candidate['supplier_id']);
-            $cost = $this->pricing->costMicros($sku, $f->quantity);
-            if (! $supplier->is_active || ! $supplier->currency_confirmed || ! $supplier->sync_expires_at?->isFuture() || ! $sku->orderable || $sku->requires_input || $supplier->currency !== $candidate['currency'] || $sku->external_id !== $candidate['external_id'] || $cost === null || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $f->maximum_cost_idr || ($supplier->balance_micros ?? 0) - $supplier->reserved_balance_micros < $cost || ($sku->stock ?? 0) - $sku->reserved_quantity < $f->quantity) {
+            $quantity = $this->outstandingQuantity($f);
+            $cost = $this->pricing->costMicros($sku, $quantity);
+            if ($quantity < 1 || ! $supplier->is_active || ! $supplier->currency_confirmed || ! $supplier->sync_expires_at?->isFuture() || ! $sku->orderable || $sku->requires_input || $supplier->currency !== $candidate['currency'] || $sku->external_id !== $candidate['external_id'] || $cost === null || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $this->remainingCostLimit($f) || ($supplier->balance_micros ?? 0) - $supplier->reserved_balance_micros < $cost || ($sku->stock ?? 0) - $sku->reserved_quantity < $quantity) {
                 throw new InsufficientStock('The original order cannot currently be fulfilled within its purchase limit.');
             }
-            $this->hold($f, $supplier, $sku, $cost);
+            $this->hold($f, $supplier, $sku, $cost, $quantity);
             $f->update(['state' => 'pending', 'current_purchase_id' => null, 'next_attempt_at' => now(), 'last_error' => null]);
             DB::afterCommit(fn () => ProcessSupplierFulfillment::dispatch($id));
         }, 5);
@@ -530,7 +744,8 @@ final class SupplierFulfillmentService
             $result = new SupplierOrderResult('ambiguous', null, null, null, [], 'transport_unavailable');
         }
         // Uncorrelated recovery must carry complete matching economic metadata, not name/time heuristics.
-        if (($purchase->supplier_order_id === null && ($result->orderId !== $orderId || $result->quantity !== $purchase->quantity || $result->costMicros === null)) || ($purchase->supplier_order_id !== null && $purchase->supplier_order_id !== $orderId)) {
+        $requestedQuantity = $supplier->provider === 'buymail' ? $result->requestedQuantity : $result->quantity;
+        if (($purchase->supplier_order_id === null && ($result->orderId !== $orderId || $requestedQuantity !== $purchase->quantity || $result->costMicros === null)) || ($purchase->supplier_order_id !== null && $purchase->supplier_order_id !== $orderId)) {
             $result = new SupplierOrderResult('ambiguous', null, null, null, [], 'order_identity_mismatch');
         }
         DB::transaction(fn () => $this->finalize($id, $purchase->id, $token, $result, true), 5);
@@ -559,7 +774,8 @@ final class SupplierFulfillmentService
             } else {
                 $this->assertActive($order);
             }
-            if ((! $lateManual && $f->state !== 'review') || count($credentials) !== $f->quantity || count(array_unique($credentials)) !== $f->quantity) {
+            $quantity = $this->outstandingQuantity($f);
+            if ((! $lateManual && $f->state !== 'review') || $quantity < 1 || count($credentials) !== $quantity || count(array_unique($credentials)) !== $quantity) {
                 throw new InvalidOrderTransition('Complete matching manual delivery is required.');
             }
             foreach ($credentials as $secret) {
@@ -571,9 +787,9 @@ final class SupplierFulfillmentService
             if ($purchase?->lease_expires_at?->isFuture()) {
                 throw new InvalidOrderTransition('A purchase is still in flight.');
             }
-            if ($purchase === null || $purchase->state === 'rejected') {
+            if ($purchase === null || $purchase->state === 'rejected' || ($quantity < $f->quantity && $purchase->committed_at !== null)) {
                 $candidate = collect($f->sources_snapshot)->first(fn ($c) => $c['catalog_item_id'] === $f->reserved_catalog_item_id);
-                $purchase = SupplierPurchase::create(['supplier_fulfillment_id' => $f->id, 'supplier_id' => $candidate['supplier_id'], 'supplier_catalog_item_id' => $candidate['catalog_item_id'], 'reference' => (string) Str::uuid(), 'quantity' => $f->quantity, 'expected_cost_micros' => 0, 'exchange_rate_idr' => $candidate['exchange_rate_idr'], 'state' => 'delivered', 'delivery_payload' => $credentials, 'last_error' => 'manual_delivery']);
+                $purchase = SupplierPurchase::create(['supplier_fulfillment_id' => $f->id, 'supplier_id' => $candidate['supplier_id'], 'supplier_catalog_item_id' => $candidate['catalog_item_id'], 'reference' => (string) Str::uuid(), 'quantity' => $quantity, 'expected_cost_micros' => 0, 'exchange_rate_idr' => $candidate['exchange_rate_idr'], 'state' => 'delivered', 'delivery_payload' => $credentials, 'last_error' => 'manual_delivery']);
                 $f->update(['current_purchase_id' => $purchase->id]);
                 $this->unhold($f, $suppliers, $catalog);
             }

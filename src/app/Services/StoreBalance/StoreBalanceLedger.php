@@ -2,12 +2,19 @@
 
 namespace App\Services\StoreBalance;
 
+use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\StoreBalanceProjectionMismatchException;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
+use App\Models\OrderRefund;
+use App\Models\Payment;
 use App\Models\StoreBalanceEntry;
+use App\Models\SupplierFulfillment;
+use App\Models\WarrantyClaim;
+use App\Services\Warranty\MissingFulfillmentRefundService;
+use App\Services\Warranty\RefundAllocation;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -135,15 +142,75 @@ final class StoreBalanceLedger
             throw new InvalidArgumentException('Store Balance refunds require an Order source.');
         }
 
-        return $this->apply(
-            $customer,
-            StoreBalanceEntryKind::RefundCredit,
-            $amount,
-            $sourceType,
-            $sourceId,
-            $idempotencyKey,
-            requiresPurchaseDebit: true,
-        );
+        return DB::transaction(function () use ($customer, $amount, $sourceType, $sourceId, $idempotencyKey): StoreBalanceMutationResult {
+            $account = $this->lockAccount($customer);
+            $this->assertProjectionIsConsistent($account, $customer);
+            if (! $this->hasPurchaseDebit($account, 'order', $sourceId, $amount)) {
+                throw new RuntimeException('Cannot refund a Store Balance Order without its original debit.');
+            }
+            $partial = (int) StoreBalanceEntry::query()->where('customer_balance_account_id', $account->id)
+                ->where('kind', StoreBalanceEntryKind::RefundCredit)->whereRaw('CAST(refund_order_id AS TEXT) = ?', [$sourceId])->sum('amount');
+            $remaining = RefundAllocation::remaining($amount, $partial);
+            if ($remaining === 0) {
+                $existing = StoreBalanceEntry::query()->where('customer_balance_account_id', $account->id)
+                    ->where('kind', StoreBalanceEntryKind::RefundCredit)->whereRaw('CAST(refund_order_id AS TEXT) = ?', [$sourceId])->latest('id')->firstOrFail();
+
+                return StoreBalanceMutationResult::replayed($existing);
+            }
+
+            return $this->apply($customer, StoreBalanceEntryKind::RefundCredit, $remaining, $sourceType, $sourceId, $idempotencyKey);
+        }, 5);
+    }
+
+    /** Credits a registered per-unit entitlement, capped by the original Order debit. */
+    public function refundPartial(Customer $customer, OrderRefund $initial, string $idempotencyKey): StoreBalanceMutationResult
+    {
+        return DB::transaction(function () use ($customer, $initial, $idempotencyKey): StoreBalanceMutationResult {
+            $account = $this->lockAccount($customer);
+            $this->assertProjectionIsConsistent($account, $customer);
+            $refund = OrderRefund::query()->whereKey($initial->id)->lockForUpdate()->firstOrFail();
+            if ((int) $refund->customer_id !== (int) $customer->id || $refund->currency !== 'IDR' || ! in_array($refund->state, ['requested', 'confirmed'], true)) {
+                throw new InvalidArgumentException('Invalid partial refund identity.');
+            }
+            $existing = $this->findEntry($account, StoreBalanceEntryKind::RefundCredit, $refund->amount, 'order_refund', (string) $refund->id, $idempotencyKey);
+            if ($existing !== null) {
+                if ($existing->refund_order_id !== $refund->order_id) {
+                    throw new InvalidArgumentException('Invalid partial refund identity.');
+                }
+
+                return StoreBalanceMutationResult::replayed($existing);
+            }
+            $payment = Payment::query()->whereKey($refund->payment_id)->firstOrFail();
+            $claim = $refund->warranty_claim_id === null ? null : WarrantyClaim::query()->whereKey($refund->warranty_claim_id)->firstOrFail();
+            $authorized = false;
+            if ($claim !== null) {
+                $authorized = $claim->order_id === $refund->order_id && (int) $claim->customer_id === (int) $customer->id
+                    && (int) $claim->supplier_account_unit_id === (int) $refund->supplier_account_unit_id
+                    && $claim->state === 'approved' && $claim->verified_at !== null && $claim->settlement_choice === 'refund'
+                    && $claim->unit->retail_amount === $refund->amount && $claim->unit->retail_currency === 'IDR';
+            } elseif ($refund->supplier_fulfillment_id !== null) {
+                $f = SupplierFulfillment::findOrFail($refund->supplier_fulfillment_id);
+                $authorized = $f->order_id === $refund->order_id && $f->state === 'refund_pending' && $f->reserved_quantity === 0
+                    && (int) $refund->missing_quantity === $f->quantity - MissingFulfillmentRefundService::acquired($f)
+                    && $refund->amount === MissingFulfillmentRefundService::entitlement($f, 'IDR')
+                    && ! $f->purchases()->whereIn('state', ['sending', 'awaiting_delivery', 'ambiguous', 'review'])->exists();
+            }
+            if ($payment->provider !== 'store_balance' || strtoupper($payment->method) !== 'STORE_BALANCE'
+                || $payment->currency !== 'IDR' || $payment->status !== PaymentStatus::Paid || $payment->paid_at === null
+                || $payment->order_id !== $refund->order_id || (int) $payment->order->customer_id !== (int) $customer->id
+                || ! $authorized
+                || ! $this->hasPurchaseDebit($account, 'order', $refund->order_id, $payment->amount)
+                || StoreBalanceEntry::query()->where('source_type', 'order')->where('source_id', $refund->order_id)->where('kind', StoreBalanceEntryKind::RefundCredit)->exists()) {
+                throw new InvalidArgumentException('Partial refund is not authorized by the original debit and verified entitlement.');
+            }
+            $alreadyRefunded = (int) StoreBalanceEntry::query()->where('customer_balance_account_id', $account->id)
+                ->where('kind', StoreBalanceEntryKind::RefundCredit)->where('refund_order_id', $refund->order_id)->sum('amount');
+            if ($refund->amount > RefundAllocation::remaining($payment->amount, $alreadyRefunded)) {
+                throw new InvalidArgumentException('Refund exceeds original payment.');
+            }
+
+            return $this->apply($customer, StoreBalanceEntryKind::RefundCredit, $refund->amount, 'order_refund', (string) $refund->id, $idempotencyKey, refundOrderId: $refund->order_id);
+        }, 5);
     }
 
     private function apply(
@@ -155,6 +222,7 @@ final class StoreBalanceLedger
         string $idempotencyKey,
         bool $requiresPurchaseDebit = false,
         bool $validateProjectionHistory = true,
+        ?string $refundOrderId = null,
     ): StoreBalanceMutationResult {
         $this->assertPositiveAmount($amount);
         $this->assertIdentity('source type', $sourceType, 64);
@@ -162,7 +230,7 @@ final class StoreBalanceLedger
         $this->assertIdentity('idempotency key', $idempotencyKey, 191);
 
         try {
-            return DB::transaction(function () use ($customer, $kind, $amount, $sourceType, $sourceId, $idempotencyKey, $requiresPurchaseDebit, $validateProjectionHistory): StoreBalanceMutationResult {
+            return DB::transaction(function () use ($customer, $kind, $amount, $sourceType, $sourceId, $idempotencyKey, $requiresPurchaseDebit, $validateProjectionHistory, $refundOrderId): StoreBalanceMutationResult {
                 $account = $this->lockAccount($customer);
                 if ($validateProjectionHistory) {
                     $this->assertProjectionIsConsistent($account, $customer);
@@ -196,6 +264,7 @@ final class StoreBalanceLedger
                     'source_id' => $sourceId,
                     'idempotency_key' => $idempotencyKey,
                     'created_at' => now(),
+                    'refund_order_id' => $refundOrderId,
                 ]);
 
                 $account->forceFill(['balance' => $balanceAfter])->save();

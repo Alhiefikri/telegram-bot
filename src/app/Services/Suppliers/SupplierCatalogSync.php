@@ -6,6 +6,8 @@ use App\Models\Product;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierPurchase;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -43,66 +45,98 @@ final class SupplierCatalogSync
             return false;
         }
         $productIds = $this->affectedProducts($connection->id);
-        $applied = DB::transaction(function () use ($connection, $token, $version, $snapshot, $productIds): bool {
-            $products = Product::withTrashed()->whereIn('id', $productIds)->orderBy('id')->lockForUpdate()->get();
-            $sources = ProductSupplierSource::query()->whereIn('product_id', $productIds)->orderBy('priority')->orderBy('id')->get();
-            $mappedItems = $sources->pluck('supplier_catalog_item_id')->unique();
-            $supplierIds = SupplierCatalogItem::query()->whereIn('id', $mappedItems)->pluck('supplier_id')->push($connection->id)->unique();
-            $suppliers = Supplier::query()->whereIn('id', $supplierIds)->orderBy('id')->lockForUpdate()->get();
-            $locked = $suppliers->firstWhere('id', $connection->id);
-            if ($locked === null || ! $locked->is_active || $locked->version !== $version || $locked->sync_token !== $token
-                || $this->affectedProducts($connection->id) !== $productIds) {
-                return false;
-            }
-            SupplierCatalogItem::query()->where(fn ($query) => $query->where('supplier_id', $locked->id)->orWhereIn('id', $mappedItems))
-                ->orderBy('id')->lockForUpdate()->get();
-            $now = now();
-            $rows = [];
-            foreach ($snapshot->products as $item) {
-                $rows[] = [
-                    'supplier_id' => $locked->id,
-                    'external_id' => $item->externalId,
-                    'name' => $item->name,
-                    'description' => $item->description,
-                    'currency' => $snapshot->currency,
-                    'unit_price_micros' => $item->unitPriceMicros,
-                    'stock' => $item->stock,
-                    'orderable' => $item->orderable,
-                    'requires_input' => $item->requiresInput,
-                    'price_tiers' => json_encode($item->priceTiers, JSON_THROW_ON_ERROR),
-                    'bulk_discounts' => json_encode($item->bulkDiscounts, JSON_THROW_ON_ERROR),
-                    'synced_at' => $now,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ];
-            }
-            foreach (array_chunk($rows, 200) as $chunk) {
-                // Never replace reserved_quantity: held commitments are owned by checkout/purchase.
-                SupplierCatalogItem::query()->upsert($chunk, ['supplier_id', 'external_id'], [
-                    'name', 'description', 'currency', 'unit_price_micros', 'stock', 'orderable', 'requires_input', 'price_tiers', 'bulk_discounts', 'synced_at', 'updated_at',
-                ]);
-            }
-            // Observed missing SKUs are authoritatively unavailable, but their holds survive.
-            SupplierCatalogItem::query()->where('supplier_id', $locked->id)
-                ->whereNotIn('external_id', array_column($rows, 'external_id'))
-                ->update(['stock' => 0, 'orderable' => false, 'synced_at' => $now, 'updated_at' => $now]);
-            $freeBalance = max(0, $snapshot->balanceMicros - $locked->reserved_balance_micros);
-            $low = $locked->low_balance_threshold_micros > 0 && $freeBalance < $locked->low_balance_threshold_micros;
-            $locked->forceFill([
-                'balance_micros' => $snapshot->balanceMicros,
-                'synced_at' => $now,
-                'sync_expires_at' => $now->copy()->addSeconds(self::FRESHNESS_SECONDS),
-                'sync_token' => null,
-                'sync_lease_expires_at' => null,
-                'last_error' => null,
-                'version' => $locked->version + 1,
-                'low_balance_alerted_at' => $low ? ($locked->low_balance_alerted_at ?? $now) : null,
-            ])->save();
-            $items = SupplierCatalogItem::query()->whereIn('id', $mappedItems)->orderBy('id')->get();
-            $this->availability->refreshLocked($products, $suppliers, $items, $sources);
+        try {
+            $applied = DB::transaction(function () use ($connection, $token, $version, $snapshot, $productIds): bool {
+                $products = Product::withTrashed()->whereIn('id', $productIds)->orderBy('id')->lockForUpdate()->get();
+                $sources = ProductSupplierSource::query()->whereIn('product_id', $productIds)->orderBy('priority')->orderBy('id')->get();
+                $mappedItems = $sources->pluck('supplier_catalog_item_id')->unique();
+                $supplierIds = SupplierCatalogItem::query()->whereIn('id', $mappedItems)->pluck('supplier_id')->push($connection->id)->unique();
+                $suppliers = Supplier::query()->whereIn('id', $supplierIds)->orderBy('id')->lockForUpdate()->get();
+                $locked = $suppliers->firstWhere('id', $connection->id);
+                if ($locked === null || ! $locked->is_active || $locked->version !== $version || $locked->sync_token !== $token
+                    || $this->affectedProducts($connection->id) !== $productIds) {
+                    return false;
+                }
+                if ($snapshot->accountMetadata !== []) {
+                    $accountId = $snapshot->accountMetadata['account_id'];
+                    if ($locked->external_account_id !== null && $locked->external_account_id !== $accountId) {
+                        $locked->forceFill(['sync_expires_at' => null, 'sync_token' => null, 'sync_lease_expires_at' => null, 'last_error' => 'account_identity_mismatch', 'version' => $locked->version + 1])->save();
+                        foreach ($products as $product) {
+                            $product->forceFill(['supplier_available_until' => null])->save();
+                        }
 
-            return true;
-        }, 5);
+                        return false;
+                    }
+                    if (Supplier::query()->where('provider', $locked->provider)->where('external_account_id', $accountId)->whereKeyNot($locked->id)->exists()) {
+                        $locked->forceFill(['sync_expires_at' => null, 'sync_token' => null, 'sync_lease_expires_at' => null, 'last_error' => 'duplicate_account', 'version' => $locked->version + 1])->save();
+
+                        return false;
+                    }
+                }
+                // A provider balance may already include an in-flight debit. Do
+                // not replace the local pre-debit observation before that purchase
+                // settles, or finalization would subtract the same debit twice.
+                if ($locked->provider === 'buymail' && SupplierPurchase::query()->where('supplier_id', $locked->id)
+                    ->whereNull('committed_at')->whereIn('state', ['sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists()) {
+                    return false;
+                }
+                SupplierCatalogItem::query()->where(fn ($query) => $query->where('supplier_id', $locked->id)->orWhereIn('id', $mappedItems))
+                    ->orderBy('id')->lockForUpdate()->get();
+                $now = now();
+                $rows = [];
+                foreach ($snapshot->products as $item) {
+                    $rows[] = [
+                        'supplier_id' => $locked->id,
+                        'external_id' => $item->externalId,
+                        'name' => $item->name,
+                        'description' => $item->description,
+                        'currency' => $snapshot->currency,
+                        'unit_price_micros' => $item->unitPriceMicros,
+                        'stock' => $item->stock,
+                        'orderable' => $item->orderable,
+                        'requires_input' => $item->requiresInput,
+                        'price_tiers' => json_encode($item->priceTiers, JSON_THROW_ON_ERROR),
+                        'bulk_discounts' => json_encode($item->bulkDiscounts, JSON_THROW_ON_ERROR),
+                        'synced_at' => $now,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
+                foreach (array_chunk($rows, 200) as $chunk) {
+                    // Never replace reserved_quantity: held commitments are owned by checkout/purchase.
+                    SupplierCatalogItem::query()->upsert($chunk, ['supplier_id', 'external_id'], [
+                        'name', 'description', 'currency', 'unit_price_micros', 'stock', 'orderable', 'requires_input', 'price_tiers', 'bulk_discounts', 'synced_at', 'updated_at',
+                    ]);
+                }
+                // Observed missing SKUs are authoritatively unavailable, but their holds survive.
+                SupplierCatalogItem::query()->where('supplier_id', $locked->id)
+                    ->whereNotIn('external_id', array_column($rows, 'external_id'))
+                    ->update(['stock' => 0, 'orderable' => false, 'synced_at' => $now, 'updated_at' => $now]);
+                $freeBalance = max(0, $snapshot->balanceMicros - $locked->reserved_balance_micros);
+                $low = $locked->low_balance_threshold_micros > 0 && $freeBalance < $locked->low_balance_threshold_micros;
+                $locked->forceFill([
+                    'balance_micros' => $snapshot->balanceMicros,
+                    'synced_at' => $now,
+                    'sync_expires_at' => $now->copy()->addSeconds(self::FRESHNESS_SECONDS),
+                    'sync_token' => null,
+                    'sync_lease_expires_at' => null,
+                    'last_error' => null,
+                    'version' => $locked->version + 1,
+                    'low_balance_alerted_at' => $low ? ($locked->low_balance_alerted_at ?? $now) : null,
+                ])->save();
+                if ($snapshot->accountMetadata !== []) {
+                    $locked->forceFill(['external_account_id' => $snapshot->accountMetadata['account_id'], 'account_metadata' => $snapshot->accountMetadata])->save();
+                }
+                $items = SupplierCatalogItem::query()->whereIn('id', $mappedItems)->orderBy('id')->get();
+                $this->availability->refreshLocked($products, $suppliers, $items, $sources);
+
+                return true;
+            }, 5);
+        } catch (UniqueConstraintViolationException) {
+            $this->fail($connection->id, $version, $token, 'duplicate_account');
+
+            return false;
+        }
         if (! $applied) {
             Supplier::query()->whereKey($connection->id)->where('version', $version)->where('sync_token', $token)
                 ->update(['sync_token' => null, 'sync_lease_expires_at' => null]);

@@ -14,6 +14,7 @@ use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
+use App\Models\OrderRefund;
 use App\Models\Payment;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
@@ -167,6 +168,11 @@ class OrderStateMachine implements OrderLifecycle
                 }
 
                 $this->supplierFulfillment()->assertRefundable($order);
+                if ($lockedPayment->provider !== 'store_balance'
+                    && OrderRefund::query()->where('payment_id', $lockedPayment->id)->exists()
+                    && (int) OrderRefund::query()->where('payment_id', $lockedPayment->id)->where('state', 'confirmed')->sum('amount') !== $lockedPayment->amount) {
+                    throw new InvalidOrderTransition('Confirm the remaining external refund amount before refunding the full Order.');
+                }
                 $this->refundStoreBalance($order, $lockedPayment, $storeBalanceCustomerId);
                 $wasAlreadyRefunded = $lockedPayment->status === PaymentStatus::Refunded
                     && $order->payment_status === PaymentStatus::Refunded;

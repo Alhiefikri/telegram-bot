@@ -14,7 +14,7 @@ class SupplierFulfillment extends Model
 {
     protected function casts(): array
     {
-        return ['order_item_id' => 'integer', 'quantity' => 'integer', 'maximum_cost_idr' => 'integer', 'sources_snapshot' => 'encrypted:array', 'reserved_supplier_id' => 'integer', 'reserved_catalog_item_id' => 'integer', 'reserved_cost_micros' => 'integer', 'reserved_quantity' => 'integer', 'current_purchase_id' => 'integer', 'delivered_at' => 'immutable_datetime', 'next_attempt_at' => 'immutable_datetime'];
+        return ['order_item_id' => 'integer', 'quantity' => 'integer', 'refunded_quantity' => 'integer', 'maximum_cost_idr' => 'integer', 'sources_snapshot' => 'encrypted:array', 'reserved_supplier_id' => 'integer', 'reserved_catalog_item_id' => 'integer', 'reserved_cost_micros' => 'integer', 'reserved_quantity' => 'integer', 'current_purchase_id' => 'integer', 'delivered_at' => 'immutable_datetime', 'next_attempt_at' => 'immutable_datetime'];
     }
 
     public function order(): BelongsTo
@@ -35,5 +35,10 @@ class SupplierFulfillment extends Model
     public function currentPurchase(): BelongsTo
     {
         return $this->belongsTo(SupplierPurchase::class, 'current_purchase_id');
+    }
+
+    public function reservedSupplier(): BelongsTo
+    {
+        return $this->belongsTo(Supplier::class, 'reserved_supplier_id');
     }
 }

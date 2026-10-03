@@ -81,7 +81,7 @@ final class StoreBalanceActivityService
         }
 
         $entry = StoreBalanceEntry::query()
-            ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'created_at'])
+            ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'refund_order_id', 'created_at'])
             ->where('customer_balance_account_id', $accountId)
             ->whereKey($id)
             ->first();
@@ -113,7 +113,7 @@ final class StoreBalanceActivityService
         $credit = $accountId === null
             ? null
             : StoreBalanceEntry::query()
-                ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'created_at'])
+                ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'refund_order_id', 'created_at'])
                 ->where('customer_balance_account_id', $accountId)
                 ->whereIn('kind', [
                     StoreBalanceEntryKind::TopUpCredit->value,
@@ -165,7 +165,7 @@ final class StoreBalanceActivityService
         }
         foreach ($entries as $entry) {
 
-            $items[] = $this->entryItem($entry, $orders, $originals->get((string) $entry->source_id));
+            $items[] = $this->entryItem($entry, $orders, $originals->get((string) $this->orderIdForEntry($entry)));
         }
 
         $this->sortItems($items);
@@ -259,7 +259,7 @@ final class StoreBalanceActivityService
         bool $newer,
     ): Collection {
         $query = StoreBalanceEntry::query()
-            ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'created_at'])
+            ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'refund_order_id', 'created_at'])
             ->where('customer_balance_account_id', $accountId)
             ->where(function (Builder $query) use ($customerId): void {
                 $query->whereNotIn('source_type', [
@@ -331,7 +331,7 @@ final class StoreBalanceActivityService
         }
 
         return StoreBalanceEntry::query()
-            ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'created_at'])
+            ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'refund_order_id', 'created_at'])
             ->where('customer_balance_account_id', $accountId)
             ->whereIn('kind', [
                 StoreBalanceEntryKind::TopUpCredit->value,
@@ -368,8 +368,8 @@ final class StoreBalanceActivityService
     private function ordersForEntries(int $customerId, Collection $entries): Collection
     {
         $ids = $entries
-            ->filter(fn (StoreBalanceEntry $entry): bool => $entry->source_type === self::ORDER_SOURCE && $entry->source_id !== '')
-            ->map(fn (StoreBalanceEntry $entry): string => (string) $entry->source_id)
+            ->filter(fn (StoreBalanceEntry $entry): bool => $this->orderIdForEntry($entry) !== null)
+            ->map(fn (StoreBalanceEntry $entry): string => (string) $this->orderIdForEntry($entry))
             ->unique()
             ->values()
             ->all();
@@ -393,9 +393,8 @@ final class StoreBalanceActivityService
     {
         $ids = $entries
             ->filter(fn (StoreBalanceEntry $entry): bool => $entry->kind === StoreBalanceEntryKind::RefundCredit
-                && $entry->source_type === self::ORDER_SOURCE
-                && $entry->source_id !== '')
-            ->map(fn (StoreBalanceEntry $entry): string => (string) $entry->source_id)
+                && $this->orderIdForEntry($entry) !== null)
+            ->map(fn (StoreBalanceEntry $entry): string => (string) $this->orderIdForEntry($entry))
             ->unique()
             ->values()
             ->all();
@@ -404,7 +403,7 @@ final class StoreBalanceActivityService
         }
 
         return StoreBalanceEntry::query()
-            ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'created_at'])
+            ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'refund_order_id', 'created_at'])
             ->where('customer_balance_account_id', $accountId)
             ->where('kind', StoreBalanceEntryKind::PurchaseDebit->value)
             ->where('source_type', self::ORDER_SOURCE)
@@ -415,16 +414,16 @@ final class StoreBalanceActivityService
 
     private function originalDebitForEntry(int $accountId, StoreBalanceEntry $entry): ?StoreBalanceEntry
     {
-        if ($entry->kind !== StoreBalanceEntryKind::RefundCredit || $entry->source_type !== self::ORDER_SOURCE) {
+        if ($entry->kind !== StoreBalanceEntryKind::RefundCredit || $this->orderIdForEntry($entry) === null) {
             return null;
         }
 
         return StoreBalanceEntry::query()
-            ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'created_at'])
+            ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'refund_order_id', 'created_at'])
             ->where('customer_balance_account_id', $accountId)
             ->where('kind', StoreBalanceEntryKind::PurchaseDebit->value)
             ->where('source_type', self::ORDER_SOURCE)
-            ->where('source_id', (string) $entry->source_id)
+            ->where('source_id', $this->orderIdForEntry($entry))
             ->first();
     }
 
@@ -483,8 +482,8 @@ final class StoreBalanceActivityService
             StoreBalanceEntryKind::RefundCredit => StoreBalanceActivityItem::STATE_REFUNDED,
         };
         $amount = (int) $entry->amount;
-        $order = $entry->source_type === self::ORDER_SOURCE
-            ? $orders->get((string) $entry->source_id)
+        $order = $this->orderIdForEntry($entry) !== null
+            ? $orders->get($this->orderIdForEntry($entry))
             : null;
 
         return new StoreBalanceActivityItem(
@@ -544,6 +543,16 @@ final class StoreBalanceActivityService
         }
 
         return '#'.(int) $entry->getKey();
+    }
+
+    private function orderIdForEntry(StoreBalanceEntry $entry): ?string
+    {
+        if ($entry->source_type === self::ORDER_SOURCE && $entry->source_id !== '') {
+            return (string) $entry->source_id;
+        }
+
+        return $entry->source_type === 'order_refund' && $entry->kind === StoreBalanceEntryKind::RefundCredit
+            ? $entry->refund_order_id : null;
     }
 
     /**

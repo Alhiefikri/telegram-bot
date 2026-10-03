@@ -16,6 +16,7 @@ use LogicException;
     'source_id',
     'idempotency_key',
     'created_at',
+    'refund_order_id',
 ])]
 class StoreBalanceEntry extends Model
 {

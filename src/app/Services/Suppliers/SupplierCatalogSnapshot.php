@@ -9,5 +9,6 @@ final readonly class SupplierCatalogSnapshot
         public int $balanceMicros,
         public string $currency,
         public array $products,
+        public array $accountMetadata = [],
     ) {}
 }

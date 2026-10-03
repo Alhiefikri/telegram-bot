@@ -28,7 +28,7 @@ final class CredentialDeliveryPresentation
 
     public function forOrder(Order $order, ?Payment $payment = null): CredentialDelivery
     {
-        $order->loadMissing(['customer', 'payments', 'orderItems.stockItems', 'orderItems.product']);
+        $order->loadMissing(['customer', 'payments', 'orderItems.stockItems.supplierAccountUnit', 'orderItems.product']);
 
         if ($this->eligibility->rejectionReason($order, payment: $payment) !== null) {
             return CredentialDelivery::empty();
@@ -44,7 +44,7 @@ final class CredentialDeliveryPresentation
 
     public function forCustomer(Customer $customer, Order $order, ?Payment $payment = null): CredentialDelivery
     {
-        $order->loadMissing(['customer', 'payments', 'orderItems.stockItems', 'orderItems.product']);
+        $order->loadMissing(['customer', 'payments', 'orderItems.stockItems.supplierAccountUnit', 'orderItems.product']);
 
         if ($this->eligibility->rejectionReason($order, $customer, $payment) !== null) {
             return CredentialDelivery::empty();
@@ -60,7 +60,10 @@ final class CredentialDeliveryPresentation
             foreach ($order->orderItems->sortBy('id')->values() as $item) {
                 $accounts = [];
                 foreach ($item->stockItems->sortBy('id')->values() as $index => $stockItem) {
-                    $accounts[] = $this->account($stockItem, $index + 1, $this->defaultTutorial($item));
+                    if ($stockItem->retired_at !== null) {
+                        continue;
+                    }
+                    $accounts[] = $this->account($stockItem, $stockItem->supplierAccountUnit?->unit_number ?? $index + 1, $this->defaultTutorial($item));
                 }
 
                 if ($accounts === []) {

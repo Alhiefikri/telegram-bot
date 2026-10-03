@@ -12,11 +12,16 @@ use Throwable;
 #[Fillable(['product_id', 'order_item_id', 'supplier_purchase_id', 'supplier_unit_index', 'retired_at', 'retired_reason', 'secret', 'credential_format', 'credential_payload'])]
 class ProductStockItem extends Model
 {
-    protected $hidden = ['supplier_purchase_id', 'supplier_unit_index', 'supplierPurchase', 'supplier_purchase', 'secret', 'credential_payload'];
+    protected $hidden = ['supplier_purchase_id', 'supplier_unit_index', 'supplierPurchase', 'supplier_purchase', 'supplierAccountUnit', 'supplier_account_unit', 'secret', 'credential_payload'];
 
     public function supplierPurchase()
     {
         return $this->belongsTo(SupplierPurchase::class);
+    }
+
+    public function supplierAccountUnit()
+    {
+        return $this->hasOne(SupplierAccountUnit::class);
     }
 
     protected static function booted(): void
