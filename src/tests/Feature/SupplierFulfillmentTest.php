@@ -29,6 +29,7 @@ use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierAvailability;
+use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\DB;
@@ -185,6 +186,30 @@ class SupplierFulfillmentTest extends TestCase
         $this->assertSame('retained-private-key', ProductStockItem::sole()->secret);
         $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
         $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+    }
+
+    public function test_catalog_sync_during_generic_purchase_does_not_apply_the_same_wallet_debit_twice(): void
+    {
+        [, $supplier, , $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fake(function ($request) use ($supplier) {
+            $this->assertSame(0, DB::transactionLevel());
+            if ($request->method() === 'GET') {
+                return Http::response(str_ends_with($request->url(), '/balance')
+                    ? ['balance' => '9', 'currency' => 'USDT']
+                    : ['products' => [['id' => 'fixture-sku', 'name' => 'Private', 'price' => '1', 'stock' => 9]], 'currency' => 'USDT']);
+            }
+            $this->assertTrue(app(SupplierCatalogSync::class)->sync($supplier->fresh()));
+
+            return Http::response(['status' => 'delivered', 'orderId' => 'sync-during-purchase', 'quantity' => 1, 'total_cost' => '1', 'deliveredKeys' => ['single-debit-key']]);
+        });
+        app(SupplierFulfillmentService::class)->process(SupplierFulfillment::where('order_id', $order->id)->sole()->id);
+        $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame('single-debit-key', ProductStockItem::sole()->secret);
+        Http::assertSentCount(3);
     }
 
     public function test_metadata_omission_cannot_erase_a_previously_observed_quantity_mismatch(): void

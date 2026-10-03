@@ -32,6 +32,9 @@ final class MissingFulfillmentRefundService
             $ledger = app(StoreBalanceLedger::class);
             $ledger->lockForTransaction($customer);
             $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
+            if ((int) $order->customer_id !== (int) $customer->id) {
+                throw new InvalidOrderTransition('Order remainder is unavailable.');
+            }
             $payments = Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
             $fulfillment = app(SupplierFulfillmentService::class);
             $fulfillment->lockForReview($order);
@@ -41,7 +44,7 @@ final class MissingFulfillmentRefundService
                 return $existing;
             }
             $payment = $payments->first(fn ($p) => $p->status === PaymentStatus::Paid && $p->paid_at !== null);
-            if ((int) $order->customer_id !== (int) $customer->id || $payment === null || $order->payment_status !== PaymentStatus::Paid
+            if ($payment === null || $order->payment_status !== PaymentStatus::Paid
                 || $order->order_status !== OrderStatus::Processing || $f->state !== 'review'
                 || $order->hasOpenLatePaymentReview() || $f->reserved_quantity !== 0) {
                 throw new InvalidOrderTransition('Only a proven unfulfilled remainder can be refunded.');

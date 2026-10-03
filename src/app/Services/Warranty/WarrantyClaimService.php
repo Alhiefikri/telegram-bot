@@ -47,12 +47,15 @@ final class WarrantyClaimService
             $claim = DB::transaction(function () use ($customer, $initial, $path, $proof, $note, &$retained): WarrantyClaim {
                 $retained = false;
                 [$order, $unit, $stock, $supplier] = $this->lockUnit($initial);
+                if ((int) $order->customer_id !== (int) $customer->id) {
+                    throw new InvalidOrderTransition('Warranty account is unavailable.');
+                }
                 $existing = WarrantyClaim::query()->where('supplier_account_unit_id', $unit->id)->lockForUpdate()->first();
                 if ($existing !== null) {
                     return $existing;
                 }
                 $paid = Payment::query()->where('order_id', $order->id)->where('status', PaymentStatus::Paid)->whereNotNull('paid_at')->exists();
-                if ((int) $order->customer_id !== (int) $customer->id || ! $paid || $order->payment_status !== PaymentStatus::Paid
+                if (! $paid || $order->payment_status !== PaymentStatus::Paid
                     || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)
                     || $order->hasOpenLatePaymentReview() || $stock->retired_at !== null
                     || $unit->provider_state !== 'active' || ! $unit->refund_deadline->isFuture()
@@ -69,7 +72,7 @@ final class WarrantyClaimService
                 ]);
                 $this->audit->log('warranty.claim_received', $claim, new: ['unit_id' => $unit->id, 'order_id' => $order->id]);
                 app(WarrantyNotificationPipeline::class)->record($claim);
-                DB::afterCommit(fn () => ProcessWarrantyClaim::dispatch($claim->id));
+                DB::afterCommit(fn () => ProcessWarrantyClaim::dispatch($claim->id, true));
                 $retained = true;
 
                 return $claim;
@@ -281,7 +284,7 @@ final class WarrantyClaimService
                 'state' => 'received', 'claim_token' => null, 'lease_expires_at' => null,
                 'dispatched_at' => null, 'last_error' => null, 'next_attempt_at' => now(),
             ])->save();
-            DB::afterCommit(fn () => ProcessWarrantyClaim::dispatch($claim->id));
+            DB::afterCommit(fn () => ProcessWarrantyClaim::dispatch($claim->id, true));
         }, 5);
     }
 }

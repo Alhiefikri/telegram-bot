@@ -83,4 +83,24 @@ final class BuyMailWebhookTest extends NonTransactionalDatabaseTestCase
         Http::assertSent(fn ($request) => $request->method() === 'GET' && str_ends_with($request->url(), '/deposits/RESOURCE1'));
         Http::assertSentCount(1);
     }
+
+    public function test_signed_dot_segment_resources_are_rejected_before_durable_acceptance(): void
+    {
+        Queue::fake();
+        $secret = 'whsec_synthetic-fixture-secret';
+        $supplier = Supplier::forceCreate(['name' => 'Private source', 'provider' => 'buymail', 'api_key' => 'synthetic-key', 'currency' => 'IDR', 'exchange_rate_idr' => 1, 'is_active' => true, 'webhook_secret' => $secret]);
+        $timestamp = time();
+        foreach (['deposit.paid', 'refund.approved'] as $type) {
+            foreach (['.', '..'] as $resource) {
+                $id = 'evt-'.$type.'-'.$resource;
+                $body = json_encode(['id' => $id, 'type' => $type, 'data' => [$type === 'deposit.paid' ? 'deposit' : 'account' => ['id' => $resource]]], JSON_THROW_ON_ERROR);
+                $headers = ['CONTENT_TYPE' => 'application/json', 'HTTP_X_WEBHOOK_ID' => $id, 'HTTP_X_WEBHOOK_EVENT' => $type,
+                    'HTTP_X_WEBHOOK_SIGNATURE' => 't='.$timestamp.',v1='.hash_hmac('sha256', $timestamp.'.'.$body, $secret)];
+                $this->call('POST', '/api/webhook/suppliers/buymail/'.$supplier->id, server: $headers, content: $body)->assertUnprocessable();
+            }
+        }
+        $this->assertSame(0, SupplierWebhookEvent::count());
+        Queue::assertNothingPushed();
+        Http::assertNothingSent();
+    }
 }

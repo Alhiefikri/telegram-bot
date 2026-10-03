@@ -2,6 +2,8 @@
 
 namespace App\Services\Warranty;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\SupplierAccountUnit;
 use App\Models\TelegramOutboundEffect;
@@ -44,6 +46,9 @@ final class WarrantyDeadlineReminderPipeline
             }
             if ($unit->provider_state !== 'active' || $unit->confirmation_state !== null
                 || $unit->stockItem?->retired_at !== null
+                || $unit->order->payment_status !== PaymentStatus::Paid
+                || ! in_array($unit->order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)
+                || $unit->order->hasOpenLatePaymentReview()
                 || WarrantyClaim::query()->where('supplier_account_unit_id', $unit->id)->exists()) {
                 $this->ledger->finalizeNotDeliverable((string) $claimed->id, $claimed->claim_token, 'warranty_reminder_no_longer_eligible');
 

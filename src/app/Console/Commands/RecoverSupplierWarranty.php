@@ -32,9 +32,9 @@ final class RecoverSupplierWarranty extends Command
             ->where(fn ($q) => $q->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now()))
             ->where(fn ($q) => $q->whereNull('lease_expires_at')->orWhere('lease_expires_at', '<=', now()))
             ->orderByRaw("CASE WHEN state = 'received' THEN 0 WHEN state = 'approved' THEN 2 ELSE 1 END")
-            ->orderBy('next_attempt_at')->orderBy('id')->limit($limit)->pluck('id');
-        foreach ($claims as $id) {
-            ProcessWarrantyClaim::dispatch($id);
+            ->orderBy('next_attempt_at')->orderBy('id')->limit($limit)->get(['id', 'state', 'dispatched_at']);
+        foreach ($claims as $claim) {
+            ProcessWarrantyClaim::dispatch($claim->id, $claim->state === 'received' && $claim->dispatched_at === null);
         }
         $replacements = WarrantyClaim::query()->where('settlement_choice', 'replacement')
             ->whereIn('settlement_state', ['replacement_pending', 'replacement_sending', 'replacement_unknown'])

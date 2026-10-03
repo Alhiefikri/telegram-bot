@@ -79,6 +79,11 @@ final class WarrantyDeadlineReminderService
             ->where('provider_state', 'active')
             ->whereNull('confirmation_state')
             ->whereBetween('refund_deadline', [$now, $now->copy()->addMinutes(self::WINDOW_MINUTES)])
+            ->whereHas('order', fn ($query) => $query
+                ->where('payment_status', PaymentStatus::Paid)
+                ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
+                ->whereHas('customer', fn ($customers) => $customers->whereNotNull('telegram_id'))
+                ->whereDoesntHave('manualFulfillmentReviews', fn ($reviews) => $reviews->openLatePayment()))
             ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('warranty_claims')
                 ->whereColumn('warranty_claims.supplier_account_unit_id', 'supplier_account_units.id'))
             ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('product_stock_items')

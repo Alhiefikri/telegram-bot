@@ -168,15 +168,23 @@ final class SupplierFulfillmentService
 
     public function recover(int $max = 100): array
     {
-        $ids = SupplierFulfillment::query()->whereIn('state', ['pending', 'purchasing', 'awaiting_delivery'])->where(fn ($q) => $q->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now()))->orderBy('next_attempt_at')->orderBy('id')->limit(max(1, min($max, 500)))->pluck('id');
+        $due = SupplierFulfillment::query()
+            ->select('supplier_fulfillments.id')
+            ->withExists([
+                'purchases as has_buymail_purchase' => fn ($query) => $query->whereHas('supplier', fn ($supplier) => $supplier->where('provider', 'buymail')),
+                'reservedSupplier as has_buymail_reservation' => fn ($query) => $query->where('provider', 'buymail'),
+            ])
+            ->whereIn('state', ['pending', 'purchasing', 'awaiting_delivery'])
+            ->where(fn ($q) => $q->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now()))
+            ->orderBy('next_attempt_at')->orderBy('id')->limit(max(1, min($max, 500)))->get();
         $started = microtime(true);
         $processed = 0;
-        foreach ($ids as $id) {
+        foreach ($due as $fulfillment) {
             if (microtime(true) - $started >= 45) {
                 break;
             }
-            if (SupplierFulfillment::query()->whereKey($id)->whereHas('purchases.supplier', fn ($query) => $query->where('provider', 'buymail'))->exists()
-                || SupplierFulfillment::query()->whereKey($id)->whereHas('reservedSupplier', fn ($query) => $query->where('provider', 'buymail'))->exists()) {
+            $id = $fulfillment->id;
+            if ($fulfillment->has_buymail_purchase || $fulfillment->has_buymail_reservation) {
                 ProcessSupplierFulfillment::dispatch($id);
             } else {
                 $this->process($id);
@@ -287,6 +295,15 @@ final class SupplierFulfillmentService
                 return;
             }
             $purchase->supplier_order_id = $result->orderId;
+        }
+        // A settled debit cannot be revised without an explicit economic adjustment.
+        if ($purchase->committed_at !== null && $result->identityTrusted
+            && (($result->costMicros !== null && $result->costMicros !== $purchase->actual_cost_micros)
+                || ($result->quantity !== null && $result->quantity !== $purchase->observed_quantity))) {
+            $purchase->forceFill(['state' => 'review', 'last_error' => 'economic_evidence_conflict'])->save();
+            $this->review($f, $order, 'economic_evidence_conflict');
+
+            return;
         }
         $previous = $purchase->delivery_payload ?? [];
         $conflictingDelivery = $previous !== [] && $result->deliveries !== []
@@ -499,8 +516,10 @@ final class SupplierFulfillmentService
     private function materialize(SupplierFulfillment $f, SupplierPurchase $purchase, array $deliveries, bool $complete = true): void
     {
         $item = OrderItem::findOrFail($f->order_item_id);
+        $accountUnits = $purchase->account_units ?? [];
+        $number = $accountUnits === [] ? null : SupplierAccountUnit::query()->where('order_item_id', $item->id)->whereNull('replaces_unit_id')->count() + $item->localQuantity() + 1;
         foreach (array_values($deliveries) as $index => $secret) {
-            $unit = ($purchase->account_units ?? [])[$index] ?? null;
+            $unit = $accountUnits[$index] ?? null;
             $structured = $unit !== null && $secret === $unit['email'].' | '.$unit['password'];
             $attributes = ['product_id' => $item->product_id, 'order_item_id' => $item->id];
             if ($structured) {
@@ -513,9 +532,8 @@ final class SupplierFulfillmentService
             }
             $stockItem = ProductStockItem::firstOrCreate(['supplier_purchase_id' => $purchase->id, 'supplier_unit_index' => $index + 1], $attributes);
             if ($structured) {
-                $number = SupplierAccountUnit::query()->where('order_item_id', $item->id)->whereNull('replaces_unit_id')->count() + $item->localQuantity() + 1;
                 $subtotal = $item->order->currency === 'USDT' ? $item->usdt_subtotal : $item->subtotal;
-                SupplierAccountUnit::firstOrCreate(['supplier_id' => $purchase->supplier_id, 'external_id' => $unit['id']], [
+                $accountUnit = SupplierAccountUnit::firstOrCreate(['supplier_id' => $purchase->supplier_id, 'external_id' => $unit['id']], [
                     'public_id' => (string) Str::uuid(), 'supplier_purchase_id' => $purchase->id,
                     'product_stock_item_id' => $stockItem->id, 'order_id' => $item->order_id,
                     'order_item_id' => $item->id, 'provider_state' => $unit['status'],
@@ -523,6 +541,9 @@ final class SupplierFulfillmentService
                     'retail_amount' => RefundAllocation::unit($subtotal, $item->quantity, $number),
                     'retail_currency' => $item->order->currency, 'unit_number' => $number,
                 ]);
+                if ($accountUnit->wasRecentlyCreated) {
+                    $number++;
+                }
             }
         }
         if ($complete) {

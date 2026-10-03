@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Models\WarrantyClaim;
 use App\Services\Warranty\WarrantyClaimService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -15,9 +14,8 @@ final class ProcessWarrantyClaim implements ShouldQueue
 
     public int $timeout = 60;
 
-    public function __construct(public readonly int $claimId)
+    public function __construct(public readonly int $claimId, bool $urgent)
     {
-        $urgent = WarrantyClaim::query()->whereKey($claimId)->where('state', 'received')->whereNull('dispatched_at')->exists();
         $this->onConnection('supplier')->onQueue($urgent ? 'supplier-refunds' : 'supplier-claims');
     }
 

@@ -8,6 +8,7 @@ use App\Models\SupplierCatalogItem;
 use App\Services\Suppliers\BuyMailClient;
 use App\Services\Suppliers\SupplierClient;
 use App\Services\Suppliers\SupplierOrderResult;
+use App\Services\Suppliers\SupplierUnavailable;
 use App\Services\Warranty\RefundProof;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -118,6 +119,8 @@ final class BuyMailClientTest extends TestCase
             'unknown state' => ['status', 'success'],
             'partial marked complete' => ['quantity_delivered', 1],
             'oversized count' => ['quantity_requested', 51],
+            'dot order identity' => ['id', '.'],
+            'parent order identity' => ['id', '..'],
         ];
     }
 
@@ -255,5 +258,104 @@ final class BuyMailClientTest extends TestCase
         $result = app(BuyMailClient::class)->recoverPurchase($this->supplier(), 2, 'local-intent-1', now()->subMinute(), allowReplay: false);
         $this->assertSame('ambiguous', $result->outcome);
         Http::assertSentCount(1);
+    }
+
+    public function test_dot_segment_resource_identifiers_never_reach_the_fixed_provider_origin(): void
+    {
+        Http::fake();
+        $client = app(BuyMailClient::class);
+        foreach (['.', '..'] as $id) {
+            foreach ([
+                fn () => $client->order($this->supplier(), $id, null),
+                fn () => $client->account($this->supplier(), $id, 'ORD1'),
+                fn () => $client->confirmAccount($this->supplier(), $id, 'ORD1'),
+                fn () => $client->deposit($this->supplier(), $id),
+                fn () => $client->cancelDeposit($this->supplier(), $id),
+            ] as $read) {
+                try {
+                    $read();
+                    $this->fail('A dot segment must not be accepted as a resource identity.');
+                } catch (SupplierUnavailable $exception) {
+                    $this->assertSame('invalid_payload', $exception->errorCode);
+                }
+            }
+        }
+        Http::assertNothingSent();
+    }
+
+    public static function invalidDeadlines(): array
+    {
+        return [
+            'overflowing calendar day' => ['2026-02-31T12:00:00Z'],
+            'non leap day' => ['2026-02-29T12:00:00Z'],
+            'overflowing month' => ['2026-13-03T12:00:00Z'],
+            'overflowing hour' => ['2026-10-03T24:00:00Z'],
+            'overflowing minute' => ['2026-10-03T12:60:00Z'],
+            'overflowing second' => ['2026-10-03T12:00:60Z'],
+            'year zero' => ['0000-10-03T12:00:00Z'],
+        ];
+    }
+
+    #[DataProvider('invalidDeadlines')]
+    public function test_invalid_calendar_deadlines_cannot_authorize_account_delivery(string $deadline): void
+    {
+        $payload = $this->order();
+        $payload['order']['accounts'][0]['refund_deadline'] = $deadline;
+        Http::fake(fn () => Http::response($payload, 201));
+        $result = $this->purchase();
+        $this->assertSame('ambiguous', $result->outcome);
+        $this->assertFalse($result->deliveryTrusted);
+        $this->assertSame([], $result->accountUnits);
+        Http::assertSentCount(1);
+    }
+
+    #[DataProvider('invalidDeadlines')]
+    public function test_invalid_calendar_deadlines_cannot_update_warranty_or_deposit_evidence(string $deadline): void
+    {
+        Http::fake(fn ($request) => Http::response(str_contains($request->url(), '/accounts/') ? [
+            'account' => ['id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'active', 'price' => 4800, 'refund_deadline' => $deadline],
+        ] : [
+            'deposit' => ['id' => 'TOPUP1', 'amount' => 100000, 'currency' => 'IDR', 'status' => 'pending', 'payment_url' => 'https://payments.example.test/topup1', 'expires_at' => $deadline],
+        ]));
+        $client = app(BuyMailClient::class);
+        foreach ([
+            fn () => $client->account($this->supplier(), 'PR1', 'ORD1'),
+            fn () => $client->deposit($this->supplier(), 'TOPUP1'),
+        ] as $read) {
+            try {
+                $read();
+                $this->fail('An invalid provider deadline must not be normalized into valid evidence.');
+            } catch (SupplierUnavailable $exception) {
+                $this->assertSame('invalid_payload', $exception->errorCode);
+            }
+        }
+        Http::assertSentCount(2);
+    }
+
+    public function test_a_provider_cannot_echo_the_private_api_key_into_customer_credentials(): void
+    {
+        $payload = $this->order();
+        $payload['order']['accounts'][0]['password'] = 'fixture-buymail-key';
+        // Escaped JSON must be checked after decoding, not by raw body matching.
+        $body = str_replace('fixture-buymail-key', 'fixture-buymail-\u006bey', json_encode($payload, JSON_THROW_ON_ERROR));
+        Http::fake(fn () => Http::response($body, 201));
+        $result = $this->purchase();
+        $this->assertSame('ambiguous', $result->outcome);
+        $this->assertSame('invalid_payload', $result->errorCode);
+        $this->assertFalse($result->deliveryTrusted);
+        $this->assertSame([], $result->accountUnits);
+        $this->assertSame([], $result->deliveries);
+        Http::assertSentCount(1);
+    }
+
+    public function test_a_private_api_key_echo_cannot_be_retained_as_a_deposit_payment_url(): void
+    {
+        Http::fake(fn () => Http::response(['deposit' => [
+            'id' => 'TOPUP1', 'amount' => 100000, 'currency' => 'IDR', 'status' => 'pending',
+            'payment_url' => 'https://payments.example.test/fixture-buymail-key', 'expires_at' => '2026-10-03T12:00:00Z',
+        ]]));
+        $this->expectException(SupplierUnavailable::class);
+        $this->expectExceptionMessage('invalid_payload');
+        app(BuyMailClient::class)->deposit($this->supplier(), 'TOPUP1');
     }
 }

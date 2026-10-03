@@ -2,19 +2,24 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Enums\UserRole;
 use App\Jobs\SendWarrantyDeadlineReminder;
 use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Models\WarrantyClaim;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Warranty\WarrantyDeadlineReminderPipeline;
+use App\Services\Warranty\WarrantyDeadlineReminderService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\BuildsBuyMailWarrantyFixture;
 use Tests\Support\NonTransactionalDatabaseTestCase;
@@ -155,6 +160,78 @@ final class WarrantyDeadlineReminderTest extends NonTransactionalDatabaseTestCas
         Queue::assertPushed(SendWarrantyDeadlineReminder::class, 1);
         $this->assertSame(1, TelegramOutboundEffect::query()
             ->where('effect_type', TelegramOutboundEffectType::WarrantyDeadlineReminder->value)->count());
+    }
+
+    public static function ineligibleOrders(): iterable
+    {
+        yield 'web buyer' => ['web'];
+        yield 'refunded order' => ['refunded'];
+        yield 'cancelled order' => ['cancelled'];
+        yield 'late payment review' => ['review'];
+    }
+
+    #[DataProvider('ineligibleOrders')]
+    public function test_ineligible_earlier_unit_does_not_starve_a_due_telegram_reminder(string $reason): void
+    {
+        Queue::fake();
+        [$customer, $unit] = $this->fixture();
+        $unit->update(['refund_deadline' => now()->addMinutes(10)]);
+        $eligibleCustomer = Customer::factory()->create(['telegram_id' => 790002]);
+        $eligibleOrder = $unit->order->replicate();
+        $eligibleOrder->forceFill(['customer_id' => $eligibleCustomer->id, 'invoice_number' => 'REMINDER-'.Str::uuid()])->save();
+        $eligibleItem = $unit->orderItem->replicate();
+        $eligibleItem->order_id = $eligibleOrder->id;
+        $eligibleItem->save();
+        $eligibleStock = $unit->stockItem->replicate();
+        $eligibleStock->forceFill(['order_item_id' => $eligibleItem->id, 'supplier_unit_index' => 2])->save();
+        $eligibleUnit = $unit->replicate();
+        $eligibleUnit->forceFill([
+            'public_id' => (string) Str::uuid(), 'external_id' => 'PR2',
+            'order_id' => $eligibleOrder->id, 'refund_deadline' => now()->addMinutes(20),
+            'order_item_id' => $eligibleItem->id, 'product_stock_item_id' => $eligibleStock->id,
+        ])->save();
+        $this->makeOrderIneligible($customer, $unit, $reason);
+
+        $this->assertSame(1, app(WarrantyDeadlineReminderService::class)->materializeDue(1));
+        $this->assertNotNull($eligibleUnit->fresh()->reminder_materialized_at);
+        $this->assertNull($unit->fresh()->reminder_materialized_at);
+        $this->assertSame(1, TelegramOutboundEffect::where('source_id', (string) $eligibleUnit->id)
+            ->where('effect_type', TelegramOutboundEffectType::WarrantyDeadlineReminder->value)->count());
+    }
+
+    #[DataProvider('ineligibleOrders')]
+    public function test_reminder_rechecks_order_eligibility_before_delivery(string $reason): void
+    {
+        Queue::fake();
+        [$customer, $unit] = $this->fixture();
+        $customer->update(['telegram_id' => 790001]);
+        $unit->update(['refund_deadline' => now()->addMinutes(20)]);
+        $effect = app(TelegramOutboundEffectService::class)->recordWarrantyDeadlineReminder($unit);
+        $this->makeOrderIneligible($customer, $unit, $reason);
+        Http::fake();
+
+        app(WarrantyDeadlineReminderPipeline::class)->deliver($effect);
+
+        Http::assertNothingSent();
+        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->fresh()->state);
+        $this->assertSame($reason === 'web' ? 'warranty_reminder_unavailable' : 'warranty_reminder_no_longer_eligible', $effect->fresh()->last_error_code);
+    }
+
+    private function makeOrderIneligible(Customer $customer, $unit, string $reason): void
+    {
+        if ($reason === 'web') {
+            $customer->update(['telegram_id' => null]);
+        } elseif ($reason === 'refunded') {
+            $unit->order->update(['payment_status' => PaymentStatus::Refunded]);
+        } elseif ($reason === 'cancelled') {
+            $unit->order->update(['order_status' => OrderStatus::Cancelled]);
+        } else {
+            ManualFulfillmentReview::create([
+                'order_id' => $unit->order_id, 'payment_id' => $unit->order->payments()->sole()->id,
+                'amount' => 16000, 'currency' => 'IDR', 'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+                'state' => ManualFulfillmentReview::STATE_PENDING,
+            ]);
+        }
     }
 
     public function test_operator_monitor_lists_near_deadline_units_with_reminder_state(): void

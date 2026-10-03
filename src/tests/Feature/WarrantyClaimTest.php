@@ -25,12 +25,15 @@ use App\Services\StoreBalance\StoreBalanceActivityService;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\BuyMailWebhookService;
 use App\Services\Suppliers\SupplierCatalogSync;
+use App\Services\Warranty\MissingFulfillmentRefundService;
 use App\Services\Warranty\RefundProof;
 use App\Services\Warranty\WarrantyAccountService;
 use App\Services\Warranty\WarrantyClaimService;
 use App\Services\Warranty\WarrantyReplacementService;
 use App\Services\Warranty\WarrantySettlementService;
 use App\Storefront\StorefrontOrderAccess;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Crypt;
@@ -38,6 +41,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
@@ -84,6 +89,110 @@ final class WarrantyClaimTest extends NonTransactionalDatabaseTestCase
         $this->assertSame('pending', $claim->fresh()->state);
         $this->assertSame('awaiting_verification', $claim->fresh()->settlement_state);
         $this->assertNull($unit->stockItem->fresh()->retired_at);
+    }
+
+    public function test_replayed_claim_rechecks_order_ownership_after_proof_storage(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $service = app(WarrantyClaimService::class);
+        $claim = $service->submit($customer, $unit->public_id, $this->proof(), 'Original proof');
+        $newOwner = Customer::factory()->create();
+        $disk = Storage::disk('local');
+        $proxy = Mockery::mock(FilesystemAdapter::class);
+        $proxy->shouldReceive('put')->once()->andReturnUsing(function ($path, $contents, $options) use ($disk, $unit, $newOwner): bool {
+            $saved = $disk->put($path, $contents, $options);
+            $unit->order->update(['customer_id' => $newOwner->id]);
+
+            return $saved;
+        });
+        $proxy->shouldReceive('delete')->once()->andReturnUsing(fn ($path) => $disk->delete($path));
+        Storage::shouldReceive('disk')->with('local')->andReturn($proxy);
+
+        try {
+            $service->submit($customer, $unit->public_id, $this->proof(), 'Retry proof');
+            $this->fail('A former owner received the existing claim after ownership changed.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame([$claim->proof_path], $disk->allFiles());
+            $this->assertSame(1, WarrantyClaim::count());
+            $this->assertSame($newOwner->id, $unit->order->fresh()->customer_id);
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_replayed_missing_refund_rechecks_order_ownership_under_the_order_lock(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $fulfillment = $unit->purchase->fulfillment;
+        $refund = OrderRefund::create([
+            'order_id' => $unit->order_id, 'payment_id' => $unit->order->payments()->sole()->id,
+            'customer_id' => $customer->id, 'supplier_fulfillment_id' => $fulfillment->id,
+            'missing_quantity' => 1, 'amount' => 8000, 'currency' => 'IDR', 'state' => 'requested',
+        ]);
+        $newOwner = Customer::factory()->create();
+        $changedOwner = false;
+        $active = true;
+        DB::listen(function (QueryExecuted $query) use ($unit, $newOwner, &$changedOwner, &$active): void {
+            if ($active && ! $changedOwner
+                && preg_match('/\bfrom\s+["`]?orders["`]?(?:\s|$)/i', $query->sql) === 1) {
+                // The first ownership read has returned its original row, but
+                // ownership changes before the mutation obtains the Order lock.
+                $changedOwner = true;
+                $unit->order->update(['customer_id' => $newOwner->id]);
+            }
+        });
+        try {
+            app(MissingFulfillmentRefundService::class)->request($customer, $unit->order_item_id);
+            $this->fail('A former owner received the existing missing-unit refund.');
+        } catch (InvalidOrderTransition) {
+            $this->assertTrue($changedOwner);
+            $this->assertSame(1, OrderRefund::count());
+            $this->assertSame('requested', $refund->fresh()->state);
+        } finally {
+            $active = false;
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_recovery_batches_claim_reads_and_preserves_upload_queue_priority(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $claims = [];
+        for ($index = 1; $index <= 4; $index++) {
+            $account = $unit;
+            if ($index > 1) {
+                $stock = $unit->stockItem->replicate();
+                $stock->supplier_unit_index = $index;
+                $stock->save();
+                $account = $unit->replicate();
+                $account->forceFill([
+                    'public_id' => (string) Str::uuid(),
+                    'external_id' => 'PR'.$index, 'unit_number' => $index,
+                    'product_stock_item_id' => $stock->id,
+                ])->save();
+            }
+            $claims[] = app(WarrantyClaimService::class)->submit($customer, $account->public_id, $this->proof(), 'Wrong password');
+        }
+        $claims[3]->update(['state' => 'pending', 'dispatched_at' => now()->subMinute()]);
+        Queue::fake();
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+        try {
+            $this->artisan('suppliers:recover-warranty', ['--limit' => 10])->assertSuccessful();
+            $queries = DB::getQueryLog();
+        } finally {
+            DB::disableQueryLog();
+        }
+
+        $claimReads = array_filter($queries, function (array $query): bool {
+            return preg_match('/\bfrom\s+["`]?([a-z_]+)/i', $query['query'], $table) === 1 && $table[1] === 'warranty_claims';
+        });
+        $this->assertCount(2, $claimReads, 'Recovery must use batch claim/replacement discovery, not one claim read per queued job.');
+        foreach (array_slice($claims, 0, 3) as $claim) {
+            Queue::assertPushedOn('supplier-refunds', ProcessWarrantyClaim::class, fn ($job): bool => $job->claimId === $claim->id);
+        }
+        Queue::assertPushedOn('supplier-claims', ProcessWarrantyClaim::class, fn ($job): bool => $job->claimId === $claims[3]->id);
+        Queue::assertPushed(ProcessWarrantyClaim::class, 4);
+        Http::assertNothingSent();
     }
 
     public static function unapprovedSettlementChoices(): iterable

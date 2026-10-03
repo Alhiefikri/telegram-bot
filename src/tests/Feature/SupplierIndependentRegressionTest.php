@@ -211,6 +211,39 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         $this->assertSame(0, ProductStockItem::where('order_item_id', $fulfillment->order_item_id)->count());
     }
 
+    public static function conflictingCommittedEconomics(): array
+    {
+        return [
+            'changed actual debit' => [['quantity' => 1, 'total_cost' => '2']],
+            'changed acquired quantity' => [['quantity' => 2, 'total_cost' => '1']],
+        ];
+    }
+
+    #[DataProvider('conflictingCommittedEconomics')]
+    public function test_recovery_cannot_rewrite_already_committed_economics(array $economics): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        Http::fakeSequence()
+            ->push(['status' => 'pending', 'order_id' => 'committed-order', 'quantity' => 1, 'total_cost' => '1'], 201)
+            ->push(array_merge(['status' => 'delivered', 'order_id' => 'committed-order', 'products' => ['conflicting-economic-key']], $economics));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $this->assertNotNull(SupplierPurchase::sole()->committed_at);
+        app(SupplierFulfillmentService::class)->recoverOrder($fulfillment->id, 'committed-order');
+        $purchase = SupplierPurchase::sole();
+        $this->assertSame(1_000_000, $purchase->actual_cost_micros);
+        $this->assertSame(1, $purchase->observed_quantity);
+        $this->assertSame(9_000_000, Supplier::sole()->balance_micros);
+        $this->assertSame(0, Supplier::sole()->reserved_balance_micros);
+        $this->assertSame('review', $purchase->state);
+        $this->assertSame('economic_evidence_conflict', $purchase->last_error);
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(0, ProductStockItem::count());
+        Http::assertSentCount(2);
+        $this->expectException(InvalidOrderTransition::class);
+        app(OrderLifecycle::class)->applyPaymentRefunded($order->payments()->sole());
+    }
+
     public function test_generic_history_preload_cannot_reclassify_numeric_local_stock(): void
     {
         [$order, $fulfillment] = $this->paidSupplierOrder();

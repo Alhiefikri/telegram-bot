@@ -96,7 +96,7 @@ final class SupplierDepositService
 
                 return null;
             }
-            $cancel = $deposit->state === 'cancel_requested';
+            $cancel = $deposit->operation === 'cancel' && $deposit->external_id !== null;
             $deposit->update(['state' => 'sending', 'claim_token' => (string) Str::uuid(), 'lease_expires_at' => now()->addMinutes(3), 'dispatched_at' => $deposit->dispatched_at ?? now()]);
 
             return [$supplier, $deposit, $cancel];
@@ -150,6 +150,13 @@ final class SupplierDepositService
                 throw new SupplierUnavailable('account_identity_mismatch');
             }
             $deposit = SupplierDeposit::query()->where('supplier_id', $locked->id)->where('external_id', $row['id'])->lockForUpdate()->first();
+            if ($deposit === null && SupplierDeposit::query()->where('supplier_id', $locked->id)
+                ->whereNull('external_id')->whereIn('state', self::ACTIVE)->exists()) {
+                // A webhook can arrive before the create response. Its external
+                // ID is not proof of which local intent created it; retry after
+                // the immutable create identity has recovered its own result.
+                throw new SupplierUnavailable('deposit_identity_unresolved');
+            }
             $deposit ??= SupplierDeposit::create([
                 'supplier_id' => $locked->id, 'idempotency_key' => 'external:'.hash('sha256', $row['id']),
                 'external_id' => $row['id'], 'account_id_snapshot' => $locked->external_account_id,
@@ -167,11 +174,13 @@ final class SupplierDepositService
         if (($deposit->external_id !== null && $deposit->external_id !== $row['id']) || $deposit->amount !== $row['amount']) {
             throw new SupplierUnavailable('deposit_identity_mismatch');
         }
-        if ($deposit->state === 'paid' && $row['status'] !== 'paid') {
+        if (($deposit->state === 'paid' && $row['status'] !== 'paid')
+            || (in_array($deposit->state, ['cancelled', 'expired'], true) && $row['status'] === 'pending')) {
             return;
         }
         $deposit->forceFill([
-            'external_id' => $row['id'], 'state' => $row['status'], 'payment_url' => $row['payment_url'], 'expires_at' => CarbonImmutable::parse($row['expires_at'])->timezone(config('app.timezone')),
+            'external_id' => $row['id'], 'state' => $row['status'] === 'pending' && $deposit->operation === 'cancel' ? 'cancel_requested' : $row['status'],
+            'payment_url' => $row['payment_url'], 'expires_at' => CarbonImmutable::parse($row['expires_at'])->timezone(config('app.timezone')),
             'paid_at' => $row['status'] === 'paid' ? ($deposit->paid_at ?? now()) : $deposit->paid_at,
             'claim_token' => null, 'lease_expires_at' => null, 'last_error' => null,
             'next_attempt_at' => $row['status'] === 'pending' ? now()->addMinute() : null,

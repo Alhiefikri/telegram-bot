@@ -73,13 +73,13 @@ final class SupplierCatalogSync
                         return false;
                     }
                 }
-                // A profile wallet may already include an unsettled purchase's
+                // Any provider wallet may already include an unsettled purchase's
                 // debit. Keep the pre-debit wallet until local finalization, but
                 // refresh catalog observations and freshness independently.
-                $balanceBlocked = $locked->provider === 'buymail' && SupplierPurchase::query()->where('supplier_id', $locked->id)
+                $balanceBlocked = SupplierPurchase::query()->where('supplier_id', $locked->id)
                     ->whereNull('committed_at')->whereIn('state', ['sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists();
                 SupplierCatalogItem::query()->where(fn ($query) => $query->where('supplier_id', $locked->id)->orWhereIn('id', $mappedItems))
-                    ->orderBy('id')->lockForUpdate()->get();
+                    ->select('id')->orderBy('id')->lockForUpdate()->get();
                 $now = now();
                 $rows = [];
                 foreach ($snapshot->products as $item) {

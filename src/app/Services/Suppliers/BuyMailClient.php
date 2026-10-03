@@ -4,7 +4,6 @@ namespace App\Services\Suppliers;
 
 use App\Models\Supplier;
 use App\Services\Warranty\RefundProof;
-use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
@@ -28,7 +27,7 @@ final class BuyMailClient
 
     public function snapshot(Supplier $supplier): SupplierCatalogSnapshot
     {
-        $profile = $this->json($this->request($supplier, 'GET', '/profile'));
+        $profile = $this->json($supplier, $this->request($supplier, 'GET', '/profile'));
         if (($profile['currency'] ?? null) !== 'IDR') {
             throw new SupplierUnavailable('currency_mismatch');
         }
@@ -80,7 +79,7 @@ final class BuyMailClient
             return new SupplierOrderResult(in_array($code, $noDebit, true) ? 'rejected' : 'ambiguous', errorCode: $code ?? 'http_'.$response->status());
         }
         try {
-            return $this->orderResult($this->json($response), $reference, null, $quantity);
+            return $this->orderResult($this->json($supplier, $response), $reference, null, $quantity);
         } catch (SupplierUnavailable) {
             return new SupplierOrderResult('ambiguous', errorCode: 'invalid_payload');
         }
@@ -90,7 +89,7 @@ final class BuyMailClient
     {
         $id = $this->identifier($orderId);
 
-        return $this->orderResult($this->json($this->request($supplier, 'GET', '/orders/'.rawurlencode($id))), $reference, $id);
+        return $this->orderResult($this->json($supplier, $this->request($supplier, 'GET', '/orders/'.rawurlencode($id))), $reference, $id);
     }
 
     public function recoverPurchase(Supplier $supplier, int $quantity, string $reference, CarbonInterface $dispatchedAt, bool $allowReplay = true): SupplierOrderResult
@@ -98,7 +97,7 @@ final class BuyMailClient
         if (preg_match('/\A[A-Za-z0-9._:-]{1,64}\z/D', $reference) !== 1) {
             throw new SupplierUnavailable('invalid_reference');
         }
-        $payload = $this->json($this->request($supplier, 'GET', '/orders', ['limit' => 20, 'reference' => $reference]));
+        $payload = $this->json($supplier, $this->request($supplier, 'GET', '/orders', ['limit' => 20, 'reference' => $reference]));
         $orders = $payload['orders'] ?? null;
         if (! is_array($orders) || ! array_is_list($orders) || count($orders) > 20) {
             throw new SupplierUnavailable('invalid_payload');
@@ -118,7 +117,7 @@ final class BuyMailClient
 
     public function account(Supplier $supplier, string $id, string $orderId): array
     {
-        return $this->accountResult($this->json($this->request($supplier, 'GET', '/accounts/'.rawurlencode($this->identifier($id)))), $id, $orderId);
+        return $this->accountResult($this->json($supplier, $this->request($supplier, 'GET', '/accounts/'.rawurlencode($this->identifier($id)))), $id, $orderId);
     }
 
     public function requestRefund(Supplier $supplier, string $id, string $orderId, RefundProof $proof, string $note): array
@@ -127,12 +126,12 @@ final class BuyMailClient
             throw new SupplierUnavailable('invalid_note');
         }
 
-        return $this->accountResult($this->json($this->request($supplier, 'POST', '/accounts/'.rawurlencode($this->identifier($id)).'/refund', ['note' => $note], timeout: self::REFUND_UPLOAD_TIMEOUT, proof: $proof)), $id, $orderId);
+        return $this->accountResult($this->json($supplier, $this->request($supplier, 'POST', '/accounts/'.rawurlencode($this->identifier($id)).'/refund', ['note' => $note], timeout: self::REFUND_UPLOAD_TIMEOUT, proof: $proof)), $id, $orderId);
     }
 
     public function confirmAccount(Supplier $supplier, string $id, string $orderId): array
     {
-        return $this->accountResult($this->json($this->request($supplier, 'POST', '/accounts/'.rawurlencode($this->identifier($id)).'/confirm')), $id, $orderId);
+        return $this->accountResult($this->json($supplier, $this->request($supplier, 'POST', '/accounts/'.rawurlencode($this->identifier($id)).'/confirm')), $id, $orderId);
     }
 
     public function createDeposit(Supplier $supplier, int $amount, string $key): array
@@ -142,17 +141,17 @@ final class BuyMailClient
             throw new SupplierUnavailable('invalid_reference');
         }
 
-        return $this->depositResult($this->json($this->request($supplier, 'POST', '/deposits', ['amount' => $amount], ['Idempotency-Key' => $key], 20)), expectedAmount: $amount);
+        return $this->depositResult($this->json($supplier, $this->request($supplier, 'POST', '/deposits', ['amount' => $amount], ['Idempotency-Key' => $key], 20)), expectedAmount: $amount);
     }
 
     public function deposit(Supplier $supplier, string $id): array
     {
-        return $this->depositResult($this->json($this->request($supplier, 'GET', '/deposits/'.rawurlencode($this->identifier($id)))), expectedId: $id);
+        return $this->depositResult($this->json($supplier, $this->request($supplier, 'GET', '/deposits/'.rawurlencode($this->identifier($id)))), expectedId: $id);
     }
 
     public function deposits(Supplier $supplier): array
     {
-        $payload = $this->json($this->request($supplier, 'GET', '/deposits', ['limit' => 20]));
+        $payload = $this->json($supplier, $this->request($supplier, 'GET', '/deposits', ['limit' => 20]));
         $rows = $payload['deposits'] ?? null;
         if (! is_array($rows) || ! array_is_list($rows) || count($rows) > 20) {
             throw new SupplierUnavailable('invalid_payload');
@@ -163,12 +162,12 @@ final class BuyMailClient
 
     public function cancelDeposit(Supplier $supplier, string $id): array
     {
-        return $this->depositResult($this->json($this->request($supplier, 'POST', '/deposits/'.rawurlencode($this->identifier($id)).'/cancel')), expectedId: $id);
+        return $this->depositResult($this->json($supplier, $this->request($supplier, 'POST', '/deposits/'.rawurlencode($this->identifier($id)).'/cancel')), expectedId: $id);
     }
 
     public function orderHistory(Supplier $supplier): array
     {
-        $payload = $this->json($this->request($supplier, 'GET', '/orders', ['limit' => 20]));
+        $payload = $this->json($supplier, $this->request($supplier, 'GET', '/orders', ['limit' => 20]));
         $rows = $payload['orders'] ?? null;
         if (! is_array($rows) || ! array_is_list($rows) || count($rows) > 20) {
             throw new SupplierUnavailable('invalid_payload');
@@ -192,12 +191,11 @@ final class BuyMailClient
         $amount = $this->whole($row['amount'] ?? null, 5000, 5000000);
         $state = $row['status'] ?? null;
         $url = $row['payment_url'] ?? null;
-        $deadline = $row['expires_at'] ?? null;
+        $deadline = $this->utcTimestamp($row['expires_at'] ?? null);
         if (($expectedId !== null && $id !== $expectedId) || ($expectedAmount !== null && $amount !== $expectedAmount)
             || ($row['currency'] ?? null) !== 'IDR' || ! in_array($state, ['pending', 'paid', 'expired', 'cancelled'], true)
             || ! is_string($url) || strlen($url) > 2048 || ! filter_var($url, FILTER_VALIDATE_URL)
-            || parse_url($url, PHP_URL_SCHEME) !== 'https' || parse_url($url, PHP_URL_USER) !== null || parse_url($url, PHP_URL_PASS) !== null
-            || ! is_string($deadline) || strlen($deadline) > 40 || ! preg_match('/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)\z/D', $deadline)) {
+            || parse_url($url, PHP_URL_SCHEME) !== 'https' || parse_url($url, PHP_URL_USER) !== null || parse_url($url, PHP_URL_PASS) !== null) {
             throw new SupplierUnavailable('invalid_payload');
         }
 
@@ -218,10 +216,7 @@ final class BuyMailClient
             throw new SupplierUnavailable('invalid_payload');
         }
         $price = $this->whole($account['price'] ?? null, 1, 1_000_000_000);
-        $deadline = $account['refund_deadline'] ?? null;
-        if (! is_string($deadline) || strlen($deadline) > 40 || preg_match('/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)\z/D', $deadline) !== 1) {
-            throw new SupplierUnavailable('invalid_payload');
-        }
+        $deadline = $this->utcTimestamp($account['refund_deadline'] ?? null);
         $chat = $refund['chat_url'] ?? null;
         if ($chat !== null && (! is_string($chat) || strlen($chat) > 2048 || ! filter_var($chat, FILTER_VALIDATE_URL)
             || parse_url($chat, PHP_URL_SCHEME) !== 'https' || parse_url($chat, PHP_URL_USER) !== null || parse_url($chat, PHP_URL_PASS) !== null)) {
@@ -262,20 +257,13 @@ final class BuyMailClient
             $accountId = $this->identifier($account['id'] ?? null);
             $email = $account['email'] ?? null;
             $password = $account['password'] ?? null;
-            $deadline = $account['refund_deadline'] ?? null;
+            $deadline = $this->utcTimestamp($account['refund_deadline'] ?? null);
             if (($account['order_id'] ?? null) !== $id || isset($ids[$accountId])
                 || ! is_string($email) || strlen($email) > 254 || ! filter_var($email, FILTER_VALIDATE_EMAIL)
                 || ! is_string($password) || trim($password) === '' || strlen($password) > 4096
                 || preg_match('/[\x00-\x1f\x7f]/', $email.$password)
                 || isset($emails[strtolower($email)]) || ($account['price'] ?? null) !== $price
-                || ! in_array($account['status'] ?? null, ['active', 'completed', 'refund_pending', 'refunded'], true)
-                || ! is_string($deadline) || strlen($deadline) > 40
-                || preg_match('/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)\z/D', $deadline) !== 1) {
-                throw new SupplierUnavailable('invalid_payload');
-            }
-            try {
-                CarbonImmutable::parse($deadline);
-            } catch (Throwable) {
+                || ! in_array($account['status'] ?? null, ['active', 'completed', 'refund_pending', 'refunded'], true)) {
                 throw new SupplierUnavailable('invalid_payload');
             }
             $ids[$accountId] = $emails[strtolower($email)] = true;
@@ -357,7 +345,7 @@ final class BuyMailClient
         }
     }
 
-    private function json(Response $response): array
+    private function json(Supplier $supplier, Response $response): array
     {
         if (! $response->successful()) {
             $code = $this->errorCode($response);
@@ -381,7 +369,7 @@ final class BuyMailClient
             throw new SupplierUnavailable('http_'.$response->status());
         }
 
-        return $this->decode($response);
+        return $this->decode($response, $supplier->api_key);
     }
 
     private function errorCode(Response $response): ?string
@@ -395,7 +383,7 @@ final class BuyMailClient
         }
     }
 
-    private function decode(Response $response): array
+    private function decode(Response $response, ?string $key = null): array
     {
         $body = $response->body();
         if (strlen($body) > self::MAX_BYTES) {
@@ -409,8 +397,29 @@ final class BuyMailClient
         if (! is_array($payload) || array_is_list($payload)) {
             throw new SupplierUnavailable('invalid_payload');
         }
+        if ($key !== null) {
+            // Match the generic supplier boundary: no successful provider echo
+            // may turn an operator API credential into delivery/payment data.
+            array_walk_recursive($payload, static function ($value) use ($key): void {
+                if (is_string($value) && str_contains($value, $key)) {
+                    throw new SupplierUnavailable('invalid_payload');
+                }
+            });
+        }
 
         return $payload;
+    }
+
+    private function utcTimestamp(mixed $value): string
+    {
+        if (! is_string($value) || strlen($value) > 40
+            || preg_match('/\A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|\+00:00)\z/D', $value, $parts) !== 1
+            || ! checkdate((int) $parts[2], (int) $parts[3], (int) $parts[1])
+            || (int) $parts[4] > 23 || (int) $parts[5] > 59 || (int) $parts[6] > 59) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+
+        return $value;
     }
 
     private function whole(mixed $value, int $minimum, int $maximum): int
@@ -424,7 +433,8 @@ final class BuyMailClient
 
     private function identifier(mixed $value): string
     {
-        if ((! is_string($value) && ! is_int($value)) || preg_match('/\A[A-Za-z0-9._:-]{1,128}\z/D', (string) $value) !== 1) {
+        if ((! is_string($value) && ! is_int($value)) || in_array($value, ['.', '..'], true)
+            || preg_match('/\A[A-Za-z0-9._:-]{1,128}\z/D', (string) $value) !== 1) {
             throw new SupplierUnavailable('invalid_payload');
         }
 

@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\UserRole;
+use App\Jobs\ProcessSupplierFulfillment;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -83,6 +84,27 @@ final class BuyMailFulfillmentTest extends NonTransactionalDatabaseTestCase
         $this->assertSame('PR1', $units[0]->external_id);
         $this->assertArrayNotHasKey('external_id', $units[0]->toArray());
         $this->assertSame(now()->addHours(2)->timestamp, $units[0]->refund_deadline->timestamp);
+    }
+
+    public function test_materializing_account_units_counts_existing_entitlements_once_per_purchase(): void
+    {
+        [, $order] = $this->fixture(5);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fake(fn ($request) => Http::response($this->delivery($request['reference'], 5, 5), 201));
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        try {
+            app(SupplierFulfillmentService::class)->process(SupplierFulfillment::where('order_id', $order->id)->sole()->id);
+            $queries = collect(DB::getQueryLog())->filter(fn ($query) => str_contains($query['query'], 'supplier_account_units')
+                && str_contains(strtolower($query['query']), 'count(*)'))->all();
+        } finally {
+            DB::disableQueryLog();
+        }
+        $this->assertCount(1, $queries);
+        $units = SupplierAccountUnit::where('order_id', $order->id)->orderBy('unit_number')->get();
+        $this->assertSame([1, 2, 3, 4, 5], $units->pluck('unit_number')->all());
+        $this->assertSame([8000, 8000, 8000, 8000, 8000], $units->pluck('retail_amount')->all());
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
     }
 
     private function fixture(int $quantity): array
@@ -371,6 +393,33 @@ final class BuyMailFulfillmentTest extends NonTransactionalDatabaseTestCase
         Http::assertNothingSent();
         $this->assertSame(100_000_000_000, $supplier->fresh()->balance_micros);
         $this->assertSame(0, ProductStockItem::count());
+    }
+
+    public function test_recovery_discovers_a_batch_of_buymail_wakeups_without_per_fulfillment_queries(): void
+    {
+        [, $order] = $this->fixture(1);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $productId = $order->orderItems()->sole()->product_id;
+        for ($index = 1; $index <= 2; $index++) {
+            $customer = Customer::factory()->create(['telegram_id' => 790001 + $index]);
+            $cart = Cart::factory()->create(['customer_id' => $customer->id, 'expires_at' => now()->addHour()]);
+            CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $productId, 'quantity' => 1]);
+            $next = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+            app(OrderLifecycle::class)->applyManualCompletion($next);
+        }
+        Queue::fake();
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        try {
+            $result = app(SupplierFulfillmentService::class)->recover();
+            $queries = DB::getQueryLog();
+        } finally {
+            DB::disableQueryLog();
+        }
+        $this->assertSame(['processed' => 3], $result);
+        $this->assertCount(1, $queries);
+        Queue::assertPushed(ProcessSupplierFulfillment::class, 3);
+        Http::assertNothingSent();
     }
 
     private function delivery(string $reference, int $requested, int $delivered): array
