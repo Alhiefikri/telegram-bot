@@ -5,6 +5,8 @@ namespace App\Services\Suppliers;
 use App\Enums\SupplierProvider;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +21,8 @@ final class SupplierClient
     private const MAX_PRODUCTS = 500;
 
     private const MAX_DETAILS = 100;
+
+    private const DETAIL_CONCURRENCY = 5;
 
     private const MAX_QUANTITY = 10_000;
 
@@ -42,9 +46,9 @@ final class SupplierClient
         if (! is_array($rows) || ! array_is_list($rows) || count($rows) > self::MAX_PRODUCTS) {
             throw new SupplierUnavailable('invalid_payload');
         }
-        $details = 0;
-        $products = [];
         $ids = [];
+        $detailCount = 0;
+        $normalized = [];
         foreach ($rows as $row) {
             if (! is_array($row)) {
                 throw new SupplierUnavailable('invalid_payload');
@@ -55,17 +59,27 @@ final class SupplierClient
             }
             $ids[$id] = true;
             if ($provider === SupplierProvider::ProdSeller && ! array_key_exists('stock', $row)) {
-                if (++$details > self::MAX_DETAILS) {
+                if (++$detailCount > self::MAX_DETAILS) {
                     throw new SupplierUnavailable('catalog_limit');
                 }
-                $detail = $this->read($supplier, '/products/'.rawurlencode($id), $deadline);
-                if ($this->identifier($detail['id'] ?? null) !== $id) {
-                    throw new SupplierUnavailable('invalid_payload');
-                }
-                $row = array_replace($row, $detail);
             }
-            $this->currency($supplier, $row);
-            $products[] = $this->product($provider, $row, $id);
+            $normalized[] = ['id' => $id, 'row' => $row];
+        }
+        $products = [];
+        foreach (array_chunk($normalized, self::DETAIL_CONCURRENCY) as $chunk) {
+            $detailIds = [];
+            foreach ($chunk as $entry) {
+                if ($provider === SupplierProvider::ProdSeller && ! array_key_exists('stock', $entry['row'])) {
+                    $detailIds[] = $entry['id'];
+                }
+            }
+            $details = $this->productDetails($supplier, $detailIds, $deadline);
+            foreach ($chunk as $entry) {
+                $id = $entry['id'];
+                $row = isset($details[$id]) ? array_replace($entry['row'], $details[$id]) : $entry['row'];
+                $this->currency($supplier, $row);
+                $products[] = $this->product($provider, $row, $id);
+            }
         }
 
         if (hrtime(true) >= $deadline) {
@@ -169,6 +183,48 @@ final class SupplierClient
         return $this->payload($response, $supplier->api_key);
     }
 
+    /** Read one bounded group; any failed detail rejects the entire snapshot. */
+    private function productDetails(Supplier $supplier, array $ids, int $deadline): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $provider = $this->ready($supplier);
+        foreach ($ids as $id) {
+            $this->budget($supplier, $provider, true);
+        }
+        $timeout = min(12, ($deadline - hrtime(true)) / 1_000_000_000);
+        if ($timeout <= 0) {
+            throw new SupplierUnavailable('snapshot_timeout');
+        }
+        try {
+            $responses = Http::pool(function (Pool $pool) use ($supplier, $provider, $ids, $timeout): void {
+                foreach ($ids as $id) {
+                    $this->request($supplier, $pool->as($id), $timeout)->get($provider->baseUrl().'/products/'.rawurlencode($id));
+                }
+            }, concurrency: self::DETAIL_CONCURRENCY);
+        } catch (Throwable) {
+            throw new SupplierUnavailable(hrtime(true) >= $deadline ? 'snapshot_timeout' : 'transport');
+        }
+        $details = [];
+        foreach ($ids as $id) {
+            $response = $responses[$id] ?? null;
+            if (! $response instanceof Response) {
+                throw new SupplierUnavailable(hrtime(true) >= $deadline ? 'snapshot_timeout' : 'transport');
+            }
+            if (! $response->successful()) {
+                throw new SupplierUnavailable($this->httpCode($response->status()));
+            }
+            $detail = $this->payload($response, $supplier->api_key);
+            if ($this->identifier($detail['id'] ?? null) !== $id) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $details[$id] = $detail;
+        }
+
+        return $details;
+    }
+
     private function send(Supplier $supplier, string $method, string $path, array $body = [], array $headers = [], ?int $deadline = null, bool $allowInactive = false): Response
     {
         $provider = $this->ready($supplier, $allowInactive);
@@ -178,26 +234,32 @@ final class SupplierClient
             throw new SupplierUnavailable('snapshot_timeout');
         }
         try {
-            return Http::acceptJson()->asJson()->timeout($timeout)->connectTimeout(min(4, $timeout))
-                ->withHeaders(['X-API-Key' => $supplier->api_key] + $headers)
-                ->withOptions([
-                    'allow_redirects' => false,
-                    'on_headers' => static function ($response): void {
-                        $length = $response->getHeaderLine('Content-Length');
-                        if ($length !== '' && (! ctype_digit($length) || strlen($length) > 10 || (int) $length > self::MAX_BYTES)) {
-                            throw new SupplierUnavailable('invalid_payload');
-                        }
-                    },
-                    'progress' => static function ($total, $downloaded): void {
-                        if ($total > self::MAX_BYTES || $downloaded > self::MAX_BYTES) {
-                            throw new SupplierUnavailable('invalid_payload');
-                        }
-                    },
-                ])->send($method, $provider->baseUrl().$path, $method === 'POST' ? ['json' => $body] : []);
+            return $this->request($supplier, Http::acceptJson(), $timeout, $headers)
+                ->send($method, $provider->baseUrl().$path, $method === 'POST' ? ['json' => $body] : []);
         } catch (Throwable) {
             // Even an oversized response can follow a successful purchase.
-            throw new SupplierUnavailable('transport');
+            throw new SupplierUnavailable($deadline !== null && hrtime(true) >= $deadline ? 'snapshot_timeout' : 'transport');
         }
+    }
+
+    private function request(Supplier $supplier, PendingRequest $request, float $timeout, array $headers = []): PendingRequest
+    {
+        return $request->acceptJson()->asJson()->timeout($timeout)->connectTimeout(min(4, $timeout))
+            ->withHeaders(['X-API-Key' => $supplier->api_key] + $headers)
+            ->withOptions([
+                'allow_redirects' => false,
+                'on_headers' => static function ($response): void {
+                    $length = $response->getHeaderLine('Content-Length');
+                    if ($length !== '' && (! ctype_digit($length) || strlen($length) > 10 || (int) $length > self::MAX_BYTES)) {
+                        throw new SupplierUnavailable('invalid_payload');
+                    }
+                },
+                'progress' => static function ($total, $downloaded): void {
+                    if ($total > self::MAX_BYTES || $downloaded > self::MAX_BYTES) {
+                        throw new SupplierUnavailable('invalid_payload');
+                    }
+                },
+            ]);
     }
 
     private function budget(Supplier $supplier, SupplierProvider $provider, bool $read): void
@@ -373,7 +435,9 @@ final class SupplierClient
             $this->text($delivery, 16_000);
         }
         $status = $row['status'] ?? $payload['status'] ?? null;
-        $success = in_array($status, ['delivered', 'success'], true) || ($status === null && ($row['success'] ?? $payload['success'] ?? false) === true);
+        $success = in_array($status, ['delivered', 'success'], true)
+            || ($status === null && ($row['success'] ?? $payload['success'] ?? false) === true)
+            || ($supplier->provider === SupplierProvider::CSxStore->value && $status === 'completed' && ($row['success'] ?? $payload['success'] ?? false) === true);
         $productId = $row['service_id'] ?? $row['product']['id'] ?? null;
         $mismatch = ($expectedOrderId !== null && $id !== $expectedOrderId)
             || ($expectedProductId !== null && $productId !== null && $this->identifier($productId) !== $expectedProductId)

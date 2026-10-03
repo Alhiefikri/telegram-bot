@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Enums\SupplierProvider;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -9,6 +10,31 @@ use Illuminate\Validation\Rule;
 
 final class SupplierAdminRequest extends FormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        if (! in_array($this->route()->getActionMethod(), ['store', 'update'], true)) {
+            return;
+        }
+
+        $provider = $this->input('provider');
+        if (is_string($provider) && ($selected = SupplierProvider::tryFrom($provider)) !== null) {
+            if (! $this->has('name')) {
+                $this->merge(['name' => $selected->label()]);
+            }
+            if (! $selected->requiresCurrencyConfirmation()) {
+                if (! $this->has('currency')) {
+                    $this->merge(['currency' => $selected->defaultCurrency()]);
+                }
+                if (! $this->has('currency_confirmed')) {
+                    $this->merge(['currency_confirmed' => true]);
+                }
+                if ($selected === SupplierProvider::BuyMail && ! $this->has('exchange_rate_idr')) {
+                    $this->merge(['exchange_rate_idr' => 1]);
+                }
+            }
+        }
+    }
+
     public function authorize(): bool
     {
         return $this->attributes->get('adminUser')?->role?->canManageStoreOperations() === true;
@@ -68,6 +94,11 @@ final class SupplierAdminRequest extends FormRequest
     public function after(): array
     {
         return [function (Validator $validator): void {
+            $provider = $this->input('provider');
+            $selected = is_string($provider) ? SupplierProvider::tryFrom($provider) : null;
+            if ($selected !== null && ! $selected->requiresCurrencyConfirmation() && $this->input('currency') !== $selected->defaultCurrency()) {
+                $validator->errors()->add('currency', 'Mata uang harus sesuai provider.');
+            }
             if ($this->input('provider') === 'buymail' && ($this->input('currency') !== 'IDR' || (int) $this->input('exchange_rate_idr') !== 1)) {
                 $validator->errors()->add('currency', 'BuyMail menggunakan IDR dengan kurs 1.');
             }

@@ -57,6 +57,39 @@ class SupplierClientTest extends TestCase
         return json_decode(file_get_contents(__DIR__.'/../Unit/Suppliers/fixtures/'.$provider.'.json'), true, 32, JSON_THROW_ON_ERROR);
     }
 
+    public function test_csxstore_completed_purchase_and_exact_order_read_are_trusted(): void
+    {
+        $supplier = $this->supplier('csxstore');
+        $this->fake(fn () => Http::response([
+            'success' => true, 'status' => 'completed', 'order_id' => 'cs-test-order',
+            'service_id' => 'sku-1', 'quantity' => 1, 'total_cost' => '0.01',
+            'products' => ['synthetic-account-unit'],
+        ]));
+        $client = app(SupplierClient::class);
+        foreach ([$client->purchase($supplier, $this->item($supplier), 1, 'checkout-1'), $client->order($supplier, 'cs-test-order', 'sku-1')] as $result) {
+            $this->assertSame('delivered', $result->outcome);
+            $this->assertTrue($result->identityTrusted);
+            $this->assertTrue($result->deliveryTrusted);
+            $this->assertSame(10000, $result->costMicros);
+        }
+    }
+
+    public function test_csxstore_completed_without_success_or_matching_identity_does_not_authorize_delivery(): void
+    {
+        $supplier = $this->supplier('csxstore');
+        foreach ([['success' => false], ['success' => null], ['service_id' => 'wrong-sku'], ['order_id' => 'wrong-order']] as $override) {
+            $this->fake(fn () => Http::response(array_replace([
+                'success' => true, 'status' => 'completed', 'order_id' => 'cs-test-order',
+                'service_id' => 'sku-1', 'quantity' => 1, 'total_cost' => '0.01',
+                'products' => ['synthetic-account-unit'],
+            ], $override)));
+            $result = app(SupplierClient::class)->order($supplier, 'cs-test-order', 'sku-1');
+            $this->assertSame('ambiguous', $result->outcome);
+            $this->assertFalse($result->identityTrusted);
+            $this->assertFalse($result->deliveryTrusted);
+        }
+    }
+
     public static function providers(): array
     {
         // BuyMail has account/partial contracts covered by BuyMailClientTest.
@@ -416,8 +449,60 @@ class SupplierClientTest extends TestCase
         } catch (SupplierUnavailable $exception) {
             $this->assertSame('catalog_limit', $exception->errorCode);
         }
-        Http::assertSentCount(102);
+        Http::assertSentCount(2);
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sku-101'));
+    }
+
+    public function test_prodseller_stock_details_use_async_reads_and_keep_every_product(): void
+    {
+        $supplier = $this->supplier('prodseller');
+        $rows = array_map(static fn ($number) => ['id' => 'sku-'.$number, 'name' => 'License', 'price' => '1'], range(1, 6));
+        $synchronous = [];
+        $this->fake(function ($request, $options) use ($rows, &$synchronous) {
+            if (str_ends_with($request->url(), '/balance')) {
+                return Http::response(['balance' => '100']);
+            }
+            if (str_ends_with($request->url(), '/products')) {
+                return Http::response(['products' => $rows]);
+            }
+            $synchronous[] = (bool) ($options['synchronous'] ?? false);
+
+            return Http::response(['id' => basename($request->url()), 'name' => 'License', 'price' => '1', 'stock' => 2]);
+        });
+        $snapshot = app(SupplierClient::class)->snapshot($supplier);
+        $this->assertCount(6, $snapshot->products);
+        $this->assertSame(array_fill(0, 6, false), $synchronous);
+        $this->assertSame(array_column($rows, 'id'), array_map(fn ($product) => $product->externalId, $snapshot->products));
+        Http::assertSentCount(8);
+        Http::assertNotSent(fn ($request) => $request->method() !== 'GET');
+    }
+
+    public function test_a_rejected_detail_discards_the_snapshot_and_stops_before_the_next_batch(): void
+    {
+        $supplier = $this->supplier('prodseller');
+        $rows = array_map(static fn ($number) => ['id' => 'sku-'.$number, 'name' => 'License', 'price' => '1'], range(1, 6));
+        $this->fake(function ($request) use ($rows) {
+            if (str_ends_with($request->url(), '/balance')) {
+                return Http::response(['balance' => '100']);
+            }
+            if (str_ends_with($request->url(), '/products')) {
+                return Http::response(['products' => $rows]);
+            }
+            if (str_ends_with($request->url(), '/sku-2')) {
+                return Http::response(['error' => 'fixture-key-not-live'], 401);
+            }
+
+            return Http::response(['id' => basename($request->url()), 'name' => 'License', 'price' => '1', 'stock' => 2]);
+        });
+        try {
+            app(SupplierClient::class)->snapshot($supplier);
+            $this->fail('A rejected detail must not return a partial catalog.');
+        } catch (SupplierUnavailable $exception) {
+            $this->assertSame('authentication', $exception->errorCode);
+            $this->assertStringNotContainsString('fixture-key-not-live', $exception->getMessage());
+        }
+        Http::assertSentCount(7);
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sku-6') || $request->method() !== 'GET');
     }
 
     public function test_exponent_economic_input_and_conflicting_tiers_are_rejected(): void

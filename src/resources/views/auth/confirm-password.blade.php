@@ -14,7 +14,7 @@
             <x-admin-dashboard.card as="section" padding="compact" shadow="md" class="rounded-neo-5xl border-4 bg-white p-6 shadow-neo-3xl">
                 <p class="font-display text-[11px] font-black uppercase tracking-[0.2em] text-brand-muted">Sensitive Owner action</p>
                 <h1 class="mt-2 font-display text-2xl font-black uppercase">Konfirmasi password</h1>
-                <p class="mt-3 text-sm font-semibold leading-6 text-brand-muted">Masukkan password admin lagi untuk melanjutkan perubahan BSC Receiving Address.</p>
+                <p class="mt-3 text-sm font-semibold leading-6 text-brand-muted">Masukkan password admin lagi untuk melanjutkan tindakan ini.</p>
 
                 @if ($errors->any())
                     <x-admin-dashboard.notice tone="danger" class="mt-4">

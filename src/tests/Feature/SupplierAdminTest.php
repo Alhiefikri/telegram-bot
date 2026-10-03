@@ -28,6 +28,74 @@ final class SupplierAdminTest extends TestCase
 {
     private const KEY = 'supplier-secret-canary-never-return-7a39';
 
+    public function test_sync_rejection_keeps_safe_reason_and_shows_actionable_feedback(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['balance_micros' => 7000000]);
+        Http::fake(fn () => Http::response(['error' => self::KEY], 401));
+        $this->post(route('admin.suppliers.sync', $supplier))->assertRedirect()
+            ->assertSessionHas('status', 'API key ditolak oleh supplier. Periksa key dan pastikan akses API aktif.');
+        $this->assertSame('authentication', $supplier->fresh()->last_error);
+        $this->assertSame(7000000, $supplier->fresh()->balance_micros);
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()
+            ->assertSee('API key ditolak oleh supplier.')->assertDontSee(self::KEY);
+        $this->assertStringNotContainsString(self::KEY, json_encode(session()->all()));
+        Http::assertSentCount(1);
+    }
+
+    public function test_inline_password_confirmation_allows_supplier_save_without_flashing_secrets(): void
+    {
+        $this->owner();
+        Http::fake();
+        $this->postJson(route('admin.password.confirm.store'), ['password' => 'password'])
+            ->assertOk()->assertExactJson(['confirmed' => true])
+            ->assertSessionHas('auth.password_confirmed_at');
+        $this->postJson(route('admin.suppliers.store'), $this->connectionInput())
+            ->assertOk()->assertJsonPath('redirect_url', route('admin.dashboard', ['tab' => 'suppliers']))
+            ->assertDontSee(self::KEY);
+        $this->assertSame(self::KEY, Supplier::query()->sole()->api_key);
+        $this->assertStringNotContainsString(self::KEY, json_encode(session()->all()));
+        $this->assertNull(session()->get('_old_input.password'));
+        Http::assertNothingSent();
+    }
+
+    public function test_wrong_inline_password_does_not_confirm_or_flash_the_password(): void
+    {
+        $this->owner();
+        $this->postJson(route('admin.password.confirm.store'), ['password' => self::KEY])
+            ->assertUnprocessable()->assertJsonValidationErrors('password')->assertDontSee(self::KEY);
+        $this->assertNull(session()->get('auth.password_confirmed_at'));
+        $this->assertStringNotContainsString(self::KEY, json_encode(session()->all()));
+        $this->assertSame(0, Supplier::query()->count());
+    }
+
+    public function test_fixed_provider_currency_is_automatic_without_name_or_currency_inputs(): void
+    {
+        $this->owner();
+        Http::fake();
+        foreach (['prodseller' => ['ProdSeller', 'USDT'], 'csxstore' => ['CSxStore', 'USD'], 'aivault' => ['AI Vault Hub', 'USD'], 'buymail' => ['BuyMail', 'IDR']] as $provider => [$name, $currency]) {
+            $input = $this->connectionInput(['provider' => $provider]);
+            unset($input['name'], $input['currency'], $input['currency_confirmed']);
+            if ($provider === 'buymail') {
+                unset($input['exchange_rate_idr']);
+            }
+            $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $input)->assertRedirect();
+            $supplier = Supplier::query()->where('provider', $provider)->sole();
+            $this->assertSame($name, $supplier->name);
+            $this->assertSame($currency, $supplier->currency);
+            $this->assertTrue($supplier->currency_confirmed);
+            $this->assertSame($provider === 'buymail' ? 1 : 16000, $supplier->exchange_rate_idr);
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_fixed_currency_cannot_be_overridden_by_a_submitted_dropdown_value(): void
+    {
+        $this->owner();
+        $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $this->connectionInput(['provider' => 'csxstore', 'currency' => 'USDT']))->assertStatus(422);
+        $this->assertSame(0, Supplier::query()->count());
+    }
+
     public function test_buymail_key_is_managed_in_dashboard_with_idr_and_no_conversion_markup(): void
     {
         $this->owner();
@@ -272,10 +340,37 @@ final class SupplierAdminTest extends TestCase
         $item = $this->item($supplier, ['unit_price_micros' => 1250000]);
         $product = Product::factory()->create(['price_amount' => 45000]);
         $this->source($product, $item);
-        $this->post(route('admin.products.supplier-pricing.preview', $product), $this->pricingInput(['mode' => 'hybrid', 'markup_basis_points' => 1000, 'profit_idr' => 3000, 'buffer_idr' => 250, 'rounding_idr' => 1000, 'catalog_item_id' => $item->id]))->assertOk()->assertExactJson(['cost_idr' => 20000, 'retail_idr' => 24000])->assertDontSee(self::KEY);
+        $this->postJson(route('admin.products.supplier-pricing.preview', $product), $this->pricingInput(['mode' => 'hybrid', 'markup_basis_points' => 1000, 'profit_idr' => 3000, 'buffer_idr' => 250, 'rounding_idr' => 1000, 'catalog_item_id' => $item->id]))->assertOk()->assertExactJson(['cost_idr' => 20000, 'retail_idr' => 24000])->assertDontSee(self::KEY);
         $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput())->assertRedirect();
         $this->assertSame(45000, $product->refresh()->price_amount);
         $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput(['mode' => 'fixed']))->assertStatus(409);
+    }
+
+    public function test_browser_preview_shows_readable_prices_and_preserves_unsaved_settings_without_buying(): void
+    {
+        $this->owner();
+        Http::fake();
+        $supplier = $this->supplier(['exchange_rate_idr' => 16000]);
+        $item = $this->item($supplier, ['unit_price_micros' => 1250000]);
+        $product = Product::factory()->create(['price_amount' => 45000]);
+        $this->source($product, $item);
+
+        $this->post(route('admin.products.supplier-pricing.preview', $product), $this->pricingInput(['mode' => 'manual', 'minimum_profit_idr' => 3000, 'buffer_idr' => 250, 'catalog_item_id' => $item->id]))
+            ->assertOk()
+            ->assertViewIs('admin.suppliers.product')
+            ->assertSee('Harga beli dari supplier')
+            ->assertSee('Rp20.000')
+            ->assertSee('Rp45.000')
+            ->assertSee('Rp24.750')
+            ->assertSee('Belum membeli produk atau menyimpan perubahan.')
+            ->assertDontSee(self::KEY)
+            ->assertViewHas('policy', fn (SupplierPricePolicy $policy): bool => $policy->mode === 'manual' && $policy->minimum_profit_idr === 3000 && $policy->buffer_idr === 250)
+            ->assertViewHas('previewItem', fn (SupplierCatalogItem $selected): bool => $selected->id === $item->id);
+
+        $this->assertSame(45000, $product->fresh()->price_amount);
+        $this->assertSame(0, SupplierPricePolicy::query()->count());
+        $this->assertSame(0, SupplierPurchase::query()->count());
+        Http::assertNothingSent();
     }
 
     public function test_manual_delivery_errors_never_flash_or_echo_credentials(): void

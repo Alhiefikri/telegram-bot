@@ -1,11 +1,13 @@
 import Alpine from "alpinejs";
 import adminDashboard, { salesFilter } from "./admin-dashboard";
 import initTheme from "./theme";
+import supplierConnectionForm from "./supplier-connection-form";
 
 window.Alpine = Alpine;
 initTheme();
 Alpine.data("adminDashboard", adminDashboard);
 Alpine.data("salesFilter", salesFilter);
+Alpine.data("supplierConnectionForm", supplierConnectionForm);
 Alpine.data("passwordReveal", () => ({
   showPassword: false,
   get buttonText() {

@@ -8,8 +8,8 @@ Supplier Balance is the operator's money at the external shop, not Customer Stor
 
 ## Setup through Admin
 
-1. Open **Admin → Supplier Reseller**. Confirm password first; credential changes and operational recovery require recent confirmation.
-2. Add a connection: private name, supported provider, API key, currency confirmation, whole-IDR conversion rate, active flag and low-balance threshold.
+1. Open **Admin → Supplier Reseller** and fill the connection form. Clicking **Buat/Simpan supplier** opens an inline password dialog if recent confirmation is missing; successful confirmation resumes saving automatically. Incorrect passwords or cancelling retain the API key and other inputs in the current browser form. No secret is flashed to server session or persisted to browser storage. Operational recovery still requires recent confirmation.
+2. Add a connection: supported provider, API key, whole-IDR conversion rate, active flag and low-balance threshold. The Dashboard derives the private name and documented currency from the provider: ProdSeller uses USDT, CSxStore and AI Vault use USD, and BuyMail uses IDR with rate 1. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation.
 3. Do not put supplier API keys in ENV. The database stores encrypted credentials using the application's encryption key; saved keys are not displayed back. Keep APP_KEY and encrypted database backups together under the existing backup policy. Losing the key makes those credentials unreadable.
 4. For ARRS/Warzone, confirm the actual account currency with the supplier. Dollar-like presentation is not currency evidence. ProdSeller uses USDT; CSxStore and AI Vault use USD.
 5. Activate the connection and click **Sinkron katalog dan saldo**. The local button is a CSRF-protected POST, but provider catalog/balance requests are GET-only. Read-only catalog fetching must not buy anything.
@@ -34,6 +34,12 @@ An account supports multiple SKUs with one credential. Adding another SKU from a
 ## Fulfillment and recovery
 
 The application buys external units only after authoritative customer payment. It saves dispatch intent before HTTP, sends outside database locks, then persists evidence before customer delivery. A timeout is not proof of rejection.
+
+CSxStore's authenticated order responses use `status: completed` with boolean
+`success: true`. The adapter recognizes that combination only for CSxStore;
+exact order/SKU identity, quantity, actual cost and complete distinct delivery
+remain necessary. This contract was verified through read-only order retrieval
+and one operator-authorized SKU 48 purchase in the isolated Telegram test.
 
 Only correlated exact identity and a recognized supplier outcome establish economic evidence. Explicit failure, wrong SKU/reference, or missing exact order ID cannot authorize delivery, debit settlement, hold release, or refund. Untrusted observations do not pin recovery to their claimed order ID. A locally blocked replay (including exhausted rate budget or an unsupported source) does not prove the original dispatched purchase was rejected; its ambiguity and hold remain.
 
@@ -88,6 +94,15 @@ php artisan suppliers:recover --limit=25
 ```
 
 The scheduler runs bounded sync/recovery each minute in the background with a two-minute overlap mutex. Sync skips fresh accounts, renews observations within one minute of their five-minute expiry, uses attempted-at ordering for fairness and a durable per-account read lease. Recovery discovers durable PostgreSQL work even if Redis lost a wakeup job. Provider request budgets, bounded snapshots/bodies/catalog counts and freshness gates are safety boundaries; increasing only a row limit does not remove them.
+
+ProdSeller's list omits stock counts, so sync reads each missing product detail
+in groups of at most five concurrent GET requests within the same 40-second
+snapshot deadline. At most 100 details are allowed; oversized detail work is
+rejected before sending those reads. Every request retains the provider/IP
+budget, fixed origin, redirect prohibition and response-body limits. A failed
+detail rejects the whole snapshot; no partial catalog is applied. Dashboard
+reports safe causes such as API authentication rejection, rate limiting or
+timeout, and disables the sync button while a request is running.
 
 Run commands on the correct application environment using the established deployment process. Do not run `migrate:fresh`, manually rewrite supplier holds, or change paid source snapshots on production. Review `last_error` safe codes and timestamps in private Admin; do not paste raw provider payloads into logs, issues or customer messages.
 

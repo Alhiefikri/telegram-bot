@@ -40,7 +40,7 @@ final class SupplierCatalogSync
                 return false;
             }
         } catch (SupplierUnavailable $exception) {
-            $this->fail($connection->id, $version, $token, $exception->errorCode === 'currency_mismatch' ? 'currency_mismatch' : 'snapshot_unavailable');
+            $this->fail($connection->id, $version, $token, $exception->errorCode);
 
             return false;
         }

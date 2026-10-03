@@ -132,6 +132,22 @@ class BscReceiverConfigurationTest extends TestCase
         Queue::assertPushed(SendBscReceiverMutationNotification::class, 1);
     }
 
+    public function test_inline_password_confirmation_does_not_execute_an_unrelated_pending_receiver(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $this->actingAs($owner)->post(route('admin.bsc.receivers.store'), [
+            'label' => 'Pending receiver',
+            'address' => '0xaac58212Ab1E3C9c8d4dbB3FD3cdAF9d4cff9012',
+        ])->assertRedirect(route('password.confirm'));
+
+        $this->postJson(route('admin.password.confirm.store'), ['password' => 'password'])
+            ->assertOk()->assertExactJson(['confirmed' => true]);
+        $this->assertTrue(session()->has(BscReceiverPendingMutationStore::SESSION_KEY));
+        $this->assertDatabaseCount('bsc_payment_receivers', 0);
+        Queue::assertNotPushed(SendBscReceiverMutationNotification::class);
+    }
+
     public function test_owner_can_add_receiver_before_bsc_token_configuration_is_ready(): void
     {
         Queue::fake();

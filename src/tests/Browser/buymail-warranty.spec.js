@@ -169,6 +169,110 @@ test("owner can inspect private warranty and deposit panels without exposing the
   ).toBe(true);
 });
 
+test("supplier creation confirms password without losing the unsaved API key", async ({
+  page,
+}) => {
+  await page.goto(environment.APP_URL + "/admin/login");
+  await page.locator('[name="email"]').fill("warranty-browser@example.test");
+  await page.locator('[name="password"]').fill("synthetic-browser-password");
+  await page
+    .getByRole("button", { name: "Masuk Dashboard", exact: true })
+    .click();
+  await page.waitForURL(environment.APP_URL + "/admin");
+  await page.goto(environment.APP_URL + "/admin?tab=suppliers");
+  await page.getByText("Tambah supplier", { exact: true }).click();
+  const form = page.locator('form[action$="/admin/suppliers"]').first();
+  const apiKey = "synthetic-browser-unsaved-api-key";
+  await form.locator('[name="api_key"]').fill(apiKey);
+  await form.locator('[name="exchange_rate_idr"]').fill("18000");
+  await form
+    .getByRole("button", { name: "Buat supplier", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Konfirmasi password",
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  await expect(form.locator('[name="api_key"]')).toHaveValue(apiKey);
+  await dialog
+    .getByLabel("Password admin", { exact: true })
+    .fill("incorrect-synthetic-password");
+  await dialog.getByRole("button", { name: "Konfirmasi dan simpan" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("Password");
+  await expect(form.locator('[name="api_key"]')).toHaveValue(apiKey);
+  await dialog.getByRole("button", { name: "Batal", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(form.locator('[name="api_key"]')).toHaveValue(apiKey);
+  await expect(form.locator('[name="exchange_rate_idr"]')).toHaveValue("18000");
+  await form
+    .getByRole("button", { name: "Buat supplier", exact: true })
+    .click();
+  await expect(dialog).toBeVisible();
+  await dialog
+    .getByLabel("Password admin", { exact: true })
+    .fill("synthetic-browser-password");
+  await dialog.getByRole("button", { name: "Konfirmasi dan simpan" }).click();
+  await page.waitForURL(environment.APP_URL + "/admin?tab=suppliers");
+  await expect(
+    page.getByText(
+      "Supplier dibuat. Sinkronkan sebelum mengaktifkan pemetaan.",
+      { exact: true }
+    )
+  ).toBeVisible();
+  await expect(page.locator("body")).not.toContainText(apiKey);
+  await expect(
+    page.getByRole("heading", { name: "ProdSeller · prodseller", exact: true })
+  ).toHaveCount(1);
+
+  // A fresh session must also preserve an edited key when confirmation is needed.
+  await page.context().clearCookies();
+  await page.goto(environment.APP_URL + "/admin/login");
+  await page.locator('[name="email"]').fill("warranty-browser@example.test");
+  await page.locator('[name="password"]').fill("synthetic-browser-password");
+  await page
+    .getByRole("button", { name: "Masuk Dashboard", exact: true })
+    .click();
+  await page.waitForURL(environment.APP_URL + "/admin");
+  await page.goto(environment.APP_URL + "/admin?tab=suppliers");
+  const connection = page.locator("article").filter({
+    has: page.getByRole("heading", {
+      name: "ProdSeller · prodseller",
+      exact: true,
+    }),
+  });
+  await connection.getByText("Edit koneksi", { exact: true }).click();
+  const editForm = connection
+    .locator("form")
+    .filter({ has: page.locator('[name="api_key"]') });
+  const replacement = "synthetic-browser-replacement-key";
+  await editForm.locator('[name="api_key"]').fill(replacement);
+  await editForm
+    .getByRole("button", { name: "Simpan supplier", exact: true })
+    .click();
+  const editDialog = connection.getByRole("dialog", {
+    name: "Konfirmasi password",
+    exact: true,
+  });
+  await expect(editDialog).toBeVisible();
+  await expect(editForm.locator('[name="api_key"]')).toHaveValue(replacement);
+  await editDialog
+    .getByLabel("Password admin", { exact: true })
+    .fill("synthetic-browser-password");
+  await editDialog
+    .getByRole("button", { name: "Konfirmasi dan simpan" })
+    .click();
+  await page.waitForURL(environment.APP_URL + "/admin?tab=suppliers");
+  await expect(
+    page.getByText("Supplier diperbarui. Sinkronisasi ulang diperlukan.", {
+      exact: true,
+    })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "ProdSeller · prodseller", exact: true })
+  ).toHaveCount(1);
+  await expect(page.locator("body")).not.toContainText(replacement);
+});
+
 function run(args) {
   const result = spawnSync("php", args, {
     cwd: appDir,

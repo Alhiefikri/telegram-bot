@@ -13,6 +13,7 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\Admin\SupplierOperationConfirmation;
 use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierCatalogSync;
@@ -40,12 +41,12 @@ final class AdminSupplierController extends Controller
         return $this->mutate(fn () => $manager->save($supplier, $request->validated(), $request->attributes->get('adminUser'), $request->ip()), 'Supplier diperbarui. Sinkronisasi ulang diperlukan.');
     }
 
-    public function sync(SupplierAdminRequest $request, Supplier $supplier, SupplierCatalogSync $sync)
+    public function sync(SupplierAdminRequest $request, Supplier $supplier, SupplierCatalogSync $sync, AdminSupplierDashboardData $dashboard)
     {
         // This POST is only a CSRF-protected local action. Provider snapshot is GET-only.
         $applied = $sync->sync($supplier);
 
-        return $this->saved($applied ? 'Katalog dan saldo disinkronkan.' : 'Supplier belum tersedia atau konfigurasi berubah. Tidak ada observasi yang ditimpa.');
+        return $this->saved($applied ? 'Katalog dan saldo disinkronkan.' : $dashboard->syncFailureMessage($supplier->refresh()));
     }
 
     public function catalog(Request $request, Supplier $supplier)
@@ -87,7 +88,23 @@ final class AdminSupplierController extends Controller
         $item = SupplierCatalogItem::query()->findOrFail($request->integer('catalog_item_id'));
         abort_unless(ProductSupplierSource::query()->where('product_id', $product->id)->where('supplier_catalog_item_id', $item->id)->exists(), 422);
 
-        return response()->json($manager->preview($product, $item, $request->validated()));
+        $input = $request->validated();
+        $pricePreview = $manager->preview($product, $item, $input);
+        if ($request->expectsJson()) {
+            return response()->json($pricePreview);
+        }
+
+        $sources = ProductSupplierSource::query()->where('product_id', $product->id)->with('catalogItem.supplier')->orderBy('priority')->orderBy('id')->get();
+        $policy = new SupplierPricePolicy;
+        $policy->forceFill($input);
+
+        return view('admin.suppliers.product', [
+            'product' => $product,
+            'sources' => $sources,
+            'policy' => $policy,
+            'pricePreview' => $pricePreview,
+            'previewItem' => $item,
+        ]);
     }
 
     public function purchases(Request $request)
@@ -139,6 +156,12 @@ final class AdminSupplierController extends Controller
 
     private function saved(string $message)
     {
+        if (request()->expectsJson()) {
+            request()->session()->flash('status', $message);
+
+            return response()->json(['message' => $message, 'redirect_url' => route('admin.dashboard', ['tab' => 'suppliers'])]);
+        }
+
         return redirect()->route('admin.dashboard', ['tab' => 'suppliers'])->with('status', $message);
     }
 }
