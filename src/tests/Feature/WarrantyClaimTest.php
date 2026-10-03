@@ -32,9 +32,11 @@ use App\Services\Warranty\WarrantySettlementService;
 use App\Storefront\StorefrontOrderAccess;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 use Tests\Support\BuildsBuyMailWarrantyFixture;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
@@ -211,6 +213,113 @@ final class WarrantyClaimTest extends NonTransactionalDatabaseTestCase
         $this->assertSame('approved', $claim->fresh()->state);
         $this->assertSame('awaiting_choice', $claim->fresh()->settlement_state);
         $this->assertNull($claim->fresh()->settlement_choice);
+    }
+
+    public function test_operator_resubmit_reuploads_the_stored_proof_only_after_an_empty_authoritative_get(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $service = app(WarrantyClaimService::class);
+        $proof = $this->proof();
+        $claim = $service->submit($customer, $unit->public_id, $proof, 'Wrong password');
+        $posts = $gets = 0;
+        Http::fake(function ($request) use (&$posts, &$gets) {
+            if ($request->method() === 'POST') {
+                $posts++;
+                throw new ConnectionException('Synthetic transport failure.');
+            }
+            $gets++;
+
+            return Http::response(['account' => [
+                'id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'active', 'price' => 4800,
+                'refund_deadline' => now()->addHours(2)->utc()->toIso8601String(), 'refund' => null,
+            ]]);
+        });
+        $service->process($claim->id);
+        $this->assertSame('submission_unknown', $claim->fresh()->state);
+        $this->travel(2)->minutes();
+        $service->process($claim->id);
+        $this->assertSame('review', $claim->fresh()->state);
+
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $service->resubmit($owner, $claim->id);
+        $fresh = $claim->fresh();
+        $this->assertSame('received', $fresh->state);
+        $this->assertNull($fresh->dispatched_at);
+        $this->assertSame(1, $posts);
+        $this->assertSame(2, $gets);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'warranty.claim_resubmitted', 'user_id' => $owner->id]);
+        $stored = Crypt::decryptString(Storage::disk('local')->get($fresh->proof_path));
+        $this->assertTrue(hash_equals($fresh->proof_digest, hash('sha256', $stored)));
+        $this->assertTrue(hash_equals(hash('sha256', $proof->bytes), hash('sha256', $stored)));
+
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        $uploadedStoredProof = null;
+        Http::fake(function ($request) use (&$posts, $proof, &$uploadedStoredProof) {
+            if ($request->method() === 'POST') {
+                $posts++;
+                $uploadedStoredProof = $request->hasFile('proof', $proof->bytes);
+
+                return Http::response(['account' => [
+                    'id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'refund_pending', 'price' => 4800,
+                    'refund_deadline' => now()->addHours(2)->utc()->toIso8601String(), 'refund' => ['status' => 'pending'],
+                ]], 202);
+            }
+
+            throw new RuntimeException('The resubmitted upload must not require another GET.');
+        });
+        $service->process($claim->id);
+        $this->assertSame(2, $posts);
+        $this->assertTrue($uploadedStoredProof);
+        $this->assertSame('pending', $claim->fresh()->state);
+    }
+
+    public function test_operator_resubmit_is_refused_when_the_authoritative_get_holds_a_refund_object(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $service = app(WarrantyClaimService::class);
+        $claim = $service->submit($customer, $unit->public_id, $this->proof(), 'Wrong password');
+        $posts = 0;
+        Http::fake(function ($request) use (&$posts) {
+            if ($request->method() === 'POST') {
+                $posts++;
+                throw new ConnectionException('Synthetic transport failure.');
+            }
+
+            return Http::response(['account' => [
+                'id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'refund_pending', 'price' => 4800,
+                'refund_deadline' => now()->addHours(2)->utc()->toIso8601String(), 'refund' => ['status' => 'pending'],
+            ]]);
+        });
+        $service->process($claim->id);
+        $this->assertSame('submission_unknown', $claim->fresh()->state);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        try {
+            $service->resubmit($owner, $claim->id);
+            $this->fail('A refund object allowed a resubmit.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame('submission_unknown', $claim->fresh()->state);
+            $this->assertSame(1, $posts);
+            Queue::assertPushed(ProcessWarrantyClaim::class, 1);
+            $this->assertDatabaseMissing('audit_logs', ['action' => 'warranty.claim_resubmitted']);
+        }
+    }
+
+    public function test_operator_resubmit_is_refused_after_the_refund_deadline_without_any_provider_call(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $service = app(WarrantyClaimService::class);
+        $claim = $service->submit($customer, $unit->public_id, $this->proof(), 'Wrong password');
+        $claim->update(['state' => 'review', 'dispatched_at' => now()->subMinute(), 'refund_deadline' => now()->subSecond()]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        try {
+            $service->resubmit($owner, $claim->id);
+            $this->fail('An expired claim was resubmitted.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame('review', $claim->fresh()->state);
+            Http::assertNothingSent();
+            $this->assertDatabaseMissing('audit_logs', ['action' => 'warranty.claim_resubmitted']);
+        }
     }
 
     public function test_buyer_refund_credits_retail_once_and_full_order_refund_only_credits_the_remainder(): void

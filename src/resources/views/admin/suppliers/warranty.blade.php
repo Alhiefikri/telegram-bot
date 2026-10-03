@@ -17,6 +17,13 @@
             @if($claim->provider_chat_url)<a class="underline" href="{{ $claim->provider_chat_url }}" rel="noreferrer noopener" target="_blank">Buka dispute chat supplier</a>@endif
             <form method="POST" action="{{ route('admin.suppliers.warranty.refresh', $claim) }}">@csrf<button class="rounded border px-3 py-2">Baca ulang status supplier (GET)</button></form>
         </div>
+        @if(in_array($claim->state, ['submission_unknown', 'review'], true) && $claim->refund_deadline->isFuture())
+            <form method="POST" action="{{ route('admin.suppliers.warranty.resubmit', $claim) }}" class="grid gap-2">
+                @csrf
+                <p>Kirim ulang bukti asli hanya jika GET authoritative terbaru tidak menemukan object refund. Aksi ini memakai bukti tersimpan yang sama, diantrikan ke worker upload, dan tidak pernah retry buta.</p>
+                <button class="rounded border px-4 py-3 font-bold">Resubmit bukti original</button>
+            </form>
+        @endif
         @if($claim->settlement_state === 'replacement_unknown')
             <form method="POST" action="{{ route('admin.suppliers.warranty.recover-replacement', $claim) }}" class="grid gap-3">
                 @csrf

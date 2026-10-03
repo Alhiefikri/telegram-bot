@@ -22,6 +22,10 @@ final class BuyMailClient
 
     private const MAX_BYTES = 2_097_152;
 
+    // A proof upload may carry up to 4 MB; keep it below the claim worker's
+    // 60-second timeout with room for the follow-up authoritative GET.
+    private const REFUND_UPLOAD_TIMEOUT = 45;
+
     public function snapshot(Supplier $supplier): SupplierCatalogSnapshot
     {
         $profile = $this->json($this->request($supplier, 'GET', '/profile'));
@@ -123,7 +127,7 @@ final class BuyMailClient
             throw new SupplierUnavailable('invalid_note');
         }
 
-        return $this->accountResult($this->json($this->request($supplier, 'POST', '/accounts/'.rawurlencode($this->identifier($id)).'/refund', ['note' => $note], proof: $proof)), $id, $orderId);
+        return $this->accountResult($this->json($this->request($supplier, 'POST', '/accounts/'.rawurlencode($this->identifier($id)).'/refund', ['note' => $note], timeout: self::REFUND_UPLOAD_TIMEOUT, proof: $proof)), $id, $orderId);
     }
 
     public function confirmAccount(Supplier $supplier, string $id, string $orderId): array

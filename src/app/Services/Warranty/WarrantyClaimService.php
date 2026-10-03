@@ -12,6 +12,7 @@ use App\Models\Payment;
 use App\Models\ProductStockItem;
 use App\Models\Supplier;
 use App\Models\SupplierAccountUnit;
+use App\Models\User;
 use App\Models\WarrantyClaim;
 use App\Services\AuditLogger;
 use App\Services\Suppliers\BuyMailClient;
@@ -248,5 +249,45 @@ final class WarrantyClaimService
         $this->process($id, readOnly: true);
 
         return WarrantyClaim::findOrFail($id)->last_error === null;
+    }
+
+    /**
+     * An operator may re-dispatch the stored original proof only after an
+     * authoritative read proves the supplier holds no refund object for the
+     * same account. A refund object observed by GET is never resubmitted.
+     */
+    public function resubmit(User $actor, int $id): void
+    {
+        if ($actor->role?->canManageStoreOperations() !== true) {
+            throw new InvalidOrderTransition('Warranty resubmission requires an operator.');
+        }
+        $initial = WarrantyClaim::query()->findOrFail($id);
+        if (! in_array($initial->state, ['submission_unknown', 'review'], true) || ! $initial->refund_deadline->isFuture()) {
+            throw new InvalidOrderTransition('This claim cannot be resubmitted.');
+        }
+        $unit = $initial->unit;
+        try {
+            $account = $this->client->account($unit->supplier, $unit->external_id, $unit->purchase->supplier_order_id);
+        } catch (Throwable) {
+            throw new InvalidOrderTransition('The supplier account could not be read authoritatively.');
+        }
+        if ($account['price'] !== $unit->cost_idr || $account['refund_status'] !== null) {
+            throw new InvalidOrderTransition('The supplier account already holds a refund record for this claim.');
+        }
+        DB::transaction(function () use ($actor, $initial, $account): void {
+            [$claim, , $lockedUnit] = $this->lockForSettlement($initial);
+            if (! in_array($claim->state, ['submission_unknown', 'review'], true) || ! $claim->refund_deadline->isFuture()
+                || $claim->lease_expires_at?->isFuture() || $lockedUnit->cost_idr !== $account['price']) {
+                throw new InvalidOrderTransition('This claim cannot be resubmitted.');
+            }
+            $this->audit->log('warranty.claim_resubmitted', $claim, old: [
+                'state' => $claim->state, 'dispatched_at' => $claim->dispatched_at?->toIso8601String(), 'last_error' => $claim->last_error,
+            ], new: ['state' => 'received', 'dispatched_at' => null, 'authoritative_refund_object' => false], user: $actor);
+            $claim->forceFill([
+                'state' => 'received', 'claim_token' => null, 'lease_expires_at' => null,
+                'dispatched_at' => null, 'last_error' => null, 'next_attempt_at' => now(),
+            ])->save();
+            DB::afterCommit(fn () => ProcessWarrantyClaim::dispatch($claim->id));
+        }, 5);
     }
 }

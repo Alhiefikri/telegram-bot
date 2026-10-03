@@ -186,6 +186,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::get('warranty', [AdminWarrantyController::class, 'index'])->name('warranty');
                 Route::get('warranty/{claim}/proof', [AdminWarrantyController::class, 'proof'])->name('warranty.proof');
                 Route::post('warranty/{claim}/refresh', [AdminWarrantyController::class, 'refresh'])->middleware('throttle:10,1')->name('warranty.refresh');
+                Route::post('warranty/{claim}/resubmit', [AdminWarrantyController::class, 'resubmit'])->middleware('throttle:10,1')->name('warranty.resubmit');
                 Route::post('warranty/{claim}/recover-replacement', [AdminWarrantyController::class, 'recoverReplacement'])->middleware('throttle:10,1')->name('warranty.recover-replacement');
                 Route::post('warranty/{claim}/approve-acquired', [AdminWarrantyController::class, 'approveAcquired'])->middleware('throttle:10,1')->name('warranty.approve-acquired');
                 Route::post('warranty/refunds/{refund}', [AdminWarrantyController::class, 'refund'])->middleware('throttle:10,1')->name('warranty.refund');

@@ -54,6 +54,19 @@ final class AdminWarrantyController extends Controller
         return redirect()->route('admin.suppliers.warranty')->with('status', 'Status klaim dibaca ulang dari akun supplier yang sama.');
     }
 
+    public function resubmit(Request $request, WarrantyClaim $claim, WarrantyClaimService $claims)
+    {
+        $this->authorizeOperator($request);
+        app(SupplierOperationConfirmation::class)->requireRecent($request);
+        try {
+            $claims->resubmit($request->attributes->get('adminUser'), $claim->id);
+        } catch (InvalidOrderTransition|InvalidArgumentException) {
+            return response()->json(['message' => 'Resubmit hanya sah saat GET authoritative tidak menemukan object refund dan deadline belum lewat.'], 409);
+        }
+
+        return redirect()->route('admin.suppliers.warranty')->with('status', 'Bukti original diantrikan ulang setelah GET supplier tidak menemukan object refund.');
+    }
+
     public function refund(Request $request, OrderRefund $refund, WarrantySettlementService $settlements)
     {
         $this->authorizeOperator($request);

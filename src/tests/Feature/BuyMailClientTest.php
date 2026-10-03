@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ProcessWarrantyClaim;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
 use App\Services\Suppliers\BuyMailClient;
@@ -10,6 +11,7 @@ use App\Services\Suppliers\SupplierOrderResult;
 use App\Services\Warranty\RefundProof;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
+use ReflectionClass;
 use Tests\TestCase;
 
 final class BuyMailClientTest extends TestCase
@@ -162,11 +164,13 @@ final class BuyMailClientTest extends TestCase
     public function test_refund_upload_uses_original_png_and_does_not_treat_accepted_as_approved(): void
     {
         $proof = RefundProof::fromBytes(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAAC0lEQVQImWNgQAYAAA4AAbGa6gYAAAAASUVORK5CYII='));
-        Http::fake(function ($request) use ($proof) {
+        $observedTimeout = null;
+        Http::fake(function ($request, $options) use ($proof, &$observedTimeout) {
             $this->assertSame('https://buymail.simuru-store.com/api/reseller/accounts/PR1/refund', $request->url());
             $this->assertTrue($request->hasHeader('Authorization', 'Bearer fixture-buymail-key'));
             $this->assertTrue($request->isMultipart());
             $this->assertTrue($request->hasFile('proof', $proof->bytes));
+            $observedTimeout = $options['timeout'];
 
             return Http::response(['account' => [
                 'id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'refund_pending', 'price' => 4800,
@@ -176,6 +180,9 @@ final class BuyMailClientTest extends TestCase
         $account = app(BuyMailClient::class)->requestRefund($this->supplier(), 'PR1', 'ORD1', $proof, 'Wrong password');
         $this->assertSame('pending', $account['refund_status']);
         $this->assertSame('refund_pending', $account['status']);
+        $this->assertGreaterThanOrEqual(45, $observedTimeout);
+        $this->assertLessThanOrEqual(55, $observedTimeout);
+        $this->assertLessThan((new ReflectionClass(ProcessWarrantyClaim::class))->getDefaultProperties()['timeout'], $observedTimeout);
         Http::assertSentCount(1);
     }
 

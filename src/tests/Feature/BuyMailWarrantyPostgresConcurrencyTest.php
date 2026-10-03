@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\UserRole;
 use App\Exceptions\InvalidOrderTransition;
+use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\ManualFulfillmentReview;
 use App\Models\OrderRefund;
@@ -182,6 +183,52 @@ final class BuyMailWarrantyPostgresConcurrencyTest extends TestCase
         $this->assertSame('pending', $claim->fresh()->state);
         $this->assertSame('awaiting_verification', $claim->fresh()->settlement_state);
         $this->assertSame(0, OrderRefund::count());
+    }
+
+    public function test_two_operator_resubmits_produce_one_upload_and_one_audit_entry(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $proof = RefundProof::fromBytes(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAAC0lEQVQImWNgQAYAAA4AAbGa6gYAAAAASUVORK5CYII='));
+        $claim = app(WarrantyClaimService::class)->submit($customer, $unit->public_id, $proof, 'Wrong password');
+        $claim->update(['state' => 'submission_unknown', 'dispatched_at' => now()->subMinute(), 'last_error' => 'warranty_transport_unavailable', 'next_attempt_at' => now()->addMinute()]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $claimId = $claim->id;
+        $ownerId = $owner->id;
+        $worker = function () use ($claimId, $ownerId): array {
+            $posts = 0;
+            Http::fake(function ($request) use (&$posts) {
+                if ($request->method() === 'POST') {
+                    $posts++;
+                    usleep(200000);
+
+                    return Http::response(['account' => [
+                        'id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'refund_pending', 'price' => 4800,
+                        'refund_deadline' => now()->addHours(2)->utc()->toIso8601String(), 'refund' => ['status' => 'pending'],
+                    ]], 202);
+                }
+
+                return Http::response(['account' => [
+                    'id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'active', 'price' => 4800,
+                    'refund_deadline' => now()->addHours(2)->utc()->toIso8601String(), 'refund' => null,
+                ]]);
+            });
+            $service = app(WarrantyClaimService::class);
+            try {
+                $service->resubmit(User::findOrFail($ownerId), $claimId);
+                $accepted = 1;
+            } catch (InvalidOrderTransition) {
+                $accepted = 0;
+            }
+            $service->process($claimId);
+
+            return ['accepted' => $accepted, 'posts' => $posts];
+        };
+        $results = $this->race([$worker, $worker]);
+        $this->assertSame(1, array_sum(array_column($results, 'accepted')));
+        $this->assertSame(1, array_sum(array_column($results, 'posts')));
+        $this->assertSame('pending', $claim->fresh()->state);
+        $this->assertNull($claim->fresh()->claim_token);
+        $this->assertSame(1, AuditLog::query()->where('action', 'warranty.claim_resubmitted')->count());
     }
 
     public function test_confirmation_and_claim_submission_race_cannot_both_close_and_request_warranty(): void
