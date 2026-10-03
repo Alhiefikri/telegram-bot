@@ -12,6 +12,8 @@ let tempDir, environment, server, fixture;
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
+  // Fresh migrations and fixture preparation need their own CI setup budget.
+  test.setTimeout(120000);
   tempDir = mkdtempSync(path.join(tmpdir(), "buymail-browser-"));
   const database = path.join(tempDir, "database.sqlite");
   writeFileSync(database, "");

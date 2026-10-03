@@ -11,8 +11,10 @@ use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
+#[Group('postgres-release')]
 final class BuyMailAccountIdentityTest extends NonTransactionalDatabaseTestCase
 {
     public function test_profile_cannot_retarget_historical_acquisitions_to_a_different_account(): void

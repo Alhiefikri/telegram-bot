@@ -41,6 +41,7 @@ use Tests\Support\RunsPostgresRace;
 use Tests\TestCase;
 
 #[Group('concurrency')]
+#[Group('postgres-release')]
 final class BuyMailWarrantyPostgresConcurrencyTest extends TestCase
 {
     use BuildsBuyMailWarrantyFixture;

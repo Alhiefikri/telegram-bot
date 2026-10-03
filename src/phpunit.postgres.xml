@@ -27,6 +27,16 @@
             <file>tests/Feature/SupplierAvailabilityTest.php</file>
             <file>tests/Feature/SupplierFulfillmentTest.php</file>
             <file>tests/Feature/SupplierPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/BuyMailAccountIdentityTest.php</file>
+            <file>tests/Feature/BuyMailClientTest.php</file>
+            <file>tests/Feature/BuyMailFulfillmentTest.php</file>
+            <file>tests/Feature/BuyMailWarrantyPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/BuyMailWebhookTest.php</file>
+            <file>tests/Feature/WarrantyAdminTest.php</file>
+            <file>tests/Feature/WarrantyClaimTest.php</file>
+            <file>tests/Feature/WarrantyDeadlineReminderTest.php</file>
+            <file>tests/Feature/WarrantyNotificationTest.php</file>
+            <file>tests/Feature/WarrantyWebTest.php</file>
         </testsuite>
     </testsuites>
     <source>

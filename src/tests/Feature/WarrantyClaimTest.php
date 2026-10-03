@@ -8,6 +8,7 @@ use App\Enums\StoreBalanceEntryKind;
 use App\Enums\UserRole;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\ProcessWarrantyClaim;
+use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\ManualFulfillmentReview;
 use App\Models\OrderRefund;
@@ -36,10 +37,13 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
 use Tests\Support\BuildsBuyMailWarrantyFixture;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
+#[Group('postgres-release')]
 final class WarrantyClaimTest extends NonTransactionalDatabaseTestCase
 {
     use BuildsBuyMailWarrantyFixture;
@@ -79,6 +83,46 @@ final class WarrantyClaimTest extends NonTransactionalDatabaseTestCase
         $this->assertSame('pending', $claim->fresh()->state);
         $this->assertSame('awaiting_verification', $claim->fresh()->settlement_state);
         $this->assertNull($unit->stockItem->fresh()->retired_at);
+    }
+
+    public static function unapprovedSettlementChoices(): iterable
+    {
+        foreach (['received', 'pending', 'submission_unknown', 'review', 'rejected', 'reversed', 'cancelled', 'expired'] as $state) {
+            foreach (['refund', 'replacement'] as $choice) {
+                yield $state.' '.$choice => [$state, $choice];
+            }
+        }
+    }
+
+    #[DataProvider('unapprovedSettlementChoices')]
+    public function test_unapproved_claim_cannot_choose_a_settlement(string $state, string $choice): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $claim = app(WarrantyClaimService::class)->submit($customer, $unit->public_id, $this->proof(), 'Wrong password');
+        // Keep the other eligibility checks satisfied to isolate the approval guard.
+        $claim->update(['state' => $state, 'verified_at' => now(), 'settlement_state' => 'awaiting_choice']);
+        Queue::fake();
+        $claimBefore = $claim->fresh()->getAttributes();
+        $stockBefore = $unit->stockItem->fresh()->getAttributes();
+        $purchaseCount = SupplierPurchase::count();
+        $entryCount = StoreBalanceEntry::count();
+        $auditCount = AuditLog::count();
+
+        try {
+            app(WarrantySettlementService::class)->choose($customer, $claim->public_id, $choice);
+            $this->fail('An unapproved claim was accepted for settlement.');
+        } catch (InvalidOrderTransition $exception) {
+            $this->assertSame('This claim is not eligible for settlement.', $exception->getMessage());
+        }
+
+        $this->assertSame($claimBefore, $claim->fresh()->getAttributes());
+        $this->assertSame($stockBefore, $unit->stockItem->fresh()->getAttributes());
+        $this->assertSame(0, OrderRefund::count());
+        $this->assertSame($purchaseCount, SupplierPurchase::count());
+        $this->assertSame($entryCount, StoreBalanceEntry::count());
+        $this->assertSame($auditCount, AuditLog::count());
+        Queue::assertNothingPushed();
+        Http::assertNothingSent();
     }
 
     private function syncReplacementSource(SupplierAccountUnit $unit): void

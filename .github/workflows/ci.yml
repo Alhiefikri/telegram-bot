@@ -164,6 +164,9 @@ jobs:
       - name: Run customer browser smoke without rebuilding assets
         run: npx playwright test tests/Browser/admin-dashboard-responsive.spec.js -g "customer checkout"
 
+      - name: Run BuyMail warranty browser tests without rebuilding assets
+        run: npm run test:browser:buymail:ci
+
       - name: Migrate empty PostgreSQL database
         env:
           DB_CONNECTION: pgsql

@@ -14,9 +14,11 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\BuildsBuyMailWarrantyFixture;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
+#[Group('postgres-release')]
 final class WarrantyWebTest extends NonTransactionalDatabaseTestCase
 {
     use BuildsBuyMailWarrantyFixture;

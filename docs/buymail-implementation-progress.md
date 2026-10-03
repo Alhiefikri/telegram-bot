@@ -8,7 +8,7 @@ User scope: automatic purchase only after verified buyer payment; Dashboard-mana
 | --- | --- | --- |
 | API key/secret managed in Dashboard without ENV rebuild | SupplierAdminRequest, SupplierManager, encrypted Supplier casts and connection form | SupplierAdminTest and BuyMailAccountIdentityTest: encryption, redaction, blank preservation, recent password, same-account rotation and holds |
 | Buy only for a real Paid buyer | SupplierFulfillmentService claim checks Order + Paid Payment + paid_at, network after commit | BuyMailFulfillmentTest: pending/unverified never sends; verified full/partial delivery; real dedicated queue worker |
-| No duplicate purchase on retry/crash | Durable intent, reference, idempotency, lease/token, exact GET recovery and credential fingerprints | BuyMailClientTest; original/replacement recovery integration; PostgreSQL worker race |
+| No duplicate purchase on retry/crash | Durable intent, reference, idempotency, lease/token, exact GET recovery and credential fingerprints | BuyMailClientTest; original/replacement recovery integration; shared purchase-claim PostgreSQL worker race (scope below) |
 | Supplier stock/balance/pricing | IDR profile adapter, private Gmail mapping, commitments/margins, freshness, quantity cap, daily reset/refunds-disabled gate | BuyMail client/availability/identity/fulfillment tests, existing supplier regressions |
 | Partial delivery and missing-unit refund | Actual debit/quantity, outstanding-only attempts, early unit access, MissingFulfillmentRefundService | Full/partial/missing Store Balance/external/full-missing integration; duplicate missing-refund PostgreSQL race |
 | Gmail proof and deadline | Private encrypted original JPEG/PNG, MIME/image decode/pixel/size limit, unit ownership/deadline | RefundProofTest; WarrantyClaimTest; Web/Admin ownership and private download tests |
@@ -32,6 +32,29 @@ User scope: automatic purchase only after verified buyer payment; Dashboard-mana
 - These PostgreSQL lanes cover duplicate refunds, full-versus-partial refund, refund-versus-replacement, duplicate replacement workers, duplicate uploads, explicit confirmation-versus-claim, missing-unit refund, IDR/unit schema, key/account identity, real queue worker and paid-evidence gate.
 - Real browser tests: two passed. Buyer at 320px switches Indonesian/English, chooses refund and loses the replacement action after settlement; Owner at 390px navigates warranty and deposit monitors without exposing the saved key or horizontal overflow. Screenshots inspected in `src/test-results/` (ignored transient test artifacts).
 - Asset build passed; translation audit passed; PHP formatting, shell syntax, Supervisor parsing and `git diff --check` verified.
+
+## CI coverage added for issue #531
+
+- `BuyMailWebhookTest` asserts the first accepted event dispatches exactly one `ProcessBuyMailWebhook` on the `supplier` connection and `supplier-claims` queue with the persisted event ID. Replaying that event and sending invalid signature/header evidence leave the dispatch count at one.
+- `WarrantyClaimTest::test_unapproved_claim_cannot_choose_a_settlement` isolates the approval guard with the other eligibility fields satisfied. Both refund and replacement are rejected for received, pending, submission-unknown, review, rejected, reversed, cancelled and expired claims, with no claim/credential mutation, refund, purchase, balance entry, audit or queued work.
+- The maintained browser spec gives fresh migrations and fixture creation a bounded 120-second setup timeout, independently of interaction assertion timeouts.
+- `npm run test:browser:buymail` builds assets and runs the maintained buyer/Owner warranty spec locally. CI runs `npm run test:browser:buymail:ci` after its shared asset build and Chromium installation; failures block the application job and its downstream image build. Existing failure diagnostics include Playwright outputs.
+- `phpunit.postgres.xml` explicitly includes all BuyMail and Warranty feature files, tagged `postgres-release` so the CI job's group filter actually selects them. The BuyMail warranty races retain their `concurrency` tag and continue to run in the separate deploy gate with `--fail-on-skipped`.
+
+### Issue #531 local verification
+
+- `composer test -- --parallel --log-junit /tmp/issue531-sqlite.xml`: 3,123 discovered, 3,026 passed, 97 existing PostgreSQL/environment-only skips, 23,432 assertions; inspected JUnit with zero failures/errors and all 16 new approval cases present. No new skip conditions were introduced.
+- `npm run test:browser:buymail`: asset build passed; the initial run exposed the default setup-hook timeout. After the bounded hook-budget fix, `npm run test:browser:buymail:ci` passed both buyer and Owner cases.
+- Isolated autoload mutations prove sensitivity without modifying application files: the original webhook test passes when dispatch is removed; the strengthened test fails for removed dispatch and duplicate dispatch; the approval regression fails when the `state !== approved` guard is removed. The unchanged application passes the focused 18-test lane (210 assertions).
+- `vendor/bin/phpunit --configuration=phpunit.postgres.xml --testsuite="PostgreSQL release integration" --group=postgres-release --fail-on-skipped --log-junit=/tmp/issue531-postgres.xml --no-coverage` against disposable PostgreSQL 16 passed: 164 tests, 1,319 assertions, zero skips/failures/errors. Inspected JUnit confirms all ten BuyMail/Warranty files (109 cases) and the shared original-purchase race executed.
+- `scripts/concurrency-deploy-gate.sh` against a disposable PostgreSQL 16 database passed with `--fail-on-skipped`: 124 parent tests, 1,085 assertions, zero skips/failures/errors. JUnit contains 144 records including fork-worker output, with all ten BuyMail warranty races present (`/tmp/issue531-concurrency/`).
+- Pint, `actionlint`, and `git diff --check` passed. GitHub execution of the updated workflow requires a push/PR; local lane results are not presented as a completed remote CI run.
+
+### Shared original-purchase race scope
+
+`SupplierPostgresConcurrencyTest::test_two_workers_purchase_one_durable_intent_and_allocate_one_customer_delivery` represents the original BuyMail purchase **claim** boundary. Two forked workers call the real `SupplierFulfillmentService::process()` for one fulfillment; both enter the same transactional `claim()` method. Its Order/resource locks, current purchase identity and unexpired lease exclusion execute before provider HTTP for every supplier, including BuyMail. The test asserts one POST, one durable purchase, one allocated credential and released wallet commitments. This test is also tagged `postgres-release` and selected by both PostgreSQL CI lanes.
+
+The race's HTTP fixture uses the generic Prodseller adapter. It proves shared claim serialization, not BuyMail response parsing, five-minute lease expiry recovery, or account-unit finalization. `BuyMailFulfillmentTest` covers provider-specific paid-evidence and delivery behaviors sequentially, and `BuyMailClientTest` covers reference-recovery contracts; `BuyMailWarrantyPostgresConcurrencyTest` separately races BuyMail replacement purchases and account claims. An original BuyMail adapter fork race is not claimed as evidence.
 
 ## Provider qualification limits
 

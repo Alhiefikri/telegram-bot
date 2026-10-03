@@ -10,8 +10,10 @@ use App\Services\Suppliers\BuyMailWebhookService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
+#[Group('postgres-release')]
 final class BuyMailWebhookTest extends NonTransactionalDatabaseTestCase
 {
     public function test_valid_signed_events_are_durable_deduplicated_and_never_trust_a_header_alone(): void
@@ -25,13 +27,18 @@ final class BuyMailWebhookTest extends NonTransactionalDatabaseTestCase
         ];
         $url = '/api/webhook/suppliers/buymail/'.$supplier->id;
         $this->call('POST', $url, server: $headers, content: $body)->assertOk();
+        $event = SupplierWebhookEvent::sole();
+        Queue::assertPushedOn('supplier-claims', ProcessBuyMailWebhook::class, fn (ProcessBuyMailWebhook $job) => $job->eventId === $event->id && $job->connection === 'supplier');
+        Queue::assertPushed(ProcessBuyMailWebhook::class, 1);
         $this->call('POST', $url, server: $headers, content: $body)->assertOk();
+        Queue::assertPushed(ProcessBuyMailWebhook::class, 1);
         $this->assertSame(1, SupplierWebhookEvent::count());
         $this->assertStringNotContainsString('evt-1', DB::table('supplier_webhook_events')->value('payload'));
         $bad = array_replace($headers, ['HTTP_X_WEBHOOK_SIGNATURE' => 't='.time().',v1='.str_repeat('0', 64)]);
         $this->call('POST', $url, server: $bad, content: $body)->assertUnauthorized();
         $mismatch = array_replace($headers, ['HTTP_X_WEBHOOK_ID' => 'different-event']);
         $this->call('POST', $url, server: $mismatch, content: $body)->assertUnprocessable();
+        Queue::assertPushed(ProcessBuyMailWebhook::class, 1);
         Http::assertNothingSent();
     }
 

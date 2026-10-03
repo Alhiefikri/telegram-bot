@@ -10,9 +10,11 @@ use App\Services\Warranty\WarrantyClaimService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\BuildsBuyMailWarrantyFixture;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
+#[Group('postgres-release')]
 final class WarrantyAdminTest extends NonTransactionalDatabaseTestCase
 {
     use BuildsBuyMailWarrantyFixture;

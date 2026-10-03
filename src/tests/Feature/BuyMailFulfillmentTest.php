@@ -37,8 +37,10 @@ use Illuminate\Queue\QueueManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
+#[Group('postgres-release')]
 final class BuyMailFulfillmentTest extends NonTransactionalDatabaseTestCase
 {
     protected function setUp(): void

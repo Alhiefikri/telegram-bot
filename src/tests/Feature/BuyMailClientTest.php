@@ -11,9 +11,11 @@ use App\Services\Suppliers\SupplierOrderResult;
 use App\Services\Warranty\RefundProof;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Group;
 use ReflectionClass;
 use Tests\TestCase;
 
+#[Group('postgres-release')]
 final class BuyMailClientTest extends TestCase
 {
     private function supplier(): Supplier

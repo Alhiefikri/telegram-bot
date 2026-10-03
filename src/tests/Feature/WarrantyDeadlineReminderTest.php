@@ -15,9 +15,11 @@ use App\Services\Warranty\WarrantyDeadlineReminderPipeline;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\BuildsBuyMailWarrantyFixture;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
+#[Group('postgres-release')]
 final class WarrantyDeadlineReminderTest extends NonTransactionalDatabaseTestCase
 {
     use BuildsBuyMailWarrantyFixture;

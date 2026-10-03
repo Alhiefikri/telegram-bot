@@ -45,6 +45,7 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         Http::preventStrayRequests();
     }
 
+    #[Group('postgres-release')]
     public function test_two_workers_purchase_one_durable_intent_and_allocate_one_customer_delivery(): void
     {
         [$product, $supplier, , $cart] = $this->fixture();
