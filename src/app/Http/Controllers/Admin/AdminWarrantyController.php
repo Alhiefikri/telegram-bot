@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Exceptions\InvalidOrderTransition;
 use App\Http\Controllers\Controller;
 use App\Models\OrderRefund;
+use App\Models\SupplierAccountUnit;
 use App\Models\SupplierWebhookEvent;
 use App\Models\WarrantyClaim;
 use App\Services\Admin\SupplierOperationConfirmation;
@@ -20,17 +21,33 @@ use InvalidArgumentException;
 
 final class AdminWarrantyController extends Controller
 {
+    public const NEAR_DEADLINE_MINUTES = 60;
+
     public function index(Request $request)
     {
         $this->authorizeOperator($request);
+        $nearDeadlineMinutes = self::NEAR_DEADLINE_MINUTES;
         $claims = WarrantyClaim::query()->with(['order', 'unit.orderItem', 'replacementPurchase'])->orderByDesc('id')->paginate(25);
         $refunds = OrderRefund::query()->whereIn('warranty_claim_id', $claims->pluck('id'))->get()->keyBy('warranty_claim_id');
         $missingRefunds = OrderRefund::whereNull('warranty_claim_id')->orderByDesc('created_at')->paginate(25, ['*'], 'missing_page');
+        $nearDeadlineUnits = SupplierAccountUnit::query()
+            ->with(['order.customer', 'orderItem'])
+            ->where('refund_deadline', '>', now())
+            ->where('refund_deadline', '<=', now()->addMinutes(self::NEAR_DEADLINE_MINUTES))
+            ->where('provider_state', 'active')
+            ->whereNull('confirmation_state')
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('warranty_claims')
+                ->whereColumn('warranty_claims.supplier_account_unit_id', 'supplier_account_units.id'))
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('product_stock_items')
+                ->whereColumn('product_stock_items.id', 'supplier_account_units.product_stock_item_id')
+                ->whereNotNull('product_stock_items.retired_at'))
+            ->orderBy('refund_deadline')->orderBy('id')
+            ->paginate(25, ['*'], 'deadline_page');
         $webhookEvents = SupplierWebhookEvent::query()
             ->select(['id', 'supplier_id', 'event_type', 'state', 'last_error', 'created_at', 'next_attempt_at'])
             ->where('state', '!=', 'processed')->orderBy('next_attempt_at')->orderBy('id')->paginate(25, ['*'], 'webhook_page');
 
-        return view('admin.suppliers.warranty', compact('claims', 'refunds', 'missingRefunds', 'webhookEvents'));
+        return view('admin.suppliers.warranty', compact('claims', 'refunds', 'missingRefunds', 'nearDeadlineUnits', 'nearDeadlineMinutes', 'webhookEvents'));
     }
 
     public function proof(Request $request, WarrantyClaim $claim)

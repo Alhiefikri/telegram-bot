@@ -29,4 +29,5 @@ enum TelegramOutboundEffectType: string
     case ReceiptTxtDownload = 'receipt.txt_download';
     case ReceiptOrderActions = 'receipt.order_actions';
     case WarrantyNotification = 'order.warranty_notification';
+    case WarrantyDeadlineReminder = 'order.warranty_deadline_reminder';
 }

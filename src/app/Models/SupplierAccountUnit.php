@@ -13,7 +13,7 @@ final class SupplierAccountUnit extends Model
 
     protected function casts(): array
     {
-        return ['refund_deadline' => 'immutable_datetime', 'cost_idr' => 'integer', 'retail_amount' => 'integer', 'unit_number' => 'integer', 'confirmation_lease_until' => 'immutable_datetime', 'confirmation_requested_at' => 'immutable_datetime', 'confirmation_next_attempt_at' => 'immutable_datetime'];
+        return ['refund_deadline' => 'immutable_datetime', 'cost_idr' => 'integer', 'retail_amount' => 'integer', 'unit_number' => 'integer', 'confirmation_lease_until' => 'immutable_datetime', 'confirmation_requested_at' => 'immutable_datetime', 'confirmation_next_attempt_at' => 'immutable_datetime', 'reminder_materialized_at' => 'immutable_datetime'];
     }
 
     public function order(): BelongsTo

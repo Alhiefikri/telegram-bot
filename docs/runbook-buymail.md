@@ -51,11 +51,14 @@ Scheduler invokes:
 php artisan suppliers:sync --limit=5
 php artisan suppliers:recover --limit=25
 php artisan suppliers:recover-warranty --limit=25
+php artisan suppliers:notify-warranty-deadlines --limit=25
 ```
+
+Buyer reminders are materialized at most once per supplier account unit 30 minutes before its `refund_deadline` and delivered through the existing Telegram outbound ledger. A unit is skipped when its stock item is retired, confirmation already closed the window, a claim exists, the order is not paid/claimable, the buyer has no Telegram chat, or the deadline has passed; delivery re-checks the same gates and finalizes without sending when the state changed. The unit marker and effect commit in PostgreSQL before dispatch, `suppliers:recover-warranty` re-discovers due reminders after Redis loss, and an ambiguous send keeps the ledger's manual delivery review instead of an automatic resend.
 
 Warranty discovery re-enqueues due claim reads/uploads, replacement acquisitions, account confirmations, supplier deposits and webhook inbox work after Redis loss. Signed inbox verifies HMAC over raw body, timestamp ±5 minutes, event ID/type match and dedupe. GET is the source of truth even for correctly signed events. Telegram status updates use the existing outbound ledger; ambiguous sends require existing manual delivery review.
 
-Monitor Admin supplier purchases, warranty cases, pending transfers, deposit state, failed jobs and both supplier worker pools. Deadline-sensitive claims take priority in a separate worker. Do not paste credentials/screenshots/raw supplier replies into logs, tickets or public messages. Private proof downloads require recent password confirmation.
+Monitor Admin supplier purchases, warranty cases, pending transfers, deposit state, failed jobs and both supplier worker pools. The Admin warranty page also lists unclaimed units whose deadline falls within the next 60 minutes together with whether the reminder was materialized or the buyer has no Telegram chat. Deadline-sensitive claims take priority in a separate worker. Do not paste credentials/screenshots/raw supplier replies into logs, tickets or public messages. Private proof downloads require recent password confirmation.
 
 ## Provider contract qualification
 

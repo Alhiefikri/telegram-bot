@@ -64,6 +64,9 @@ Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverl
 Schedule::command('suppliers:sync --limit=5')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('suppliers:recover --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('suppliers:recover-warranty --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
+// Deadline reminders are materialized from durable PostgreSQL unit state; the
+// queue job is only the delivery wakeup and the effect ledger survives Redis loss.
+Schedule::command('suppliers:notify-warranty-deadlines --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('ops:payment-lifecycle-rollout-report')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping();
 Schedule::command('customers:cleanup-login-links --chunk=500')->hourly()->withoutOverlapping();

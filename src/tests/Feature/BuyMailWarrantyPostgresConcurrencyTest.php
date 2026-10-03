@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
+use App\Enums\TelegramOutboundEffectType;
 use App\Enums\UserRole;
 use App\Exceptions\InvalidOrderTransition;
 use App\Models\AuditLog;
@@ -16,6 +17,7 @@ use App\Models\ProductStockItem;
 use App\Models\StoreBalanceEntry;
 use App\Models\SupplierAccountUnit;
 use App\Models\SupplierPurchase;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Models\WarrantyClaim;
 use App\Services\Admin\ManualFulfillmentResolutionService;
@@ -25,6 +27,7 @@ use App\Services\Warranty\MissingFulfillmentRefundService;
 use App\Services\Warranty\RefundProof;
 use App\Services\Warranty\WarrantyAccountService;
 use App\Services\Warranty\WarrantyClaimService;
+use App\Services\Warranty\WarrantyDeadlineReminderService;
 use App\Services\Warranty\WarrantyReplacementService;
 use App\Services\Warranty\WarrantySettlementService;
 use Illuminate\Support\Facades\DB;
@@ -266,6 +269,19 @@ final class BuyMailWarrantyPostgresConcurrencyTest extends TestCase
             $this->assertSame('confirmed', $unit->fresh()->confirmation_state);
             $this->assertSame('completed', $unit->fresh()->provider_state);
         }
+    }
+
+    public function test_two_reminder_sweeps_materialize_one_reminder_for_the_same_unit(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $customer->update(['telegram_id' => 790001]);
+        $unit->update(['refund_deadline' => now()->addMinutes(20)]);
+        $worker = fn (): array => ['materialized' => app(WarrantyDeadlineReminderService::class)->materializeDue(25)];
+        $results = $this->race([$worker, $worker]);
+        $this->assertSame(1, array_sum(array_column($results, 'materialized')));
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectType::WarrantyDeadlineReminder->value)->count());
+        $this->assertNotNull($unit->fresh()->reminder_materialized_at);
     }
 
     private function verifiedClaim(): array

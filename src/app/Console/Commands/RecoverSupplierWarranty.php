@@ -11,6 +11,7 @@ use App\Models\SupplierAccountUnit;
 use App\Models\SupplierDeposit;
 use App\Models\SupplierWebhookEvent;
 use App\Models\WarrantyClaim;
+use App\Services\Warranty\WarrantyDeadlineReminderService;
 use Illuminate\Console\Command;
 
 final class RecoverSupplierWarranty extends Command
@@ -63,7 +64,8 @@ final class RecoverSupplierWarranty extends Command
         foreach ($confirmations as $id) {
             ProcessWarrantyConfirmation::dispatch($id);
         }
-        $this->info('Warranty wakeups: '.$claims->count().' claims, '.$replacements->count().' replacements, '.$events->count().' webhook events.');
+        $reminders = app(WarrantyDeadlineReminderService::class)->run($limit);
+        $this->info('Warranty wakeups: '.$claims->count().' claims, '.$replacements->count().' replacements, '.$events->count().' webhook events, '.$reminders['materialized'].' reminders materialized, '.$reminders['dispatched'].' reminders dispatched.');
 
         return self::SUCCESS;
     }

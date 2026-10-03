@@ -954,6 +954,7 @@
   "order.status.month_empty": "Belum ada pesanan di bulan ini.",
   "order.warranty.title": "Bantuan akun dan pengembalian dana",
   "order.warranty.window": "Laporkan masalah akun sebelum :deadline. Batas klaim dihitung sejak akun diperoleh, bukan sejak halaman ini dibuka.",
+  "order.warranty.deadline_reminder": "Laporkan masalah akun ini sebelum :deadline. Batas klaim dihitung sejak akun diperoleh, bukan sejak pesan ini dibaca.",
   "order.warranty.proof": "Unggah screenshot JPEG atau PNG asli, maksimal 4 MB, dari aplikasi Google di HP. Jam, baterai, dan sinyal harus terlihat. Screenshot browser tidak diterima.",
   "order.warranty.eligibility": "Password yang berubah lebih dari satu jam menurut pesan Google, atau pembatasan Family Link, dapat memenuhi syarat setelah diperiksa. Akun terkunci setelah kamu mengubah password, penanda perangkat/lokasi baru, dan pembatasan kirim email massal tidak ditanggung.",
   "order.warranty.submit": "Laporkan masalah akun",

@@ -955,6 +955,7 @@
   "order.status.month_empty": "No orders this month.",
   "order.warranty.title": "Account support and refunds",
   "order.warranty.window": "Report an account problem before :deadline. The claim deadline starts when the account is acquired, not when you open this page.",
+  "order.warranty.deadline_reminder": "Report any problem with this account before :deadline. The claim deadline starts when the account is acquired, not when you read this message.",
   "order.warranty.proof": "Upload the original JPEG or PNG screenshot, up to 4 MB, from the Google app on your phone. Keep the clock, battery and signal visible. Browser screenshots are not accepted.",
   "order.warranty.eligibility": "A Google message reporting a password change more than one hour ago, or a Family Link restriction, may qualify after review. Locks after your own password change, new-device or new-location flags, and bulk-mail restrictions are not covered.",
   "order.warranty.submit": "Report an account problem",

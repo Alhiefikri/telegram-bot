@@ -953,6 +953,7 @@
   "order.status.month_empty": "Tiada pesanan pada bulan ini.",
   "order.warranty.title": "Bantuan akaun dan bayaran balik",
   "order.warranty.window": "Laporkan masalah akaun sebelum :deadline. Tempoh tuntutan bermula apabila akaun diperoleh, bukan apabila halaman ini dibuka.",
+  "order.warranty.deadline_reminder": "Laporkan sebarang masalah dengan akaun ini sebelum :deadline. Tempoh tuntutan bermula apabila akaun diperoleh, bukan apabila anda membaca mesej ini.",
   "order.warranty.proof": "Muat naik tangkap layar JPEG atau PNG asal, maksimum 4 MB, daripada aplikasi Google di telefon. Jam, bateri dan isyarat mesti kelihatan. Tangkap layar pelayar tidak diterima.",
   "order.warranty.eligibility": "Kata laluan yang berubah lebih satu jam menurut mesej Google, atau sekatan Family Link, boleh layak selepas semakan. Akaun terkunci selepas anda menukar kata laluan, tanda peranti/lokasi baharu dan sekatan e-mel pukal tidak dilindungi.",
   "order.warranty.submit": "Laporkan masalah akaun",

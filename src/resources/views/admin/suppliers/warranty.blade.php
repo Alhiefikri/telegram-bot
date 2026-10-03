@@ -3,6 +3,21 @@
 @section('content')
 <p>Refund supplier memulihkan modal ke saldo supplier. Refund buyer menggunakan harga retail snapshot dan proses terpisah. Keputusan supplier dapat reversed; uang buyer tidak ditarik kembali otomatis.</p>
 <p>Klaim harus sampai ke supplier sebelum deadline. Screenshot asli hanya dibuka oleh Owner/Admin setelah konfirmasi password.</p>
+@if($nearDeadlineUnits->isNotEmpty())
+    <section class="grid gap-3 rounded-xl border bg-white p-4">
+        <h2 class="font-bold">Unit mendekati deadline klaim ({{ $nearDeadlineMinutes }} menit)</h2>
+        <p>Belum ada klaim pada unit-unit ini. Pembeli Telegram menerima pengingat otomatis 30 menit sebelum deadline; hubungi manual bila pengingat belum dijadwalkan atau pembeli tanpa Telegram.</p>
+        @foreach($nearDeadlineUnits as $unit)
+            <p class="break-all">
+                <a class="underline" href="{{ route('admin.orders.show', $unit->order) }}">{{ $unit->order->invoice_number }}</a>
+                · akun #{{ $unit->unit_number }} · {{ $unit->orderItem->product_name }}
+                · {{ $unit->refund_deadline->timezone(config('app.timezone'))->format('Y-m-d H:i T') }}
+                · {{ $unit->reminder_materialized_at !== null ? 'Pengingat diantrikan '.$unit->reminder_materialized_at->timezone(config('app.timezone'))->format('H:i T') : ($unit->order->customer?->telegram_id !== null ? 'Pengingat belum dijadwalkan' : 'Pembeli tanpa Telegram') }}
+            </p>
+        @endforeach
+        {{ $nearDeadlineUnits->links() }}
+    </section>
+@endif
 @foreach($claims as $claim)
     @php
         $refund = $refunds->get($claim->id);
