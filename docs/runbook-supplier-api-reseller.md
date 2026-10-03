@@ -74,6 +74,7 @@ Admin Product availability uses local-only existence/count projections plus fres
 
 - Store Balance customer refunds go through OrderLifecycle/StoreBalanceLedger and credit exactly once.
 - QRIS/transfer refunds require provider confirmation where supported or the existing manual external refund evidence. Recording a refund is not itself a bank transfer.
+- A full external refund after a registered partial refund records the unclaimed remainder as one confirmed OrderRefund from the same exact transfer evidence; pending or uncertain registered refunds must be confirmed or recovered first.
 - Never silently convert an externally funded payment into Store Balance.
 - In-flight, awaiting-delivery, ambiguous and unresolved partial purchases block refund because supplier debit/delivery may still exist.
 - Delivered supplier credentials stay permanently order-owned and cannot return to local Available stock after refund.

@@ -21,6 +21,7 @@ use App\Services\ProductCredentialAllocator;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Warranty\RemainderRefundService;
 use Illuminate\Support\Facades\DB;
 
 class ManualFulfillmentResolutionService
@@ -112,7 +113,8 @@ class ManualFulfillmentResolutionService
 
     private function refund(ManualFulfillmentReview $review, User $actor, string $reason, ?string $reference, ?string $result, ?string $ip): ManualFulfillmentReview
     {
-        app(SupplierFulfillmentService::class)->assertRefundable(Order::findOrFail($review->order_id));
+        $order = Order::findOrFail($review->order_id);
+        app(SupplierFulfillmentService::class)->assertRefundable($order);
         $payment = Payment::query()->findOrFail($review->payment_id);
         if ($payment->provider === 'store_balance') {
             $this->orders->applyPaymentRefunded($payment);
@@ -130,9 +132,10 @@ class ManualFulfillmentResolutionService
             return $this->markRefundUncertain($review, $actor, $reason, $reference, $ip);
         }
 
+        $remainder = app(RemainderRefundService::class)->registerConfirmedExternal($actor, $order, $payment, $reference);
         $this->orders->applyPaymentRefunded($payment);
         $resolved = $this->markResolved($review, ManualFulfillmentReview::STATE_REFUNDED, $actor, $reason, $reference, $result);
-        $this->audit->log('manual_fulfillment_review.refunded', $review, ['state' => ManualFulfillmentReview::STATE_PENDING], ['reason' => $reason, 'amount' => $review->amount, 'currency' => $review->currency, 'provider_reference' => $reference, 'provider_result' => $result], $actor, $ip);
+        $this->audit->log('manual_fulfillment_review.refunded', $review, ['state' => ManualFulfillmentReview::STATE_PENDING], ['reason' => $reason, 'amount' => $review->amount, 'currency' => $review->currency, 'provider_reference' => $reference, 'provider_result' => $result, 'remainder_refund_id' => $remainder?->id], $actor, $ip);
 
         return $resolved;
     }

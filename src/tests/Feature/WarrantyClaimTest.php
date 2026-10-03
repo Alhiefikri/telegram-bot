@@ -2,12 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\UserRole;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\ProcessWarrantyClaim;
 use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\OrderRefund;
 use App\Models\StoreBalanceEntry;
 use App\Models\SupplierAccountUnit;
@@ -15,6 +17,7 @@ use App\Models\SupplierPurchase;
 use App\Models\SupplierWebhookEvent;
 use App\Models\User;
 use App\Models\WarrantyClaim;
+use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\Customer\CustomerOrderClaimService;
 use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceActivityService;
@@ -263,6 +266,99 @@ final class WarrantyClaimTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(PaymentStatus::Paid, $unit->order->payments()->sole()->status);
         $this->assertSame(0, StoreBalanceEntry::count());
         $this->assertNotNull($unit->stockItem->fresh()->retired_at);
+    }
+
+    public function test_external_full_refund_after_confirmed_partial_registers_the_unclaimed_remainder(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $order = $unit->order;
+        $payment = $order->payments()->sole();
+        $claim = app(WarrantyClaimService::class)->submit($customer, $unit->public_id, $this->proof(), 'Wrong password');
+        Http::fake(fn () => Http::response(['account' => [
+            'id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'refunded', 'price' => 4800,
+            'refund_deadline' => now()->addHours(2)->utc()->toIso8601String(), 'refund' => ['status' => 'approved'],
+        ]]));
+        app(WarrantyClaimService::class)->process($claim->id);
+        $settlements = app(WarrantySettlementService::class);
+        $settlements->choose($customer, $claim->public_id, 'refund');
+        $partial = OrderRefund::where('warranty_claim_id', $claim->id)->sole();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $settlements->confirmExternalRefund($owner, $partial->id, 8000, 'IDR', 'synthetic-partial-transfer', 'success');
+        $this->assertSame('confirmed', $partial->fresh()->state);
+
+        $review = ManualFulfillmentReview::query()->create([
+            'order_id' => $order->id,
+            'payment_id' => $payment->id,
+            'amount' => 16000,
+            'currency' => 'IDR',
+            'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+            'provider_reference' => 'synthetic-review-reference',
+        ]);
+
+        $resolved = app(ManualFulfillmentResolutionService::class)->resolve($review, $owner, 'refund', 'Full refund of the unclaimed remainder.', 'synthetic-full-transfer', 'success');
+        $replay = app(ManualFulfillmentResolutionService::class)->resolve($review->fresh(), $owner, 'refund', 'Replay.', 'synthetic-full-transfer', 'success');
+
+        $this->assertSame(ManualFulfillmentReview::STATE_REFUNDED, $resolved->state);
+        $this->assertSame(ManualFulfillmentReview::STATE_REFUNDED, $replay->state);
+        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(2, OrderRefund::count());
+        $remainder = OrderRefund::whereNull('warranty_claim_id')->whereNull('supplier_fulfillment_id')->sole();
+        $this->assertSame(8000, $remainder->amount);
+        $this->assertSame('IDR', $remainder->currency);
+        $this->assertSame('confirmed', $remainder->state);
+        $this->assertNotNull($remainder->confirmed_at);
+        $this->assertSame($owner->id, (int) $remainder->actor_user_id);
+        $this->assertSame(16000, (int) OrderRefund::where('payment_id', $payment->id)->where('state', 'confirmed')->sum('amount'));
+        $this->assertSame(0, OrderRefund::whereIn('state', ['requested', 'uncertain'])->count());
+        $this->assertSame(0, StoreBalanceEntry::count());
+        $this->assertDatabaseHas('audit_logs', ['action' => 'order.remainder_refund_confirmed', 'user_id' => $owner->id]);
+    }
+
+    public function test_a_pending_registered_refund_blocks_the_full_external_refund(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $order = $unit->order;
+        $payment = $order->payments()->sole();
+        $claim = app(WarrantyClaimService::class)->submit($customer, $unit->public_id, $this->proof(), 'Wrong password');
+        Http::fake(fn () => Http::response(['account' => [
+            'id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'refunded', 'price' => 4800,
+            'refund_deadline' => now()->addHours(2)->utc()->toIso8601String(), 'refund' => ['status' => 'approved'],
+        ]]));
+        app(WarrantyClaimService::class)->process($claim->id);
+        app(WarrantySettlementService::class)->choose($customer, $claim->public_id, 'refund');
+        $pending = OrderRefund::where('warranty_claim_id', $claim->id)->sole();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $review = ManualFulfillmentReview::query()->create([
+            'order_id' => $order->id,
+            'payment_id' => $payment->id,
+            'amount' => 16000,
+            'currency' => 'IDR',
+            'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+            'provider_reference' => 'synthetic-review-reference',
+        ]);
+
+        try {
+            app(OrderLifecycle::class)->applyPaymentRefunded($payment);
+            $this->fail('A pending registered refund allowed the full Order refund.');
+        } catch (InvalidOrderTransition $exception) {
+            $this->assertSame('Confirm or recover every registered external refund before refunding the full Order.', $exception->getMessage());
+        }
+        try {
+            app(ManualFulfillmentResolutionService::class)->resolve($review, $owner, 'refund', 'Full refund attempt.', 'synthetic-full-transfer', 'success');
+            $this->fail('The review resolution bypassed a pending registered refund.');
+        } catch (InvalidOrderTransition $exception) {
+            $this->assertSame('Confirm or recover every registered external refund before refunding the full Order.', $exception->getMessage());
+        }
+
+        $this->assertSame(ManualFulfillmentReview::STATE_PENDING, $review->fresh()->state);
+        $this->assertSame('requested', $pending->fresh()->state);
+        $this->assertSame(1, OrderRefund::count());
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
     }
 
     public function test_verified_replacement_buys_one_new_account_once_without_charging_the_buyer(): void

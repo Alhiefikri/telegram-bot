@@ -48,8 +48,13 @@
 {{ $claims->links() }}
 @foreach($missingRefunds as $refund)
     <article class="grid gap-3 rounded-xl border bg-white p-4">
-        <h2 class="break-all font-bold">Refund sisa pesanan {{ $refund->order_id }}</h2>
-        <p>Quantity belum diperoleh: {{ $refund->missing_quantity }} · {{ $refund->amount }} {{ $refund->currency }} · {{ $refund->state }}</p>
+        @if($refund->supplier_fulfillment_id !== null)
+            <h2 class="break-all font-bold">Refund sisa pesanan {{ $refund->order_id }}</h2>
+            <p>Quantity belum diperoleh: {{ $refund->missing_quantity }} · {{ $refund->amount }} {{ $refund->currency }} · {{ $refund->state }}</p>
+        @else
+            <h2 class="break-all font-bold">Refund sisa pembayaran pesanan {{ $refund->order_id }}</h2>
+            <p>Sisa tanpa klaim unit · {{ $refund->amount }} {{ $refund->currency }} · {{ $refund->state }}</p>
+        @endif
         @if($refund->state !== 'confirmed')
             <form method="POST" action="{{ route('admin.suppliers.warranty.refund', $refund) }}" class="grid gap-3 sm:grid-cols-2">
                 @csrf

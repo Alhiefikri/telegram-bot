@@ -171,7 +171,7 @@ class OrderStateMachine implements OrderLifecycle
                 if ($lockedPayment->provider !== 'store_balance'
                     && OrderRefund::query()->where('payment_id', $lockedPayment->id)->exists()
                     && (int) OrderRefund::query()->where('payment_id', $lockedPayment->id)->where('state', 'confirmed')->sum('amount') !== $lockedPayment->amount) {
-                    throw new InvalidOrderTransition('Confirm the remaining external refund amount before refunding the full Order.');
+                    throw new InvalidOrderTransition('Confirm or recover every registered external refund before refunding the full Order.');
                 }
                 $this->refundStoreBalance($order, $lockedPayment, $storeBalanceCustomerId);
                 $wasAlreadyRefunded = $lockedPayment->status === PaymentStatus::Refunded

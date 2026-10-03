@@ -5,15 +5,19 @@ namespace Tests\Feature;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
+use App\Enums\UserRole;
 use App\Exceptions\InvalidOrderTransition;
 use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\OrderRefund;
 use App\Models\Payment;
 use App\Models\ProductStockItem;
 use App\Models\StoreBalanceEntry;
 use App\Models\SupplierAccountUnit;
 use App\Models\SupplierPurchase;
+use App\Models\User;
 use App\Models\WarrantyClaim;
+use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Warranty\MissingFulfillmentRefundService;
@@ -250,5 +254,68 @@ final class BuyMailWarrantyPostgresConcurrencyTest extends TestCase
         $this->assertSame(8000, $ledger->snapshot($customer)->balance());
         $this->assertSame(1, ProductStockItem::whereNull('retired_at')->count());
         $this->assertSame(PaymentStatus::Paid, $order->payments()->sole()->status);
+    }
+
+    public function test_partial_confirmation_and_full_remainder_refund_race_never_exceeds_the_original_payment(): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $order = $unit->order;
+        $payment = $order->payments()->sole();
+        $this->assertSame('manual', $payment->provider);
+        $proof = RefundProof::fromBytes(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAAC0lEQVQImWNgQAYAAA4AAbGa6gYAAAAASUVORK5CYII='));
+        $claim = app(WarrantyClaimService::class)->submit($customer, $unit->public_id, $proof, 'Wrong password');
+        $claim->update(['state' => 'approved', 'verified_at' => now(), 'settlement_state' => 'awaiting_choice']);
+        app(WarrantySettlementService::class)->choose($customer, $claim->public_id, 'refund');
+        $refund = OrderRefund::where('warranty_claim_id', $claim->id)->sole();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $review = ManualFulfillmentReview::query()->create([
+            'order_id' => $order->id,
+            'payment_id' => $payment->id,
+            'amount' => 16000,
+            'currency' => 'IDR',
+            'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+            'provider_reference' => 'synthetic-race-review',
+        ]);
+        $paymentId = $payment->id;
+        $refundId = $refund->id;
+        $reviewId = $review->id;
+        $ownerId = $owner->id;
+
+        $this->race([
+            function () use ($ownerId, $refundId): array {
+                try {
+                    app(WarrantySettlementService::class)->confirmExternalRefund(User::findOrFail($ownerId), $refundId, 8000, 'IDR', 'synthetic-partial-transfer', 'success');
+
+                    return ['state' => 'confirmed'];
+                } catch (\Throwable) {
+                    return ['state' => 'blocked'];
+                }
+            },
+            function () use ($ownerId, $reviewId): array {
+                try {
+                    app(ManualFulfillmentResolutionService::class)->resolve(ManualFulfillmentReview::findOrFail($reviewId), User::findOrFail($ownerId), 'refund', 'Full refund race.', 'synthetic-full-transfer', 'success');
+
+                    return ['state' => 'refunded'];
+                } catch (\Throwable) {
+                    return ['state' => 'blocked'];
+                }
+            },
+        ]);
+
+        $payment = Payment::findOrFail($paymentId);
+        $confirmed = (int) OrderRefund::where('payment_id', $paymentId)->where('state', 'confirmed')->sum('amount');
+        $this->assertLessThanOrEqual(16000, $confirmed);
+        if ($payment->status === PaymentStatus::Refunded) {
+            $this->assertSame(16000, $confirmed);
+            $this->assertSame(0, OrderRefund::where('payment_id', $paymentId)->whereIn('state', ['requested', 'uncertain'])->count());
+            $this->assertSame(2, OrderRefund::where('payment_id', $paymentId)->count());
+            $this->assertSame(ManualFulfillmentReview::STATE_REFUNDED, ManualFulfillmentReview::findOrFail($reviewId)->state);
+        } else {
+            $this->assertSame(PaymentStatus::Paid, $payment->status);
+            $this->assertSame(1, OrderRefund::where('payment_id', $paymentId)->count());
+            $this->assertSame(ManualFulfillmentReview::STATE_PENDING, ManualFulfillmentReview::findOrFail($reviewId)->state);
+        }
+        $this->assertLessThanOrEqual(1, OrderRefund::where('payment_id', $paymentId)->whereNull('warranty_claim_id')->whereNull('supplier_fulfillment_id')->count());
     }
 }

@@ -220,8 +220,12 @@ A Customer-owned case about one delivered Supplier Account Unit, with private or
 _Avoid_: automatic refund approval, Payment refund
 
 **Order Refund**:
-One immutable buyer refund entitlement and settlement record for a verified account claim or definitively missing fulfillment units. Supplier Balance recovery is separate. A partial Order Refund does not mark the entire Payment Refunded until the complete paid amount is returned.
+One immutable buyer refund entitlement and settlement record for a verified account claim, definitively missing fulfillment units, or an operator-confirmed remainder. Supplier Balance recovery is separate. A partial Order Refund does not mark the entire Payment Refunded until the complete paid amount is returned.
 _Avoid_: supplier credit, proof of bank transfer, direct balance mutation
+
+**Remainder Refund**:
+The part of a full external Order refund that no verified account claim or definitively missing fulfillment unit covers, recorded as one confirmed Order Refund from the operator's exact transfer evidence. It never credits Store Balance and never replaces a registered partial refund.
+_Avoid_: goodwill credit, adjustment refund, extra refund
 
 **Supplier Balance**:
 The store operator's prepaid funds held by a Supplier and available for acquiring products. It is distinct from Customer-owned Store Balance and is not a customer refund destination.

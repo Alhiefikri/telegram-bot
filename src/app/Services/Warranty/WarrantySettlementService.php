@@ -112,6 +112,9 @@ final class WarrantySettlementService
             throw new InvalidOrderTransition('Invalid external refund evidence.');
         }
         $initial = OrderRefund::query()->findOrFail($refundId);
+        if ($initial->warranty_claim_id === null && $initial->supplier_fulfillment_id === null) {
+            throw new InvalidOrderTransition('This refund has no confirmable claim or fulfillment entitlement.');
+        }
         if ($initial->warranty_claim_id === null && $initial->supplier_fulfillment_id !== null) {
             return app(MissingFulfillmentRefundService::class)->confirmExternal($actor, $initial, $amount, $currency, $reference, $result);
         }

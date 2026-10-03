@@ -25,7 +25,7 @@ final class AdminWarrantyController extends Controller
         $this->authorizeOperator($request);
         $claims = WarrantyClaim::query()->with(['order', 'unit.orderItem', 'replacementPurchase'])->orderByDesc('id')->paginate(25);
         $refunds = OrderRefund::query()->whereIn('warranty_claim_id', $claims->pluck('id'))->get()->keyBy('warranty_claim_id');
-        $missingRefunds = OrderRefund::whereNotNull('supplier_fulfillment_id')->orderByDesc('created_at')->paginate(25, ['*'], 'missing_page');
+        $missingRefunds = OrderRefund::whereNull('warranty_claim_id')->orderByDesc('created_at')->paginate(25, ['*'], 'missing_page');
         $webhookEvents = SupplierWebhookEvent::query()
             ->select(['id', 'supplier_id', 'event_type', 'state', 'last_error', 'created_at', 'next_attempt_at'])
             ->where('state', '!=', 'processed')->orderBy('next_attempt_at')->orderBy('id')->paginate(25, ['*'], 'webhook_page');
