@@ -34,6 +34,7 @@ use App\Storefront\StorefrontOrderAccess;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -661,6 +662,126 @@ final class WarrantyClaimTest extends NonTransactionalDatabaseTestCase
         $this->assertSame('reversed', $claim->fresh()->state);
         $this->assertSame(8000, $ledger->snapshot($customer)->balance());
         $this->assertSame(1, OrderRefund::count());
+        $retiredAt = $unit->stockItem->fresh()->retired_at;
+        $entryCount = StoreBalanceEntry::count();
+        $decision = 'approved';
+        $this->assertTrue($claims->refreshNow($claim->id));
+        $this->assertSame('approved', $claim->fresh()->state);
+        $this->assertSame('approved', $claim->fresh()->provider_decision);
+        $this->assertCount(3, $claim->fresh()->decision_history);
+        $this->assertSame('refunded', $claim->fresh()->settlement_state);
+        app(WarrantySettlementService::class)->choose($customer, $claim->public_id, 'refund');
+        $this->assertSame(8000, $ledger->snapshot($customer)->balance());
+        $this->assertSame($entryCount, StoreBalanceEntry::count());
+        $this->assertTrue($retiredAt->equalTo($unit->stockItem->fresh()->retired_at));
+        $this->assertSame(1, OrderRefund::count());
+        $decision = 'reversed';
+        $correctedEvent = SupplierWebhookEvent::create([
+            'supplier_id' => $unit->supplier_id, 'external_event_id' => 'corrected-reversed-2',
+            'event_type' => 'refund.reversed', 'resource_id' => 'PR1', 'state' => 'received',
+            'next_attempt_at' => now(), 'payload' => ['id' => 'corrected-reversed-2', 'type' => 'refund.reversed', 'data' => ['account' => ['id' => 'PR1']]],
+        ]);
+        app(BuyMailWebhookService::class)->process($correctedEvent->id);
+        $this->assertSame('processed', $correctedEvent->fresh()->state);
+        $this->assertSame('reversed', $claim->fresh()->state);
+        $decision = 'approved';
+        $correctedEvent = SupplierWebhookEvent::create([
+            'supplier_id' => $unit->supplier_id, 'external_event_id' => 'corrected-approved-3',
+            'event_type' => 'refund.approved', 'resource_id' => 'PR1', 'state' => 'received',
+            'next_attempt_at' => now(), 'payload' => ['id' => 'corrected-approved-3', 'type' => 'refund.approved', 'data' => ['account' => ['id' => 'PR1']]],
+        ]);
+        app(BuyMailWebhookService::class)->process($correctedEvent->id);
+        $this->assertSame('processed', $correctedEvent->fresh()->state);
+        $this->assertSame('approved', $claim->fresh()->state);
+        $this->assertCount(5, $claim->fresh()->decision_history);
+        $this->assertSame('refunded', $claim->fresh()->settlement_state);
+        $this->assertSame($entryCount, StoreBalanceEntry::count());
+        $this->assertSame(8000, $ledger->snapshot($customer)->balance());
+        $this->assertTrue($retiredAt->equalTo($unit->stockItem->fresh()->retired_at));
+        $this->assertSame(1, OrderRefund::count());
+    }
+
+    public static function terminalRefreshStates(): iterable
+    {
+        foreach (['reversed', 'rejected', 'cancelled', 'expired'] as $state) {
+            yield $state => [$state];
+        }
+    }
+
+    #[DataProvider('terminalRefreshStates')]
+    public function test_terminal_refresh_without_refund_object_preserves_state_and_audits_the_get(string $state): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $claims = app(WarrantyClaimService::class);
+        $claim = $claims->submit($customer, $unit->public_id, $this->proof(), 'Wrong password');
+        $claim->update(['state' => $state, 'provider_decision' => $state === 'expired' ? null : $state, 'next_attempt_at' => now()->addHour()]);
+        Http::fake(function ($request) {
+            $this->assertSame('GET', $request->method());
+            $this->assertSame(0, DB::transactionLevel());
+
+            return Http::response(['account' => [
+                'id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'completed', 'price' => 4800,
+                'refund_deadline' => now()->addHours(2)->utc()->toIso8601String(), 'refund' => null,
+            ]]);
+        });
+
+        $this->assertTrue($claims->refreshNow($claim->id));
+        Http::assertSentCount(1);
+        $this->assertSame($state, $claim->fresh()->state);
+        $this->assertSame($state === 'expired' ? null : $state, $claim->fresh()->provider_decision);
+        $this->assertEmpty($claim->fresh()->decision_history);
+        $this->assertNull($claim->fresh()->next_attempt_at);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'warranty.supplier_refreshed', 'subject_id' => (string) $claim->id]);
+        $claims->process($claim->id);
+        Http::assertSentCount(1);
+    }
+
+    public static function adminRefreshOutcomes(): iterable
+    {
+        yield 'success' => ['success', true, 1];
+        yield 'active lease' => ['busy', false, 0];
+        yield 'transport failure' => ['failure', false, 1];
+        yield 'cost mismatch' => ['mismatch', false, 1];
+        yield 'lost lease' => ['lost', false, 1];
+    }
+
+    #[DataProvider('adminRefreshOutcomes')]
+    public function test_admin_terminal_refresh_reports_only_a_committed_authoritative_get(string $outcome, bool $success, int $requests): void
+    {
+        [$customer, $unit] = $this->fixture();
+        $claim = app(WarrantyClaimService::class)->submit($customer, $unit->public_id, $this->proof(), 'Wrong password');
+        $claim->update(['state' => 'reversed', 'provider_decision' => 'reversed', 'next_attempt_at' => null,
+            'lease_expires_at' => $outcome === 'busy' ? now()->addMinutes(3) : null]);
+        $attempts = 0;
+        Http::fake(function ($request) use ($outcome, $claim, &$attempts) {
+            $attempts++;
+            $this->assertSame('GET', $request->method());
+            if ($outcome === 'failure') {
+                throw new ConnectionException('Synthetic unavailable transport');
+            }
+            if ($outcome === 'lost') {
+                $claim->update(['claim_token' => 'other-worker']);
+            }
+
+            return Http::response(['account' => [
+                'id' => 'PR1', 'order_id' => 'ORD1', 'status' => 'completed', 'price' => $outcome === 'mismatch' ? 4900 : 4800,
+                'refund_deadline' => now()->addHours(2)->utc()->toIso8601String(), 'refund' => ['status' => 'reversed'],
+            ]]);
+        });
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]))
+            ->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.suppliers.warranty.refresh', $claim))
+            ->assertRedirect(route('admin.suppliers.warranty'))
+            ->assertSessionHas('status', $success
+                ? 'Status klaim dibaca ulang dari akun supplier yang sama.'
+                : 'Status supplier belum berhasil dibaca ulang. Pembacaan sedang berjalan atau supplier tidak tersedia; coba lagi.');
+        $this->assertSame($requests, $attempts);
+        // Laravel records completed fake exchanges; connection failures have no response.
+        Http::assertSentCount($outcome === 'failure' ? 0 : $requests);
+        $this->assertSame('reversed', $claim->fresh()->state);
+        $this->assertSame('awaiting_verification', $claim->fresh()->settlement_state);
+        $this->assertSame($success ? 1 : 0, AuditLog::where('action', 'warranty.supplier_refreshed')->count());
+        $this->assertSame(0, OrderRefund::count());
     }
 
     public function test_unknown_replacement_blocks_refund_switch_and_full_order_refund(): void

@@ -83,7 +83,7 @@ final class WarrantyClaimService
         }
     }
 
-    public function process(int $id, bool $readOnly = false): void
+    public function process(int $id, bool $readOnly = false): bool
     {
         if (DB::transactionLevel() !== 0) {
             throw new InvalidOrderTransition('Warranty transport cannot run under financial locks.');
@@ -95,8 +95,10 @@ final class WarrantyClaimService
             }
             [, $unit, , $supplier] = $this->lockUnit($initial->unit);
             $claim = WarrantyClaim::query()->whereKey($id)->lockForUpdate()->firstOrFail();
-            if ($claim->lease_expires_at?->isFuture() || $claim->next_attempt_at?->isFuture()
-                || ! in_array($claim->state, ['received', 'submitting', 'submission_unknown', 'pending', 'approved', 'review'], true)) {
+            if ($claim->lease_expires_at?->isFuture() || (! $readOnly && $claim->next_attempt_at?->isFuture())
+                || ! in_array($claim->state, $readOnly
+                    ? ['received', 'submitting', 'submission_unknown', 'pending', 'approved', 'review', 'reversed', 'rejected', 'cancelled', 'expired']
+                    : ['received', 'submitting', 'submission_unknown', 'pending', 'approved', 'review'], true)) {
                 return null;
             }
             $submit = ! $readOnly && $claim->state === 'received' && $claim->dispatched_at === null;
@@ -116,7 +118,7 @@ final class WarrantyClaimService
             return [$claim, $unit, $supplier, $token, $submit];
         }, 5);
         if ($request === null) {
-            return;
+            return false;
         }
         [$claim, $unit, $supplier, $token, $submit] = $request;
         $account = null;
@@ -139,11 +141,12 @@ final class WarrantyClaimService
         } catch (Throwable) {
             $error = 'warranty_transport_unavailable';
         }
-        DB::transaction(function () use ($id, $unit, $token, $submit, $account, $error): void {
+
+        return DB::transaction(function () use ($id, $unit, $token, $submit, $readOnly, $account, $error): bool {
             [, $lockedUnit, , $supplier] = $this->lockUnit($unit);
             $claim = WarrantyClaim::query()->whereKey($id)->lockForUpdate()->firstOrFail();
             if ($claim->claim_token !== $token) {
-                return;
+                return false;
             }
             $claim->forceFill(['claim_token' => null, 'lease_expires_at' => null, 'last_error' => $error]);
             if ($account === null || $account['price'] !== $lockedUnit->cost_idr) {
@@ -153,16 +156,21 @@ final class WarrantyClaimService
                     // failures retain their original dispatch and use GET only.
                     $claim->forceFill(['state' => 'received', 'dispatched_at' => null, 'next_attempt_at' => now()->addSeconds(15)])->save();
 
-                    return;
+                    return false;
                 }
                 $claim->forceFill(['state' => $submit ? 'submission_unknown' : $claim->state, 'next_attempt_at' => now()->addMinute(), 'last_error' => $error ?? 'refund_cost_mismatch'])->save();
 
-                return;
+                return false;
             }
             $decision = $account['refund_status'];
             // A submitted upload without a claim in GET is not safely retryable:
             // the provider documents no idempotency contract for refund POST.
-            $state = $decision ?? ($submit ? 'submission_unknown' : ($claim->state === 'received' && $claim->dispatched_at === null ? 'received' : ($claim->state === 'approved' ? 'approved' : 'review')));
+            $state = $decision ?? match (true) {
+                $submit => 'submission_unknown',
+                $claim->state === 'received' && $claim->dispatched_at === null => 'received',
+                in_array($claim->state, ['approved', 'reversed', 'rejected', 'cancelled', 'expired'], true) => $claim->state,
+                default => 'review',
+            };
             if ($claim->state === 'approved' && in_array($state, ['pending', 'review', 'submission_unknown'], true)) {
                 $state = 'approved';
             }
@@ -184,9 +192,16 @@ final class WarrantyClaimService
                 'next_attempt_at' => in_array($state, ['received', 'pending', 'submission_unknown', 'review', 'approved'], true) ? now()->addMinutes($state === 'approved' ? 30 : 1) : null,
             ])->save();
             $lockedUnit->update(['provider_state' => $account['status']]);
+            if ($readOnly) {
+                $this->audit->log('warranty.supplier_refreshed', $claim, new: [
+                    'unit_id' => $lockedUnit->id, 'decision' => $decision, 'state' => $state,
+                ]);
+            }
             app(WarrantyNotificationPipeline::class)->record($claim);
             // Balance is recovered through profile synchronization, never by
             // adding a webhook credit to an observation that may contain it.
+
+            return true;
         }, 5);
     }
 
@@ -225,30 +240,9 @@ final class WarrantyClaimService
 
     public function refreshNow(int $id): bool
     {
-        $ready = DB::transaction(function () use ($id): bool {
-            [$claim] = $this->lockForSettlement(WarrantyClaim::findOrFail($id));
-            if ($claim->lease_expires_at?->isFuture()) {
-                return false;
-            }
-            if ($claim->state === 'reversed') {
-                return true;
-            }
-            // A webhook can arrive after a locally rejected/cancelled state;
-            // GET must still be allowed to recover a later authoritative decision.
-            if (! in_array($claim->state, ['received', 'submitting', 'submission_unknown', 'pending', 'approved', 'review'], true)) {
-                $claim->state = 'review';
-            }
-            $claim->next_attempt_at = now();
-            $claim->save();
-
-            return true;
-        }, 5);
-        if (! $ready) {
-            return false;
-        }
-        $this->process($id, readOnly: true);
-
-        return WarrantyClaim::findOrFail($id)->last_error === null;
+        // One leased GET, including terminal observations. Never rewrite state
+        // before transport or report success for a skipped/lost lease.
+        return $this->process($id, readOnly: true);
     }
 
     /**

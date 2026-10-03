@@ -2,6 +2,7 @@
 @section('title', 'Klaim Gmail · Refund & penggantian')
 @section('content')
 <p>Refund supplier memulihkan modal ke saldo supplier. Refund buyer menggunakan harga retail snapshot dan proses terpisah. Keputusan supplier dapat reversed; uang buyer tidak ditarik kembali otomatis.</p>
+<p>Status terminal menghentikan polling berkala. Baca ulang (GET) tetap tersedia untuk melihat koreksi supplier, tanpa mengulang refund buyer atau membuka akun retired.</p>
 <p>Klaim harus sampai ke supplier sebelum deadline. Screenshot asli hanya dibuka oleh Owner/Admin setelah konfirmasi password.</p>
 @if($nearDeadlineUnits->isNotEmpty())
     <section class="grid gap-3 rounded-xl border bg-white p-4">

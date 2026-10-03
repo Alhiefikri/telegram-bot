@@ -66,7 +66,9 @@ final class AdminWarrantyController extends Controller
     {
         $this->authorizeOperator($request);
         app(SupplierOperationConfirmation::class)->requireRecent($request);
-        $claims->refreshNow($claim->id);
+        if (! $claims->refreshNow($claim->id)) {
+            return redirect()->route('admin.suppliers.warranty')->with('status', 'Status supplier belum berhasil dibaca ulang. Pembacaan sedang berjalan atau supplier tidak tersedia; coba lagi.');
+        }
 
         return redirect()->route('admin.suppliers.warranty')->with('status', 'Status klaim dibaca ulang dari akun supplier yang sama.');
     }

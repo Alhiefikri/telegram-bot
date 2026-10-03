@@ -17,3 +17,7 @@ Provider HTTP stays outside financial locks. Claim/settlement operations share O
 Private API keys and webhook secrets are encrypted and edited through Dashboard. Rotation verifies the same supplier profile identity outside the mutation transaction and rechecks its version before saving. Fixed-origin Bearer transport, disabled redirects and bounded decoding protect credentials. Proof uploads retain original bytes encrypted on private storage and are never flashed or published.
 
 This decision extends ADR-0016 for per-unit warranty, partial acquisition and compensation. It does not promise a provider price lock, unrestricted refund coverage, guaranteed webhook delivery, refund finality, or exactly-once behavior without documented idempotency. API contracts not fully specified publicly require operator qualification.
+
+## Terminal supplier observations (issue #530)
+
+`reversed`, `rejected`, `cancelled` and locally `expired` stop periodic claim polling, but do not establish provider finality. Admin refresh and signed webhook wakeups may perform one leased, read-only authoritative account GET. They preserve the current state when GET contains no refund decision, record successful reads in the audit even when the decision is unchanged, and report failure when the read is skipped, fails validation/transport, or loses its lease. A later valid decision updates the observation/history without resetting customer settlement, crediting/debiting buyer funds, or unretiring credentials. Existing settlement identities continue to prevent a second refund.
