@@ -46,10 +46,17 @@ final class BuyMailWebhookController extends Controller
             || ($type !== 'ping' && (! is_string($resource) || preg_match('/\A[A-Za-z0-9._:-]{1,128}\z/D', $resource) !== 1))) {
             return response()->json(['received' => false], 422);
         }
+        // Reconstruct an allowlisted envelope from validated routing values.
+        // Signed provider data is still private and never settlement authority.
+        $safePayload = ['id' => $id, 'type' => $type, 'data' => match ($type) {
+            'ping' => [],
+            'deposit.paid' => ['deposit' => ['id' => $resource]],
+            default => ['account' => ['id' => $resource]],
+        }];
         try {
-            DB::transaction(function () use ($supplier, $id, $type, $resource, $payload): void {
+            DB::transaction(function () use ($supplier, $id, $type, $resource, $safePayload): void {
                 $event = SupplierWebhookEvent::firstOrCreate(['supplier_id' => $supplier->id, 'external_event_id' => $id], [
-                    'event_type' => $type, 'resource_id' => $resource, 'payload' => $payload,
+                    'event_type' => $type, 'resource_id' => $resource, 'payload' => $safePayload,
                     'state' => 'received', 'next_attempt_at' => now(),
                 ]);
                 if ($event->wasRecentlyCreated) {

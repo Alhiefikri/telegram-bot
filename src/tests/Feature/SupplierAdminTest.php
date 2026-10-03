@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Jobs\ProcessSupplierDeposit;
 use App\Models\AuditLog;
 use App\Models\OrderItem;
 use App\Models\Product;
@@ -10,6 +11,7 @@ use App\Models\ProductQuantityPriceTier;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierDeposit;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
@@ -17,6 +19,8 @@ use App\Models\User;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Support\NonTransactionalDatabaseTestCase as TestCase;
 
@@ -37,6 +41,53 @@ final class SupplierAdminTest extends TestCase
         $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertSee('BuyMail')->assertDontSee(self::KEY);
         $this->patch(route('admin.suppliers.update', $supplier), array_replace($input, ['api_key' => '', 'version' => 1, 'exchange_rate_idr' => 16000]))->assertStatus(422);
         $this->assertSame(1, $supplier->fresh()->exchange_rate_idr);
+    }
+
+    public function test_buymail_deposit_refresh_requires_recent_confirmation_before_recovery_or_http(): void
+    {
+        $this->owner();
+        Queue::fake();
+        Http::fake();
+        $supplier = $this->supplier(['provider' => 'buymail', 'currency' => 'IDR', 'exchange_rate_idr' => 1, 'external_account_id' => '123']);
+        $deposit = SupplierDeposit::create([
+            'supplier_id' => $supplier->id, 'idempotency_key' => (string) Str::uuid(),
+            'account_id_snapshot' => '123', 'amount' => 100000, 'state' => 'pending', 'operation' => 'create',
+        ]);
+        foreach ([null, 'TOPUP1'] as $externalId) {
+            $deposit->update(['external_id' => $externalId]);
+            foreach ([null, time() - 901, time() + 60] as $confirmedAt) {
+                $this->withSession(['auth.password_confirmed_at' => $confirmedAt])
+                    ->post(route('admin.suppliers.buymail.deposit.refresh', $deposit))->assertStatus(428);
+                $this->assertSame('pending', $deposit->fresh()->state);
+            }
+        }
+        Queue::assertNothingPushed();
+        Http::assertNothingSent();
+    }
+
+    public function test_buymail_deposit_refresh_with_recent_confirmation_preserves_recovery_identity(): void
+    {
+        $this->owner();
+        Queue::fake();
+        Http::fake(fn () => Http::response(['deposit' => [
+            'id' => 'TOPUP1', 'amount' => 100000, 'currency' => 'IDR', 'status' => 'paid',
+            'payment_url' => 'https://payments.example.test/topup1', 'expires_at' => now()->addHour()->utc()->toIso8601String(),
+        ]]));
+        $supplier = $this->supplier(['provider' => 'buymail', 'currency' => 'IDR', 'exchange_rate_idr' => 1, 'external_account_id' => '123']);
+        $deposit = SupplierDeposit::create([
+            'supplier_id' => $supplier->id, 'idempotency_key' => 'original-intent',
+            'account_id_snapshot' => '123', 'amount' => 100000, 'state' => 'requested', 'operation' => 'create',
+        ]);
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.suppliers.buymail.deposit.refresh', $deposit))->assertRedirect();
+        Queue::assertPushed(ProcessSupplierDeposit::class, fn ($job) => $job->depositId === $deposit->id);
+        Http::assertNothingSent();
+        $deposit->update(['external_id' => 'TOPUP1', 'state' => 'pending']);
+        $this->post(route('admin.suppliers.buymail.deposit.refresh', $deposit))->assertRedirect();
+        $this->assertSame('paid', $deposit->fresh()->state);
+        $this->assertSame('original-intent', $deposit->idempotency_key);
+        $this->assertSame(1, SupplierDeposit::count());
+        Http::assertSent(fn ($request) => $request->method() === 'GET' && str_ends_with($request->url(), '/deposits/TOPUP1'));
     }
 
     public function test_buymail_webhook_secret_is_saved_privately_and_blank_updates_preserve_it(): void

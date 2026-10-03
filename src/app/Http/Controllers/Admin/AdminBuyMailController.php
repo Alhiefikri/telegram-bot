@@ -59,6 +59,7 @@ final class AdminBuyMailController extends Controller
     {
         $supplier = Supplier::findOrFail($deposit->supplier_id);
         $this->authorizeOperator($request, $supplier);
+        app(SupplierOperationConfirmation::class)->requireRecent($request);
         if ($deposit->external_id === null) {
             // Queue recovery preserves the original intent/key; this action
             // never creates a replacement deposit with a new key.
