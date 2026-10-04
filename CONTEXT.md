@@ -214,7 +214,7 @@ A proposed global identity for one externally observed economic transfer, shared
 _Avoid_: screenshot, webhook delivery ID, customer-submitted hash proof
 
 **Balance Adjustment Request**:
-A proposed immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID, with an identity/amount preview and default distinct maker/approver. Application or linked reversal creates a new ledger effect; it never sets or edits a balance directly.
+A proposed immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID, with an identity/amount preview. H0-v1 permits the store's sole Owner to confirm each request individually under the accepted single-operator exception; this is not a currently available feature. Application or linked full reversal creates a new ledger effect; it never sets or edits a balance directly. An Owner-attested manual case is distinct from a provider-verified top-up.
 _Avoid_: manual balance overwrite, automatic Customer creation, arbitrary USDT grant
 
 **Economic Source**:
