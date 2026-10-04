@@ -127,7 +127,9 @@ final class CheckoutInstructionDeliveryPipeline
             }
 
             $this->synchronizeSentProjection($finalized, $messageId, $finalized->sent_at ?? now());
-            $terminalOrder = $order->fresh(['payments']);
+            $terminalOrder = Order::query()
+                ->select(['id', 'order_status', 'telegram_receipt_sent_at'])
+                ->findOrFail($order->id);
             if ($terminalOrder->order_status === OrderStatus::Cancelled
                 || ($terminalOrder->order_status === OrderStatus::Completed && $terminalOrder->telegram_receipt_sent_at !== null)) {
                 DeleteBuyerCheckoutMessages::dispatch($terminalOrder->id, now()->toISOString())
