@@ -195,6 +195,36 @@ _Avoid_: Top-up receipt, sales report, revenue post
 One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.
 _Avoid_: Transaction, balance mutation, adjustment row
 
+The following balance-extension terms are **proposed** under [ADR-0019](docs/adr/0019-idr-usdt-economic-sources-and-receipt-claims.md) and issue #537. They describe downstream contracts, not currently available features or approved funding providers. Store Balance continues to mean the existing IDR ledger.
+
+**Customer USDT Balance**:
+A proposed Customer-owned shopping balance held in a separate USDT account and immutable ledger, denominated in integer micro-USDT. It is a store liability, with no implicit conversion to Store Balance and no application custody of private keys.
+_Avoid_: Store Balance USDT, non-custodial wallet, Supplier Balance
+
+**USDT Funding Intent**:
+A proposed expiring Customer confirmation binding exact USDT amount, policy version, private chat/navigation root and nonce before any provider invoice or money posting.
+_Avoid_: USDT invoice, deposit receipt, available funds
+
+**USDT Top-up**:
+A proposed funding target with immutable currency, amount, fee, provider/receiver/token/network and finality snapshots. Only verified attributable final evidence and one economic resolution can credit Customer USDT Balance; expiry does not prove absence of money.
+_Avoid_: Order Payment, automatic currency conversion
+
+**External Money Receipt**:
+A proposed global identity for one externally observed economic transfer, shared by checkout, funding and funded adjustments. Verified aliases refer to the same physical funds; BSC logs also retain a single-target parent transaction claim. Observation is distinct from authorized consumption.
+_Avoid_: screenshot, webhook delivery ID, customer-submitted hash proof
+
+**Balance Adjustment Request**:
+A proposed immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID, with an identity/amount preview and default distinct maker/approver. Application or linked reversal creates a new ledger effect; it never sets or edits a balance directly.
+_Avoid_: manual balance overwrite, automatic Customer creation, arbitrary USDT grant
+
+**Economic Source**:
+A proposed typed authorization for one ledger effect, binding its immutable business identity, Customer, currency, exact units, evidence and request fingerprint. Matching replay returns the same posting; changed payload conflicts.
+_Avoid_: arbitrary source string, transport request ID
+
+**Accounting Event**:
+A proposed append-only, currency-specific counterpart record committed with one ledger posting, linking liability, settlement asset, sale, fee or expense legs. Supplier treasury observations and unresolved deposits remain distinct from Customer available funds.
+_Avoid_: Telegram receipt, mixed-currency total, projection repair
+
 **Store Activity**:
 The public-safe Telegram home summary of the Telegram Customer count and canonical successful Orders. It never discloses revenue, sold units, GMV, or earnings.
 _Avoid_: Sales report, revenue dashboard, store statistics
