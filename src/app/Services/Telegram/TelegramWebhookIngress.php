@@ -33,6 +33,12 @@ class TelegramWebhookIngress
             return new TelegramWebhookIngressResult(['message' => 'Unsupported update type'], 422);
         }
 
+        // Pinning a delivered receipt creates a service message, not buyer input.
+        // Acknowledge it before minimization discards the service-event identity.
+        if (isset($payload['message']['pinned_message'])) {
+            return new TelegramWebhookIngressResult(['ok' => true]);
+        }
+
         $payload = $this->minimizedPayload($payload);
         $callbackResponse = $this->callbackResponse($payload);
 

@@ -7,7 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\DeleteAdminPendingOrderNotification;
-use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
+use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
@@ -142,10 +142,7 @@ class OrderStateMachine implements OrderLifecycle
                     throw new InvalidOrderTransition('Only pending manual orders can be rejected.');
                 }
 
-                $rejected = $this->applyReleaseTransition($lockedOrder, $payments, OrderStatus::Cancelled, PaymentStatus::Failed, false);
-                DeleteBuyerBinanceCheckoutInstruction::dispatch($rejected->order->getKey(), now()->toISOString())->onQueue('notifications')->afterCommit();
-
-                return $rejected;
+                return $this->applyReleaseTransition($lockedOrder, $payments, OrderStatus::Cancelled, PaymentStatus::Failed, false);
             });
         }, 5);
     }
@@ -494,6 +491,11 @@ class OrderStateMachine implements OrderLifecycle
             $this->recordGuestNotification($order, GuestOrderNotificationEvent::OrderCancelled);
         }
         $this->dispatchAdminPendingNotificationDelete($order);
+        if ($orderStatus === OrderStatus::Cancelled) {
+            DeleteBuyerCheckoutMessages::dispatch((string) $order->id, now()->toISOString())
+                ->onQueue('notifications')
+                ->afterCommit();
+        }
         if ($orderStatus === OrderStatus::Expired && $paymentStatus === PaymentStatus::Expired) {
             $this->recordAndDispatchAdminOrderExpired($order);
         }

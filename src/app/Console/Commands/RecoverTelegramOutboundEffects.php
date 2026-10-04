@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\OrderStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
@@ -11,6 +12,7 @@ use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Services\Telegram\CheckoutInstructionDeliveryPipeline;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
@@ -284,15 +286,6 @@ class RecoverTelegramOutboundEffects extends Command
                                     ->where(function ($claim) use ($cutoff): void {
                                         $claim->whereNull('manual_checkout_customer_notification_deletion_started_at')
                                             ->orWhere('manual_checkout_customer_notification_deletion_started_at', '<=', $cutoff);
-                                    })
-                                    ->whereHas('payments', function ($payments): void {
-                                        $payments->where(function ($candidates): void {
-                                            $candidates
-                                                ->where(fn ($binance) => $binance
-                                                    ->where('provider', PaymentProvider::MANUAL)
-                                                    ->whereIn('method', ['BINANCE_PAY_ID', 'USDT_BEP20']))
-                                                ->orWhere('provider', PaymentProvider::KLIKQRIS);
-                                        });
                                     });
                             })->orWhere(function ($detail) use ($cutoff): void {
                                 $detail
@@ -303,15 +296,31 @@ class RecoverTelegramOutboundEffects extends Command
                                         $claim->whereNull('buyer_order_detail_message_deletion_started_at')
                                             ->orWhere('buyer_order_detail_message_deletion_started_at', '<=', $cutoff);
                                     });
+                            })->orWhereExists(function ($effects) use ($cutoff): void {
+                                $effects->selectRaw('1')
+                                    ->from('telegram_outbound_effects')
+                                    ->where('source_type', Order::class)
+                                    ->whereRaw('source_id = CAST(orders.id AS TEXT)')
+                                    ->whereIn('effect_type', CheckoutInstructionDeliveryPipeline::EFFECT_TYPES)
+                                    ->where('state', TelegramOutboundEffectState::Sent->value)
+                                    ->whereNotNull('telegram_chat_id')
+                                    ->whereNotNull('telegram_message_id')
+                                    ->whereNull('telegram_message_deleted_at')
+                                    ->where(function ($claim) use ($cutoff): void {
+                                        $claim->whereNull('telegram_message_deletion_started_at')
+                                            ->orWhere('telegram_message_deletion_started_at', '<=', $cutoff);
+                                    });
                             });
                         });
                 });
             })
-            ->select('id')
+            ->select(['id', 'order_status', 'telegram_receipt_sent_at'])
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($orders) use (&$dispatched): void {
                 foreach ($orders as $order) {
-                    $job = $order->payments()->where('provider', PaymentProvider::MANUAL)->whereIn('method', ['BINANCE_PAY_ID', 'USDT_BEP20'])->exists()
+                    $job = $order->order_status === OrderStatus::Completed
+                        && $order->telegram_receipt_sent_at === null
+                        && $order->payments()->where('provider', PaymentProvider::MANUAL)->whereIn('method', ['BINANCE_PAY_ID', 'USDT_BEP20'])->exists()
                         ? DeleteBuyerBinanceCheckoutInstruction::dispatch($order->id, now()->toISOString())
                         : DeleteBuyerCheckoutMessages::dispatch($order->id, now()->toISOString());
                     $job

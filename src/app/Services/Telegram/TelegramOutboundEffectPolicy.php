@@ -118,8 +118,11 @@ final class TelegramOutboundEffectPolicy
     ];
 
     /** @return Builder<TelegramOutboundEffect> */
-    public function applyRetryableConstraints(Builder $query): Builder
+    public function applyRetryableConstraints(Builder $query, ?string $effectType = null): Builder
     {
+        if ($effectType !== null) {
+            $query->where('effect_type', $effectType);
+        }
         $query
             ->where(function (Builder $state): void {
                 $state
@@ -133,17 +136,24 @@ final class TelegramOutboundEffectPolicy
                                     ->orWhereNotIn('last_error_code', self::NON_RETRYABLE_FAILURE_CODES);
                             });
                     });
-            })
-            ->where(function (Builder $attempts): void {
-                $attempts->whereNotIn('effect_type', array_keys(self::MAX_ATTEMPTS));
+            });
 
-                foreach (self::MAX_ATTEMPTS as $effectType => $maximum) {
-                    $attempts->orWhere(function (Builder $family) use ($effectType, $maximum): void {
-                        $family->where('effect_type', $effectType)
-                            ->where(function (Builder $available) use ($effectType, $maximum): void {
+        $maximums = $effectType === null
+            ? self::MAX_ATTEMPTS
+            : array_intersect_key(self::MAX_ATTEMPTS, [$effectType => true]);
+        if ($maximums !== []) {
+            $query->where(function (Builder $attempts) use ($effectType, $maximums): void {
+                if ($effectType === null) {
+                    $attempts->whereNotIn('effect_type', array_keys($maximums));
+                }
+
+                foreach ($maximums as $familyType => $maximum) {
+                    $attempts->orWhere(function (Builder $family) use ($familyType, $maximum): void {
+                        $family->where('effect_type', $familyType)
+                            ->where(function (Builder $available) use ($familyType, $maximum): void {
                                 $available->where('attempts', '<', $maximum);
 
-                                if (in_array($effectType, [
+                                if (in_array($familyType, [
                                     TelegramOutboundEffectType::SalesProofPost->value,
                                     TelegramOutboundEffectType::BalanceTopUpInstructions->value,
                                 ], true)) {
@@ -152,8 +162,13 @@ final class TelegramOutboundEffectPolicy
                             });
                     });
                 }
-            })
-            ->where(function (Builder $receipt): void {
+            });
+        }
+
+        // Known non-receipt families cannot have receipt predecessors. Keeping
+        // that correlated subquery in stock discovery triggers costly plans/JIT.
+        if ($effectType === null || $effectType === TelegramOutboundEffectType::ReceiptCredentials->value) {
+            $query->where(function (Builder $receipt): void {
                 $receipt
                     ->where('effect_type', '<>', TelegramOutboundEffectType::ReceiptCredentials->value)
                     ->orWhere(function (Builder $ordered): void {
@@ -187,6 +202,7 @@ final class TelegramOutboundEffectPolicy
                             });
                     });
             });
+        }
 
         return $query;
     }

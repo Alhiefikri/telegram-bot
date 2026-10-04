@@ -113,6 +113,22 @@ final class SupplierAvailabilityTest extends TestCase
         $this->assertSame(2, ProductWaitlistEvent::query()->count());
     }
 
+    public function test_external_topup_refreshes_four_unit_capacity_on_the_next_minute_tick(): void
+    {
+        [$product, $supplier] = $this->mapped();
+        $this->snapshot('4', 100);
+        $this->assertTrue(app(SupplierCatalogSync::class)->sync($supplier));
+        $this->assertSame(4, $product->fresh()->availableStock());
+
+        $this->travel(1)->minutes();
+        $this->snapshot('90', 100);
+        $this->artisan('suppliers:sync', ['--limit' => 1])->assertSuccessful();
+
+        $this->assertSame(90000000, $supplier->fresh()->balance_micros);
+        $this->assertSame(90, $product->fresh()->availableStock());
+        $this->assertSame(0, $product->fresh()->stock);
+    }
+
     public function test_missing_sku_and_unsupported_activation_fail_closed_and_preserve_holds(): void
     {
         [$product, $supplier, $item] = $this->mapped();

@@ -35,6 +35,8 @@ An account supports multiple SKUs with one credential. Adding another SKU from a
 - While any supplier purchase has an unresolved, uncommitted debit, sync retains the existing wallet observation: the provider may already have charged that purchase. Catalog freshness still updates, but local finalization must not subtract the same debit from an already-reduced wallet.
 - If supplier balance is insufficient and no equivalent funded source is available, customer sees the ordinary unavailable state. Private Admin shows the funding warning.
 - A genuine authoritative unavailable-to-available Product transition reuses existing Telegram/Store Channel restock notifications and Web waitlist events. Repeated sync, recovery from a transient outage, or restock of an unused primary while a backup remained available must not create duplicate announcements.
+- Top-up yang dilakukan langsung di supplier dideteksi pada tick sync berikutnya setelah snapshot berusia satu menit; Admin **Sinkron katalog dan saldo** dapat meminta refresh langsung. Provider outage/rate limit dan antrean akun tetap dapat menunda observasi, bukan mengotorisasi stok dari saldo yang belum terbukti.
+- Angka public adalah kapasitas pembelian aman, bukan raw stock supplier. Jika tetap 4 setelah sync berhasil, bandingkan saldo tersedia (total dikurangi dana ditahan), biaya/unit, unit ditahan, batas quantity provider, dan harga tier retail mulai quantity 5 terhadap minimum profit/buffer. Saldo dan raw stock besar tidak boleh melewati tier yang membuat pembelian rugi. Purchase dengan debit belum terselesaikan tetap menjaga wallet observation sebelumnya; selesaikan recovery, jangan menghapus hold.
 
 ### Automated pricing regression
 
@@ -133,7 +135,7 @@ php artisan suppliers:sync --supplier=<supplier-id> --limit=1
 php artisan suppliers:recover --limit=25
 ```
 
-The scheduler runs bounded sync/recovery each minute in the background with a two-minute overlap mutex. Sync skips fresh accounts, renews observations within one minute of their five-minute expiry, uses attempted-at ordering for fairness and a durable per-account read lease. Recovery discovers durable PostgreSQL work even if Redis lost a wakeup job. Provider request budgets, bounded snapshots/bodies/catalog counts and freshness gates are safety boundaries; increasing only a row limit does not remove them.
+The scheduler launches bounded sync/recovery first each minute in the background with a two-minute overlap mutex, before synchronous payment/notification sweeps. Sync skips accounts observed less than one minute ago, keeps the five-minute freshness gate, uses attempted-at ordering for fairness and a durable per-account read lease. Stock-notification reconciliation also runs in the background, using family-scoped ledger queries and PostgreSQL recovery cursor indexes; historical terminal Telegram HTTP 400/403 failures no longer occupy its dispatch index. Recovery discovers durable PostgreSQL work even if Redis lost a wakeup job. Provider request budgets, bounded snapshots/bodies/catalog counts and freshness gates are safety boundaries; increasing only a row limit does not remove them.
 
 Recovery classifies fulfillment providers and claim upload priority in batch queries, not one lookup per record. New, undispatched warranty proofs retain the urgent `supplier-refunds` queue; polling and already-dispatched claims use `supplier-claims`. Customer catalog reads use Product availability projections without querying each supplier.
 

@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
+use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
@@ -27,7 +28,7 @@ use Throwable;
 final class CheckoutInstructionDeliveryPipeline
 {
     /** @var list<string> */
-    private const EFFECT_TYPES = [
+    public const EFFECT_TYPES = [
         TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
         TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
         TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
@@ -126,12 +127,19 @@ final class CheckoutInstructionDeliveryPipeline
             }
 
             $this->synchronizeSentProjection($finalized, $messageId, $finalized->sent_at ?? now());
+            $terminalOrder = $order->fresh(['payments']);
+            if ($terminalOrder->order_status === OrderStatus::Cancelled
+                || ($terminalOrder->order_status === OrderStatus::Completed && $terminalOrder->telegram_receipt_sent_at !== null)) {
+                DeleteBuyerCheckoutMessages::dispatch($terminalOrder->id, now()->toISOString())
+                    ->onQueue('notifications');
+
+                return;
+            }
 
             if (in_array($claimed->effect_type, [
                 TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
             ], true)) {
-                $terminalOrder = $order->fresh(['payments']);
                 if (in_array($terminalOrder->order_status, [OrderStatus::Completed, OrderStatus::Cancelled], true)) {
                     DeleteBuyerBinanceCheckoutInstruction::dispatch($terminalOrder->id, now()->toISOString())
                         ->onQueue('notifications');

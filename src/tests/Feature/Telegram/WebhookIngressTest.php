@@ -70,6 +70,23 @@ class WebhookIngressTest extends TelegramBotTestSupport
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
     }
 
+    public function test_receipt_pin_service_event_is_acknowledged_without_routing_a_customer_command(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $payload = $this->messageUpdate(305, '');
+        unset($payload['message']['text']);
+        $payload['message']['from'] = ['id' => 54321, 'is_bot' => true, 'first_name' => 'Store Bot'];
+        $payload['message']['pinned_message'] = ['message_id' => 700, 'photo' => [['file_id' => 'receipt-photo']]];
+
+        $this->postTelegramWebhook($payload)->assertOk();
+        $this->postTelegramWebhook($payload)->assertOk();
+
+        Http::assertNothingSent();
+        $this->assertSame(1, Customer::count());
+        $this->assertSame(0, TelegramUpdate::count());
+    }
+
     public function test_webhook_persists_minimized_message_payload(): void
     {
         Bus::fake();

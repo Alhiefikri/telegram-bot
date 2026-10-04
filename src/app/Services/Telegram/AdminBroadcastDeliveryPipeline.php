@@ -233,9 +233,8 @@ final class AdminBroadcastDeliveryPipeline
 
     private function readyAdminBroadcastEffectsQuery(?CarbonInterface $at = null): Builder
     {
-        return $this->ledger->readyToDispatchQuery($at)
-            ->where('source_type', TelegramBroadcastRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectType::AdminBroadcastRecipient->value);
+        return $this->ledger->readyToDispatchQuery($at, TelegramOutboundEffectType::AdminBroadcastRecipient->value)
+            ->where('source_type', TelegramBroadcastRecipient::class);
     }
 
     private function ensureAdminBroadcastRecipients(TelegramBroadcast $broadcast): void
@@ -601,9 +600,8 @@ final class AdminBroadcastDeliveryPipeline
                     ->orWhere('attempts', '>=', self::MAX_ATTEMPTS);
             })
             ->count();
-        $retryableCount = $this->ledger->retryableQuery()
+        $retryableCount = $this->ledger->retryableQuery(TelegramOutboundEffectType::AdminBroadcastRecipient->value)
             ->where('source_type', TelegramBroadcastRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectType::AdminBroadcastRecipient->value)
             ->whereIn('source_id', TelegramBroadcastRecipient::query()
                 ->where('broadcast_id', $broadcastId)
                 ->selectRaw('CAST(id AS TEXT)'))

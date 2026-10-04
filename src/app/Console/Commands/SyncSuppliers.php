@@ -25,7 +25,11 @@ final class SyncSuppliers extends Command
         $connections = Supplier::query()->where('is_active', true)
             ->when($supplierId !== null,
                 fn ($query) => $query->whereKey((int) $supplierId),
-                fn ($query) => $query->where(fn ($due) => $due->whereNull('sync_expires_at')->orWhere('sync_expires_at', '<=', now()->addMinute())),
+                fn ($query) => $query->where(fn ($due) => $due
+                    ->whereNull('synced_at')
+                    ->orWhere('synced_at', '<=', now()->subMinute())
+                    ->orWhereNull('sync_expires_at')
+                    ->orWhere('sync_expires_at', '<=', now()->addMinute())),
             )
             ->where(fn ($query) => $query->whereNull('sync_token')->orWhere('sync_lease_expires_at', '<=', now()))
             ->orderByRaw('CASE WHEN sync_attempted_at IS NULL THEN 0 ELSE 1 END')->orderBy('sync_attempted_at')->orderBy('id')

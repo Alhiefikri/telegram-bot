@@ -151,7 +151,14 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
 
         $cancelled = $order->fresh();
 
-        if ($context->messageId !== null) {
+        $trackedMessageIds = [];
+        if ((string) $cancelled->manual_checkout_customer_notification_chat_id === $context->chatId) {
+            $trackedMessageIds[] = (int) $cancelled->manual_checkout_customer_notification_message_id;
+        }
+        if ((string) $cancelled->buyer_order_detail_message_chat_id === $context->chatId) {
+            $trackedMessageIds[] = (int) $cancelled->buyer_order_detail_message_id;
+        }
+        if ($context->messageId !== null && ! in_array((int) $context->messageId, $trackedMessageIds, true)) {
             try {
                 $this->bot->deleteMessage($context->chatId, $context->messageId);
             } catch (\Throwable $e) {

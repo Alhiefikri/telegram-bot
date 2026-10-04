@@ -30,17 +30,17 @@ class TelegramOutboundEffectLedgerProtocol
     ) {}
 
     /** @return Builder<TelegramOutboundEffect> */
-    public function retryableQuery(): Builder
+    public function retryableQuery(?string $effectType = null): Builder
     {
-        return $this->policy->applyRetryableConstraints(TelegramOutboundEffect::query());
+        return $this->policy->applyRetryableConstraints(TelegramOutboundEffect::query(), $effectType);
     }
 
     /** @return Builder<TelegramOutboundEffect> */
-    public function readyToDispatchQuery(?CarbonInterface $at = null): Builder
+    public function readyToDispatchQuery(?CarbonInterface $at = null, ?string $effectType = null): Builder
     {
         $at ??= now();
 
-        return $this->retryableQuery()
+        return $this->retryableQuery($effectType)
             ->where(function (Builder $query) use ($at): void {
                 $query->whereNull('next_attempt_at')
                     ->orWhere('next_attempt_at', '<=', $at);

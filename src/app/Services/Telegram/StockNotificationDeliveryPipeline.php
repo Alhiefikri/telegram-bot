@@ -288,9 +288,8 @@ class StockNotificationDeliveryPipeline
     public function reconcile(int $chunk = 100): int
     {
         $limit = max(1, $chunk);
-        $ledgerRecipientIds = $this->ledger()->readyToDispatchQuery()
+        $ledgerRecipientIds = $this->ledger()->readyToDispatchQuery(effectType: TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->where('source_type', StockNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->orderBy('id')
             ->limit($limit)
             ->pluck('source_id');
@@ -490,9 +489,8 @@ class StockNotificationDeliveryPipeline
 
     private function dueEffects(int $eventId, int $batchSize)
     {
-        return $this->ledger()->readyToDispatchQuery()
+        return $this->ledger()->readyToDispatchQuery(effectType: TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->where('source_type', StockNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->whereIn('source_id', StockNotificationRecipient::query()
                 ->where('stock_notification_event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
@@ -503,9 +501,8 @@ class StockNotificationDeliveryPipeline
 
     private function hasPendingEffects(int $eventId): bool
     {
-        $ready = $this->ledger()->readyToDispatchQuery()
+        $ready = $this->ledger()->readyToDispatchQuery(effectType: TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->where('source_type', StockNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
             ->whereIn('source_id', StockNotificationRecipient::query()
                 ->where('stock_notification_event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))

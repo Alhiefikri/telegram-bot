@@ -758,23 +758,6 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         Queue::assertNotPushed(SendTelegramReceipt::class);
     }
 
-    public function test_recovery_does_not_rediscover_cleanup_for_an_uncleanable_checkout_instruction(): void
-    {
-        Queue::fake();
-        $order = $this->multiChunkPaidOrder();
-        $order->forceFill([
-            'telegram_receipt_sent_at' => now(),
-            'manual_checkout_customer_notification_chat_id' => (string) $order->customer->telegram_id,
-            'manual_checkout_customer_notification_message_id' => 889903,
-        ])->save();
-
-        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
-            ->assertSuccessful();
-
-        Queue::assertNotPushed(DeleteBuyerCheckoutMessages::class);
-        Queue::assertNotPushed(DeleteBuyerBinanceCheckoutInstruction::class);
-    }
-
     public function test_recovery_still_dispatches_cleanup_for_a_klikqris_checkout_instruction(): void
     {
         Queue::fake();

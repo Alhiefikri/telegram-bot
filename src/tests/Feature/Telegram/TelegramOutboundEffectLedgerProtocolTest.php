@@ -187,6 +187,26 @@ class TelegramOutboundEffectLedgerProtocolTest extends TestCase
         $this->assertTrue($protocol->readyToDispatchQuery(now()->addMinutes(1))->whereKey($effect->id)->exists());
     }
 
+    public function test_stock_family_discovery_excludes_terminal_exhausted_future_and_ambiguous_deliveries(): void
+    {
+        $type = TelegramOutboundEffectService::TYPE_STOCK_NOTIFICATION_RECIPIENT;
+        $due = TelegramOutboundEffect::factory()->create(['effect_type' => $type, 'attempts' => 4]);
+        foreach ([
+            ['state' => TelegramOutboundEffectState::Failed, 'last_error_code' => 'telegram_http_403'],
+            ['state' => TelegramOutboundEffectState::Failed, 'attempts' => 5],
+            ['next_attempt_at' => now()->addMinute()],
+            ['state' => TelegramOutboundEffectState::Unknown],
+            ['effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS],
+        ] as $overrides) {
+            TelegramOutboundEffect::factory()->create(array_merge(['effect_type' => $type], $overrides));
+        }
+
+        $ids = app(TelegramOutboundEffectLedgerProtocol::class)
+            ->readyToDispatchQuery(effectType: $type)->pluck('id')->all();
+
+        $this->assertSame([$due->id], $ids);
+    }
+
     public function test_non_retryable_failure_is_terminal_and_not_dispatchable(): void
     {
         $effect = TelegramOutboundEffect::factory()->create();

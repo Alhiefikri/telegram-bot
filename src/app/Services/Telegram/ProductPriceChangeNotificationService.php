@@ -110,10 +110,9 @@ class ProductPriceChangeNotificationService
 
     private function sendStoreChannelEffect(ProductPriceChangeEvent $event): string
     {
-        $effect = $this->ledger()->readyToDispatchQuery()
+        $effect = $this->ledger()->readyToDispatchQuery(effectType: TelegramOutboundEffectType::PriceChangeStoreChannel->value)
             ->where('source_type', ProductPriceChangeEvent::class)
             ->where('source_id', (string) $event->getKey())
-            ->where('effect_type', TelegramOutboundEffectType::PriceChangeStoreChannel->value)
             ->first();
         if ($effect === null) {
             return 'skipped';
@@ -266,9 +265,8 @@ class ProductPriceChangeNotificationService
 
     private function dueRecipientEffects(int $eventId, int $batchSize)
     {
-        return $this->ledger()->readyToDispatchQuery()
+        return $this->ledger()->readyToDispatchQuery(effectType: TelegramOutboundEffectType::PriceChangeNotificationRecipient->value)
             ->where('source_type', ProductPriceChangeNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectType::PriceChangeNotificationRecipient->value)
             ->whereIn('source_id', ProductPriceChangeNotificationRecipient::query()
                 ->where('event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
@@ -364,9 +362,8 @@ class ProductPriceChangeNotificationService
 
     private function hasPendingEffects(int $eventId): bool
     {
-        $recipientPending = $this->ledger()->readyToDispatchQuery()
+        $recipientPending = $this->ledger()->readyToDispatchQuery(effectType: TelegramOutboundEffectType::PriceChangeNotificationRecipient->value)
             ->where('source_type', ProductPriceChangeNotificationRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectType::PriceChangeNotificationRecipient->value)
             ->whereIn('source_id', ProductPriceChangeNotificationRecipient::query()
                 ->where('event_id', $eventId)
                 ->selectRaw('CAST(id AS TEXT)'))
@@ -375,10 +372,9 @@ class ProductPriceChangeNotificationService
             return true;
         }
 
-        return $this->ledger()->readyToDispatchQuery()
+        return $this->ledger()->readyToDispatchQuery(effectType: TelegramOutboundEffectType::PriceChangeStoreChannel->value)
             ->where('source_type', ProductPriceChangeEvent::class)
             ->where('source_id', (string) $eventId)
-            ->where('effect_type', TelegramOutboundEffectType::PriceChangeStoreChannel->value)
             ->exists();
     }
 

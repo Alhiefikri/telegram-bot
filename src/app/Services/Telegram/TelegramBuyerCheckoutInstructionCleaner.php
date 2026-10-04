@@ -3,12 +3,13 @@
 namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Models\Order;
-use App\Models\Payment;
-use App\Support\PaymentProvider;
+use App\Models\TelegramOutboundEffect;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Throwable;
 
 class TelegramBuyerCheckoutInstructionCleaner
 {
@@ -30,6 +31,78 @@ class TelegramBuyerCheckoutInstructionCleaner
 
         $this->deleteOrderDetailMessage($current);
         $this->deleteTarget($current, 'manual_checkout_customer_notification', false);
+        $this->deleteCheckoutEffectMessages($current->refresh());
+    }
+
+    private function deleteCheckoutEffectMessages(Order $order): void
+    {
+        $effects = TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->where('source_id', (string) $order->id)
+            ->whereIn('effect_type', CheckoutInstructionDeliveryPipeline::EFFECT_TYPES)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->whereNotNull('telegram_chat_id')
+            ->whereNotNull('telegram_message_id')
+            ->whereNull('telegram_message_deleted_at')
+            ->lazyById(50);
+
+        foreach ($effects as $effect) {
+            if ((string) $effect->telegram_chat_id === (string) $order->manual_checkout_customer_notification_chat_id
+                && (string) $effect->telegram_message_id === (string) $order->manual_checkout_customer_notification_message_id) {
+                if ($order->manual_checkout_customer_notification_deleted_at !== null) {
+                    $effect->forceFill(['telegram_message_deleted_at' => $order->manual_checkout_customer_notification_deleted_at])->save();
+                }
+
+                continue;
+            }
+
+            $token = (string) Str::uuid();
+            $target = DB::transaction(function () use ($effect, $token): ?TelegramOutboundEffect {
+                $target = TelegramOutboundEffect::query()->whereKey($effect->id)->lockForUpdate()->first();
+                if (! $target
+                    || $target->state !== TelegramOutboundEffectState::Sent
+                    || $target->telegram_message_deleted_at !== null
+                    || $this->hasActiveDeletionClaim($target->telegram_message_deletion_started_at)) {
+                    return null;
+                }
+
+                $target->forceFill([
+                    'telegram_message_deletion_started_at' => now(),
+                    'telegram_message_deletion_token' => $token,
+                ])->save();
+
+                return $target;
+            }, 5);
+            if ($target === null) {
+                continue;
+            }
+
+            try {
+                $this->bot->deleteMessage($target->telegram_chat_id, $target->telegram_message_id);
+            } catch (Throwable $exception) {
+                if (! ($exception instanceof RequestException && $this->isAlreadyDeletedTelegramMessage($exception))) {
+                    TelegramOutboundEffect::query()
+                        ->whereKey($target->id)
+                        ->where('telegram_message_deletion_token', $token)
+                        ->update([
+                            'telegram_message_deletion_started_at' => null,
+                            'telegram_message_deletion_token' => null,
+                        ]);
+
+                    throw $exception;
+                }
+            }
+
+            TelegramOutboundEffect::query()
+                ->whereKey($target->id)
+                ->where('telegram_message_id', $target->telegram_message_id)
+                ->where('telegram_message_deletion_token', $token)
+                ->update([
+                    'telegram_message_deleted_at' => now(),
+                    'telegram_message_deletion_started_at' => null,
+                    'telegram_message_deletion_token' => null,
+                ]);
+        }
     }
 
     private function deleteOrderDetailMessage(Order $order): void
@@ -135,15 +208,7 @@ class TelegramBuyerCheckoutInstructionCleaner
                 || ! $target->{$chatColumn}
                 || ! $target->{$messageColumn}
                 || $target->{$deletedColumn} !== null
-                || $this->hasActiveDeletionClaim($target->{$startedColumn})
-                || ($prefix === 'manual_checkout_customer_notification' && ! Payment::query()
-                    ->where('order_id', $target->id)
-                    ->where(fn ($query) => $query
-                        ->where(fn ($binance) => $binance
-                            ->where('provider', PaymentProvider::MANUAL)
-                            ->whereIn('method', ['BINANCE_PAY_ID', 'USDT_BEP20']))
-                        ->orWhere('provider', PaymentProvider::KLIKQRIS))
-                    ->exists())) {
+                || $this->hasActiveDeletionClaim($target->{$startedColumn})) {
                 return null;
             }
 

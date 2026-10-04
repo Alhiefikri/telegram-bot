@@ -5,10 +5,9 @@ namespace Tests\Feature\Telegram;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
-use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
+use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendBinanceCheckoutInstructions;
-use App\Jobs\SendBscCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
@@ -137,7 +136,8 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
 
     public function test_recovery_repairs_sent_binance_and_bsc_checkout_projections_without_redispatching(): void
     {
-        Queue::fake();
+        Queue::fake()->except(DeleteBuyerCheckoutMessages::class);
+        $this->fakeTelegramHttp();
         $sentAt = now()->subMinute()->startOfSecond();
         $cases = [
             [
@@ -200,20 +200,19 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
             $this->assertTrue($sentAt->equalTo($repaired->manual_checkout_customer_notified_at));
             $this->assertSame($case['chat_id'], $repaired->manual_checkout_customer_notification_chat_id);
             $this->assertSame($case['message_id'], $repaired->manual_checkout_customer_notification_message_id);
-            $this->assertNull($repaired->manual_checkout_customer_notification_deleted_at);
+            $this->assertNotNull($repaired->manual_checkout_customer_notification_deleted_at);
             $this->assertNull($repaired->manual_checkout_customer_notification_deletion_started_at);
             $this->assertNull($repaired->manual_checkout_customer_notification_deletion_token);
             $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
         }
 
-        Queue::assertPushed(DeleteBuyerBinanceCheckoutInstruction::class, 2);
-        Queue::assertNotPushed(SendBinanceCheckoutInstructions::class);
-        Queue::assertNotPushed(SendBscCheckoutInstructions::class);
-
         $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
             ->assertSuccessful();
 
-        Queue::assertPushed(DeleteBuyerBinanceCheckoutInstruction::class, 2);
+        $deletions = Http::recorded(fn ($request) => str_ends_with($request->url(), '/deleteMessage'));
+        $this->assertEqualsCanonicalizing([81001, 81002], $deletions->map(fn (array $record) => (int) $record[0]['message_id'])->all());
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
+            || str_ends_with($request->url(), '/sendMessage'));
     }
 
     public function test_recovery_leaves_an_unknown_checkout_effect_for_manual_review(): void

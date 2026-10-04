@@ -733,7 +733,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     public function test_recovery_dispatches_stale_binance_checkout_instruction_cleanup_claim(): void
     {
         config()->set('services.telegram.claim_lease_seconds', 60);
-        Queue::fake();
+        Queue::fake()->except(DeleteBuyerCheckoutMessages::class);
+        $this->fakeTelegramHttp();
         $order = $this->completedTrackedBinanceOrder([
             'manual_checkout_customer_notification_message_id' => 707,
             'manual_checkout_customer_notification_deletion_started_at' => now()->subSeconds(61),
@@ -741,10 +742,14 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         ]);
 
         $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
-            ->expectsOutputToContain('telegram:recover-outbound completed cleanly: dispatched=1')
             ->assertSuccessful();
 
-        Queue::assertPushed(DeleteBuyerBinanceCheckoutInstruction::class, fn (DeleteBuyerBinanceCheckoutInstruction $job): bool => $job->orderId === $order->id);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/deleteMessage')
+            && (string) $request['chat_id'] === '12345'
+            && (int) $request['message_id'] === 707);
+        $this->assertNotNull($order->fresh()->manual_checkout_customer_notification_deleted_at);
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])->assertSuccessful();
+        $this->assertCount(1, Http::recorded(fn ($request) => str_ends_with($request->url(), '/deleteMessage')));
     }
 
     public function test_unforwarded_binance_payment_proof_is_recovered_by_scheduler(): void
