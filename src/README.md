@@ -161,6 +161,8 @@ Customers do not need a Binance account. They send the exact unique USDT amount 
 
 BSC remains disabled until Owner enables `bsc_payment_enabled` from the dashboard after `bsc:check-readiness --json` shows readiness: BNB Smart Chain Mainnet RPC, approved contract metadata/18 decimals, at least one active receiver, and a successful `eth_getLogs` probe over the configured scanner chunk. Public endpoints are best-effort; production should set the existing optional `BSC_RPC_URL` to a provider verified to support the scanner's log filters. Addresses are database records, not ENV or source constants. ENV contains only the optional secret-bearing RPC URL; network identity, scanner bounds, explorer, timeout, and readiness TTL remain application configuration.
 
+`bsc:check-capabilities --json` separately classifies the RPC capabilities required by a future USDT funding rail (chain, contract code, decimals, `finalized` block, canonical receipt, bounded transfer logs) as `verified`, `unsupported`, or `unknown`, and exits non-zero unless every required capability is verified. The [A1 capability report](../../docs/balance-a1-bsc-capability.md) records the live evidence, the Binance C2C funding decision, and the immutable fee/network/custody snapshot contract. A qualified probe is qualification evidence only; it does not authorize funding, custody, or legal activation (issue #539 remains open).
+
 `bsc:reconcile` uses the existing `binance-verification` worker and includes new amount-unique Payments even when no hash is stored. Historical `verification_mode=transaction_hash` Payments remain compatible with the customer hash endpoint and are skipped until a hash is submitted. Exact transfers still require the configured confirmation policy; RPC failures remain pending with bounded retries; late, mismatched, duplicate, or ambiguous evidence follows the manual-review path through `ManualFulfillmentReview`.
 
 ## 4. Admin Flow
@@ -774,7 +776,9 @@ Langkah cek:
 - `src/app/Services/Binance/BinancePaymentVerification.php` — Binance verification workflow.
 - `src/app/Services/Bsc/BscPaymentVerification.php` — authoritative BSC Payment verification and atomic claim/manual-review workflow.
 - `src/app/Services/Bsc/BscReadiness.php` — DB activation, RPC/token metadata, and active receiver readiness.
+- `src/app/Services/Bsc/BscCapabilityProbe.php` — capability qualification (`verified`/`unsupported`/`unknown`, fail closed) for the future USDT funding rail.
 - `src/app/Console/Commands/CheckBscReadiness.php` — command `bsc:check-readiness --json` for deployment validation.
+- `src/app/Console/Commands/CheckBscCapabilities.php` — command `bsc:check-capabilities --json` for rail capability evidence.
 - `src/app/Console/Commands/ReconcileBscPayments.php` — command `bsc:reconcile {--chunk=100}` using the shared Binance verification queue.
 - `src/app/Storefront/StorefrontShopCheckout.php` — guest storefront checkout dan Recovery Key issuance.
 - `src/app/Storefront/StorefrontShopPaymentStatusRefresh.php` — signed invoice status refresh/recovery adapter.

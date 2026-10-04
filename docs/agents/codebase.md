@@ -16,7 +16,7 @@ Dokumen ini menjelaskan _mengapa_ file-file utama saling berhubungan. Source cod
 
 The [source audit and lock graph](../balance-a0-baseline.md) maps actual money writers, nested checkout/lifecycle/supplier/warranty/refund/compensation callers and I1–I12 gaps. Its [lock-site appendix](../balance-a0-lock-sites.md) names each explicit acquisition by file/symbol. [ADR-0019](../adr/0019-idr-usdt-economic-sources-and-receipt-claims.md) is **Proposed**, not accepted: it defines typed economic sources, additive USDT ledger, global receipt aliases/parent transaction claims, counterpart accounting and durable work. Runtime ownership below remains current; these documents do not introduce or activate new services.
 
-Start downstream work from the audit's per-flow lock graph and remediation register, including event-first lifecycle entry and historical Supplier/SKU resource unions. Preserve the IDR ledger/provider history, prepare without network inside locks, and reuse Telegram Outbound Effect recovery. H0/H1/A1/H2 own operational policy, custody/provider qualification and production sign-off. Admin IDR adjustment lookup is exact numeric Telegram ID for an already registered Customer, with identity/amount preview and server revalidation; username does not identify the recipient and unknown IDs never create Customers.
+Start downstream work from the audit's per-flow lock graph and remediation register, including event-first lifecycle entry and historical Supplier/SKU resource unions. Preserve the IDR ledger/provider history, prepare without network inside locks, and reuse Telegram Outbound Effect recovery. H0/H1/A1/H2 own operational policy, custody/provider qualification and production sign-off. A1's [capability report](../balance-a1-bsc-capability.md) records the BSC chain/token/decimals, `finalized`/canonical-receipt/log capability classification (`verified`/`unsupported`/`unknown`, fail closed), Binance C2C funding decision, and immutable fee/network/custody snapshot contract; a qualified RPC probe is not funding, custody, or legal authorization. Admin IDR adjustment lookup is exact numeric Telegram ID for an already registered Customer, with identity/amount preview and server revalidation; username does not identify the recipient and unknown IDs never create Customers.
 
 ## Configuration boundary (current runtime)
 
@@ -662,6 +662,8 @@ USDT BEP20 memakai `provider=manual`, `method=USDT_BEP20`, dan authority BNB Sma
 
 `BscReadiness` checks the database activation flag, approved chain/token metadata, RPC response, active receiver count, and one bounded `eth_getLogs` query. That probe does not guarantee access to the full history window required by an active `amount_unique` Payment. Receiver management is Owner-only: the submitted address is normalized and stored as an active `manual_verified` destination after re-authentication, without a wallet-signature challenge. Multiple distinct addresses are supported and the existing least-recently-assigned pool distributes new Payments across them. The BSC RPC endpoint is the only environment authority; chain/token identity, explorer, and operational limits are pinned in application configuration. Its short-lived result is shared across customer surfaces and invalidated after committed BSC setting/receiver mutations. Reconciliation scans bounded transfer-log windows only while both Payment and Order are pending and applies the legacy hash cadence only within that active window.
 
+`BscCapabilityProbe` is the separate rail-qualification seam (A1): it classifies chain, contract code, decimals, `finalized` block, canonical receipt, and bounded transfer-log support as `verified`, `unsupported`, or `unknown`, and `isQualified()` is true only when every required capability is verified. `bsc:check-capabilities --json` exposes the sanitized report and exits non-zero for mismatch/unknown. The probe does not write payments, settings, or ledger state; funding activation stays no-go until H1/provider gates and the downstream rail tickets are satisfied.
+
 ### 5.7 Sakurupiah QRIS
 
 Sakurupiah is an Owner-selectable provider for new QRIS checkout
@@ -847,6 +849,7 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/Telegram/` — command, callback, checkout, payment instructions, privacy, onboarding, dan webhook.
 - `tests/Feature/Storefront/` dan `Storefront*Test.php` — catalog, guest checkout, signed invoice, recovery key, payment refresh.
 - `tests/Feature/*Payment*Test.php`, `KlikQris*Test.php`, `Pakasir*Test.php`, `Binance*Test.php` — provider contract/lifecycle/reconciliation.
+- `tests/Feature/Bsc*Test.php`, `tests/Unit/Services/Bsc/` — BSC readiness/verification plus capability and exact-amount contract fixtures (`verified`/`unsupported`/`unknown`, fail closed).
 - `tests/Feature/OrderCartDomainTest.php` — cart/order/inventory transition.
 - `tests/Feature/Admin*Test.php` — role, dashboard, provider switch, audit, manual completion.
 - `tests/Feature/CredentialIdentityFoundationTest.php` — additive encrypted persistence, normalization, registry backfill, and safe command output.

@@ -356,6 +356,67 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertDatabaseCount('manual_fulfillment_reviews', 1);
     }
 
+    public function test_failed_receipt_fixture_never_claims_and_opens_review(): void
+    {
+        $payment = $this->payment();
+        $hash = '0x'.str_repeat('d', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+        $this->rpc->receipts[$hash]['status'] = '0x0';
+
+        $result = app(BscPaymentVerification::class)->verify($payment, $hash);
+
+        $this->assertSame(BscVerificationOutcome::Mismatch, $result->outcome);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(PaymentBscDetail::STATUS_MISMATCH, $payment->fresh()->bscDetail()->firstOrFail()->verification_status);
+        $this->assertSame(0, PaymentEvent::query()->where('provider', 'bsc')->count());
+        $this->assertDatabaseHas('manual_fulfillment_reviews', [
+            'payment_id' => $payment->id,
+            'reason' => ManualFulfillmentReview::REASON_BSC_MISMATCH,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+        ]);
+    }
+
+    public function test_incomplete_receipt_fixture_never_claims_and_opens_review(): void
+    {
+        $payment = $this->payment();
+        $hash = '0x'.str_repeat('e', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+        unset($this->rpc->receipts[$hash]['blockNumber']);
+
+        $result = app(BscPaymentVerification::class)->verify($payment, $hash);
+
+        $this->assertSame(BscVerificationOutcome::Mismatch, $result->outcome);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(PaymentBscDetail::STATUS_MISMATCH, $payment->fresh()->bscDetail()->firstOrFail()->verification_status);
+        $this->assertSame(0, PaymentEvent::query()->where('provider', 'bsc')->count());
+        $this->assertDatabaseHas('manual_fulfillment_reviews', [
+            'payment_id' => $payment->id,
+            'reason' => ManualFulfillmentReview::REASON_BSC_MISMATCH,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+        ]);
+    }
+
+    public function test_malformed_transfer_log_fixture_never_claims_and_opens_review(): void
+    {
+        $payment = $this->payment();
+        $hash = '0x'.str_repeat('7', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+        $this->rpc->receipts[$hash]['logs'][0]['topics'] = ['0xdeadbeef'];
+        $this->rpc->receipts[$hash]['logs'][0]['data'] = '0xnot-hex';
+
+        $result = app(BscPaymentVerification::class)->verify($payment, $hash);
+
+        $this->assertSame(BscVerificationOutcome::Mismatch, $result->outcome);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(PaymentBscDetail::STATUS_MISMATCH, $payment->fresh()->bscDetail()->firstOrFail()->verification_status);
+        $this->assertSame(0, PaymentEvent::query()->where('provider', 'bsc')->count());
+        $this->assertDatabaseHas('manual_fulfillment_reviews', [
+            'payment_id' => $payment->id,
+            'reason' => ManualFulfillmentReview::REASON_BSC_MISMATCH,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+        ]);
+    }
+
     public function test_rpc_failure_stays_pending_and_reconciliation_can_recover_it(): void
     {
         $payment = $this->payment();
