@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Enums\PaymentStatus;
+use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
+use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -17,16 +19,20 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Models\User;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
+use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\Group;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\Support\PostgresTestDatabase;
 use Tests\TestCase;
 use Throwable;
@@ -158,6 +164,114 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         $this->assertSame(1_000_000, $supplierB->fresh()->reserved_balance_micros);
         $this->assertSame(1, $skuA->fresh()->reserved_quantity);
         $this->assertSame(1, $skuB->fresh()->reserved_quantity);
+    }
+
+    #[Group('postgres-release')]
+    public function test_checkout_product_lock_serializes_detach_and_protects_retained_snapshot(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $actor = User::factory()->create(['role' => UserRole::Owner]);
+        $source = ProductSupplierSource::where('product_id', $product->id)->sole();
+        $input = ['source_id' => $source->id, 'version' => $source->version, 'supplier_version' => $supplier->fresh()->version];
+        $results = $this->serializedProductRace($product->id,
+            fn (): array => $this->checkoutOutcome($cart->id),
+            function () use ($product, $sku, $input, $actor): array {
+                try {
+                    app(ProductSupplierManager::class)->detach($product, $sku, $input, $actor, null);
+
+                    return ['outcome' => 'detached'];
+                } catch (ValidationException $exception) {
+                    return ['outcome' => 'stale', 'errors' => array_keys($exception->errors())];
+                }
+            });
+        $this->assertSame([['outcome' => 'reserved'], ['outcome' => 'stale', 'errors' => ['version']]], $results);
+        $this->assertModelExists($source);
+        $fulfillment = SupplierFulfillment::sole();
+        $this->assertSame($sku->id, $fulfillment->reserved_catalog_item_id);
+        $this->assertSame($source->id, $fulfillment->sources_snapshot[0]['source_id']);
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, AuditLog::where('action', 'supplier.source_detached')->count());
+        // Checkout increments the wallet version; even a reloaded form cannot bypass the retained-history guard.
+        $input['supplier_version'] = $supplier->fresh()->version;
+        try {
+            app(ProductSupplierManager::class)->detach($product, $sku, $input, $actor, null);
+            $this->fail('A refreshed form must still protect the checkout snapshot.');
+        } catch (HttpException $exception) {
+            $this->assertSame(409, $exception->getStatusCode());
+        }
+        $this->assertModelExists($source);
+        $this->assertSame(0, AuditLog::where('action', 'supplier.source_detached')->count());
+    }
+
+    #[Group('postgres-release')]
+    public function test_detach_product_lock_serializes_checkout_before_source_snapshot_is_created(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $actor = User::factory()->create(['role' => UserRole::Owner]);
+        $source = ProductSupplierSource::where('product_id', $product->id)->sole();
+        $input = ['source_id' => $source->id, 'version' => $source->version, 'supplier_version' => $supplier->fresh()->version];
+        $results = $this->serializedProductRace($product->id,
+            function () use ($product, $sku, $input, $actor): array {
+                app(ProductSupplierManager::class)->detach($product, $sku, $input, $actor, null);
+
+                return ['outcome' => 'detached'];
+            },
+            fn (): array => $this->checkoutOutcome($cart->id));
+        $this->assertSame([['outcome' => 'detached'], ['outcome' => 'unavailable']], $results);
+        $this->assertModelMissing($source);
+        $this->assertSame(0, SupplierFulfillment::count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(0, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, $product->fresh()->supplier_available_stock);
+        $this->assertSame(1, AuditLog::where('action', 'supplier.source_detached')->count());
+    }
+
+    /** Hold Product until PostgreSQL confirms the competing real mutation is waiting on its lock. */
+    private function serializedProductRace(int $productId, callable $holder, callable $contender): array
+    {
+        $directory = storage_path('framework/testing/supplier-detach-'.bin2hex(random_bytes(8)));
+        mkdir($directory, 0700, true);
+        try {
+            return $this->race([
+                function () use ($productId, $holder, $directory): array {
+                    return DB::transaction(function () use ($productId, $holder, $directory): array {
+                        Product::whereKey($productId)->lockForUpdate()->firstOrFail();
+                        touch($directory.'/locked');
+                        $deadline = microtime(true) + 5;
+                        do {
+                            if (is_file($directory.'/contender')) {
+                                $pid = (int) file_get_contents($directory.'/contender');
+                                $blocked = DB::selectOne('SELECT pg_backend_pid() = ANY(pg_blocking_pids(?)) AS blocked', [$pid]);
+                                if (in_array($blocked->blocked, [true, 1, '1', 't'], true)) {
+                                    return $holder();
+                                }
+                            }
+                            usleep(1000);
+                        } while (microtime(true) < $deadline);
+                        throw new \RuntimeException('Competing supplier mutation did not wait on the Product lock.');
+                    });
+                },
+                function () use ($contender, $directory): array {
+                    $deadline = microtime(true) + 5;
+                    while (! is_file($directory.'/locked') && microtime(true) < $deadline) {
+                        usleep(1000);
+                    }
+                    if (! is_file($directory.'/locked')) {
+                        throw new \RuntimeException('Product lock was not acquired.');
+                    }
+                    file_put_contents($directory.'/contender', (string) DB::selectOne('SELECT pg_backend_pid() AS pid')->pid);
+
+                    return $contender();
+                },
+            ]);
+        } finally {
+            foreach (glob($directory.'/*') ?: [] as $path) {
+                unlink($path);
+            }
+            rmdir($directory);
+        }
     }
 
     private function process(int $id): array

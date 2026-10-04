@@ -19,6 +19,7 @@ use App\Models\StoreBalanceCompensation;
 use App\Models\StoreBalanceTopUp;
 use App\Models\StoreChannelSetting;
 use App\Models\SupplierAccountUnit;
+use App\Models\SupplierHealthEvent;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
 use App\Models\TelegramOutboundEffect;
@@ -554,6 +555,22 @@ class TelegramOutboundEffectService
             'queue' => 'notifications', 'telegram_method' => 'sendMessage', 'locale' => $customer->locale,
             'template_version' => 'warranty-deadline-reminder-v1', 'state' => TelegramOutboundEffectState::Pending->value,
             'attempts' => 0, 'next_attempt_at' => now(), 'outcome_metadata' => ['delivery_context' => 'warranty_deadline_reminder'],
+        ]);
+    }
+
+    public function recordSupplierHealth(SupplierHealthEvent $event, string $chatId): TelegramOutboundEffect
+    {
+        $key = 'supplier-health:'.$event->id;
+
+        return TelegramOutboundEffect::firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectType::SupplierHealth->value,
+            'source_type' => SupplierHealthEvent::class, 'source_id' => (string) $event->id,
+            'target_type' => 'admin', 'telegram_chat_id' => $chatId,
+            'queue' => 'notifications', 'telegram_method' => 'sendMessage', 'locale' => 'id',
+            'template_version' => 'supplier-health-v1', 'state' => TelegramOutboundEffectState::Pending->value,
+            'attempts' => 0, 'next_attempt_at' => now(),
+            'outcome_metadata' => ['delivery_context' => 'supplier_health'],
         ]);
     }
 

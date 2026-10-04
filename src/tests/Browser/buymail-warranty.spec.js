@@ -35,7 +35,10 @@ test.beforeAll(async () => {
     DB_CONNECTION: "sqlite",
     DB_DATABASE: database,
     DB_URL: "",
-    SESSION_DRIVER: "file",
+    SESSION_DRIVER: "database",
+    SESSION_ENCRYPT: "false",
+    SESSION_CONNECTION: "sqlite",
+    SESSION_TABLE: "sessions",
     CACHE_STORE: "array",
     QUEUE_CONNECTION: "database",
     TELEGRAM_BOT_TOKEN: "",
@@ -172,6 +175,26 @@ test("owner can inspect private warranty and deposit panels without exposing the
 test("supplier creation confirms password without losing the unsaved API key", async ({
   page,
 }) => {
+  const apiKey = "synthetic-browser-unsaved-api-key";
+  const replacement = "synthetic-browser-replacement-key";
+  const keys = [apiKey, replacement];
+  const responses = [];
+  // Inspect the actual response before browser navigation can evict Chromium's
+  // response-body handle. Fetch once, preserve redirects and fulfill unchanged.
+  await page.route(environment.APP_URL + "/**", async (route) => {
+    if (
+      !["document", "fetch", "xhr"].includes(route.request().resourceType())
+    ) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch({ maxRedirects: 0 });
+    responses.push({
+      text: JSON.stringify(response.headers()) + "\n" + (await response.text()),
+    });
+    await route.fulfill({ response });
+  });
+  const initial = supplierState(keys);
   await page.goto(environment.APP_URL + "/admin/login");
   await page.locator('[name="email"]').fill("warranty-browser@example.test");
   await page.locator('[name="password"]').fill("synthetic-browser-password");
@@ -182,8 +205,8 @@ test("supplier creation confirms password without losing the unsaved API key", a
   await page.goto(environment.APP_URL + "/admin?tab=suppliers");
   await page.getByText("Tambah supplier", { exact: true }).click();
   const form = page.locator('form[action$="/admin/suppliers"]').first();
-  const apiKey = "synthetic-browser-unsaved-api-key";
   await form.locator('[name="api_key"]').fill(apiKey);
+  await form.getByLabel("Pilih supplier").selectOption("prodseller");
   await form.locator('[name="exchange_rate_idr"]').fill("18000");
   await form
     .getByRole("button", { name: "Buat supplier", exact: true })
@@ -200,10 +223,14 @@ test("supplier creation confirms password without losing the unsaved API key", a
   await dialog.getByRole("button", { name: "Konfirmasi dan simpan" }).click();
   await expect(dialog.getByRole("alert")).toContainText("Password");
   await expect(form.locator('[name="api_key"]')).toHaveValue(apiKey);
+  expect(supplierState(keys).suppliers).toEqual(initial.suppliers);
+  await expectNoSecretLeak(page, keys, responses);
   await dialog.getByRole("button", { name: "Batal", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(form.locator('[name="api_key"]')).toHaveValue(apiKey);
   await expect(form.locator('[name="exchange_rate_idr"]')).toHaveValue("18000");
+  expect(supplierState(keys).suppliers).toEqual(initial.suppliers);
+  await expectNoSecretLeak(page, keys, responses);
   await form
     .getByRole("button", { name: "Buat supplier", exact: true })
     .click();
@@ -220,9 +247,22 @@ test("supplier creation confirms password without losing the unsaved API key", a
     )
   ).toBeVisible();
   await expect(page.locator("body")).not.toContainText(apiKey);
-  await expect(
-    page.getByRole("heading", { name: "ProdSeller · prodseller", exact: true })
-  ).toHaveCount(1);
+  const createdState = supplierState(keys);
+  expect(createdState.suppliers).toHaveLength(initial.suppliers.length + 1);
+  const created = createdState.suppliers.filter(
+    (supplier) =>
+      !initial.suppliers.some((existing) => existing.id === supplier.id)
+  );
+  expect(created).toHaveLength(1);
+  expect(created[0]).toMatchObject({
+    provider: "prodseller",
+    key_matches: [true, false],
+    key_encrypted: true,
+  });
+  expect(
+    createdState.suppliers.filter((supplier) => supplier.id !== created[0].id)
+  ).toEqual(initial.suppliers);
+  await expectNoSecretLeak(page, keys, responses);
 
   // A fresh session must also preserve an edited key when confirmation is needed.
   await page.context().clearCookies();
@@ -235,16 +275,15 @@ test("supplier creation confirms password without losing the unsaved API key", a
   await page.waitForURL(environment.APP_URL + "/admin");
   await page.goto(environment.APP_URL + "/admin?tab=suppliers");
   const connection = page.locator("article").filter({
-    has: page.getByRole("heading", {
-      name: "ProdSeller · prodseller",
-      exact: true,
-    }),
+    has: page.locator(`form[action$="/admin/suppliers/${created[0].id}"]`),
   });
-  await connection.getByText("Edit koneksi", { exact: true }).click();
+  await connection
+    .locator("summary")
+    .filter({ hasText: "Edit koneksi" })
+    .click();
   const editForm = connection
     .locator("form")
     .filter({ has: page.locator('[name="api_key"]') });
-  const replacement = "synthetic-browser-replacement-key";
   await editForm.locator('[name="api_key"]').fill(replacement);
   await editForm
     .getByRole("button", { name: "Simpan supplier", exact: true })
@@ -267,17 +306,59 @@ test("supplier creation confirms password without losing the unsaved API key", a
       exact: true,
     })
   ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "ProdSeller · prodseller", exact: true })
-  ).toHaveCount(1);
+  const editedState = supplierState(keys);
+  expect(editedState.suppliers).toHaveLength(createdState.suppliers.length);
+  expect(
+    editedState.suppliers.find((supplier) => supplier.id === created[0].id)
+  ).toMatchObject({
+    provider: "prodseller",
+    key_matches: [false, true],
+    key_encrypted: true,
+  });
+  expect(
+    editedState.suppliers.filter((supplier) => supplier.id !== created[0].id)
+  ).toEqual(initial.suppliers);
+  await expectNoSecretLeak(page, keys, responses);
   await expect(page.locator("body")).not.toContainText(replacement);
 });
 
-function run(args) {
+function supplierState(keys) {
+  return JSON.parse(
+    run(
+      [path.join(directory, "fixtures/warranty.php"), "state"],
+      JSON.stringify({ keys })
+    )
+  );
+}
+
+async function expectNoSecretLeak(page, keys, responses) {
+  for (const response of await Promise.all(responses)) {
+    for (const key of keys) expect(response.text.includes(key)).toBe(false);
+  }
+  const storage = await page.evaluate(() =>
+    JSON.stringify({
+      local: Object.entries(localStorage),
+      session: Object.entries(sessionStorage),
+    })
+  );
+  const cookies = JSON.stringify(await page.context().cookies());
+  for (const key of keys) {
+    expect(storage.includes(key)).toBe(false);
+    expect(cookies.includes(key)).toBe(false);
+  }
+  const state = supplierState(keys);
+  expect(state.sessions_checked).toBeGreaterThan(0);
+  expect(state.sessions_contain_key).toBe(false);
+  for (const supplier of state.suppliers)
+    expect(supplier.key_encrypted).toBe(true);
+}
+
+function run(args, input) {
   const result = spawnSync("php", args, {
     cwd: appDir,
     env: environment,
     encoding: "utf8",
+    input,
   });
   if (result.status !== 0) throw new Error(result.stderr || result.stdout);
   return result.stdout.trim();

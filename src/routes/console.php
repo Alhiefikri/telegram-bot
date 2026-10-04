@@ -67,6 +67,9 @@ Schedule::command('suppliers:recover-warranty --limit=25')->everyMinute()->witho
 // Deadline reminders are materialized from durable PostgreSQL unit state; the
 // queue job is only the delivery wakeup and the effect ledger survives Redis loss.
 Schedule::command('suppliers:notify-warranty-deadlines --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
+// Health episodes and outbound effects are PostgreSQL-durable. One existing
+// scheduler is sufficient; Redis overlap is not the dedupe authority.
+Schedule::command('suppliers:notify-health --limit=25')->everyFifteenMinutes()->withoutOverlapping(10)->runInBackground();
 Schedule::command('ops:payment-lifecycle-rollout-report')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping();
 Schedule::command('customers:cleanup-login-links --chunk=500')->hourly()->withoutOverlapping();

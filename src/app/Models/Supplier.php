@@ -26,6 +26,7 @@ class Supplier extends Model
             'version' => 'integer',
             'synced_at' => 'immutable_datetime',
             'sync_expires_at' => 'immutable_datetime',
+            'balance_observed_at' => 'immutable_datetime',
             'sync_attempted_at' => 'immutable_datetime',
             'sync_lease_expires_at' => 'immutable_datetime',
             'low_balance_threshold_micros' => 'integer',

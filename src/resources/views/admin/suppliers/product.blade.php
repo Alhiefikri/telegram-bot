@@ -44,13 +44,36 @@
     <label><input type="checkbox" name="equivalent_confirmed" value="1" required> Saya memastikan paket, durasi, dan garansinya sesuai produk toko.</label>
     <button class="supplier-button supplier-button-primary">Simpan pilihan supplier</button>
 </form>
+<form method="POST" action="{{ route('admin.suppliers.detach', $item) }}" class="mt-4"
+    data-detach-confirmation="Lepas mapping koneksi {{ $supplier->name }} / SKU {{ $item->external_id }} dari produk {{ $product->name }}? Mapping yang sudah digunakan dalam riwayat pemenuhan/pembelian tidak boleh dilepas; nonaktifkan saja. Stok lokal, harga, dan riwayat tetap tersimpan."
+    onsubmit="return confirm(this.dataset.detachConfirmation)">
+    @csrf
+    @method('DELETE')
+    <input type="hidden" name="product_id" value="{{ $product->id }}">
+    <input type="hidden" name="source_id" value="{{ $source->id }}">
+    <input type="hidden" name="version" value="{{ $source->version }}">
+    <input type="hidden" name="supplier_version" value="{{ $supplier->version }}">
+    <button type="submit" class="supplier-button">Lepas mapping</button>
+    <p class="supplier-muted mt-2 text-sm">Lepas hanya mapping yang belum digunakan. Jika ada riwayat pemenuhan/pembelian, nonaktifkan pilihan supplier di atas agar pemulihan tetap aman.</p>
+</form>
 @if($item->requires_input || !$item->orderable)<p class="supplier-alert mt-4">Produk supplier ini belum mendukung pembelian dan pengiriman otomatis.</p>@endif
 </article>
 @endforeach
 <section class="supplier-panel p-5 sm:p-6"><p class="supplier-eyebrow">Kebijakan produk</p><h2 class="mt-1 text-xl font-black">Pengaturan harga jual</h2>
+<div class="supplier-muted mt-3 space-y-2 text-sm leading-relaxed">
+    <p class="font-bold">Jika mode otomatis disimpan</p>
+    <p>Harga otomatis tersimpan dihitung dari supplier aktif dan layak pertama menurut urutan (Urutan 1 diprioritaskan). Jika Urutan 1 tidak memenuhi syarat basis harga, source berikutnya yang memenuhi syarat digunakan.</p>
+    <p>Kelayakan basis harga mengikuti filter harga saat ini: mapping dan koneksi aktif, currency sesuai, mendukung pembelian tanpa input tambahan, observasi masih segar, serta harga valid. Bukan memilih harga termurah, dan kelayakan basis harga bukan jaminan stok atau saldo cukup saat checkout.</p>
+    @if(!isset($pricePreview) && ($policy?->mode ?? 'manual') === 'manual')
+        <p>Harga otomatis tidak aktif pada mode manual. Harga jual tersimpan mengikuti harga yang kamu isi di halaman Produk.</p>
+    @endif
+    @if($sources->isEmpty())
+        <p>Belum ada mapping supplier; belum ada source untuk menghitung harga otomatis atau simulasi SKU.</p>
+    @endif
+</div>
 @isset($pricePreview)
 <div id="price-preview" class="my-4 rounded-xl border-2 bg-neo-paper p-4" role="status">
-    <h3 class="text-lg font-bold">Hasil cek harga untuk 1 produk</h3>
+    <h3 class="text-lg font-bold">Hasil simulasi harga untuk 1 produk</h3>
     <p class="mt-1 text-sm">{{ $previewItem->name }} · Berdasarkan harga supplier yang terakhir diperbarui{{ $previewItem->synced_at ? ' pada '.$previewItem->synced_at->format('d/m/Y H:i') : '' }}.</p>
     @if($pricePreview['cost_idr'] === null || $pricePreview['retail_idr'] === null)
         <p class="mt-3">Harga beli supplier belum tersedia. Perbarui katalog supplier lalu coba lagi.</p>
@@ -63,7 +86,7 @@
         </dl>
         <p class="mt-3 text-sm">Cadangan biaya: Rp{{ number_format($policy->buffer_idr, 0, ',', '.') }} · Keuntungan minimal yang kamu pilih: Rp{{ number_format($policy->minimum_profit_idr, 0, ',', '.') }}.</p>
     @endif
-    <p class="mt-3 text-sm">Ini hanya pengecekan. Belum membeli produk atau menyimpan perubahan. Klik “Simpan pengaturan harga” di bawah jika sudah sesuai.</p>
+    <p class="mt-3 text-sm">Simulasi SKU terpilih tidak mengubah urutan supplier atau source basis harga otomatis tersimpan. Belum membeli produk atau menyimpan perubahan. Klik “Simpan pengaturan harga” di bawah untuk menyimpan kebijakan, bukan untuk memilih SKU basis harga tersimpan.</p>
 </div>
 @endisset
 <form method="POST" action="{{ route('admin.products.supplier-pricing', $product) }}" class="mt-3 grid gap-3 sm:grid-cols-2" x-data="{ mode: @js($policy?->mode ?? 'manual') }">@csrf<input type="hidden" name="version" value="{{ $policy?->version ?? 0 }}">
@@ -81,6 +104,6 @@
     'buffer_idr' => 'Cadangan untuk biaya isi saldo, selisih kurs, atau biaya lain. Bukan uang yang otomatis dipotong. Isi 0 jika tidak diperlukan.',
 } }}</small></label>
 @endforeach
-@if($sources->isNotEmpty())<label>Produk supplier yang ingin dicek <select class="w-full rounded border p-2" name="catalog_item_id">@foreach($sources as $source)<option value="{{ $source->supplier_catalog_item_id }}" @selected(isset($previewItem) && $previewItem->id === $source->supplier_catalog_item_id)>{{ $source->catalogItem->name }}</option>@endforeach</select></label><button type="submit" formaction="{{ route('admin.products.supplier-pricing.preview', $product) }}#price-preview" class="supplier-button self-end">Lihat perkiraan modal & harga jual</button>@endif
+@if($sources->isNotEmpty())<label>Hitung simulasi berdasarkan SKU <select class="w-full rounded border p-2" name="catalog_item_id">@foreach($sources as $source)<option value="{{ $source->supplier_catalog_item_id }}" @selected(isset($previewItem) && $previewItem->id === $source->supplier_catalog_item_id)>{{ $source->catalogItem->name }}</option>@endforeach</select><small class="mt-1 block text-sm">SKU yang dipilih hanya untuk simulasi; tidak memilih source harga tersimpan dan tidak menyimpan kebijakan atau harga jual.</small></label><button type="submit" formaction="{{ route('admin.products.supplier-pricing.preview', $product) }}#price-preview" class="supplier-button self-end">Lihat perkiraan modal & harga jual</button>@endif
 <button type="submit" class="supplier-button supplier-button-primary sm:col-span-2">Simpan pengaturan harga</button></form></section>
 @endsection

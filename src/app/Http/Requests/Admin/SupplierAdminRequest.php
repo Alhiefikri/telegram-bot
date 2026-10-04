@@ -78,6 +78,12 @@ final class SupplierAdminRequest extends FormRequest
                 'supplier_version' => ['required', 'integer', 'min:0'],
                 'version' => ['required', 'integer', 'min:0'],
             ],
+            'detach' => [
+                'product_id' => ['required', 'integer', 'exists:products,id'],
+                'source_id' => ['required', 'integer', 'min:1'],
+                'supplier_version' => ['required', 'integer', 'min:0'],
+                'version' => ['required', 'integer', 'min:0'],
+            ],
             'price', 'preview' => [
                 'version' => ['required', 'integer', 'min:0'],
                 'mode' => ['required', Rule::in(['manual', 'percent', 'fixed', 'hybrid'])],
