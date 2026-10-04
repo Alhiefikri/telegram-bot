@@ -88,6 +88,42 @@ final class ProductSupplierManager
         return $source;
     }
 
+    /** Move a mapped source one rank up or down; priorities are normalized to 10, 20, 30, ... */
+    public function move(Product $product, SupplierCatalogItem $item, array $input, User $actor, ?string $ip): void
+    {
+        abort_unless($actor->role?->canManageStoreOperations() === true, 403);
+        DB::transaction(function () use ($product, $item, $input, $actor, $ip): void {
+            $locked = Product::query()->whereKey($product->id)->lockForUpdate()->firstOrFail();
+            $supplier = Supplier::query()->whereKey($item->supplier_id)->lockForUpdate()->firstOrFail();
+            $catalog = SupplierCatalogItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            $this->version((int) $supplier->version, (int) $input['supplier_version']);
+            $sources = ProductSupplierSource::query()->where('product_id', $locked->id)->orderBy('priority')->orderBy('id')->lockForUpdate()->get()->values();
+            $index = $sources->search(fn (ProductSupplierSource $source): bool => (int) $source->supplier_catalog_item_id === (int) $catalog->id);
+            if ($index === false) {
+                throw ValidationException::withMessages(['connection' => 'Pemetaan supplier tidak ditemukan untuk produk ini.']);
+            }
+            $this->version((int) $sources[$index]->version, (int) $input['version']);
+            $neighbor = $input['direction'] === 'up' ? $index - 1 : $index + 1;
+            if ($neighbor < 0 || $neighbor >= $sources->count()) {
+                return;
+            }
+            $ordered = $sources->all();
+            [$ordered[$index], $ordered[$neighbor]] = [$ordered[$neighbor], $ordered[$index]];
+            foreach ($ordered as $position => $row) {
+                $priority = ($position + 1) * 10;
+                if ((int) $row->priority !== $priority) {
+                    $row->forceFill(['priority' => $priority, 'version' => (int) $row->version + 1])->save();
+                }
+            }
+            $supplier->version = (int) $supplier->version + 1;
+            $supplier->save();
+            $locked->supplier_available_until = null;
+            $locked->save();
+            $this->audit->log('supplier.source_moved', $sources[$index], null, ['product_id' => $locked->id, 'catalog_item_id' => $catalog->id, 'direction' => $input['direction'], 'position' => $neighbor + 1], $actor, $ip);
+        }, 5);
+        $this->availability->refreshProducts([(int) $product->id]);
+    }
+
     public function price(Product $product, array $input, User $actor, ?string $ip): SupplierPricePolicy
     {
         abort_unless($actor->role?->canManageStoreOperations() === true, 403);

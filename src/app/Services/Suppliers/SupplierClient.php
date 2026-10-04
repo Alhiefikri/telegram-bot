@@ -42,7 +42,10 @@ final class SupplierClient
         $this->currency($supplier, $account);
         $this->currency($supplier, $catalog);
         $balance = $this->money($account['balance'] ?? $account['wallet_balance'] ?? null, roundUp: false);
-        $rows = $catalog[$provider === SupplierProvider::ProdSeller || $provider === SupplierProvider::AiVault ? 'products' : 'services'] ?? null;
+        $rows = $catalog[match ($provider) {
+            SupplierProvider::ProdSeller, SupplierProvider::AiVault, SupplierProvider::ToolOrax => 'products',
+            default => 'services',
+        }] ?? null;
         if (! is_array($rows) || ! array_is_list($rows) || count($rows) > self::MAX_PRODUCTS) {
             throw new SupplierUnavailable('invalid_payload');
         }
@@ -53,7 +56,11 @@ final class SupplierClient
             if (! is_array($row)) {
                 throw new SupplierUnavailable('invalid_payload');
             }
-            $id = $this->identifier($row[$provider === SupplierProvider::ProdSeller ? 'id' : 'service_id'] ?? null);
+            $idKey = match ($provider) {
+                SupplierProvider::ProdSeller, SupplierProvider::ToolOrax => 'id',
+                default => 'service_id',
+            };
+            $id = $this->identifier($row[$idKey] ?? null);
             if (isset($ids[$id])) {
                 throw new SupplierUnavailable('invalid_payload');
             }
@@ -109,27 +116,77 @@ final class SupplierClient
             }
             $id = $this->identifier($item->external_id);
             $this->identifier($reference, 100);
-            $body = [$provider === SupplierProvider::ProdSeller ? 'productId' : 'service_id' => $id, 'quantity' => $quantity];
+            if ($provider === SupplierProvider::ToolOrax && ! ctype_digit($id)) {
+                throw new SupplierUnavailable('unsupported_product');
+            }
+            $body = match ($provider) {
+                SupplierProvider::ProdSeller => ['productId' => $id, 'quantity' => $quantity],
+                SupplierProvider::ToolOrax => ['product_id' => (int) $id, 'quantity' => $quantity],
+                default => ['service_id' => $id, 'quantity' => $quantity],
+            };
             $headers = [];
-            if ($provider === SupplierProvider::ProdSeller) {
+            if ($provider === SupplierProvider::ProdSeller || $provider === SupplierProvider::NyStore) {
                 $headers['Idempotency-Key'] = $reference;
+            }
+            if ($provider === SupplierProvider::NyStore) {
+                // Documented fastest mode: skip the local checker wait and omit
+                // proof files; the admin audit still runs after delivery.
+                $body['precheck'] = false;
+                $body['include_proofs'] = false;
             } elseif ($provider === SupplierProvider::AiVault) {
                 $body['external_order_id'] = $reference;
             }
-            $response = $this->send($supplier, 'POST', $provider === SupplierProvider::ProdSeller ? '/orders' : '/order', $body, $headers);
+            $path = match ($provider) {
+                SupplierProvider::ProdSeller, SupplierProvider::ToolOrax => '/orders',
+                default => '/order',
+            };
+            $response = $this->send($supplier, 'POST', $path, $body, $headers);
         } catch (SupplierUnavailable $exception) {
             $ambiguous = $exception->errorCode === 'transport';
 
             return new SupplierOrderResult($ambiguous ? 'ambiguous' : 'rejected', errorCode: $exception->errorCode);
         }
         if (! $response->successful()) {
+            // NyStore can answer a paid, still-verifying order with 503 (or a
+            // refunded one with 409) while returning the saved order identity.
+            // Keep that evidence so recovery reads the same order instead of
+            // dispatching a second purchase.
+            if ($provider === SupplierProvider::NyStore) {
+                $orderId = null;
+                try {
+                    $rawOrderId = $this->payload($response, $supplier->api_key)['order_id'] ?? null;
+                    $orderId = $rawOrderId === null ? null : $this->identifier($rawOrderId);
+                } catch (SupplierUnavailable) {
+                    $orderId = null;
+                }
+                if ($orderId !== null) {
+                    return new SupplierOrderResult('ambiguous', $orderId, null, null, [], $this->httpCode($response->status()), identityTrusted: true);
+                }
+            }
+
             return new SupplierOrderResult($this->noPurchase($provider, $response) ? 'rejected' : 'ambiguous', errorCode: $this->httpCode($response->status()));
         }
         try {
-            return $this->result($supplier, $this->payload($response, $supplier->api_key), $quantity, null, $id, $reference);
+            $result = $this->result($supplier, $this->payload($response, $supplier->api_key), $quantity, null, $id, $reference);
         } catch (SupplierUnavailable) {
             return new SupplierOrderResult('ambiguous', errorCode: 'invalid_payload');
         }
+        // ShopBot's create response shape is not documented; when it carries an
+        // order identity but no canonical status, read the saved order once.
+        if ($provider === SupplierProvider::ToolOrax && $result->orderId !== null && $result->outcome === 'ambiguous' && $result->deliveries === []) {
+            try {
+                $detail = $this->order($supplier, $result->orderId, $id, $reference);
+                if ($detail->identityTrusted) {
+                    return $detail;
+                }
+            } catch (SupplierUnavailable) {
+                // Fall through with the POST identity evidence.
+            }
+
+            return new SupplierOrderResult('ambiguous', $result->orderId, $result->quantity, $result->costMicros, [], 'delivery_pending', identityTrusted: true);
+        }
+
+        return $result;
     }
 
     public function order(Supplier $supplier, string $orderId, ?string $productId = null, ?string $reference = null): SupplierOrderResult
@@ -139,7 +196,11 @@ final class SupplierClient
         }
         $provider = $this->ready($supplier, allowInactive: true);
         $orderId = $this->identifier($orderId);
-        $payload = $this->read($supplier, ($provider === SupplierProvider::ProdSeller ? '/orders/' : '/order/').rawurlencode($orderId), allowInactive: true);
+        $path = match ($provider) {
+            SupplierProvider::ProdSeller, SupplierProvider::ToolOrax => '/orders/',
+            default => '/order/',
+        };
+        $payload = $this->read($supplier, $path.rawurlencode($orderId), allowInactive: true);
 
         return $this->result($supplier, $payload, null, $orderId, $productId, $reference);
     }
@@ -161,7 +222,9 @@ final class SupplierClient
         try {
             $key = $supplier->api_key;
         } catch (Throwable) {
-            throw new SupplierUnavailable('invalid_key');
+            // The stored ciphertext cannot be read (for example after an
+            // APP_KEY change); this is not a provider rejection.
+            throw new SupplierUnavailable('credential_unreadable');
         }
         if (! is_string($key) || strlen($key) < 1 || strlen($key) > 512 || preg_match('/[^\x21-\x7e]/', $key)) {
             throw new SupplierUnavailable('invalid_key');
@@ -244,8 +307,12 @@ final class SupplierClient
 
     private function request(Supplier $supplier, PendingRequest $request, float $timeout, array $headers = []): PendingRequest
     {
+        $authentication = $supplier->provider === SupplierProvider::ToolOrax->value
+            ? ['X-Shop-API-Key' => $supplier->api_key]
+            : ['X-API-Key' => $supplier->api_key];
+
         return $request->acceptJson()->asJson()->timeout($timeout)->connectTimeout(min(4, $timeout))
-            ->withHeaders(['X-API-Key' => $supplier->api_key] + $headers)
+            ->withHeaders($authentication + $headers)
             ->withOptions([
                 'allow_redirects' => false,
                 'on_headers' => static function ($response): void {
@@ -266,9 +333,12 @@ final class SupplierClient
     {
         [$maximum, $seconds, $readMaximum] = match ($provider) {
             SupplierProvider::ProdSeller => [300, 900, 240],
-            SupplierProvider::Arrs, SupplierProvider::Warzone => [3, 1, 2],
+            // NyStore documents 3 requests/second per API key.
+            SupplierProvider::Arrs, SupplierProvider::Warzone, SupplierProvider::NyStore => [3, 1, 2],
             SupplierProvider::AiVault => [60, 60, 45],
             SupplierProvider::CSxStore => [60, 60, 45],
+            // ShopBot publishes no rate-limit contract; stay deliberately small.
+            SupplierProvider::ToolOrax => [30, 60, 20],
         };
         // A shared provider bucket is deliberately conservative: all configured
         // accounts on this application may share the same outbound IP.
@@ -325,6 +395,16 @@ final class SupplierClient
 
     private function product(SupplierProvider $provider, array $row, string $id): SupplierProductData
     {
+        // ShopBot exposes catalog economics as unit_price/stock_count rather
+        // than the price/stock field names used by the other services catalogs.
+        if ($provider === SupplierProvider::ToolOrax) {
+            if (! array_key_exists('price', $row) && array_key_exists('unit_price', $row)) {
+                $row['price'] = $row['unit_price'];
+            }
+            if (! array_key_exists('stock', $row) && array_key_exists('stock_count', $row)) {
+                $row['stock'] = $row['stock_count'];
+            }
+        }
         $name = $this->text($row['name'] ?? null, 500);
         $description = isset($row['description']) && $row['description'] !== '' ? $this->text($row['description'], 16_000) : null;
         $stock = array_key_exists('stock', $row) && $row['stock'] === null ? null : $this->integer($row['stock'] ?? null, 0, 1_000_000_000);
@@ -421,12 +501,21 @@ final class SupplierClient
             throw new SupplierUnavailable('invalid_payload');
         }
         $this->currency($supplier, $row);
-        $rawId = $row['orderId'] ?? $row['order_id'] ?? $payload['orderId'] ?? $payload['order_id'] ?? null;
+        $rawId = $row['orderId'] ?? $row['order_id'] ?? $row['order_code']
+            ?? $payload['orderId'] ?? $payload['order_id'] ?? $payload['order_code'] ?? null;
         $id = $rawId === null ? null : $this->identifier($rawId);
-        $quantity = isset($row['quantity']) ? $this->integer($row['quantity'], 1, self::MAX_QUANTITY) : null;
-        $cost = isset($row['total_cost']) || isset($row['amount']) ? $this->money($row['total_cost'] ?? $row['amount']) : null;
-        $deliveries = $row['deliveredKeys'] ?? $row['delivered_products'] ?? $row['products']
-            ?? $payload['deliveredKeys'] ?? $payload['delivered_products'] ?? $payload['products']
+        $quantity = null;
+        foreach (['quantity', 'requested_quantity'] as $quantityKey) {
+            if (isset($row[$quantityKey])) {
+                $quantity = $this->integer($row[$quantityKey], 1, self::MAX_QUANTITY);
+                break;
+            }
+        }
+        $costValue = $row['total_cost'] ?? $row['charged_amount'] ?? $row['amount'] ?? $row['total']
+            ?? $payload['total_cost'] ?? $payload['charged_amount'] ?? $payload['amount'] ?? $payload['total'] ?? null;
+        $cost = $costValue === null ? null : $this->money($costValue);
+        $deliveries = $row['deliveredKeys'] ?? $row['delivered_products'] ?? $row['delivered_keys'] ?? $row['products']
+            ?? $payload['deliveredKeys'] ?? $payload['delivered_products'] ?? $payload['delivered_keys'] ?? $payload['products']
             ?? (isset($row['deliveredKey']) ? [$row['deliveredKey']] : (isset($payload['deliveredKey']) ? [$payload['deliveredKey']] : []));
         if (! is_array($deliveries) || ! array_is_list($deliveries) || count($deliveries) > self::MAX_QUANTITY) {
             throw new SupplierUnavailable('invalid_payload');
@@ -434,11 +523,12 @@ final class SupplierClient
         foreach ($deliveries as $delivery) {
             $this->text($delivery, 16_000);
         }
-        $status = $row['status'] ?? $payload['status'] ?? null;
+        $status = $row['status'] ?? $payload['status'] ?? $row['order_status'] ?? $payload['order_status'] ?? null;
         $success = in_array($status, ['delivered', 'success'], true)
             || ($status === null && ($row['success'] ?? $payload['success'] ?? false) === true)
-            || ($supplier->provider === SupplierProvider::CSxStore->value && $status === 'completed' && ($row['success'] ?? $payload['success'] ?? false) === true);
-        $productId = $row['service_id'] ?? $row['product']['id'] ?? null;
+            || ($supplier->provider === SupplierProvider::CSxStore->value && $status === 'completed' && ($row['success'] ?? $payload['success'] ?? false) === true)
+            || ($supplier->provider === SupplierProvider::ToolOrax->value && $status === 'fulfilled');
+        $productId = $row['service_id'] ?? $row['product_id'] ?? $row['product']['id'] ?? $payload['product_id'] ?? null;
         $mismatch = ($expectedOrderId !== null && $id !== $expectedOrderId)
             || ($expectedProductId !== null && $productId !== null && $this->identifier($productId) !== $expectedProductId)
             || ($reference !== null && isset($row['external_order_id']) && $row['external_order_id'] !== $reference);
@@ -481,6 +571,28 @@ final class SupplierClient
             }
 
             return ($status === 409 && $error === 'Buffer Stock Conflict') || ($status === 500 && $error === 'internal_error');
+        }
+        if ($provider === SupplierProvider::NyStore) {
+            // 409 (idempotency conflict/refunded) and 503 (delivery
+            // verification pending) can both refer to an existing order.
+            return in_array($status, [400, 401, 403, 404, 415, 429], true);
+        }
+        if ($provider === SupplierProvider::ToolOrax) {
+            if (in_array($status, [400, 401, 402, 403, 404, 429], true)) {
+                return true;
+            }
+            if ($status === 409) {
+                try {
+                    $error = $this->payload($response)['error'] ?? null;
+                } catch (SupplierUnavailable) {
+                    return false;
+                }
+
+                // Only documented pre-purchase conflicts prove no order exists.
+                return is_string($error) && in_array($error, ['Insufficient balance.', 'Quantity is outside the available range.'], true);
+            }
+
+            return false;
         }
 
         // Conflict/duplicate responses never prove that no order exists.

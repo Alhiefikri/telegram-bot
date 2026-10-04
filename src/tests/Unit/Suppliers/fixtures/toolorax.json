@@ -1,0 +1,50 @@
+{
+  "account": { "balance": 12.5, "ok": true, "label": "default" },
+  "catalog": {
+    "count": 1,
+    "ok": true,
+    "products": [
+      {
+        "id": 4,
+        "name": "Gemini Pro 18 Months",
+        "description": "Instant text delivery",
+        "unit_price": 0.57,
+        "list_price": 0.7,
+        "stock_count": 1204,
+        "in_stock": true,
+        "min_qty": 1,
+        "max_qty": 1204,
+        "delivery_type": "Text",
+        "fulfillment": "source"
+      }
+    ]
+  },
+  "purchase": {
+    "ok": true,
+    "order": {
+      "order_code": "order-1",
+      "product_id": 4,
+      "product_name": "Gemini Pro 18 Months",
+      "quantity": 2,
+      "status": "fulfilled",
+      "total": 1.14,
+      "delivered_keys": ["DELIVERY-ONE", "DELIVERY-TWO"]
+    }
+  },
+  "order": {
+    "ok": true,
+    "order": {
+      "order_code": "order-1",
+      "product_id": 4,
+      "product_name": "Gemini Pro 18 Months",
+      "quantity": 2,
+      "status": "fulfilled",
+      "total": 1.14,
+      "delivered_keys": ["DELIVERY-ONE", "DELIVERY-TWO"]
+    }
+  },
+  "balance_micros": 12500000,
+  "price_micros": 570000,
+  "cost_micros": 1140000,
+  "stock": 1204
+}

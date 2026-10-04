@@ -11,13 +11,13 @@ Supplier Balance is the operator's money at the external shop, not Customer Stor
 Dashboard menampilkan setiap koneksi sebagai kartu dengan status aktif/nonaktif, saldo tersedia, saldo total, dana ditahan, dan waktu sinkron. Aksi monitor, katalog, sinkronisasi, serta deposit BuyMail tersedia sebagai tombol; form Tambah/Edit koneksi dapat dibuka tanpa berpindah halaman. Daftar produk toko menampilkan harga jual dan status publik dengan tombol **Atur supplier & harga**. Katalog privat memakai kartu produk dengan harga beli, stok, dana/unit ditahan, pemetaan, dan form impor/hubungkan yang dapat dibuka per produk. Semua halaman supplier mendukung layout mobile serta pilihan tema terang/gelap.
 
 1. Open **Admin → Supplier Reseller** and fill the connection form. Clicking **Buat/Simpan supplier** opens an inline password dialog if recent confirmation is missing; successful confirmation resumes saving automatically. Incorrect passwords or cancelling retain the API key and other inputs in the current browser form. No secret is flashed to server session or persisted to browser storage. Operational recovery still requires recent confirmation.
-2. Add a connection: supported provider, API key, whole-IDR conversion rate, active flag and low-balance threshold. The Dashboard derives the private name and documented currency from the provider: ProdSeller uses USDT, CSxStore and AI Vault use USD, and BuyMail uses IDR with rate 1. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation.
+2. Add a connection: supported provider, API key, whole-IDR conversion rate, active flag and low-balance threshold. The Dashboard derives the private name and documented currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official and ToolOraX (ShopBot) use USD; BuyMail uses IDR with rate 1. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation.
 3. Do not put supplier API keys in ENV. The database stores encrypted credentials using the application's encryption key; saved keys are not displayed back. Keep APP_KEY and encrypted database backups together under the existing backup policy. Losing the key makes those credentials unreadable.
-4. For ARRS/Warzone, confirm the actual account currency with the supplier. Dollar-like presentation is not currency evidence. ProdSeller uses USDT; CSxStore and AI Vault use USD.
+4. For ARRS/Warzone, confirm the actual account currency with the supplier. Dollar-like presentation is not currency evidence. ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official and ToolOraX use USD.
 5. Activate the connection and click **Sinkron katalog dan saldo**. The local button is a CSRF-protected POST, but provider catalog/balance requests are GET-only. Read-only catalog fetching must not buy anything.
 6. Open the private catalog. Select a SKU to import as a draft Product, or open **Hubungkan ke produk toko yang sudah ada** and select a Product by name from the **Produk toko** dropdown. Options show retail price and active/draft status; the ID is only a disambiguating label, not an input to memorize. Drafts and Products mapped to other suppliers remain selectable. Deleted Products and Products already mapped to this SKU are excluded. Confirm equivalent entitlement before saving; edit an existing mapping through its linked Product button.
 7. Give the draft store-owned name, description, tutorial, warranty and support terms through normal Product editing. Import does not publish the supplier description or activate the Product automatically.
-8. Enable the source mapping and set priority. Lower priority sorts first. Only map products whose entitlement, region, account requirements, redemption deadline and warranty promises are equivalent.
+8. Enable the source mapping and arrange the try order with the **↑ Naikkan / ↓ Turunkan** controls. "Urutan 1 · utama" is tried first; later ranks are the fallback. The page shows each rank explicitly, so you never have to compare numbers: it keeps the underlying priority normalized to 10, 20, 30, … and lower values still sort first internally. Each card also shows the last observed unit cost in IDR and the supplier currency (`Harga beli/unit`), or a "Belum ada harga" warning when the catalog has no price yet — read-only display, never a purchase authorization. Only map products whose entitlement, region, account requirements, redemption deadline and warranty promises are equivalent.
 9. Set Product-owned pricing: manual, percentage, fixed profit or hybrid percentage/minimum profit; configure buffer, rounding and minimum-profit guard. Preview the cost/retail calculation before enabling public sales.
 10. Top up the external supplier account through that supplier's own supported payment flow. This application does not create a supplier funding transaction. Sync after funding to update availability.
 
@@ -57,6 +57,27 @@ CSxStore's authenticated order responses use `status: completed` with boolean
 exact order/SKU identity, quantity, actual cost and complete distinct delivery
 remain necessary. This contract was verified through read-only order retrieval
 and one operator-authorized SKU 48 purchase in the isolated Telegram test.
+
+NyStore Official authenticates with `X-API-Key`, requires an `Idempotency-Key`
+per purchase and returns `order_status: success|pending` with `delivered_products[]`.
+The adapter sends the documented fastest mode (`precheck=false`,
+`include_proofs=false`); the store still audits after delivery. A POST answered
+with 503 `DELIVERY_VERIFICATION_PENDING`, or a 409 refund/idempotency conflict,
+keeps the returned `order_id` as identity evidence so recovery reads that exact
+order instead of buying again.
+
+ToolOraX (ShopBot) authenticates with `X-Shop-API-Key`, buys with
+`POST /orders {product_id, quantity}` and reads `GET /orders/{order_code}`
+(`status: fulfilled`, `delivered_keys[]`). Its create-response envelope is not
+documented, so a create body without a recognized status is immediately
+re-read once through the canonical order endpoint. Documented pre-purchase
+conflicts (`Insufficient balance.`, `Quantity is outside the available range.`)
+are safe rejections; any other 409 stays ambiguous and is never retried
+automatically.
+
+Both providers' balance and catalog were verified read-only with the operator's
+keys; a funded live purchase still requires the controlled qualification in
+**Production qualification** before real selling.
 
 Only correlated exact identity and a recognized supplier outcome establish economic evidence. Explicit failure, wrong SKU/reference, or missing exact order ID cannot authorize delivery, debit settlement, hold release, or refund. Untrusted observations do not pin recovery to their claimed order ID. A locally blocked replay (including exhausted rate budget or an unsupported source) does not prove the original dispatched purchase was rejected; its ambiguity and hold remain.
 

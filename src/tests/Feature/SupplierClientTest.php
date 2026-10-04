@@ -102,21 +102,32 @@ class SupplierClientTest extends TestCase
         $supplier = $this->supplier($provider);
         $fixture = self::fixture($provider);
         $base = SupplierProvider::from($provider)->baseUrl();
-        $purchasePath = $provider === 'prodseller' ? '/orders' : '/order';
+        $purchasePath = in_array($provider, ['prodseller', 'toolorax'], true) ? '/orders' : '/order';
+        $externalId = $provider === 'toolorax' ? '4' : 'sku-1';
         $this->fake(function ($request, $options) use ($base, $fixture, $provider, $purchasePath) {
             $this->assertFalse($options['allow_redirects']);
-            $this->assertTrue($request->hasHeader('X-API-Key', 'fixture-key-not-live'));
+            $this->assertTrue($request->hasHeader($provider === 'toolorax' ? 'X-Shop-API-Key' : 'X-API-Key', 'fixture-key-not-live'));
             if ($request->method() === 'POST') {
                 $this->assertSame($base.$purchasePath, $request->url());
                 $this->assertSame(2, $request['quantity']);
-                $this->assertSame('sku-1', $request[$provider === 'prodseller' ? 'productId' : 'service_id']);
-                if ($provider === 'prodseller') {
+                $bodyKey = match ($provider) {
+                    'prodseller' => 'productId',
+                    'toolorax' => 'product_id',
+                    default => 'service_id',
+                };
+                $this->assertSame($provider === 'toolorax' ? 4 : 'sku-1', $request[$bodyKey]);
+                if ($provider === 'prodseller' || $provider === 'nystore') {
                     $this->assertTrue($request->hasHeader('Idempotency-Key', 'checkout-1'));
+                } else {
+                    $this->assertFalse($request->hasHeader('Idempotency-Key'));
+                }
+                if ($provider === 'nystore') {
+                    $this->assertFalse($request['precheck']);
+                    $this->assertFalse($request['include_proofs']);
                 } elseif ($provider === 'aivault') {
                     $this->assertSame('checkout-1', $request['external_order_id']);
                     $this->assertArrayNotHasKey('accept_normal_price', $request->data());
                 } else {
-                    $this->assertFalse($request->hasHeader('Idempotency-Key'));
                     $this->assertArrayNotHasKey('external_order_id', $request->data());
                 }
 
@@ -135,7 +146,7 @@ class SupplierClientTest extends TestCase
         $this->assertSame($fixture['balance_micros'], $snapshot->balanceMicros);
         $this->assertSame($supplier->currency, $snapshot->currency);
         $product = $snapshot->products[0];
-        $this->assertSame('sku-1', $product->externalId);
+        $this->assertSame($externalId, $product->externalId);
         $this->assertSame($fixture['stock'], $product->stock);
         $this->assertSame($fixture['price_micros'], $product->unitPriceMicros);
         $this->assertTrue($product->orderable);
@@ -145,7 +156,7 @@ class SupplierClientTest extends TestCase
         if ($provider === 'aivault') {
             $this->assertSame([['min' => 500, 'percent_basis_points' => 500]], $product->bulkDiscounts);
         }
-        $purchase = $client->purchase($supplier, $this->item($supplier), 2, 'checkout-1');
+        $purchase = $client->purchase($supplier, $this->item($supplier, ['external_id' => $externalId]), 2, 'checkout-1');
         $this->assertSame('delivered', $purchase->outcome);
         $this->assertSame('order-1', $purchase->orderId);
         $this->assertSame(2, $purchase->quantity);
@@ -162,18 +173,19 @@ class SupplierClientTest extends TestCase
     public function test_transport_conflicts_and_unknown_server_failures_are_one_shot_ambiguous(string $provider): void
     {
         $supplier = $this->supplier($provider);
+        $item = $this->item($supplier, $provider === 'toolorax' ? ['external_id' => '4'] : []);
         $client = app(SupplierClient::class);
         foreach ([409, 500, 502] as $status) {
             Cache::flush();
             $this->fake(fn () => Http::response(['error' => 'unverified failure fixture-key-not-live'], $status));
-            $result = $client->purchase($supplier, $this->item($supplier), 1, 'checkout-1');
+            $result = $client->purchase($supplier, $item, 1, 'checkout-1');
             $this->assertSame('ambiguous', $result->outcome);
             $this->assertStringNotContainsString('fixture-key-not-live', json_encode($result));
             Http::assertSentCount(1);
         }
         Cache::flush();
         $this->fake(fn () => throw new ConnectionException('secret fixture-key-not-live / full response'));
-        $result = $client->purchase($supplier, $this->item($supplier), 1, 'checkout-1');
+        $result = $client->purchase($supplier, $item, 1, 'checkout-1');
         $this->assertSame('ambiguous', $result->outcome);
         $this->assertSame('transport', $result->errorCode);
         Http::assertSentCount(0);
@@ -201,6 +213,106 @@ class SupplierClientTest extends TestCase
             Http::assertSent(fn ($request) => ! array_key_exists('accept_normal_price', $request->data()));
             Http::assertSentCount(1);
         }
+    }
+
+    public function test_nystore_pending_purchase_keeps_saved_order_identity_for_recovery(): void
+    {
+        $supplier = $this->supplier('nystore');
+        $this->fake(fn () => Http::response([
+            'success' => true, 'order_id' => 'order-9', 'order_status' => 'pending',
+            'requested_quantity' => 1, 'delivered_quantity' => 0, 'charged_amount' => 1.0, 'products' => [],
+        ]));
+        $client = app(SupplierClient::class);
+        $pending = $client->purchase($supplier, $this->item($supplier), 1, 'checkout-1');
+        $this->assertSame('pending', $pending->outcome);
+        $this->assertSame('order-9', $pending->orderId);
+        $this->assertTrue($pending->identityTrusted);
+        $this->assertFalse($pending->deliveryTrusted);
+
+        $this->travel(2)->seconds();
+        $this->fake(fn () => Http::response(['success' => true, 'order' => [
+            'order_id' => 'order-9', 'service_id' => 'sku-1', 'quantity' => 1, 'amount' => 1.0,
+            'status' => 'success', 'delivered_products' => ['DELIVERED-UNIT'],
+        ]]));
+        $read = $client->order($supplier, 'order-9', 'sku-1');
+        $this->assertSame('delivered', $read->outcome);
+        $this->assertSame(['DELIVERED-UNIT'], $read->deliveries);
+    }
+
+    public function test_nystore_503_verification_pending_keeps_the_saved_order_identity(): void
+    {
+        $supplier = $this->supplier('nystore');
+        $this->fake(fn () => Http::response([
+            'success' => false, 'error' => 'Paid order is still being verified', 'error_code' => 'DELIVERY_VERIFICATION_PENDING',
+            'order_id' => 'order-7', 'order_status' => 'pending',
+        ], 503));
+        $result = app(SupplierClient::class)->purchase($supplier, $this->item($supplier), 2, 'checkout-1');
+        $this->assertSame('ambiguous', $result->outcome);
+        $this->assertSame('order-7', $result->orderId);
+        $this->assertTrue($result->identityTrusted);
+    }
+
+    public function test_nystore_documented_rejections_are_safe_and_conflicts_are_not(): void
+    {
+        $supplier = $this->supplier('nystore');
+        foreach ([400, 401, 403, 404, 415, 429] as $status) {
+            Cache::flush();
+            $this->fake(fn () => Http::response(['success' => false, 'error' => 'private diagnostic'], $status));
+            $this->assertSame('rejected', app(SupplierClient::class)->purchase($supplier, $this->item($supplier), 1, 'checkout-1')->outcome);
+        }
+        foreach ([409, 503] as $status) {
+            Cache::flush();
+            $this->fake(fn () => Http::response(['success' => false, 'error' => 'private diagnostic'], $status));
+            $this->assertSame('ambiguous', app(SupplierClient::class)->purchase($supplier, $this->item($supplier), 1, 'checkout-1')->outcome);
+        }
+    }
+
+    public function test_toolorax_documented_pre_purchase_conflicts_are_safe_rejections(): void
+    {
+        $supplier = $this->supplier('toolorax');
+        foreach ([
+            [409, ['balance' => 0.0, 'error' => 'Insufficient balance.', 'required' => 0.04, 'shortfall' => 0.04]],
+            [409, ['error' => 'Quantity is outside the available range.']],
+            [400, ['error' => 'product_id and quantity are required']],
+            [404, ['error' => 'Product not found']],
+        ] as [$status, $body]) {
+            Cache::flush();
+            $this->fake(fn () => Http::response($body, $status));
+            $this->assertSame('rejected', app(SupplierClient::class)->purchase($supplier, $this->item($supplier, ['external_id' => '4']), 1, 'checkout-1')->outcome);
+        }
+        Cache::flush();
+        $this->fake(fn () => Http::response(['error' => 'unexpected conflict'], 409));
+        $this->assertSame('ambiguous', app(SupplierClient::class)->purchase($supplier, $this->item($supplier, ['external_id' => '4']), 1, 'checkout-1')->outcome);
+    }
+
+    public function test_toolorax_create_envelope_without_status_hydrates_the_saved_order(): void
+    {
+        $supplier = $this->supplier('toolorax');
+        $this->fake(function ($request) {
+            if ($request->method() === 'POST') {
+                return Http::response(['ok' => true, 'order_code' => 'order-5']);
+            }
+
+            return Http::response(['ok' => true, 'order' => [
+                'order_code' => 'order-5', 'product_id' => 4, 'quantity' => 2,
+                'status' => 'fulfilled', 'total' => 1.14, 'delivered_keys' => ['ONE', 'TWO'],
+            ]]);
+        });
+        $result = app(SupplierClient::class)->purchase($supplier, $this->item($supplier, ['external_id' => '4']), 2, 'checkout-1');
+        $this->assertSame('delivered', $result->outcome);
+        $this->assertSame(['ONE', 'TWO'], $result->deliveries);
+        $this->assertSame(1_140_000, $result->costMicros);
+        Http::assertSentCount(2);
+    }
+
+    public function test_toolorax_non_numeric_sku_never_dispatches(): void
+    {
+        $this->fake();
+        $supplier = $this->supplier('toolorax');
+        $result = app(SupplierClient::class)->purchase($supplier, $this->item($supplier), 1, 'checkout-1');
+        $this->assertSame('rejected', $result->outcome);
+        $this->assertSame('unsupported_product', $result->errorCode);
+        Http::assertNothingSent();
     }
 
     public function test_redirects_never_follow_or_produce_delivery_and_error_is_private(): void
@@ -332,6 +444,24 @@ class SupplierClientTest extends TestCase
                 $this->assertContains($exception->errorCode, ['currency_mismatch', 'invalid_key']);
                 $this->assertNull($exception->getPrevious());
             }
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_unreadable_stored_credential_reports_a_distinct_safe_error(): void
+    {
+        $this->fake();
+        $supplier = $this->supplier('nystore');
+        $attributes = $supplier->getAttributes();
+        $attributes['api_key'] = 'not-a-valid-ciphertext';
+        $supplier->setRawAttributes($attributes, true);
+        try {
+            app(SupplierClient::class)->snapshot($supplier);
+            $this->fail('An unreadable credential must fail closed.');
+        } catch (SupplierUnavailable $exception) {
+            $this->assertSame('credential_unreadable', $exception->errorCode);
+            $this->assertStringNotContainsString('not-a-valid-ciphertext', $exception->getMessage());
+            $this->assertNull($exception->getPrevious());
         }
         Http::assertNothingSent();
     }
@@ -575,7 +705,10 @@ class SupplierClientTest extends TestCase
             ['prodseller', 402, 'rejected'], ['csxstore', 402, 'ambiguous'],
             ['arrs', 401, 'ambiguous'], ['arrs', 402, 'ambiguous'],
             ['warzone', 403, 'rejected'], ['aivault', 502, 'ambiguous'],
-            ['aivault', 503, 'ambiguous'],
+            ['aivault', 503, 'ambiguous'], ['nystore', 403, 'rejected'],
+            ['nystore', 409, 'ambiguous'], ['nystore', 500, 'ambiguous'],
+            ['toolorax', 402, 'rejected'], ['toolorax', 409, 'ambiguous'],
+            ['toolorax', 500, 'ambiguous'],
         ];
     }
 
@@ -584,7 +717,8 @@ class SupplierClientTest extends TestCase
     {
         $supplier = $this->supplier($provider);
         $this->fake(fn () => Http::response(['error' => 'private diagnostic'], $status));
-        $this->assertSame($outcome, app(SupplierClient::class)->purchase($supplier, $this->item($supplier), 1, 'checkout-1')->outcome);
+        $result = app(SupplierClient::class)->purchase($supplier, $this->item($supplier, $provider === 'toolorax' ? ['external_id' => '4'] : []), 1, 'checkout-1');
+        $this->assertSame($outcome, $result->outcome);
         Http::assertSentCount(1);
     }
 }

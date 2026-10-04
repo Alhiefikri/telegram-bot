@@ -44,6 +44,7 @@ final class AdminSupplierDashboardData
 
         return match ($supplier->last_error) {
             'authentication', 'invalid_key' => 'API key ditolak oleh supplier. Periksa key dan pastikan akses API aktif.',
+            'credential_unreadable' => 'API key tersimpan tidak dapat dibaca (misalnya APP_KEY aplikasi berubah atau database berasal dari environment lain). Masukkan ulang API key lewat Edit koneksi.',
             'rate_limited' => 'Batas permintaan ke supplier sedang tercapai. Tunggu beberapa menit sebelum sinkron lagi.',
             'transport', 'snapshot_timeout' => 'Supplier belum merespons tepat waktu. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
             'invalid_payload' => 'Format data supplier belum dapat dibaca. Katalog sebelumnya tetap disimpan.',

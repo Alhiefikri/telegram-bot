@@ -19,8 +19,12 @@ use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierManager;
+use App\Services\Suppliers\SupplierMoney;
+use App\Services\Suppliers\SupplierPricing;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 final class AdminSupplierController extends Controller
 {
@@ -70,13 +74,25 @@ final class AdminSupplierController extends Controller
         return $this->mutate(fn () => $manager->map(Product::query()->findOrFail($request->integer('product_id')), $catalogItem, $request->validated(), $request->attributes->get('adminUser'), $request->ip()), 'Pemetaan supplier disimpan.');
     }
 
-    public function product(Request $request, Product $product)
+    public function move(SupplierAdminRequest $request, SupplierCatalogItem $catalogItem, ProductSupplierManager $manager)
+    {
+        $product = Product::query()->findOrFail($request->integer('product_id'));
+        try {
+            $manager->move($product, $catalogItem, $request->validated(), $request->attributes->get('adminUser'), $request->ip());
+        } catch (ValidationException $exception) {
+            return redirect()->route('admin.products.suppliers', $product->id)->withErrors($exception->errors())->with('status', 'Urutan tidak berubah. Muat ulang halaman lalu coba lagi.');
+        }
+
+        return redirect()->route('admin.products.suppliers', $product->id)->with('status', 'Urutan supplier diperbarui.');
+    }
+
+    public function product(Request $request, Product $product, SupplierPricing $pricing)
     {
         $this->authorizeManager($request);
         $sources = ProductSupplierSource::query()->where('product_id', $product->id)->with('catalogItem.supplier')->orderBy('priority')->orderBy('id')->get();
         $policy = SupplierPricePolicy::query()->where('product_id', $product->id)->first();
 
-        return view('admin.suppliers.product', compact('product', 'sources', 'policy'));
+        return view('admin.suppliers.product', ['product' => $product, 'sources' => $sources, 'policy' => $policy, 'sourceCosts' => $this->sourceCosts($sources, $pricing)]);
     }
 
     public function price(SupplierAdminRequest $request, Product $product, ProductSupplierManager $manager)
@@ -84,7 +100,7 @@ final class AdminSupplierController extends Controller
         return $this->mutate(fn () => $manager->price($product, $request->validated(), $request->attributes->get('adminUser'), $request->ip()), 'Kebijakan harga supplier disimpan.');
     }
 
-    public function preview(SupplierAdminRequest $request, Product $product, ProductSupplierManager $manager)
+    public function preview(SupplierAdminRequest $request, Product $product, ProductSupplierManager $manager, SupplierPricing $pricing)
     {
         $item = SupplierCatalogItem::query()->findOrFail($request->integer('catalog_item_id'));
         abort_unless(ProductSupplierSource::query()->where('product_id', $product->id)->where('supplier_catalog_item_id', $item->id)->exists(), 422);
@@ -105,6 +121,7 @@ final class AdminSupplierController extends Controller
             'policy' => $policy,
             'pricePreview' => $pricePreview,
             'previewItem' => $item,
+            'sourceCosts' => $this->sourceCosts($sources, $pricing),
         ]);
     }
 
@@ -129,7 +146,7 @@ final class AdminSupplierController extends Controller
                 'recover' => $service->recoverOrder((int) $fulfillment->id, $request->string('supplier_order_id')->toString()),
                 'manual' => $service->provideManualCredentials((int) $fulfillment->id, array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $request->string('credentials')->toString())), fn (string $value): bool => $value !== ''))),
             };
-        } catch (InvalidOrderTransition|InsufficientStock|\DomainException|\InvalidArgumentException|ValidationException $exception) {
+        } catch (InvalidOrderTransition|InsufficientStock|\DomainException|InvalidArgumentException|ValidationException $exception) {
             // Operational errors may contain delivery data: never echo them.
             return response()->json(['message' => 'Tindakan tidak aman untuk status fulfillment saat ini.'], 409);
         }
@@ -140,6 +157,28 @@ final class AdminSupplierController extends Controller
     private function authorizeManager(Request $request): void
     {
         abort_unless($request->attributes->get('adminUser')?->role?->canManageStoreOperations() === true, 403);
+    }
+
+    /** Private read-only unit cost per mapped source; display only, never a purchase authorization. */
+    private function sourceCosts(Collection $sources, SupplierPricing $pricing): array
+    {
+        $costs = [];
+        foreach ($sources as $source) {
+            $item = $source->catalogItem;
+            $supplier = $item?->supplier;
+            $micros = $item === null ? null : $pricing->costMicros($item, 1);
+            try {
+                $idr = $micros === null || $supplier === null ? null : SupplierMoney::costIdr($micros, (int) $supplier->exchange_rate_idr);
+            } catch (InvalidArgumentException) {
+                $idr = null;
+            }
+            $costs[$source->id] = [
+                'unit' => $micros === null ? null : rtrim(rtrim(SupplierMoney::decimal($micros), '0'), '.'),
+                'idr' => $idr,
+            ];
+        }
+
+        return $costs;
     }
 
     private function mutate(callable $mutation, string $message)

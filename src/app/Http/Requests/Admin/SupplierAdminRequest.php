@@ -47,7 +47,7 @@ final class SupplierAdminRequest extends FormRequest
         return match ($action) {
             'store', 'update' => [
                 'name' => ['required', 'string', 'max:120', 'not_regex:/[\x00-\x1F\x7F]/'],
-                'provider' => ['required', Rule::in(['prodseller', 'csxstore', 'arrs', 'warzone', 'aivault', 'buymail'])],
+                'provider' => ['required', Rule::in(['prodseller', 'csxstore', 'arrs', 'warzone', 'aivault', 'nystore', 'toolorax', 'buymail'])],
                 'api_key' => [$action === 'store' ? 'required' : 'nullable', 'string', 'max:2048', 'not_regex:/[\x00-\x20\x7F]/'],
                 'webhook_secret' => ['nullable', 'string', 'max:256', 'regex:/\Awhsec_[A-Za-z0-9_-]{8,240}\z/D'],
                 'currency' => ['required', Rule::in(['USD', 'USDT', 'IDR'])],
@@ -71,6 +71,12 @@ final class SupplierAdminRequest extends FormRequest
                 'equivalent_confirmed' => ['required', 'accepted'],
                 'priority' => ['required', 'integer', 'min:0', 'max:10000'],
                 'is_active' => ['required', 'boolean'],
+            ],
+            'move' => [
+                'product_id' => ['required', 'integer', 'exists:products,id'],
+                'direction' => ['required', Rule::in(['up', 'down'])],
+                'supplier_version' => ['required', 'integer', 'min:0'],
+                'version' => ['required', 'integer', 'min:0'],
             ],
             'price', 'preview' => [
                 'version' => ['required', 'integer', 'min:0'],

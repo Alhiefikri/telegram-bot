@@ -73,7 +73,7 @@ final class SupplierAdminTest extends TestCase
     {
         $this->owner();
         Http::fake();
-        foreach (['prodseller' => ['ProdSeller', 'USDT'], 'csxstore' => ['CSxStore', 'USD'], 'aivault' => ['AI Vault Hub', 'USD'], 'buymail' => ['BuyMail', 'IDR']] as $provider => [$name, $currency]) {
+        foreach (['prodseller' => ['ProdSeller', 'USDT'], 'csxstore' => ['CSxStore', 'USD'], 'aivault' => ['AI Vault Hub', 'USD'], 'nystore' => ['NyStore Official', 'USD'], 'toolorax' => ['ToolOraX (ShopBot)', 'USD'], 'buymail' => ['BuyMail', 'IDR']] as $provider => [$name, $currency]) {
             $input = $this->connectionInput(['provider' => $provider]);
             unset($input['name'], $input['currency'], $input['currency_confirmed']);
             if ($provider === 'buymail') {
@@ -365,6 +365,64 @@ final class SupplierAdminTest extends TestCase
         $policy->forceFill(['product_id' => $product->id, 'mode' => 'manual', 'version' => 2])->save();
         $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput(['version' => 1]))->assertStatus(409);
         $this->assertSame(45000, $product->refresh()->price_amount);
+    }
+
+    public function test_supplier_ranking_is_shown_and_move_buttons_reorder_sources(): void
+    {
+        $this->owner();
+        $primary = $this->supplier(['name' => 'Supplier Utama']);
+        $backup = $this->supplier(['name' => 'Supplier Cadangan']);
+        $primaryItem = $this->item($primary, ['external_id' => 'sku-utama']);
+        $backupItem = $this->item($backup, ['external_id' => 'sku-cadangan']);
+        $product = Product::factory()->create();
+        $first = $this->source($product, $primaryItem, ['priority' => 10, 'is_active' => true]);
+        $second = $this->source($product, $backupItem, ['priority' => 20, 'is_active' => true]);
+
+        $this->get(route('admin.products.suppliers', $product))->assertOk()
+            ->assertSee('Urutan 1 · utama')->assertSee('Urutan 2 · cadangan');
+
+        $this->post(route('admin.suppliers.move', $backupItem), [
+            'product_id' => $product->id, 'direction' => 'up',
+            'supplier_version' => (int) $backup->refresh()->version, 'version' => (int) $second->refresh()->version,
+        ])->assertRedirect(route('admin.products.suppliers', $product));
+
+        $this->assertSame(10, $second->refresh()->priority);
+        $this->assertSame(20, $first->refresh()->priority);
+        $this->assertSame(1, AuditLog::query()->where('action', 'supplier.source_moved')->count());
+
+        $versions = [(int) Supplier::query()->findOrFail($backup->id)->version, (int) $second->refresh()->version, (int) $first->refresh()->version];
+        $this->post(route('admin.suppliers.move', $backupItem), [
+            'product_id' => $product->id, 'direction' => 'up',
+            'supplier_version' => $versions[0], 'version' => $versions[1],
+        ])->assertRedirect();
+        $this->assertSame($versions, [(int) Supplier::query()->findOrFail($backup->id)->version, (int) $second->refresh()->version, (int) $first->refresh()->version]);
+
+        $this->post(route('admin.suppliers.move', $backupItem), [
+            'product_id' => $product->id, 'direction' => 'down',
+            'supplier_version' => $versions[0], 'version' => $versions[1] - 1,
+        ])->assertRedirect()->assertSessionHasErrors('version');
+        $this->assertSame(10, $second->refresh()->priority);
+        $this->assertSame(20, $first->refresh()->priority);
+        $this->assertSame(1, AuditLog::query()->where('action', 'supplier.source_moved')->count());
+    }
+
+    public function test_source_cards_show_each_supplier_cost_and_missing_price_notice(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['exchange_rate_idr' => 18000]);
+        $item = $this->item($supplier, ['unit_price_micros' => 590000]);
+        $product = Product::factory()->create();
+        $this->source($product, $item, ['priority' => 10, 'is_active' => true]);
+
+        $this->get(route('admin.products.suppliers', $product))->assertOk()
+            ->assertSee('Harga beli/unit')
+            ->assertSee('Rp10.620')
+            ->assertSee('0.59 USD');
+
+        $unpriced = $this->item($supplier, ['external_id' => 'private-sku-2', 'unit_price_micros' => null]);
+        $this->source($product, $unpriced, ['priority' => 20]);
+        $this->get(route('admin.products.suppliers', $product))->assertOk()
+            ->assertSee('Belum ada harga — sinkronkan katalog supplier.');
     }
 
     public function test_private_preview_is_integer_and_manual_policy_preserves_retail(): void

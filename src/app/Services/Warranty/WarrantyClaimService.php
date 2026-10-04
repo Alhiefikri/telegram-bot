@@ -153,7 +153,7 @@ final class WarrantyClaimService
             }
             $claim->forceFill(['claim_token' => null, 'lease_expires_at' => null, 'last_error' => $error]);
             if ($account === null || $account['price'] !== $lockedUnit->cost_idr) {
-                if ($submit && in_array($error, ['rate_limited', 'invalid_key', 'currency_mismatch', 'financial_lock', 'unauthorized', 'ip_not_allowed'], true)) {
+                if ($submit && in_array($error, ['rate_limited', 'invalid_key', 'credential_unreadable', 'currency_mismatch', 'financial_lock', 'unauthorized', 'ip_not_allowed'], true)) {
                     // Local pre-dispatch failures and documented authentication/
                     // rate rejections cannot accept a claim. Unknown transport
                     // failures retain their original dispatch and use GET only.

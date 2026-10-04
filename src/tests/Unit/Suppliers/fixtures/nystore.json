@@ -1,0 +1,49 @@
+{
+  "account": {
+    "chat_id": 1242433004,
+    "first_name": "Operator",
+    "wallet_balance": 1.15
+  },
+  "catalog": {
+    "services": [
+      {
+        "service_id": "sku-1",
+        "name": "Duplicate-free subscription",
+        "price": 0.59,
+        "stock": 1465,
+        "stock_status": "fresh",
+        "availability_state": "available"
+      }
+    ]
+  },
+  "purchase": {
+    "success": true,
+    "order_id": "order-1",
+    "order_status": "success",
+    "requested_quantity": 2,
+    "delivered_quantity": 2,
+    "charged_amount": 1.18,
+    "refunded_amount": 0,
+    "net_charged_amount": 1.18,
+    "partial_delivery": false,
+    "products": ["DELIVERY-ONE", "DELIVERY-TWO"]
+  },
+  "order": {
+    "success": true,
+    "order": {
+      "order_id": "order-1",
+      "service_id": "sku-1",
+      "quantity": 2,
+      "requested_quantity": 2,
+      "amount": 1.18,
+      "status": "success",
+      "order_status": "success",
+      "delivered_quantity": 2,
+      "delivered_products": ["DELIVERY-ONE", "DELIVERY-TWO"]
+    }
+  },
+  "balance_micros": 1150000,
+  "price_micros": 590000,
+  "cost_micros": 1180000,
+  "stock": 1465
+}

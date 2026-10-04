@@ -5,13 +5,40 @@
 @foreach($sources as $source)
 @php($item = $source->catalogItem)
 @php($supplier = $item->supplier)
-<article class="supplier-panel p-5 sm:p-6"><p class="supplier-eyebrow">Sumber stok · {{ $supplier->name }}</p><h2 class="mt-2 break-words text-lg font-black">{{ $item->name }}</h2><p class="supplier-muted mt-1 break-all text-xs">SKU {{ $item->external_id }}</p>
+@php($rank = $loop->iteration)
+@php($cost = $sourceCosts[$source->id] ?? null)
+<article class="supplier-panel p-5 sm:p-6">
+<div class="flex flex-wrap items-start justify-between gap-3">
+    <div><p class="supplier-eyebrow">Sumber stok · {{ $supplier->name }}</p><h2 class="mt-2 break-words text-lg font-black">{{ $item->name }}</h2><p class="supplier-muted mt-1 break-all text-xs">SKU {{ $item->external_id }}</p>
+    <p class="mt-2 text-sm"><span class="supplier-muted font-bold">Harga beli/unit</span>
+    @if(($cost['idr'] ?? null) !== null)
+        <strong class="text-lg">Rp{{ number_format($cost['idr'], 0, ',', '.') }}</strong> <span class="supplier-muted text-xs">({{ $cost['unit'] }} {{ $supplier->currency }} · kurs Rp{{ number_format($supplier->exchange_rate_idr, 0, ',', '.') }} · katalog {{ $item->synced_at?->format('d/m H:i') ?? 'belum sync' }})</span>
+    @else
+        <strong class="text-neo-warning-text">Belum ada harga — sinkronkan katalog supplier.</strong>
+    @endif
+    </p>
+    </div>
+    <span class="supplier-badge {{ $rank === 1 ? 'bg-neo-success-soft text-neo-success-text' : '' }}">Urutan {{ $rank }}{{ $rank === 1 ? ' · utama' : ' · cadangan' }}</span>
+</div>
+@if($sources->count() > 1)
+<form method="POST" action="{{ route('admin.suppliers.move', $item) }}" class="mt-4 flex flex-wrap items-center gap-2">
+    @csrf
+    <input type="hidden" name="product_id" value="{{ $product->id }}">
+    <input type="hidden" name="version" value="{{ $source->version }}">
+    <input type="hidden" name="supplier_version" value="{{ $supplier->version }}">
+    <button class="supplier-button" name="direction" value="up" @disabled($loop->first)>↑ Naikkan</button>
+    <button class="supplier-button" name="direction" value="down" @disabled($loop->last)>↓ Turunkan</button>
+    <small class="supplier-muted text-sm">Urutan 1 dicoba lebih dulu saat pembelian; urutan berikutnya menjadi cadangan.</small>
+</form>
+@else
+<p class="supplier-muted mt-3 text-sm">Baru satu supplier untuk produk ini. Petakan supplier kedua dari Katalog privat untuk mengatur urutan utama/cadangan.</p>
+@endif
 <form method="POST" action="{{ route('admin.suppliers.map', $item) }}" class="mt-4 grid gap-4">
     @csrf
     <input type="hidden" name="supplier_version" value="{{ $supplier->version }}">
     <input type="hidden" name="version" value="{{ $source->version }}">
     <input type="hidden" name="product_id" value="{{ $product->id }}">
-    <label>Urutan supplier <input name="priority" type="number" min="0" max="10000" value="{{ $source->priority }}" required><small class="supplier-muted text-sm font-normal">Angka lebih kecil didahulukan. Contoh: 10 menjadi pilihan utama, 20 menjadi cadangan.</small></label>
+    <input type="hidden" name="priority" value="{{ $source->priority }}">
     <input type="hidden" name="is_active" value="0">
     <label><input type="checkbox" name="is_active" value="1" @checked($source->is_active) @disabled($item->requires_input || !$item->orderable)> Gunakan supplier ini untuk membeli produk</label>
     <label><input type="checkbox" name="equivalent_confirmed" value="1" required> Saya memastikan paket, durasi, dan garansinya sesuai produk toko.</label>

@@ -292,7 +292,9 @@ final class BuyMailClient
         try {
             $key = $supplier->api_key;
         } catch (Throwable) {
-            throw new SupplierUnavailable('invalid_key');
+            // The stored ciphertext cannot be read (for example after an
+            // APP_KEY change); this is not a provider rejection.
+            throw new SupplierUnavailable('credential_unreadable');
         }
         if (! is_string($key) || preg_match('/\A[\x21-\x7e]{1,512}\z/D', $key) !== 1) {
             throw new SupplierUnavailable('invalid_key');
