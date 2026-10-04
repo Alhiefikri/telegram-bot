@@ -869,7 +869,9 @@ final class WarrantyClaimTest extends NonTransactionalDatabaseTestCase
                 throw new ConnectionException('Synthetic unavailable transport');
             }
             if ($outcome === 'lost') {
-                $claim->update(['claim_token' => 'other-worker']);
+                $takeoverToken = (string) Str::uuid();
+                $this->assertNotSame($claim->fresh()->claim_token, $takeoverToken);
+                $claim->update(['claim_token' => $takeoverToken]);
             }
 
             return Http::response(['account' => [

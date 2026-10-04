@@ -227,26 +227,6 @@ final class SupplierAvailabilityTest extends TestCase
         $this->assertFalse(Product::query()->availableForPurchase()->whereKey($product->id)->exists());
     }
 
-    public function test_private_low_balance_warning_rearms_after_observed_recovery(): void
-    {
-        [$product, $supplier] = $this->mapped();
-        $supplier->low_balance_threshold_micros = 2000000;
-        $supplier->save();
-        $this->snapshot('1', 20);
-        app(SupplierCatalogSync::class)->sync($supplier);
-        $first = $supplier->fresh()->low_balance_alerted_at;
-        $this->assertNotNull($first);
-        $this->travel(1)->seconds();
-        app(SupplierCatalogSync::class)->sync($supplier);
-        $this->assertTrue($first->equalTo($supplier->fresh()->low_balance_alerted_at));
-        $this->snapshot('2', 20);
-        app(SupplierCatalogSync::class)->sync($supplier);
-        $this->assertNull($supplier->fresh()->low_balance_alerted_at);
-        $this->snapshot('1', 20);
-        app(SupplierCatalogSync::class)->sync($supplier);
-        $this->assertTrue($supplier->fresh()->low_balance_alerted_at->greaterThan($first));
-    }
-
     public function test_expiry_bounds_cached_catalog_and_sql_purchase_semantics_without_supplier_n_plus_one(): void
     {
         [$product, $supplier] = $this->mapped();

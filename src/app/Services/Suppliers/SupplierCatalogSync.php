@@ -111,18 +111,17 @@ final class SupplierCatalogSync
                     ->whereNotIn('external_id', array_column($rows, 'external_id'))
                     ->update(['stock' => 0, 'orderable' => false, 'synced_at' => $now, 'updated_at' => $now]);
                 $balance = $balanceBlocked ? $locked->balance_micros : $snapshot->balanceMicros;
-                $freeBalance = max(0, ($balance ?? 0) - $locked->reserved_balance_micros);
-                $low = $locked->low_balance_threshold_micros > 0 && $freeBalance < $locked->low_balance_threshold_micros;
                 $locked->forceFill([
                     'balance_micros' => $balance,
+                    'balance_observed_at' => $balanceBlocked ? $locked->balance_observed_at : $now,
                     'synced_at' => $now,
                     'sync_expires_at' => $now->copy()->addSeconds(self::FRESHNESS_SECONDS),
                     'sync_token' => null,
                     'sync_lease_expires_at' => null,
                     'last_error' => null,
                     'version' => $locked->version + 1,
-                    'low_balance_alerted_at' => $low ? ($locked->low_balance_alerted_at ?? $now) : null,
                 ])->save();
+                app(SupplierHealthService::class)->observeRecovery($locked, ! $balanceBlocked);
                 if ($snapshot->accountMetadata !== []) {
                     $locked->forceFill(['external_account_id' => $snapshot->accountMetadata['account_id'], 'account_metadata' => $snapshot->accountMetadata])->save();
                 }

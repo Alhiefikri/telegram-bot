@@ -2,6 +2,7 @@
 
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\UserRole;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Models\WarrantyClaim;
 use App\Services\StoreBalance\StoreBalanceLedger;
@@ -10,6 +11,7 @@ use App\Services\Warranty\WarrantyClaimService;
 use App\Services\Warranty\WarrantyOrderAccess;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -36,6 +38,39 @@ if (($argv[1] ?? null) === 'cleanup') {
         Storage::disk('local')->delete($claim->proof_path);
     }
     echo '{"cleaned":true}';
+    exit;
+}
+if (($argv[1] ?? null) === 'state') {
+    $keys = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR)['keys'];
+    $suppliers = Supplier::orderBy('id')->get()->map(fn (Supplier $supplier) => [
+        'id' => $supplier->id,
+        'provider' => $supplier->provider,
+        'key_matches' => array_map(fn (string $key) => $supplier->api_key === $key, $keys),
+        'key_encrypted' => $supplier->getRawOriginal('api_key') !== $supplier->api_key,
+        'key_storage_digest' => hash('sha256', $supplier->getRawOriginal('api_key')),
+    ]);
+    if (config('session.driver') !== 'database') {
+        throw new RuntimeException('Warranty browser state checks require disposable database sessions.');
+    }
+    $sessions = DB::table(config('session.table'))->get(['payload']);
+    $sessionsContainKey = $sessions->contains(function ($session) use ($keys): bool {
+        $payload = base64_decode($session->payload, true);
+        if ($payload === false) {
+            throw new RuntimeException('Warranty browser session payload is unreadable.');
+        }
+        foreach ($keys as $key) {
+            if (str_contains($payload, $key)) {
+                return true;
+            }
+        }
+
+        return false;
+    });
+    echo json_encode([
+        'suppliers' => $suppliers,
+        'sessions_checked' => $sessions->count(),
+        'sessions_contain_key' => $sessionsContainKey,
+    ], JSON_THROW_ON_ERROR);
     exit;
 }
 Http::preventStrayRequests();

@@ -85,6 +85,7 @@ final class TelegramOutboundEffectPolicy
     private const MAX_ATTEMPTS = [
         TelegramOutboundEffectType::WarrantyNotification->value => 3,
         TelegramOutboundEffectType::WarrantyDeadlineReminder->value => 3,
+        TelegramOutboundEffectType::SupplierHealth->value => 3,
         TelegramOutboundEffectType::ReceiptCredentials->value => self::RECEIPT_MAX_ATTEMPTS,
         TelegramOutboundEffectType::ReceiptTxtDownload->value => self::RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS,
         TelegramOutboundEffectType::ReceiptOrderActions->value => self::RECEIPT_ACTIONS_MAX_ATTEMPTS,
@@ -103,6 +104,7 @@ final class TelegramOutboundEffectPolicy
     /** @var array<string, string> */
     private const ATTEMPTS_EXHAUSTED_CODES = [
         TelegramOutboundEffectType::WarrantyDeadlineReminder->value => 'warranty_deadline_reminder_attempts_exhausted',
+        TelegramOutboundEffectType::SupplierHealth->value => 'supplier_health_attempts_exhausted',
         TelegramOutboundEffectType::ReceiptCredentials->value => 'receipt_attempts_exhausted',
         TelegramOutboundEffectType::ReceiptTxtDownload->value => 'receipt_txt_download_attempts_exhausted',
         TelegramOutboundEffectType::ReceiptOrderActions->value => 'receipt_actions_attempts_exhausted',

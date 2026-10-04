@@ -70,6 +70,9 @@ Schedule::command('telegram:reconcile-stock-notifications --chunk=25')
     ->withoutOverlapping(45)
     ->runInBackground();
 Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
+// Health episodes and outbound effects are PostgreSQL-durable. One existing
+// scheduler is sufficient; Redis overlap is not the dedupe authority.
+Schedule::command('suppliers:notify-health --limit=25')->everyFifteenMinutes()->withoutOverlapping(10)->runInBackground();
 Schedule::command('ops:payment-lifecycle-rollout-report')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping();
 Schedule::command('customers:cleanup-login-links --chunk=500')->hourly()->withoutOverlapping();
