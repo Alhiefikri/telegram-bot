@@ -9,7 +9,6 @@ use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
 use App\Exceptions\TelegramOutboundPreSendException;
-use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
