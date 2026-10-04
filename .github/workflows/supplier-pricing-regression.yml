@@ -1,0 +1,57 @@
+name: Supplier pricing regression
+
+on:
+  schedule:
+    # 03:00 WITA (UTC+8), daily. Scheduled runs use the default branch.
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supplier-pricing-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  supplier-pricing:
+    name: Supplier markup, profit, money, and availability
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      APP_ENV: testing
+      APP_FORCE_HTTPS: false
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.4'
+          extensions: bcmath, gd, intl, pdo_sqlite, sqlite3, zip
+          coverage: none
+          tools: composer:v2
+
+      - name: Prepare isolated test environment
+        run: |
+          cp .env.example .env
+          mkdir -p database storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
+          touch database/database.sqlite
+          composer install --no-interaction --prefer-dist --no-progress
+          php artisan key:generate --ansi
+
+      - name: Run supplier pricing regression tests
+        run: composer test -- --filter='SupplierPricingTest|SupplierMoneyTest|SupplierAvailabilityTest' --log-junit=supplier-pricing-junit.xml
+
+      - name: Retain test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: supplier-pricing-results
+          path: src/supplier-pricing-junit.xml
+          if-no-files-found: ignore
+          retention-days: 14

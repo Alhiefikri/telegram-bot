@@ -208,6 +208,58 @@ Scheduler isolated dinyalakan kembali. Suite regression supplier: 134 passed,
 994 assertions; tes tambahan memastikan detail yang gagal menolak seluruh
 snapshot dan tidak mengirim kelompok berikutnya.
 
+## Katalog review supplier — 4 Oktober 2026
+
+Empat Product baru diimpor melalui `ProductSupplierManager` pada database
+`supplier-local.sqlite`, bukan database produksi. Harga manual mengikuti
+katalog publik produksi: Gemini 18 bulan Rp13.000, Adobe Express 1 tahun
+Rp10.000, Super Duolingo 12 bulan Rp13.000, dan Capcut 1 bulan Rp20.000.
+Product Capcut 7 hari yang sudah ada tetap Rp5.000. Semua menggunakan stok
+lokal nol dan mapping supplier aktif; Product Family GEMINI, ADOBE, DUOLINGO,
+dan CAPCUT menyediakan label paket. CAPCUT mempunyai dua pilihan Plan.
+Deskripsi, durasi, ikon, catatan pengiriman/support, dan batas garansi diisi
+sebagai konten toko. Gambar Duolingo diambil dari aset publik produksi.
+
+Harga produksi bukan bukti kelayakan supplier: pada observasi review,
+saldo CSxStore nol dan ProdSeller 0,169999 USDT. Capcut 7 hari memiliki kapasitas
+satu; produk lain nol karena saldo tidak cukup. Capcut 1 bulan juga bermodal
+Rp22.500, lebih besar daripada retail Rp20.000. Stok API tidak disalin ke stok
+lokal dan saldo tidak direkayasa. Garansi Adobe produksi tujuh hari tidak
+ditiru: SKU yang dipilih tidak memberi garansi setelah aktivasi.
+
+Checkout Maintenance diaktifkan dengan catatan review test. Jangan membuka
+checkout tanpa otorisasi spending supplier terpisah. Tidak ada Order atau
+SupplierPurchase baru selama smoke katalog. Bot `LhieStoreTestBot` terverifikasi;
+ngrok menunjuk ke port 18082 dengan request inspection dimatikan.
+
+Terminal interaktif ditemukan mewarisi APP_KEY yang berbeda. Launcher privat
+`src/storage/app/private/supplier-review-runtime.sh` membersihkan environment
+aplikasi warisan sebelum memuat `.env.supplier-local`; APP_KEY database tidak
+diganti. Gunakan launcher ini untuk seluruh proses review, dari `src/`:
+
+```bash
+sh storage/app/private/supplier-review-runtime.sh php artisan serve --env=supplier-local --host=127.0.0.1 --port=18082 --no-reload
+sh storage/app/private/supplier-review-runtime.sh php artisan queue:work database --env=supplier-local --queue=default,notifications,telegram-outbound,telegram-stock --timeout=60 --tries=1 --sleep=2
+sh storage/app/private/supplier-review-runtime.sh php artisan queue:work supplier --env=supplier-local --queue=suppliers --timeout=120 --tries=1 --sleep=2
+sh storage/app/private/supplier-review-runtime.sh php artisan schedule:work --env=supplier-local
+```
+
+Verifikasi review: build frontend berhasil; login Owner, daftar produk supplier,
+foto Duolingo, serta pergantian Plan CAPCUT diuji pada browser. Viewport 390 px
+tidak overflow. Browse sintetis `/products` diterima melalui webhook publik,
+diproses worker, lalu empat family dan detail Duolingo dikirim melalui service
+katalog ke private chat operator pada Telegram nyata. Ini bukan bukti pembeli
+telah menekan seluruh tombol. Tidak ada pembelian atau deposit supplier.
+
+Tambahan review: Product #7 `HOTMAIL ACCOUNT` dari CSxStore SKU `10` masuk
+family HOTMAIL dengan label `1 akun · Email / Password / Code`, ikon email,
+retail review Rp1.000, minimum profit Rp500, dan buffer Rp100. Paket berisi
+akun `@hotmail.com`; masa garansi tidak diasumsikan. Observasi API menunjukkan
+163.195 unit, tetapi kapasitas buyer nol karena saldo CSxStore kosong.
+Halaman publik `/pilihan/hotmail` menampilkan harga dan deskripsi yang benar;
+preview family dikirim melalui service katalog ke Telegram test nyata.
+Jumlah Order dan SupplierPurchase tidak berubah; checkout tetap ditutup.
+
 Referensi: [dokumentasi API CSxStore](https://api.cssx.store/docs),
 [supplier runbook](runbook-supplier-api-reseller.md),
 [Laravel queue workers](https://laravel.com/docs/13.x/queues#running-the-queue-worker).

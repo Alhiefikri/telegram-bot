@@ -1,14 +1,26 @@
 @extends('admin.suppliers.layout')
 @section('title', 'Supplier & harga jual · '.$product->name)
 @section('content')
-<p>Produk #{{ $product->id }} · harga jual Rp {{ number_format($product->price_amount, 0, ',', '.') }}. Pilih supplier tempat membeli produk dan tentukan cara mengatur harga jual. Harga pesanan yang sudah dibuat tetap sama.</p>
+<div class="supplier-panel p-5"><p class="supplier-eyebrow">Produk toko #{{ $product->id }}</p><p class="mt-2 text-2xl font-black">Rp{{ number_format($product->price_amount, 0, ',', '.') }}</p><p class="supplier-muted mt-2 text-sm leading-relaxed">Pilih supplier tempat membeli produk dan tentukan cara mengatur harga jual. Harga pesanan yang sudah dibuat tetap sama.</p></div>
 @foreach($sources as $source)
 @php($item = $source->catalogItem)
 @php($supplier = $item->supplier)
-<article class="rounded-2xl border-2 bg-white p-4"><h2 class="font-bold">{{ $supplier->name }} · {{ $item->name }} · SKU {{ $item->external_id }}</h2>
-<form method="POST" action="{{ route('admin.suppliers.map', $item) }}" class="mt-3 grid gap-3">@csrf<input type="hidden" name="supplier_version" value="{{ $supplier->version }}"><input type="hidden" name="version" value="{{ $source->version }}"><input type="hidden" name="product_id" value="{{ $product->id }}"><label>Urutan supplier <input class="rounded border p-2" name="priority" type="number" min="0" max="10000" value="{{ $source->priority }}" required><small class="mt-1 block text-sm">Angka lebih kecil didahulukan. Contoh: 10 menjadi pilihan utama, 20 menjadi cadangan.</small></label><input type="hidden" name="is_active" value="0"><label><input type="checkbox" name="is_active" value="1" @checked($source->is_active) @disabled($item->requires_input || !$item->orderable)> Gunakan supplier ini untuk membeli produk</label><label><input type="checkbox" name="equivalent_confirmed" value="1" required> Saya memastikan paket, durasi, dan garansinya sesuai produk toko.</label><button class="rounded border-2 px-3 py-2 font-bold">Simpan pilihan supplier</button></form>@if($item->requires_input || !$item->orderable)<p class="mt-2 text-sm">Produk supplier ini belum mendukung pembelian dan pengiriman otomatis.</p>@endif</article>
+<article class="supplier-panel p-5 sm:p-6"><p class="supplier-eyebrow">Sumber stok · {{ $supplier->name }}</p><h2 class="mt-2 break-words text-lg font-black">{{ $item->name }}</h2><p class="supplier-muted mt-1 break-all text-xs">SKU {{ $item->external_id }}</p>
+<form method="POST" action="{{ route('admin.suppliers.map', $item) }}" class="mt-4 grid gap-4">
+    @csrf
+    <input type="hidden" name="supplier_version" value="{{ $supplier->version }}">
+    <input type="hidden" name="version" value="{{ $source->version }}">
+    <input type="hidden" name="product_id" value="{{ $product->id }}">
+    <label>Urutan supplier <input name="priority" type="number" min="0" max="10000" value="{{ $source->priority }}" required><small class="supplier-muted text-sm font-normal">Angka lebih kecil didahulukan. Contoh: 10 menjadi pilihan utama, 20 menjadi cadangan.</small></label>
+    <input type="hidden" name="is_active" value="0">
+    <label><input type="checkbox" name="is_active" value="1" @checked($source->is_active) @disabled($item->requires_input || !$item->orderable)> Gunakan supplier ini untuk membeli produk</label>
+    <label><input type="checkbox" name="equivalent_confirmed" value="1" required> Saya memastikan paket, durasi, dan garansinya sesuai produk toko.</label>
+    <button class="supplier-button supplier-button-primary">Simpan pilihan supplier</button>
+</form>
+@if($item->requires_input || !$item->orderable)<p class="supplier-alert mt-4">Produk supplier ini belum mendukung pembelian dan pengiriman otomatis.</p>@endif
+</article>
 @endforeach
-<section class="rounded-2xl border-2 bg-white p-4"><h2 class="font-bold">Pengaturan harga jual</h2>
+<section class="supplier-panel p-5 sm:p-6"><p class="supplier-eyebrow">Kebijakan produk</p><h2 class="mt-1 text-xl font-black">Pengaturan harga jual</h2>
 @isset($pricePreview)
 <div id="price-preview" class="my-4 rounded-xl border-2 bg-neo-paper p-4" role="status">
     <h3 class="text-lg font-bold">Hasil cek harga untuk 1 produk</h3>
@@ -42,6 +54,6 @@
     'buffer_idr' => 'Cadangan untuk biaya isi saldo, selisih kurs, atau biaya lain. Bukan uang yang otomatis dipotong. Isi 0 jika tidak diperlukan.',
 } }}</small></label>
 @endforeach
-@if($sources->isNotEmpty())<label>Produk supplier yang ingin dicek <select class="w-full rounded border p-2" name="catalog_item_id">@foreach($sources as $source)<option value="{{ $source->supplier_catalog_item_id }}" @selected(isset($previewItem) && $previewItem->id === $source->supplier_catalog_item_id)>{{ $source->catalogItem->name }}</option>@endforeach</select></label><button type="submit" formaction="{{ route('admin.products.supplier-pricing.preview', $product) }}#price-preview" class="rounded border px-3 py-2 font-bold">Lihat perkiraan modal & harga jual</button>@endif
-<button type="submit" class="rounded border-2 px-3 py-2 font-bold sm:col-span-2">Simpan pengaturan harga</button></form></section>
+@if($sources->isNotEmpty())<label>Produk supplier yang ingin dicek <select class="w-full rounded border p-2" name="catalog_item_id">@foreach($sources as $source)<option value="{{ $source->supplier_catalog_item_id }}" @selected(isset($previewItem) && $previewItem->id === $source->supplier_catalog_item_id)>{{ $source->catalogItem->name }}</option>@endforeach</select></label><button type="submit" formaction="{{ route('admin.products.supplier-pricing.preview', $product) }}#price-preview" class="supplier-button self-end">Lihat perkiraan modal & harga jual</button>@endif
+<button type="submit" class="supplier-button supplier-button-primary sm:col-span-2">Simpan pengaturan harga</button></form></section>
 @endsection

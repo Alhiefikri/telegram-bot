@@ -304,6 +304,40 @@ final class SupplierAdminTest extends TestCase
         $this->assertSame(1, AuditLog::query()->where('action', 'supplier.product_imported')->count());
     }
 
+    public function test_catalog_product_selector_includes_drafts_and_other_supplier_sources_but_not_deleted_or_already_mapped_products(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier();
+        $item = $this->item($supplier);
+        $active = Product::factory()->create(['name' => 'Gemini Pro', 'is_active' => true]);
+        $draft = Product::factory()->create(['name' => 'Gemini Draft', 'is_active' => false]);
+        $deleted = Product::factory()->create();
+        $deleted->delete();
+        $mapped = Product::factory()->create();
+        $this->source($mapped, $item);
+        $otherSupplier = $this->supplier(['name' => 'Second supplier']);
+        $otherItem = $this->item($otherSupplier);
+        $this->source($active, $otherItem);
+
+        $response = $this->get(route('admin.suppliers.catalog', $supplier))->assertOk();
+        $document = new \DOMDocument;
+        @$document->loadHTML($response->getContent());
+        $xpath = new \DOMXPath($document);
+        $options = $xpath->query('//select[@name="product_id"]/option[@value!=""]');
+        $ids = [];
+        foreach ($options as $option) {
+            $ids[] = (int) $option->getAttribute('value');
+        }
+        $this->assertEqualsCanonicalizing([$active->id, $draft->id], $ids);
+
+        $this->post(route('admin.suppliers.map', $item), [
+            'product_id' => $active->id, 'supplier_version' => 1, 'version' => 0,
+            'priority' => 20, 'is_active' => 0, 'equivalent_confirmed' => 1,
+        ])->assertRedirect();
+        $this->assertSame(2, ProductSupplierSource::query()->where('product_id', $active->id)->count());
+        $this->assertSame('Gemini Pro', $active->refresh()->name);
+    }
+
     public function test_mapping_requires_equivalence_and_cannot_activate_manual_sku(): void
     {
         $this->owner();

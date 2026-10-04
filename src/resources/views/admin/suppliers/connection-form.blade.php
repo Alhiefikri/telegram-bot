@@ -15,7 +15,7 @@
     <input type="hidden" name="currency_confirmed" value="0" x-bind:disabled="!providers[provider].confirm"><label x-show="providers[provider].confirm" x-cloak><input name="currency_confirmed" type="checkbox" value="1" @checked($connection['currency_confirmed'] ?? false) x-bind:disabled="!providers[provider].confirm">Saya telah memverifikasi mata uang akun supplier (wajib ARRS/Warzone).</label>
     <input type="hidden" name="is_active" value="0"><label><input name="is_active" type="checkbox" value="1" @checked($connection['is_active'] ?? false)> Izinkan pembelian dari supplier ini setelah katalog diperbarui</label>
     <p class="text-sm text-red-700 sm:col-span-2" role="alert" x-show="error" x-text="error" x-cloak></p>
-    <button class="rounded border-2 bg-white px-4 py-2 font-bold sm:col-span-2" type="submit" x-ref="saveButton" x-bind:disabled="saving || confirming"><span x-show="saving" x-cloak>Menyimpan...</span><span x-show="!saving">{{ isset($connection['id']) ? 'Simpan supplier' : 'Buat supplier' }}</span></button>
+    <button class="supplier-button supplier-button-primary sm:col-span-2" type="submit" x-ref="saveButton" x-bind:disabled="saving || confirming"><span x-show="saving" x-cloak>Menyimpan...</span><span x-show="!saving">{{ isset($connection['id']) ? 'Simpan supplier' : 'Buat supplier' }}</span></button>
     <dialog x-ref="passwordDialog" class="m-auto w-[calc(100%_-_2rem)] max-w-md rounded-2xl border-2 bg-white p-5 text-neo-ink shadow-xl backdrop:bg-black/40" aria-labelledby="supplier-password-title-{{ $connection['id'] ?? 'new' }}" aria-describedby="supplier-password-help-{{ $connection['id'] ?? 'new' }}" x-on:cancel.prevent="cancelConfirmation()">
         <h2 id="supplier-password-title-{{ $connection['id'] ?? 'new' }}" class="text-xl font-bold">Konfirmasi password</h2>
         <p id="supplier-password-help-{{ $connection['id'] ?? 'new' }}" class="mt-2 text-sm">Masukkan password admin untuk menyimpan supplier. API key dan isianmu tetap ada.</p>
@@ -24,8 +24,8 @@
         </label>
         <p class="mt-2 text-sm text-red-700" role="alert" x-show="confirmationError" x-text="confirmationError" x-cloak></p>
         <div class="mt-4 flex flex-wrap gap-3">
-            <button type="button" class="rounded border-2 px-3 py-2 font-bold" x-bind:disabled="confirming" x-on:click="confirmPassword()">Konfirmasi dan simpan</button>
-            <button type="button" class="rounded border px-3 py-2" x-bind:disabled="confirming" x-on:click="cancelConfirmation()">Batal</button>
+            <button type="button" class="supplier-button supplier-button-primary" x-bind:disabled="confirming" x-on:click="confirmPassword()">Konfirmasi dan simpan</button>
+            <button type="button" class="supplier-button" x-bind:disabled="confirming" x-on:click="cancelConfirmation()">Batal</button>
         </div>
     </dialog>
 </form>

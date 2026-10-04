@@ -20,7 +20,12 @@ final class SupplierPricing
             throw new InvalidArgumentException('Invalid supplier cost.');
         }
         $base = $this->add($costIdr, (int) $policy->buffer_idr);
-        $percent = $this->ceilDiv($this->multiply($costIdr, (int) $policy->markup_basis_points), 10000);
+        // Divide before multiplying so a representable percentage cannot overflow
+        // just because the unscaled cost × basis-points intermediate is larger.
+        $percent = $policy->mode === 'fixed' ? 0 : $this->add(
+            $this->multiply(intdiv($costIdr, 10000), (int) $policy->markup_basis_points),
+            $this->ceilDiv($this->multiply($costIdr % 10000, (int) $policy->markup_basis_points), 10000),
+        );
         $profit = match ($policy->mode) {
             'percent' => $percent,
             'fixed' => (int) $policy->profit_idr,

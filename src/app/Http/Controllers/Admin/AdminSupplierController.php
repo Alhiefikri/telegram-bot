@@ -53,8 +53,9 @@ final class AdminSupplierController extends Controller
     {
         $this->authorizeManager($request);
         $items = SupplierCatalogItem::query()->where('supplier_id', $supplier->id)->with(['sources.product'])->orderBy('id')->paginate(25);
+        $products = Product::query()->orderBy('name')->orderBy('id')->get(['id', 'name', 'price_amount', 'is_active']);
 
-        return view('admin.suppliers.catalog', ['supplier' => $supplier->only(['id', 'name', 'provider', 'currency', 'exchange_rate_idr', 'version', 'synced_at']), 'items' => $items]);
+        return view('admin.suppliers.catalog', ['supplier' => $supplier->only(['id', 'name', 'provider', 'currency', 'exchange_rate_idr', 'version', 'synced_at']), 'items' => $items, 'products' => $products]);
     }
 
     public function import(SupplierAdminRequest $request, SupplierCatalogItem $catalogItem, ProductSupplierManager $manager)

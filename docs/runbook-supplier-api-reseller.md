@@ -8,12 +8,14 @@ Supplier Balance is the operator's money at the external shop, not Customer Stor
 
 ## Setup through Admin
 
+Dashboard menampilkan setiap koneksi sebagai kartu dengan status aktif/nonaktif, saldo tersedia, saldo total, dana ditahan, dan waktu sinkron. Aksi monitor, katalog, sinkronisasi, serta deposit BuyMail tersedia sebagai tombol; form Tambah/Edit koneksi dapat dibuka tanpa berpindah halaman. Daftar produk toko menampilkan harga jual dan status publik dengan tombol **Atur supplier & harga**. Katalog privat memakai kartu produk dengan harga beli, stok, dana/unit ditahan, pemetaan, dan form impor/hubungkan yang dapat dibuka per produk. Semua halaman supplier mendukung layout mobile serta pilihan tema terang/gelap.
+
 1. Open **Admin → Supplier Reseller** and fill the connection form. Clicking **Buat/Simpan supplier** opens an inline password dialog if recent confirmation is missing; successful confirmation resumes saving automatically. Incorrect passwords or cancelling retain the API key and other inputs in the current browser form. No secret is flashed to server session or persisted to browser storage. Operational recovery still requires recent confirmation.
 2. Add a connection: supported provider, API key, whole-IDR conversion rate, active flag and low-balance threshold. The Dashboard derives the private name and documented currency from the provider: ProdSeller uses USDT, CSxStore and AI Vault use USD, and BuyMail uses IDR with rate 1. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation.
 3. Do not put supplier API keys in ENV. The database stores encrypted credentials using the application's encryption key; saved keys are not displayed back. Keep APP_KEY and encrypted database backups together under the existing backup policy. Losing the key makes those credentials unreadable.
 4. For ARRS/Warzone, confirm the actual account currency with the supplier. Dollar-like presentation is not currency evidence. ProdSeller uses USDT; CSxStore and AI Vault use USD.
 5. Activate the connection and click **Sinkron katalog dan saldo**. The local button is a CSRF-protected POST, but provider catalog/balance requests are GET-only. Read-only catalog fetching must not buy anything.
-6. Open the private catalog. Select a SKU to import as a draft Product, or map it to an existing Product with explicit equivalent-product confirmation.
+6. Open the private catalog. Select a SKU to import as a draft Product, or open **Hubungkan ke produk toko yang sudah ada** and select a Product by name from the **Produk toko** dropdown. Options show retail price and active/draft status; the ID is only a disambiguating label, not an input to memorize. Drafts and Products mapped to other suppliers remain selectable. Deleted Products and Products already mapped to this SKU are excluded. Confirm equivalent entitlement before saving; edit an existing mapping through its linked Product button.
 7. Give the draft store-owned name, description, tutorial, warranty and support terms through normal Product editing. Import does not publish the supplier description or activate the Product automatically.
 8. Enable the source mapping and set priority. Lower priority sorts first. Only map products whose entitlement, region, account requirements, redemption deadline and warranty promises are equivalent.
 9. Set Product-owned pricing: manual, percentage, fixed profit or hybrid percentage/minimum profit; configure buffer, rounding and minimum-profit guard. Preview the cost/retail calculation before enabling public sales.
@@ -25,12 +27,26 @@ An account supports multiple SKUs with one credential. Adding another SKU from a
 
 - Manual retail price is never overwritten by sync.
 - Automatic policy updates base IDR price using configured supplier conversion rate; existing quantity tiers must remain valid and their actual retail totals are checked against the purchase profit floor.
+- Percentage markup is calculated from converted supplier cost, not from the cost plus buffer: `ceil(cost_IDR × basis_points / 10000)`. `100` means 1%; `1000` means 10%. Fixed mode uses `profit_idr` and ignores a previously saved percentage. Hybrid uses the larger of the percentage amount and `profit_idr`, not their sum.
+- Automatic retail is supplier cost + selected markup/profit + buffer, rounded upward to the configured IDR multiple. `minimum_profit_idr` is a separate purchasing guard, not another markup: every external unit must retain that minimum after its buffer. A computed price below that guard does not authorize a purchase.
 - Configured conversion rate should reflect actual cost of funding the supplier, not an assumed live exchange rate. Pending/paid Order Items keep their immutable retail snapshots and source cost ceiling.
 - Stale observations cannot authorize checkout. Failed reads preserve the last observed data rather than inventing zero stock. A stale last observation is not a promise that purchases remain possible.
 - Local stock is used first; external units cover the remainder when a safe source is eligible. Unresolved commitments reserve supplier balance and SKU capacity for existing orders.
 - While any supplier purchase has an unresolved, uncommitted debit, sync retains the existing wallet observation: the provider may already have charged that purchase. Catalog freshness still updates, but local finalization must not subtract the same debit from an already-reduced wallet.
 - If supplier balance is insufficient and no equivalent funded source is available, customer sees the ordinary unavailable state. Private Admin shows the funding warning.
 - A genuine authoritative unavailable-to-available Product transition reuses existing Telegram/Store Channel restock notifications and Web waitlist events. Repeated sync, recovery from a transient outage, or restock of an unused primary while a backup remained available must not create duplicate announcements.
+
+### Automated pricing regression
+
+`SupplierPricingTest` covers percentage/fixed/hybrid arithmetic, fractional-rupiah rounding, buffers, minimum-profit boundaries, quantity tiers, and true versus intermediate integer overflow. `SupplierMoneyTest` covers exact currency conversion and signed wallet presentation; `SupplierAvailabilityTest` exercises fresh eligible-source projection and retail updates.
+
+Run locally from `src/`:
+
+```sh
+composer test -- --filter='SupplierPricingTest|SupplierMoneyTest|SupplierAvailabilityTest'
+```
+
+The normal CI suite includes these tests on PRs and pushes to `main`. `.github/workflows/supplier-pricing-regression.yml` also runs this focused suite daily at **03:00 WITA** (19:00 UTC), supports **Run workflow**, and retains a JUnit result for 14 days. Scheduled execution starts only after the workflow is present on the default branch; GitHub may delay its start. These checks use isolated SQLite and fake/blocked provider HTTP, never live supplier purchases or funding.
 
 ## Fulfillment and recovery
 
