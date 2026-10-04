@@ -85,6 +85,9 @@ yang didukung; mutex tetap bukan otoritas dedupe.
   episode. `balance_observed_at` adalah waktu observasi wallet nyata: sync yang
   menahan wallet karena debit belum settled tidak memperbaruinya meskipun
   freshness katalog diperbarui. Cutover menunggu observasi wallet baru.
+  Timestamp mengikuti kolom Supplier existing (`timestamp` tanpa timezone);
+  nilai offset-free Eloquent dibaca dalam timezone aplikasi yang sama, bukan
+  diinterpretasi ulang oleh timezone session PostgreSQL.
 - Threshold nol menonaktifkan/reset episode. Observasi normal yang sah menutup
   episode agar low berikutnya dapat memberi alert baru. Sync hanya menyimpan
   observations/recovery; `low_balance_alerted_at` dimiliki materializer dan

@@ -11,7 +11,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('suppliers', function (Blueprint $table): void {
-            $table->timestampTz('balance_observed_at')->nullable();
+            $table->timestamp('balance_observed_at')->nullable();
         });
         foreach (['supplier_fulfillments', 'supplier_purchases'] as $tableName) {
             Schema::table($tableName, function (Blueprint $table): void {
@@ -39,7 +39,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->foreignId('supplier_id')->nullable()->constrained()->nullOnDelete();
             $table->text('message');
-            $table->timestampTz('created_at');
+            $table->timestamp('created_at');
         });
         // Old sync timestamps did not materialize any outbound effect. This
         // one-time cutover precedes the new writer and never touches sent history.
