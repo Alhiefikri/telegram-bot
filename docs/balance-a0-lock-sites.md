@@ -204,3 +204,31 @@ Explicit acquisition sites: **196**.
 | [WarrantyReplacementService](../src/app/Services/Warranty/WarrantyReplacementService.php#L186) | `approveAcquired` | 186 | `$attempt = SupplierPurchase::query()->where('warranty_claim_id', $claim->id)->lockForUpdate()->firstOrFail();` |
 | [WarrantySettlementService](../src/app/Services/Warranty/WarrantySettlementService.php#L43) | `choose` | 43 | `$attempt = SupplierPurchase::query()->where('warranty_claim_id', $claim->id)->lockForUpdate()->first();` |
 | [WarrantySettlementService](../src/app/Services/Warranty/WarrantySettlementService.php#L125) | `confirmExternalRefund` | 125 | `$refund = OrderRefund::query()->whereKey($initial->id)->lockForUpdate()->firstOrFail();` |
+
+## Cache coordination locks
+
+These are volatile coordination/rate-limit locks, not money authority. Provider single-flight and client budget locks may enclose HTTP outside a financial transaction; a vanished lease does not authorize a second money posting. Redis loss must be survivable through database claims/version checks and durable discovery. No raw `FOR UPDATE` or PostgreSQL advisory lock was found in the audited money service families.
+
+Cache acquisition sites: **19**. Reproduce with `rg -n "Cache::lock"` over the service families above.
+
+| File | Enclosing symbol | Source line | Cache acquisition |
+| --- | --- | --- | --- |
+| [BinancePayClient](../src/app/Services/Binance/BinancePayClient.php#L56) | `payTransactions` | 56 | `return Cache::lock($cacheKey.':lock', $lockSeconds)->block($lockSeconds, function () use ($startTimeMs, $endTimeMs, $limit, $cacheSeconds, $cacheKey): array {` |
+| [BscOperationalAlertNotifier](../src/app/Services/Bsc/BscOperationalAlertNotifier.php#L98) | `notifyVerification` | 98 | `$lock = Cache::lock($stateKey.':lock', self::VERIFICATION_LOCK_SECONDS);` |
+| [BscOperationalAlertNotifier](../src/app/Services/Bsc/BscOperationalAlertNotifier.php#L132) | `clearVerificationIncident` | 132 | `$lock = Cache::lock($stateKey.':lock', self::VERIFICATION_LOCK_SECONDS);` |
+| [BscOperationalAlertNotifier](../src/app/Services/Bsc/BscOperationalAlertNotifier.php#L172) | `rememberReadinessIncident` | 172 | `$lock = Cache::lock(self::READINESS_LOCK_KEY, self::READINESS_LOCK_SECONDS);` |
+| [KlikQrisNativeQrisService](../src/app/Services/KlikQris/KlikQrisNativeQrisService.php#L159) | `deliverOwnerAlert` | 159 | `$lock = Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds());` |
+| [KlikQrisNativeQrisService](../src/app/Services/KlikQris/KlikQrisNativeQrisService.php#L202) | `lifecycle` | 202 | `return Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds())` |
+| [KlikQrisNativeQrisService](../src/app/Services/KlikQris/KlikQrisNativeQrisService.php#L293) | `reconcile` | 293 | `$lock = Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds());` |
+| [KlikQrisNativeQrisService](../src/app/Services/KlikQris/KlikQrisNativeQrisService.php#L346) | `reconcileInFlight` | 346 | `$lock = Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds());` |
+| [KlikQrisNativeQrisService](../src/app/Services/KlikQris/KlikQrisNativeQrisService.php#L393) | `tryWithPaymentLock` | 393 | `$lock = Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds());` |
+| [KlikQrisNativeQrisService](../src/app/Services/KlikQris/KlikQrisNativeQrisService.php#L570) | `lifecycleForTopUp` | 570 | `return Cache::lock($this->topUpLockKey($topUp), $this->topUpLockLeaseSeconds())` |
+| [KlikQrisNativeQrisService](../src/app/Services/KlikQris/KlikQrisNativeQrisService.php#L586) | `reconcileTopUp` | 586 | `$lock = Cache::lock($this->topUpLockKey($topUp), $this->topUpLockLeaseSeconds());` |
+| [KlikQrisNativeQrisService](../src/app/Services/KlikQris/KlikQrisNativeQrisService.php#L648) | `tryWithTopUpLock` | 648 | `$lock = Cache::lock($this->topUpLockKey($topUp), $this->topUpLockLeaseSeconds());` |
+| [PakasirNativeQrisService](../src/app/Services/Pakasir/PakasirNativeQrisService.php#L40) | `ensureCreated` | 40 | `return Cache::lock('pakasir:native-qris:create:'.$payment->getKey(), 30)` |
+| [SakurupiahInvoiceLifecycleService](../src/app/Services/Sakurupiah/SakurupiahInvoiceLifecycleService.php#L80) | `lifecycle` | 80 | `return Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds())` |
+| [SakurupiahInvoiceLifecycleService](../src/app/Services/Sakurupiah/SakurupiahInvoiceLifecycleService.php#L121) | `refreshStatus` | 121 | `return Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds())` |
+| [SakurupiahInvoiceLifecycleService](../src/app/Services/Sakurupiah/SakurupiahInvoiceLifecycleService.php#L147) | `withPaymentLock` | 147 | `return Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds())` |
+| [SakurupiahInvoiceLifecycleService](../src/app/Services/Sakurupiah/SakurupiahInvoiceLifecycleService.php#L181) | `tryWithPaymentLock` | 181 | `$lock = Cache::lock($this->paymentLockKey($payment), $this->paymentLockLeaseSeconds());` |
+| [BuyMailClient](../src/app/Services/Suppliers/BuyMailClient.php#L304) | `request` | 304 | `Cache::lock($bucket.':lock', 5)->block(2, function () use ($bucket, $method): void {` |
+| [SupplierClient](../src/app/Services/Suppliers/SupplierClient.php#L361) | `budget` | 361 | `Cache::lock($global.':lock', 5)->block(2, function () use ($global, $account, $maximum, $seconds, $readMaximum, $read): void {` |
