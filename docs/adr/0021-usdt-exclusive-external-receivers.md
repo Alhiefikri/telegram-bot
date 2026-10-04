@@ -1,0 +1,7 @@
+# Customer USDT funding melalui receiver eksklusif dan signer eksternal
+
+Status: **Selected for design; activation unqualified**, 2026-10-04. Keputusan agent berdasarkan delegasi Owner untuk memilih pendekatan [#539](https://github.com/Alhiefikri/telegram-bot/issues/539), bukan sign-off legal/custody.
+
+Pilih verified operator-controlled public receiver yang terikat permanen ke satu Customer, terpisah dari checkout; private key/seed dan signing tetap di luar aplikasi. Jalur desain pertama BSC memakai seam verifikasi existing, dengan provenance token/bridge tetap harus qualified. Akun Binance biasa, shared receiver dengan nominal unik, dan asumsi custody provider berdasarkan API tidak memenuhi evidence H1. Binance Pay funding tetap menunggu qualification sendiri sesuai pilihan produk H0-v1.
+
+Keputusan ini menukar kemudahan shared address dengan atribusi Customer yang lebih kuat, tetapi menambah kewajiban provisioning, treasury backing 1:1, gas dan signing external return. Aplikasi watch-only tidak menjadikan dana Customer non-custodial. [Decision/evidence register H1](../balance-h1-custody-decision.md) merinci bukti missing; real funding/spend tetap no-go, #539 tetap open, dan ledger scaffolding bisa berjalan sesuai gates asli. Tidak menggantikan H0-v1 atau mengaktifkan perubahan runtime.
