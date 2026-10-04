@@ -202,6 +202,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('catalog/{catalogItem}/import', [AdminSupplierController::class, 'import'])->name('import');
                 Route::post('catalog/{catalogItem}/map', [AdminSupplierController::class, 'map'])->name('map');
                 Route::post('catalog/{catalogItem}/move', [AdminSupplierController::class, 'move'])->name('move');
+                Route::delete('catalog/{catalogItem}/map', [AdminSupplierController::class, 'detach'])->name('detach');
                 Route::get('monitor/purchases', [AdminSupplierController::class, 'purchases'])->name('purchases');
                 Route::post('fulfillments/{fulfillment}/operate', [AdminSupplierController::class, 'operate'])->middleware('throttle:10,1')->name('operate');
             });

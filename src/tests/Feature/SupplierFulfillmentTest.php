@@ -381,6 +381,29 @@ class SupplierFulfillmentTest extends TestCase
         $this->assertSame(0, ProductStockItem::whereNull('retired_at')->count());
     }
 
+    public function test_toolorax_disputed_exact_order_debit_retains_hold_without_allocating_delivery(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture(provider: 'toolorax');
+        $sku->update(['external_id' => '4']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fake(fn ($request) => Http::response($request->method() === 'POST'
+            ? ['ok' => true, 'order_code' => 'order-conflict', 'quantity' => 1, 'total' => 1, 'delivered_keys' => ['PRIVATE-UNIT']]
+            : ['ok' => true, 'order' => ['order_code' => 'order-conflict', 'product_id' => 4, 'quantity' => 1, 'total' => 1.1, 'status' => 'fulfilled', 'delivered_keys' => ['PRIVATE-UNIT']]]));
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $purchase = $fulfillment->purchases()->sole();
+        $this->assertSame('order-conflict', $purchase->supplier_order_id);
+        $this->assertNull($purchase->committed_at);
+        $this->assertNull($purchase->actual_cost_micros);
+        $this->assertSame(10_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, $order->orderItems->sole()->stockItems()->count());
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        Http::assertSentCount(2);
+    }
+
     protected function fixture(int $local = 0, int $quantity = 1, string $provider = 'prodseller'): array
     {
         $product = Product::factory()->create(['stock' => $local, 'reserved_stock' => 0, 'price_amount' => 5000]);

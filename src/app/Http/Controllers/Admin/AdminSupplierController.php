@@ -25,6 +25,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 final class AdminSupplierController extends Controller
 {
@@ -84,6 +85,24 @@ final class AdminSupplierController extends Controller
         }
 
         return redirect()->route('admin.products.suppliers', $product->id)->with('status', 'Urutan supplier diperbarui.');
+    }
+
+    public function detach(SupplierAdminRequest $request, SupplierCatalogItem $catalogItem, ProductSupplierManager $manager)
+    {
+        $product = Product::query()->findOrFail($request->integer('product_id'));
+        try {
+            $manager->detach($product, $catalogItem, $request->validated(), $request->attributes->get('adminUser'), $request->ip());
+        } catch (ValidationException $exception) {
+            return response()->json(['message' => 'Pemetaan berubah. Muat ulang sebelum melepas mapping.', 'errors' => $exception->errors()], 422);
+        } catch (HttpException $exception) {
+            if ($exception->getStatusCode() !== 409) {
+                throw $exception;
+            }
+
+            return response()->json(['message' => $exception->getMessage()], 409);
+        }
+
+        return redirect()->route('admin.products.suppliers', $product)->with('status', 'Mapping supplier dilepas. Stok lokal, harga, dan riwayat tetap tersimpan.');
     }
 
     public function product(Request $request, Product $product, SupplierPricing $pricing)

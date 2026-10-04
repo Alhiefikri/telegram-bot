@@ -171,19 +171,32 @@ final class SupplierClient
         } catch (SupplierUnavailable) {
             return new SupplierOrderResult('ambiguous', errorCode: 'invalid_payload');
         }
-        // ShopBot's create response shape is not documented; when it carries an
-        // order identity but no canonical status, read the saved order once.
-        if ($provider === SupplierProvider::ToolOrax && $result->orderId !== null && $result->outcome === 'ambiguous' && $result->deliveries === []) {
+        // ShopBot's documented create envelope omits canonical status, even
+        // when it includes delivery. Only an otherwise correlated envelope
+        // may hydrate its exact order; never launder a POST payload mismatch.
+        if ($provider === SupplierProvider::ToolOrax && $result->orderId !== null && $result->errorCode === 'invalid_order_status') {
             try {
                 $detail = $this->order($supplier, $result->orderId, $id, $reference);
+                if ($detail->errorCode === 'payload_mismatch'
+                    || $detail->quantity !== $quantity
+                    || $detail->costMicros === null
+                    || ($result->quantity !== null && $result->quantity !== $detail->quantity)
+                    || ($result->costMicros !== null && $result->costMicros !== $detail->costMicros)
+                    || ($result->deliveries !== [] && (count($result->deliveries) !== count($detail->deliveries)
+                        || array_diff($result->deliveries, $detail->deliveries) !== []
+                        || array_diff($detail->deliveries, $result->deliveries) !== []))) {
+                    // Preserve exact recovery identity, not disputed debit evidence.
+                    return new SupplierOrderResult('ambiguous', $result->orderId, errorCode: 'payload_mismatch', identityTrusted: true);
+                }
                 if ($detail->identityTrusted) {
                     return $detail;
                 }
             } catch (SupplierUnavailable) {
-                // Fall through with the POST identity evidence.
+                // Retain only the correlated POST identity for exact recovery;
+                // unrecognized POST delivery cannot authorize allocation.
             }
 
-            return new SupplierOrderResult('ambiguous', $result->orderId, $result->quantity, $result->costMicros, [], 'delivery_pending', identityTrusted: true);
+            return new SupplierOrderResult('ambiguous', $result->orderId, errorCode: 'delivery_pending', identityTrusted: true);
         }
 
         return $result;
@@ -531,6 +544,8 @@ final class SupplierClient
         $productId = $row['service_id'] ?? $row['product_id'] ?? $row['product']['id'] ?? $payload['product_id'] ?? null;
         $mismatch = ($expectedOrderId !== null && $id !== $expectedOrderId)
             || ($expectedProductId !== null && $productId !== null && $this->identifier($productId) !== $expectedProductId)
+            || ($supplier->provider === SupplierProvider::ToolOrax->value && $expectedOrderId !== null && $expectedProductId !== null && $productId === null)
+            || ($supplier->provider === SupplierProvider::ToolOrax->value && $expectedQuantity !== null && $quantity !== null && $quantity !== $expectedQuantity)
             || ($reference !== null && isset($row['external_order_id']) && $row['external_order_id'] !== $reference);
         $count = $quantity ?? $expectedQuantity;
         if ($mismatch || $id === null || ($count !== null && count($deliveries) > $count)) {

@@ -16,12 +16,16 @@ use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
 use App\Models\User;
+use App\Services\AuditLogger;
+use App\Services\Suppliers\ProductSupplierManager;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\Support\NonTransactionalDatabaseTestCase as TestCase;
 
 final class SupplierAdminTest extends TestCase
@@ -522,6 +526,207 @@ final class SupplierAdminTest extends TestCase
         });
         $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $this->connectionInput())->assertStatus(419);
         $this->assertSame(0, Supplier::query()->count());
+    }
+
+    public function test_detach_deletes_only_mapping_and_normalizes_remaining_ranks_with_safe_audit(): void
+    {
+        $this->owner();
+        Http::fake();
+        $supplier = $this->supplier();
+        $product = Product::factory()->create(['stock' => 3, 'reserved_stock' => 1, 'price_amount' => 45000]);
+        $first = $this->source($product, $this->item($supplier), ['priority' => 10, 'version' => 2]);
+        $item = $this->item($supplier, ['external_id' => 'remove']);
+        $target = $this->source($product, $item, ['priority' => 25, 'version' => 4]);
+        $last = $this->source($product, $this->item($supplier, ['external_id' => 'last']), ['priority' => 80, 'version' => 7]);
+        $policy = SupplierPricePolicy::forceCreate(['product_id' => $product->id, 'mode' => 'manual', 'version' => 3]);
+        $tier = ProductQuantityPriceTier::factory()->create(['product_id' => $product->id]);
+        $policyBefore = $policy->fresh()->getAttributes();
+        $tierBefore = $tier->fresh()->getAttributes();
+
+        $this->delete(route('admin.suppliers.detach', $item), $this->detachInput($product, $target, $supplier))
+            ->assertRedirect(route('admin.products.suppliers', $product));
+
+        $this->assertModelMissing($target);
+        $this->assertSame([10, 2], [$first->fresh()->priority, $first->fresh()->version]);
+        $this->assertSame([20, 8], [$last->fresh()->priority, $last->fresh()->version]);
+        $this->assertSame(2, $supplier->fresh()->version);
+        $this->assertSame(self::KEY, $supplier->fresh()->api_key);
+        $this->assertModelExists($item);
+        $this->assertSame([3, 1, 45000], [$product->fresh()->stock, $product->fresh()->reserved_stock, $product->fresh()->price_amount]);
+        $this->assertSame($policyBefore, $policy->fresh()->getAttributes());
+        $this->assertSame($tierBefore, $tier->fresh()->getAttributes());
+        $audit = AuditLog::where('action', 'supplier.source_detached')->sole();
+        $this->assertSame((string) $target->id, $audit->subject_id);
+        $this->assertSame([
+            'source_id' => $target->id, 'product_id' => $product->id, 'supplier_id' => $supplier->id,
+            'catalog_item_id' => $item->id, 'priority' => 25, 'rank' => 2, 'version' => 4, 'supplier_version' => 1,
+        ], $audit->old_values);
+        $this->assertNull($audit->new_values);
+        $this->assertStringNotContainsString(self::KEY, $audit->toJson());
+        Http::assertNothingSent();
+    }
+
+    public function test_detach_last_source_refreshes_external_capacity_without_touching_local_stock_or_pricing(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5)]);
+        $item = $this->item($supplier, ['synced_at' => now()]);
+        $product = Product::factory()->create(['stock' => 4, 'reserved_stock' => 1, 'price_amount' => 45000, 'supplier_available_stock' => 5, 'supplier_available_until' => now()->addMinutes(5)]);
+        $source = $this->source($product, $item, ['is_active' => true]);
+        $policy = SupplierPricePolicy::forceCreate(['product_id' => $product->id, 'mode' => 'fixed', 'profit_idr' => 5000, 'version' => 6]);
+        $before = $policy->fresh()->getAttributes();
+        $this->delete(route('admin.suppliers.detach', $item), $this->detachInput($product, $source, $supplier))->assertRedirect();
+        $product->refresh();
+        $this->assertSame(0, $product->supplier_available_stock);
+        $this->assertSame([4, 1, 45000], [$product->stock, $product->reserved_stock, $product->price_amount]);
+        $this->assertSame($before, $policy->fresh()->getAttributes());
+        $this->assertSame(0, $product->supplierSources()->count());
+    }
+
+    #[DataProvider('detachHistoryCases')]
+    public function test_detach_blocks_all_related_history_without_mutation(string $kind): void
+    {
+        $this->owner();
+        $supplier = $this->supplier();
+        $catalog = $this->item($supplier);
+        $product = Product::factory()->create(['supplier_available_stock' => 7, 'supplier_available_until' => now()->addMinutes(5)]);
+        $source = $this->source($product, $catalog);
+        $fulfillment = $this->detachFulfillment($product);
+        if (str_starts_with($kind, 'purchase:')) {
+            SupplierPurchase::create([
+                'supplier_fulfillment_id' => $fulfillment->id, 'supplier_id' => $supplier->id,
+                'supplier_catalog_item_id' => $catalog->id, 'reference' => (string) Str::uuid(),
+                'quantity' => 1, 'expected_cost_micros' => 1000000, 'exchange_rate_idr' => 16000,
+                'state' => substr($kind, strlen('purchase:')),
+            ]);
+        } elseif ($kind === 'reserved') {
+            $fulfillment->update(['reserved_catalog_item_id' => $catalog->id]);
+        } elseif ($kind === 'backup') {
+            $fulfillment->update(['sources_snapshot' => [
+                ['catalog_item_id' => $catalog->id + 1000, 'source_id' => $source->id + 1000],
+                ['catalog_item_id' => $catalog->id, 'source_id' => $source->id],
+            ]]);
+        } elseif ($kind === 'unreadable') {
+            DB::table('supplier_fulfillments')->where('id', $fulfillment->id)->update(['sources_snapshot' => self::KEY]);
+        } else {
+            $fulfillment->update(['sources_snapshot' => [['unexpected' => self::KEY]]]);
+        }
+        $before = [$product->fresh()->getAttributes(), $supplier->fresh()->getAttributes(), $source->fresh()->getAttributes(), $fulfillment->fresh()->getAttributes()];
+        $response = $this->deleteJson(route('admin.suppliers.detach', $catalog), $this->detachInput($product, $source, $supplier))->assertStatus(409)->assertDontSee(self::KEY);
+        if (in_array($kind, ['unreadable', 'malformed'], true)) {
+            $response->assertJsonPath('message', 'Riwayat pemenuhan tidak dapat dibaca. Jangan lepas mapping; pulihkan APP_KEY/backup atau hubungi operator.');
+        } else {
+            $response->assertJsonPath('message', 'Mapping sudah digunakan pada pemenuhan/pembelian. Nonaktifkan saja agar riwayat dan pemulihan tetap aman.');
+        }
+        $this->assertSame($before, [$product->fresh()->getAttributes(), $supplier->fresh()->getAttributes(), $source->fresh()->getAttributes(), $fulfillment->fresh()->getAttributes()]);
+        $this->assertSame(0, AuditLog::where('action', 'supplier.source_detached')->count());
+    }
+
+    public static function detachHistoryCases(): array
+    {
+        return array_map(fn ($kind): array => [$kind], ['purchase:awaiting_delivery', 'purchase:delivered', 'purchase:rejected', 'purchase:settled', 'reserved', 'backup', 'unreadable', 'malformed']);
+    }
+
+    public function test_detach_snapshot_guard_reads_later_batches_and_ignores_other_products_with_same_sku(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier();
+        $catalog = $this->item($supplier);
+        $product = Product::factory()->create();
+        $source = $this->source($product, $catalog);
+        for ($i = 0; $i < 100; $i++) {
+            $this->detachFulfillment($product);
+        }
+        $last = $this->detachFulfillment($product, [['catalog_item_id' => $catalog->id]]);
+        $this->deleteJson(route('admin.suppliers.detach', $catalog), $this->detachInput($product, $source, $supplier))->assertStatus(409);
+        $last->update(['sources_snapshot' => []]);
+        $unrelated = $this->detachFulfillment(Product::factory()->create(), [['catalog_item_id' => $catalog->id]]);
+        SupplierPurchase::create([
+            'supplier_fulfillment_id' => $unrelated->id, 'supplier_id' => $supplier->id, 'supplier_catalog_item_id' => $catalog->id,
+            'reference' => (string) Str::uuid(), 'quantity' => 1, 'expected_cost_micros' => 1000000, 'exchange_rate_idr' => 16000, 'state' => 'delivered',
+        ]);
+        $unreadable = $this->detachFulfillment(Product::factory()->create());
+        DB::table('supplier_fulfillments')->where('id', $unreadable->id)->update(['sources_snapshot' => self::KEY]);
+        $this->delete(route('admin.suppliers.detach', $catalog), $this->detachInput($product, $source, $supplier))->assertRedirect();
+        $this->assertModelMissing($source);
+        $this->assertModelExists($unrelated);
+        $this->assertSame(1, SupplierPurchase::count());
+    }
+
+    #[DataProvider('detachStaleCases')]
+    public function test_detach_revalidates_form_identity_and_versions(string $field): void
+    {
+        $this->owner();
+        $supplier = $this->supplier();
+        $catalog = $this->item($supplier);
+        $product = Product::factory()->create();
+        $source = $this->source($product, $catalog, ['version' => 5]);
+        $input = $this->detachInput($product, $source, $supplier);
+        $input[$field] = match ($field) {
+            'product_id' => Product::factory()->create()->id,
+            'source_id' => $this->source($product, $this->item($supplier, ['external_id' => 'other']))->id,
+            default => 0,
+        };
+        $before = [$product->fresh()->getAttributes(), $supplier->fresh()->getAttributes(), $source->fresh()->getAttributes()];
+        $this->deleteJson(route('admin.suppliers.detach', $catalog), $input)->assertStatus(422);
+        $this->assertSame($before, [$product->fresh()->getAttributes(), $supplier->fresh()->getAttributes(), $source->fresh()->getAttributes()]);
+        $this->assertSame(0, AuditLog::where('action', 'supplier.source_detached')->count());
+    }
+
+    public static function detachStaleCases(): array
+    {
+        return [['product_id'], ['source_id'], ['version'], ['supplier_version']];
+    }
+
+    public function test_detach_requires_store_operations_authorization_at_http_and_manager_boundaries(): void
+    {
+        $supplier = $this->supplier();
+        $catalog = $this->item($supplier);
+        $product = Product::factory()->create();
+        $source = $this->source($product, $catalog);
+        $actor = User::factory()->create(['role' => UserRole::Support]);
+        $this->actingAs($actor)->delete(route('admin.suppliers.detach', $catalog), $this->detachInput($product, $source, $supplier))->assertForbidden();
+        try {
+            app(ProductSupplierManager::class)->detach($product, $catalog, $this->detachInput($product, $source, $supplier), $actor, null);
+            $this->fail('Unauthorized manager mutation must be rejected.');
+        } catch (HttpException $exception) {
+            $this->assertSame(403, $exception->getStatusCode());
+        }
+        $this->assertModelExists($source);
+        $this->assertSame(1, $supplier->fresh()->version);
+    }
+
+    public function test_detach_audit_failure_rolls_back_mapping_rank_version_and_projection(): void
+    {
+        $actor = User::factory()->create(['role' => UserRole::Owner]);
+        $supplier = $this->supplier();
+        $catalog = $this->item($supplier);
+        $product = Product::factory()->create(['supplier_available_stock' => 6, 'supplier_available_until' => now()->addMinutes(5)]);
+        $source = $this->source($product, $catalog);
+        $before = [$product->fresh()->getAttributes(), $supplier->fresh()->getAttributes(), $source->fresh()->getAttributes()];
+        $this->mock(AuditLogger::class)->shouldReceive('log')->once()->withArgs(fn ($action): bool => $action === 'supplier.source_detached')->andThrow(new \RuntimeException('audit unavailable'));
+        try {
+            app(ProductSupplierManager::class)->detach($product, $catalog, $this->detachInput($product, $source, $supplier), $actor, null);
+            $this->fail('Audit failure must abort deletion.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('audit unavailable', $exception->getMessage());
+        }
+        $this->assertSame($before, [$product->fresh()->getAttributes(), $supplier->fresh()->getAttributes(), $source->fresh()->getAttributes()]);
+    }
+
+    private function detachInput(Product $product, ProductSupplierSource $source, Supplier $supplier): array
+    {
+        return ['product_id' => $product->id, 'source_id' => $source->id, 'version' => $source->version, 'supplier_version' => $supplier->version];
+    }
+
+    private function detachFulfillment(Product $product, array $snapshot = []): SupplierFulfillment
+    {
+        $item = OrderItem::factory()->create(['product_id' => $product->id]);
+
+        return SupplierFulfillment::create([
+            'order_id' => $item->order_id, 'order_item_id' => $item->id, 'quantity' => 1,
+            'state' => 'delivered', 'maximum_cost_idr' => 5000, 'sources_snapshot' => $snapshot,
+        ]);
     }
 
     private function owner(): void

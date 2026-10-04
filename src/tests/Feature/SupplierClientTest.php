@@ -305,6 +305,146 @@ class SupplierClientTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    public function test_toolorax_documented_create_delivery_requires_correlated_exact_order_evidence(): void
+    {
+        $supplier = $this->supplier('toolorax');
+        $this->assertFalse(SupplierProvider::ToolOrax->supportsIdempotency());
+        foreach ([null, 'unknown-status'] as $status) {
+            Cache::flush();
+            $this->fake(function ($request) use ($status) {
+                $this->assertFalse($request->hasHeader('Idempotency-Key'));
+                if ($request->method() === 'POST') {
+                    $body = [
+                        'ok' => true, 'order_code' => 'order-5', 'quantity' => 2,
+                        'total' => 1.14, 'balance_after' => 8.86, 'channel' => 'api',
+                        'delivered_keys' => ['ONE', 'TWO'],
+                    ];
+                    if ($status !== null) {
+                        $body['status'] = $status;
+                    }
+
+                    return Http::response($body);
+                }
+                $this->assertSame('GET', $request->method());
+                $this->assertSame(SupplierProvider::ToolOrax->baseUrl().'/orders/order-5', $request->url());
+
+                return Http::response(['ok' => true, 'order' => [
+                    'order_code' => 'order-5', 'product_id' => 4, 'quantity' => 2,
+                    'status' => 'fulfilled', 'total' => 1.14, 'delivered_keys' => ['ONE', 'TWO'],
+                ]]);
+            });
+            $result = app(SupplierClient::class)->purchase($supplier, $this->item($supplier, ['external_id' => '4']), 2, 'checkout-1');
+            $this->assertSame('delivered', $result->outcome);
+            $this->assertSame('order-5', $result->orderId);
+            $this->assertSame(2, $result->quantity);
+            $this->assertSame(1_140_000, $result->costMicros);
+            $this->assertSame(['ONE', 'TWO'], $result->deliveries);
+            $this->assertTrue($result->identityTrusted);
+            $this->assertTrue($result->deliveryTrusted);
+            Http::assertSentCount(2);
+        }
+    }
+
+    public function test_toolorax_failed_exact_read_preserves_only_the_known_order_identity(): void
+    {
+        $supplier = $this->supplier('toolorax');
+        $this->fake(function ($request) {
+            if ($request->method() === 'POST') {
+                return Http::response([
+                    'ok' => true, 'order_code' => 'order-5', 'quantity' => 2,
+                    'total' => 1.14, 'delivered_keys' => ['ONE', 'TWO'],
+                ]);
+            }
+            $this->assertSame('GET', $request->method());
+            $this->assertSame(SupplierProvider::ToolOrax->baseUrl().'/orders/order-5', $request->url());
+
+            return Http::response(['error' => 'temporary failure'], 503);
+        });
+        $result = app(SupplierClient::class)->purchase($supplier, $this->item($supplier, ['external_id' => '4']), 2, 'checkout-1');
+        $this->assertSame('ambiguous', $result->outcome);
+        $this->assertSame('delivery_pending', $result->errorCode);
+        $this->assertSame('order-5', $result->orderId);
+        $this->assertTrue($result->identityTrusted);
+        $this->assertFalse($result->deliveryTrusted);
+        $this->assertSame([], $result->deliveries);
+        Http::assertSentCount(2);
+    }
+
+    #[DataProvider('tooloraxHydrationConflicts')]
+    public function test_toolorax_conflicting_create_and_exact_order_evidence_remains_held(array $createChanges, array $orderChanges): void
+    {
+        $supplier = $this->supplier('toolorax');
+        $this->fake(function ($request) use ($createChanges, $orderChanges) {
+            if ($request->method() === 'POST') {
+                return Http::response(array_replace([
+                    'ok' => true, 'order_code' => 'order-5', 'quantity' => 2,
+                    'total' => 1.14, 'delivered_keys' => ['ONE', 'TWO'],
+                ], $createChanges));
+            }
+            $this->assertSame('GET', $request->method());
+            $this->assertSame(SupplierProvider::ToolOrax->baseUrl().'/orders/order-5', $request->url());
+
+            return Http::response(['ok' => true, 'order' => array_replace([
+                'order_code' => 'order-5', 'product_id' => 4, 'quantity' => 2,
+                'status' => 'fulfilled', 'total' => 1.14, 'delivered_keys' => ['ONE', 'TWO'],
+            ], $orderChanges)]);
+        });
+        $result = app(SupplierClient::class)->purchase($supplier, $this->item($supplier, ['external_id' => '4']), 2, 'checkout-1');
+        $this->assertSame('ambiguous', $result->outcome);
+        $this->assertSame('payload_mismatch', $result->errorCode);
+        $this->assertSame('order-5', $result->orderId);
+        $this->assertTrue($result->identityTrusted);
+        $this->assertFalse($result->deliveryTrusted);
+        $this->assertSame([], $result->deliveries);
+        $this->assertNull($result->costMicros);
+        $this->assertNull($result->quantity);
+        Http::assertSentCount(2);
+    }
+
+    public static function tooloraxHydrationConflicts(): array
+    {
+        return [
+            'different exact order' => [[], ['order_code' => 'other-order']],
+            'different SKU' => [[], ['product_id' => 8]],
+            'missing SKU identity' => [[], ['product_id' => null]],
+            'different GET quantity' => [[], ['quantity' => 1, 'delivered_keys' => ['ONE']]],
+            'missing GET quantity' => [[], ['quantity' => null]],
+            'different GET debit' => [[], ['total' => 1.15]],
+            'missing GET debit' => [[], ['total' => null]],
+            'different create debit' => [['total' => 1.15], []],
+            'different GET units' => [[], ['delivered_keys' => ['OTHER', 'TWO']]],
+            'different create units' => [['delivered_keys' => ['OTHER', 'TWO']], []],
+            'incomplete GET units' => [[], ['delivered_keys' => ['ONE']]],
+            'duplicate GET units' => [[], ['delivered_keys' => ['ONE', 'ONE']]],
+        ];
+    }
+
+    public function test_toolorax_invalid_create_identity_and_unknown_conflicts_never_trigger_hydration(): void
+    {
+        $supplier = $this->supplier('toolorax');
+        foreach ([
+            [200, ['ok' => true, 'quantity' => 2, 'total' => 1.14, 'delivered_keys' => ['ONE', 'TWO']]],
+            [200, ['ok' => true, 'order_code' => 'order-5', 'product_id' => 8]],
+            [200, ['ok' => true, 'order_code' => 'order-5', 'external_order_id' => 'other-reference']],
+            [200, ['ok' => true, 'order_code' => 'order-5', 'quantity' => 1, 'delivered_keys' => ['ONE', 'TWO']]],
+            [200, ['ok' => true, 'order_code' => 'order-5', 'quantity' => 3, 'delivered_keys' => ['ONE', 'TWO']]],
+            [409, ['error' => 'unknown conflict', 'order_code' => 'order-5']],
+        ] as [$status, $body]) {
+            Cache::flush();
+            $this->fake(function ($request) use ($status, $body) {
+                $this->assertSame('POST', $request->method());
+                $this->assertFalse($request->hasHeader('Idempotency-Key'));
+
+                return Http::response($body, $status);
+            });
+            $result = app(SupplierClient::class)->purchase($supplier, $this->item($supplier, ['external_id' => '4']), 2, 'checkout-1');
+            $this->assertSame('ambiguous', $result->outcome);
+            $this->assertFalse($result->identityTrusted);
+            $this->assertFalse($result->deliveryTrusted);
+            Http::assertSentCount(1);
+        }
+    }
+
     public function test_toolorax_non_numeric_sku_never_dispatches(): void
     {
         $this->fake();

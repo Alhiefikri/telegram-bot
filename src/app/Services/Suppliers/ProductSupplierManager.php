@@ -6,12 +6,16 @@ use App\Models\Product;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
+use App\Models\SupplierPurchase;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\Pricing\ProductQuantityPricing;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use JsonException;
 
 final class ProductSupplierManager
 {
@@ -122,6 +126,70 @@ final class ProductSupplierManager
             $this->audit->log('supplier.source_moved', $sources[$index], null, ['product_id' => $locked->id, 'catalog_item_id' => $catalog->id, 'direction' => $input['direction'], 'position' => $neighbor + 1], $actor, $ip);
         }, 5);
         $this->availability->refreshProducts([(int) $product->id]);
+    }
+
+    public function detach(Product $product, SupplierCatalogItem $item, array $input, User $actor, ?string $ip): void
+    {
+        abort_unless($actor->role?->canManageStoreOperations() === true, 403);
+        DB::transaction(function () use ($product, $item, $input, $actor, $ip): void {
+            // Checkout holds this same Product lock before retaining its source snapshot.
+            $locked = Product::query()->whereKey($product->id)->lockForUpdate()->firstOrFail();
+            $supplier = Supplier::query()->whereKey($item->supplier_id)->lockForUpdate()->firstOrFail();
+            $catalog = SupplierCatalogItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            $sources = ProductSupplierSource::query()->where('product_id', $locked->id)->orderBy('id')->lockForUpdate()->get();
+            $source = $sources->first(fn (ProductSupplierSource $row): bool => (int) $row->id === (int) $input['source_id']
+                && (int) $row->supplier_catalog_item_id === (int) $catalog->id);
+            if ($source === null || (int) $catalog->supplier_id !== (int) $supplier->id) {
+                throw ValidationException::withMessages(['source_id' => 'Pemetaan supplier tidak ditemukan untuk produk ini.']);
+            }
+            $this->version((int) $source->version, (int) $input['version']);
+            $this->version((int) $supplier->version, (int) $input['supplier_version']);
+            $this->guardDetachHistory($locked, $catalog);
+
+            $ordered = $sources->sortBy(fn (ProductSupplierSource $row): array => [(int) $row->priority, (int) $row->id])->values();
+            $this->audit->log('supplier.source_detached', $source, [
+                'source_id' => $source->id, 'product_id' => $locked->id,
+                'supplier_id' => $supplier->id, 'catalog_item_id' => $catalog->id,
+                'priority' => $source->priority, 'rank' => $ordered->search(fn ($row): bool => $row->id === $source->id) + 1,
+                'version' => $source->version, 'supplier_version' => $supplier->version,
+            ], null, $actor, $ip);
+            $source->delete();
+            foreach ($ordered->reject(fn ($row): bool => $row->id === $source->id)->values() as $position => $row) {
+                $priority = ($position + 1) * 10;
+                if ((int) $row->priority !== $priority) {
+                    $row->forceFill(['priority' => $priority, 'version' => (int) $row->version + 1])->save();
+                }
+            }
+            $supplier->forceFill(['version' => (int) $supplier->version + 1])->save();
+            $locked->forceFill(['supplier_available_until' => null])->save();
+            DB::afterCommit(fn () => $this->availability->refreshProducts([(int) $locked->id]));
+        }, 5);
+    }
+
+    private function guardDetachHistory(Product $product, SupplierCatalogItem $catalog): void
+    {
+        $message = 'Mapping sudah digunakan pada pemenuhan/pembelian. Nonaktifkan saja agar riwayat dan pemulihan tetap aman.';
+        $fulfillments = SupplierFulfillment::query()->whereHas('orderItem', fn ($query) => $query->where('product_id', $product->id));
+        abort_if((clone $fulfillments)->where('reserved_catalog_item_id', $catalog->id)->exists(), 409, $message);
+        abort_if(SupplierPurchase::query()->where('supplier_catalog_item_id', $catalog->id)
+            ->whereHas('fulfillment.orderItem', fn ($query) => $query->where('product_id', $product->id))->exists(), 409, $message);
+
+        $unreadable = 'Riwayat pemenuhan tidak dapat dibaca. Jangan lepas mapping; pulihkan APP_KEY/backup atau hubungi operator.';
+        // Encrypted retained snapshots cannot be searched as SQL JSON. Only decrypt this Product's bounded batches.
+        foreach ($fulfillments->select(['id', 'sources_snapshot'])->lazyById(100) as $fulfillment) {
+            try {
+                $snapshot = $fulfillment->sources_snapshot;
+            } catch (DecryptException|JsonException) {
+                abort(409, $unreadable);
+            }
+            abort_unless(is_array($snapshot) && array_is_list($snapshot), 409, $unreadable);
+            foreach ($snapshot as $candidate) {
+                abort_unless(is_array($candidate), 409, $unreadable);
+                $catalogId = $candidate['catalog_item_id'] ?? null;
+                abort_unless((is_int($catalogId) || (is_string($catalogId) && ctype_digit($catalogId))) && (int) $catalogId > 0, 409, $unreadable);
+                abort_if((int) $catalogId === (int) $catalog->id, 409, $message);
+            }
+        }
     }
 
     public function price(Product $product, array $input, User $actor, ?string $ip): SupplierPricePolicy

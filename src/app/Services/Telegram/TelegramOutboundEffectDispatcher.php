@@ -22,6 +22,7 @@ use App\Jobs\SendStoreBalanceTopUpInstructions;
 use App\Jobs\SendStoreBalanceTopUpOwnerAlert;
 use App\Jobs\SendStoreBalanceTopUpPaymentProof;
 use App\Jobs\SendStoreBalanceTopUpReceipt;
+use App\Jobs\SendSupplierHealthNotification;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
@@ -57,6 +58,7 @@ final class TelegramOutboundEffectDispatcher
         $pending = match ($effect->effect_type) {
             TelegramOutboundEffectType::WarrantyNotification->value => SendWarrantyNotification::dispatch((string) $effect->id),
             TelegramOutboundEffectType::WarrantyDeadlineReminder->value => SendWarrantyDeadlineReminder::dispatch((string) $effect->id),
+            TelegramOutboundEffectType::SupplierHealth->value => SendSupplierHealthNotification::dispatch((string) $effect->id),
             TelegramOutboundEffectType::ManualCheckoutInstructions->value => SendManualCheckoutNotifications::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,
