@@ -292,6 +292,69 @@ final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabase
             ->assertSee('Dashboard history item 0');
     }
 
+    public function test_owner_creates_and_confirms_a_linked_reversal_from_the_customer_history(): void
+    {
+        Queue::fake();
+        config(['services.telegram.admin_telegram_chat_id' => '998877']);
+        $owner = User::factory()->create(['role' => UserRole::Owner, 'password' => 'owner-password']);
+        $customer = Customer::factory()->create(['telegram_id' => 901550, 'first_name' => 'Reversal Customer']);
+
+        $response = $this->actingAs($owner)->post(route('admin.store-balance.adjustments.previews.store'), [
+            'telegram_id' => '901550',
+            'amount' => '5000',
+            'reason' => 'Owner received the funds.',
+        ])->assertRedirect();
+        $this->carrySessionCookie($response);
+        $credit = BalanceAdjustmentRequest::query()->where('category', 'owner_attested')->sole();
+
+        $response = $this->actingAs($owner)->post(
+            route('admin.store-balance.adjustments.previews.confirm', ['adjustment' => $credit->id]),
+            ['fingerprint' => $credit->fingerprint, 'version' => 1, 'password' => 'owner-password'],
+        )->assertRedirect();
+        $this->carrySessionCookie($response);
+
+        $this->get(route('admin.store-balance.adjustments.index', ['telegram_id' => '901550']))
+            ->assertOk()
+            ->assertSee('aria-label="Reversal penuh penyesuaian ini"', false);
+
+        $response = $this->actingAs($owner)->post(route('admin.store-balance.adjustments.reversals.store'), [
+            'source_id' => $credit->id,
+            'telegram_id' => '901550',
+        ])->assertRedirect();
+        $this->carrySessionCookie($response);
+
+        $reversal = BalanceAdjustmentRequest::query()->where('category', 'reversal')->sole();
+        $this->assertSame($credit->id, $reversal->source_id);
+        $this->assertSame(5000, $reversal->amount);
+        $this->assertSame('pending', $reversal->state);
+
+        $this->get(route('admin.store-balance.adjustments.index', [
+            'telegram_id' => '901550',
+            'preview' => $reversal->id,
+        ]))
+            ->assertOk()
+            ->assertSee('Preview reversal IDR')
+            ->assertSee('Konfirmasi reversal')
+            ->assertSee('Adjustment asal');
+
+        $response = $this->actingAs($owner)->post(
+            route('admin.store-balance.adjustments.previews.confirm', ['adjustment' => $reversal->id]),
+            ['fingerprint' => $reversal->fingerprint, 'version' => 1, 'password' => 'owner-password'],
+        )->assertRedirect()
+            ->assertSessionHas('status', fn (string $status): bool => str_contains($status, 'Reversal saldo diterapkan'));
+        $this->carrySessionCookie($response);
+
+        $this->assertSame('applied', $reversal->fresh()->state);
+        $this->assertSame(0, (int) CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(2, StoreBalanceEntry::query()->count());
+
+        $this->get(route('admin.store-balance.adjustments.index', ['telegram_id' => '901550']))
+            ->assertOk()
+            ->assertSee('−Rp 5.000')
+            ->assertSee('REVERSAL')
+            ->assertDontSee('aria-label="Reversal penuh penyesuaian ini"', false);
+    }
+
     public function test_wrong_owner_password_leaves_the_preview_pending_without_crediting_balance(): void
     {
         Queue::fake();

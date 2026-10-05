@@ -52,7 +52,7 @@ final class AdminBalanceAdjustmentController extends Controller
                 ->select(['id', 'customer_id', 'owner_user_id', 'telegram_id', 'username', 'amount', 'reason', 'category', 'fingerprint', 'version', 'state', 'ledger_entry_id', 'expires_at', 'resolved_at'])
                 ->whereKey($previewId)
                 ->where('owner_user_id', $owner->id)
-                ->where('category', 'owner_attested')
+                ->whereIn('category', ['owner_attested', 'reversal'])
                 ->where('session_binding', hash('sha256', $request->session()->getId()))
                 ->where('credential_binding', hash('sha256', $owner->password))
                 ->first()
@@ -94,9 +94,25 @@ final class AdminBalanceAdjustmentController extends Controller
                 ->orderByDesc('created_at')
                 ->orderByDesc('id')
                 ->paginate(self::HISTORY_PAGE_SIZE, [
-                    'id', 'customer_id', 'telegram_id', 'username', 'amount', 'reason', 'category', 'state', 'ledger_entry_id', 'created_at',
+                    'id', 'customer_id', 'telegram_id', 'username', 'amount', 'reason', 'category', 'currency', 'state', 'ledger_entry_id', 'created_at',
                 ], 'history_page')
                 ->withQueryString();
+
+        $previewOriginal = $preview !== null && $preview->category === 'reversal'
+            ? BalanceAdjustmentPreview::query()->select(['id', 'amount', 'reason', 'category', 'created_at'])->find($preview->source_id)
+            : null;
+        $reversibleAdjustmentIds = [];
+        if ($history !== null) {
+            $pageIds = $history->getCollection()->pluck('id')->all();
+            $blocked = array_flip($adjustments->openReversalSourceIds($pageIds));
+            foreach ($history->getCollection() as $entry) {
+                if ($entry->state === 'applied'
+                    && BalanceAdjustmentService::isReversibleOriginal($entry)
+                    && ! isset($blocked[$entry->id])) {
+                    $reversibleAdjustmentIds[] = $entry->id;
+                }
+            }
+        }
 
         return view('admin.store-balance.adjustments', [
             'telegramId' => is_string($telegramId) ? $telegramId : null,
@@ -104,11 +120,13 @@ final class AdminBalanceAdjustmentController extends Controller
             'customerBalance' => $customerBalance,
             'lookupError' => $lookupError,
             'preview' => $preview,
+            'previewOriginal' => $previewOriginal,
             'previewCustomer' => $previewCustomer,
             'previewBalance' => $previewBalance,
             'previewUnavailable' => $previewUnavailable,
             'positiveBalances' => $positiveBalances,
             'history' => $history,
+            'reversibleAdjustmentIds' => $reversibleAdjustmentIds,
         ]);
     }
 
@@ -139,6 +157,33 @@ final class AdminBalanceAdjustmentController extends Controller
                 'preview' => $preview->id,
             ])
             ->with('status', 'Preview dibuat. Periksa kembali Customer, Telegram ID, nominal, dan alasan sebelum memasukkan password Owner.');
+    }
+
+    public function reversal(Request $request, BalanceAdjustmentService $adjustments): RedirectResponse
+    {
+        $this->assertDashboardReady();
+        $owner = $this->owner($request);
+        $sourceId = $request->input('source_id');
+        $telegramId = $request->input('telegram_id');
+
+        try {
+            if (! is_string($sourceId) || ! Str::isUuid($sourceId)) {
+                throw new BalanceAdjustmentRejected('invalid_original_adjustment');
+            }
+
+            $preview = $adjustments->requestReversal($owner, $telegramId, $sourceId);
+        } catch (BalanceAdjustmentRejected $exception) {
+            return redirect()
+                ->route('admin.store-balance.adjustments.index', $this->lookupQuery($telegramId))
+                ->withErrors(['reversal' => $this->message($exception->reason)]);
+        }
+
+        return redirect()
+            ->route('admin.store-balance.adjustments.index', [
+                'telegram_id' => $preview->telegram_id,
+                'preview' => $preview->id,
+            ])
+            ->with('status', 'Preview reversal dibuat. Periksa adjustment asal sebelum konfirmasi dengan password Owner.');
     }
 
     public function confirm(Request $request, string $adjustment, BalanceAdjustmentService $adjustments): RedirectResponse
@@ -173,11 +218,16 @@ final class AdminBalanceAdjustmentController extends Controller
                 ->withErrors(['confirmation' => 'Saldo tidak dapat diverifikasi dengan ledger. Penambahan ditahan sampai rekonsiliasi dilakukan.']);
         }
 
-        $preview = BalanceAdjustmentPreview::query()->select(['id', 'telegram_id'])->find($adjustment);
+        $preview = BalanceAdjustmentPreview::query()->select(['id', 'telegram_id', 'category'])->find($adjustment);
         abort_if($preview === null, 404);
+        $reversal = $preview->category === 'reversal';
         $status = $result->applied
-            ? 'Penambahan saldo diterapkan. Entry #'.$result->entryId.'; saldo Rupiah sekarang Rp '.number_format($result->balanceAfter, 0, ',', '.').'.'
-            : 'Permintaan ini sudah diterapkan sebelumnya. Saldo tidak ditambah kembali.';
+            ? ($reversal
+                ? 'Reversal saldo diterapkan. Entry #'.$result->entryId.'; saldo Rupiah sekarang Rp '.number_format($result->balanceAfter, 0, ',', '.').'.'
+                : 'Penambahan saldo diterapkan. Entry #'.$result->entryId.'; saldo Rupiah sekarang Rp '.number_format($result->balanceAfter, 0, ',', '.').'.')
+            : ($reversal
+                ? 'Reversal ini sudah diterapkan sebelumnya. Saldo tidak didebit kembali.'
+                : 'Permintaan ini sudah diterapkan sebelumnya. Saldo tidak ditambah kembali.');
 
         return redirect()
             ->route('admin.store-balance.adjustments.index', [
@@ -257,6 +307,10 @@ final class AdminBalanceAdjustmentController extends Controller
             'preview_unavailable' => 'Preview sudah kedaluwarsa atau ditutup. Buat preview baru.',
             'credentials_changed' => 'Password Owner berubah. Buat preview baru untuk melanjutkan.',
             'authenticated_session_required' => 'Sesi admin tidak tersedia. Muat ulang halaman dan coba lagi.',
+            'invalid_original_adjustment' => 'Adjustment asal tidak memenuhi syarat untuk reversal penuh.',
+            'original_already_reversed' => 'Adjustment ini sudah pernah dibalik. Preview ini tidak memiliki efek baru.',
+            'reversal_already_open' => 'Sudah ada preview reversal aktif untuk adjustment ini.',
+            'reversal_insufficient_funds' => 'Saldo tersedia tidak cukup untuk reversal penuh. Tidak ada debit; tinjau saldo dan transaksi Customer.',
             default => 'Penambahan saldo tidak dapat diproses. Periksa status dan coba lagi jika preview masih berlaku.',
         };
     }

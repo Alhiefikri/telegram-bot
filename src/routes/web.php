@@ -179,6 +179,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('previews', [AdminBalanceAdjustmentController::class, 'preview'])->name('previews.store');
                 Route::post('previews/{adjustment}/confirm', [AdminBalanceAdjustmentController::class, 'confirm'])->name('previews.confirm');
                 Route::post('previews/{adjustment}/cancel', [AdminBalanceAdjustmentController::class, 'cancel'])->name('previews.cancel');
+                Route::post('reversals', [AdminBalanceAdjustmentController::class, 'reversal'])->name('reversals.store');
             });
             Route::post('store-balance/funding-policy', AdminStoreBalanceFundingPolicyController::class)->name('store-balance.funding-policy.update');
             Route::post('store-balance/top-ups/{topUp}/compensate', AdminStoreBalanceTopUpCompensationController::class)

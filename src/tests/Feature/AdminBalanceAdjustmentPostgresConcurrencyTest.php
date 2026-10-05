@@ -2,12 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Enums\StoreBalanceEntryKind;
 use App\Enums\UserRole;
 use App\Exceptions\BalanceAdjustmentRejected;
+use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\InvalidOrderTransition;
 use App\Exceptions\StoreBalanceCompensationRejected;
+use App\Models\BalanceAdjustmentRequest;
 use App\Models\Customer;
 use App\Models\ExternalMoneyReceiptReservation;
+use App\Models\StoreBalanceEntry;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
@@ -15,10 +19,12 @@ use App\Services\MoneyReceipts\MoneyReceiptTarget;
 use App\Services\MoneyReceipts\VerifiedMoneyReceipt;
 use App\Services\StoreBalance\BalanceAdjustmentService;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\StoreBalance\StoreBalanceReconciliation;
 use App\Services\Warranty\WarrantySettlementService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\BuildsBalanceAdjustmentSources;
 use Tests\Support\NonTransactionalDatabaseTestCase;
@@ -215,6 +221,151 @@ final class AdminBalanceAdjustmentPostgresConcurrencyTest extends NonTransaction
         $this->assertDatabaseCount('store_balance_entries', 1);
         $this->assertSame(5000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
         $this->assertDatabaseCount('balance_adjustment_accounting_events', $results[0] === 'applied' ? 1 : 0);
+    }
+
+    public function test_reversal_and_spend_race_never_commits_a_negative_balance(): void
+    {
+        [$owner, $customer, $service, $creditPreview] = $this->fixture();
+        $service->confirm($owner, $creditPreview->id, $creditPreview->fingerprint, 1, 'owner-password');
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $creditPreview->id);
+
+        $results = $this->race([
+            fn () => $this->attempt(fn () => $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password')),
+            function () use ($customer): string {
+                try {
+                    app(StoreBalanceLedger::class)->debit($customer, 5000, 'order', 'race-order-1', 'order:race-order-1:debit');
+
+                    return 'debited';
+                } catch (InsufficientStoreBalance) {
+                    return 'insufficient';
+                }
+            },
+        ]);
+
+        $reversalWon = $results[0] === 'applied';
+        $this->assertTrue(
+            ($reversalWon && $results[1] === 'insufficient')
+            || (! $reversalWon && $results[0] === 'reversal_insufficient_funds' && $results[1] === 'debited'),
+            'Exactly one side wins the account lock: '.implode(',', $results),
+        );
+        $this->assertDatabaseCount('store_balance_entries', 2);
+        $this->assertSame($reversalWon ? 1 : 0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::AdminAdjustmentReversal)->count());
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertTrue(app(StoreBalanceReconciliation::class)->inspect($customer)->isConsistent());
+    }
+
+    public function test_double_reversal_race_posts_exactly_one_linked_debit(): void
+    {
+        [$owner, $customer, $service, $creditPreview] = $this->fixture();
+        $service->confirm($owner, $creditPreview->id, $creditPreview->fingerprint, 1, 'owner-password');
+        $first = $service->requestReversal($owner, (string) $customer->telegram_id, $creditPreview->id);
+
+        // Two live previews for one entitlement: the ledger source claim must
+        // still allow exactly one linked debit and one accounting counterpart.
+        $second = new BalanceAdjustmentRequest;
+        $second->forceFill([
+            'id' => (string) Str::uuid(), 'customer_id' => $first->customer_id, 'telegram_id' => $first->telegram_id,
+            'username' => $first->username, 'owner_user_id' => $first->owner_user_id,
+            'session_binding' => $first->session_binding, 'credential_binding' => $first->credential_binding,
+            'mode' => $first->mode, 'currency' => $first->currency, 'amount' => $first->amount, 'reason' => $first->reason,
+            'category' => 'reversal', 'source_id' => $first->source_id, 'receipt_fingerprint' => null,
+            'fingerprint' => hash('sha256', (string) Str::uuid()), 'version' => 1, 'state' => 'pending',
+            'expires_at' => $first->expires_at,
+        ])->save();
+
+        $results = $this->race([
+            fn () => $this->attempt(fn () => $service->confirm($owner, $first->id, $first->fingerprint, 1, 'owner-password')),
+            fn () => $this->attempt(fn () => $service->confirm($owner, $second->id, $second->fingerprint, 1, 'owner-password')),
+        ]);
+
+        $this->assertSame(1, count(array_filter($results, fn (string $result): bool => $result === 'applied')), implode(',', $results));
+        $this->assertDatabaseCount('store_balance_entries', 2);
+        $this->assertDatabaseCount('balance_adjustment_accounting_events', 2);
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+
+        // A loser that was held out by the per-Owner verification lease still
+        // resolves as already reversed on retry instead of posting again.
+        $loser = $first->fresh()->state === 'applied' ? $second : $first;
+        $this->assertSame('pending', $loser->fresh()->state);
+        $this->assertSame('original_already_reversed', $this->attempt(
+            fn () => $service->confirm($owner, $loser->id, $loser->fingerprint, 1, 'owner-password'),
+        ));
+        $this->assertDatabaseCount('store_balance_entries', 2);
+        $this->assertDatabaseCount('balance_adjustment_accounting_events', 2);
+    }
+
+    public function test_reversal_and_late_top_up_settlement_never_recredit_compensated_money(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $topUp = $this->adjustmentTopUp($customer);
+        $preview = $service->request($owner, (string) $customer->telegram_id, 5000, 'Original recovery', 'top_up_recovery', (string) $topUp->id);
+        $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id);
+
+        $this->race([
+            fn () => $this->attempt(fn () => $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password')),
+            fn () => $this->observeAdjustmentTopUp($topUp),
+        ]);
+        $this->observeAdjustmentTopUp($topUp); // Late evidence still resolves the original without a second credit.
+
+        $this->assertSame('applied', $reversal->fresh()->state);
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertDatabaseCount('store_balance_entries', 2);
+        $this->assertDatabaseCount('external_money_receipts', 1);
+        $this->assertSame('compensated', $topUp->fresh()->status->value);
+        $this->assertNull(ExternalMoneyReceiptReservation::query()->whereNull('resolved_at')->first());
+    }
+
+    public function test_postgres_forbids_reversal_identity_and_entry_edits(): void
+    {
+        [$owner, $customer, $service, $creditPreview] = $this->fixture();
+        $service->confirm($owner, $creditPreview->id, $creditPreview->fingerprint, 1, 'owner-password');
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $creditPreview->id);
+        $result = $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password');
+
+        foreach ([
+            fn () => DB::table('balance_adjustment_requests')->where('id', $reversal->id)->update(['source_id' => (string) Str::uuid()]),
+            fn () => DB::table('balance_adjustment_requests')->where('id', $reversal->id)->delete(),
+            fn () => DB::table('store_balance_entries')->where('id', $result->entryId)->update(['amount' => 4000]),
+            fn () => DB::table('store_balance_entries')->where('id', $result->entryId)->delete(),
+            fn () => DB::table('balance_adjustment_accounting_events')->where('ledger_entry_id', $result->entryId)->update(['amount' => 4000]),
+            fn () => DB::table('balance_adjustment_accounting_events')->where('ledger_entry_id', $result->entryId)->delete(),
+            fn () => DB::table('audit_logs')->where('action', 'balance.adjustment.applied')->update(['action' => 'tampered']),
+            fn () => DB::table('audit_logs')->where('action', 'balance.adjustment.applied')->delete(),
+        ] as $mutation) {
+            try {
+                DB::transaction($mutation);
+                $this->fail('Expected PostgreSQL immutable reversal history guard.');
+            } catch (QueryException $error) {
+                $this->assertStringContainsString('immutable', $error->getMessage());
+            }
+        }
+    }
+
+    public function test_reversal_and_refund_credit_race_stays_consistent_without_negative_balance(): void
+    {
+        [$owner, $customer, $service, $creditPreview] = $this->fixture();
+        $service->confirm($owner, $creditPreview->id, $creditPreview->fingerprint, 1, 'owner-password');
+        app(StoreBalanceLedger::class)->debit($customer, 5000, 'order', 'racer-refund-order', 'order:racer-refund-order:debit');
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $creditPreview->id);
+
+        $results = $this->race([
+            fn () => $this->attempt(fn () => $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password')),
+            function () use ($customer): string {
+                app(StoreBalanceLedger::class)->refund($customer, 5000, 'order', 'racer-refund-order', 'order:racer-refund-order:refund');
+
+                return 'refunded';
+            },
+        ]);
+
+        $this->assertContains($results[0], ['applied', 'reversal_insufficient_funds']);
+        $this->assertSame('refunded', $results[1]);
+        $reversalApplied = $results[0] === 'applied';
+        $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());
+        $this->assertSame($reversalApplied ? 1 : 0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::AdminAdjustmentReversal)->count());
+        $this->assertDatabaseCount('store_balance_entries', $reversalApplied ? 4 : 3);
+        $this->assertSame($reversalApplied ? 0 : 5000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertTrue(app(StoreBalanceReconciliation::class)->inspect($customer)->isConsistent());
     }
 
     private function fixture(): array

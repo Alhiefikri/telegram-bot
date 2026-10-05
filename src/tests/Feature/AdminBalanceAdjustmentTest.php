@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\StoreBalanceEntryKind;
 use App\Enums\UserRole;
 use App\Exceptions\BalanceAdjustmentRejected;
 use App\Exceptions\InvalidOrderTransition;
@@ -10,6 +11,7 @@ use App\Jobs\SendBalanceAdjustmentNotice;
 use App\Jobs\SendStoreBalanceOwnerCompensationNotification;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
+use App\Models\StoreBalanceEntry;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\MoneyReceipts\MoneyReceiptIdentity;
@@ -20,6 +22,7 @@ use App\Services\StoreBalance\BalanceAdjustmentService;
 use App\Services\StoreBalance\StoreBalanceActivityService;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
+use App\Services\StoreBalance\StoreBalanceReconciliation;
 use App\Services\Telegram\BalanceAdjustmentNoticeDeliveryPipeline;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Warranty\WarrantySettlementService;
@@ -278,6 +281,219 @@ final class AdminBalanceAdjustmentTest extends NonTransactionalDatabaseTestCase
         $this->assertSame('sent', $effect->fresh()->state->value);
         $this->assertSame(5000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
         $this->assertDatabaseCount('store_balance_entries', 1);
+    }
+
+    public function test_full_linked_reversal_posts_one_debit_and_replay_returns_the_same_entry(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $preview = $service->request($owner, (string) $customer->telegram_id, 5000, 'Dana diterima');
+        $credit = $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id);
+        $this->assertSame('pending', $reversal->state);
+        $this->assertSame('reversal', $reversal->category);
+        $this->assertSame($preview->id, $reversal->source_id);
+        $this->assertSame(5000, $reversal->amount);
+        $this->assertStringContainsString('Reversal penuh', $reversal->reason);
+
+        $result = $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password');
+        $replay = $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password');
+
+        $this->assertTrue($result->applied);
+        $this->assertFalse($replay->applied);
+        $this->assertSame($result->entryId, $replay->entryId);
+        $this->assertSame(0, $result->balanceAfter);
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+
+        $entry = StoreBalanceEntry::query()->findOrFail($result->entryId);
+        $this->assertSame(StoreBalanceEntryKind::AdminAdjustmentReversal, $entry->kind);
+        $this->assertSame('balance_adjustment', $entry->source_type);
+        $this->assertSame($preview->id, $entry->source_id);
+        $this->assertSame(5000, (int) $entry->amount);
+        $this->assertSame(0, (int) $entry->balance_after);
+        $this->assertSame($credit->entryId, (int) $preview->fresh()->ledger_entry_id);
+        $this->assertSame('applied', $preview->fresh()->state);
+        $this->assertSame('applied', $reversal->fresh()->state);
+        $this->assertSame($result->entryId, (int) $reversal->fresh()->ledger_entry_id);
+        $this->assertDatabaseCount('store_balance_entries', 2);
+        $this->assertDatabaseCount('balance_adjustment_accounting_events', 2);
+        $this->assertDatabaseHas('balance_adjustment_accounting_events', [
+            'request_id' => $reversal->id, 'debit_account' => 'customer_idr_liability',
+            'credit_account' => 'owner_attested_adjustment_suspense', 'amount' => 5000,
+        ]);
+        $this->assertSame(4, DB::table('telegram_outbound_effects')->count());
+        $notice = TelegramOutboundEffect::query()->where('target_type', 'customer')->where('source_id', $reversal->id)->sole();
+        $this->assertSame('Your IDR balance decreased by Rp 5.000.', $notice->outcome_metadata['message']);
+
+        $this->assertTrue(app(StoreBalanceReconciliation::class)->inspect($customer)->isConsistent());
+        $page = app(StoreBalanceActivityService::class)->firstPage($customer);
+        $this->assertSame('adjustment_reversal', $page->items[0]->kind);
+        $this->assertSame(-5000, $page->items[0]->signedAmount);
+        $this->assertSame(5000, $page->items[0]->amount);
+    }
+
+    public function test_reversal_rejects_foreign_non_adjustment_non_idr_and_non_applied_originals(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $preview = $service->request($owner, (string) $customer->telegram_id, 5000, 'Dana diterima');
+
+        $this->rejects('invalid_original_adjustment', fn () => $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id));
+        $this->rejects('invalid_original_adjustment', fn () => $service->requestReversal($owner, (string) $customer->telegram_id, (string) Str::uuid()));
+        $this->rejects('invalid_original_adjustment', fn () => $service->requestReversal($owner, (string) $customer->telegram_id, 'not-a-uuid'));
+
+        $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $foreignCustomer = Customer::factory()->create(['telegram_id' => 901544]);
+        $foreignPreview = $service->request($owner, '901544', 7000, 'Foreign adjustment');
+        $service->confirm($owner, $foreignPreview->id, $foreignPreview->fingerprint, 1, 'owner-password');
+        $this->rejects('invalid_original_adjustment', fn () => $service->requestReversal($owner, (string) $customer->telegram_id, $foreignPreview->id));
+        $this->assertSame(7000, app(StoreBalanceLedger::class)->snapshot($foreignCustomer)->balance());
+
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id);
+        $this->assertSame('reversal', $reversal->category);
+        $this->rejects('reversal_already_open', fn () => $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id));
+        $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password');
+        $this->rejects('invalid_original_adjustment', fn () => $service->requestReversal($owner, (string) $customer->telegram_id, $reversal->id));
+        $this->rejects('original_already_reversed', fn () => $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id));
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(3, StoreBalanceEntry::query()->count());
+
+        $nonIdr = (string) Str::uuid();
+        DB::table('balance_adjustment_requests')->insert([
+            'id' => $nonIdr, 'customer_id' => $customer->id, 'owner_user_id' => $owner->id,
+            'telegram_id' => (string) $customer->telegram_id, 'username' => null,
+            'session_binding' => hash('sha256', 'non-idr'), 'credential_binding' => hash('sha256', 'non-idr'),
+            'mode' => 'single_owner', 'currency' => 'USD', 'amount' => 5000, 'reason' => 'Non-IDR fixture',
+            'category' => 'owner_attested', 'source_id' => null, 'receipt_fingerprint' => null,
+            'fingerprint' => hash('sha256', 'non-idr'), 'version' => 1, 'state' => 'applied',
+            'ledger_entry_id' => null, 'expires_at' => now(), 'resolved_at' => now(),
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $this->rejects('invalid_original_adjustment', fn () => $service->requestReversal($owner, (string) $customer->telegram_id, $nonIdr));
+    }
+
+    public function test_reversal_with_insufficient_available_funds_is_a_safe_review_without_debit(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $preview = $service->request($owner, (string) $customer->telegram_id, 5000, 'Dana diterima');
+        $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        app(StoreBalanceLedger::class)->debit($customer, 4500, 'order', '99001', 'order:99001:debit');
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id);
+
+        $this->rejects('reversal_insufficient_funds', fn () => $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password'));
+
+        $this->assertSame('pending', $reversal->fresh()->state);
+        $this->assertNull($reversal->fresh()->ledger_entry_id);
+        $this->assertSame(500, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(2, StoreBalanceEntry::query()->count());
+        $this->assertSame(0, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::AdminAdjustmentReversal)->count());
+        $this->assertDatabaseCount('balance_adjustment_accounting_events', 1);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'balance.adjustment.reversal_review']);
+
+        $closed = $service->close($owner, $reversal->id, $reversal->fingerprint, 1, 'cancelled');
+        $this->assertSame('cancelled', $closed->state);
+        $this->assertSame(2, StoreBalanceEntry::query()->count());
+    }
+
+    public function test_reversal_of_top_up_recovery_does_not_reopen_the_original_source(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $topUp = $this->adjustmentTopUp($customer);
+        $preview = $service->request($owner, (string) $customer->telegram_id, 5000, 'Original recovery', 'top_up_recovery', (string) $topUp->id);
+        $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $this->assertSame('compensated', $topUp->fresh()->status->value);
+
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id);
+        $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password');
+
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame('compensated', $topUp->fresh()->status->value);
+        $this->assertDatabaseCount('store_balance_compensations', 1);
+        $this->observeAdjustmentTopUp($topUp);
+        $this->assertDatabaseCount('store_balance_entries', 2);
+        $this->assertDatabaseCount('external_money_receipts', 1);
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame('compensated', $topUp->fresh()->status->value);
+    }
+
+    public function test_reversal_of_refund_recovery_keeps_the_original_entitlement_resolved(): void
+    {
+        [$owner, , $service] = $this->fixture();
+        Queue::fake();
+        [$customer, $unit, $claim, $refund] = $this->adjustmentRefund();
+        $preview = $service->request($owner, (string) $customer->telegram_id, 8000, 'Customer chose balance refund', 'refund_recovery', $refund->id);
+        $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id);
+        $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password');
+
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame('confirmed', $refund->fresh()->state);
+        $this->assertSame('refunded', $claim->fresh()->settlement_state);
+        $this->assertDatabaseCount('store_balance_entries', 2);
+        $this->assertDatabaseHas('store_balance_entries', [
+            'id' => $reversal->fresh()->ledger_entry_id, 'kind' => StoreBalanceEntryKind::AdminAdjustmentReversal,
+            'source_type' => 'balance_adjustment', 'source_id' => $preview->id,
+        ]);
+    }
+
+    public function test_reversal_rolls_back_with_the_money_transaction_and_fails_closed_on_drift(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $preview = $service->request($owner, (string) $customer->telegram_id, 5000, 'Dana diterima');
+        $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id);
+
+        if (DB::getDriverName() === 'pgsql') {
+            DB::unprepared("CREATE FUNCTION fail_adjustment_insert() RETURNS trigger LANGUAGE plpgsql AS \$\$ BEGIN RAISE EXCEPTION 'injected failure'; END \$\$; CREATE TRIGGER fail_adjustment_insert BEFORE INSERT ON balance_adjustment_accounting_events FOR EACH ROW EXECUTE FUNCTION fail_adjustment_insert()");
+        } else {
+            DB::unprepared("CREATE TRIGGER fail_adjustment_insert BEFORE INSERT ON balance_adjustment_accounting_events BEGIN SELECT RAISE(ABORT, 'injected failure'); END");
+        }
+        try {
+            $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password');
+            $this->fail('Expected accounting insert failure.');
+        } catch (QueryException $error) {
+            $this->assertStringContainsString('injected failure', $error->getMessage());
+        } finally {
+            if (DB::getDriverName() === 'pgsql') {
+                DB::unprepared('DROP TRIGGER fail_adjustment_insert ON balance_adjustment_accounting_events; DROP FUNCTION fail_adjustment_insert()');
+            } else {
+                DB::unprepared('DROP TRIGGER fail_adjustment_insert');
+            }
+        }
+        $this->assertSame('pending', $reversal->fresh()->state);
+        $this->assertSame(5000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertDatabaseCount('balance_adjustment_accounting_events', 1);
+
+        CustomerBalanceAccount::query()->where('customer_id', $customer->id)->update(['balance' => 0]);
+        try {
+            $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password');
+            $this->fail('Expected projection mismatch.');
+        } catch (StoreBalanceProjectionMismatchException) {
+            $this->assertSame(1, StoreBalanceEntry::query()->count());
+            $this->assertDatabaseCount('balance_adjustment_accounting_events', 1);
+        }
+    }
+
+    public function test_reversal_does_not_release_the_original_external_receipt_claim(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $receipt = $this->receipt($customer);
+        $preview = $service->request($owner, (string) $customer->telegram_id, 5000, 'Verified transfer', 'funded_transfer', receipt: $receipt);
+        $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password', $receipt);
+
+        $reversal = $service->requestReversal($owner, (string) $customer->telegram_id, $preview->id);
+        $service->confirm($owner, $reversal->id, $reversal->fingerprint, 1, 'owner-password');
+
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertDatabaseCount('external_money_receipts', 1);
+        $this->assertDatabaseHas('balance_adjustment_accounting_events', [
+            'request_id' => $reversal->id, 'debit_account' => 'customer_idr_liability',
+            'credit_account' => 'adjustment_reversal_gain', 'amount' => 5000,
+        ]);
+        $second = $service->request($owner, (string) $customer->telegram_id, 5000, 'Reuse after reversal', 'funded_transfer', receipt: $receipt);
+        $this->rejects('receipt_unavailable', fn () => $service->confirm($owner, $second->id, $second->fingerprint, 1, 'owner-password', $receipt));
+        $this->assertSame(2, StoreBalanceEntry::query()->count());
     }
 
     private function receipt(Customer $customer): VerifiedMoneyReceipt

@@ -230,8 +230,12 @@ The reported gate that every backfill source has completed a full scan with zero
 _Avoid_: production approval, provider readiness, canary
 
 **Balance Adjustment Request**:
-An immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID. I1 #543 implements the service boundary with a five-minute preview and the explicitly approved single-Owner, per-action password confirmation mode from H0-v1; I2 #544 exposes the owner-only Admin Dashboard flow and paginated IDR view. Application or linked reversal creates a new ledger effect; it never sets or edits a balance directly.
+An immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID. I1 #543 implements the service boundary with a five-minute preview and the explicitly approved single-Owner, per-action password confirmation mode from H0-v1; I2 #544 exposes the owner-only Admin Dashboard flow and paginated IDR view; I3 #545 adds the linked full reversal under the same password boundary. Application or linked reversal creates a new ledger effect; it never sets or edits a balance directly.
 _Avoid_: manual balance overwrite, automatic Customer creation, arbitrary USDT grant
+
+**Balance Adjustment Reversal**:
+A linked full reversal of one applied Balance Adjustment Request, requested from the original history entry with a fresh Owner password. It debits exactly the original credited amount once, only while available funds cover it; insufficient funds become a review without a partial debit or negative balance. The original entry, linked Top-up/refund resolution and any claimed external receipt stay immutable and resolved.
+_Avoid_: balance overwrite, partial reversal, external payment refund
 
 **Economic Source**:
 A proposed typed authorization for one ledger effect, binding its immutable business identity, Customer, currency, exact units, evidence and request fingerprint. Matching replay returns the same posting; changed payload conflicts.

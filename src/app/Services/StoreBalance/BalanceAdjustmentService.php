@@ -3,10 +3,13 @@
 namespace App\Services\StoreBalance;
 
 use App\Enums\ExternalMoneyReceiptTargetType;
+use App\Enums\StoreBalanceEntryKind;
 use App\Enums\UserRole;
 use App\Exceptions\BalanceAdjustmentRejected;
+use App\Exceptions\InsufficientStoreBalance;
 use App\Models\BalanceAdjustmentRequest;
 use App\Models\Customer;
+use App\Models\CustomerBalanceAccount;
 use App\Models\OrderRefund;
 use App\Models\StoreBalanceEntry;
 use App\Models\StoreBalanceTopUp;
@@ -99,17 +102,47 @@ final class BalanceAdjustmentService
         ];
         $attributes['fingerprint'] = hash('sha256', json_encode($attributes, JSON_THROW_ON_ERROR));
 
-        return DB::transaction(function () use ($attributes, $actor): BalanceAdjustmentRequest {
-            $actor = $this->owner(User::query()->whereKey($actor->id)->sharedLock()->firstOrFail());
-            if ($attributes['credential_binding'] !== hash('sha256', $actor->password)) {
-                throw new BalanceAdjustmentRejected('credentials_changed');
-            }
-            $preview = new BalanceAdjustmentRequest;
-            $preview->forceFill($attributes)->save();
-            $this->audit->logWithResolvedContext('balance.adjustment.requested', $preview, new: $this->auditValues($preview), user: $actor);
+        return $this->persistPreview($actor, $attributes);
+    }
 
-            return $preview;
-        }, 5);
+    /**
+     * Canonical full reversal request for one applied adjustment. The original
+     * entry, customer, currency and exact amount are verified server-side; the
+     * Owner never supplies the reversed amount.
+     */
+    public function requestReversal(User $actor, mixed $telegramId, string $originalRequestId): BalanceAdjustmentRequest
+    {
+        $actor = $this->owner($actor);
+        $customer = $this->registeredCustomer($telegramId);
+        if ($customer === null) {
+            throw new BalanceAdjustmentRejected('customer_not_registered');
+        }
+        if (! Str::isUuid($originalRequestId)) {
+            throw new BalanceAdjustmentRejected('invalid_original_adjustment');
+        }
+        $original = BalanceAdjustmentRequest::query()->whereKey($originalRequestId)->first();
+        if ($original === null || (int) $original->customer_id !== (int) $customer->id || ! self::isReversibleOriginal($original)) {
+            throw new BalanceAdjustmentRejected('invalid_original_adjustment');
+        }
+        if (StoreBalanceEntry::query()->where('source_type', 'balance_adjustment')->where('source_id', $original->id)
+            ->where('kind', StoreBalanceEntryKind::AdminAdjustmentReversal)->exists()) {
+            throw new BalanceAdjustmentRejected('original_already_reversed');
+        }
+        if ($this->openReversalSourceIds([$original->id]) !== []) {
+            throw new BalanceAdjustmentRejected('reversal_already_open');
+        }
+        $attributes = [
+            'id' => (string) Str::uuid(), 'customer_id' => $customer->id, 'telegram_id' => (string) $customer->telegram_id,
+            'username' => $customer->username, 'owner_user_id' => $actor->id,
+            'session_binding' => $this->sessionBinding(), 'credential_binding' => hash('sha256', $actor->password),
+            'mode' => 'single_owner', 'currency' => 'IDR', 'amount' => $original->amount,
+            'reason' => mb_substr('Reversal penuh: '.$original->reason, 0, 500),
+            'category' => 'reversal', 'source_id' => $original->id, 'receipt_fingerprint' => null,
+            'version' => 1, 'state' => 'pending', 'expires_at' => now()->addMinutes(5),
+        ];
+        $attributes['fingerprint'] = hash('sha256', json_encode($attributes, JSON_THROW_ON_ERROR));
+
+        return $this->persistPreview($actor, $attributes);
     }
 
     public function confirm(User $actor, string $id, string $fingerprint, int $version, string $password,
@@ -155,6 +188,7 @@ final class BalanceAdjustmentService
                     return new BalanceAdjustmentRejected('receipt_unavailable');
                 }
                 $preview->forceFill(['state' => 'approved'])->save();
+                $reversalOriginal = null;
                 if ($preview->category === 'top_up_recovery') {
                     $topUp = StoreBalanceTopUp::query()->whereKey($preview->source_id)->lockForUpdate()->firstOrFail();
                     if ((int) $topUp->customer_id !== (int) $customer->id || (int) $topUp->amount !== $preview->amount || $topUp->currency !== 'IDR') {
@@ -170,23 +204,45 @@ final class BalanceAdjustmentService
                     }
                 } elseif ($preview->category === 'refund_recovery') {
                     $mutation = $this->refunds->apply($customer, $preview, $approval);
+                } elseif ($preview->category === 'reversal') {
+                    $reversalOriginal = BalanceAdjustmentRequest::query()->whereKey($preview->source_id)->lockForUpdate()->first();
+                    if ($reversalOriginal === null || ! self::isReversibleOriginal($reversalOriginal)) {
+                        throw new BalanceAdjustmentRejected('invalid_original_adjustment');
+                    }
+                    try {
+                        $mutation = $this->ledger->reverseApprovedAdjustment($preview, $reversalOriginal, $approval);
+                    } catch (InsufficientStoreBalance) {
+                        throw new BalanceAdjustmentRejected('reversal_insufficient_funds');
+                    }
+                    if (! $mutation->applied) {
+                        throw new BalanceAdjustmentRejected('original_already_reversed');
+                    }
                 } else {
                     $mutation = $this->ledger->creditApprovedAdjustment($preview, $approval);
                 }
                 $preview->forceFill(['state' => 'applied', 'ledger_entry_id' => $mutation->entryId, 'resolved_at' => now()])->save();
                 DB::table('balance_adjustment_accounting_events')->insert([
                     'request_id' => $preview->id, 'ledger_entry_id' => $mutation->entryId, 'currency' => 'IDR', 'amount' => $preview->amount,
-                    'debit_account' => match ($preview->category) {
-                        'funded_transfer' => 'verified_settlement_asset', 'promotional_grant' => 'promotional_expense',
-                        'refund_recovery' => 'sale_refund', 'correction' => 'correction_suspense', default => 'owner_attested_adjustment_suspense',
-                    },
-                    'credit_account' => 'customer_idr_liability', 'source_fingerprint' => $preview->fingerprint, 'created_at' => now(),
+                    'debit_account' => $preview->category === 'reversal'
+                        ? 'customer_idr_liability'
+                        : match ($preview->category) {
+                            'funded_transfer' => 'verified_settlement_asset', 'promotional_grant' => 'promotional_expense',
+                            'refund_recovery' => 'sale_refund', 'correction' => 'correction_suspense', default => 'owner_attested_adjustment_suspense',
+                        },
+                    'credit_account' => $preview->category === 'reversal'
+                        ? $this->reversalCounterpartAccount($reversalOriginal)
+                        : 'customer_idr_liability',
+                    'source_fingerprint' => $preview->fingerprint, 'created_at' => now(),
                 ]);
                 $this->audit->logWithResolvedContext('balance.adjustment.applied', $preview, new: $this->auditValues($preview), user: $freshActor);
-                if ($preview->category !== 'top_up_recovery') {
+                if ($preview->category === 'reversal') {
+                    $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'customer', $this->locale->translate($customer, 'balance.adjustment.reversal', ['amount' => 'Rp '.number_format($preview->amount, 0, ',', '.')]), $customer);
+                } elseif ($preview->category !== 'top_up_recovery') {
                     $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'customer', $this->locale->translate($customer, 'balance.adjustment.credit', ['amount' => 'Rp '.number_format($preview->amount, 0, ',', '.')]), $customer);
                 }
-                $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'owner', 'Adjustment IDR '.$preview->id.' diterapkan: Rp '.number_format($preview->amount, 0, ',', '.').'.');
+                $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'owner', $preview->category === 'reversal'
+                    ? 'Reversal IDR '.$preview->id.' diterapkan: Rp '.number_format($preview->amount, 0, ',', '.').' dari adjustment '.$reversalOriginal->id.'.'
+                    : 'Adjustment IDR '.$preview->id.' diterapkan: Rp '.number_format($preview->amount, 0, ',', '.').'.');
 
                 return $mutation;
             }, 5);
@@ -195,6 +251,16 @@ final class BalanceAdjustmentService
             }
 
             return $result;
+        } catch (BalanceAdjustmentRejected $error) {
+            if ($error->reason === 'reversal_insufficient_funds') {
+                $reversal = BalanceAdjustmentRequest::query()->find($identity->id);
+                if ($reversal !== null) {
+                    $this->audit->logWithResolvedContext('balance.adjustment.reversal_review', $reversal,
+                        new: ['reason' => $error->reason, 'amount' => $reversal->amount], user: $actor);
+                }
+            }
+
+            throw $error;
         } finally {
             $this->passwords->release($actor, $token);
         }
@@ -269,6 +335,79 @@ final class BalanceAdjustmentService
 
         return new VerifiedMoneyReceipt($receipt->identity, $receipt->beneficiary, 'IDR', (string) $amount, 0,
             MoneyReceiptTarget::balanceAdjustment($id), $receipt->evidence, $receipt->aliases, $receipt->parentClaim);
+    }
+
+    private function persistPreview(User $actor, array $attributes): BalanceAdjustmentRequest
+    {
+        return DB::transaction(function () use ($attributes, $actor): BalanceAdjustmentRequest {
+            $actor = $this->owner(User::query()->whereKey($actor->id)->sharedLock()->firstOrFail());
+            if ($attributes['credential_binding'] !== hash('sha256', $actor->password)) {
+                throw new BalanceAdjustmentRejected('credentials_changed');
+            }
+            $preview = new BalanceAdjustmentRequest;
+            $preview->forceFill($attributes)->save();
+            $this->audit->logWithResolvedContext('balance.adjustment.requested', $preview, new: $this->auditValues($preview), user: $actor);
+
+            return $preview;
+        }, 5);
+    }
+
+    /**
+     * One applied adjustment credit can be reversed exactly once; linked
+     * Top-up/refund recovery credits are reversible without reopening their
+     * original economic resolution.
+     */
+    public static function isReversibleOriginal(BalanceAdjustmentRequest $original): bool
+    {
+        $expectedKind = StoreBalanceEntryKind::forAdjustmentCategory($original->category);
+        if ($original->state !== 'applied' || $original->currency !== 'IDR' || $original->ledger_entry_id === null || $expectedKind === null) {
+            return false;
+        }
+        $entry = StoreBalanceEntry::query()->whereKey($original->ledger_entry_id)->first();
+        $accountId = CustomerBalanceAccount::query()->where('customer_id', $original->customer_id)->value('id');
+
+        return $entry !== null && $entry->kind === $expectedKind && (int) $entry->amount === (int) $original->amount
+            && $accountId !== null && (int) $entry->customer_balance_account_id === (int) $accountId;
+    }
+
+    /**
+     * Live reversal previews (approved, applied or unexpired pending) for a
+     * set of original adjustment ids. Concurrent preview creation is still
+     * resolved safely by the unique ledger claim at confirmation.
+     *
+     * @param  list<string>  $originalIds
+     * @return list<string>
+     */
+    public function openReversalSourceIds(array $originalIds): array
+    {
+        if ($originalIds === []) {
+            return [];
+        }
+
+        return BalanceAdjustmentRequest::query()
+            ->where('category', 'reversal')
+            ->whereIn('source_id', $originalIds)
+            ->where(function ($query): void {
+                $query->whereIn('state', ['approved', 'applied'])
+                    ->orWhere(fn ($pending) => $pending->where('state', 'pending')->where('expires_at', '>', now()));
+            })
+            ->pluck('source_id')
+            ->all();
+    }
+
+    /**
+     * Reversal mirrors the original counterpart, except for a funded transfer:
+     * the verified external money was not returned, so the settlement asset
+     * must not be de-recognized as if it had been refunded.
+     */
+    private function reversalCounterpartAccount(BalanceAdjustmentRequest $original): string
+    {
+        if ($original->category === 'funded_transfer') {
+            return 'adjustment_reversal_gain';
+        }
+
+        return DB::table('balance_adjustment_accounting_events')->where('request_id', $original->id)->value('debit_account')
+            ?? 'owner_attested_adjustment_suspense';
     }
 
     private function exactAmount(mixed $amount): int

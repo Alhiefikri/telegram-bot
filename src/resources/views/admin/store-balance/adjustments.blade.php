@@ -125,10 +125,11 @@
 
         @if ($preview)
             @php($previewExpired = $preview->state === 'pending' && now()->gte($preview->expires_at))
-            <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-2xl" aria-label="Preview penambahan saldo">
+            @php($previewReversal = $preview->category === 'reversal')
+            <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-2xl" aria-label="{{ $previewReversal ? 'Preview reversal saldo' : 'Preview penambahan saldo' }}">
                 <div class="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Preview penambahan IDR</p>
+                        <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Preview {{ $previewReversal ? 'reversal' : 'penambahan' }} IDR</p>
                         <h2 class="mt-1 text-lg font-black">Periksa sebelum konfirmasi</h2>
                     </div>
                     <x-admin-dashboard.badge :tone="$preview->state === 'applied' ? 'success' : ($previewExpired || $preview->state !== 'pending' ? 'warning' : 'blue')" dot>
@@ -145,13 +146,19 @@
                         <dd class="mt-1 break-all font-mono font-black">{{ $preview->telegram_id }}</dd>
                     </div>
                     <div>
-                        <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Jumlah tambahan</dt>
+                        <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">{{ $previewReversal ? 'Jumlah reversal' : 'Jumlah tambahan' }}</dt>
                         <dd class="mt-1 text-lg font-black">Rp {{ number_format($preview->amount, 0, ',', '.') }}</dd>
                     </div>
                     <div>
                         <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Alasan</dt>
                         <dd class="mt-1 break-words text-sm font-semibold">{{ $preview->reason }}</dd>
                     </div>
+                    @if ($previewReversal)
+                        <div class="sm:col-span-2">
+                            <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Adjustment asal</dt>
+                            <dd class="mt-1 break-words text-sm font-semibold">Rp {{ number_format($previewOriginal?->amount ?? $preview->amount, 0, ',', '.') }} · {{ $previewOriginal?->reason ?? 'Adjustment asal' }}</dd>
+                        </div>
+                    @endif
                     <div class="sm:col-span-2">
                         <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Batas konfirmasi</dt>
                         <dd class="mt-1 text-sm font-semibold">{{ $preview->expires_at->timezone(config('app.timezone'))->format('d M Y, H:i T') }}</dd>
@@ -163,7 +170,7 @@
                         method="POST"
                         action="{{ route('admin.store-balance.adjustments.previews.confirm', ['adjustment' => $preview->id]) }}"
                         class="mt-4 space-y-3"
-                        aria-label="Konfirmasi penambahan dengan password Owner"
+                        aria-label="{{ $previewReversal ? 'Konfirmasi reversal dengan password Owner' : 'Konfirmasi penambahan dengan password Owner' }}"
                         x-data="{ submitting: false }"
                         x-on:submit.prevent="if (!submitting) { submitting = true; $nextTick(() => $el.submit()); }"
                     >
@@ -177,7 +184,7 @@
                         <p class="text-[11px] font-semibold leading-5 text-brand-muted">Password diminta setiap kali konfirmasi dan tidak disimpan pada preview.</p>
                         <div class="grid gap-2 sm:grid-cols-2">
                             <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full" x-bind:disabled="submitting" x-bind:aria-busy="submitting">
-                                <span x-show="!submitting">Konfirmasi penambahan</span>
+                                <span x-show="!submitting">Konfirmasi {{ $previewReversal ? 'reversal' : 'penambahan' }}</span>
                                 <span x-cloak x-show="submitting">Memproses…</span>
                             </x-admin-dashboard.button>
                         </div>
@@ -189,7 +196,7 @@
                         <button type="submit" class="w-full rounded-xl px-3 py-2 text-sm font-bold text-brand-slate-dark underline sm:w-auto">Batalkan preview</button>
                     </form>
                 @elseif ($preview->state === 'applied')
-                    <x-admin-dashboard.notice tone="success" class="mt-4" role="status">Penambahan ini sudah diterapkan. Pengiriman ulang konfirmasi tidak membuat kredit kedua.</x-admin-dashboard.notice>
+                    <x-admin-dashboard.notice tone="success" class="mt-4" role="status">{{ $previewReversal ? 'Reversal ini sudah diterapkan. Konfirmasi ulang tidak mendebit saldo kedua kali.' : 'Penambahan ini sudah diterapkan. Pengiriman ulang konfirmasi tidak membuat kredit kedua.' }}</x-admin-dashboard.notice>
                 @elseif ($preview->state === 'pending' && ! $previewExpired)
                     <x-admin-dashboard.notice tone="warning" class="mt-4" role="status">Saldo Customer tidak dapat diverifikasi dengan ledger. Konfirmasi ditahan sampai rekonsiliasi dilakukan.</x-admin-dashboard.notice>
                 @elseif ($previewExpired)
@@ -218,6 +225,24 @@
                             <p class="mt-2 break-words text-sm font-semibold">{{ $entry->reason }}</p>
                             @if ($entry->ledger_entry_id)
                                 <p class="mt-2 text-[11px] font-semibold text-brand-muted">Ledger entry #{{ $entry->ledger_entry_id }}</p>
+                            @endif
+                            @if (in_array($entry->id, $reversibleAdjustmentIds, true))
+                                <form
+                                    method="POST"
+                                    action="{{ route('admin.store-balance.adjustments.reversals.store') }}"
+                                    class="mt-3"
+                                    aria-label="Reversal penuh penyesuaian ini"
+                                    x-data="{ submitting: false }"
+                                    x-on:submit.prevent="if (!submitting) { submitting = true; $nextTick(() => $el.submit()); }"
+                                >
+                                    @csrf
+                                    <input type="hidden" name="source_id" value="{{ $entry->id }}">
+                                    <input type="hidden" name="telegram_id" value="{{ (string) $customer->telegram_id }}">
+                                    <button type="submit" class="rounded-xl border-2 border-neo-ink/15 bg-white px-3 py-1.5 text-xs font-black text-brand-slate-dark transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-neo-focus" x-bind:disabled="submitting" x-bind:aria-busy="submitting">
+                                        <span x-show="!submitting">Reversal penuh</span>
+                                        <span x-cloak x-show="submitting">Membuat preview…</span>
+                                    </button>
+                                </form>
                             @endif
                         </article>
                     @empty
