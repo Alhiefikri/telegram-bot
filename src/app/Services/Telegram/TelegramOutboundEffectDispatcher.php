@@ -9,6 +9,7 @@ use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendAdminOrderPendingNotification;
+use App\Jobs\SendBalanceAdjustmentNotice;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendBscCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
@@ -58,6 +59,7 @@ final class TelegramOutboundEffectDispatcher
         $pending = match ($effect->effect_type) {
             TelegramOutboundEffectType::WarrantyNotification->value => SendWarrantyNotification::dispatch((string) $effect->id),
             TelegramOutboundEffectType::WarrantyDeadlineReminder->value => SendWarrantyDeadlineReminder::dispatch((string) $effect->id),
+            TelegramOutboundEffectType::BalanceAdjustmentNotice->value => SendBalanceAdjustmentNotice::dispatch((string) $effect->id),
             TelegramOutboundEffectType::SupplierHealth->value => SendSupplierHealthNotification::dispatch((string) $effect->id),
             TelegramOutboundEffectType::ManualCheckoutInstructions->value => SendManualCheckoutNotifications::dispatch(
                 (string) $effect->source_id,

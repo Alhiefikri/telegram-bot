@@ -56,6 +56,8 @@
   "balance.activity.detail.back": "⬅️ Kembali ke aktiviti",
   "balance.activity.detail.support": "Tambah baki ini belum dikreditkan. Gunakan tindakan bayaran yang tersedia atau buka Sokongan; jangan hantar data rahsia.",
   "balance.activity.kind.top_up": "Tambah baki",
+  "balance.adjustment.credit": "Baki IDR anda bertambah :amount.",
+  "balance.activity.kind.adjustment": "Pelarasan baki",
   "balance.activity.kind.compensation": "Pampasan baki",
   "balance.activity.kind.purchase": "Pembelian",
   "balance.activity.kind.refund": "Bayaran balik",

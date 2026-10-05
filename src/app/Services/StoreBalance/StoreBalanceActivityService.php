@@ -470,12 +470,14 @@ final class StoreBalanceActivityService
         ?StoreBalanceEntry $related,
     ): StoreBalanceActivityItem {
         $kind = match ($entry->kind) {
+            StoreBalanceEntryKind::AdminAdjustmentCredit => StoreBalanceActivityItem::KIND_ADJUSTMENT,
             StoreBalanceEntryKind::TopUpCredit => StoreBalanceActivityItem::KIND_TOP_UP,
             StoreBalanceEntryKind::OwnerCompensationCredit => StoreBalanceActivityItem::KIND_COMPENSATION,
             StoreBalanceEntryKind::PurchaseDebit => StoreBalanceActivityItem::KIND_PURCHASE,
             StoreBalanceEntryKind::RefundCredit => StoreBalanceActivityItem::KIND_REFUND,
         };
         $state = match ($entry->kind) {
+            StoreBalanceEntryKind::AdminAdjustmentCredit => StoreBalanceActivityItem::STATE_CREDITED,
             StoreBalanceEntryKind::TopUpCredit => StoreBalanceActivityItem::STATE_CREDITED,
             StoreBalanceEntryKind::OwnerCompensationCredit => StoreBalanceActivityItem::STATE_COMPENSATED,
             StoreBalanceEntryKind::PurchaseDebit => StoreBalanceActivityItem::STATE_DEBITED,

@@ -30,5 +30,6 @@ enum TelegramOutboundEffectType: string
     case ReceiptOrderActions = 'receipt.order_actions';
     case WarrantyNotification = 'order.warranty_notification';
     case WarrantyDeadlineReminder = 'order.warranty_deadline_reminder';
+    case BalanceAdjustmentNotice = 'balance.adjustment_notice';
     case SupplierHealth = 'admin.supplier_health';
 }

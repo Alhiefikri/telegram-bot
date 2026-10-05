@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\StoreBalanceProjectionMismatchException;
+use App\Models\BalanceAdjustmentRequest;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\OrderRefund;
@@ -119,6 +120,39 @@ final class StoreBalanceLedger
             $compensationId,
             $idempotencyKey,
         );
+    }
+
+    /** Only a transaction-approved immutable request can authorize this posting. */
+    public function creditApprovedAdjustment(BalanceAdjustmentRequest $request, ApprovedBalanceAdjustment $approval): StoreBalanceMutationResult
+    {
+        $approval->assertMatches($request);
+        if (DB::transactionLevel() === 0) {
+            throw new InvalidArgumentException('Adjustment approval requires its money transaction.');
+        }
+        $approved = BalanceAdjustmentRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
+        if ($approved->state !== 'approved' || $approved->currency !== 'IDR'
+            || $approved->fingerprint !== $request->fingerprint || in_array($approved->category, ['top_up_recovery', 'refund_recovery'], true)) {
+            throw new InvalidArgumentException('Adjustment request is not approved for a new credit.');
+        }
+
+        return $this->apply(Customer::findOrFail($approved->customer_id), StoreBalanceEntryKind::AdminAdjustmentCredit,
+            $approved->amount, 'balance_adjustment', $approved->id, 'balance-adjustment:'.$approved->id.':v1',
+            validateProjectionHistory: false);
+    }
+
+    public function creditApprovedRefundAdjustment(BalanceAdjustmentRequest $request, OrderRefund $refund, ApprovedBalanceAdjustment $approval): StoreBalanceMutationResult
+    {
+        $request = BalanceAdjustmentRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
+        $refund = OrderRefund::query()->whereKey($refund->id)->lockForUpdate()->firstOrFail();
+        $approval->assertMatches($request);
+        if (DB::transactionLevel() === 0 || $request->state !== 'approved' || $request->category !== 'refund_recovery'
+            || $request->source_id !== $refund->id || $request->amount !== $refund->amount
+            || (int) $request->customer_id !== (int) $refund->customer_id || $refund->currency !== 'IDR' || $refund->state !== 'requested') {
+            throw new InvalidArgumentException('Refund recovery requires its approved original entitlement.');
+        }
+
+        return $this->apply(Customer::findOrFail($request->customer_id), StoreBalanceEntryKind::RefundCredit, $refund->amount,
+            'order_refund', $refund->id, 'order-refund:'.$refund->id, validateProjectionHistory: false, refundOrderId: $refund->order_id);
     }
 
     public function debit(

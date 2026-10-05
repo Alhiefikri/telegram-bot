@@ -85,6 +85,7 @@ final class TelegramOutboundEffectPolicy
     private const MAX_ATTEMPTS = [
         TelegramOutboundEffectType::WarrantyNotification->value => 3,
         TelegramOutboundEffectType::WarrantyDeadlineReminder->value => 3,
+        TelegramOutboundEffectType::BalanceAdjustmentNotice->value => 3,
         TelegramOutboundEffectType::SupplierHealth->value => 3,
         TelegramOutboundEffectType::ReceiptCredentials->value => self::RECEIPT_MAX_ATTEMPTS,
         TelegramOutboundEffectType::ReceiptTxtDownload->value => self::RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS,

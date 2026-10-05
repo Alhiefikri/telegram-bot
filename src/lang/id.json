@@ -56,6 +56,8 @@
   "balance.activity.detail.back": "⬅️ Kembali ke aktivitas",
   "balance.activity.detail.support": "Top-up ini belum dikreditkan. Gunakan aksi pembayaran yang tersedia atau buka Support; jangan kirim data rahasia.",
   "balance.activity.kind.top_up": "Top-up",
+  "balance.adjustment.credit": "Saldo IDR bertambah :amount.",
+  "balance.activity.kind.adjustment": "Penyesuaian saldo",
   "balance.activity.kind.compensation": "Kompensasi saldo",
   "balance.activity.kind.purchase": "Pembelian",
   "balance.activity.kind.refund": "Pengembalian dana",

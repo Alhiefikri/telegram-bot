@@ -374,6 +374,12 @@ final class StoreBalanceTopUpService
                 // The compensation reservation is now backed by verified
                 // provider evidence; the money identity is identified and the
                 // reservation is resolved without a second credit.
+                $claim = $this->receipts->claimStoreBalanceTopUp($lockedTopUp, $evidence->providerReference());
+                if ($claim->isHeld()) {
+                    $this->reviews->mark($lockedTopUp, $claim === ExternalMoneyReceiptClaimOutcome::Conflict ? 'receipt_conflict' : 'receipt_review');
+
+                    return $lockedEvent->fresh();
+                }
                 $this->receipts->resolveCompensationReservation($lockedTopUp);
 
                 $lockedEvent->forceFill(['processed_at' => now()])->save();
@@ -546,6 +552,12 @@ final class StoreBalanceTopUpService
 
             if ($lockedTopUp->status === StoreBalanceTopUpStatus::Compensated
                 && $this->matchesCompensatedCallback($lockedTopUp, $callback)) {
+                $claim = $this->receipts->claimStoreBalanceTopUp($lockedTopUp, $callback->providerReference());
+                if ($claim->isHeld()) {
+                    $this->reviews->mark($lockedTopUp, $claim === ExternalMoneyReceiptClaimOutcome::Conflict ? 'receipt_conflict' : 'receipt_review');
+
+                    return $lockedEvent->fresh();
+                }
                 $this->receipts->resolveCompensationReservation($lockedTopUp);
                 $lockedEvent->forceFill(['processed_at' => now()])->save();
                 ($this->audit ?? app(AuditLogger::class))->logWithResolvedContext(

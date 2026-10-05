@@ -56,6 +56,8 @@
   "balance.activity.detail.back": "⬅️ Back to activity",
   "balance.activity.detail.support": "This top-up is not credited. Use the existing payment action or open Support; do not send secret data.",
   "balance.activity.kind.top_up": "Top-up",
+  "balance.adjustment.credit": "Your IDR balance increased by :amount.",
+  "balance.activity.kind.adjustment": "Balance adjustment",
   "balance.activity.kind.compensation": "Balance compensation",
   "balance.activity.kind.purchase": "Purchase",
   "balance.activity.kind.refund": "Refund",

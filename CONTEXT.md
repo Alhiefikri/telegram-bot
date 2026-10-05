@@ -195,7 +195,7 @@ _Avoid_: Top-up receipt, sales report, revenue post
 One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.
 _Avoid_: Transaction, balance mutation, adjustment row
 
-The following balance-extension terms are **proposed** under [ADR-0019](docs/adr/0019-idr-usdt-economic-sources-and-receipt-claims.md), issue #537, and the A1 capability report. They describe downstream contracts, not currently available features or approved funding providers. Store Balance continues to mean the existing IDR ledger; the external money receipt registry and claim seam are implemented additively (R1 #541) and R2 #542 backfills legacy identities, routes every external payment writer through the registry, and records ambiguous evidence as reservations without activating funding. R2 implementation decisions are recorded in [ADR-0022](docs/adr/0022-external-money-receipt-backfill-and-reservations.md).
+The following balance-extension terms originate in the **proposed** contracts under [ADR-0019](docs/adr/0019-idr-usdt-economic-sources-and-receipt-claims.md), issue #537, and the A1 capability report. They describe downstream contracts, not currently available features or approved funding providers. Store Balance continues to mean the existing IDR ledger; the external money receipt registry and claim seam are implemented additively (R1 #541) and R2 #542 backfills legacy identities, routes every external payment writer through the registry, and records ambiguous evidence as reservations without activating funding. I1 #543 now implements the IDR adjustment service under the accepted H0-v1 single-Owner overlay, while Dashboard access and reversal remain downstream. R2 implementation decisions are recorded in [ADR-0022](docs/adr/0022-external-money-receipt-backfill-and-reservations.md).
 
 **Customer USDT Balance**:
 A proposed Customer-owned shopping balance held in a separate USDT account and immutable ledger, denominated in integer micro-USDT. It is a store liability, with no implicit conversion to Store Balance and no application custody of private keys.
@@ -230,7 +230,7 @@ The reported gate that every backfill source has completed a full scan with zero
 _Avoid_: production approval, provider readiness, canary
 
 **Balance Adjustment Request**:
-A proposed immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID, with an identity/amount preview and default distinct maker/approver. Application or linked reversal creates a new ledger effect; it never sets or edits a balance directly.
+An immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID. I1 #543 implements the service boundary with a five-minute preview and the explicitly approved single-Owner, per-action password confirmation mode from H0-v1; Dashboard access remains I2 #544. Application or linked reversal creates a new ledger effect; it never sets or edits a balance directly.
 _Avoid_: manual balance overwrite, automatic Customer creation, arbitrary USDT grant
 
 **Economic Source**:
