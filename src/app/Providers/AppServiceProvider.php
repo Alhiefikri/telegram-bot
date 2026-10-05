@@ -73,6 +73,7 @@ use App\Services\Telegram\TelegramCallbackAckState;
 use App\Services\Telegram\TelegramCallbackHandlerPipeline;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramConfiguredCheckoutPaymentIntentSelector;
+use App\Services\UsdtTreasury\UsdtTreasuryAssetRegistry;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
@@ -111,6 +112,13 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(SakurupiahProviderAdapter::class, SakurupiahClient::class);
         $this->app->singleton(SakurupiahProviderReadiness::class);
+        // USDT treasury asset providers are approved adapters: an implementation
+        // may be tagged only after the H1 custody/capacity/provider gates pass.
+        // Until then the registry is intentionally empty and reconciliation
+        // reports missing custody input instead of any fabricated backing.
+        $this->app->singleton(UsdtTreasuryAssetRegistry::class, fn ($app): UsdtTreasuryAssetRegistry => new UsdtTreasuryAssetRegistry(
+            $app->tagged('usdt-treasury-asset-providers'),
+        ));
         $this->app->singleton(CheckoutPaymentPreparationResolver::class, function ($app) {
             return new CheckoutPaymentPreparationResolver([
                 ManualQrisCheckoutPaymentPreparation::IDENTITY => $app->make(ManualQrisCheckoutPaymentPreparation::class),

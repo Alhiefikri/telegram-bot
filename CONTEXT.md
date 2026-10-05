@@ -249,6 +249,22 @@ _Avoid_: arbitrary source string, transport request ID
 A proposed append-only, currency-specific counterpart record committed with one ledger posting, linking liability, settlement asset, sale, fee or expense legs. Supplier treasury observations and unresolved deposits remain distinct from Customer available funds.
 _Avoid_: Telegram receipt, mixed-currency total, projection repair
 
+**Accounting Aggregate**:
+A derived, per-consumer total of Accounting Events grouped by balanced leg pair, consumed asynchronously through a unique consumer/event claim. It is reporting evidence that can be rebuilt from immutable events, never an authority for balances and never a single global clearing row.
+_Avoid_: source of truth, ledger balance, global clearing account
+
+**Custody Asset Observation**:
+A read-only, provider-specific statement of USDT assets held by one approved custody adapter, either proving an exact amount or explicitly reporting unavailable/unsupported/missing input. Unavailable is never a proven zero, and a fixture adapter is never proof of actual backing.
+_Avoid_: wallet balance, provider approval, verified backing
+
+**Treasury Movement**:
+An audited bookkeeping record of USDT entering or leaving the operator's custody pool outside Customer funding receipts, such as sweeps, external returns or gas paid from custody. Recording it is not a transfer, credit or refund.
+_Avoid_: Customer top-up, provider settlement, on-chain transfer
+
+**USDT Reconciliation Run**:
+A bounded, read-only comparison of the Customer USDT subledger, its external funding receipts and its accounting aggregates against qualified custody assets and audited treasury movements. Drift freezes only the affected accounts and produces append-only evidence; it never repairs, credits or debits money.
+_Avoid_: balance repair, auto-settlement, money movement
+
 **Store Activity**:
 The public-safe Telegram home summary of the Telegram Customer count and canonical successful Orders. It never discloses revenue, sold units, GMV, or earnings.
 _Avoid_: Sales report, revenue dashboard, store statistics

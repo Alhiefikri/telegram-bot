@@ -33,4 +33,9 @@ final readonly class MoneyReceiptTarget
     {
         return new self(ExternalMoneyReceiptTargetType::BalanceAdjustment, $requestId);
     }
+
+    public static function customerUsdtTopUp(string $topUpId): self
+    {
+        return new self(ExternalMoneyReceiptTargetType::CustomerUsdtTopUp, $topUpId);
+    }
 }
