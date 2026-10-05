@@ -195,7 +195,7 @@ _Avoid_: Top-up receipt, sales report, revenue post
 One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.
 _Avoid_: Transaction, balance mutation, adjustment row
 
-The following balance-extension terms are **proposed** under [ADR-0019](docs/adr/0019-idr-usdt-economic-sources-and-receipt-claims.md), issue #537, and the A1 capability report. They describe downstream contracts, not currently available features or approved funding providers. Store Balance continues to mean the existing IDR ledger.
+The following balance-extension terms are **proposed** under [ADR-0019](docs/adr/0019-idr-usdt-economic-sources-and-receipt-claims.md), issue #537, and the A1 capability report. They describe downstream contracts, not currently available features or approved funding providers. Store Balance continues to mean the existing IDR ledger; the external money receipt registry and claim seam are implemented additively (R1 #541) without cutting payment writers over or activating funding.
 
 **Customer USDT Balance**:
 A proposed Customer-owned shopping balance held in a separate USDT account and immutable ledger, denominated in integer micro-USDT. It is a store liability, with no implicit conversion to Store Balance and no application custody of private keys.

@@ -14,7 +14,7 @@ Sebelum mengubah behavior:
 Dokumen ini menjelaskan _mengapa_ file-file utama saling berhubungan. Source code tetap menjadi sumber kebenaran untuk detail method dan schema.
 ## Proposed IDR/USDT balance extension (A0 #537)
 
-The [source audit and lock graph](../balance-a0-baseline.md) maps actual money writers, nested checkout/lifecycle/supplier/warranty/refund/compensation callers and I1–I12 gaps. Its [lock-site appendix](../balance-a0-lock-sites.md) names each explicit acquisition by file/symbol. [ADR-0019](../adr/0019-idr-usdt-economic-sources-and-receipt-claims.md) is **Proposed**, not accepted: it defines typed economic sources, additive USDT ledger, global receipt aliases/parent transaction claims, counterpart accounting and durable work. Runtime ownership below remains current; these documents do not introduce or activate new services.
+The [source audit and lock graph](../balance-a0-baseline.md) maps actual money writers, nested checkout/lifecycle/supplier/warranty/refund/compensation callers and I1–I12 gaps. Its [lock-site appendix](../balance-a0-lock-sites.md) names each explicit acquisition by file/symbol. [ADR-0019](../adr/0019-idr-usdt-economic-sources-and-receipt-claims.md) is **Proposed**, not accepted: it defines typed economic sources, additive USDT ledger, global receipt aliases/parent transaction claims, counterpart accounting and durable work. R1 (#541) additionally implements the additive receipt registry and claim seam described below; existing money writers are not cut over yet and funding stays gated. Runtime ownership below remains current for every other writer.
 
 Start downstream work from the audit's per-flow lock graph and remediation register, including event-first lifecycle entry and historical Supplier/SKU resource unions. Preserve the IDR ledger/provider history, prepare without network inside locks, and reuse Telegram Outbound Effect recovery. H0/H1/A1/H2 own operational policy, custody/provider qualification and production sign-off. A1's [capability report](../balance-a1-bsc-capability.md) records the BSC chain/token/decimals, `finalized`/canonical-receipt/log capability classification (`verified`/`unsupported`/`unknown`, fail closed), Binance C2C funding decision, and immutable fee/network/custody snapshot contract; a qualified RPC probe is not funding, custody, or legal authorization. Admin IDR adjustment lookup is exact numeric Telegram ID for an already registered Customer, with identity/amount preview and server revalidation; username does not identify the recipient and unknown IDs never create Customers.
 
@@ -185,6 +185,43 @@ CustomerBalanceAccount -> CartItem/Product` untuk checkout dan
 `CustomerBalanceAccount -> Order -> Payment ->
 OrderItem/InventoryMovement/Product` untuk refund.
 
+### External money receipts (R1 #541)
+
+[`ExternalMoneyReceiptClaims`](../../src/app/Services/MoneyReceipts/ExternalMoneyReceiptClaims.php)
+adalah seam claim provider-neutral untuk satu transfer eksternal yang teramati,
+ditambahkan secara additive oleh R1 tanpa mengubah caller lama.
+`VerifiedMoneyReceipt` bersifat immutable dan mengikat identity canonical
+(`MoneyReceiptIdentity`: namespace penerima Binance yang stabil atau BSC
+`(chain_id, tx_hash, log_index)` yang memakai normalisasi `BscTransactionHash`
+legacy), beneficiary, currency, amount integer positif exact, satu
+`MoneyReceiptTarget` (`order_payment`, `store_balance_top_up`,
+`balance_adjustment`) dan fingerprint berversi; alias terverifikasi memetakan
+dana fisik yang sama yang terlihat lewat adapter lain, dan log BSC juga
+mengklaim parent `(chain_id, tx_hash)`-nya. `claim()` dipanggil di dalam
+transaksi money caller yang pendek tanpa HTTP dan mengembalikan `claimed`,
+`replayed`, `conflict`, atau `review`: receipt yang belum ada di-insert dengan
+`INSERT ... ON CONFLICT DO NOTHING`, replay fingerprint yang sama mengembalikan
+`replayed`, payload uang yang berubah atau target kedua menjadi `conflict`, dan
+beberapa log BSC dalam satu transaksi yang menunjuk dua target ditahan sebagai
+`review` dengan owner pertama dipertahankan. Unique constraint database tetap
+otoritatif; race SQL unique dipulihkan lewat savepoint atau transaksi baru,
+bukan melanjutkan transaksi PostgreSQL yang sudah aborted. Status baris hanya
+menyelesaikan kepemilikan klaim (`claimed`/`review`), bukan finalitas bukti atau
+kredit uang: adapter tetap memvalidasi finalitas/attribution sebelum dana
+dianggap spendable, dan backfill reservasi legacy (R2) dapat mengklaim identitas
+lebih awal tanpa memindahkan uang. Tabel
+`external_money_receipts`, `external_money_receipt_aliases`, dan
+`external_money_receipt_parent_claims` bersifat append-only pada model
+(`ExternalMoneyReceipt` menolak perubahan identity/uang dan penghapusan).
+
+R1 belum memindahkan caller: `BinancePaymentVerification`,
+`BscPaymentVerification`, `StoreBalanceTopUpService`, dan compensation tetap
+memakai claim lama sampai R2 (#542) mem-backfill identity legacy dan me-route
+seluruh payment writer secara atomik; funding USDT tetap gated. Bukti race
+PostgreSQL: [`ExternalMoneyReceiptPostgresConcurrencyTest`](../../src/tests/Feature/ExternalMoneyReceiptPostgresConcurrencyTest.php)
+(receipt sama/target berbeda, replay, alias collision dengan pemulihan
+savepoint, dan review multi-log lintas target).
+
 ### Store Channel dan Sales Proof Post
 
 `StoreChannelSetting` menyimpan target Store Channel dan konfigurasi Sales Proof Post. Home `/start` menampilkan CTA channel opsional ketika username/link tersedia; membership channel tidak menjadi syarat akses Store Bot. `SalesProofPost` dipublish setelah payment paid dan inventory sale tercatat; publikasi dilakukan job sehingga OrderLifecycle tidak mengirim pesan Telegram langsung.
@@ -224,6 +261,7 @@ and the caption never publishes a number that the sold-out post will contradict.
 | provider baru untuk checkout                                    | [`PaymentProviderSwitcher`](../../src/app/Services/Admin/PaymentProviderSwitcher.php) dan [`PaymentProviderResolver`](../../src/app/Services/Checkout/PaymentProviderResolver.php)                              | channel-specific provider selection                                    |
 | reservation/sale/release stock                                  | [`InventoryLedger`](../../src/app/Services/InventoryLedger.php)                                                                                                                                                    | model/controller langsung mengubah stock                               |
 | Store Balance credit/debit dan projection                        | [`StoreBalanceLedger`](../../src/app/Services/StoreBalance/StoreBalanceLedger.php)                                                                                                                                 | checkout, refund, top-up, atau Telegram adapter menulis balance langsung |
+| global external money receipt identity dan consumption           | [`ExternalMoneyReceiptClaims`](../../src/app/Services/MoneyReceipts/ExternalMoneyReceiptClaims.php)                                                                                                               | adapter provider, top-up, checkout, atau controller menulis baris receipt/alias/parent claim langsung |
 | Store Balance funding policy admin/customer chooser                 | [`StoreBalanceFundingPolicyManager`](../../src/app/Services/StoreBalance/StoreBalanceFundingPolicyManager.php) | controller admin, form, atau callback mempercayai nominal langsung |
 | Store Balance top-up provider rail lifecycle                    | [`StoreBalanceTopUpLifecycle`](../../src/app/Services/StoreBalance/TopUp/StoreBalanceTopUpLifecycle.php) yang dipilih [`StoreBalanceTopUpLifecycleResolver`](../../src/app/Services/StoreBalance/TopUp/StoreBalanceTopUpLifecycleResolver.php) | `StoreBalanceTopUpService`, provider resolver, atau adapter Telegram memilih perilaku rail |
 | manual Store Balance top-up operator confirmation               | [`ManualStoreBalanceTopUpConfirmationService`](../../src/app/Services/StoreBalance/TopUp/ManualStoreBalanceTopUpConfirmationService.php) | callback Telegram menandai paid/expired atau mengkredit saldo langsung |
@@ -834,6 +872,7 @@ Data boundary:
 | KlikQRIS        | [`KlikQrisClient`](../../src/app/Services/KlikQris/KlikQrisClient.php), [`src/app/Services/KlikQris/`](../../src/app/Services/KlikQris/)                                                                                                  |
 | Pakasir         | [`src/app/Services/Pakasir/`](../../src/app/Services/Pakasir/)                                                                                                                                                                             |
 | Binance         | [`src/app/Services/Binance/`](../../src/app/Services/Binance/)                                                                                                                                                                             |
+| money receipts  | [`ExternalMoneyReceiptClaims`](../../src/app/Services/MoneyReceipts/ExternalMoneyReceiptClaims.php), [`Services/MoneyReceipts/`](../../src/app/Services/MoneyReceipts/)                                                                     |
 | background work | [`src/app/Jobs/`](../../src/app/Jobs/), [`src/app/Console/Commands/`](../../src/app/Console/Commands/)                                                                                                                                     |
 | config          | [`src/config/services.php`](../../src/config/services.php), [`src/config/storefront.php`](../../src/config/storefront.php), [`src/.env.example`](../../src/.env.example)                                                                   |
 | schema          | [`src/database/migrations/`](../../src/database/migrations/)                                                                                                                                                                               |
@@ -865,6 +904,9 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/StoreBalanceFundingPolicyTest.php` — versioned Admin policy updates, strict bounded validation, role authorization, no-op/audit atomicity, and stale-version recovery.
 - `tests/Feature/StoreBalanceReconciliationTest.php` — projection/ledger mismatch detection via `store-balance:check` without changing money, customer scoping, limit, and sanitized JSON output.
 - `tests/Feature/StoreBalancePostgresConcurrencyTest.php` — process races for one idempotency claim, competing debits, parallel credits, duplicate source identity, competing Store Balance funding-intent submissions/claims, and PostgreSQL non-negative/positive/unique constraints plus one-stale-version funding-policy update; runs only through the PostgreSQL gate.
+- `tests/Feature/ExternalMoneyReceiptClaimTest.php` — additive external receipt claim outcomes (claimed/replayed/conflict/review), alias and BSC parent reconciliation, rollback on alias collision, caller-transaction participation, model immutability, cross-target/adjustment coverage, and legacy-compatible BSC identity mapping.
+- `tests/Feature/ExternalMoneyReceiptPostgresConcurrencyTest.php` — process races for one receipt claim across targets and replays, deterministic alias savepoint recovery, cross-target BSC parent review, and named PostgreSQL unique/check constraints; runs only through the PostgreSQL gate.
+- `tests/Unit/Services/MoneyReceipts/MoneyReceiptIdentityTest.php` — canonical identity normalization (stable Binance receiver namespace across credential rotation, legacy BSC transaction hash), BSC parent-claim requirement, and money fingerprint binding.
 - `tests/Feature/Telegram/StoreBalanceTopUpTest.php` — confirmation-to-provider quote, safe evidence redaction, durable QR instruction separation, exact requested credit settlement, and replayed confirmation; the shared top-up tests now pin the KlikQRIS rail via `KlikQrisSandboxScenarios::selectKlikQrisProvider()`.
 - `tests/Feature/Telegram/StoreBalanceTopUpManualRailTest.php` — manual rail creation in `awaiting_confirmation`, `/payment` proof forwarding to the admin with approve/reject callbacks, operator confirmation/rejection audit and idempotency, and exact-credit settlement.
 - `tests/Feature/Telegram/StoreBalanceTopUpSakurupiahRailTest.php` — Sakurupiah rail create/refresh, encrypted QR payload presentation, scheduled reconciliation settlement, and exact-credit credit.
