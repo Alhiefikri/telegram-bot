@@ -189,6 +189,29 @@ final class ExternalMoneyReceiptClaimTest extends TestCase
         $this->assertNull($reviewed->claimed_at);
     }
 
+    public function test_a_reviewed_bsc_parent_transaction_holds_every_receipt_and_later_log_for_review(): void
+    {
+        $first = $this->bscReceipt('alpha', 0, MoneyReceiptTarget::orderPayment('order-1'));
+        $second = $this->bscReceipt('alpha', 1, MoneyReceiptTarget::orderPayment('order-2'));
+
+        $this->assertSame(ExternalMoneyReceiptClaimOutcome::Claimed, $this->claims()->claim($first));
+        $this->assertSame(ExternalMoneyReceiptClaimOutcome::Review, $this->claims()->claim($second));
+
+        $this->assertSame(ExternalMoneyReceiptClaimOutcome::Review, $this->claims()->claim($first));
+
+        $later = $this->bscReceipt('alpha', 2, MoneyReceiptTarget::orderPayment('order-1'));
+        $this->assertSame(ExternalMoneyReceiptClaimOutcome::Review, $this->claims()->claim($later));
+
+        $this->assertDatabaseCount('external_money_receipts', 3);
+        $this->assertDatabaseCount('external_money_receipt_parent_claims', 1);
+
+        foreach (ExternalMoneyReceipt::query()->get() as $record) {
+            $this->assertSame('review', $record->status->value);
+            $this->assertSame(ExternalMoneyReceipt::REVIEW_REASON_BSC_PARENT_CROSS_TARGET, $record->review_reason);
+            $this->assertNull($record->claimed_at);
+        }
+    }
+
     public function test_observed_receipts_aliases_and_parent_claims_are_immutable(): void
     {
         $alias = new MoneyReceiptAlias('custody_deposit', MoneyReceiptIdentity::providerReference('custody', 'account-1', 'deposit-1'));

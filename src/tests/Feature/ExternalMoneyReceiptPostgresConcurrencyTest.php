@@ -198,9 +198,10 @@ final class ExternalMoneyReceiptPostgresConcurrencyTest extends TestCase
 
         $claimed = ExternalMoneyReceipt::query()->where('status', ExternalMoneyReceiptStatus::Claimed->value)->sole();
         $reviewed = ExternalMoneyReceipt::query()->where('status', ExternalMoneyReceiptStatus::Review->value)->sole();
-        $this->assertSame($claimed->target_id, $parent->target_id);
-        $this->assertSame(ExternalMoneyReceipt::REVIEW_REASON_BSC_PARENT_CROSS_TARGET, $reviewed->review_reason);
+        $this->assertSame($parent->target_id, $claimed->target_id);
+        $this->assertNotNull($claimed->claimed_at);
         $this->assertNull($reviewed->claimed_at);
+        $this->assertSame(ExternalMoneyReceipt::REVIEW_REASON_BSC_PARENT_CROSS_TARGET, $reviewed->review_reason);
     }
 
     public function test_postgres_registry_constraints_reject_duplicate_identities_and_invalid_amounts(): void

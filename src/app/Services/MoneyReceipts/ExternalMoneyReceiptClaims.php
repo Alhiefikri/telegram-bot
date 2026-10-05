@@ -19,7 +19,8 @@ use Illuminate\Support\Facades\DB;
  *
  * Replaying the same claims returns Replayed; a changed money payload or a
  * second target returns Conflict; a BSC transaction whose logs point at two
- * targets is held as Review instead of being consumed. SQL uniqueness races
+ * targets is held as Review, and every later claim or replay against that
+ * transaction stays held instead of being consumed. SQL uniqueness races
  * are recovered through savepoints or a fresh transaction, never by
  * continuing an aborted PostgreSQL transaction.
  */
@@ -219,28 +220,50 @@ final class ExternalMoneyReceiptClaims
             }
         }
 
+        if ($row->status->isReview()) {
+            $this->holdReceiptForReview($record);
+
+            return ExternalMoneyReceiptClaimOutcome::Review;
+        }
+
         if ($row->target_type === $receipt->target->type && $row->target_id === $receipt->target->targetId) {
             return $inserted ? ExternalMoneyReceiptClaimOutcome::Claimed : ExternalMoneyReceiptClaimOutcome::Replayed;
         }
 
         // One BSC transaction may contain several legitimate transfer logs, but
         // in this release they must all fund one target. Keep the original
-        // owner, record the ambiguity and refuse to consume any of it.
-        if (! $row->status->isReview()) {
-            $row->forceFill([
-                'status' => ExternalMoneyReceiptStatus::Review,
-                'review_reason' => ExternalMoneyReceipt::REVIEW_REASON_BSC_PARENT_CROSS_TARGET,
-            ])->save();
-        }
-        if (! $record->status->isReview()) {
-            $record->forceFill([
-                'status' => ExternalMoneyReceiptStatus::Review,
-                'review_reason' => ExternalMoneyReceipt::REVIEW_REASON_BSC_PARENT_CROSS_TARGET,
-                'claimed_at' => null,
-            ])->save();
-        }
+        // owner, record the ambiguity on the parent and hold every later claim
+        // against the transaction - including replays - as review so no
+        // ambiguous log can be consumed.
+        $this->holdParentForReview($row);
+        $this->holdReceiptForReview($record);
 
         return ExternalMoneyReceiptClaimOutcome::Review;
+    }
+
+    private function holdParentForReview(ExternalMoneyReceiptParentClaim $parent): void
+    {
+        if ($parent->status->isReview()) {
+            return;
+        }
+
+        $parent->forceFill([
+            'status' => ExternalMoneyReceiptStatus::Review,
+            'review_reason' => ExternalMoneyReceipt::REVIEW_REASON_BSC_PARENT_CROSS_TARGET,
+        ])->save();
+    }
+
+    private function holdReceiptForReview(ExternalMoneyReceipt $record): void
+    {
+        if ($record->status->isReview()) {
+            return;
+        }
+
+        $record->forceFill([
+            'status' => ExternalMoneyReceiptStatus::Review,
+            'review_reason' => ExternalMoneyReceipt::REVIEW_REASON_BSC_PARENT_CROSS_TARGET,
+            'claimed_at' => null,
+        ])->save();
     }
 
     /**

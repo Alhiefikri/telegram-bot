@@ -203,7 +203,9 @@ transaksi money caller yang pendek tanpa HTTP dan mengembalikan `claimed`,
 `INSERT ... ON CONFLICT DO NOTHING`, replay fingerprint yang sama mengembalikan
 `replayed`, payload uang yang berubah atau target kedua menjadi `conflict`, dan
 beberapa log BSC dalam satu transaksi yang menunjuk dua target ditahan sebagai
-`review` dengan owner pertama dipertahankan. Unique constraint database tetap
+`review` dengan owner pertama dipertahankan; selama parent masih `review`,
+setiap klaim/replay berikutnya pada transaksi itu tetap `review` dan receipt
+yang bersangkutan ikut ditahan. Unique constraint database tetap
 otoritatif; race SQL unique dipulihkan lewat savepoint atau transaksi baru,
 bukan melanjutkan transaksi PostgreSQL yang sudah aborted. Status baris hanya
 menyelesaikan kepemilikan klaim (`claimed`/`review`), bukan finalitas bukti atau
