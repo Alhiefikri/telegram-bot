@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Jobs\VerifyBscPayment;
 use App\Models\BscPaymentReceiver;
+use App\Models\BscPaymentTransferEvidence;
 use App\Models\ManualFulfillmentReview;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
@@ -22,6 +23,10 @@ use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Bsc\BscVerificationOutcome;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\Bsc\BscVerificationSubmissionOutcome;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptClaims;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
+use App\Services\MoneyReceipts\MoneyReceiptTarget;
+use App\Services\MoneyReceipts\VerifiedMoneyReceipt;
 use App\Storefront\StorefrontShopPaymentStatusRefresh;
 use App\Storefront\StorefrontShopSignedInvoice;
 use Brick\Math\BigInteger;
@@ -527,6 +532,111 @@ class BscPaymentVerificationTest extends TestCase
         app(BscPaymentVerification::class)->verify($second->fresh(), $hash, 1);
 
         $this->assertDatabaseCount('manual_fulfillment_reviews', 1);
+    }
+
+    public function test_a_successful_bsc_claim_owns_the_log_receipt_in_the_global_registry(): void
+    {
+        $payment = $this->payment();
+        $hash = '0x'.str_repeat('c', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+
+        $this->assertSame(BscVerificationOutcome::Confirmed, app(BscPaymentVerification::class)->verify($payment, $hash)->outcome);
+
+        $this->assertDatabaseHas('external_money_receipts', [
+            'provider' => 'bsc',
+            'identity_kind' => 'bsc_log',
+            'chain_id' => 56,
+            'tx_hash' => $hash,
+            'log_index' => 0,
+            'status' => 'claimed',
+            'target_type' => 'order_payment',
+            'target_id' => $payment->id,
+        ]);
+        $this->assertDatabaseHas('external_money_receipt_parent_claims', [
+            'chain_id' => 56,
+            'tx_hash' => $hash,
+            'status' => 'claimed',
+            'target_type' => 'order_payment',
+            'target_id' => $payment->id,
+        ]);
+    }
+
+    public function test_a_receipt_already_claimed_by_another_adapter_blocks_verification_without_legacy_evidence(): void
+    {
+        $payment = $this->payment();
+        $hash = '0x'.str_repeat('f', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+        $detail = $payment->bscDetail()->firstOrFail();
+
+        $receipt = app(ExternalMoneyReceiptWriter::class)->receiptForBscPayment(
+            $payment,
+            56,
+            $hash,
+            0,
+            $detail->receiver_address,
+            '1000000000000000000',
+            18,
+        );
+        $fixture = new VerifiedMoneyReceipt(
+            identity: $receipt->identity,
+            beneficiary: $receipt->beneficiary,
+            currency: $receipt->currency,
+            amountUnits: $receipt->amountUnits,
+            decimals: $receipt->decimals,
+            target: MoneyReceiptTarget::storeBalanceTopUp('fixture-top-up'),
+            parentClaim: $receipt->parentClaim,
+        );
+        $this->assertTrue(app(ExternalMoneyReceiptClaims::class)->claim($fixture)->allowsMoneyEffect());
+
+        $result = app(BscPaymentVerification::class)->verify($payment, $hash);
+
+        $this->assertSame(BscVerificationOutcome::TransactionAlreadyUsed, $result->outcome);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertDatabaseHas('external_money_receipts', [
+            'canonical_key' => $receipt->canonicalKey(),
+            'target_type' => 'store_balance_top_up',
+            'target_id' => 'fixture-top-up',
+        ]);
+        $this->assertDatabaseHas('external_money_receipt_reservations', [
+            'legacy_type' => 'payment',
+            'legacy_id' => $payment->id,
+            'reason' => 'registry_conflict',
+            'resolved_at' => null,
+        ]);
+        $this->assertDatabaseHas('manual_fulfillment_reviews', [
+            'payment_id' => $payment->id,
+            'reason' => ManualFulfillmentReview::REASON_BSC_TRANSACTION_ALREADY_USED,
+        ]);
+    }
+
+    public function test_legacy_evidence_ownership_stays_the_mixed_version_guard_without_a_registry_claim(): void
+    {
+        // An old worker recorded the transfer against another payment before
+        // the registry existed; the new worker must refuse it without ever
+        // creating a registry receipt, and denylist the conflict.
+        $owner = $this->payment();
+        $hash = '0x'.str_repeat('9', 64);
+        BscPaymentTransferEvidence::factory()->create([
+            'payment_id' => $owner->id,
+            'tx_hash' => $hash,
+            'log_index' => 0,
+            'verification_status' => PaymentBscDetail::STATUS_CONFIRMED,
+        ]);
+
+        $payment = $this->payment('0x7777777777777777777777777777777777777777');
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+
+        $result = app(BscPaymentVerification::class)->verify($payment, $hash);
+
+        $this->assertSame(BscVerificationOutcome::TransactionAlreadyUsed, $result->outcome);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertDatabaseCount('external_money_receipts', 0);
+        $this->assertDatabaseHas('external_money_receipt_reservations', [
+            'legacy_type' => 'payment',
+            'legacy_id' => $payment->id,
+            'reason' => 'registry_conflict',
+            'resolved_at' => null,
+        ]);
     }
 
     public function test_multiple_matching_transfers_in_submitted_receipt_create_one_ambiguous_manual_review(): void

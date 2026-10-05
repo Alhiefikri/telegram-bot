@@ -2,6 +2,7 @@
 
 namespace App\Services\StoreBalance;
 
+use App\Enums\ExternalMoneyReceiptClaimOutcome;
 use App\Enums\StoreBalanceFundingIntentStatus;
 use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\StoreBalanceTopUpStatus;
@@ -16,6 +17,7 @@ use App\Services\AuditLogger;
 use App\Services\KlikQris\KlikQrisCallback;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpInstructionAttachment;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResolver;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResult;
@@ -42,6 +44,7 @@ final class StoreBalanceTopUpService
         private readonly StoreBalanceTopUpLifecycleResolver $lifecycles,
         private readonly StoreBalanceTopUpProviderResolver $providers,
         private readonly StoreBalanceTopUpReviewMarker $reviews,
+        private readonly ExternalMoneyReceiptWriter $receipts,
         private readonly ?AuditLogger $audit = null,
     ) {}
 
@@ -368,6 +371,11 @@ final class StoreBalanceTopUpService
                     return $lockedEvent->fresh();
                 }
 
+                // The compensation reservation is now backed by verified
+                // provider evidence; the money identity is identified and the
+                // reservation is resolved without a second credit.
+                $this->receipts->resolveCompensationReservation($lockedTopUp);
+
                 $lockedEvent->forceFill(['processed_at' => now()])->save();
                 ($this->audit ?? app(AuditLogger::class))->logWithResolvedContext(
                     'store_balance.top_up.compensation_provider_evidence',
@@ -391,6 +399,19 @@ final class StoreBalanceTopUpService
                 }
 
                 $lateSettlement = true;
+            }
+
+            // The global receipt registry decides ownership before any credit:
+            // a receipt already claimed by another target, or one held for
+            // review, never funds this top-up.
+            $claim = $this->receipts->claimStoreBalanceTopUp($lockedTopUp, $evidence->providerReference());
+            if ($claim->isHeld()) {
+                $this->reviews->mark(
+                    $lockedTopUp,
+                    $claim === ExternalMoneyReceiptClaimOutcome::Conflict ? 'receipt_conflict' : 'receipt_review',
+                );
+
+                return $lockedEvent->fresh();
             }
 
             $mutation = $this->ledger->creditTopUp(
@@ -525,6 +546,7 @@ final class StoreBalanceTopUpService
 
             if ($lockedTopUp->status === StoreBalanceTopUpStatus::Compensated
                 && $this->matchesCompensatedCallback($lockedTopUp, $callback)) {
+                $this->receipts->resolveCompensationReservation($lockedTopUp);
                 $lockedEvent->forceFill(['processed_at' => now()])->save();
                 ($this->audit ?? app(AuditLogger::class))->logWithResolvedContext(
                     'store_balance.top_up.compensation_provider_evidence',

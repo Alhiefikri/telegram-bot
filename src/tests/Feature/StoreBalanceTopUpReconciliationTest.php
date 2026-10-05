@@ -63,6 +63,12 @@ final class StoreBalanceTopUpReconciliationTest extends TelegramBotTestSupport
         $this->assertSame(1, StoreBalanceEntry::query()->count());
         $this->assertSame(StoreBalanceEntryKind::TopUpCredit, StoreBalanceEntry::query()->sole()->kind);
         $this->assertSame(5000, StoreBalanceEntry::query()->sole()->amount);
+        $this->assertDatabaseHas('external_money_receipts', [
+            'provider' => 'klikqris',
+            'status' => 'claimed',
+            'target_type' => 'store_balance_top_up',
+            'target_id' => $topUp->id,
+        ]);
         $this->assertSame(1, StoreBalanceTopUpEvent::query()->where('event_type', 'reconciliation')->count());
         $this->assertNotNull(StoreBalanceTopUpEvent::query()->where('event_type', 'reconciliation')->sole()->processed_at);
         $this->assertSame(1, TelegramOutboundEffect::query()->count());

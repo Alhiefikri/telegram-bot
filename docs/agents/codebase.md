@@ -216,13 +216,42 @@ lebih awal tanpa memindahkan uang. Tabel
 `external_money_receipt_parent_claims` bersifat append-only pada model
 (`ExternalMoneyReceipt` menolak perubahan identity/uang dan penghapusan).
 
-R1 belum memindahkan caller: `BinancePaymentVerification`,
-`BscPaymentVerification`, `StoreBalanceTopUpService`, dan compensation tetap
-memakai claim lama sampai R2 (#542) mem-backfill identity legacy dan me-route
-seluruh payment writer secara atomik; funding USDT tetap gated. Bukti race
-PostgreSQL: [`ExternalMoneyReceiptPostgresConcurrencyTest`](../../src/tests/Feature/ExternalMoneyReceiptPostgresConcurrencyTest.php)
+R2 (#542) memindahkan seluruh writer eksternal ke seam ini: Binance
+(`BinancePaymentVerification::confirm`), BSC (`claim` dan late payment),
+QRIS checkout (KlikQRIS/Sakurupiah/Pakasir callback dan cancellation
+re-check), approval manual, fulfillment review BSC, settlement top-up Store
+Balance (termasuk rail manual) dan compensation. `ExternalMoneyReceiptWriter`
+membangun identity dari kolom persisten; Binance memakai snapshot receiver
+checkout (fallback config hanya untuk pembayaran yang tervalidasi live oleh
+verifier lama), dan backfill tidak menebak dari config sehingga baris legacy
+tanpa snapshot di-reserve fail-closed. Reference provider yang tidak
+memenuhi alfabet canonical (spasi/karakter khusus, misalnya merchant ref
+legacy) di-encode deterministik sebagai SHA-256 agar runtime dan backfill
+menghasilkan canonical key yang sama. Outcome Conflict/Review tidak pernah
+memindahkan uang dan dicatat sebagai reservation. Keputusan implementasi ada
+di [ADR-0022](../../docs/adr/0022-external-money-receipt-backfill-and-reservations.md).
+
+Backfill (`balance:backfill-money-receipts`) memproses sumber
+`binance_payments`, `bsc_payments`, `qris_payments`, `manual_payments`,
+`qris_top_ups`, dan `compensations` secara bounded/chunked, idempotent, dan
+resumable lewat `external_money_receipt_backfill_states`; dry-run tidak
+menulis receipt, reservation, atau checkpoint. Bukti yang tidak bisa
+dinormalisasi (receiver namespace Binance hilang, log index BSC hilang,
+conflict/review registry) dan compensated funding sources dicatat di
+`external_money_receipt_reservations` (denylist blocking) alih-alih dibuang,
+tanpa mengubah amount/provider/status historis.
+`balance:money-receipt-cutover-report` merangkum kelengkapan per sumber,
+collision, reservation terbuka, daftar writer, kompatibilitas mixed-version
+dan status USDT (`disabled`); `--require-ready` gagal selama gate belum
+bersih. `balance:resolve-money-receipt-reservation` menyelesaikan satu
+reservation setelah review operator dengan audit note.
+
+Bukti race PostgreSQL: [`ExternalMoneyReceiptPostgresConcurrencyTest`](../../src/tests/Feature/ExternalMoneyReceiptPostgresConcurrencyTest.php)
 (receipt sama/target berbeda, replay, alias collision dengan pemulihan
-savepoint, dan review multi-log lintas target).
+savepoint, dan review multi-log lintas target) dan
+[`ExternalMoneyReceiptWriterPostgresConcurrencyTest`](../../src/tests/Feature/ExternalMoneyReceiptWriterPostgresConcurrencyTest.php)
+(checkout vs top-up writer contention dan replay konkuren melalui
+`ExternalMoneyReceiptWriter`).
 
 ### Store Channel dan Sales Proof Post
 
@@ -908,6 +937,9 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/StoreBalancePostgresConcurrencyTest.php` — process races for one idempotency claim, competing debits, parallel credits, duplicate source identity, competing Store Balance funding-intent submissions/claims, and PostgreSQL non-negative/positive/unique constraints plus one-stale-version funding-policy update; runs only through the PostgreSQL gate.
 - `tests/Feature/ExternalMoneyReceiptClaimTest.php` — additive external receipt claim outcomes (claimed/replayed/conflict/review), alias and BSC parent reconciliation, rollback on alias collision, caller-transaction participation, model immutability, cross-target/adjustment coverage, and legacy-compatible BSC identity mapping.
 - `tests/Feature/ExternalMoneyReceiptPostgresConcurrencyTest.php` — process races for one receipt claim across targets and replays, deterministic alias savepoint recovery, cross-target BSC parent review, and named PostgreSQL unique/check constraints; runs only through the PostgreSQL gate.
+- `tests/Feature/ExternalMoneyReceiptWriterPostgresConcurrencyTest.php` — process races for checkout vs top-up writers contending for the same receipt (one funds, one conflicts and reserves) and concurrent writer replays without reservations; runs only through the PostgreSQL gate.
+- `tests/Feature/ExternalMoneyReceiptBackfillTest.php` — bounded dry-run without writes, idempotent replay, interrupted/resumed cursor, settled Binance/BSC/QRIS/manual/top-up receipt targets, missing-identity and registry-conflict reservations, compensated funding sources, cutover report gate, and operator reservation resolution.
+- `tests/Feature/ExternalMoneyReceiptWriterCutoverTest.php` — writer-level cross-target conflicts with blocking reservations, provider/namespace scoping for top-ups, owner-attestation namespace and hashed legacy references, compensation reservation idempotence/resolution, and runtime/backfill identity equality.
 - `tests/Unit/Services/MoneyReceipts/MoneyReceiptIdentityTest.php` — canonical identity normalization (stable Binance receiver namespace across credential rotation, legacy BSC transaction hash), BSC parent-claim requirement, and money fingerprint binding.
 - `tests/Feature/Telegram/StoreBalanceTopUpTest.php` — confirmation-to-provider quote, safe evidence redaction, durable QR instruction separation, exact requested credit settlement, and replayed confirmation; the shared top-up tests now pin the KlikQRIS rail via `KlikQrisSandboxScenarios::selectKlikQrisProvider()`.
 - `tests/Feature/Telegram/StoreBalanceTopUpManualRailTest.php` — manual rail creation in `awaiting_confirmation`, `/payment` proof forwarding to the admin with approve/reject callbacks, operator confirmation/rejection audit and idempotency, and exact-credit settlement.

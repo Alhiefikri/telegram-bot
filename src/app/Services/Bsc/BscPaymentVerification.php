@@ -2,16 +2,20 @@
 
 namespace App\Services\Bsc;
 
+use App\Enums\ExternalMoneyReceiptClaimOutcome;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Models\BscPaymentTransferEvidence;
+use App\Models\ExternalMoneyReceiptReservation;
 use App\Models\ManualFulfillmentReview;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\PaymentEvent;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptReservations;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -26,6 +30,7 @@ final class BscPaymentVerification
         private readonly OrderLifecycle $orders,
         private readonly BscVerificationQueue $queue,
         private readonly BscConfirmationGrace $confirmationGrace,
+        private readonly ExternalMoneyReceiptWriter $receipts,
     ) {}
 
     public function enabled(): bool
@@ -574,6 +579,12 @@ final class BscPaymentVerification
 
             $evidence = $inspection->exactTransfers[0];
             if ($this->evidenceBelongsToAnotherPayment($payment, $evidence)) {
+                $this->receipts->reservePayment(
+                    $payment,
+                    ExternalMoneyReceiptReservation::REASON_REGISTRY_CONFLICT,
+                    ['tx_hash' => $evidence->txHash, 'reason' => 'legacy_evidence_owner'],
+                );
+
                 return $this->flagForManualReview(
                     payment: $payment,
                     detail: $detail,
@@ -724,6 +735,12 @@ final class BscPaymentVerification
         if ($inspection->exactTransfers === []) {
             $evidence = $inspection->transfers[0];
             if ($this->evidenceBelongsToAnotherPayment($payment, $evidence)) {
+                $this->receipts->reservePayment(
+                    $payment,
+                    ExternalMoneyReceiptReservation::REASON_REGISTRY_CONFLICT,
+                    ['tx_hash' => $evidence->txHash, 'reason' => 'legacy_evidence_owner'],
+                );
+
                 return $this->flagForManualReview(
                     payment: $payment,
                     detail: $detail,
@@ -978,7 +995,18 @@ final class BscPaymentVerification
                     ->lockForUpdate()
                     ->first();
                 if ($existing !== null && (string) $existing->payment_id !== (string) $locked->id) {
+                    $this->receipts->reservePayment(
+                        $locked,
+                        ExternalMoneyReceiptReservation::REASON_REGISTRY_CONFLICT,
+                        ['tx_hash' => $evidence->txHash, 'owner_payment_id' => (string) $existing->payment_id],
+                    );
+
                     return BscVerificationOutcome::TransactionAlreadyUsed;
+                }
+
+                $held = $this->claimBscReceipt($locked, $lockedDetail, $evidence);
+                if ($held !== null) {
+                    return $held;
                 }
 
                 if ($existing === null) {
@@ -1074,6 +1102,74 @@ final class BscPaymentVerification
         return BscVerificationResult::of($outcome, $evidence, retryable: false);
     }
 
+    /**
+     * Claim the BSC log receipt in the global registry before the money
+     * effect. Claimed/Replayed allows the effect; Conflict and Review never
+     * move money and are recorded as blocking reservations for review.
+     */
+    private function claimBscReceipt(
+        Payment $locked,
+        PaymentBscDetail $lockedDetail,
+        BscTransferEvidence $evidence,
+    ): ?BscVerificationOutcome {
+        $receipt = $this->receipts->receiptForBscPayment(
+            $locked,
+            (int) ($lockedDetail->chain_id ?: config('services.bsc.chain_id', 56)),
+            $evidence->txHash,
+            $evidence->logIndex,
+            $evidence->receiverAddress,
+            $evidence->amountUnits,
+            $lockedDetail->token_decimals === null ? null : (int) $lockedDetail->token_decimals,
+        );
+
+        $claim = $this->receipts->claim(
+            $receipt,
+            ExternalMoneyReceiptReservations::SOURCE_RUNTIME,
+            ExternalMoneyReceiptReservation::LEGACY_TYPE_PAYMENT,
+            (string) $locked->getKey(),
+        );
+
+        if ($claim === ExternalMoneyReceiptClaimOutcome::Conflict) {
+            $lockedDetail->update([
+                'verification_status' => PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED,
+                'last_verified_at' => now(),
+                'current_tx_hash' => $evidence->txHash,
+                'evidence_payload' => [
+                    'reason' => 'external_money_receipt_conflict',
+                    'tx_hash' => $evidence->txHash,
+                ],
+            ]);
+            $this->ensureManualFulfillmentReview(
+                payment: $locked,
+                reason: ManualFulfillmentReview::REASON_BSC_TRANSACTION_ALREADY_USED,
+                providerReference: $evidence->txHash,
+            );
+
+            return BscVerificationOutcome::TransactionAlreadyUsed;
+        }
+
+        if ($claim === ExternalMoneyReceiptClaimOutcome::Review) {
+            $lockedDetail->update([
+                'verification_status' => PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                'last_verified_at' => now(),
+                'current_tx_hash' => $evidence->txHash,
+                'evidence_payload' => [
+                    'reason' => 'external_money_receipt_review',
+                    'tx_hash' => $evidence->txHash,
+                ],
+            ]);
+            $this->ensureManualFulfillmentReview(
+                payment: $locked,
+                reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+                providerReference: $evidence->txHash,
+            );
+
+            return BscVerificationOutcome::ManualReview;
+        }
+
+        return null;
+    }
+
     private function claim(
         Payment $payment,
         PaymentBscDetail $detail,
@@ -1127,6 +1223,11 @@ final class BscPaymentVerification
                     ->lockForUpdate()
                     ->first();
                 if ($existing !== null && (string) $existing->payment_id !== (string) $locked->id) {
+                    $this->receipts->reservePayment(
+                        $locked,
+                        ExternalMoneyReceiptReservation::REASON_REGISTRY_CONFLICT,
+                        ['tx_hash' => $evidence->txHash, 'owner_payment_id' => (string) $existing->payment_id],
+                    );
                     $lockedDetail->update([
                         'verification_status' => PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED,
                         'last_verified_at' => now(),
@@ -1143,6 +1244,11 @@ final class BscPaymentVerification
                     );
 
                     return BscVerificationOutcome::TransactionAlreadyUsed;
+                }
+
+                $held = $this->claimBscReceipt($locked, $lockedDetail, $evidence);
+                if ($held !== null) {
+                    return $held;
                 }
 
                 if ($existing === null) {

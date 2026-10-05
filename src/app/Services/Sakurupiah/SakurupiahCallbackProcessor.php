@@ -10,6 +10,7 @@ use App\Jobs\VerifySakurupiahWebhookPayment;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\DB;
@@ -32,6 +33,7 @@ final class SakurupiahCallbackProcessor
         private readonly SakurupiahProviderAdapter $provider,
         private readonly SakurupiahInvoiceLifecycleService $lifecycle,
         private readonly SakurupiahPaymentEventLogger $events,
+        private readonly ExternalMoneyReceiptWriter $receipts,
     ) {}
 
     public function authenticatesCallback(
@@ -164,6 +166,13 @@ final class SakurupiahCallbackProcessor
                 SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL,
             );
             $this->expireOverduePendingPayment($payment);
+
+            // The global receipt registry owns the physical money identity: an
+            // already claimed or held receipt never marks this payment paid.
+            if ($this->receipts->claimProviderPayment($payment)->isHeld()) {
+                return SakurupiahReconciliationOutcome::VerificationPending;
+            }
+
             $this->orders->applyPaymentPaid($payment);
 
             return SakurupiahReconciliationOutcome::Paid;
@@ -322,6 +331,11 @@ final class SakurupiahCallbackProcessor
                 SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL,
             );
             $this->expireOverduePendingPayment($payment);
+
+            if ($this->receipts->claimProviderPayment($payment)->isHeld()) {
+                return ['processed' => false, 'defer' => false];
+            }
+
             $this->orders->applyPaymentPaid($payment);
 
             return ['processed' => true, 'defer' => false];

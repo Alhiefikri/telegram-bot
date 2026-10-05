@@ -23,6 +23,7 @@
             <file>tests/Feature/Telegram/StoreBalanceTopUpChannelProofTest.php</file>
             <file>tests/Feature/StoreBalancePostgresConcurrencyTest.php</file>
             <file>tests/Feature/ExternalMoneyReceiptPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/ExternalMoneyReceiptWriterPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SupplierClientTest.php</file>
             <file>tests/Feature/SupplierAdminTest.php</file>
             <file>tests/Feature/SupplierAvailabilityTest.php</file>

@@ -260,6 +260,15 @@ class BinanceAutoVerifyTest extends TelegramBotTestSupport
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame('P_000000000021', $payment->fresh()->provider_reference);
+        $this->assertDatabaseHas('external_money_receipts', [
+            'provider' => 'binance',
+            'identity_kind' => 'provider_reference',
+            'account_namespace' => 'pay_id:987654321',
+            'reference' => 'P_000000000021',
+            'status' => 'claimed',
+            'target_type' => 'order_payment',
+            'target_id' => $payment->id,
+        ]);
     }
 
     public function test_old_payment_snapshot_keeps_manual_screenshot_flow_after_credentials_are_added(): void

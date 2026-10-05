@@ -8,6 +8,7 @@ use App\Exceptions\InvalidOrderTransition;
 use App\Models\Order;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -20,6 +21,7 @@ class AdminOrderOperations
         private readonly OrderLifecycle $orders,
         private readonly TelegramOutboundEffectService $outboundEffects,
         private readonly TelegramOutboundEffectDispatcher $dispatcher,
+        private readonly ExternalMoneyReceiptWriter $receipts,
     ) {}
 
     public function canCompleteManualOrder(Order $order): bool
@@ -70,6 +72,17 @@ class AdminOrderOperations
 
     public function completeManualOrder(Order $order, ?User $user = null, ?string $ip = null): Order
     {
+        $order->loadMissing('payments');
+        $payment = $order->payments->first();
+
+        if ($payment !== null
+            && $payment->provider === 'manual'
+            && $payment->status === PaymentStatus::Pending
+            && trim((string) $payment->merchant_ref) !== ''
+            && $this->receipts->claimOwnerAttestation($payment)->isHeld()) {
+            throw new InvalidArgumentException('This manual payment receipt is held for review and cannot be completed.');
+        }
+
         try {
             $completedOrder = $this->orders->applyManualCompletion($order)->order;
         } catch (InvalidOrderTransition $exception) {

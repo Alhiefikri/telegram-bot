@@ -195,7 +195,7 @@ _Avoid_: Top-up receipt, sales report, revenue post
 One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.
 _Avoid_: Transaction, balance mutation, adjustment row
 
-The following balance-extension terms are **proposed** under [ADR-0019](docs/adr/0019-idr-usdt-economic-sources-and-receipt-claims.md), issue #537, and the A1 capability report. They describe downstream contracts, not currently available features or approved funding providers. Store Balance continues to mean the existing IDR ledger; the external money receipt registry and claim seam are implemented additively (R1 #541) without cutting payment writers over or activating funding.
+The following balance-extension terms are **proposed** under [ADR-0019](docs/adr/0019-idr-usdt-economic-sources-and-receipt-claims.md), issue #537, and the A1 capability report. They describe downstream contracts, not currently available features or approved funding providers. Store Balance continues to mean the existing IDR ledger; the external money receipt registry and claim seam are implemented additively (R1 #541) and R2 #542 backfills legacy identities, routes every external payment writer through the registry, and records ambiguous evidence as reservations without activating funding. R2 implementation decisions are recorded in [ADR-0022](docs/adr/0022-external-money-receipt-backfill-and-reservations.md).
 
 **Customer USDT Balance**:
 A proposed Customer-owned shopping balance held in a separate USDT account and immutable ledger, denominated in integer micro-USDT. It is a store liability, with no implicit conversion to Store Balance and no application custody of private keys.
@@ -216,6 +216,18 @@ _Avoid_: provider approval, funding readiness, custody proof
 **External Money Receipt**:
 A proposed global identity for one externally observed economic transfer, shared by checkout, funding and funded adjustments. Verified aliases refer to the same physical funds; BSC logs also retain a single-target parent transaction claim. Observation is distinct from authorized consumption.
 _Avoid_: screenshot, webhook delivery ID, customer-submitted hash proof
+
+**External Money Receipt Backfill**:
+A bounded, resumable, additive scan that claims already settled legacy Binance/BSC/QRIS/top-up identities, and records compensated or unnormalizable evidence as reservations, without rewriting any historical amount, provider, or status. Dry runs inspect only and never write receipts, reservations, or checkpoints.
+_Avoid_: data migration, status rewrite, money movement
+
+**Legacy Money Receipt Reservation**:
+A fail-closed denylist row for legacy evidence that cannot be normalized into a claimed receipt (missing provider identity, conflicts, review holds, or owner-compensated unresolved money). Open blocking reservations stay visible and block the cutover readiness gate instead of being discarded.
+_Avoid_: dead letter queue, silent skip, automatic write-off
+
+**Money Receipt Cutover Readiness**:
+The reported gate that every backfill source has completed a full scan with zero conflicts, no blocking reservation remains open, and no writer can move external money without a registry claim. USDT funding stays disabled in this release; readiness is not funding authorization.
+_Avoid_: production approval, provider readiness, canary
 
 **Balance Adjustment Request**:
 A proposed immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID, with an identity/amount preview and default distinct maker/approver. Application or linked reversal creates a new ledger effect; it never sets or edits a balance directly.
