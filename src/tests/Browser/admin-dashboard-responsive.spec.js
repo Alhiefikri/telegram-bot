@@ -2841,7 +2841,7 @@ test("keeps responsive navigation and utility actions usable", async ({
     })
   );
 
-  await expect(desktopButtons).toHaveCount(10);
+  await expect(desktopButtons).toHaveCount(11);
   expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
   expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
   await expect(
@@ -2890,7 +2890,7 @@ for (const width of [768, 1024, 1280, 1440, 1920]) {
       })
     );
 
-    await expect(desktopButtons).toHaveCount(10);
+    await expect(desktopButtons).toHaveCount(11);
     if (width >= 1024) {
       expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
       expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
