@@ -20,7 +20,7 @@ Start downstream work from the audit's per-flow lock graph and remediation regis
 
 ## IDR adjustment request seam (I1 #543)
 
-`BalanceAdjustmentService` owns exact Telegram-ID preview and single-Owner request-bound password confirmation. `BalanceAdjustmentPasswordConfirmation` owns durable failure/lockout/KDF leases; `ApprovedBalanceAdjustment` supplies typed authority to `StoreBalanceLedger`. Request resolution, ledger/projection, accounting, audit and Telegram Outbound Effect obligations commit together. Original Top-up and registered refund recovery retain their existing economic resolution. See [I1 contract and activation boundaries](../balance-i1-adjustments.md). Dashboard forms/routes remain #544 and full reversal remains #545; this seam does not authorize production activation.
+`BalanceAdjustmentService` owns exact Telegram-ID preview and single-Owner request-bound password confirmation. `BalanceAdjustmentPasswordConfirmation` owns durable failure/lockout/KDF leases; `ApprovedBalanceAdjustment` supplies typed authority to `StoreBalanceLedger`. Request resolution, ledger/projection, accounting, audit and Telegram Outbound Effect obligations commit together. Original Top-up and registered refund recovery retain their existing economic resolution. See [I1 contract and activation boundaries](../balance-i1-adjustments.md). I2 #544 adds the Owner-only Dashboard adapter at `admin.store-balance.adjustments.*`: exact Telegram-ID search, immutable preview, per-action password, replay feedback, and paginated IDR request/positive-balance views. Full reversal remains #545. The USDT account does not exist until U1 #546, so this screen currently reports the existing IDR projection only. These seams do not authorize production activation.
 
 ## Configuration boundary (current runtime)
 
@@ -926,6 +926,7 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/Bsc*Test.php`, `tests/Unit/Services/Bsc/` — BSC readiness/verification plus capability and exact-amount contract fixtures (`verified`/`unsupported`/`unknown`, fail closed).
 - `tests/Feature/OrderCartDomainTest.php` — cart/order/inventory transition.
 - `tests/Feature/Admin*Test.php` — role, dashboard, provider switch, audit, manual completion.
+- `tests/Feature/AdminBalanceAdjustmentDashboardTest.php` — exact Owner-only Telegram-ID lookup, preview without ledger effects, request-bound password, replay, positive IDR tracking and paginated adjustment history; `tests/Browser/admin-dashboard-responsive.spec.js` covers the narrow-screen confirmation form.
 - `tests/Feature/CredentialIdentityFoundationTest.php` — additive encrypted persistence, normalization, registry backfill, and safe command output.
 - `tests/Feature/ProductStockIntakeTest.php` — atomic Input Cepat/Input Akun, idempotency, duplicate identity, authorization, audit/movement/notification behavior.
 - `tests/Feature/ProductStockIntakePostgresConcurrencyTest.php` — process races for same key, duplicate identity, intake/checkout, edit/checkout, and delete/checkout; runs only through the PostgreSQL gate.

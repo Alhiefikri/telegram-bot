@@ -35,20 +35,23 @@ final class BalanceAdjustmentService
         private readonly TelegramLocale $locale,
     ) {}
 
+    /**
+     * Resolve a Customer for the Owner adjustment screen without coercing the
+     * Telegram ID through a floating-point or integer form.
+     */
+    public function findRegisteredCustomerByTelegramId(User $actor, mixed $telegramId): ?Customer
+    {
+        $this->owner($actor);
+
+        return $this->registeredCustomer($telegramId);
+    }
+
     public function request(User $actor, mixed $telegramId, mixed $amount, string $reason,
         string $category = 'owner_attested', ?string $sourceId = null, ?VerifiedMoneyReceipt $receipt = null): BalanceAdjustmentRequest
     {
         $actor = $this->owner($actor);
-        if (! is_string($telegramId)) {
-            throw new BalanceAdjustmentRejected('invalid_telegram_id');
-        }
         $amount = $this->exactAmount($amount);
-        if (! preg_match('/^[1-9][0-9]{0,18}$/D', $telegramId)
-            || strlen($telegramId) > strlen((string) PHP_INT_MAX)
-            || (strlen($telegramId) === strlen((string) PHP_INT_MAX) && strcmp($telegramId, (string) PHP_INT_MAX) > 0)) {
-            throw new BalanceAdjustmentRejected('invalid_telegram_id');
-        }
-        $customer = Customer::query()->where('telegram_id', $telegramId)->first();
+        $customer = $this->registeredCustomer($telegramId);
         if ($customer === null) {
             throw new BalanceAdjustmentRejected('customer_not_registered');
         }
@@ -276,6 +279,18 @@ final class BalanceAdjustmentService
         }
 
         return (int) $amount;
+    }
+
+    private function registeredCustomer(mixed $telegramId): ?Customer
+    {
+        if (! is_string($telegramId)
+            || ! preg_match('/^[1-9][0-9]{0,18}$/D', $telegramId)
+            || strlen($telegramId) > strlen((string) PHP_INT_MAX)
+            || (strlen($telegramId) === strlen((string) PHP_INT_MAX) && strcmp($telegramId, (string) PHP_INT_MAX) > 0)) {
+            throw new BalanceAdjustmentRejected('invalid_telegram_id');
+        }
+
+        return Customer::query()->where('telegram_id', $telegramId)->first();
     }
 
     private function auditValues(BalanceAdjustmentRequest $preview): array

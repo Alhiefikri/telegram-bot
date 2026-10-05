@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AdminBalanceAdjustmentController;
 use App\Http\Controllers\Admin\AdminBroadcastController;
 use App\Http\Controllers\Admin\AdminBscReceiverController;
 use App\Http\Controllers\Admin\AdminBuyMailController;
@@ -173,6 +174,12 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('receivers/{receiver}/deactivate', [AdminBscReceiverController::class, 'deactivate'])->name('receivers.deactivate');
             });
             Route::post('checkout-maintenance', AdminCheckoutMaintenanceController::class)->name('checkout-maintenance.update');
+            Route::prefix('store-balance/adjustments')->name('store-balance.adjustments.')->middleware('admin.store-balance-owner')->group(function (): void {
+                Route::get('/', [AdminBalanceAdjustmentController::class, 'index'])->name('index');
+                Route::post('previews', [AdminBalanceAdjustmentController::class, 'preview'])->name('previews.store');
+                Route::post('previews/{adjustment}/confirm', [AdminBalanceAdjustmentController::class, 'confirm'])->name('previews.confirm');
+                Route::post('previews/{adjustment}/cancel', [AdminBalanceAdjustmentController::class, 'cancel'])->name('previews.cancel');
+            });
             Route::post('store-balance/funding-policy', AdminStoreBalanceFundingPolicyController::class)->name('store-balance.funding-policy.update');
             Route::post('store-balance/top-ups/{topUp}/compensate', AdminStoreBalanceTopUpCompensationController::class)
                 ->middleware('admin.store-balance-owner')

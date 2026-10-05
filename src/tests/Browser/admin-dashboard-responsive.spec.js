@@ -154,6 +154,71 @@ test("admin dashboard exposes the shared theme preference control", async ({
     .not.toBe(initialBackground);
 });
 
+test("admin balance adjustment previews the exact Customer and disables duplicate confirmation", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.getByRole("link", { name: "Kelola saldo" }).click();
+
+  await expect(page).toHaveURL(/\/admin\/store-balance\/adjustments/);
+  await page
+    .getByLabel("Telegram ID", { exact: true })
+    .fill("9007199254740993");
+  await page.getByRole("button", { name: "Cari Customer" }).click();
+  await expect(
+    page.getByRole("region", { name: "Customer ditemukan" })
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-customer-telegram-id="9007199254740993"]')
+  ).toHaveText("9007199254740993");
+
+  await page.getByLabel("Jumlah tambahan Rupiah").fill("12345");
+  await page
+    .getByLabel("Alasan penambahan")
+    .fill("Browser QA Owner-attested adjustment.");
+  await page.getByRole("button", { name: "Tinjau penambahan" }).click();
+
+  const preview = page.getByRole("region", {
+    name: "Preview penambahan saldo",
+  });
+  await expect(preview).toContainText("@balance_adjustment_qa");
+  await expect(preview).toContainText("Rp 12.345");
+  await expect(
+    page.getByRole("form", {
+      name: "Konfirmasi penambahan dengan password Owner",
+    })
+  ).toBeVisible();
+
+  await page.getByLabel("Password Owner untuk tindakan ini").fill("password");
+
+  const confirmationForm = page.getByRole("form", {
+    name: "Konfirmasi penambahan dengan password Owner",
+  });
+  const confirmButton = confirmationForm.locator('button[type="submit"]');
+  await confirmationForm.evaluate((form) => {
+    form.submit = () => {
+      window.__balanceAdjustmentSubmitDisabled = form.querySelector(
+        'button[type="submit"]'
+      ).disabled;
+    };
+  });
+  await confirmButton.click();
+  await expect
+    .poll(() => page.evaluate(() => window.__balanceAdjustmentSubmitDisabled))
+    .toBe(true);
+  await expect(confirmButton).toBeDisabled();
+
+  await page.reload();
+  await page.getByLabel("Password Owner untuk tindakan ini").fill("password");
+  await page.getByRole("button", { name: "Konfirmasi penambahan" }).click();
+
+  await expect(
+    page.getByRole("status").filter({ hasText: "Penambahan saldo diterapkan" })
+  ).toBeVisible();
+  await expectNoDocumentOverflow(page);
+});
+
 test("asset isolation: Storefront 404 retains its Storefront entry and theme", async ({
   page,
 }) => {
@@ -4962,6 +5027,7 @@ function appEnv() {
     MAIL_MAILER: "log",
     // prettier-ignore
     DOGFOOD_FAKE_TELEGRAM_OUTBOUND: 'true',
+    TELEGRAM_ADMIN_CHAT_ID: "998877",
     KLIKQRIS_SANDBOX_ENABLED: "true",
     KLIKQRIS_SANDBOX_API_KEY: "test-only-browser-key",
     KLIKQRIS_SANDBOX_MERCHANT_ID: "merchant-browser",
@@ -5033,6 +5099,15 @@ User::query()->updateOrCreate(
         'email_verified_at' => now(),
         'password' => Hash::make('password'),
         'role' => UserRole::Owner,
+    ],
+);
+
+Customer::query()->updateOrCreate(
+    ['telegram_id' => 9007199254740993],
+    [
+        'first_name' => 'Balance Adjustment QA',
+        'username' => 'balance_adjustment_qa',
+        'locale' => 'id',
     ],
 );
 

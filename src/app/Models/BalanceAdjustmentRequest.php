@@ -20,6 +20,11 @@ final class BalanceAdjustmentRequest extends Model
         return ['amount' => 'integer', 'version' => 'integer', 'expires_at' => 'immutable_datetime', 'resolved_at' => 'immutable_datetime'];
     }
 
+    public function ledgerEntry()
+    {
+        return $this->belongsTo(StoreBalanceEntry::class, 'ledger_entry_id');
+    }
+
     protected static function booted(): void
     {
         self::updating(function (self $request): void {
