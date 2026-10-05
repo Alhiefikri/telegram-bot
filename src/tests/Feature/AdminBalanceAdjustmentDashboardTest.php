@@ -9,14 +9,23 @@ use App\Models\CustomerBalanceAccount;
 use App\Models\StoreBalanceEntry;
 use App\Models\User;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
 final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabaseTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->createUsdtLedgerReadinessSchema();
+    }
+
     public function test_owner_can_search_a_registered_customer_by_the_exact_telegram_id(): void
     {
         Queue::fake();
@@ -42,6 +51,31 @@ final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabase
             ->assertSee('Customer tidak ditemukan');
 
         $this->assertSame(1, Customer::query()->count(), 'An unknown Telegram ID must not create a Customer.');
+    }
+
+    public function test_adjustment_dashboard_and_routes_stay_inactive_until_the_usdt_ledger_is_installed(): void
+    {
+        Schema::dropIfExists('customer_usdt_balance_accounting_events');
+        Schema::dropIfExists('customer_usdt_balance_entries');
+        Schema::dropIfExists('customer_usdt_balance_accounts');
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($owner)
+            ->get(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertOk()
+            ->assertDontSee('Kelola saldo');
+
+        $this->actingAs($owner)
+            ->get(route('admin.store-balance.adjustments.index'))
+            ->assertNotFound();
+
+        $this->actingAs($owner)
+            ->post(route('admin.store-balance.adjustments.previews.store'), [
+                'telegram_id' => '901541',
+                'amount' => '1000',
+                'reason' => 'The route must remain closed before U1.',
+            ])
+            ->assertNotFound();
     }
 
     public function test_search_works_when_the_customer_has_no_username(): void
@@ -387,5 +421,18 @@ final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabase
         $cookie = $response->getCookie(config('session.cookie'));
         $this->assertNotNull($cookie, 'The browser session cookie should be returned after an admin request.');
         $this->withCookie(config('session.cookie'), $cookie->getValue());
+    }
+
+    private function createUsdtLedgerReadinessSchema(): void
+    {
+        foreach ([
+            'customer_usdt_balance_accounts',
+            'customer_usdt_balance_entries',
+            'customer_usdt_balance_accounting_events',
+        ] as $tableName) {
+            Schema::create($tableName, static function (Blueprint $table): void {
+                $table->id();
+            });
+        }
     }
 }

@@ -44,6 +44,7 @@
             $canViewFunnel = (bool) ($funnelTab['can_view'] ?? false);
             $canViewWithdraw = (bool) ($withdrawTab['can_view'] ?? false);
             $canManageBalanceIssues = ($admin['role'] ?? '') === 'owner';
+            $canManageBalanceAdjustments = $canManageBalanceIssues && (bool) ($balanceAdjustmentDashboardReady ?? false);
             $canManageSuppliers = in_array($admin['role'] ?? '', ['owner', 'admin'], true);
             $canViewBalanceIssues = ($navigation['activeTab'] ?? '') === 'balance-issues'
                 && ($balanceIssuesTab['state'] ?? null) === 'ready';

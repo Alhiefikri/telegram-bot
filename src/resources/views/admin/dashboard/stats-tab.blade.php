@@ -581,7 +581,7 @@
                     @endif
                 </x-admin-dashboard.card>
 
-                @if ($canManageBalanceIssues)
+                @if ($canManageBalanceAdjustments)
                     <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Penambahan saldo Customer">
                         <div class="flex flex-wrap items-center justify-between gap-3">
                             <div>

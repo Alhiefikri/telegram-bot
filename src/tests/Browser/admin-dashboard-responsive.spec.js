@@ -5089,8 +5089,20 @@ use App\Models\ProductFamilySlugRedirect;
 use App\Models\ProductStockItem;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Tests\Support\QrisTestPayload;
+
+foreach ([
+    'customer_usdt_balance_accounts',
+    'customer_usdt_balance_entries',
+    'customer_usdt_balance_accounting_events',
+] as $tableName) {
+    Schema::create($tableName, static function (Blueprint $table): void {
+        $table->id();
+    });
+}
 
 User::query()->updateOrCreate(
     ['email' => 'test@example.com'],

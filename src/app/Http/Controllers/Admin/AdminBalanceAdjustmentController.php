@@ -9,6 +9,7 @@ use App\Models\BalanceAdjustmentRequest as BalanceAdjustmentPreview;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\User;
+use App\Services\Admin\BalanceAdjustmentDashboardReadiness;
 use App\Services\StoreBalance\BalanceAdjustmentService;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use Illuminate\Http\RedirectResponse;
@@ -22,8 +23,11 @@ final class AdminBalanceAdjustmentController extends Controller
 
     private const HISTORY_PAGE_SIZE = 20;
 
+    public function __construct(private readonly BalanceAdjustmentDashboardReadiness $readiness) {}
+
     public function index(Request $request, BalanceAdjustmentService $adjustments, StoreBalanceLedger $ledger): View
     {
+        $this->assertDashboardReady();
         $owner = $this->owner($request);
         $telegramId = $request->query('telegram_id');
         $customer = null;
@@ -110,6 +114,7 @@ final class AdminBalanceAdjustmentController extends Controller
 
     public function preview(Request $request, BalanceAdjustmentService $adjustments): RedirectResponse
     {
+        $this->assertDashboardReady();
         $owner = $this->owner($request);
         $telegramId = $request->input('telegram_id');
         $amount = $request->input('amount');
@@ -138,6 +143,7 @@ final class AdminBalanceAdjustmentController extends Controller
 
     public function confirm(Request $request, string $adjustment, BalanceAdjustmentService $adjustments): RedirectResponse
     {
+        $this->assertDashboardReady();
         $owner = $this->owner($request);
         $validated = $request->validate([
             'fingerprint' => ['required', 'string', 'regex:/\A[a-f0-9]{64}\z/D'],
@@ -183,6 +189,7 @@ final class AdminBalanceAdjustmentController extends Controller
 
     public function cancel(Request $request, string $adjustment, BalanceAdjustmentService $adjustments): RedirectResponse
     {
+        $this->assertDashboardReady();
         $owner = $this->owner($request);
         $validated = $request->validate([
             'fingerprint' => ['required', 'string', 'regex:/\A[a-f0-9]{64}\z/D'],
@@ -215,6 +222,11 @@ final class AdminBalanceAdjustmentController extends Controller
         abort_unless($owner instanceof User && $owner->role?->canCompensateStoreBalance() === true, 403);
 
         return $owner;
+    }
+
+    private function assertDashboardReady(): void
+    {
+        abort_unless($this->readiness->isReady(), 404);
     }
 
     private function lookupQuery(mixed $telegramId): array
