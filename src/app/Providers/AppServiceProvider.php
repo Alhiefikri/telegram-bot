@@ -73,6 +73,7 @@ use App\Services\Telegram\TelegramCallbackAckState;
 use App\Services\Telegram\TelegramCallbackHandlerPipeline;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramConfiguredCheckoutPaymentIntentSelector;
+use App\Services\UsdtFunding\UsdtFundingRailReadinessRegistry;
 use App\Services\UsdtTreasury\UsdtTreasuryAssetRegistry;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
@@ -118,6 +119,13 @@ class AppServiceProvider extends ServiceProvider
         // reports missing custody input instead of any fabricated backing.
         $this->app->singleton(UsdtTreasuryAssetRegistry::class, fn ($app): UsdtTreasuryAssetRegistry => new UsdtTreasuryAssetRegistry(
             $app->tagged('usdt-treasury-asset-providers'),
+        ));
+        // USDT funding rail readiness providers are approved adapters that
+        // register only after a rail passes its H1/A1 qualification. The tag
+        // is intentionally empty in this release, so the funding gate fails
+        // closed and no rail can mint a new funding target.
+        $this->app->singleton(UsdtFundingRailReadinessRegistry::class, fn ($app): UsdtFundingRailReadinessRegistry => new UsdtFundingRailReadinessRegistry(
+            $app->tagged('usdt-funding-rail-readiness'),
         ));
         $this->app->singleton(CheckoutPaymentPreparationResolver::class, function ($app) {
             return new CheckoutPaymentPreparationResolver([

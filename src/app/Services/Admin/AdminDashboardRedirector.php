@@ -106,6 +106,11 @@ class AdminDashboardRedirector
         return $this->dashboard(self::TAB_STATS, 'admin-store-balance-funding-policy');
     }
 
+    public function usdtFundingPolicy(): RedirectResponse
+    {
+        return $this->dashboard(self::TAB_STATS, 'admin-usdt-funding-policy');
+    }
+
     public function balanceIssues(): RedirectResponse
     {
         return $this->dashboard(self::TAB_BALANCE_ISSUES, self::TAB_FALLBACK_TARGETS[self::TAB_BALANCE_ISSUES]);
