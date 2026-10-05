@@ -5099,9 +5099,11 @@ foreach ([
     'customer_usdt_balance_entries',
     'customer_usdt_balance_accounting_events',
 ] as $tableName) {
-    Schema::create($tableName, static function (Blueprint $table): void {
-        $table->id();
-    });
+    if (! Schema::hasTable($tableName)) {
+        Schema::create($tableName, static function (Blueprint $table): void {
+            $table->id();
+        });
+    }
 }
 
 User::query()->updateOrCreate(

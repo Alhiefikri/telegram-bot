@@ -493,6 +493,10 @@ final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabase
             'customer_usdt_balance_entries',
             'customer_usdt_balance_accounting_events',
         ] as $tableName) {
+            if (Schema::hasTable($tableName)) {
+                continue;
+            }
+
             Schema::create($tableName, static function (Blueprint $table): void {
                 $table->id();
             });
