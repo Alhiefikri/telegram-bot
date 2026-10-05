@@ -58,7 +58,6 @@
 
             @if ($customer)
                 @php($customerId = (string) $customer->telegram_id)
-                @php($customerBalance = (int) ($customer->balanceAccount?->balance ?? 0))
                 <section class="mt-5 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-4" aria-label="Customer ditemukan">
                     <div class="grid gap-3 sm:grid-cols-2">
                         <div>
@@ -69,10 +68,15 @@
                         <div class="sm:text-right">
                             <p class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Telegram ID · tidak dapat diubah</p>
                             <p class="mt-1 break-all font-mono text-base font-black" data-customer-telegram-id="{{ $customerId }}">{{ $customerId }}</p>
-                            <p class="mt-1 text-sm font-semibold text-brand-muted">Saldo Rupiah saat ini <span class="font-black text-neo-ink">Rp {{ number_format($customerBalance, 0, ',', '.') }}</span></p>
+                            @if ($customerBalance?->isAvailable())
+                                <p class="mt-1 text-sm font-semibold text-brand-muted">Saldo Rupiah saat ini <span class="font-black text-neo-ink">Rp {{ number_format($customerBalance->balance(), 0, ',', '.') }}</span></p>
+                            @else
+                                <p class="mt-1 text-sm font-black text-brand-slate-dark">Saldo Rupiah tidak dapat ditampilkan sampai ledger direkonsiliasi.</p>
+                            @endif
                         </div>
                     </div>
 
+                    @if ($customerBalance?->isAvailable())
                     <form
                         method="POST"
                         action="{{ route('admin.store-balance.adjustments.previews.store') }}"
@@ -108,6 +112,9 @@
                             <span x-cloak x-show="submitting">Membuat preview…</span>
                         </x-admin-dashboard.button>
                     </form>
+                    @else
+                        <x-admin-dashboard.notice tone="warning" class="mt-4" role="status">Penambahan saldo dinonaktifkan karena proyeksi Customer tidak cocok dengan ledger.</x-admin-dashboard.notice>
+                    @endif
                 </section>
             @endif
         </x-admin-dashboard.card>
@@ -151,7 +158,7 @@
                     </div>
                 </dl>
 
-                @if ($preview->state === 'pending' && ! $previewExpired)
+                @if ($preview->state === 'pending' && ! $previewExpired && $previewBalance?->isAvailable())
                     <form
                         method="POST"
                         action="{{ route('admin.store-balance.adjustments.previews.confirm', ['adjustment' => $preview->id]) }}"
@@ -183,6 +190,8 @@
                     </form>
                 @elseif ($preview->state === 'applied')
                     <x-admin-dashboard.notice tone="success" class="mt-4" role="status">Penambahan ini sudah diterapkan. Pengiriman ulang konfirmasi tidak membuat kredit kedua.</x-admin-dashboard.notice>
+                @elseif ($preview->state === 'pending' && ! $previewExpired)
+                    <x-admin-dashboard.notice tone="warning" class="mt-4" role="status">Saldo Customer tidak dapat diverifikasi dengan ledger. Konfirmasi ditahan sampai rekonsiliasi dilakukan.</x-admin-dashboard.notice>
                 @elseif ($previewExpired)
                     <x-admin-dashboard.notice tone="warning" class="mt-4" role="status">Preview kedaluwarsa. Cari Customer dan buat preview baru untuk melanjutkan.</x-admin-dashboard.notice>
                 @endif
@@ -231,15 +240,16 @@
             </div>
             <p class="mt-2 text-[11px] font-semibold leading-5 text-brand-muted">Daftar menampilkan account yang memiliki saldo tersedia di atas nol. Account bernilai nol tetap tersimpan untuk menjaga riwayat ledger.</p>
             <div class="mt-4 space-y-2">
-                @forelse ($positiveBalances as $account)
-                    @php($accountCustomer = $account->customer)
+                @forelse ($positiveBalances as $balanceItem)
+                    @php($accountCustomer = $balanceItem['customer'])
+                    @php($balanceSnapshot = $balanceItem['snapshot'])
                     @if ($accountCustomer && $accountCustomer->telegram_id !== null)
                         <a href="{{ route('admin.store-balance.adjustments.index', ['telegram_id' => (string) $accountCustomer->telegram_id]) }}" class="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3 transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-neo-focus" aria-label="Lihat saldo {{ $accountCustomer->first_name ?: 'Customer' }}">
                             <span class="min-w-0">
                                 <span class="block break-words font-black">{{ $accountCustomer->first_name ?: 'Customer Telegram' }} {{ $accountCustomer->username ? '· @'.$accountCustomer->username : '' }}</span>
                                 <span class="mt-1 block break-all font-mono text-[11px] font-semibold text-brand-muted">{{ (string) $accountCustomer->telegram_id }}</span>
                             </span>
-                            <span class="font-display text-sm font-black">Rp {{ number_format($account->balance, 0, ',', '.') }}</span>
+                            <span class="font-display text-sm font-black">{{ $balanceSnapshot->isAvailable() ? 'Rp '.number_format($balanceSnapshot->balance(), 0, ',', '.') : 'Perlu rekonsiliasi' }}</span>
                         </a>
                     @elseif ($accountCustomer)
                         <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3">
@@ -247,7 +257,7 @@
                                 <span class="block break-words font-black">{{ $accountCustomer->first_name ?: 'Customer Web Storefront' }}</span>
                                 <span class="mt-1 block text-[11px] font-semibold text-brand-muted">Customer ini belum memiliki Telegram ID.</span>
                             </span>
-                            <span class="font-display text-sm font-black">Rp {{ number_format($account->balance, 0, ',', '.') }}</span>
+                            <span class="font-display text-sm font-black">{{ $balanceSnapshot->isAvailable() ? 'Rp '.number_format($balanceSnapshot->balance(), 0, ',', '.') : 'Perlu rekonsiliasi' }}</span>
                         </div>
                     @endif
                 @empty

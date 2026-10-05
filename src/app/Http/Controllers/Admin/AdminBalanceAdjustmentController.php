@@ -3,11 +3,14 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Exceptions\BalanceAdjustmentRejected;
+use App\Exceptions\StoreBalanceProjectionMismatchException;
 use App\Http\Controllers\Controller;
 use App\Models\BalanceAdjustmentRequest as BalanceAdjustmentPreview;
+use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\User;
 use App\Services\StoreBalance\BalanceAdjustmentService;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -19,7 +22,7 @@ final class AdminBalanceAdjustmentController extends Controller
 
     private const HISTORY_PAGE_SIZE = 20;
 
-    public function index(Request $request, BalanceAdjustmentService $adjustments): View
+    public function index(Request $request, BalanceAdjustmentService $adjustments, StoreBalanceLedger $ledger): View
     {
         $owner = $this->owner($request);
         $telegramId = $request->query('telegram_id');
@@ -37,9 +40,7 @@ final class AdminBalanceAdjustmentController extends Controller
             }
         }
 
-        if ($customer !== null) {
-            $customer->load(['balanceAccount:id,customer_id,balance']);
-        }
+        $customerBalance = $customer === null ? null : $ledger->snapshot($customer);
 
         $previewId = $request->query('preview');
         $preview = is_string($previewId) && Str::isUuid($previewId)
@@ -52,16 +53,34 @@ final class AdminBalanceAdjustmentController extends Controller
                 ->where('credential_binding', hash('sha256', $owner->password))
                 ->first()
             : null;
+        $previewCustomer = $preview === null
+            ? null
+            : Customer::query()->select(['id', 'telegram_id'])->find($preview->customer_id);
+        $previewBalance = $previewCustomer === null ? null : $ledger->snapshot($previewCustomer);
 
         $previewUnavailable = $previewId !== null && $preview === null;
         $positiveBalances = CustomerBalanceAccount::query()
             ->select(['id', 'customer_id', 'balance'])
             ->with('customer:id,telegram_id,username,first_name')
-            ->where('balance', '>', 0)
+            ->where(function ($query): void {
+                $query->where('balance', '>', 0)->orWhereExists(function ($latest): void {
+                    $latest->selectRaw('1')
+                        ->from('store_balance_entries as latest_entries')
+                        ->whereColumn('latest_entries.customer_balance_account_id', 'customer_balance_accounts.id')
+                        ->whereRaw('latest_entries.id = (SELECT MAX(balance_entries.id) FROM store_balance_entries AS balance_entries WHERE balance_entries.customer_balance_account_id = customer_balance_accounts.id)')
+                        ->where('latest_entries.balance_after', '>', 0);
+                });
+            })
             ->orderByDesc('balance')
             ->orderBy('customer_id')
             ->paginate(self::BALANCE_PAGE_SIZE, ['id', 'customer_id', 'balance'], 'balances_page')
             ->withQueryString();
+        $positiveBalances->setCollection($positiveBalances->getCollection()->map(
+            fn (CustomerBalanceAccount $account): array => [
+                'customer' => $account->customer,
+                'snapshot' => $ledger->snapshot($account->customer),
+            ],
+        ));
 
         $history = $customer === null
             ? null
@@ -78,8 +97,11 @@ final class AdminBalanceAdjustmentController extends Controller
         return view('admin.store-balance.adjustments', [
             'telegramId' => is_string($telegramId) ? $telegramId : null,
             'customer' => $customer,
+            'customerBalance' => $customerBalance,
             'lookupError' => $lookupError,
             'preview' => $preview,
+            'previewCustomer' => $previewCustomer,
+            'previewBalance' => $previewBalance,
             'previewUnavailable' => $previewUnavailable,
             'positiveBalances' => $positiveBalances,
             'history' => $history,
@@ -139,6 +161,10 @@ final class AdminBalanceAdjustmentController extends Controller
             return redirect()
                 ->route('admin.store-balance.adjustments.index', ['preview' => $adjustment])
                 ->withErrors(['confirmation' => $this->message($exception->reason)]);
+        } catch (StoreBalanceProjectionMismatchException) {
+            return redirect()
+                ->route('admin.store-balance.adjustments.index', ['preview' => $adjustment])
+                ->withErrors(['confirmation' => 'Saldo tidak dapat diverifikasi dengan ledger. Penambahan ditahan sampai rekonsiliasi dilakukan.']);
         }
 
         $preview = BalanceAdjustmentPreview::query()->select(['id', 'telegram_id'])->find($adjustment);

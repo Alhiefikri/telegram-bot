@@ -230,7 +230,7 @@ The reported gate that every backfill source has completed a full scan with zero
 _Avoid_: production approval, provider readiness, canary
 
 **Balance Adjustment Request**:
-An immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID. I1 #543 implements the service boundary with a five-minute preview and the explicitly approved single-Owner, per-action password confirmation mode from H0-v1; Dashboard access remains I2 #544. Application or linked reversal creates a new ledger effect; it never sets or edits a balance directly.
+An immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID. I1 #543 implements the service boundary with a five-minute preview and the explicitly approved single-Owner, per-action password confirmation mode from H0-v1; I2 #544 exposes the owner-only Admin Dashboard flow and paginated IDR view. Application or linked reversal creates a new ledger effect; it never sets or edits a balance directly.
 _Avoid_: manual balance overwrite, automatic Customer creation, arbitrary USDT grant
 
 **Economic Source**:

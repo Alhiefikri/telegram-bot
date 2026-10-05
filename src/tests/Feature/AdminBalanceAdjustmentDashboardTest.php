@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\StoreBalanceEntry;
 use App\Models\User;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -300,12 +301,25 @@ final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabase
         $customers = Customer::factory()->count(22)->create();
 
         foreach ($customers as $index => $customer) {
-            DB::table('customer_balance_accounts')->insert([
+            $balance = $index === 21 ? 0 : 20000 - $index;
+            $accountId = DB::table('customer_balance_accounts')->insertGetId([
                 'customer_id' => $customer->id,
-                'balance' => $index === 21 ? 0 : 20000 - $index,
+                'balance' => $balance,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
+            if ($balance > 0) {
+                DB::table('store_balance_entries')->insert([
+                    'customer_balance_account_id' => $accountId,
+                    'kind' => 'top_up_credit',
+                    'amount' => $balance,
+                    'balance_after' => $balance,
+                    'source_type' => 'balance_top_up',
+                    'source_id' => 'dashboard-directory-'.$index,
+                    'idempotency_key' => 'dashboard-directory-'.$index,
+                    'created_at' => now(),
+                ]);
+            }
         }
 
         $response = $this->actingAs($owner)->get(route('admin.store-balance.adjustments.index'))->assertOk();
@@ -313,6 +327,59 @@ final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabase
         $response->assertSee('Customer dengan saldo Rupiah positif')
             ->assertSee('balances_page=2')
             ->assertDontSee((string) $customers[21]->telegram_id);
+    }
+
+    public function test_projection_drift_hides_amounts_and_holds_an_open_confirmation(): void
+    {
+        Queue::fake();
+        config(['services.telegram.admin_telegram_chat_id' => '998877']);
+        $owner = User::factory()->create(['role' => UserRole::Owner, 'password' => 'owner-password']);
+        $customer = Customer::factory()->create([
+            'telegram_id' => 901549,
+            'first_name' => 'Drifted Balance Customer',
+        ]);
+
+        $response = $this->actingAs($owner)->post(route('admin.store-balance.adjustments.previews.store'), [
+            'telegram_id' => '901549',
+            'amount' => '7000',
+            'reason' => 'Projection must be checked before applying.',
+        ])->assertRedirect();
+        $this->carrySessionCookie($response);
+        $preview = BalanceAdjustmentRequest::query()->sole();
+
+        app(StoreBalanceLedger::class)->creditTopUp($customer, 5000, 'dashboard-drift-fixture', 'dashboard-drift-fixture');
+        DB::table('customer_balance_accounts')->where('customer_id', $customer->id)->update(['balance' => 0]);
+
+        $this->get(route('admin.store-balance.adjustments.index', [
+            'telegram_id' => '901549',
+            'preview' => $preview->id,
+        ]))
+            ->assertOk()
+            ->assertSee('Saldo Rupiah tidak dapat ditampilkan')
+            ->assertSee('Penambahan saldo dinonaktifkan')
+            ->assertSee('Perlu rekonsiliasi')
+            ->assertDontSee('Saldo Rupiah saat ini')
+            ->assertDontSee('Rp 5.000')
+            ->assertDontSee('Konfirmasi penambahan');
+
+        $response = $this->actingAs($owner)->post(
+            route('admin.store-balance.adjustments.previews.confirm', ['adjustment' => $preview->id]),
+            [
+                'fingerprint' => $preview->fingerprint,
+                'version' => $preview->version,
+                'password' => 'owner-password',
+            ],
+        )->assertRedirect();
+        $this->carrySessionCookie($response);
+
+        $this->get(route('admin.store-balance.adjustments.index', ['preview' => $preview->id]))
+            ->assertOk()
+            ->assertSee('Saldo tidak dapat diverifikasi dengan ledger');
+
+        $this->assertSame('pending', $preview->fresh()->state);
+        $this->assertSame(0, (int) CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
+        $this->assertSame(1, StoreBalanceEntry::query()->count());
+        $this->assertSame(0, DB::table('balance_adjustment_accounting_events')->count());
     }
 
     private function carrySessionCookie(TestResponse $response): void
