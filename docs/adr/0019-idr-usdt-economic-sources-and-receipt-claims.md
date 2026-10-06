@@ -1,6 +1,6 @@
 # IDR/USDT economic sources, receipt claims, and atomic postings
 
-Status: **Proposed**, 2026-10-04. Technical contract for [A0 #537](https://github.com/Alhiefikri/telegram-bot/issues/537), within [#536](https://github.com/Alhiefikri/telegram-bot/issues/536). This is neither an accepted architecture decision nor permission to activate funding. Provider, custody, legal and staffing decisions remain with H0/H1/A1/H2.
+Status: **Proposed**, 2026-10-04. Technical contract for [A0 #537](https://github.com/Alhiefikri/telegram-bot/issues/537), within [#536](https://github.com/Alhiefikri/telegram-bot/issues/536). This is neither an accepted architecture decision nor permission to activate funding. Provider, custody, legal and staffing decisions remain with H0/H1/A1/H2. **Implementation note (U3 #548):** the approved H0-v1 overlay on [#538](https://github.com/Alhiefikri/telegram-bot/issues/538) supersedes this proposal's business minimum/maximum, per-Customer/aggregate caps and beta allowlist for the USDT funding policy; U3 implements the uncapped policy with representational/overflow guards only, while every other invariant stated here remains.
 
 ## Context
 

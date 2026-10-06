@@ -73,6 +73,8 @@ use App\Services\Telegram\TelegramCallbackAckState;
 use App\Services\Telegram\TelegramCallbackHandlerPipeline;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramConfiguredCheckoutPaymentIntentSelector;
+use App\Services\UsdtFunding\LocalBscFundingReadiness;
+use App\Services\UsdtFunding\UsdtFundingRailReadinessRegistry;
 use App\Services\UsdtReceivers\UsdtDepositReceiverProvisioners;
 use App\Services\UsdtTopUps\BscUsdtTopUpRail;
 use App\Services\UsdtTopUps\UsdtTopUpRail;
@@ -130,6 +132,18 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(UsdtDepositReceiverProvisioners::class, fn ($app): UsdtDepositReceiverProvisioners => new UsdtDepositReceiverProvisioners(
             $app->tagged('usdt-deposit-receiver-provisioners'),
         ));
+        // Qualified production adapters remain gated. U5's technical-only BSC
+        // path is available in disposable local/testing environments, without
+        // replacing an explicitly registered readiness provider.
+        $this->app->singleton(UsdtFundingRailReadinessRegistry::class, function ($app): UsdtFundingRailReadinessRegistry {
+            $providers = iterator_to_array($app->tagged('usdt-funding-rail-readiness'));
+            if ($app->environment(['local', 'testing'])
+                && ! collect($providers)->contains(fn ($provider): bool => $provider->railKey() === 'bsc_usdt')) {
+                $providers[] = $app->make(LocalBscFundingReadiness::class);
+            }
+
+            return new UsdtFundingRailReadinessRegistry($providers);
+        });
         $this->app->singleton(CheckoutPaymentPreparationResolver::class, function ($app) {
             return new CheckoutPaymentPreparationResolver([
                 ManualQrisCheckoutPaymentPreparation::IDENTITY => $app->make(ManualQrisCheckoutPaymentPreparation::class),

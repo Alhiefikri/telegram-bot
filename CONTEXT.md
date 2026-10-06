@@ -206,12 +206,24 @@ One immutable ledger row recording a single economic effect on a Customer USDT B
 _Avoid_: USDT transaction, balance mutation, wallet row
 
 **USDT Funding Intent**:
-A proposed expiring Customer confirmation binding exact USDT amount, policy version, private chat/navigation root and nonce before any provider invoice or money posting.
+A Customer-owned expiring confirmation binding exact micro-USDT credit, application fee/payable amount, policy/terms versions, exclusive receiver/payment terms, private chat/canonical message/root generation and opaque nonce. U6 persists this preview without provider, invoice, Payment, receipt, ledger or outbound effects; cancellation/expiry ends only the local preview.
 _Avoid_: USDT invoice, deposit receipt, available funds
 
 **USDT Top-up**:
-A proposed funding target with immutable currency, amount, fee, provider/receiver/token/network and finality snapshots. Only verified attributable final evidence and one economic resolution can credit Customer USDT Balance; expiry does not prove absence of money. U5 implements the watch-only BSC rail's local invoice snapshot, reference recovery and receipt inspection in disposable environments, not the confirmed Top-up target, receipt consumption, balance settlement or production funding authorization.
+A confirmed Customer funding target with an immutable identity, currency, amount, fee, receiver/token/network/finality and payment deadline snapshot, one U3 active-target reservation and durable provider-preparation work. U6 atomically creates these facts and returns the same target on confirmation replay; preparation/recovery retains that reference after unknown outcomes and never switches receivers. U5 supplies the watch-only local BSC invoice and inspection. Only verified attributable final evidence and one economic resolution can credit Customer USDT Balance; expiry does not prove absence of money. U7 settlement and production funding authorization remain separate gates.
 _Avoid_: Order Payment, automatic currency conversion
+
+**USDT Funding Policy**:
+The versioned DB/Admin configuration for Customer USDT top-up funding: Owner activation flag, bounded confirmation TTL, nonnegative exact application fee, published terms version and Owner pause controls. H0-v1 disables business minimum/maximum/per-Customer/aggregate caps, presets and the beta allowlist, so the policy holds no cap value; representational and overflow guards remain. Changing it never creates a ledger entry, reservation or provider target.
+_Avoid_: ENV presentation knob, funding credit, exposure quota
+
+**USDT Funding Reservation**:
+The single durable open funding target slot per Customer across rails, created with the policy/terms snapshot and one immutable source identity. Expiry moves it to expired-unresolved but never releases the slot; only a settlement that posts the linked funding ledger entry or a typed release resolution resolves it.
+_Avoid_: USDT Top-up, quota bucket, balance hold
+
+**USDT Funding Pause**:
+An Owner-controlled operational pause of one USDT scope (funding, spending, or one rail) with a required reason and audit. A funding or rail pause blocks new targets only: settlement, refund and reconciliation of money already observed continue.
+_Avoid_: ledger freeze, account freeze, automatic resume
 
 **BSC Capability Qualification**:
 The result of probing the BNB Smart Chain RPC surface required by a future USDT funding rail — chain identity, token contract code/decimals, `finalized` block depth behind head, canonical receipt consistency, and bounded transfer-log access — classified as verified, unsupported, or unknown. Only verified capabilities qualify; mismatch or unknown evidence fails closed. A qualified result is RPC evidence only, never funding, custody, provisioning, or legal authorization.
