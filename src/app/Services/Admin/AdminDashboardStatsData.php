@@ -60,6 +60,7 @@ final class AdminDashboardStatsData
             'balanceOperations' => $this->balanceOperations->summary(),
             'paymentControl' => $this->paymentControl($user),
             'statusCounts' => $statusCounts,
+            'canViewBalanceReports' => (bool) $user->role?->canReconcilePayments(),
             'actionableStatusCounts' => $this->actionableStatusCounts($statusCounts),
             'earnings' => $this->earnings(),
         ];

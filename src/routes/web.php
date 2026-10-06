@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\AdminBalanceAdjustmentController;
+use App\Http\Controllers\Admin\AdminBalanceReportController;
 use App\Http\Controllers\Admin\AdminBroadcastController;
 use App\Http\Controllers\Admin\AdminBscReceiverController;
 use App\Http\Controllers\Admin\AdminBuyMailController;
@@ -145,6 +146,7 @@ Route::prefix('akun')->name('customer.')->group(function (): void {
     Route::middleware('auth:customer')->group(function (): void {
         Route::post('logout', [CustomerAccountController::class, 'logout'])->name('logout');
         Route::get('pesanan', [CustomerAccountController::class, 'orders'])->name('orders.index');
+        Route::get('saldo', [CustomerAccountController::class, 'balance'])->name('balance.show');
         Route::post('pesanan/{order}/status', [CustomerAccountController::class, 'status'])->middleware('throttle:automatic-payment-status-refresh')->name('orders.status');
         Route::get('pesanan/{order}', [CustomerAccountController::class, 'show'])->name('orders.show');
         Route::get('klaim-pesanan', [CustomerAccountController::class, 'claimForm'])->name('claim.create');
@@ -166,6 +168,13 @@ Route::middleware('admin.no-cache')->group(function (): void {
 
         Route::middleware('admin.access')->group(function (): void {
             Route::get('/', AdminDashboardController::class)->name('dashboard');
+            Route::prefix('store-balance/reports')->name('store-balance.reports.')->group(function (): void {
+                Route::get('/', [AdminBalanceReportController::class, 'index'])->name('index');
+                Route::get('top-ups/{topUp}/proof', [AdminBalanceReportController::class, 'proof'])
+                    ->whereNumber('topUp')
+                    ->middleware('signed')
+                    ->name('proof');
+            });
             Route::post('payment-mode', AdminPaymentModeController::class)->name('payment-mode.update');
             // BSC controllers persist validated pending mutations because password redirects cannot replay POST bodies.
             Route::prefix('bsc')->name('bsc.')->middleware('admin.bsc-owner')->group(function (): void {

@@ -349,6 +349,14 @@ CustomerBalanceAccount -> CartItem/Product` untuk checkout dan
 `CustomerBalanceAccount -> Order -> Payment ->
 OrderItem/InventoryMovement/Product` untuk refund.
 
+### Customer balance web and Admin reports (#557)
+
+`CustomerBalanceOverviewReader` reads both IDR and USDT account projections and their latest immutable ledger cursors in one SQL statement. Missing accounts are zero; a projection/cursor mismatch is unavailable, and a valid frozen USDT projection remains visibly frozen. `customer.balance.show` is read-only behind `auth:customer`; only the existing verified-email magic-link flow establishes that session. `CustomerBalanceActivityCursorToken` encrypts and binds each history keyset cursor to the Customer and currency. Invoice/recovery keys and Telegram IDs are not session authority, and the page adds no wallet write route.
+
+`StoreBalanceActivityService::pageForCustomer()` and `CustomerUsdtActivityService` own the bounded customer history pages. `AdminBalanceReportReader` owns the role-checked IDR/USDT accounts, entries, top-ups, reviews, treasury and audit reports, exact numeric Telegram-ID filters, state filters, masked references and actor/filter-scoped keyset cursor. Per-currency totals aggregate account projections rather than full ledger history; the treasury panel reads the latest persisted reconciliation run and never presents missing/unavailable custody as zero.
+
+IDR payment-proof links use Laravel temporary signed URLs ([Laravel URL documentation](https://laravel.com/docs/13.x/urls#signed-urls)), expire after five minutes, and are additionally bound to the current report-authorized admin. The download fetches only the proof file ID stored on the selected top-up, through the fixed Telegram Bot API file host; it disables redirects and rejects oversized, non-JPEG/PNG, mismatched, or undecodable image bytes. No user-supplied URL is fetched. `2026_10_06_190000_add_balance_report_keyset_indexes` supports report and customer-history ordering. Behavior coverage is in `CustomerBalanceWebTest` and `AdminBalanceReportTest`; responsive customer rendering is exercised by the customer browser suite.
+
 ### External money receipts (R1 #541)
 
 [`ExternalMoneyReceiptClaims`](../../src/app/Services/MoneyReceipts/ExternalMoneyReceiptClaims.php)
