@@ -191,6 +191,19 @@ class BscRpcClientTest extends TestCase
         }
     }
 
+    public function test_oversized_rpc_result_is_rejected_before_json_decoding(): void
+    {
+        config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
+        Http::fake(['*' => Http::response(json_encode([
+            'jsonrpc' => '2.0', 'id' => 1, 'result' => '0x38',
+            'padding' => str_repeat('x', BscRpcClient::MAX_RESPONSE_BYTES),
+        ], JSON_THROW_ON_ERROR), 200, ['Content-Type' => 'application/json'])]);
+        $this->expectException(BscRpcException::class);
+        $this->expectExceptionMessage('byte budget');
+
+        (new BscRpcClient)->chainId();
+    }
+
     public function test_an_empty_endpoint_list_is_reported_as_not_configured(): void
     {
         config()->set('services.bsc.rpc_urls', []);

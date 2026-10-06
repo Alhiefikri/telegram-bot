@@ -210,7 +210,7 @@ A proposed expiring Customer confirmation binding exact USDT amount, policy vers
 _Avoid_: USDT invoice, deposit receipt, available funds
 
 **USDT Top-up**:
-A proposed funding target with immutable currency, amount, fee, provider/receiver/token/network and finality snapshots. Only verified attributable final evidence and one economic resolution can credit Customer USDT Balance; expiry does not prove absence of money.
+A proposed funding target with immutable currency, amount, fee, provider/receiver/token/network and finality snapshots. Only verified attributable final evidence and one economic resolution can credit Customer USDT Balance; expiry does not prove absence of money. U5 implements the watch-only BSC rail's local invoice snapshot, reference recovery and receipt inspection in disposable environments, not the confirmed Top-up target, receipt consumption, balance settlement or production funding authorization.
 _Avoid_: Order Payment, automatic currency conversion
 
 **BSC Capability Qualification**:

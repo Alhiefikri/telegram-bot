@@ -74,6 +74,8 @@ use App\Services\Telegram\TelegramCallbackHandlerPipeline;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramConfiguredCheckoutPaymentIntentSelector;
 use App\Services\UsdtReceivers\UsdtDepositReceiverProvisioners;
+use App\Services\UsdtTopUps\BscUsdtTopUpRail;
+use App\Services\UsdtTopUps\UsdtTopUpRail;
 use App\Services\UsdtTreasury\UsdtTreasuryAssetRegistry;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
@@ -100,6 +102,7 @@ class AppServiceProvider extends ServiceProvider
                 ? $client
                 : new BscVerificationRpcClientAdapter($client);
         });
+        $this->app->bind(UsdtTopUpRail::class, BscUsdtTopUpRail::class);
         $this->app->bind(BscWalletOwnershipVerifierInterface::class, BscWalletOwnershipVerifier::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
         $this->app->bind(KlikQrisTopUpProviderAdapter::class, function ($app): KlikQrisTopUpProviderAdapter {
