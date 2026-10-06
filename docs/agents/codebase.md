@@ -62,7 +62,7 @@ Operator discovery: `php artisan usdt-bsc:scan --json` reads enrolled work by ke
 
 ## Configuration boundary (current runtime)
 
-The [H1 custody decision](../balance-h1-custody-decision.md) and [ADR-0021](../adr/0021-usdt-exclusive-external-receivers.md) select permanently Customer-exclusive public receivers with external signing for the BSC funding design. Receiver capacity/control, token/bridge provenance, legal/provider qualification, treasury/gas and external returns remain unproven; #539 remains open and activation no-go. Binance Pay funding is separately unqualified. These decisions do not activate or change existing checkout.
+The [H1 custody decision](../balance-h1-custody-decision.md) and [ADR-0021](../adr/0021-usdt-exclusive-external-receivers.md) select permanently Customer-exclusive public receivers with external signing for the BSC funding design. Receiver capacity/control, token/bridge provenance, legal/provider qualification, treasury/gas and external returns remain unproven; activation remains no-go. GitHub closure of #539 does not qualify these obligations or authorize activation. Binance Pay funding is separately unqualified. These decisions do not activate or change existing checkout.
 
 `ENV` hanya untuk credential/secret dan nilai deployment yang memang tidak boleh berada di database. Jangan menambah ENV untuk data katalog atau presentation customer. Icon Product wajib nullable di database dan diedit dari Admin Dashboard; perubahan tidak boleh membutuhkan rebuild image atau clear config.
 
