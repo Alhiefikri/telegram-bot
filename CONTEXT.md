@@ -206,11 +206,11 @@ One immutable ledger row recording a single economic effect on a Customer USDT B
 _Avoid_: USDT transaction, balance mutation, wallet row
 
 **USDT Funding Intent**:
-A proposed expiring Customer confirmation binding exact USDT amount, policy version, private chat/navigation root and nonce before any provider invoice or money posting.
+A Customer-owned expiring confirmation binding exact micro-USDT credit, application fee/payable amount, policy/terms versions, exclusive receiver/payment terms, private chat/canonical message/root generation and opaque nonce. U6 persists this preview without provider, invoice, Payment, receipt, ledger or outbound effects; cancellation/expiry ends only the local preview.
 _Avoid_: USDT invoice, deposit receipt, available funds
 
 **USDT Top-up**:
-A proposed funding target with immutable currency, amount, fee, provider/receiver/token/network and finality snapshots. Only verified attributable final evidence and one economic resolution can credit Customer USDT Balance; expiry does not prove absence of money. U5 implements the watch-only BSC rail's local invoice snapshot, reference recovery and receipt inspection in disposable environments, not the confirmed Top-up target, receipt consumption, balance settlement or production funding authorization.
+A confirmed Customer funding target with an immutable identity, currency, amount, fee, receiver/token/network/finality and payment deadline snapshot, one U3 active-target reservation and durable provider-preparation work. U6 atomically creates these facts and returns the same target on confirmation replay; preparation/recovery retains that reference after unknown outcomes and never switches receivers. U5 supplies the watch-only local BSC invoice and inspection. Only verified attributable final evidence and one economic resolution can credit Customer USDT Balance; expiry does not prove absence of money. U7 settlement and production funding authorization remain separate gates.
 _Avoid_: Order Payment, automatic currency conversion
 
 **USDT Funding Policy**:

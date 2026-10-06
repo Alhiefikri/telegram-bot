@@ -40,6 +40,7 @@ final class UsdtFundingReservationTest extends TestCase
     public function test_missing_policy_or_readiness_disables_new_targets_without_writing_rows(): void
     {
         $customer = Customer::factory()->create();
+        $this->app->instance(UsdtFundingRailReadinessRegistry::class, new UsdtFundingRailReadinessRegistry([]));
 
         // Seeded policy is disabled; no readiness provider is registered.
         $this->assertUnavailable(

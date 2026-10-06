@@ -14,6 +14,7 @@ use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\CustomerUsdtFundingReservation;
 use App\Services\UsdtBalance\UsdtMicroAmount;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -51,11 +52,12 @@ final class CustomerUsdtFundingReservationService
         UsdtMicroAmount $amount,
         string $sourceType,
         string $sourceId,
+        ?CarbonImmutable $expiresAt = null,
     ): CustomerUsdtFundingReservationResult {
         self::assertIdentifier('source type', $sourceType);
         self::assertIdentifier('source id', $sourceId);
 
-        return DB::transaction(function () use ($customer, $rail, $amount, $sourceType, $sourceId): CustomerUsdtFundingReservationResult {
+        return DB::transaction(function () use ($customer, $rail, $amount, $sourceType, $sourceId, $expiresAt): CustomerUsdtFundingReservationResult {
             $policy = CustomerUsdtFundingPolicy::query()
                 ->where('singleton_key', CustomerUsdtFundingPolicy::SINGLETON_KEY)
                 ->lockForUpdate()
@@ -72,6 +74,9 @@ final class CustomerUsdtFundingReservationService
                 ->lockForUpdate()
                 ->first();
             if ($existing !== null) {
+                if ($expiresAt !== null && ! $expiresAt->equalTo($existing->expires_at)) {
+                    throw new CustomerUsdtFundingReservationConflict('Funding reservation deadline replay differs.');
+                }
                 $this->assertFingerprint($existing, $this->fingerprint(
                     $customer,
                     $rail,
@@ -107,6 +112,9 @@ final class CustomerUsdtFundingReservationService
             }
 
             $now = now();
+            if ($expiresAt !== null && ! $expiresAt->isFuture()) {
+                throw new InvalidArgumentException('Funding reservation requires a future payment deadline.');
+            }
             $attributes = [
                 'customer_id' => $customer->getKey(),
                 'source_type' => $sourceType,
@@ -128,7 +136,7 @@ final class CustomerUsdtFundingReservationService
                 ),
                 'state' => CustomerUsdtFundingReservationState::Reserved->value,
                 'reserved_at' => $now,
-                'expires_at' => $now->copy()->addSeconds($policy->confirmationTtlSeconds()),
+                'expires_at' => $expiresAt ?? $now->copy()->addSeconds($policy->confirmationTtlSeconds()),
             ];
 
             try {

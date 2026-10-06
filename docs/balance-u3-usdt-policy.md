@@ -4,7 +4,7 @@ U3 implements work package **P4** of [#536](https://github.com/Alhiefikri/telegr
 
 > U3 policy amendment: H0-v1 business min/max/per-Customer/aggregate exposure limits are explicitly disabled (no business cap), with representational/overflow guards retained. No preallocated beta quotas/allowlist or preset buttons for this release. Audience all registered bot Customers, custom exact positive USDT input, application fee 0, Customer-paid transfer fees, one active funding target across rails, ten-minute confirmation and snapshotted Binance/BSC dashboard deadline. Implement durable active-target reservation, ambiguous-money handling, policy/terms versions, Owner pause/resume and bounded technical anti-abuse limits. Do not silently replace the approved uncapped policy with a smaller capped beta.
 
-U3 is configuration and exposure-slot state only. It never moves money, never mints a provider target, never creates a funding receipt and never activates a rail. **USDT funding stays disabled**: the seeded policy has `funding_enabled = false` and no rail readiness provider is registered, so every new funding target fails closed. This ticket does not authorize deploy, real funds or production configuration.
+U3 is configuration and exposure-slot state only. It never moves money, mints a provider target or creates a funding receipt. **Production USDT funding stays disabled**: the seeded policy has `funding_enabled = false` and no qualified production readiness provider is registered. U6 adds the actual U5 watch-only technical path only in disposable local/testing environments; this is not qualification, deploy authorization, real funding or production configuration.
 
 ## 1. What this package adds
 
@@ -46,11 +46,13 @@ There is deliberately **no** minimum, maximum, preset, per-Customer cap, aggrega
 
 The slot is per Customer across rails, so confirmation can never open a second target on another rail; `findBySource()` is the read seam for showing the existing target.
 
+U6 calls `reserve()` with the confirmed Dashboard payment deadline. The optional immutable deadline is validated at creation and on same-source replay; callers without a target deadline retain the U3 confirmation-TTL default. No UPDATE extends a reservation after creation.
+
 ## 4. Pause and readiness controls
 
 - `CustomerUsdtFundingPauseScope` covers `funding`, `spending`, `rail_binance_pay` and `rail_bsc_usdt`. Pausing requires an Owner, a 3–191 character single-line reason, is audited (`customer_usdt.funding_pause.created`/`deleted`) and is idempotent. Resume deletes the row and audits it.
 - Pausing blocks **new** funding targets (or new USDT spending) only. Existing targets replay, settlement, refunds and reconciliation are never gated — the U2 reconciliation contract keeps consuming old deposits.
-- `UsdtFundingRailReadiness` providers (tag `usdt-funding-rail-readiness`) report a local, non-blocking, sanitized readiness observation. The tag is intentionally empty in this release, so the gate reports `rail_not_registered` and fails closed; a fixture provider in tests is behavior evidence, never rail qualification. H1 [#539](https://github.com/Alhiefikri/telegram-bot/issues/539) remains open/no-go.
+- `UsdtFundingRailReadiness` providers (tag `usdt-funding-rail-readiness`) report a local, non-blocking, sanitized observation. The qualified production tag stays empty, so production fails closed. U6's `LocalBscFundingReadiness` is assembled only for local/testing when no explicit BSC provider is registered, and observes no network. RPC qualification and exclusive receiver validation happen on the actual U5 creation path. Synthetic test evidence and technical readiness never qualify custody/legal/production funding; H1 remains no-go regardless of GitHub closure.
 - `CustomerUsdtFundingGate` is consumed by `reserve()` inside its transaction, so an Owner activation/pause change (serialized on the policy row lock) cannot interleave with a new target. U10 [#555](https://github.com/Alhiefikri/telegram-bot/issues/555) consumes `assertSpendingAvailable()` for USDT checkout.
 
 ## 5. Admin surface

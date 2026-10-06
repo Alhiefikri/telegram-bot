@@ -5,6 +5,7 @@ namespace App\Services\UsdtTopUps;
 use App\Exceptions\UsdtReceiverCapacityUnavailable;
 use App\Models\Customer;
 use App\Models\CustomerUsdtDepositReceiver;
+use App\Models\CustomerUsdtTopUp;
 use App\Models\ManualPaymentSetting;
 use App\Models\UsdtBscRailInvoice;
 use App\Services\Bsc\BscCapabilityProbe;
@@ -72,13 +73,18 @@ final class BscUsdtTopUpRail implements UsdtTopUpRail
         return new UsdtTopUpRailReadiness(true, false, 'h1_funding_unqualified');
     }
 
-    public function createOrRecover(Customer $customer, string $reference, UsdtMicroAmount $amount, CarbonImmutable $expiresAt): UsdtBscRailInvoice
+    public function createOrRecover(Customer $customer, string $reference, UsdtMicroAmount $amount, CarbonImmutable $expiresAt, ?CustomerUsdtTopUp $target = null): UsdtBscRailInvoice
     {
         $this->outsideTransaction();
         $this->validateReference($reference);
+        if ($target !== null && ((int) $target->customer_id !== (int) $customer->id
+            || $target->reference !== $reference || $target->payable_micro !== $amount->units()
+            || ! $target->expires_at->equalTo($expiresAt))) {
+            throw new DomainException('Confirmed USDT target does not match rail request.');
+        }
         $fingerprint = hash('sha256', json_encode(['v' => 1, 'customer' => (int) $customer->getKey(),
             'reference' => $reference, 'currency' => 'USDT', 'amount_micro' => $amount->integerUnits(),
-            'expires_at_epoch' => $expiresAt->getTimestamp()], JSON_THROW_ON_ERROR));
+            'expires_at_epoch' => $expiresAt->getTimestamp(), ...($target === null ? [] : ['target_fingerprint' => $target->request_fingerprint])], JSON_THROW_ON_ERROR));
         $existing = UsdtBscRailInvoice::query()->where('reference', $reference)->first();
         if ($existing !== null) {
             return $this->replay($existing, $customer, $fingerprint);
@@ -99,6 +105,14 @@ final class BscUsdtTopUpRail implements UsdtTopUpRail
         // All RPC work is before the retryable transaction. This local rail has
         // no remote create: crash-after-commit recovery queries the same ref.
         $preparedReceiver = $this->receivers->snapshotFor($customer);
+        if ($target !== null && ($preparedReceiver->receiverId !== $target->receiver_id
+            || $preparedReceiver->address !== $target->payment_snapshot['receiver_address']
+            || $preparedReceiver->chainId !== $target->payment_snapshot['chain_id']
+            || $preparedReceiver->tokenContract !== $target->payment_snapshot['token_contract']
+            || $preparedReceiver->tokenDecimals !== $target->payment_snapshot['token_decimals']
+            || $preparedReceiver->custodyNamespace !== $target->payment_snapshot['custody_namespace'])) {
+            throw new DomainException('Confirmed USDT receiver changed; no fallback is permitted.');
+        }
         $head = BscChainFacts::block($this->rpc->blockByNumber('latest'));
         if ($head === null) {
             throw new BscRpcException('BSC invoice requires complete latest-block facts.');
@@ -107,7 +121,7 @@ final class BscUsdtTopUpRail implements UsdtTopUpRail
         if ($policy === null) {
             throw new RuntimeException('BSC finality policy is unavailable.');
         }
-        $minimumConfirmations = $policy->bscMinConfirmations();
+        $minimumConfirmations = $target?->payment_snapshot['minimum_confirmations'] ?? $policy->bscMinConfirmations();
 
         try {
             return DB::transaction(function () use ($customer, $reference, $amount, $expiresAt, $now, $fingerprint, $head, $minimumConfirmations, $preparedReceiver): UsdtBscRailInvoice {
