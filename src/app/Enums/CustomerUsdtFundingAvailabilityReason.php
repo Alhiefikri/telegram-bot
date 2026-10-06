@@ -17,6 +17,7 @@ enum CustomerUsdtFundingAvailabilityReason: string
     case RailNotReady = 'rail_not_ready';
     case RailPaused = 'rail_paused';
     case SpendingPaused = 'spending_paused';
+    case RestoreGateOpen = 'restore_gate_open';
 
     public function blocksNewFunding(): bool
     {
@@ -34,6 +35,7 @@ enum CustomerUsdtFundingAvailabilityReason: string
             self::RailNotReady => 'Rail belum siap menerima dana',
             self::RailPaused => 'Rail dijeda Owner',
             self::SpendingPaused => 'Belanja USDT dijeda Owner',
+            self::RestoreGateOpen => 'Pemulihan basis data belum diverifikasi',
         };
     }
 }

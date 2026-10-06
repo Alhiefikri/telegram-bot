@@ -2,9 +2,11 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\BalanceOperationMetric;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Operations\BalanceOperationEventRecorder;
 use Throwable;
 
 final class BalanceTopUpReceiptDeliveryPipeline
@@ -17,6 +19,8 @@ final class BalanceTopUpReceiptDeliveryPipeline
         private readonly TelegramLocale $locale,
         private readonly TelegramHtmlCaption $html,
         private readonly TelegramUiIcons $uiIcons,
+        private readonly TelegramBalanceReceiptDeliveryPause $deliveryPause,
+        private readonly BalanceOperationEventRecorder $metrics,
     ) {}
 
     public function deliver(string $topUpId, ?string $effectId = null): void
@@ -36,8 +40,16 @@ final class BalanceTopUpReceiptDeliveryPipeline
 
         $claimed = $this->ledger->claim((string) $effect->getKey());
         if ($claimed === null) {
+            // A claim refused while the Owner delivery pause is active is a
+            // deferred delivery, not a failure: the effect stays durable.
+            if ($this->deliveryPause->pausesEffect((string) $effect->effect_type)) {
+                $this->metrics->record(BalanceOperationMetric::OutboundDeliveryOutcome, 'skipped_paused');
+            }
+
             return;
         }
+
+        $this->metrics->record(BalanceOperationMetric::OutboundDeliveryOutcome, 'claimed');
 
         try {
             $topUp = StoreBalanceTopUp::query()
@@ -125,6 +137,7 @@ final class BalanceTopUpReceiptDeliveryPipeline
                     'delivery_method' => 'sendMessage',
                 ],
             );
+            $this->metrics->record(BalanceOperationMetric::OutboundDeliveryOutcome, 'sent');
         } catch (Throwable $exception) {
             if ($this->ledger->isAmbiguous($exception)) {
                 $this->ledger->finalizeUnknown(
@@ -132,6 +145,7 @@ final class BalanceTopUpReceiptDeliveryPipeline
                     (string) $claimed->claim_token,
                     $exception,
                 );
+                $this->metrics->record(BalanceOperationMetric::OutboundDeliveryOutcome, 'unknown');
 
                 return;
             }
@@ -141,6 +155,7 @@ final class BalanceTopUpReceiptDeliveryPipeline
                 (string) $claimed->claim_token,
                 $exception,
             )) {
+                $this->metrics->record(BalanceOperationMetric::OutboundDeliveryOutcome, 'failed');
                 throw $exception;
             }
         }

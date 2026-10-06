@@ -9,6 +9,7 @@ use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\BalanceAdjustmentRequest;
+use App\Models\BalanceOperationsAlertEpisode;
 use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtTopUp;
@@ -71,6 +72,8 @@ class TelegramOutboundEffectService
     public const TYPE_BALANCE_TOP_UP_CHANNEL_PROOF = TelegramOutboundEffectType::BalanceTopUpChannelProof->value;
 
     public const TYPE_OWNER_COMPENSATION_NOTIFICATION = TelegramOutboundEffectType::OwnerCompensationNotification->value;
+
+    public const TYPE_BALANCE_OPERATIONS_ALERT = TelegramOutboundEffectType::BalanceOperationsAlert->value;
 
     public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
 
@@ -147,6 +150,8 @@ class TelegramOutboundEffectService
     public const TEMPLATE_BALANCE_TOP_UP_CHANNEL_PROOF = 'balance-top-up-channel-proof-v1';
 
     public const TEMPLATE_OWNER_COMPENSATION_NOTIFICATION = 'balance-owner-compensation-v1';
+
+    public const TEMPLATE_BALANCE_OPERATIONS_ALERT = 'balance-operations-alert-v1';
 
     public const TEMPLATE_RECEIPT_CREDENTIALS = 'receipt-credentials-v1';
 
@@ -668,6 +673,41 @@ class TelegramOutboundEffectService
             'template_version' => 'supplier-health-v1', 'state' => TelegramOutboundEffectState::Pending->value,
             'attempts' => 0, 'next_attempt_at' => now(),
             'outcome_metadata' => ['delivery_context' => 'supplier_health'],
+        ]);
+    }
+
+    public function recordBalanceOperationsAlert(
+        BalanceOperationsAlertEpisode $episode,
+        string $chatId,
+        string $message,
+        bool $resolved,
+    ): TelegramOutboundEffect {
+        // The key carries the open transition (`open_count`, incremented every
+        // time an episode reopens), so a reopened condition is announced again
+        // while a repeated evaluation of the same transition still dedupes.
+        $key = implode(':', [
+            'balance-ops-alert',
+            (string) $episode->id,
+            $resolved ? 'resolved' : $episode->fingerprint,
+            (string) $episode->open_count,
+        ]);
+
+        return TelegramOutboundEffect::query()->firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1,
+            'effect_type' => self::TYPE_BALANCE_OPERATIONS_ALERT,
+            'source_type' => BalanceOperationsAlertEpisode::class, 'source_id' => (string) $episode->id,
+            'target_type' => 'admin', 'telegram_chat_id' => $chatId,
+            'queue' => 'notifications', 'telegram_method' => 'sendMessage', 'locale' => 'id',
+            'template_version' => self::TEMPLATE_BALANCE_OPERATIONS_ALERT,
+            'state' => TelegramOutboundEffectState::Pending->value,
+            'attempts' => 0, 'next_attempt_at' => now(),
+            'outcome_metadata' => [
+                'delivery_context' => 'balance_operations_alert',
+                'delivery_method' => 'sendMessage',
+                'alert_key' => $episode->alert_key,
+                'alert_state' => $resolved ? 'resolved' : 'open',
+                'message' => $message,
+            ],
         ]);
     }
 

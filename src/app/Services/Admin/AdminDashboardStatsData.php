@@ -38,6 +38,7 @@ final class AdminDashboardStatsData
         private readonly SakurupiahOperationalMetrics $sakurupiahMetrics,
         private readonly CustomerUsdtFundingPolicyManager $usdtFundingPolicies,
         private readonly CustomerUsdtFundingGate $usdtFundingGate,
+        private readonly AdminBalanceOperationsData $balanceOperations,
     ) {}
 
     /**
@@ -56,6 +57,7 @@ final class AdminDashboardStatsData
             'cards' => $this->statsCards($metrics),
             'fundingPolicy' => $this->fundingPolicy($user),
             'usdtFundingPolicy' => $this->usdtFundingPolicy($user),
+            'balanceOperations' => $this->balanceOperations->summary(),
             'paymentControl' => $this->paymentControl($user),
             'statusCounts' => $statusCounts,
             'canViewBalanceReports' => (bool) $user->role?->canReconcilePayments(),

@@ -2,6 +2,7 @@
 
 namespace App\Services\UsdtFunding;
 
+use App\Enums\BalanceOperationMetric;
 use App\Enums\CustomerUsdtFundingAvailabilityReason;
 use App\Enums\CustomerUsdtFundingRail;
 use App\Enums\CustomerUsdtFundingReservationOutcome;
@@ -14,6 +15,8 @@ use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\CustomerUsdtFundingReservation;
 use App\Models\CustomerUsdtTopUp;
+use App\Services\Operations\BalanceOperationEventRecorder;
+use App\Services\Operations\BalanceOperationRetry;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -45,7 +48,11 @@ final class CustomerUsdtFundingReservationService
 
     private const MAX_EXPIRY_BATCH = 1000;
 
-    public function __construct(private readonly CustomerUsdtFundingGate $gate) {}
+    public function __construct(
+        private readonly CustomerUsdtFundingGate $gate,
+        private readonly BalanceOperationEventRecorder $events,
+        private readonly BalanceOperationRetry $retry,
+    ) {}
 
     public function reserve(
         Customer $customer,
@@ -58,7 +65,7 @@ final class CustomerUsdtFundingReservationService
         self::assertIdentifier('source type', $sourceType);
         self::assertIdentifier('source id', $sourceId);
 
-        return DB::transaction(function () use ($customer, $rail, $amount, $sourceType, $sourceId, $expiresAt): CustomerUsdtFundingReservationResult {
+        $reserve = function () use ($customer, $rail, $amount, $sourceType, $sourceId, $expiresAt): CustomerUsdtFundingReservationResult {
             $policy = CustomerUsdtFundingPolicy::query()
                 ->where('singleton_key', CustomerUsdtFundingPolicy::SINGLETON_KEY)
                 ->lockForUpdate()
@@ -176,7 +183,27 @@ final class CustomerUsdtFundingReservationService
                 CustomerUsdtFundingReservationOutcome::Created,
                 $this->snapshot($reservation),
             );
-        }, 5);
+        };
+
+        try {
+            $result = $this->retry->transaction($reserve, 5);
+        } catch (CustomerUsdtFundingReservationConflict|CustomerUsdtFundingUnavailable $exception) {
+            $this->events->record(BalanceOperationMetric::FundingReservationOutcome, 'conflict');
+
+            throw $exception;
+        }
+
+        $outcome = match ($result->outcome) {
+            CustomerUsdtFundingReservationOutcome::Created => 'reserved',
+            CustomerUsdtFundingReservationOutcome::Replayed => 'replayed',
+            CustomerUsdtFundingReservationOutcome::ExistingActive => 'existing_active',
+            default => null,
+        };
+        if ($outcome !== null) {
+            $this->events->record(BalanceOperationMetric::FundingReservationOutcome, $outcome);
+        }
+
+        return $result;
     }
 
     public function activeForCustomer(Customer $customer): ?CustomerUsdtFundingReservationResult

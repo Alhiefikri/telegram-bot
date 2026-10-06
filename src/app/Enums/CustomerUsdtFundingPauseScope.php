@@ -3,10 +3,11 @@
 namespace App\Enums;
 
 /**
- * Owner pause scopes for Customer USDT funding. Funding and rail pauses block
- * new funding targets only; spending pause blocks new USDT checkout debits.
- * None of them ever stops reconciliation, settlement, refund or reversal of
- * money that already entered the system.
+ * Owner pause scopes for Customer USDT funding and balance delivery. Funding
+ * and rail pauses block new funding targets only; spending pause blocks new
+ * USDT checkout debits; delivery pause defers balance receipt messages. None
+ * of them ever stops reconciliation, settlement, refund or reversal of money
+ * that already entered the system.
  */
 enum CustomerUsdtFundingPauseScope: string
 {
@@ -14,6 +15,7 @@ enum CustomerUsdtFundingPauseScope: string
     case Spending = 'spending';
     case RailBinancePay = 'rail_binance_pay';
     case RailBscUsdt = 'rail_bsc_usdt';
+    case Delivery = 'delivery';
 
     public static function forRail(CustomerUsdtFundingRail $rail): self
     {
@@ -36,6 +38,7 @@ enum CustomerUsdtFundingPauseScope: string
             self::Spending => 'Belanja USDT',
             self::RailBinancePay => 'Rail Binance Pay ID',
             self::RailBscUsdt => 'Rail USDT BEP20 (BSC)',
+            self::Delivery => 'Pengiriman bukti saldo',
         };
     }
 }

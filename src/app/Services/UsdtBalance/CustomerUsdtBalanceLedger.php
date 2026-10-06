@@ -2,6 +2,7 @@
 
 namespace App\Services\UsdtBalance;
 
+use App\Enums\BalanceOperationMetric;
 use App\Enums\UsdtBalanceEntryKind;
 use App\Exceptions\InsufficientUsdtBalance;
 use App\Exceptions\UsdtBalanceFrozenException;
@@ -10,6 +11,8 @@ use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceAccount;
 use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\UsdtTopUpReviewRequest;
+use App\Services\Operations\BalanceOperationEventRecorder;
+use App\Services\Operations\BalanceOperationRetry;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -24,6 +27,11 @@ use RuntimeException;
  */
 final class CustomerUsdtBalanceLedger
 {
+    public function __construct(
+        private readonly BalanceOperationEventRecorder $events,
+        private readonly BalanceOperationRetry $retry,
+    ) {}
+
     public function snapshot(Customer $customer): UsdtBalanceSnapshot
     {
         // One statement keeps the projection and its newest entry inside a
@@ -155,7 +163,7 @@ final class CustomerUsdtBalanceLedger
         $fingerprint = $source->fingerprint();
 
         try {
-            return DB::transaction(function () use ($customer, $source, $idempotencyKey, $fingerprint, $validate): UsdtBalanceMutationResult {
+            $result = $this->retry->transaction(function () use ($customer, $source, $idempotencyKey, $fingerprint, $validate): UsdtBalanceMutationResult {
                 $account = $this->lockAccount($customer);
 
                 // A matching replay is a pure resolution of the recorded
@@ -220,17 +228,37 @@ final class CustomerUsdtBalanceLedger
 
                 return UsdtBalanceMutationResult::applied($entry);
             }, 5);
+        } catch (InsufficientUsdtBalance $exception) {
+            $this->events->record(BalanceOperationMetric::LedgerOutcome, 'insufficient_funds');
+
+            throw $exception;
+        } catch (UsdtBalanceFrozenException $exception) {
+            $this->events->record(BalanceOperationMetric::LedgerOutcome, 'frozen');
+
+            throw $exception;
+        } catch (UsdtBalanceProjectionMismatchException $exception) {
+            $this->events->record(BalanceOperationMetric::LedgerOutcome, 'projection_drift');
+
+            throw $exception;
         } catch (UniqueConstraintViolationException $exception) {
             // The unique source/sequence/idempotency claims are the final
             // guard for a concurrent claim that committed after this
             // transaction started.
             $existing = $this->findEntryAfterConflict($customer, $source, $fingerprint, $idempotencyKey);
-            if ($existing !== null) {
-                return UsdtBalanceMutationResult::replayed($existing);
+            if ($existing === null) {
+                $this->events->record(BalanceOperationMetric::LedgerOutcome, 'identity_conflict');
+
+                throw $exception;
             }
 
-            throw $exception;
+            $this->events->record(BalanceOperationMetric::LedgerOutcome, 'replayed');
+
+            return UsdtBalanceMutationResult::replayed($existing);
         }
+
+        $this->events->record(BalanceOperationMetric::LedgerOutcome, $result->applied ? 'posted' : 'replayed');
+
+        return $result;
     }
 
     /**
