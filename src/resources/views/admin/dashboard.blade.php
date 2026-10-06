@@ -24,6 +24,7 @@
             $paymentControl = $statsTab['paymentControl'] ?? [];
             $fundingPolicy = $statsTab['fundingPolicy'] ?? [];
             $usdtFundingPolicy = $statsTab['usdtFundingPolicy'] ?? [];
+            $balanceOperations = $statsTab['balanceOperations'] ?? [];
             $checkoutMaintenance = $statsTab['checkoutMaintenance'] ?? [];
             $canManageProducts = $productsTab['canManage'];
             $productPlaceholder = $productsTab['placeholder'] ?? [];

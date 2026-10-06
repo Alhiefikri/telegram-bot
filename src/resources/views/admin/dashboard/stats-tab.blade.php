@@ -721,6 +721,123 @@
                     @endif
                 </x-admin-dashboard.card>
 
+                @php($opsCritical = ($balanceOperations['alertCounts']['critical'] ?? 0) > 0 || ($balanceOperations['restoreGate']['open'] ?? false))
+                <x-admin-dashboard.card
+                    id="admin-balance-operations"
+                    as="section"
+                    tone="{{ $opsCritical ? 'rose' : 'blue' }}"
+                    padding="compact"
+                    shadow="sm"
+                    class="rounded-[1.125rem]"
+                    aria-label="Kontrol Operasional Saldo"
+                >
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Operasional · read-only</p>
+                            <h2 class="mt-1 font-display text-base font-bold text-neo-ink">Kontrol Operasional</h2>
+                        </div>
+                        <div class="flex flex-col items-end gap-1">
+                            @if ($balanceOperations['restoreGate']['open'] ?? false)
+                                <x-admin-dashboard.badge tone="rose" dot>GATE TERBUKA</x-admin-dashboard.badge>
+                            @else
+                                <x-admin-dashboard.badge tone="emerald" dot>GATE TERTUTUP</x-admin-dashboard.badge>
+                            @endif
+                            @if (($balanceOperations['alertCounts']['critical'] ?? 0) > 0)
+                                <x-admin-dashboard.badge tone="rose">{{ $balanceOperations['alertCounts']['critical'] }} KRITIS</x-admin-dashboard.badge>
+                            @endif
+                        </div>
+                    </div>
+
+                    <p class="mt-2 text-xs font-semibold leading-5 text-brand-muted">
+                        Status jeda, gerbang pemulihan, dan episode alert saldo. Hanya tampilan; tidak ada aksi tulis di sini.
+                        {{ $balanceOperations['alertCounts']['open'] ?? 0 }} episode terbuka
+                        ({{ $balanceOperations['alertCounts']['critical'] ?? 0 }} kritis, {{ $balanceOperations['alertCounts']['warning'] ?? 0 }} peringatan).
+                    </p>
+
+                    <div class="mt-3 space-y-2" aria-label="Jeda operasional">
+                        @foreach (($balanceOperations['pauses'] ?? []) as $opsPause)
+                            <div class="flex items-center justify-between gap-2 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-2">
+                                <div class="min-w-0">
+                                    <p class="text-[11px] font-black text-neo-ink">{{ $opsPause['label'] }}</p>
+                                    @if ($opsPause['paused'])
+                                        <p class="text-[11px] font-semibold text-brand-muted">{{ $opsPause['reason'] }} &middot; {{ $opsPause['paused_at'] }}</p>
+                                    @endif
+                                </div>
+                                @if ($opsPause['paused'])
+                                    <x-admin-dashboard.badge tone="rose">DIJEDA</x-admin-dashboard.badge>
+                                @else
+                                    <x-admin-dashboard.badge tone="emerald">BERJALAN</x-admin-dashboard.badge>
+                                @endif
+                            </div>
+                        @endforeach
+                    </div>
+
+                    <div class="mt-3 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <p class="text-[11px] font-black text-neo-ink">Gerbang pemulihan saldo</p>
+                            @if ($balanceOperations['restoreGate']['open'] ?? false)
+                                <x-admin-dashboard.badge tone="rose">TERBUKA</x-admin-dashboard.badge>
+                            @else
+                                <x-admin-dashboard.badge tone="emerald">TERTUTUP</x-admin-dashboard.badge>
+                            @endif
+                        </div>
+                        <p class="mt-1 text-[11px] font-semibold leading-5 text-brand-muted">
+                            Window {{ $balanceOperations['restoreGate']['window_start'] ?? '—' }} s.d. {{ $balanceOperations['restoreGate']['window_end'] ?? '—' }}
+                            &middot; dibuka {{ $balanceOperations['restoreGate']['opened_at'] ?? '—' }}
+                            &middot; replay {{ $balanceOperations['restoreGate']['replay_completed_at'] ?? 'belum selesai' }}
+                        </p>
+                    </div>
+
+                    <div class="mt-3 space-y-2" aria-label="Episode alert terbuka">
+                        <p class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Episode alert terbuka</p>
+                        @forelse (($balanceOperations['alerts'] ?? []) as $opsAlert)
+                            <div class="rounded-xl border-2 border-neo-ink/15 bg-white/80 p-2">
+                                <div class="flex items-start justify-between gap-2">
+                                    <p class="text-[11px] font-black text-neo-ink">{{ $opsAlert['summary'] }}</p>
+                                    @if ($opsAlert['severity'] === 'critical')
+                                        <x-admin-dashboard.badge tone="rose">{{ $opsAlert['severity_label'] }}</x-admin-dashboard.badge>
+                                    @else
+                                        <x-admin-dashboard.badge tone="amber">{{ $opsAlert['severity_label'] }}</x-admin-dashboard.badge>
+                                    @endif
+                                </div>
+                                <p class="mt-1 text-[11px] font-semibold text-brand-muted">
+                                    {{ $opsAlert['alert_key'] }} &middot; {{ $opsAlert['state_label'] }} &middot; {{ $opsAlert['occurrences'] }}x &middot; terakhir {{ $opsAlert['last_seen_at'] }}
+                                </p>
+                            </div>
+                        @empty
+                            <p class="text-[11px] font-semibold text-brand-muted">Tidak ada episode alert terbuka.</p>
+                        @endforelse
+                    </div>
+
+                    @if (! empty($balanceOperations['metrics']))
+                        <div class="mt-3 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3">
+                            <p class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Metrik operasi (60 menit)</p>
+                            <div class="mt-2 space-y-2">
+                                @foreach ($balanceOperations['metrics'] as $opsMetricKey => $opsMetricValue)
+                                    @if (is_array($opsMetricValue))
+                                        <div class="rounded-lg border border-neo-ink/20 p-2">
+                                            <p class="text-[10px] font-black uppercase tracking-wider text-brand-muted">{{ $opsMetricKey }}</p>
+                                            <dl class="mt-1 grid gap-x-3 gap-y-1 sm:grid-cols-2">
+                                                @foreach ($opsMetricValue as $opsSubKey => $opsSubValue)
+                                                    <div class="flex items-baseline justify-between gap-2">
+                                                        <dt class="text-[10px] font-semibold text-brand-muted">{{ $opsSubKey }}</dt>
+                                                        <dd class="break-words text-[11px] font-black text-neo-ink">{{ is_array($opsSubValue) ? ($opsSubValue['count'] ?? '—') : (is_bool($opsSubValue) ? ($opsSubValue ? 'ya' : 'tidak') : ($opsSubValue ?? '—')) }}</dd>
+                                                    </div>
+                                                @endforeach
+                                            </dl>
+                                        </div>
+                                    @else
+                                        <div class="flex items-baseline justify-between gap-2 rounded-lg border border-neo-ink/20 p-2">
+                                            <span class="text-[10px] font-bold uppercase tracking-wider text-brand-muted">{{ $opsMetricKey }}</span>
+                                            <span class="break-words text-[11px] font-black text-neo-ink">{{ is_bool($opsMetricValue) ? ($opsMetricValue ? 'ya' : 'tidak') : ($opsMetricValue ?? '—') }}</span>
+                                        </div>
+                                    @endif
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+                </x-admin-dashboard.card>
+
                 @if ($canManageBalanceAdjustments)
                     <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Penambahan saldo Customer">
                         <div class="flex flex-wrap items-center justify-between gap-3">

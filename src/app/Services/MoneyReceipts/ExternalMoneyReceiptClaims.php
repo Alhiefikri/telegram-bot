@@ -2,12 +2,14 @@
 
 namespace App\Services\MoneyReceipts;
 
+use App\Enums\BalanceOperationMetric;
 use App\Enums\ExternalMoneyReceiptClaimOutcome;
 use App\Enums\ExternalMoneyReceiptStatus;
 use App\Exceptions\ExternalMoneyReceiptClaimRejected;
 use App\Models\ExternalMoneyReceipt;
 use App\Models\ExternalMoneyReceiptAlias;
 use App\Models\ExternalMoneyReceiptParentClaim;
+use App\Services\Operations\BalanceOperationEventRecorder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
@@ -26,18 +28,24 @@ use Illuminate\Support\Facades\DB;
  */
 final class ExternalMoneyReceiptClaims
 {
+    public function __construct(private readonly BalanceOperationEventRecorder $events) {}
+
     public function claim(VerifiedMoneyReceipt $receipt): ExternalMoneyReceiptClaimOutcome
     {
         try {
-            return DB::transaction(
+            $outcome = DB::transaction(
                 fn (): ExternalMoneyReceiptClaimOutcome => $this->claimWithinTransaction($receipt),
                 1,
             );
         } catch (ExternalMoneyReceiptClaimRejected $rejected) {
-            return $rejected->outcome;
+            $outcome = $rejected->outcome;
         } catch (UniqueConstraintViolationException) {
-            return $this->resolveAfterUniqueViolation($receipt);
+            $outcome = $this->resolveAfterUniqueViolation($receipt);
         }
+
+        $this->events->record(BalanceOperationMetric::ReceiptClaimOutcome, $outcome->value);
+
+        return $outcome;
     }
 
     private function claimWithinTransaction(VerifiedMoneyReceipt $receipt): ExternalMoneyReceiptClaimOutcome

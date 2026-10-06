@@ -8,13 +8,14 @@ use App\Enums\CustomerUsdtFundingRail;
 use App\Exceptions\CustomerUsdtFundingUnavailable;
 use App\Models\CustomerUsdtFundingPause;
 use App\Models\CustomerUsdtFundingPolicy;
+use App\Services\Operations\BalanceRestoreGateReader;
 
 /**
  * Fail-closed availability gate for new Customer USDT funding targets and
  * USDT spending. A missing policy row, an Owner-disabled activation flag, a
- * funding/spending/rail pause or an unregistered/unready rail blocks the
- * relevant action; nothing here blocks reconciliation, settlement, refund or
- * reversal of money that already entered the system.
+ * funding/spending/rail pause, an open post-restore gate or an unregistered/
+ * unready rail blocks the relevant action; nothing here blocks reconciliation,
+ * settlement, refund or reversal of money that already entered the system.
  *
  * The reservation service calls the readiness registry inside its short
  * transaction, so rail readiness observations must be local and cheap (see
@@ -24,7 +25,10 @@ use App\Models\CustomerUsdtFundingPolicy;
  */
 final class CustomerUsdtFundingGate
 {
-    public function __construct(private readonly UsdtFundingRailReadinessRegistry $readiness) {}
+    public function __construct(
+        private readonly UsdtFundingRailReadinessRegistry $readiness,
+        private readonly BalanceRestoreGateReader $restoreGate,
+    ) {}
 
     public function availability(CustomerUsdtFundingRail $rail): CustomerUsdtFundingAvailability
     {
@@ -50,6 +54,10 @@ final class CustomerUsdtFundingGate
 
         if ($this->paused(CustomerUsdtFundingPauseScope::Spending)) {
             return CustomerUsdtFundingAvailability::blocked(CustomerUsdtFundingAvailabilityReason::SpendingPaused);
+        }
+
+        if ($this->restoreGate->isOpen()) {
+            return CustomerUsdtFundingAvailability::blocked(CustomerUsdtFundingAvailabilityReason::RestoreGateOpen);
         }
 
         return CustomerUsdtFundingAvailability::available();
@@ -87,6 +95,10 @@ final class CustomerUsdtFundingGate
 
         if ($this->paused($rail->pauseScope())) {
             return CustomerUsdtFundingAvailability::blocked(CustomerUsdtFundingAvailabilityReason::RailPaused);
+        }
+
+        if ($this->restoreGate->isOpen()) {
+            return CustomerUsdtFundingAvailability::blocked(CustomerUsdtFundingAvailabilityReason::RestoreGateOpen);
         }
 
         $observation = $this->readiness->observe($rail);
