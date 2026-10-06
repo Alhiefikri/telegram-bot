@@ -8,6 +8,8 @@ use App\Http\Controllers\Admin\AdminCategoryCreateController;
 use App\Http\Controllers\Admin\AdminCategoryDeleteController;
 use App\Http\Controllers\Admin\AdminCategoryUpdateController;
 use App\Http\Controllers\Admin\AdminCheckoutMaintenanceController;
+use App\Http\Controllers\Admin\AdminCustomerUsdtFundingPauseController;
+use App\Http\Controllers\Admin\AdminCustomerUsdtFundingPolicyController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminFakeSalesProofPostController;
 use App\Http\Controllers\Admin\AdminLoginController;
@@ -182,6 +184,15 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('reversals', [AdminBalanceAdjustmentController::class, 'reversal'])->name('reversals.store');
             });
             Route::post('store-balance/funding-policy', AdminStoreBalanceFundingPolicyController::class)->name('store-balance.funding-policy.update');
+            Route::post('store-balance/usdt-policy', AdminCustomerUsdtFundingPolicyController::class)
+                ->middleware('admin.store-balance-owner')
+                ->name('store-balance.usdt-policy.update');
+            Route::post('store-balance/usdt-pauses/{scope}', [AdminCustomerUsdtFundingPauseController::class, 'store'])
+                ->middleware('admin.store-balance-owner')
+                ->name('store-balance.usdt-pauses.store');
+            Route::delete('store-balance/usdt-pauses/{scope}', [AdminCustomerUsdtFundingPauseController::class, 'destroy'])
+                ->middleware('admin.store-balance-owner')
+                ->name('store-balance.usdt-pauses.destroy');
             Route::post('store-balance/top-ups/{topUp}/compensate', AdminStoreBalanceTopUpCompensationController::class)
                 ->middleware('admin.store-balance-owner')
                 ->name('store-balance.top-ups.compensate');

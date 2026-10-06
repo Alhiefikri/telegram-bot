@@ -14,19 +14,19 @@ use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\UsdtPurchase;
 use App\Services\UsdtBalance\UsdtRefund;
 use App\Services\UsdtBalance\VerifiedUsdtFunding;
-use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\Group;
-use RuntimeException;
+use Tests\Concerns\RunsPostgresWorkers;
 use Tests\TestCase;
-use Throwable;
 
 #[Group('concurrency')]
 #[Group('postgres-release')]
 final class CustomerUsdtBalancePostgresConcurrencyTest extends TestCase
 {
+    use RunsPostgresWorkers;
+
     /** @var list<int> */
     private array $createdCustomerIds = [];
 
@@ -507,182 +507,5 @@ final class CustomerUsdtBalancePostgresConcurrencyTest extends TestCase
         $this->assertSame($expected, (int) $account->balance_micro);
         $this->assertSame($expected, $ledgerBalance);
         $this->assertSame($expected, $snapshot->balanceMicro());
-    }
-
-    /**
-     * @param  callable(int): string  $work
-     * @return list<array{ok: bool, value?: string, class?: string, exit_code: int}>
-     */
-    private function runConcurrentWorkers(int $count, callable $work): array
-    {
-        $directory = $this->createWorkspace();
-        $children = [];
-
-        try {
-            DB::disconnect();
-            for ($index = 0; $index < $count; $index++) {
-                $children[$index] = $this->forkWorker($directory, $index, $work);
-            }
-
-            foreach (range(0, $count - 1) as $index) {
-                $this->waitForMarker($directory.'/ready-'.$index);
-            }
-            touch($directory.'/start');
-
-            return $this->collectResults($children, $directory);
-        } finally {
-            $this->cleanupWorkspace($directory);
-            DB::reconnect();
-        }
-    }
-
-    private function createWorkspace(): string
-    {
-        $directory = storage_path('framework/testing/usdt-balance-race-'.bin2hex(random_bytes(8)));
-        if (! mkdir($directory, 0700, true) && ! is_dir($directory)) {
-            throw new RuntimeException("Unable to create USDT balance race workspace [{$directory}].");
-        }
-
-        return $directory;
-    }
-
-    private function forkWorker(string $directory, int $index, callable $work): int
-    {
-        $pid = pcntl_fork();
-        if ($pid === -1) {
-            $this->fail('Unable to fork Customer USDT Balance concurrency worker.');
-        }
-
-        if ($pid === 0) {
-            $this->runWorker(
-                $work,
-                $index,
-                $directory.'/ready-'.$index,
-                $directory.'/start',
-                $directory.'/result-'.$index.'.json',
-            );
-        }
-
-        return $pid;
-    }
-
-    /**
-     * @param  callable(int): string  $work
-     */
-    private function runWorker(callable $work, int $index, string $readyFile, string $startFile, string $resultFile): never
-    {
-        try {
-            DB::disconnect();
-            touch($readyFile);
-            $this->waitForMarker($startFile);
-            $value = $work($index);
-            file_put_contents($resultFile, json_encode(['ok' => true, 'value' => $value], JSON_THROW_ON_ERROR), LOCK_EX);
-            exit(0);
-        } catch (Throwable $exception) {
-            file_put_contents($resultFile, json_encode(['ok' => false, 'class' => $exception::class], JSON_THROW_ON_ERROR), LOCK_EX);
-            exit(1);
-        }
-    }
-
-    /**
-     * @param  array<int, int>  $children
-     * @return list<array{ok: bool, value?: string, class?: string, exit_code: int}>
-     */
-    private function collectResults(array $children, string $directory): array
-    {
-        $results = [];
-        foreach ($children as $index => $pid) {
-            $status = 0;
-            pcntl_waitpid($pid, $status);
-            $resultPath = $directory.'/result-'.$index.'.json';
-            $result = is_file($resultPath)
-                ? json_decode((string) file_get_contents($resultPath), true, flags: JSON_THROW_ON_ERROR)
-                : ['ok' => false, 'class' => RuntimeException::class];
-            $result['exit_code'] = pcntl_wifexited($status) ? pcntl_wexitstatus($status) : 255;
-            $results[] = $result;
-        }
-
-        return $results;
-    }
-
-    private function waitForMarker(string $path): void
-    {
-        $deadline = microtime(true) + 15;
-        while (! is_file($path)) {
-            if (microtime(true) > $deadline) {
-                throw new RuntimeException('Timed out waiting for a Customer USDT Balance concurrency worker.');
-            }
-            usleep(10_000);
-        }
-    }
-
-    private function cleanupWorkspace(string $directory): void
-    {
-        foreach (glob($directory.'/*') ?: [] as $path) {
-            unlink($path);
-        }
-        if (is_dir($directory)) {
-            rmdir($directory);
-        }
-    }
-
-    /**
-     * @param  list<array{ok: bool, value?: string, class?: string, exit_code: int}>  $results
-     */
-    private function assertWorkersSucceeded(array $results): void
-    {
-        foreach ($results as $result) {
-            $this->assertTrue($result['ok'], json_encode($result, JSON_THROW_ON_ERROR));
-            $this->assertSame(0, $result['exit_code'], json_encode($result, JSON_THROW_ON_ERROR));
-        }
-    }
-
-    private function assertDatabaseConstraintRejects(callable $statement, string $expectedConstraint): void
-    {
-        try {
-            $statement();
-            $this->fail("The database constraint [{$expectedConstraint}] was expected to reject this USDT balance mutation.");
-        } catch (QueryException $exception) {
-            $this->assertStringContainsString($expectedConstraint, $exception->getMessage());
-        }
-    }
-
-    private function requirePostgresConcurrency(): void
-    {
-        if (DB::getDriverName() !== 'pgsql') {
-            $this->markTestSkipped('Customer USDT Balance PostgreSQL races require the pgsql test connection.');
-        }
-        if ((string) env('RUN_CONCURRENCY_TESTS', '') !== '1') {
-            $this->markTestSkipped('Set RUN_CONCURRENCY_TESTS=1 to run process-level PostgreSQL races.');
-        }
-        $this->assertSafeConcurrencyDatabase();
-    }
-
-    private function assertSafeConcurrencyDatabase(): void
-    {
-        if (! function_exists('pcntl_fork')) {
-            $this->fail('The pcntl extension is required for Customer USDT Balance PostgreSQL races.');
-        }
-        if (! extension_loaded('pdo_pgsql')) {
-            $this->fail('The pdo_pgsql extension is required for Customer USDT Balance PostgreSQL races.');
-        }
-        if (app()->environment() !== 'testing') {
-            $this->fail('Refusing to run Customer USDT Balance races outside APP_ENV=testing.');
-        }
-        if (config('database.default') !== 'pgsql' || config('database.connections.pgsql.driver') !== 'pgsql') {
-            $this->fail('Customer USDT Balance races require DB_CONNECTION=pgsql.');
-        }
-        if ((string) config('database.connections.pgsql.url') !== '' || (string) env('DB_URL', '') !== '') {
-            $this->fail('Refusing to run Customer USDT Balance races while DB_URL is configured.');
-        }
-        $database = (string) config('database.connections.pgsql.database');
-        if (preg_match('/(^|[_-])(prod|production|live|main)([_-]|$)/i', $database) === 1
-            || ! preg_match('/(^|[_-])(test|testing)([_-]|$)/i', $database)) {
-            $this->fail("Customer USDT Balance races require an isolated test database; got [{$database}].");
-        }
-        $actualDatabase = (string) DB::selectOne('select current_database() as database')->database;
-        if ($actualDatabase !== $database) {
-            $this->fail("Connected database [{$actualDatabase}] does not match configured database [{$database}].");
-        }
     }
 }

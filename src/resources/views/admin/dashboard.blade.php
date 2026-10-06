@@ -23,6 +23,7 @@
             $earnings = $statsTab['earnings'] ?? [];
             $paymentControl = $statsTab['paymentControl'] ?? [];
             $fundingPolicy = $statsTab['fundingPolicy'] ?? [];
+            $usdtFundingPolicy = $statsTab['usdtFundingPolicy'] ?? [];
             $checkoutMaintenance = $statsTab['checkoutMaintenance'] ?? [];
             $canManageProducts = $productsTab['canManage'];
             $productPlaceholder = $productsTab['placeholder'] ?? [];
