@@ -12,6 +12,7 @@ use App\Models\StoreBalanceCompensation;
 use App\Models\StoreBalanceTopUp;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\Telegram\TelegramBotApiRedactor;
 use App\Support\Money;
 use Carbon\CarbonInterface;
@@ -73,6 +74,7 @@ final class StoreBalanceOwnerCompensationService
     public function __construct(
         private readonly StoreBalanceLedger $ledger,
         private readonly AuditLogger $audit,
+        private readonly ExternalMoneyReceiptWriter $receipts,
     ) {}
 
     /**
@@ -235,6 +237,13 @@ final class StoreBalanceOwnerCompensationService
             $balanceBefore = (int) $account->balance;
             $idempotencyKey = self::compensationIdempotencyKey($topUp->getKey());
             $sourceId = self::compensationSourceId($topUp->getKey());
+
+            // Compensation money has no independently verified receipt. It is
+            // reserved as unresolved money so a later settlement receipt for
+            // the same top-up resolves the reservation instead of crediting
+            // twice, and so the cutover gate cannot pass while it is unknown.
+            $this->receipts->reserveCompensatedUnresolvedMoney($topUp, $providerReference);
+
             $mutation = $this->ledger->creditOwnerCompensation(
                 customer: $customer,
                 amount: (int) $topUp->amount,

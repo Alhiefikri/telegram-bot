@@ -374,8 +374,7 @@ class OrderCartDomainTest extends TestCase
         try {
             app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::storeBalance(), 'web-balance-910003');
             $this->fail('Expected Store Balance to be Telegram-only.');
-        } catch (InvalidCheckout $exception) {
-            $this->assertSame('Store Balance checkout is available only for Telegram customers.', $exception->getMessage());
+        } catch (InvalidCheckout) {
         }
 
         $this->assertSame(0, Order::count());

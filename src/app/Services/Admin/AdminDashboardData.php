@@ -189,6 +189,7 @@ final class AdminDashboardData
         $completedOrderCount = Order::query()->where('order_status', OrderStatus::Completed)->count();
         $gmvAmount = (int) Order::query()
             ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed])
+            ->where('currency', 'IDR')
             ->sum('total_amount');
         $readOnlyBalanceAmount = $this->receiptReport->idrNetTotalCanonical();
 

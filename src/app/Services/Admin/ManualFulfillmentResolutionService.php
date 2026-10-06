@@ -2,27 +2,35 @@
 
 namespace App\Services\Admin;
 
+use App\Enums\ExternalMoneyReceiptClaimOutcome;
 use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\SendTelegramReceipt;
+use App\Models\BscPaymentTransferEvidence;
+use App\Models\ExternalMoneyReceiptReservation;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentBscDetail;
 use App\Models\SupplierFulfillment;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\GuestOrderNotificationService;
 use App\Services\InventoryLedger;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptReservations;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
 use App\Services\ProductCredentialAllocator;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\Warranty\RemainderRefundService;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 class ManualFulfillmentResolutionService
 {
@@ -32,6 +40,7 @@ class ManualFulfillmentResolutionService
         private readonly OrderLifecycle $orders,
         private readonly ProductCredentialAllocator $credentials,
         private readonly GuestOrderNotificationService $guestOrderNotifications,
+        private readonly ExternalMoneyReceiptWriter $receipts,
     ) {}
 
     public function resolve(ManualFulfillmentReview $review, User $actor, string $action, string $reason, ?string $refundReference = null, ?string $refundResult = null, ?string $ip = null): ManualFulfillmentReview
@@ -39,9 +48,10 @@ class ManualFulfillmentResolutionService
         return DB::transaction(function () use ($review, $actor, $action, $reason, $refundReference, $refundResult, $ip) {
             $initial = ManualFulfillmentReview::query()->findOrFail($review->id);
             $initialPayment = Payment::query()->findOrFail($initial->payment_id);
-            if ($action === 'refund' && $initialPayment->provider === 'store_balance') {
+            if ($action === 'refund' && in_array($initialPayment->provider, ['store_balance', 'usdt_balance'], true)) {
                 $customer = Order::findOrFail($initial->order_id)->customer;
-                app(StoreBalanceLedger::class)->lockForTransaction($customer);
+                $ledger = $initialPayment->provider === 'usdt_balance' ? app(CustomerUsdtBalanceLedger::class) : app(StoreBalanceLedger::class);
+                $ledger->lockForTransaction($customer);
             }
             Order::query()->lockForUpdate()->findOrFail($initial->order_id);
             Payment::query()->where('order_id', $initial->order_id)->orderBy('id')->lockForUpdate()->get();
@@ -78,6 +88,10 @@ class ManualFulfillmentResolutionService
             && strtoupper((string) $payment->method) === 'USDT_BEP20';
 
         if ($isPendingBscReview) {
+            if ($this->claimPendingBscReceipt($payment)->isHeld()) {
+                throw new InvalidOrderTransition('The BSC payment receipt is held for review and cannot be completed.');
+            }
+
             $completion = $this->orders->applyManualCompletion($order);
             if (! $completion->newlyApplied) {
                 throw new InvalidOrderTransition('The BSC payment review could not be completed from its current state.');
@@ -111,12 +125,68 @@ class ManualFulfillmentResolutionService
         return $resolved;
     }
 
+    /**
+     * Owner-approved BSC evidence claims the chain receipt from the registry;
+     * legacy reviews without persisted evidence fall back to a per-payment
+     * owner attestation so no approval can move money without a claim.
+     */
+    private function claimPendingBscReceipt(Payment $payment): ExternalMoneyReceiptClaimOutcome
+    {
+        $evidence = BscPaymentTransferEvidence::query()
+            ->where('payment_id', $payment->getKey())
+            ->orderByDesc('id')
+            ->first();
+
+        if ($evidence === null) {
+            return $this->receipts->claimOwnerAttestation($payment);
+        }
+
+        if ($evidence->log_index === null) {
+            $this->receipts->reservePayment(
+                $payment,
+                ExternalMoneyReceiptReservation::REASON_MISSING_CHAIN_IDENTITY,
+                ['tx_hash' => (string) $evidence->tx_hash],
+            );
+
+            return ExternalMoneyReceiptClaimOutcome::Review;
+        }
+
+        $detail = PaymentBscDetail::query()->whereKey($payment->getKey())->first();
+
+        try {
+            $receipt = $this->receipts->receiptForBscPayment(
+                $payment,
+                (int) ($detail?->chain_id ?: config('services.bsc.chain_id', 56)),
+                (string) $evidence->tx_hash,
+                (int) $evidence->log_index,
+                (string) $evidence->receiver_address,
+                (string) $evidence->amount_units,
+                $detail?->token_decimals === null ? null : (int) $detail->token_decimals,
+            );
+        } catch (InvalidArgumentException $exception) {
+            $this->receipts->reservePayment(
+                $payment,
+                ExternalMoneyReceiptReservation::REASON_UNNORMALIZABLE_IDENTITY,
+                ['identity_error' => $exception->getMessage()],
+            );
+
+            return ExternalMoneyReceiptClaimOutcome::Review;
+        }
+
+        return $this->receipts->claim(
+            $receipt,
+            ExternalMoneyReceiptReservations::SOURCE_RUNTIME,
+            ExternalMoneyReceiptReservation::LEGACY_TYPE_PAYMENT,
+            (string) $payment->getKey(),
+        );
+    }
+
     private function refund(ManualFulfillmentReview $review, User $actor, string $reason, ?string $reference, ?string $result, ?string $ip): ManualFulfillmentReview
     {
         $order = Order::findOrFail($review->order_id);
         app(SupplierFulfillmentService::class)->assertRefundable($order);
         $payment = Payment::query()->findOrFail($review->payment_id);
-        if ($payment->provider === 'store_balance') {
+        if (in_array($payment->provider, ['store_balance', 'usdt_balance'], true)) {
             $this->orders->applyPaymentRefunded($payment);
 
             return $this->markResolved($review, ManualFulfillmentReview::STATE_REFUNDED, $actor, $reason, null, 'success');

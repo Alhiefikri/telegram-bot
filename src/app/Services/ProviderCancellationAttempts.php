@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Jobs\ProcessProviderCancellationAttempt;
 use App\Models\Payment;
 use App\Models\ProviderCancellationAttempt;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\Pakasir\PakasirPayloadSanitizer;
 use App\Services\Pakasir\PakasirPaymentEventLogger;
 use App\Services\Pakasir\PakasirProviderAdapter;
@@ -18,6 +19,7 @@ final readonly class ProviderCancellationAttempts
     public function __construct(
         private PakasirProviderAdapter $pakasir,
         private PakasirPaymentEventLogger $events,
+        private ExternalMoneyReceiptWriter $receipts,
     ) {}
 
     /**
@@ -106,6 +108,14 @@ final readonly class ProviderCancellationAttempts
         if (in_array($status, ['paid', 'completed', 'success'], true)) {
             // applyPaymentPaid re-locks Order then Payment and creates the
             // Manual Fulfillment Review because this Order is already released.
+            // A held receipt must never mark the payment paid.
+            if ($this->receipts->claimProviderPayment($payment)->isHeld()) {
+                $exception = new RuntimeException('The provider receipt is held for review.');
+                $this->markRetryableFailure($attempt->id, $exception, $response);
+
+                return;
+            }
+
             app(OrderLifecycle::class)->applyPaymentPaid($payment);
             ProviderCancellationAttempt::query()->whereKey($attempt->id)->update([
                 'state' => ProviderCancellationAttempt::STATE_ALREADY_PAID,

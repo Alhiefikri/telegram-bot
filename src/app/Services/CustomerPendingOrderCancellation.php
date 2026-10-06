@@ -9,6 +9,7 @@ use App\Jobs\ReconcileCustomerCancellationPayment;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirTransaction;
 use App\Support\PaymentProvider;
@@ -21,6 +22,7 @@ final readonly class CustomerPendingOrderCancellation
         private OrderLifecycle $orders,
         private PakasirProviderAdapter $pakasir,
         private KlikQrisProviderAdapter $klikQris,
+        private ExternalMoneyReceiptWriter $receipts,
     ) {}
 
     public function cancel(Order $order): CustomerCancellationOutcome
@@ -36,6 +38,10 @@ final readonly class CustomerPendingOrderCancellation
 
         try {
             if ($this->providerReportsPaid($payment)) {
+                if ($this->receipts->claimProviderPayment($payment)->isHeld()) {
+                    return CustomerCancellationOutcome::VerificationUnavailable;
+                }
+
                 $this->orders->applyPaymentPaid($payment);
 
                 return CustomerCancellationOutcome::Paid;
@@ -64,6 +70,10 @@ final readonly class CustomerPendingOrderCancellation
     public function reconcile(Payment $payment): void
     {
         if (! $this->requiresProviderVerification($payment) || ! $this->providerReportsPaid($payment)) {
+            return;
+        }
+
+        if ($this->receipts->claimProviderPayment($payment)->isHeld()) {
             return;
         }
 

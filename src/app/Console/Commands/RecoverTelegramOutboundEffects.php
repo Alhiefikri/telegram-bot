@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\OrderStatus;
 use App\Enums\TelegramOutboundEffectState;
+use App\Enums\TelegramOutboundEffectType;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendProductPriceChangeNotifications;
@@ -48,6 +49,10 @@ class RecoverTelegramOutboundEffects extends Command
 
         $ledger->readyToDispatchQuery(now())
             ->whereIn('effect_type', [
+                TelegramOutboundEffectType::BalanceAdjustmentNotice->value,
+                TelegramOutboundEffectType::BalanceOperationsAlert->value,
+                TelegramOutboundEffectType::OwnerCompensationNotification->value,
+                TelegramOutboundEffectType::UsdtRefundReceipt->value,
                 TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,

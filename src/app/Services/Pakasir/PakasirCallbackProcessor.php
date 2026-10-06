@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
@@ -19,6 +20,7 @@ class PakasirCallbackProcessor
         private readonly PakasirProviderAdapter $client,
         private readonly PakasirPaymentEventLogger $events,
         private readonly PakasirProviderReadiness $readiness,
+        private readonly ExternalMoneyReceiptWriter $receipts,
     ) {}
 
     public function processCallback(array $payload): PaymentEvent
@@ -121,9 +123,18 @@ class PakasirCallbackProcessor
     private function applyPaid(PaymentEvent $event): void
     {
         $payment = Payment::query()->whereKey($event->payment_id)->firstOrFail();
-        $this->orders->applyPaymentPaid($payment);
 
-        $event->update(['processed_at' => now()]);
+        DB::transaction(function () use ($payment, $event): void {
+            // The global receipt registry owns the physical money identity; an
+            // already claimed or held receipt never marks this payment paid.
+            if ($this->receipts->claimProviderPayment($payment)->isHeld()) {
+                return;
+            }
+
+            $this->orders->applyPaymentPaid($payment);
+
+            $event->update(['processed_at' => now()]);
+        }, 5);
     }
 
     private function findPayment(PakasirTransaction $transaction): ?Payment

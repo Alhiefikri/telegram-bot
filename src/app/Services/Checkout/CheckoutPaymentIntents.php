@@ -8,6 +8,8 @@ final class CheckoutPaymentIntents
 
     public const RAIL_STORE_BALANCE = 'store_balance';
 
+    public const RAIL_USDT_BALANCE = 'usdt_balance';
+
     public const RAIL_BINANCE_PAY = 'binance_pay';
 
     public const RAIL_BINANCE_PAY_ID = 'binance_pay_id';
@@ -17,7 +19,7 @@ final class CheckoutPaymentIntents
     /** @return list<string> */
     public static function supportedPaymentRails(): array
     {
-        return [self::RAIL_QRIS, self::RAIL_STORE_BALANCE, self::RAIL_BINANCE_PAY_ID, self::RAIL_USDT_BEP20];
+        return [self::RAIL_QRIS, self::RAIL_STORE_BALANCE, self::RAIL_USDT_BALANCE, self::RAIL_BINANCE_PAY_ID, self::RAIL_USDT_BEP20];
     }
 
     /** @return list<string> */
@@ -71,6 +73,11 @@ final class CheckoutPaymentIntents
     public static function storeBalance(): StoreBalanceCheckoutIntent
     {
         return new StoreBalanceCheckoutIntent;
+    }
+
+    public static function usdtBalance(): UsdtBalanceCheckoutIntent
+    {
+        return new UsdtBalanceCheckoutIntent;
     }
 
     public static function binancePayId(): BinancePayCheckoutIntent

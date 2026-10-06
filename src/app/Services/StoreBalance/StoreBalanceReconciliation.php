@@ -21,10 +21,12 @@ final class StoreBalanceReconciliation
                 'customer_balance_accounts.balance',
             ])
             ->selectSub(function ($query): void {
+                $debits = StoreBalanceEntryKind::debitValues();
+                $placeholders = implode(', ', array_fill(0, count($debits), '?'));
                 $query->from('store_balance_entries')
                     ->selectRaw(
-                        'COALESCE(SUM(CASE WHEN kind = ? THEN -amount ELSE amount END), 0)',
-                        [StoreBalanceEntryKind::PurchaseDebit->value],
+                        "COALESCE(SUM(CASE WHEN kind IN ({$placeholders}) THEN -amount ELSE amount END), 0)",
+                        $debits,
                     )
                     ->whereColumn('store_balance_entries.customer_balance_account_id', 'customer_balance_accounts.id');
             }, 'ledger_balance')

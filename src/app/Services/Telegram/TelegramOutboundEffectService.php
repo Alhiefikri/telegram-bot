@@ -8,7 +8,11 @@ use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
+use App\Models\BalanceAdjustmentRequest;
+use App\Models\BalanceOperationsAlertEpisode;
 use App\Models\Customer;
+use App\Models\CustomerUsdtBalanceEntry;
+use App\Models\CustomerUsdtTopUp;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\ProductPriceChangeEvent;
@@ -28,6 +32,7 @@ use App\Models\WarrantyClaim;
 use App\Services\AuditLogger;
 use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -67,6 +72,8 @@ class TelegramOutboundEffectService
     public const TYPE_BALANCE_TOP_UP_CHANNEL_PROOF = TelegramOutboundEffectType::BalanceTopUpChannelProof->value;
 
     public const TYPE_OWNER_COMPENSATION_NOTIFICATION = TelegramOutboundEffectType::OwnerCompensationNotification->value;
+
+    public const TYPE_BALANCE_OPERATIONS_ALERT = TelegramOutboundEffectType::BalanceOperationsAlert->value;
 
     public const TYPE_RECEIPT_CREDENTIALS = TelegramOutboundEffectType::ReceiptCredentials->value;
 
@@ -143,6 +150,8 @@ class TelegramOutboundEffectService
     public const TEMPLATE_BALANCE_TOP_UP_CHANNEL_PROOF = 'balance-top-up-channel-proof-v1';
 
     public const TEMPLATE_OWNER_COMPENSATION_NOTIFICATION = 'balance-owner-compensation-v1';
+
+    public const TEMPLATE_BALANCE_OPERATIONS_ALERT = 'balance-operations-alert-v1';
 
     public const TEMPLATE_RECEIPT_CREDENTIALS = 'receipt-credentials-v1';
 
@@ -558,6 +567,99 @@ class TelegramOutboundEffectService
         ]);
     }
 
+    /** Materialize the obligation inside the money/auth transaction. Recovery dispatches it. */
+    public function recordBalanceAdjustmentNotice(string $sourceId, string $target, string $message, ?Customer $customer = null): TelegramOutboundEffect
+    {
+        $chatId = $target === 'customer' ? (string) $customer?->telegram_id : trim((string) config('services.telegram.admin_telegram_chat_id'));
+        if (! in_array($target, ['customer', 'owner'], true) || ! preg_match('/^-?[1-9][0-9]{0,18}$/D', $chatId)) {
+            throw new InvalidArgumentException('Balance adjustment notification recipient is unavailable.');
+        }
+        $key = 'balance-adjustment:'.$sourceId.':'.$target.':v1';
+
+        return TelegramOutboundEffect::firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectType::BalanceAdjustmentNotice->value,
+            'source_type' => BalanceAdjustmentRequest::class, 'source_id' => $sourceId,
+            'target_type' => $target === 'owner' ? 'admin' : 'customer', 'telegram_chat_id' => $chatId,
+            'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE, 'telegram_method' => 'sendMessage',
+            'locale' => $customer?->locale ?? 'id', 'template_version' => 'balance-adjustment-v1',
+            'state' => TelegramOutboundEffectState::Pending->value, 'attempts' => 0, 'next_attempt_at' => now(),
+            'outcome_metadata' => ['delivery_context' => 'balance_adjustment', 'message' => $message],
+        ]);
+    }
+
+    public function recordUsdtTopUpReceipt(
+        CustomerUsdtTopUp $target,
+        CustomerUsdtBalanceEntry $entry,
+        bool $late,
+    ): TelegramOutboundEffect {
+        $customer = Customer::query()->findOrFail($target->customer_id);
+        $chatId = (string) $customer->telegram_id;
+        if (preg_match('/^[1-9][0-9]{0,18}$/D', $chatId) !== 1) {
+            throw new InvalidArgumentException('USDT receipt recipient unavailable.');
+        }
+        $locale = $customer->locale ?? 'id';
+        $translations = app(TelegramLocale::class);
+        $message = implode("\n", [
+            $translations->translateLocale($locale, 'balance.usdt.receipt.title'),
+            $translations->translateLocale($locale, 'balance.usdt.receipt.credit', [
+                'amount' => UsdtMicroAmount::fromUnits($entry->amount_micro)->decimal(),
+            ]),
+            $translations->translateLocale($locale, 'balance.usdt.receipt.reference', ['reference' => $target->id]),
+            ...((int) $entry->amount_micro !== (int) $target->amount_micro ? [
+                $translations->translateLocale($locale, 'balance.usdt.receipt.revised', [
+                    'original' => UsdtMicroAmount::fromUnits($target->amount_micro)->decimal(),
+                    'approved' => UsdtMicroAmount::fromUnits($entry->amount_micro)->decimal(),
+                ]),
+            ] : []),
+            ...($late ? [$translations->translateLocale($locale, 'balance.usdt.receipt.late')] : []),
+        ]);
+        $key = 'usdt-top-up:'.$target->id.':receipt:v1';
+
+        return TelegramOutboundEffect::firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectType::UsdtTopUpReceipt->value,
+            'source_type' => CustomerUsdtTopUp::class, 'source_id' => $target->id,
+            'target_type' => 'customer', 'telegram_chat_id' => $chatId,
+            'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE, 'telegram_method' => 'sendMessage',
+            'locale' => $locale, 'template_version' => 'usdt-top-up-receipt-v1',
+            'state' => TelegramOutboundEffectState::Pending->value, 'attempts' => 0, 'next_attempt_at' => now(),
+            'outcome_metadata' => ['delivery_context' => 'usdt_top_up_receipt', 'message' => $message],
+        ]);
+    }
+
+    public function recordUsdtRefundReceipt(CustomerUsdtBalanceEntry $entry): ?TelegramOutboundEffect
+    {
+        $customer = $entry->account->customer;
+        $chatId = (string) $customer->telegram_id;
+        if (preg_match('/^[1-9][0-9]{0,18}$/D', $chatId) !== 1) {
+            return null;
+        }
+        $locale = $customer->locale ?? 'id';
+        $translations = app(TelegramLocale::class);
+        $order = Order::findOrFail($entry->refund_order_id);
+        $message = implode("\n", [
+            $translations->translateLocale($locale, 'balance.usdt.refund.title'),
+            $translations->translateLocale($locale, 'balance.usdt.receipt.credit', [
+                'amount' => UsdtMicroAmount::fromUnits($entry->amount_micro)->decimal(),
+            ]),
+            $order->invoice_number,
+            $translations->translateLocale($locale, 'balance.usdt.receipt.reference', ['reference' => (string) $entry->id]),
+        ]);
+        $key = 'usdt-refund:'.$entry->id.':receipt:v1';
+
+        return TelegramOutboundEffect::firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectType::UsdtRefundReceipt->value,
+            'source_type' => CustomerUsdtBalanceEntry::class, 'source_id' => (string) $entry->id,
+            'target_type' => 'customer', 'telegram_chat_id' => $chatId,
+            'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE, 'telegram_method' => 'sendMessage',
+            'locale' => $locale, 'template_version' => 'usdt-refund-receipt-v1',
+            'state' => TelegramOutboundEffectState::Pending->value, 'attempts' => 0, 'next_attempt_at' => now(),
+            'outcome_metadata' => ['delivery_context' => 'usdt_refund_receipt', 'message' => $message],
+        ]);
+    }
+
     public function recordSupplierHealth(SupplierHealthEvent $event, string $chatId): TelegramOutboundEffect
     {
         $key = 'supplier-health:'.$event->id;
@@ -571,6 +673,41 @@ class TelegramOutboundEffectService
             'template_version' => 'supplier-health-v1', 'state' => TelegramOutboundEffectState::Pending->value,
             'attempts' => 0, 'next_attempt_at' => now(),
             'outcome_metadata' => ['delivery_context' => 'supplier_health'],
+        ]);
+    }
+
+    public function recordBalanceOperationsAlert(
+        BalanceOperationsAlertEpisode $episode,
+        string $chatId,
+        string $message,
+        bool $resolved,
+    ): TelegramOutboundEffect {
+        // The key carries the open transition (`open_count`, incremented every
+        // time an episode reopens), so a reopened condition is announced again
+        // while a repeated evaluation of the same transition still dedupes.
+        $key = implode(':', [
+            'balance-ops-alert',
+            (string) $episode->id,
+            $resolved ? 'resolved' : $episode->fingerprint,
+            (string) $episode->open_count,
+        ]);
+
+        return TelegramOutboundEffect::query()->firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1,
+            'effect_type' => self::TYPE_BALANCE_OPERATIONS_ALERT,
+            'source_type' => BalanceOperationsAlertEpisode::class, 'source_id' => (string) $episode->id,
+            'target_type' => 'admin', 'telegram_chat_id' => $chatId,
+            'queue' => 'notifications', 'telegram_method' => 'sendMessage', 'locale' => 'id',
+            'template_version' => self::TEMPLATE_BALANCE_OPERATIONS_ALERT,
+            'state' => TelegramOutboundEffectState::Pending->value,
+            'attempts' => 0, 'next_attempt_at' => now(),
+            'outcome_metadata' => [
+                'delivery_context' => 'balance_operations_alert',
+                'delivery_method' => 'sendMessage',
+                'alert_key' => $episode->alert_key,
+                'alert_state' => $resolved ? 'resolved' : 'open',
+                'message' => $message,
+            ],
         ]);
     }
 
@@ -1991,6 +2128,8 @@ class TelegramOutboundEffectService
                     'delivery_context' => 'explicit_resend',
                     'duplicate_risk_acknowledged' => true,
                     'supersedes_effect_id' => (string) $locked->getKey(),
+                    ...(in_array($locked->effect_type, [TelegramOutboundEffectType::UsdtTopUpReceipt->value, TelegramOutboundEffectType::UsdtRefundReceipt->value], true)
+                        ? ['message' => $locked->outcome_metadata['message'] ?? null] : []),
                 ],
             ]);
 
@@ -2782,6 +2921,9 @@ class TelegramOutboundEffectService
 
         if ($effect->source_type === StoreBalanceTopUp::class) {
             return 'Balance top-up #'.substr((string) $effect->source_id, 0, 12);
+        }
+        if ($effect->source_type === CustomerUsdtTopUp::class) {
+            return 'USDT top-up #'.substr((string) $effect->source_id, 0, 12);
         }
 
         if ($effect->source_type === TelegramBroadcastRecipient::class) {

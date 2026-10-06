@@ -23,6 +23,8 @@ use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
+use App\Services\UsdtBalance\UsdtOrderRefundService;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -163,9 +165,13 @@ class OrderStateMachine implements OrderLifecycle
                 if (! $lockedPayment) {
                     throw new InvalidOrderTransition('Payment is not attached to order.');
                 }
+                if ($lockedPayment->provider === PaymentProvider::USDT_BALANCE) {
+                    $customer = Customer::findOrFail($storeBalanceCustomerId);
+                    app(UsdtOrderRefundService::class)->full($customer, $order, $lockedPayment);
+                }
 
                 $this->supplierFulfillment()->assertRefundable($order);
-                if ($lockedPayment->provider !== 'store_balance'
+                if (! in_array($lockedPayment->provider, [PaymentProvider::STORE_BALANCE, PaymentProvider::USDT_BALANCE], true)
                     && OrderRefund::query()->where('payment_id', $lockedPayment->id)->exists()
                     && (int) OrderRefund::query()->where('payment_id', $lockedPayment->id)->where('state', 'confirmed')->sum('amount') !== $lockedPayment->amount) {
                     throw new InvalidOrderTransition('Confirm or recover every registered external refund before refunding the full Order.');
@@ -527,7 +533,7 @@ class OrderStateMachine implements OrderLifecycle
 
     private function lockStoreBalanceAccount(Payment $payment): ?int
     {
-        if (strtolower(trim((string) $payment->provider)) !== PaymentProvider::STORE_BALANCE) {
+        if (! in_array($payment->provider, [PaymentProvider::STORE_BALANCE, PaymentProvider::USDT_BALANCE], true)) {
             return null;
         }
 
@@ -544,7 +550,11 @@ class OrderStateMachine implements OrderLifecycle
             throw new InvalidOrderTransition('Store Balance refund customer is missing.');
         }
 
-        $this->storeBalanceLedger()->lockForTransaction($customer);
+        if ($payment->provider === PaymentProvider::USDT_BALANCE) {
+            app(CustomerUsdtBalanceLedger::class)->lockForTransaction($customer);
+        } else {
+            $this->storeBalanceLedger()->lockForTransaction($customer);
+        }
 
         return (int) $customer->getKey();
     }

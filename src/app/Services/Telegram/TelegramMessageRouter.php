@@ -5,6 +5,7 @@ namespace App\Services\Telegram;
 use App\Enums\CartStatus;
 use App\Models\Customer;
 use App\Services\Telegram\Callbacks\TelegramBalanceFundingCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramUsdtFundingCallbackHandler;
 use Illuminate\Support\Arr;
 
 class TelegramMessageRouter
@@ -38,6 +39,7 @@ class TelegramMessageRouter
         private TelegramBinanceVerifyIntents $binanceVerify,
         private TelegramBscVerifyIntents $bscVerify,
         private TelegramBalanceFundingCallbackHandler $balanceFunding,
+        private TelegramUsdtFundingCallbackHandler $usdtFunding,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
@@ -96,6 +98,14 @@ class TelegramMessageRouter
             $this->session->forgetWithLock($customer);
             $this->catalogQueries->forget($customer);
             $this->balanceFunding->handleDepositCommand($customer, $chatId, $text);
+
+            return;
+        }
+
+        if ($this->usdtFunding->isUsdtCommand($text)) {
+            $this->session->forgetWithLock($customer);
+            $this->catalogQueries->forget($customer);
+            $this->usdtFunding->handleUsdtCommand($customer, $chatId, $text);
 
             return;
         }
@@ -306,6 +316,10 @@ class TelegramMessageRouter
             return;
         }
 
+        if ($isPrivateChat && $this->usdtFunding->handleHashInput($customer, $chatId, $text)) {
+            return;
+        }
+
         if ($isPrivateChat && $this->binanceVerify->handleOrderIdInput($customer, $chatId, $text)) {
             return;
         }
@@ -349,6 +363,7 @@ class TelegramMessageRouter
             '/stok',
         ], true)
             || $this->balanceFunding->isDepositCommand($text)
+            || $this->usdtFunding->isUsdtCommand($text)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
             || $this->isBroadcastCommand($text);

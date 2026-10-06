@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Services\Admin\AdminDashboardData;
 use App\Services\Admin\AdminProductDashboardState;
+use App\Services\Admin\BalanceAdjustmentDashboardReadiness;
 use App\Services\Admin\StorefrontFunnelReport;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use Illuminate\Http\RedirectResponse;
@@ -14,7 +15,7 @@ use Illuminate\View\View;
 
 class AdminDashboardController extends Controller
 {
-    public function __invoke(Request $request, AdminDashboardData $dashboardData, AdminProductDashboardState $dashboardState, StorefrontFunnelReport $funnelReport): View|RedirectResponse
+    public function __invoke(Request $request, AdminDashboardData $dashboardData, AdminProductDashboardState $dashboardState, StorefrontFunnelReport $funnelReport, BalanceAdjustmentDashboardReadiness $balanceAdjustmentDashboardReadiness): View|RedirectResponse
     {
         $user = $request->attributes->get('adminUser');
         $requestedTab = (string) $request->query('tab', 'stats');
@@ -65,6 +66,7 @@ class AdminDashboardController extends Controller
             $request->query('family_form') !== null ? (string) $request->query('family_form') : null,
             $request->query('family_id') !== null ? (int) $request->query('family_id') : null,
         );
+        $viewData['balanceAdjustmentDashboardReady'] = $balanceAdjustmentDashboardReadiness->isReady();
 
         $stockAdded = filter_var($request->query('stock_added'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         $viewData['accountStockStatus'] = $stockAdded !== false && $stockAdded !== null

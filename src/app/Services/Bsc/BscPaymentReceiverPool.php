@@ -2,6 +2,7 @@
 
 namespace App\Services\Bsc;
 
+use App\Enums\UsdtReceiverChannel;
 use App\Exceptions\InvalidCheckout;
 use App\Models\BscPaymentReceiver;
 use Illuminate\Database\Eloquent\Collection;
@@ -28,6 +29,7 @@ final class BscPaymentReceiverPool
             ->where('chain_id', $chainId)
             ->where('token_contract', $tokenContract)
             ->where('token_decimals', $tokenDecimals)
+            ->whereHas('addressClaim', fn ($query) => $query->where('channel', UsdtReceiverChannel::Checkout->value))
             ->orderByRaw('CASE WHEN last_assigned_at IS NULL THEN 0 ELSE 1 END ASC')
             ->orderBy('last_assigned_at')
             ->orderBy('id')

@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Services\UsdtBalance\UsdtMicroAmount;
+
 final class Money
 {
     public static function idr(int|float|string|null $amount): string
@@ -16,9 +18,6 @@ final class Money
 
     public static function usdt(int|float|string|null $microAmount): string
     {
-        $amount = number_format(((int) $microAmount) / 1_000_000, 6, '.', '');
-        $amount = rtrim(rtrim($amount, '0'), '.');
-
-        return ($amount === '' ? '0' : $amount).' USDT';
+        return UsdtMicroAmount::formatUnits(max(0, (int) $microAmount)).' USDT';
     }
 }

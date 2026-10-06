@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\StoreBalanceTopUp;
 use App\Models\StoreBalanceTopUpEvent;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Support\PaymentProvider;
@@ -24,6 +25,7 @@ class KlikQrisCallbackProcessor
         private readonly KlikQrisNativeQrisService $nativeQris,
         private readonly StoreBalanceTopUpEventLogger $topUpEvents,
         private readonly StoreBalanceTopUpService $topUps,
+        private readonly ExternalMoneyReceiptWriter $receipts,
     ) {}
 
     /** @param array<mixed> $payload */
@@ -271,6 +273,12 @@ class KlikQrisCallbackProcessor
             if ($payment->fresh()->status === PaymentStatus::Paid) {
                 $lockedEvent->update(['processed_at' => now()]);
 
+                return $lockedEvent->fresh();
+            }
+
+            // The global receipt registry owns the physical money identity:
+            // an already claimed or held receipt never marks this payment paid.
+            if ($this->receipts->claimProviderPayment($payment)->isHeld()) {
                 return $lockedEvent->fresh();
             }
 

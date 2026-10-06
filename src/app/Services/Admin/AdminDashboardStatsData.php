@@ -2,9 +2,12 @@
 
 namespace App\Services\Admin;
 
+use App\Enums\CustomerUsdtFundingPauseScope;
+use App\Enums\CustomerUsdtFundingRail;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\AuditLog;
+use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Models\User;
@@ -15,6 +18,9 @@ use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\Telegram\SalesProofPostNumbering;
+use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Services\UsdtFunding\CustomerUsdtFundingGate;
+use App\Services\UsdtFunding\CustomerUsdtFundingPolicyManager;
 use App\Support\Money;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Carbon;
@@ -30,6 +36,9 @@ final class AdminDashboardStatsData
         private readonly StoreBalanceFundingPolicyManager $fundingPolicies,
         private readonly BscDashboardData $bscDashboard,
         private readonly SakurupiahOperationalMetrics $sakurupiahMetrics,
+        private readonly CustomerUsdtFundingPolicyManager $usdtFundingPolicies,
+        private readonly CustomerUsdtFundingGate $usdtFundingGate,
+        private readonly AdminBalanceOperationsData $balanceOperations,
     ) {}
 
     /**
@@ -47,8 +56,11 @@ final class AdminDashboardStatsData
             'balance' => $this->balance($metrics['read_only_balance_amount']),
             'cards' => $this->statsCards($metrics),
             'fundingPolicy' => $this->fundingPolicy($user),
+            'usdtFundingPolicy' => $this->usdtFundingPolicy($user),
+            'balanceOperations' => $this->balanceOperations->summary(),
             'paymentControl' => $this->paymentControl($user),
             'statusCounts' => $statusCounts,
+            'canViewBalanceReports' => (bool) $user->role?->canReconcilePayments(),
             'actionableStatusCounts' => $this->actionableStatusCounts($statusCounts),
             'earnings' => $this->earnings(),
         ];
@@ -196,6 +208,54 @@ final class AdminDashboardStatsData
             'version' => $state->version,
             'update_url' => route('admin.store-balance.funding-policy.update'),
             'can_manage' => (bool) $user->role?->canManageStoreOperations(),
+        ];
+    }
+
+    private function usdtFundingPolicy(User $user): array
+    {
+        $state = $this->usdtFundingPolicies->currentOrNull();
+        $pauseStates = $this->usdtFundingPolicies->pauses();
+
+        $rails = [];
+        foreach (CustomerUsdtFundingRail::cases() as $rail) {
+            $availability = $this->usdtFundingGate->availability($rail);
+            $rails[] = [
+                'rail' => $rail->value,
+                'label' => $rail->label(),
+                'available' => $availability->available,
+                'reason' => $availability->reason->label(),
+                'detail' => $availability->detail,
+            ];
+        }
+
+        $pauses = [];
+        foreach (CustomerUsdtFundingPauseScope::cases() as $scope) {
+            $pause = $pauseStates[$scope->value] ?? null;
+            $pauses[] = [
+                'scope' => $scope->value,
+                'label' => $scope->label(),
+                'paused' => $pause !== null,
+                'reason' => $pause?->reason,
+                'paused_at' => $pause?->pausedAt,
+            ];
+        }
+
+        $feeMicro = $state?->applicationFeeMicro ?? 0;
+
+        return [
+            'configured' => $state !== null,
+            'funding_enabled' => $state?->fundingEnabled ?? false,
+            'confirmation_ttl_seconds' => $state?->confirmationTtlSeconds
+                ?? CustomerUsdtFundingPolicy::DEFAULT_CONFIRMATION_TTL_SECONDS,
+            'application_fee_input' => $feeMicro === 0 ? '0' : UsdtMicroAmount::fromUnits($feeMicro)->decimal(),
+            'application_fee_display' => $feeMicro === 0 ? '0 USDT' : UsdtMicroAmount::fromUnits($feeMicro)->decimal().' USDT',
+            'terms_version' => $state?->termsVersion,
+            'terms_body' => $state === null ? '' : $this->usdtFundingPolicies->termsBody($state->termsVersion),
+            'version' => $state?->version ?? 0,
+            'update_url' => route('admin.store-balance.usdt-policy.update'),
+            'rails' => $rails,
+            'pauses' => $pauses,
+            'can_manage' => (bool) $user->role?->canManageUsdtFundingPolicy(),
         ];
     }
 

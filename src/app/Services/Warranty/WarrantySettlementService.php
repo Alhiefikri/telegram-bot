@@ -15,6 +15,8 @@ use App\Models\WarrantyClaim;
 use App\Services\AuditLogger;
 use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
+use App\Services\UsdtBalance\UsdtOrderRefundService;
 use Illuminate\Support\Facades\DB;
 
 /** Customer settlement is independent of Supplier Balance recovery. */
@@ -32,7 +34,11 @@ final class WarrantySettlementService
 
         return DB::transaction(function () use ($customer, $initial, $choice): WarrantyClaim {
             // Account before Order, matching checkout and whole-order refunds.
-            $this->ledger->lockForTransaction($customer);
+            if ($initial->order->payments()->where('provider', 'usdt_balance')->exists()) {
+                app(CustomerUsdtBalanceLedger::class)->lockForTransaction($customer);
+            } else {
+                $this->ledger->lockForTransaction($customer);
+            }
             [$claim, $order, $unit, $stock] = $this->claims->lockForSettlement($initial);
             if ((int) $order->customer_id !== (int) $customer->id) {
                 throw new InvalidOrderTransition('The claim is not owned by this Customer.');
@@ -55,7 +61,7 @@ final class WarrantySettlementService
             }
             $payment = Payment::query()->where('order_id', $order->id)->where('status', PaymentStatus::Paid)->whereNotNull('paid_at')->first();
             if ((int) $claim->customer_id !== (int) $customer->id) {
-                if ($payment?->provider === 'store_balance') {
+                if (in_array($payment?->provider, ['store_balance', 'usdt_balance'], true)) {
                     throw new InvalidOrderTransition('Store Balance refund must retain its original debit owner.');
                 }
                 $oldCustomerId = $claim->customer_id;
@@ -88,8 +94,12 @@ final class WarrantySettlementService
                 'supplier_account_unit_id' => $unit->id, 'amount' => $unit->retail_amount,
                 'currency' => $unit->retail_currency, 'state' => 'requested',
             ]);
-            if ($payment->provider === 'store_balance') {
-                $this->ledger->refundPartial($customer, $refund, 'order-refund:'.$refund->id);
+            if (in_array($payment->provider, ['store_balance', 'usdt_balance'], true)) {
+                if ($payment->provider === 'usdt_balance') {
+                    app(UsdtOrderRefundService::class)->partial($customer, $refund);
+                } else {
+                    $this->ledger->refundPartial($customer, $refund, 'order-refund:'.$refund->id);
+                }
                 $refund->update(['state' => 'confirmed', 'confirmed_at' => now()]);
                 $claim->update(['settlement_state' => 'refunded']);
                 $stock->update(['retired_at' => now(), 'retired_reason' => 'warranty_refund']);
@@ -124,7 +134,7 @@ final class WarrantySettlementService
             [$claim, $order, $unit, $stock] = $this->claims->lockForSettlement($initialClaim);
             $refund = OrderRefund::query()->whereKey($initial->id)->lockForUpdate()->firstOrFail();
             $payment = Payment::query()->whereKey($refund->payment_id)->firstOrFail();
-            if ($payment->provider === 'store_balance' || $refund->amount !== $amount || $refund->currency !== $currency
+            if (in_array($payment->provider, ['store_balance', 'usdt_balance'], true) || $refund->amount !== $amount || $refund->currency !== $currency
                 || $claim->settlement_choice !== 'refund' || $refund->order_id !== $order->id
                 || (int) $refund->supplier_account_unit_id !== (int) $unit->id) {
                 throw new InvalidOrderTransition('External refund does not match the registered entitlement.');

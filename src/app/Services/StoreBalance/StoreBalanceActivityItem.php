@@ -10,6 +10,10 @@ final class StoreBalanceActivityItem
 
     public const TYPE_ENTRY = StoreBalanceActivityCursor::TYPE_ENTRY;
 
+    public const KIND_ADJUSTMENT = 'adjustment';
+
+    public const KIND_ADJUSTMENT_REVERSAL = 'adjustment_reversal';
+
     public const KIND_TOP_UP = 'top_up';
 
     public const KIND_COMPENSATION = 'compensation';

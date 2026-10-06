@@ -29,8 +29,8 @@ final class RemainderRefundService
             || $reference === '' || strlen($reference) > 200 || preg_match('/[\x00-\x1f\x7f]/', $reference)) {
             throw new InvalidOrderTransition('Invalid remainder refund evidence.');
         }
-        if (strtolower(trim((string) $payment->provider)) === 'store_balance') {
-            throw new InvalidOrderTransition('Store Balance refunds never register an external remainder.');
+        if (in_array(strtolower(trim((string) $payment->provider)), ['store_balance', 'usdt_balance'], true)) {
+            throw new InvalidOrderTransition('Internal balance refunds never register an external remainder.');
         }
 
         $refunds = OrderRefund::query()->where('payment_id', $payment->id)->orderBy('id')->lockForUpdate()->get();

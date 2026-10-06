@@ -195,27 +195,99 @@ _Avoid_: Top-up receipt, sales report, revenue post
 One immutable ledger row recording a single economic effect on a Store Balance — a top-up credit, a purchase debit, or a refund credit — with its immutable source identity and idempotency identity. Reapplying the same source or key returns the existing entry.
 _Avoid_: Transaction, balance mutation, adjustment row
 
-The following balance-extension terms are **proposed** under [ADR-0019](docs/adr/0019-idr-usdt-economic-sources-and-receipt-claims.md) and issue #537. They describe downstream contracts, not currently available features or approved funding providers. Store Balance continues to mean the existing IDR ledger.
+The following balance-extension terms originate in the **proposed** contracts under [ADR-0019](docs/adr/0019-idr-usdt-economic-sources-and-receipt-claims.md), issue #537, and the A1 capability report. They describe downstream contracts, not currently available features or approved funding providers. Store Balance continues to mean the existing IDR ledger; the external money receipt registry and claim seam are implemented additively (R1 #541) and R2 #542 backfills legacy identities, routes every external payment writer through the registry, and records ambiguous evidence as reservations without activating funding. I1 #543 implements the IDR adjustment service under the accepted H0-v1 single-Owner overlay; I2 #544 adds a gated IDR Dashboard flow; I3 #545 adds the linked full reversal under the same password boundary; U1 #546 adds the separate Customer USDT account, immutable ledger, accounting events and exact micro-USDT contract while funding stays disabled. R2 implementation decisions are recorded in [ADR-0022](docs/adr/0022-external-money-receipt-backfill-and-reservations.md). U4 #549 implements the global receiver-ownership registry — permanent channel-exclusive address claims plus Customer-exclusive deposit receivers — while custody provisioning stays fail-closed and funding remains disabled.
 
 **Customer USDT Balance**:
-A proposed Customer-owned shopping balance held in a separate USDT account and immutable ledger, denominated in integer micro-USDT. It is a store liability, with no implicit conversion to Store Balance and no application custody of private keys.
+A Customer-owned shopping balance held in a separate USDT account and immutable ledger, denominated in integer micro-USDT. U7 credits verified final, attributable top-ups atomically with receipt ownership, economic resolution, accounting and durable Telegram receipt work; new funding remains local/testing-only. U10 spends the full frozen USDT quantity-tier price through the internal `usdt_balance` checkout rail, atomically with Order/Payment, inventory, fulfillment work and durable lifecycle notifications. U11 refunds verified warranty/missing-unit entitlements and full-order remainders in original micro-USDT, linked to the original Customer/Payment/debit and capped cumulatively, with immutable accounting and durable exact receipts. Production authorization remains a separate gate. It is a store liability, with no partial tender, implicit conversion to Store Balance or application custody of private keys.
 _Avoid_: Store Balance USDT, non-custodial wallet, Supplier Balance
 
+**Customer USDT Balance Entry**:
+One immutable ledger row recording a single economic effect on a Customer USDT Balance — a funding credit, purchase debit, refund credit, or linked reversal debit — with its exact positive micro-USDT amount, per-account sequence, typed economic source, request fingerprint and unique idempotency claim. Reapplying the same source, key or fingerprint returns the existing entry; a changed payload conflicts.
+_Avoid_: USDT transaction, balance mutation, wallet row
+
+**Customer USDT Balance History**:
+The bounded, Customer-scoped presentation read of one Customer's USDT balance activity: immutable ledger entries plus funding targets that have no resolution yet. It is keyset-paginated through a signed, Customer-scoped cursor with a 25-row default and 100-row maximum, and its status text is never money authority — only a linked ledger entry means credited funds.
+_Avoid_: account statement, money authority, shared balance cache
+
 **USDT Funding Intent**:
-A proposed expiring Customer confirmation binding exact USDT amount, policy version, private chat/navigation root and nonce before any provider invoice or money posting.
+A Customer-owned expiring confirmation binding exact micro-USDT credit, application fee/payable amount, policy/terms versions, exclusive receiver/payment terms, private chat and canonical message identity plus an opaque nonce. U6 persists this preview without provider, invoice, Payment, receipt, ledger or outbound effects; cancellation/expiry ends only the local preview, and a replaced canonical message (not a mere re-render) invalidates it.
 _Avoid_: USDT invoice, deposit receipt, available funds
 
 **USDT Top-up**:
-A proposed funding target with immutable currency, amount, fee, provider/receiver/token/network and finality snapshots. Only verified attributable final evidence and one economic resolution can credit Customer USDT Balance; expiry does not prove absence of money.
+A confirmed Customer funding target with an immutable identity, currency, amount, fee, receiver/token/network/finality and payment deadline snapshot, one U3 active-target reservation and durable preparation/settlement work. U6 confirmation replay returns the same target; U5 preparation retains its reference and never switches receivers. U7 accepts authenticated lookup hints into a durable inbox, verifies authoritative chain evidence outside transactions and consumes one receipt under DB lease/version fencing. Exact final late money can settle the original source once; expiry retains unresolved exposure, while settled, compensated and externally returned sources never reopen. Receipt delivery failure cannot change money. Production funding authorization remains a separate gate.
 _Avoid_: Order Payment, automatic currency conversion
+
+**USDT Exception Resolution**:
+An immutable, single economic resolution of a confirmed USDT Top-up, approved by a fresh Owner per-action password and backed by authoritative finalized transfer evidence. Revised settlement or compensation credits the actual exactly representable deposit less the original fee without rewriting the original invoice; external return requires a distinct verified outgoing receipt and an authenticated Customer destination authorization. Unknown, ambiguous, sub-micro and additional deposits remain unresolved rather than becoming rounded or arbitrary credits.
+_Avoid_: invoice overwrite, screenshot approval, manual USDT grant, maker-checker requirement
+
+**USDT Reorg Incident**:
+An immutable record that previously credited funding has lost canonical chain evidence, freezing its Customer account while preserving all original receipts and ledger history. Total exposure and conservatively allocated available/spent exposure remain visible as unresolved treasury loss, including when Customer liability is zero.
+_Avoid_: automatic chargeback, history deletion, negative Customer balance, settled loss
+
+**USDT Reorg Recovery Case**:
+An Owner-authorized, per-action-password-confirmed case for a USDT Reorg Incident. Its `authorized_unresolved` status permits recovery investigation but neither closes the loss nor creates assets, charges the Customer or releases the account freeze.
+_Avoid_: automatic recovery, loss settlement, Customer debit authorization
+
+**USDT Funding Policy**:
+The versioned DB/Admin configuration for Customer USDT top-up funding: Owner activation flag, bounded confirmation TTL, nonnegative exact application fee, published terms version and Owner pause controls. H0-v1 disables business minimum/maximum/per-Customer/aggregate caps, presets and the beta allowlist, so the policy holds no cap value; representational and overflow guards remain. Changing it never creates a ledger entry, reservation or provider target.
+_Avoid_: ENV presentation knob, funding credit, exposure quota
+
+**USDT Funding Reservation**:
+The single durable open funding target slot per Customer across rails, created with the policy/terms snapshot and one immutable source identity. Expiry moves it to expired-unresolved but never releases the slot; only a settlement that posts the linked funding ledger entry or a typed release resolution resolves it.
+_Avoid_: USDT Top-up, quota bucket, balance hold
+
+**USDT Funding Pause**:
+An Owner-controlled operational pause of one USDT scope (funding, spending, one rail, or balance receipt delivery) with a required reason and audit. A funding, rail or delivery pause blocks new targets or their receipt messages only: settlement, refund, reversal and reconciliation of money already observed continue, and a deferred receipt stays durable until it is delivered after resume.
+_Avoid_: ledger freeze, account freeze, automatic resume, message loss
+
+**Balance Operations Alert**:
+A durable, deduplicated operational alert about Customer USDT Balance evidence — reconciliation drift, receipt collision, treasury coverage, unresolved reorg loss, stuck funding/settlement/delivery work, a frozen account or an open restore gate — announced to the administrator exactly once per episode and fingerprint. It carries counts, sanitized aggregate amounts, run references and scope names only, never customer identity or chain evidence.
+_Avoid_: money authority, customer notification, log line
+
+**Balance Restore Gate**:
+A post-restore block on new Customer USDT funding and spending after a database restore, kept open until authoritative external evidence for the lost window is replayed and a full reconciliation run recorded after that replay shows zero unexplained drift. It never deletes ledger, receipt or claim history, never refunds automatically and never reopens itself.
+_Avoid_: automatic recovery, funding authorization, migration rollback
+
+**BSC Capability Qualification**:
+The result of probing the BNB Smart Chain RPC surface required by a future USDT funding rail — chain identity, token contract code/decimals, `finalized` block depth behind head, canonical receipt consistency, and bounded transfer-log access — classified as verified, unsupported, or unknown. Only verified capabilities qualify; mismatch or unknown evidence fails closed. A qualified result is RPC evidence only, never funding, custody, provisioning, or legal authorization.
+_Avoid_: provider approval, funding readiness, custody proof
+
+**USDT Deposit Receiver**:
+A public BNB Smart Chain address permanently bound to exactly one Customer for USDT top-up funding, with chain, token contract, decimals and custody namespace fixed when the binding is created. Retirement stops new invoice assignment while the binding, the permanent Customer identity and verification evidence stay immutable, and the address keeps being monitored for late money. It is never reassigned to another Customer, never shared with the checkout pool, and never substituted by a shared address with a unique amount. The application stores public addresses and verification evidence only: no private key, seed or signing capability.
+_Avoid_: shared deposit address, checkout receiver, wallet credential, private key
+
+**USDT Receiver Address Claim**:
+The permanent, channel-exclusive claim of one normalized chain+address pair in the global receiver-ownership registry, owned either by the checkout pool or by one Customer deposit binding. Database uniqueness rejects any cross-table overlap, including addresses whose receiver row was later deleted; a checkout claim can never be converted into a Customer-exclusive binding, and a Customer binding is never recycled.
+_Avoid_: address index, soft reservation, customer wallet, shared address pool
+
+**USDT Deposit Receiver Provisioner**:
+An approved custody adapter that can answer with one exclusive public address per Customer without the application ever holding key material. It reports readiness and capacity, and when no approved adapter is available or its capacity is exhausted the USDT rail refuses to create an invoice instead of falling back to a shared address.
+_Avoid_: signer, wallet generator, private key service
 
 **External Money Receipt**:
 A proposed global identity for one externally observed economic transfer, shared by checkout, funding and funded adjustments. Verified aliases refer to the same physical funds; BSC logs also retain a single-target parent transaction claim. Observation is distinct from authorized consumption.
 _Avoid_: screenshot, webhook delivery ID, customer-submitted hash proof
 
+**External Money Receipt Backfill**:
+A bounded, resumable, additive scan that claims already settled legacy Binance/BSC/QRIS/top-up identities, and records compensated or unnormalizable evidence as reservations, without rewriting any historical amount, provider, or status. Dry runs inspect only and never write receipts, reservations, or checkpoints.
+_Avoid_: data migration, status rewrite, money movement
+
+**Legacy Money Receipt Reservation**:
+A fail-closed denylist row for legacy evidence that cannot be normalized into a claimed receipt (missing provider identity, conflicts, review holds, or owner-compensated unresolved money). Open blocking reservations stay visible and block the cutover readiness gate instead of being discarded.
+_Avoid_: dead letter queue, silent skip, automatic write-off
+
+**Money Receipt Cutover Readiness**:
+The reported gate that every backfill source has completed a full scan with zero conflicts, no blocking reservation remains open, and no writer can move external money without a registry claim. USDT funding stays disabled in this release; readiness is not funding authorization.
+_Avoid_: production approval, provider readiness, canary
+
 **Balance Adjustment Request**:
-A proposed immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID, with an identity/amount preview. H0-v1 permits the store's sole Owner to confirm each request individually under the accepted single-operator exception; this is not a currently available feature. Application or linked full reversal creates a new ledger effect; it never sets or edits a balance directly. An Owner-attested manual case is distinct from a provider-verified top-up.
+An immutable, reasoned and authorized request to add IDR to an already registered Customer selected by exact numeric Telegram ID. I1 #543 implements the service boundary with a five-minute preview and the explicitly approved single-Owner, per-action password confirmation mode from H0-v1; I2 #544 exposes the owner-only Admin Dashboard flow and paginated IDR view; I3 #545 adds the linked full reversal under the same password boundary. Application or linked reversal creates a new ledger effect; it never sets or edits a balance directly. An Owner-attested manual case is distinct from a provider-verified top-up.
 _Avoid_: manual balance overwrite, automatic Customer creation, arbitrary USDT grant
+
+**Balance Adjustment Reversal**:
+A linked full reversal of one applied Balance Adjustment Request, requested from the original history entry with a fresh Owner password. It debits exactly the original credited amount once, only while available funds cover it; insufficient funds become a review without a partial debit or negative balance. The original entry, linked Top-up/refund resolution and any claimed external receipt stay immutable and resolved.
+_Avoid_: balance overwrite, partial reversal, external payment refund
 
 **Economic Source**:
 A proposed typed authorization for one ledger effect, binding its immutable business identity, Customer, currency, exact units, evidence and request fingerprint. Matching replay returns the same posting; changed payload conflicts.
@@ -224,6 +296,22 @@ _Avoid_: arbitrary source string, transport request ID
 **Accounting Event**:
 A proposed append-only, currency-specific counterpart record committed with one ledger posting, linking liability, settlement asset, sale, fee or expense legs. Supplier treasury observations and unresolved deposits remain distinct from Customer available funds.
 _Avoid_: Telegram receipt, mixed-currency total, projection repair
+
+**Accounting Aggregate**:
+A derived, per-consumer total of Accounting Events grouped by balanced leg pair, consumed asynchronously through a unique consumer/event claim. It is reporting evidence that can be rebuilt from immutable events, never an authority for balances and never a single global clearing row.
+_Avoid_: source of truth, ledger balance, global clearing account
+
+**Custody Asset Observation**:
+A read-only, provider-specific statement of USDT assets held by one approved custody adapter, either proving an exact amount or explicitly reporting unavailable/unsupported/missing input. Unavailable is never a proven zero, and a fixture adapter is never proof of actual backing.
+_Avoid_: wallet balance, provider approval, verified backing
+
+**Treasury Movement**:
+An audited bookkeeping record of USDT entering or leaving the operator's custody pool outside Customer funding receipts, such as sweeps, external returns or gas paid from custody. Recording it is not a transfer, credit or refund.
+_Avoid_: Customer top-up, provider settlement, on-chain transfer
+
+**USDT Reconciliation Run**:
+A bounded, read-only comparison of the Customer USDT subledger, its external funding receipts and its accounting aggregates against qualified custody assets and audited treasury movements. Drift freezes only the affected accounts and produces append-only evidence; it never repairs, credits or debits money.
+_Avoid_: balance repair, auto-settlement, money movement
 
 **Store Activity**:
 The public-safe Telegram home summary of the Telegram Customer count and canonical successful Orders. It never discloses revenue, sold units, GMV, or earnings.

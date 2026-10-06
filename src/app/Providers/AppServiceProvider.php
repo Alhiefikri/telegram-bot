@@ -32,6 +32,7 @@ use App\Services\Checkout\KlikQrisCheckoutPaymentPreparation;
 use App\Services\Checkout\ManualQrisCheckoutPaymentPreparation;
 use App\Services\Checkout\SakurupiahCheckoutPaymentPreparation;
 use App\Services\Checkout\StoreBalanceCheckoutPaymentPreparation;
+use App\Services\Checkout\UsdtBalanceCheckoutPaymentPreparation;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\KlikQris\KlikQrisClient;
@@ -67,12 +68,19 @@ use App\Services\Telegram\Callbacks\TelegramOrderCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramOrderTxtCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramPaymentProofCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramReceiptActionCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramUsdtFundingCallbackHandler;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackAckState;
 use App\Services\Telegram\TelegramCallbackHandlerPipeline;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramConfiguredCheckoutPaymentIntentSelector;
+use App\Services\UsdtFunding\LocalBscFundingReadiness;
+use App\Services\UsdtFunding\UsdtFundingRailReadinessRegistry;
+use App\Services\UsdtReceivers\UsdtDepositReceiverProvisioners;
+use App\Services\UsdtTopUps\BscUsdtTopUpRail;
+use App\Services\UsdtTopUps\UsdtTopUpRail;
+use App\Services\UsdtTreasury\UsdtTreasuryAssetRegistry;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
@@ -98,6 +106,7 @@ class AppServiceProvider extends ServiceProvider
                 ? $client
                 : new BscVerificationRpcClientAdapter($client);
         });
+        $this->app->bind(UsdtTopUpRail::class, BscUsdtTopUpRail::class);
         $this->app->bind(BscWalletOwnershipVerifierInterface::class, BscWalletOwnershipVerifier::class);
         $this->app->bind(KlikQrisProviderAdapter::class, KlikQrisClient::class);
         $this->app->bind(KlikQrisTopUpProviderAdapter::class, function ($app): KlikQrisTopUpProviderAdapter {
@@ -111,6 +120,32 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(SakurupiahProviderAdapter::class, SakurupiahClient::class);
         $this->app->singleton(SakurupiahProviderReadiness::class);
+        // USDT treasury asset providers are approved adapters: an implementation
+        // may be tagged only after the H1 custody/capacity/provider gates pass.
+        // Until then the registry is intentionally empty and reconciliation
+        // reports missing custody input instead of any fabricated backing.
+        $this->app->singleton(UsdtTreasuryAssetRegistry::class, fn ($app): UsdtTreasuryAssetRegistry => new UsdtTreasuryAssetRegistry(
+            $app->tagged('usdt-treasury-asset-providers'),
+        ));
+        // USDT deposit receiver provisioners are approved custody adapters: a
+        // provider may be tagged only after the H1 custody/capacity gates pass.
+        // Until then the registry stays empty and allocation fails closed
+        // instead of falling back to a shared address.
+        $this->app->singleton(UsdtDepositReceiverProvisioners::class, fn ($app): UsdtDepositReceiverProvisioners => new UsdtDepositReceiverProvisioners(
+            $app->tagged('usdt-deposit-receiver-provisioners'),
+        ));
+        // Qualified production adapters remain gated. U5's technical-only BSC
+        // path is available in disposable local/testing environments, without
+        // replacing an explicitly registered readiness provider.
+        $this->app->singleton(UsdtFundingRailReadinessRegistry::class, function ($app): UsdtFundingRailReadinessRegistry {
+            $providers = iterator_to_array($app->tagged('usdt-funding-rail-readiness'));
+            if ($app->environment(['local', 'testing'])
+                && ! collect($providers)->contains(fn ($provider): bool => $provider->railKey() === 'bsc_usdt')) {
+                $providers[] = $app->make(LocalBscFundingReadiness::class);
+            }
+
+            return new UsdtFundingRailReadinessRegistry($providers);
+        });
         $this->app->singleton(CheckoutPaymentPreparationResolver::class, function ($app) {
             return new CheckoutPaymentPreparationResolver([
                 ManualQrisCheckoutPaymentPreparation::IDENTITY => $app->make(ManualQrisCheckoutPaymentPreparation::class),
@@ -119,6 +154,7 @@ class AppServiceProvider extends ServiceProvider
                 BscCheckoutPaymentPreparation::IDENTITY => $app->make(BscCheckoutPaymentPreparation::class),
                 SakurupiahCheckoutPaymentPreparation::IDENTITY => $app->make(SakurupiahCheckoutPaymentPreparation::class),
                 StoreBalanceCheckoutPaymentPreparation::IDENTITY => $app->make(StoreBalanceCheckoutPaymentPreparation::class),
+                UsdtBalanceCheckoutPaymentPreparation::IDENTITY => $app->make(UsdtBalanceCheckoutPaymentPreparation::class),
             ]);
         });
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());
@@ -136,6 +172,7 @@ class AppServiceProvider extends ServiceProvider
             $app->make(TelegramLocaleCallbackHandler::class),
             $app->make(TelegramBalanceFundingCallbackHandler::class),
             $app->make(TelegramBalanceActivityCallbackHandler::class),
+            $app->make(TelegramUsdtFundingCallbackHandler::class),
             $app->make(TelegramHomeCallbackHandler::class),
             $app->make(TelegramAdminPaymentCallbackHandler::class),
             $app->make(TelegramBroadcastCallbackHandler::class),

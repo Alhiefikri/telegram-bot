@@ -3,8 +3,11 @@
 namespace Database\Factories;
 
 use App\Enums\BscReceiverVerificationStatus;
+use App\Enums\UsdtReceiverChannel;
 use App\Models\BscPaymentReceiver;
+use App\Models\UsdtReceiverAddressClaim;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use RuntimeException;
 
 /** @extends Factory<BscPaymentReceiver> */
 class BscPaymentReceiverFactory extends Factory
@@ -33,6 +36,26 @@ class BscPaymentReceiverFactory extends Factory
             'verified_by' => null,
             'last_assigned_at' => null,
         ];
+    }
+
+    public function configure(): static
+    {
+        return $this->afterMaking(function (BscPaymentReceiver $receiver): void {
+            $address = BscPaymentReceiver::normalizeAddress((string) ($receiver->address ?: $receiver->address_normalized));
+
+            $claim = UsdtReceiverAddressClaim::query()->firstOrCreate(
+                ['chain_id' => (int) ($receiver->chain_id ?: 56), 'address_normalized' => $address],
+                ['channel' => UsdtReceiverChannel::Checkout, 'claimed_at' => now()],
+            );
+
+            if ($claim->channel !== UsdtReceiverChannel::Checkout) {
+                throw new RuntimeException('This factory address is already claimed by the Customer USDT deposit channel.');
+            }
+
+            $receiver->address = $address;
+            $receiver->address_normalized = $address;
+            $receiver->address_claim_id = $claim->getKey();
+        });
     }
 
     public function verified(): static

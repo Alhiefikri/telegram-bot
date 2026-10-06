@@ -26,6 +26,8 @@ const customerCheckoutViewports = [
 ];
 const customerCheckoutTestPrefix = "customer checkout:";
 
+const customerBalanceLoginToken = "a".repeat(64);
+
 test.beforeAll(async () => {
   const tempDir = mkdtempSync(
     path.join(tmpdir(), "telegram-bot-admin-responsive-")
@@ -126,6 +128,15 @@ test("admin dashboard exposes the shared theme preference control", async ({
   page,
 }) => {
   await login(page);
+  const balanceReportsLink = page.getByRole("link", {
+    name: "Buka laporan saldo",
+  });
+  await expect(balanceReportsLink).toBeVisible();
+  await expect(balanceReportsLink).toHaveAttribute(
+    "href",
+    /\/admin\/store-balance\/reports/
+  );
+
   await expect(
     page.locator('script[type="module"][src*="/assets/app-"]')
   ).toHaveCount(1);
@@ -152,6 +163,71 @@ test("admin dashboard exposes the shared theme preference control", async ({
         .evaluate((body) => getComputedStyle(body).backgroundColor)
     )
     .not.toBe(initialBackground);
+});
+
+test("admin balance adjustment previews the exact Customer and disables duplicate confirmation", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.getByRole("link", { name: "Kelola saldo" }).click();
+
+  await expect(page).toHaveURL(/\/admin\/store-balance\/adjustments/);
+  await page
+    .getByLabel("Telegram ID", { exact: true })
+    .fill("9007199254740993");
+  await page.getByRole("button", { name: "Cari Customer" }).click();
+  await expect(
+    page.getByRole("region", { name: "Customer ditemukan" })
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-customer-telegram-id="9007199254740993"]')
+  ).toHaveText("9007199254740993");
+
+  await page.getByLabel("Jumlah tambahan Rupiah").fill("12345");
+  await page
+    .getByLabel("Alasan penambahan")
+    .fill("Browser QA Owner-attested adjustment.");
+  await page.getByRole("button", { name: "Tinjau penambahan" }).click();
+
+  const preview = page.getByRole("region", {
+    name: "Preview penambahan saldo",
+  });
+  await expect(preview).toContainText("@balance_adjustment_qa");
+  await expect(preview).toContainText("Rp 12.345");
+  await expect(
+    page.getByRole("form", {
+      name: "Konfirmasi penambahan dengan password Owner",
+    })
+  ).toBeVisible();
+
+  await page.getByLabel("Password Owner untuk tindakan ini").fill("password");
+
+  const confirmationForm = page.getByRole("form", {
+    name: "Konfirmasi penambahan dengan password Owner",
+  });
+  const confirmButton = confirmationForm.locator('button[type="submit"]');
+  await confirmationForm.evaluate((form) => {
+    form.submit = () => {
+      window.__balanceAdjustmentSubmitDisabled = form.querySelector(
+        'button[type="submit"]'
+      ).disabled;
+    };
+  });
+  await confirmButton.click();
+  await expect
+    .poll(() => page.evaluate(() => window.__balanceAdjustmentSubmitDisabled))
+    .toBe(true);
+  await expect(confirmButton).toBeDisabled();
+
+  await page.reload();
+  await page.getByLabel("Password Owner untuk tindakan ini").fill("password");
+  await page.getByRole("button", { name: "Konfirmasi penambahan" }).click();
+
+  await expect(
+    page.getByRole("status").filter({ hasText: "Penambahan saldo diterapkan" })
+  ).toBeVisible();
+  await expectNoDocumentOverflow(page);
 });
 
 test("asset isolation: Storefront 404 retains its Storefront entry and theme", async ({
@@ -251,6 +327,49 @@ test("customer checkout: opens canonical page checkout from the landing catalog"
   ).toBeVisible();
   await expect(page.locator("#checkout-form")).toBeVisible();
   await expect(page.locator('input[name="product_id"]')).toBeAttached();
+});
+
+test("customer checkout: opens the authenticated balance overview across mobile viewports", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto(
+    `${baseUrl}/akun/login-link#token=${customerBalanceLoginToken}`,
+    { waitUntil: "domcontentloaded" }
+  );
+  await page.waitForURL(`${baseUrl}/akun/pesanan`);
+  await page.getByRole("link", { name: "Saldo saya" }).click();
+
+  await expect(page).toHaveURL(/\/akun\/saldo/);
+  await expect(page.getByRole("heading", { name: "Saldo saya" })).toBeVisible();
+  await expect(page.getByText("Rp 12.345", { exact: true })).toBeVisible();
+  await expect(page.getByText("0 USDT", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Halaman ini hanya-baca. Top-up, pembayaran, dan perubahan saldo tidak tersedia melalui web."
+    )
+  ).toBeVisible();
+
+  for (const viewport of [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+    { width: 768, height: 900 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expectNoDocumentOverflow(page);
+    await expect(
+      page.getByRole("heading", { name: "Saldo saya" })
+    ).toBeVisible();
+  }
+
+  await page
+    .getByRole("navigation", { name: "Pilih mata uang saldo" })
+    .getByRole("link", { name: "USDT", exact: true })
+    .click();
+  await expect(page).toHaveURL(/currency=USDT/);
+  await expect(page.getByText("Belum ada aktivitas USDT")).toBeVisible();
+  await expectNoDocumentOverflow(page);
 });
 
 test("customer checkout: keeps canonical checkout usable without JavaScript", async ({
@@ -2776,7 +2895,7 @@ test("keeps responsive navigation and utility actions usable", async ({
     })
   );
 
-  await expect(desktopButtons).toHaveCount(10);
+  await expect(desktopButtons).toHaveCount(11);
   expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
   expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
   await expect(
@@ -2825,7 +2944,7 @@ for (const width of [768, 1024, 1280, 1440, 1920]) {
       })
     );
 
-    await expect(desktopButtons).toHaveCount(10);
+    await expect(desktopButtons).toHaveCount(11);
     if (width >= 1024) {
       expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
       expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
@@ -4962,6 +5081,7 @@ function appEnv() {
     MAIL_MAILER: "log",
     // prettier-ignore
     DOGFOOD_FAKE_TELEGRAM_OUTBOUND: 'true',
+    TELEGRAM_ADMIN_CHAT_ID: "998877",
     KLIKQRIS_SANDBOX_ENABLED: "true",
     KLIKQRIS_SANDBOX_API_KEY: "test-only-browser-key",
     KLIKQRIS_SANDBOX_MERCHANT_ID: "merchant-browser",
@@ -5022,9 +5142,25 @@ use App\Models\ProductFamily;
 use App\Models\ProductFamilySlugRedirect;
 use App\Models\ProductStockItem;
 use App\Models\User;
+use App\Models\CustomerLoginLink;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Tests\Support\QrisTestPayload;
+
+foreach ([
+    'customer_usdt_balance_accounts',
+    'customer_usdt_balance_entries',
+    'customer_usdt_balance_accounting_events',
+] as $tableName) {
+    if (! Schema::hasTable($tableName)) {
+        Schema::create($tableName, static function (Blueprint $table): void {
+            $table->id();
+        });
+    }
+}
 
 User::query()->updateOrCreate(
     ['email' => 'test@example.com'],
@@ -5034,6 +5170,38 @@ User::query()->updateOrCreate(
         'password' => Hash::make('password'),
         'role' => UserRole::Owner,
     ],
+);
+
+Customer::query()->updateOrCreate(
+    ['telegram_id' => 9007199254740993],
+    [
+        'first_name' => 'Balance Adjustment QA',
+        'username' => 'balance_adjustment_qa',
+        'locale' => 'id',
+    ],
+);
+
+$balanceCustomer = Customer::query()->updateOrCreate(
+    ['email' => 'balance-browser@example.test'],
+    [
+        'telegram_id' => 9007199254740995,
+        'first_name' => 'Browser Balance Customer',
+        'username' => 'balance_browser',
+        'email_verified_at' => now(),
+    ],
+);
+$loginToken = str_repeat('a', 64);
+CustomerLoginLink::query()->create([
+    'email' => $balanceCustomer->email,
+    'token_hash' => hash('sha256', $loginToken),
+    'expires_at' => now()->addMinutes(15),
+    'requested_ip' => '127.0.0.1',
+]);
+app(StoreBalanceLedger::class)->creditTopUp(
+    $balanceCustomer,
+    12_345,
+    'browser-balance-credit',
+    'browser-balance:credit',
 );
 
 $category = Category::query()->firstOrCreate(

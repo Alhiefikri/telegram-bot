@@ -16,6 +16,8 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
+use App\Services\UsdtBalance\UsdtOrderRefundService;
 use Illuminate\Support\Facades\DB;
 
 /** Refunds only units proven not acquired after bounded fulfillment fails. */
@@ -29,7 +31,8 @@ final class MissingFulfillmentRefundService
         }
 
         return DB::transaction(function () use ($customer, $item): OrderRefund {
-            $ledger = app(StoreBalanceLedger::class);
+            $usdt = $item->order->payments()->where('provider', 'usdt_balance')->exists();
+            $ledger = $usdt ? app(CustomerUsdtBalanceLedger::class) : app(StoreBalanceLedger::class);
             $ledger->lockForTransaction($customer);
             $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
             if ((int) $order->customer_id !== (int) $customer->id) {
@@ -62,8 +65,12 @@ final class MissingFulfillmentRefundService
                 'amount' => $amount, 'currency' => $payment->currency, 'state' => 'requested',
             ]);
             $f->update(['state' => 'refund_pending', 'next_attempt_at' => null, 'last_error' => 'missing_units_refund_pending']);
-            if ($payment->provider === 'store_balance') {
-                $ledger->refundPartial($customer, $refund, 'order-refund:'.$refund->id);
+            if (in_array($payment->provider, ['store_balance', 'usdt_balance'], true)) {
+                if ($payment->provider === 'usdt_balance') {
+                    app(UsdtOrderRefundService::class)->partial($customer, $refund);
+                } else {
+                    $ledger->refundPartial($customer, $refund, 'order-refund:'.$refund->id);
+                }
                 $refund->update(['state' => 'confirmed', 'confirmed_at' => now()]);
                 $fulfillment->completeMissingRefund($f, $refund);
             }
@@ -94,7 +101,7 @@ final class MissingFulfillmentRefundService
             $refund = OrderRefund::query()->whereKey($initial->id)->lockForUpdate()->firstOrFail();
             $f = SupplierFulfillment::findOrFail($refund->supplier_fulfillment_id);
             $identity = hash('sha256', $payment->provider.'|'.$currency.'|'.$reference);
-            if ($refund->amount !== $amount || $refund->currency !== $currency || $payment->provider === 'store_balance'
+            if ($refund->amount !== $amount || $refund->currency !== $currency || in_array($payment->provider, ['store_balance', 'usdt_balance'], true)
                 || $refund->warranty_claim_id !== null || $f->order_id !== $order->id) {
                 throw new InvalidOrderTransition('Transfer evidence does not match the missing-unit entitlement.');
             }

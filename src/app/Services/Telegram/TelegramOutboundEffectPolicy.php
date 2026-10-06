@@ -51,6 +51,8 @@ final class TelegramOutboundEffectPolicy
         'balance_top_up_not_payable',
         'balance_top_up_expired',
         'balance_top_up_receipt_missing',
+        'usdt_receipt_missing',
+        'balance_operations_alert_missing',
         'balance_top_up_not_paid',
         'balance_owner_compensation_missing',
         'balance_owner_compensation_not_eligible',
@@ -85,7 +87,11 @@ final class TelegramOutboundEffectPolicy
     private const MAX_ATTEMPTS = [
         TelegramOutboundEffectType::WarrantyNotification->value => 3,
         TelegramOutboundEffectType::WarrantyDeadlineReminder->value => 3,
+        TelegramOutboundEffectType::BalanceAdjustmentNotice->value => 3,
         TelegramOutboundEffectType::SupplierHealth->value => 3,
+        TelegramOutboundEffectType::UsdtTopUpReceipt->value => 3,
+        TelegramOutboundEffectType::UsdtRefundReceipt->value => 3,
+        TelegramOutboundEffectType::BalanceOperationsAlert->value => 3,
         TelegramOutboundEffectType::ReceiptCredentials->value => self::RECEIPT_MAX_ATTEMPTS,
         TelegramOutboundEffectType::ReceiptTxtDownload->value => self::RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS,
         TelegramOutboundEffectType::ReceiptOrderActions->value => self::RECEIPT_ACTIONS_MAX_ATTEMPTS,
@@ -105,6 +111,9 @@ final class TelegramOutboundEffectPolicy
     private const ATTEMPTS_EXHAUSTED_CODES = [
         TelegramOutboundEffectType::WarrantyDeadlineReminder->value => 'warranty_deadline_reminder_attempts_exhausted',
         TelegramOutboundEffectType::SupplierHealth->value => 'supplier_health_attempts_exhausted',
+        TelegramOutboundEffectType::UsdtTopUpReceipt->value => 'usdt_top_up_receipt_attempts_exhausted',
+        TelegramOutboundEffectType::UsdtRefundReceipt->value => 'usdt_refund_receipt_attempts_exhausted',
+        TelegramOutboundEffectType::BalanceOperationsAlert->value => 'balance_operations_alert_attempts_exhausted',
         TelegramOutboundEffectType::ReceiptCredentials->value => 'receipt_attempts_exhausted',
         TelegramOutboundEffectType::ReceiptTxtDownload->value => 'receipt_txt_download_attempts_exhausted',
         TelegramOutboundEffectType::ReceiptOrderActions->value => 'receipt_actions_attempts_exhausted',
@@ -119,12 +128,27 @@ final class TelegramOutboundEffectPolicy
         TelegramOutboundEffectType::OwnerCompensationNotification->value => 'balance_owner_compensation_attempts_exhausted',
     ];
 
+    public function __construct(
+        private readonly TelegramBalanceReceiptDeliveryPause $deliveryPause,
+    ) {}
+
     /** @return Builder<TelegramOutboundEffect> */
     public function applyRetryableConstraints(Builder $query, ?string $effectType = null): Builder
     {
         if ($effectType !== null) {
             $query->where('effect_type', $effectType);
         }
+
+        // A paused balance receipt delivery family is not retryable work: the
+        // effects stay pending and are rediscovered after the pause resumes.
+        if ($effectType === null || in_array($effectType, TelegramBalanceReceiptDeliveryPause::EFFECT_TYPES, true)) {
+            foreach (TelegramBalanceReceiptDeliveryPause::EFFECT_TYPES as $pausableType) {
+                if ($this->deliveryPause->pausesEffect($pausableType)) {
+                    $query->where('effect_type', '<>', $pausableType);
+                }
+            }
+        }
+
         $query
             ->where(function (Builder $state): void {
                 $state
@@ -211,6 +235,10 @@ final class TelegramOutboundEffectPolicy
 
     public function canClaim(TelegramOutboundEffect $effect, CarbonInterface $at): bool
     {
+        if ($this->deliveryPause->pausesEffect((string) $effect->effect_type)) {
+            return false;
+        }
+
         if (! in_array($this->stateValue($effect), [
             TelegramOutboundEffectState::Pending->value,
             TelegramOutboundEffectState::Failed->value,

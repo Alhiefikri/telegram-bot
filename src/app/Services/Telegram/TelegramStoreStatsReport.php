@@ -131,7 +131,7 @@ final class TelegramStoreStatsReport
         }
 
         $salesValue = $paidOrders > 0
-            ? (int) Order::query()->whereIn('id', $paidOrderIds)->sum('total_amount')
+            ? (int) Order::query()->whereIn('id', $paidOrderIds)->where('currency', 'IDR')->sum('total_amount')
             : 0;
 
         $receipts = $this->receiptReport->netReceiptsByCurrency($canonicalPaidPayments);

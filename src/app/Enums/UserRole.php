@@ -49,7 +49,21 @@ enum UserRole: string
         return $this === self::Owner;
     }
 
+    /**
+     * Customer-exclusive USDT deposit receivers are custody/provider address
+     * mappings: Owner-only, with every mapping audited.
+     */
+    public function canManageUsdtReceivers(): bool
+    {
+        return $this === self::Owner;
+    }
+
     public function canCompensateStoreBalance(): bool
+    {
+        return $this === self::Owner;
+    }
+
+    public function canManageUsdtFundingPolicy(): bool
     {
         return $this === self::Owner;
     }

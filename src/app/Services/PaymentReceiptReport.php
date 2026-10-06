@@ -83,13 +83,15 @@ class PaymentReceiptReport
      *
      * @return array{IDR: int, USDT: int}
      */
-    public function customerTransactionTotals(int $customerId): array
+    public function customerTransactionTotals(int $customerId, ?Carbon $createdFrom = null, ?Carbon $createdUntil = null): array
     {
         $currency = "UPPER(COALESCE(NULLIF(TRIM(canonical_payments.currency), ''), 'IDR'))";
         $amount = 'CASE WHEN canonical_payments.amount > 0 THEN canonical_payments.amount ELSE 0 END';
         $totals = $this->canonicalPaidPaymentsQuery(null, null, false)
             ->join('orders as transaction_orders', 'transaction_orders.id', '=', 'canonical_payments.order_id')
             ->where('transaction_orders.customer_id', $customerId)
+            ->when($createdFrom !== null, fn ($query) => $query->where('transaction_orders.created_at', '>=', $createdFrom))
+            ->when($createdUntil !== null, fn ($query) => $query->where('transaction_orders.created_at', '<', $createdUntil))
             ->whereIn('transaction_orders.order_status', [
                 OrderStatus::Processing->value,
                 OrderStatus::Completed->value,

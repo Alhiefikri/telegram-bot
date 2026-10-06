@@ -41,6 +41,15 @@ final readonly class PaymentProviderResolver
                 paymentIntent: $this->intentFor($paymentRail, PaymentProvider::STORE_BALANCE),
             );
         }
+        if ($paymentRail === CheckoutPaymentIntents::RAIL_USDT_BALANCE) {
+            return new PaymentProviderSelection(
+                requestedProvider: $requestedProvider,
+                provider: PaymentProvider::USDT_BALANCE,
+                providerVersion: $providerVersion,
+                settingId: $settingId,
+                paymentIntent: CheckoutPaymentIntents::usdtBalance(),
+            );
+        }
         if ($requestedProvider === PaymentProvider::PAKASIR) {
             throw new InvalidCheckout('Pakasir sudah dipensiunkan untuk checkout baru.');
         }

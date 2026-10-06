@@ -20,6 +20,8 @@ final class StoreBalanceActivityService
 {
     public const PAGE_SIZE = 5;
 
+    public const WEB_PAGE_SIZE = 25;
+
     private const BALANCE_TOP_UP_SOURCE = 'balance_top_up';
 
     private const OWNER_COMPENSATION_SOURCE = 'owner_compensation';
@@ -48,17 +50,30 @@ final class StoreBalanceActivityService
 
     public function firstPage(Customer $customer): StoreBalanceActivityPage
     {
-        return $this->page($customer, null, false);
+        return $this->page($customer, null, false, self::PAGE_SIZE);
     }
 
     public function olderPage(Customer $customer, StoreBalanceActivityCursor $cursor): ?StoreBalanceActivityPage
     {
-        return $this->page($customer, $cursor, false);
+        return $this->page($customer, $cursor, false, self::PAGE_SIZE);
     }
 
     public function newerPage(Customer $customer, StoreBalanceActivityCursor $cursor): ?StoreBalanceActivityPage
     {
-        return $this->page($customer, $cursor, true);
+        return $this->page($customer, $cursor, true, self::PAGE_SIZE);
+    }
+
+    public function pageForCustomer(
+        Customer $customer,
+        ?StoreBalanceActivityCursor $cursor,
+        bool $newer,
+        int $limit = self::WEB_PAGE_SIZE,
+    ): ?StoreBalanceActivityPage {
+        if ($limit < 1 || $limit > 100) {
+            throw new \InvalidArgumentException('Store Balance activity page size must be between 1 and 100.');
+        }
+
+        return $this->page($customer, $cursor, $newer, $limit);
     }
 
     public function detail(Customer $customer, string $type, int $id): ?StoreBalanceActivityDetail
@@ -142,16 +157,17 @@ final class StoreBalanceActivityService
         Customer $customer,
         ?StoreBalanceActivityCursor $cursor,
         bool $newer,
+        int $pageSize,
     ): ?StoreBalanceActivityPage {
         if ($cursor !== null && ! $this->cursorExists($customer, $cursor)) {
             return null;
         }
 
         $accountId = $this->accountId($customer);
-        $topUps = $this->topUpCandidates($customer->id, $cursor, $newer);
+        $topUps = $this->topUpCandidates($customer->id, $cursor, $newer, $pageSize);
         $entries = $accountId === null
             ? collect()
-            : $this->entryCandidates($customer->id, $accountId, $cursor, $newer);
+            : $this->entryCandidates($customer->id, $accountId, $cursor, $newer, $pageSize);
         $credits = $this->creditEntriesForTopUps($accountId, $topUps);
         $orders = $this->ordersForEntries($customer->id, $entries);
         $originals = $accountId === null
@@ -168,11 +184,19 @@ final class StoreBalanceActivityService
             $items[] = $this->entryItem($entry, $orders, $originals->get((string) $this->orderIdForEntry($entry)));
         }
 
-        $this->sortItems($items);
-        $hasMoreInDirection = count($items) > self::PAGE_SIZE;
+        usort($items, static function (StoreBalanceActivityItem $left, StoreBalanceActivityItem $right): int {
+            $leftCursor = $left->cursor();
+            $rightCursor = $right->cursor();
+
+            return ($rightCursor->occurredAtMicros <=> $leftCursor->occurredAtMicros)
+                ?: ($rightCursor->rank() <=> $leftCursor->rank())
+                ?: ($rightCursor->id <=> $leftCursor->id);
+        });
+
+        $hasMoreInDirection = count($items) > $pageSize;
         $visibleItems = $newer
-            ? array_slice($items, -self::PAGE_SIZE)
-            : array_slice($items, 0, self::PAGE_SIZE);
+            ? array_slice($items, -$pageSize)
+            : array_slice($items, 0, $pageSize);
 
         if ($visibleItems === []) {
             return new StoreBalanceActivityPage(
@@ -234,6 +258,7 @@ final class StoreBalanceActivityService
         int $customerId,
         ?StoreBalanceActivityCursor $cursor,
         bool $newer,
+        int $limit,
     ): Collection {
         $query = StoreBalanceTopUp::query()
             ->select(self::TOP_UP_COLUMNS)
@@ -245,7 +270,7 @@ final class StoreBalanceActivityService
         return $query
             ->orderBy('created_at', $newer ? 'asc' : 'desc')
             ->orderBy('id', $newer ? 'asc' : 'desc')
-            ->limit(self::PAGE_SIZE + 1)
+            ->limit($limit + 1)
             ->get();
     }
 
@@ -257,6 +282,7 @@ final class StoreBalanceActivityService
         int $accountId,
         ?StoreBalanceActivityCursor $cursor,
         bool $newer,
+        int $limit,
     ): Collection {
         $query = StoreBalanceEntry::query()
             ->select(['id', 'customer_balance_account_id', 'kind', 'amount', 'source_type', 'source_id', 'refund_order_id', 'created_at'])
@@ -282,11 +308,17 @@ final class StoreBalanceActivityService
         return $query
             ->orderBy('created_at', $newer ? 'asc' : 'desc')
             ->orderBy('id', $newer ? 'asc' : 'desc')
-            ->limit(self::PAGE_SIZE + 1)
+            ->limit($limit + 1)
             ->get();
     }
 
     /**
+     * Rows are ordered by (created_at, rank, id) descending. Whether a row of
+     * another source belongs beyond the cursor depends on how this source's
+     * rank compares with the cursor's rank: a lower-ranked row may share the
+     * cursor timestamp and still belong to the page, a higher-ranked one may
+     * not. Comparing only the timestamp drops same-second rows at a boundary.
+     *
      * @param  Builder<StoreBalanceTopUp|StoreBalanceEntry>  $query
      */
     private function applyCursor(
@@ -296,25 +328,37 @@ final class StoreBalanceActivityService
         bool $newer,
     ): void {
         $timestamp = $cursor->occurredAt();
-        $timestampOperator = $newer ? '>' : '<';
-        $sameTimestampOperator = $newer ? '>' : '<';
+        $operator = $newer ? '>' : '<';
 
-        if (($newer && $sourceRank < $cursor->rank()) || (! $newer && $sourceRank > $cursor->rank())) {
-            $query->where('created_at', $newer ? '>=' : '<=', $timestamp);
+        if ($newer) {
+            if ($sourceRank > $cursor->rank()) {
+                $query->where('created_at', '>=', $timestamp);
 
-            return;
+                return;
+            }
+            if ($sourceRank < $cursor->rank()) {
+                $query->where('created_at', '>', $timestamp);
+
+                return;
+            }
+        } else {
+            if ($sourceRank < $cursor->rank()) {
+                $query->where('created_at', '<=', $timestamp);
+
+                return;
+            }
+            if ($sourceRank > $cursor->rank()) {
+                $query->where('created_at', '<', $timestamp);
+
+                return;
+            }
         }
 
-        if (($newer && $sourceRank > $cursor->rank()) || (! $newer && $sourceRank < $cursor->rank())) {
-            $query->where('created_at', $newer ? '>' : '<', $timestamp);
-
-            return;
-        }
-        $query->where(function (Builder $same) use ($timestamp, $sameTimestampOperator, $cursor): void {
-            $same->where('created_at', $sameTimestampOperator, $timestamp)
-                ->orWhere(function (Builder $tie) use ($timestamp, $cursor, $sameTimestampOperator): void {
+        $query->where(function (Builder $same) use ($timestamp, $operator, $cursor): void {
+            $same->where('created_at', $operator, $timestamp)
+                ->orWhere(function (Builder $tie) use ($timestamp, $operator, $cursor): void {
                     $tie->where('created_at', '=', $timestamp)
-                        ->where('id', $sameTimestampOperator, $cursor->id);
+                        ->where('id', $operator, $cursor->id);
                 });
         });
     }
@@ -470,12 +514,16 @@ final class StoreBalanceActivityService
         ?StoreBalanceEntry $related,
     ): StoreBalanceActivityItem {
         $kind = match ($entry->kind) {
+            StoreBalanceEntryKind::AdminAdjustmentCredit => StoreBalanceActivityItem::KIND_ADJUSTMENT,
+            StoreBalanceEntryKind::AdminAdjustmentReversal => StoreBalanceActivityItem::KIND_ADJUSTMENT_REVERSAL,
             StoreBalanceEntryKind::TopUpCredit => StoreBalanceActivityItem::KIND_TOP_UP,
             StoreBalanceEntryKind::OwnerCompensationCredit => StoreBalanceActivityItem::KIND_COMPENSATION,
             StoreBalanceEntryKind::PurchaseDebit => StoreBalanceActivityItem::KIND_PURCHASE,
             StoreBalanceEntryKind::RefundCredit => StoreBalanceActivityItem::KIND_REFUND,
         };
         $state = match ($entry->kind) {
+            StoreBalanceEntryKind::AdminAdjustmentCredit => StoreBalanceActivityItem::STATE_CREDITED,
+            StoreBalanceEntryKind::AdminAdjustmentReversal => StoreBalanceActivityItem::STATE_DEBITED,
             StoreBalanceEntryKind::TopUpCredit => StoreBalanceActivityItem::STATE_CREDITED,
             StoreBalanceEntryKind::OwnerCompensationCredit => StoreBalanceActivityItem::STATE_COMPENSATED,
             StoreBalanceEntryKind::PurchaseDebit => StoreBalanceActivityItem::STATE_DEBITED,

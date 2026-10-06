@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\Admin\AdminBalanceAdjustmentController;
+use App\Http\Controllers\Admin\AdminBalanceReportController;
 use App\Http\Controllers\Admin\AdminBroadcastController;
 use App\Http\Controllers\Admin\AdminBscReceiverController;
 use App\Http\Controllers\Admin\AdminBuyMailController;
@@ -7,6 +9,8 @@ use App\Http\Controllers\Admin\AdminCategoryCreateController;
 use App\Http\Controllers\Admin\AdminCategoryDeleteController;
 use App\Http\Controllers\Admin\AdminCategoryUpdateController;
 use App\Http\Controllers\Admin\AdminCheckoutMaintenanceController;
+use App\Http\Controllers\Admin\AdminCustomerUsdtFundingPauseController;
+use App\Http\Controllers\Admin\AdminCustomerUsdtFundingPolicyController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminFakeSalesProofPostController;
 use App\Http\Controllers\Admin\AdminLoginController;
@@ -43,6 +47,7 @@ use App\Http\Controllers\Admin\AdminSupplierController;
 use App\Http\Controllers\Admin\AdminSupportSettingsController;
 use App\Http\Controllers\Admin\AdminTelegramOutboundEffectController;
 use App\Http\Controllers\Admin\AdminTelegramWelcomeBannerController;
+use App\Http\Controllers\Admin\AdminUsdtTopUpReviewController;
 use App\Http\Controllers\Admin\AdminWarrantyController;
 use App\Http\Controllers\CustomerAccountController;
 use App\Http\Controllers\StorefrontController;
@@ -141,6 +146,7 @@ Route::prefix('akun')->name('customer.')->group(function (): void {
     Route::middleware('auth:customer')->group(function (): void {
         Route::post('logout', [CustomerAccountController::class, 'logout'])->name('logout');
         Route::get('pesanan', [CustomerAccountController::class, 'orders'])->name('orders.index');
+        Route::get('saldo', [CustomerAccountController::class, 'balance'])->name('balance.show');
         Route::post('pesanan/{order}/status', [CustomerAccountController::class, 'status'])->middleware('throttle:automatic-payment-status-refresh')->name('orders.status');
         Route::get('pesanan/{order}', [CustomerAccountController::class, 'show'])->name('orders.show');
         Route::get('klaim-pesanan', [CustomerAccountController::class, 'claimForm'])->name('claim.create');
@@ -162,6 +168,13 @@ Route::middleware('admin.no-cache')->group(function (): void {
 
         Route::middleware('admin.access')->group(function (): void {
             Route::get('/', AdminDashboardController::class)->name('dashboard');
+            Route::prefix('store-balance/reports')->name('store-balance.reports.')->group(function (): void {
+                Route::get('/', [AdminBalanceReportController::class, 'index'])->name('index');
+                Route::get('top-ups/{topUp}/proof', [AdminBalanceReportController::class, 'proof'])
+                    ->whereNumber('topUp')
+                    ->middleware('signed')
+                    ->name('proof');
+            });
             Route::post('payment-mode', AdminPaymentModeController::class)->name('payment-mode.update');
             // BSC controllers persist validated pending mutations because password redirects cannot replay POST bodies.
             Route::prefix('bsc')->name('bsc.')->middleware('admin.bsc-owner')->group(function (): void {
@@ -173,7 +186,30 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('receivers/{receiver}/deactivate', [AdminBscReceiverController::class, 'deactivate'])->name('receivers.deactivate');
             });
             Route::post('checkout-maintenance', AdminCheckoutMaintenanceController::class)->name('checkout-maintenance.update');
+            Route::prefix('store-balance/adjustments')->name('store-balance.adjustments.')->middleware('admin.store-balance-owner')->group(function (): void {
+                Route::get('/', [AdminBalanceAdjustmentController::class, 'index'])->name('index');
+                Route::post('previews', [AdminBalanceAdjustmentController::class, 'preview'])->name('previews.store');
+                Route::post('previews/{adjustment}/confirm', [AdminBalanceAdjustmentController::class, 'confirm'])->name('previews.confirm');
+                Route::post('previews/{adjustment}/cancel', [AdminBalanceAdjustmentController::class, 'cancel'])->name('previews.cancel');
+                Route::post('reversals', [AdminBalanceAdjustmentController::class, 'reversal'])->name('reversals.store');
+            });
+            Route::prefix('store-balance/usdt-review')->name('store-balance.usdt-review.')->middleware('admin.store-balance-owner')->group(function (): void {
+                Route::get('/', [AdminUsdtTopUpReviewController::class, 'index'])->name('index');
+                Route::post('previews', [AdminUsdtTopUpReviewController::class, 'preview'])->name('previews.store');
+                Route::post('previews/{review}/confirm', [AdminUsdtTopUpReviewController::class, 'confirm'])->whereUuid('review')->name('previews.confirm');
+                Route::post('recovery-previews', [AdminUsdtTopUpReviewController::class, 'recoveryPreview'])->name('recovery-previews.store');
+                Route::post('recovery-previews/{recovery}/confirm', [AdminUsdtTopUpReviewController::class, 'recoveryConfirm'])->whereUuid('recovery')->name('recovery-previews.confirm');
+            });
             Route::post('store-balance/funding-policy', AdminStoreBalanceFundingPolicyController::class)->name('store-balance.funding-policy.update');
+            Route::post('store-balance/usdt-policy', AdminCustomerUsdtFundingPolicyController::class)
+                ->middleware('admin.store-balance-owner')
+                ->name('store-balance.usdt-policy.update');
+            Route::post('store-balance/usdt-pauses/{scope}', [AdminCustomerUsdtFundingPauseController::class, 'store'])
+                ->middleware('admin.store-balance-owner')
+                ->name('store-balance.usdt-pauses.store');
+            Route::delete('store-balance/usdt-pauses/{scope}', [AdminCustomerUsdtFundingPauseController::class, 'destroy'])
+                ->middleware('admin.store-balance-owner')
+                ->name('store-balance.usdt-pauses.destroy');
             Route::post('store-balance/top-ups/{topUp}/compensate', AdminStoreBalanceTopUpCompensationController::class)
                 ->middleware('admin.store-balance-owner')
                 ->name('store-balance.top-ups.compensate');

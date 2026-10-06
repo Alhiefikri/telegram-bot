@@ -20,6 +20,7 @@ use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahQrisImage;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Support\DogfoodTiming;
 use App\Support\PakasirCheckoutFlow;
 use InvalidArgumentException;
@@ -239,7 +240,7 @@ class TelegramCheckoutIntents
 
     public function formatUsdt(int $amount): string
     {
-        return rtrim(rtrim(number_format($amount / 1_000_000, 6, '.', ''), '0'), '.');
+        return UsdtMicroAmount::formatUnits($amount);
     }
 
     public function sendBinancePaymentInstructions(string $chatId, Order $order, Payment $payment, Customer $customer): array

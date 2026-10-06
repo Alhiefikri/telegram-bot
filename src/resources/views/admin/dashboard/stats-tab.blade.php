@@ -581,6 +581,289 @@
                     @endif
                 </x-admin-dashboard.card>
 
+                @php($usdtFundingEnabledInput = old('funding_enabled', ($usdtFundingPolicy['funding_enabled'] ?? false) ? '1' : '0'))
+                <x-admin-dashboard.card
+                    id="admin-usdt-funding-policy"
+                    data-admin-return-target
+                    tabindex="-1"
+                    as="section"
+                    tone="blue"
+                    padding="compact"
+                    shadow="sm"
+                    class="rounded-[1.125rem]"
+                    aria-label="Kebijakan Top-up USDT"
+                >
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Customer USDT</p>
+                            <h2 class="mt-1 font-display text-base font-bold text-neo-ink">Kebijakan Top-up USDT</h2>
+                        </div>
+                        <div class="flex flex-col items-end gap-1">
+                            <x-admin-dashboard.badge tone="blue" dot>VERSI {{ $usdtFundingPolicy['version'] ?? 0 }}</x-admin-dashboard.badge>
+                            @if ($usdtFundingPolicy['funding_enabled'] ?? false)
+                                <x-admin-dashboard.badge tone="emerald">AKTIF</x-admin-dashboard.badge>
+                            @else
+                                <x-admin-dashboard.badge tone="amber">NONAKTIF</x-admin-dashboard.badge>
+                            @endif
+                        </div>
+                    </div>
+
+                    <p class="mt-2 text-xs font-semibold leading-5 text-brand-muted">
+                        Kebijakan H0-v1 tanpa minimum/maksimum bisnis dan tanpa preset; fee aplikasi
+                        <span class="font-black text-neo-ink">{{ $usdtFundingPolicy['application_fee_display'] ?? '0 USDT' }}</span>,
+                        konfirmasi {{ $usdtFundingPolicy['confirmation_ttl_seconds'] ?? 600 }} detik, satu target aktif per Customer lintas rail.
+                        Syarat versi {{ $usdtFundingPolicy['terms_version'] ?? 1 }} disnapshot ke tiap konfirmasi.
+                    </p>
+
+                    <div class="mt-3 space-y-2">
+                        @foreach (($usdtFundingPolicy['rails'] ?? []) as $rail)
+                            <div class="flex items-start justify-between gap-2 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-2">
+                                <div class="min-w-0">
+                                    <p class="text-[11px] font-black text-neo-ink">{{ $rail['label'] }}</p>
+                                    <p class="text-[11px] font-semibold text-brand-muted">
+                                        {{ $rail['reason'] }}@if (! empty($rail['detail'])) &middot; {{ $rail['detail'] }}@endif
+                                    </p>
+                                </div>
+                                @if ($rail['available'])
+                                    <x-admin-dashboard.badge tone="emerald">SIAP</x-admin-dashboard.badge>
+                                @else
+                                    <x-admin-dashboard.badge tone="amber">DITUTUP</x-admin-dashboard.badge>
+                                @endif
+                            </div>
+                        @endforeach
+                    </div>
+
+                    <div class="mt-3 space-y-2">
+                        @foreach (($usdtFundingPolicy['pauses'] ?? []) as $pause)
+                            <div class="rounded-xl border-2 border-neo-ink/15 bg-white/80 p-2">
+                                <div class="flex items-center justify-between gap-2">
+                                    <p class="text-[11px] font-black text-neo-ink">{{ $pause['label'] }}</p>
+                                    @if ($pause['paused'])
+                                        <x-admin-dashboard.badge tone="rose">DIJEDA</x-admin-dashboard.badge>
+                                    @else
+                                        <x-admin-dashboard.badge tone="emerald">BERJALAN</x-admin-dashboard.badge>
+                                    @endif
+                                </div>
+                                @if ($pause['paused'])
+                                    <p class="mt-1 text-[11px] font-semibold text-brand-muted">{{ $pause['reason'] }} &middot; {{ $pause['paused_at'] }}</p>
+                                @endif
+                                @if ($usdtFundingPolicy['can_manage'] ?? false)
+                                    @if ($pause['paused'])
+                                        <form method="POST" action="{{ route('admin.store-balance.usdt-pauses.destroy', $pause['scope']) }}" class="mt-2">
+                                            @csrf
+                                            @method('DELETE')
+                                            <x-admin-dashboard.button type="submit" variant="secondary" size="sm" class="w-full text-[11px]">Lanjutkan</x-admin-dashboard.button>
+                                        </form>
+                                    @else
+                                        <form method="POST" action="{{ route('admin.store-balance.usdt-pauses.store', $pause['scope']) }}" class="mt-2 space-y-2">
+                                            @csrf
+                                            <x-admin-dashboard.input name="reason" :value="old('reason')" placeholder="Alasan jeda (wajib)" required />
+                                            <x-admin-dashboard.button type="submit" variant="warning" size="sm" class="w-full text-[11px]">Jeda</x-admin-dashboard.button>
+                                        </form>
+                                    @endif
+                                @endif
+                            </div>
+                        @endforeach
+                    </div>
+
+                    @error('funding_enabled', 'usdtFundingPolicy')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('confirmation_ttl_seconds', 'usdtFundingPolicy')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('application_fee_micro', 'usdtFundingPolicy')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('terms_body', 'usdtFundingPolicy')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('version', 'usdtFundingPolicy')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('reason', 'usdtFundingPolicy')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+
+                    @if ($usdtFundingPolicy['can_manage'] ?? false)
+                        <form method="POST" action="{{ $usdtFundingPolicy['update_url'] ?? route('admin.store-balance.usdt-policy.update') }}" class="mt-4 space-y-3" aria-label="Kebijakan top-up USDT">
+                            @csrf
+                            <input type="hidden" name="version" value="{{ $usdtFundingPolicy['version'] ?? 0 }}">
+                            <label class="block text-xs font-bold text-neo-ink">
+                                Status top-up USDT
+                                <x-admin-dashboard.select class="mt-1" name="funding_enabled" required>
+                                    <option value="0" @selected((string) $usdtFundingEnabledInput !== '1')>Nonaktif (aktifkan hanya setelah rail qualified)</option>
+                                    <option value="1" @selected((string) $usdtFundingEnabledInput === '1')>Aktif</option>
+                                </x-admin-dashboard.select>
+                            </label>
+                            <label class="block text-xs font-bold text-neo-ink">
+                                Masa konfirmasi (detik, 60-3600)
+                                <x-admin-dashboard.input class="mt-1" name="confirmation_ttl_seconds" inputmode="numeric" autocomplete="off" :value="old('confirmation_ttl_seconds', $usdtFundingPolicy['confirmation_ttl_seconds'] ?? 600)" required />
+                            </label>
+                            <label class="block text-xs font-bold text-neo-ink">
+                                Fee aplikasi (USDT, maksimal 6 desimal)
+                                <x-admin-dashboard.input class="mt-1" name="application_fee_micro" inputmode="decimal" autocomplete="off" :value="old('application_fee_micro', $usdtFundingPolicy['application_fee_input'] ?? '0')" required />
+                            </label>
+                            <label class="block text-xs font-bold text-neo-ink">
+                                Syarat top-up USDT (versi disnapshot ke konfirmasi)
+                                <x-admin-dashboard.textarea class="mt-1" name="terms_body" :rows="6" :value="old('terms_body', $usdtFundingPolicy['terms_body'] ?? '')" required />
+                            </label>
+                            <p class="text-[11px] font-semibold leading-5 text-brand-muted">Tidak ada batas minimum, maksimum, kuota, atau allowlist bisnis pada rilis ini (H0-v1). Perubahan kebijakan tidak pernah memindahkan saldo.</p>
+                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">
+                                Simpan kebijakan top-up USDT
+                            </x-admin-dashboard.button>
+                        <a href="{{ route('admin.store-balance.usdt-review.index') }}" class="inline-flex min-h-11 items-center font-bold underline">Review deposit USDT dan insiden</a>
+                        </form>
+                    @else
+                        <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">
+                            Hanya Owner yang dapat mengubah kebijakan dan jeda top-up USDT.
+                        </x-admin-dashboard.notice>
+                    @endif
+                </x-admin-dashboard.card>
+
+                @php($opsCritical = ($balanceOperations['alertCounts']['critical'] ?? 0) > 0 || ($balanceOperations['restoreGate']['open'] ?? false))
+                <x-admin-dashboard.card
+                    id="admin-balance-operations"
+                    as="section"
+                    tone="{{ $opsCritical ? 'rose' : 'blue' }}"
+                    padding="compact"
+                    shadow="sm"
+                    class="rounded-[1.125rem]"
+                    aria-label="Kontrol Operasional Saldo"
+                >
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Operasional · read-only</p>
+                            <h2 class="mt-1 font-display text-base font-bold text-neo-ink">Kontrol Operasional</h2>
+                        </div>
+                        <div class="flex flex-col items-end gap-1">
+                            @if ($balanceOperations['restoreGate']['open'] ?? false)
+                                <x-admin-dashboard.badge tone="rose" dot>GATE TERBUKA</x-admin-dashboard.badge>
+                            @else
+                                <x-admin-dashboard.badge tone="emerald" dot>GATE TERTUTUP</x-admin-dashboard.badge>
+                            @endif
+                            @if (($balanceOperations['alertCounts']['critical'] ?? 0) > 0)
+                                <x-admin-dashboard.badge tone="rose">{{ $balanceOperations['alertCounts']['critical'] }} KRITIS</x-admin-dashboard.badge>
+                            @endif
+                        </div>
+                    </div>
+
+                    <p class="mt-2 text-xs font-semibold leading-5 text-brand-muted">
+                        Status jeda, gerbang pemulihan, dan episode alert saldo. Hanya tampilan; tidak ada aksi tulis di sini.
+                        {{ $balanceOperations['alertCounts']['open'] ?? 0 }} episode terbuka
+                        ({{ $balanceOperations['alertCounts']['critical'] ?? 0 }} kritis, {{ $balanceOperations['alertCounts']['warning'] ?? 0 }} peringatan).
+                    </p>
+
+                    <div class="mt-3 space-y-2" aria-label="Jeda operasional">
+                        @foreach (($balanceOperations['pauses'] ?? []) as $opsPause)
+                            <div class="flex items-center justify-between gap-2 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-2">
+                                <div class="min-w-0">
+                                    <p class="text-[11px] font-black text-neo-ink">{{ $opsPause['label'] }}</p>
+                                    @if ($opsPause['paused'])
+                                        <p class="text-[11px] font-semibold text-brand-muted">{{ $opsPause['reason'] }} &middot; {{ $opsPause['paused_at'] }}</p>
+                                    @endif
+                                </div>
+                                @if ($opsPause['paused'])
+                                    <x-admin-dashboard.badge tone="rose">DIJEDA</x-admin-dashboard.badge>
+                                @else
+                                    <x-admin-dashboard.badge tone="emerald">BERJALAN</x-admin-dashboard.badge>
+                                @endif
+                            </div>
+                        @endforeach
+                    </div>
+
+                    <div class="mt-3 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <p class="text-[11px] font-black text-neo-ink">Gerbang pemulihan saldo</p>
+                            @if ($balanceOperations['restoreGate']['open'] ?? false)
+                                <x-admin-dashboard.badge tone="rose">TERBUKA</x-admin-dashboard.badge>
+                            @else
+                                <x-admin-dashboard.badge tone="emerald">TERTUTUP</x-admin-dashboard.badge>
+                            @endif
+                        </div>
+                        <p class="mt-1 text-[11px] font-semibold leading-5 text-brand-muted">
+                            Window {{ $balanceOperations['restoreGate']['window_start'] ?? '—' }} s.d. {{ $balanceOperations['restoreGate']['window_end'] ?? '—' }}
+                            &middot; dibuka {{ $balanceOperations['restoreGate']['opened_at'] ?? '—' }}
+                            &middot; replay {{ $balanceOperations['restoreGate']['replay_completed_at'] ?? 'belum selesai' }}
+                        </p>
+                    </div>
+
+                    <div class="mt-3 space-y-2" aria-label="Episode alert terbuka">
+                        <p class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Episode alert terbuka</p>
+                        @forelse (($balanceOperations['alerts'] ?? []) as $opsAlert)
+                            <div class="rounded-xl border-2 border-neo-ink/15 bg-white/80 p-2">
+                                <div class="flex items-start justify-between gap-2">
+                                    <p class="text-[11px] font-black text-neo-ink">{{ $opsAlert['summary'] }}</p>
+                                    @if ($opsAlert['severity'] === 'critical')
+                                        <x-admin-dashboard.badge tone="rose">{{ $opsAlert['severity_label'] }}</x-admin-dashboard.badge>
+                                    @else
+                                        <x-admin-dashboard.badge tone="amber">{{ $opsAlert['severity_label'] }}</x-admin-dashboard.badge>
+                                    @endif
+                                </div>
+                                <p class="mt-1 text-[11px] font-semibold text-brand-muted">
+                                    {{ $opsAlert['alert_key'] }} &middot; {{ $opsAlert['state_label'] }} &middot; {{ $opsAlert['occurrences'] }}x &middot; terakhir {{ $opsAlert['last_seen_at'] }}
+                                </p>
+                            </div>
+                        @empty
+                            <p class="text-[11px] font-semibold text-brand-muted">Tidak ada episode alert terbuka.</p>
+                        @endforelse
+                    </div>
+
+                    @if (! empty($balanceOperations['metrics']))
+                        <div class="mt-3 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3">
+                            <p class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Metrik operasi (60 menit)</p>
+                            <div class="mt-2 space-y-2">
+                                @foreach ($balanceOperations['metrics'] as $opsMetricKey => $opsMetricValue)
+                                    @if (is_array($opsMetricValue))
+                                        <div class="rounded-lg border border-neo-ink/20 p-2">
+                                            <p class="text-[10px] font-black uppercase tracking-wider text-brand-muted">{{ $opsMetricKey }}</p>
+                                            <dl class="mt-1 grid gap-x-3 gap-y-1 sm:grid-cols-2">
+                                                @foreach ($opsMetricValue as $opsSubKey => $opsSubValue)
+                                                    <div class="flex items-baseline justify-between gap-2">
+                                                        <dt class="text-[10px] font-semibold text-brand-muted">{{ $opsSubKey }}</dt>
+                                                        <dd class="break-words text-[11px] font-black text-neo-ink">{{ is_array($opsSubValue) ? ($opsSubValue['count'] ?? '—') : (is_bool($opsSubValue) ? ($opsSubValue ? 'ya' : 'tidak') : ($opsSubValue ?? '—')) }}</dd>
+                                                    </div>
+                                                @endforeach
+                                            </dl>
+                                        </div>
+                                    @else
+                                        <div class="flex items-baseline justify-between gap-2 rounded-lg border border-neo-ink/20 p-2">
+                                            <span class="text-[10px] font-bold uppercase tracking-wider text-brand-muted">{{ $opsMetricKey }}</span>
+                                            <span class="break-words text-[11px] font-black text-neo-ink">{{ is_bool($opsMetricValue) ? ($opsMetricValue ? 'ya' : 'tidak') : ($opsMetricValue ?? '—') }}</span>
+                                        </div>
+                                    @endif
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+                </x-admin-dashboard.card>
+
+                @if ($canManageBalanceAdjustments)
+                    <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Penambahan saldo Customer">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Owner</p>
+                                <h2 class="mt-1 font-display text-base font-bold text-neo-ink">Penambahan saldo Customer</h2>
+                                <p class="mt-1 text-xs font-semibold leading-5 text-brand-muted">Cari dengan Telegram ID exact, periksa preview, lalu konfirmasi dengan password Owner.</p>
+                            </div>
+                            <a href="{{ route('admin.store-balance.adjustments.index') }}" class="inline-flex min-h-11 w-full items-center justify-center rounded-xl border-2 border-neo-ink bg-brand-yellow px-4 py-2 text-sm font-black text-neo-ink shadow-neo-sm transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-neo-focus sm:w-auto">Kelola saldo</a>
+                        </div>
+                    </x-admin-dashboard.card>
+                @endif
+
+                @if ($canViewBalanceReports)
+                    <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Laporan saldo Customer">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Customer balance</p>
+                                <h2 class="mt-1 font-display text-base font-bold text-neo-ink">Laporan saldo, ledger, top-up, review, dan treasury</h2>
+                                <p class="mt-1 text-xs font-semibold leading-5 text-brand-muted">Akses baca-saja dengan filter Telegram ID exact, saldo IDR/USDT terpisah, dan referensi tersamarkan.</p>
+                            </div>
+                            <a href="{{ route('admin.store-balance.reports.index') }}" class="inline-flex min-h-11 w-full items-center justify-center rounded-xl border-2 border-neo-ink bg-brand-yellow px-4 py-2 text-sm font-black text-neo-ink shadow-neo-sm sm:w-auto">Buka laporan saldo</a>
+                        </div>
+                    </x-admin-dashboard.card>
+                @endif
+
                 <x-admin-dashboard.card
                     id="admin-checkout-maintenance"
                     data-admin-return-target

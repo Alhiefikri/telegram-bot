@@ -13,6 +13,8 @@ final class BscRpcClient implements BscTransferLogRpcClientInterface, BscVerific
 {
     public const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
+    public const MAX_RESPONSE_BYTES = 1_048_576;
+
     private int $requestId = 0;
 
     public function chainId(): int
@@ -234,6 +236,10 @@ final class BscRpcClient implements BscTransferLogRpcClientInterface, BscVerific
             throw $this->httpFailure($response);
         }
 
+        if (strlen($response->body()) > self::MAX_RESPONSE_BYTES) {
+            throw new BscRpcException('BSC RPC response exceeds the byte budget.', retryable: false);
+        }
+
         $payload = $response->json();
         if (! is_array($payload)) {
             throw new BscRpcException('BSC RPC returned invalid JSON.');
@@ -263,7 +269,14 @@ final class BscRpcClient implements BscTransferLogRpcClientInterface, BscVerific
     {
         return Http::acceptJson()
             ->asJson()
-            ->withOptions(['force_ip_resolve' => 'v4'])
+            ->withOptions([
+                'force_ip_resolve' => 'v4',
+                'progress' => static function (float $total, float $downloaded): void {
+                    if ($total > self::MAX_RESPONSE_BYTES || $downloaded > self::MAX_RESPONSE_BYTES) {
+                        throw new BscRpcException('BSC RPC response exceeds the byte budget.', retryable: false);
+                    }
+                },
+            ])
             ->timeout(max(1, (int) ceil((float) config('services.bsc.rpc_timeout_seconds', 5.0))))
             ->connectTimeout(max(1, (int) ceil((float) config('services.bsc.rpc_connect_timeout_seconds', 2.0))))
             ->retry(

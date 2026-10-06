@@ -55,6 +55,7 @@ final class BuyMailFulfillmentTest extends NonTransactionalDatabaseTestCase
 
     public function test_only_verified_payment_acquires_and_delivers_order_owned_accounts_once(): void
     {
+        $this->freezeTime();
         [$supplier, $order] = $this->fixture(2);
         $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
         Http::fake(function ($request) {

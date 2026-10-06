@@ -18,6 +18,30 @@ Schedule::command('suppliers:recover-warranty --limit=25')->everyMinute()->witho
 // Deadline reminders are materialized from durable PostgreSQL unit state; the
 // queue job is only the delivery wakeup and the effect ledger survives Redis loss.
 Schedule::command('suppliers:notify-warranty-deadlines --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
+Schedule::command('usdt-funding:recover --limit=25 --json')->everyMinute()->withoutOverlapping(2)->runInBackground();
+// Drift and coverage authority for the Customer USDT subledger (#558). The run
+// is bounded per facet and records sanitized evidence that alerting consumes;
+// a full sweep across cursors stays an explicit operator action (runbook).
+Schedule::command('usdt-balance:reconcile --limit=500 --json')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->runInBackground();
+// Accounting aggregates are derived reporting evidence, rebuilt asynchronously
+// from immutable events through a unique consumer/event claim.
+Schedule::command('usdt-balance:aggregate-accounting --limit=2000 --json')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->runInBackground();
+// Durable balance operations alerts (#558): episodes + one Telegram Outbound
+// Effect per new/changed episode, recovered by telegram:recover-outbound.
+Schedule::command('ops:balance-alerts --json')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->runInBackground();
+// Bounded retention for the operational metric ledger (append-only, UPDATE-denied).
+Schedule::command('usdt-balance:metrics --prune-days=30 --json')
+    ->daily()
+    ->withoutOverlapping(10);
 $klikQrisEnvironment = KlikQrisEnvironment::runtime();
 if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnvironment)) {
     Schedule::command((string) config('services.klikqris.reconciliation_command', 'klikqris:reconcile --chunk=100'))

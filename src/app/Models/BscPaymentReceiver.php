@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 
 #[Fillable([
+    'address_claim_id',
     'label',
     'address',
     'address_normalized',
@@ -76,6 +77,11 @@ class BscPaymentReceiver extends Model
     public function verifiedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'verified_by');
+    }
+
+    public function addressClaim(): BelongsTo
+    {
+        return $this->belongsTo(UsdtReceiverAddressClaim::class, 'address_claim_id');
     }
 
     public function ownershipChallenges(): HasMany

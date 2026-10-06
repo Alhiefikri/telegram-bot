@@ -2,16 +2,21 @@
 
 namespace App\Services\Binance;
 
+use App\Enums\ExternalMoneyReceiptClaimOutcome;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
+use App\Models\ExternalMoneyReceiptReservation;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptReservations;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use Throwable;
 
 final class BinancePaymentVerification
@@ -23,6 +28,7 @@ final class BinancePaymentVerification
         private readonly BinanceTransactionHistoryReader $history,
         private readonly OrderLifecycle $orders,
         private readonly BinanceVerificationQueue $queue,
+        private readonly ExternalMoneyReceiptWriter $receipts,
     ) {}
 
     public function enabled(): bool
@@ -558,6 +564,58 @@ final class BinancePaymentVerification
                     ]);
 
                     return BinanceVerificationOutcome::Mismatch;
+                }
+
+                $receipt = null;
+                try {
+                    $receipt = $this->receipts->receiptForBinancePayment(
+                        $locked,
+                        $transaction->transactionId(),
+                        $transaction->currency(),
+                        (int) $transaction->amountMicro(),
+                    );
+                } catch (InvalidArgumentException) {
+                    $receipt = null;
+                }
+
+                if ($receipt === null) {
+                    $this->receipts->reservePayment(
+                        $locked,
+                        ExternalMoneyReceiptReservation::REASON_MISSING_RECEIVER_NAMESPACE,
+                    );
+                    $locked->update([
+                        'provider_payload' => $transaction->sanitizedPayload(),
+                        'binance_verification_grace_until' => now(),
+                        'binance_verification_status' => 'mismatch',
+                        'binance_last_verified_at' => now(),
+                    ]);
+
+                    return BinanceVerificationOutcome::Mismatch;
+                }
+
+                // The registry owns one receipt per physical transfer across
+                // every money owner and adapter; the payments unique index
+                // below stays as the mixed-version compatibility guard.
+                $claim = $this->receipts->claim(
+                    $receipt,
+                    ExternalMoneyReceiptReservations::SOURCE_RUNTIME,
+                    ExternalMoneyReceiptReservation::LEGACY_TYPE_PAYMENT,
+                    (string) $locked->getKey(),
+                );
+
+                if ($claim === ExternalMoneyReceiptClaimOutcome::Review) {
+                    $locked->update([
+                        'provider_payload' => $transaction->sanitizedPayload(),
+                        'binance_verification_grace_until' => now(),
+                        'binance_verification_status' => 'mismatch',
+                        'binance_last_verified_at' => now(),
+                    ]);
+
+                    return BinanceVerificationOutcome::Mismatch;
+                }
+
+                if ($claim === ExternalMoneyReceiptClaimOutcome::Conflict) {
+                    return BinanceVerificationOutcome::TransactionAlreadyUsed;
                 }
 
                 // The unique index on payments.provider_reference is the

@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\StoreBalanceProjectionMismatchException;
+use App\Models\BalanceAdjustmentRequest;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\OrderRefund;
@@ -119,6 +120,69 @@ final class StoreBalanceLedger
             $compensationId,
             $idempotencyKey,
         );
+    }
+
+    /** Only a transaction-approved immutable request can authorize this posting. */
+    public function creditApprovedAdjustment(BalanceAdjustmentRequest $request, ApprovedBalanceAdjustment $approval): StoreBalanceMutationResult
+    {
+        $approval->assertMatches($request);
+        if (DB::transactionLevel() === 0) {
+            throw new InvalidArgumentException('Adjustment approval requires its money transaction.');
+        }
+        $approved = BalanceAdjustmentRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
+        if ($approved->state !== 'approved' || $approved->currency !== 'IDR'
+            || $approved->fingerprint !== $request->fingerprint || in_array($approved->category, ['top_up_recovery', 'refund_recovery', 'reversal'], true)) {
+            throw new InvalidArgumentException('Adjustment request is not approved for a new credit.');
+        }
+
+        return $this->apply(Customer::findOrFail($approved->customer_id), StoreBalanceEntryKind::AdminAdjustmentCredit,
+            $approved->amount, 'balance_adjustment', $approved->id, 'balance-adjustment:'.$approved->id.':v1',
+            validateProjectionHistory: false);
+    }
+
+    public function creditApprovedRefundAdjustment(BalanceAdjustmentRequest $request, OrderRefund $refund, ApprovedBalanceAdjustment $approval): StoreBalanceMutationResult
+    {
+        $request = BalanceAdjustmentRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
+        $refund = OrderRefund::query()->whereKey($refund->id)->lockForUpdate()->firstOrFail();
+        $approval->assertMatches($request);
+        if (DB::transactionLevel() === 0 || $request->state !== 'approved' || $request->category !== 'refund_recovery'
+            || $request->source_id !== $refund->id || $request->amount !== $refund->amount
+            || (int) $request->customer_id !== (int) $refund->customer_id || $refund->currency !== 'IDR' || $refund->state !== 'requested') {
+            throw new InvalidArgumentException('Refund recovery requires its approved original entitlement.');
+        }
+
+        return $this->apply(Customer::findOrFail($request->customer_id), StoreBalanceEntryKind::RefundCredit, $refund->amount,
+            'order_refund', $refund->id, 'order-refund:'.$refund->id, validateProjectionHistory: false, refundOrderId: $refund->order_id);
+    }
+
+    /**
+     * Full linked debit of one applied adjustment credit. The unique
+     * (source_type, source_id, kind) claim allows exactly one reversal entry
+     * per original request; the full-history projection check keeps a drifted
+     * ledger from being masked by the debit.
+     */
+    public function reverseApprovedAdjustment(BalanceAdjustmentRequest $reversal, BalanceAdjustmentRequest $original, ApprovedBalanceAdjustment $approval): StoreBalanceMutationResult
+    {
+        $approval->assertMatches($reversal);
+        if (DB::transactionLevel() === 0) {
+            throw new InvalidArgumentException('Reversal approval requires its money transaction.');
+        }
+        $approved = BalanceAdjustmentRequest::query()->whereKey($reversal->id)->lockForUpdate()->firstOrFail();
+        $origin = BalanceAdjustmentRequest::query()->whereKey($original->id)->lockForUpdate()->firstOrFail();
+        $expectedKind = StoreBalanceEntryKind::forAdjustmentCategory($origin->category);
+        $entry = $origin->ledger_entry_id === null ? null : StoreBalanceEntry::query()->whereKey($origin->ledger_entry_id)->first();
+        $accountId = CustomerBalanceAccount::query()->where('customer_id', $origin->customer_id)->value('id');
+        if ($approved->state !== 'approved' || $approved->category !== 'reversal' || $approved->currency !== 'IDR'
+            || $approved->fingerprint !== $reversal->fingerprint || $approved->source_id !== $origin->id
+            || (int) $approved->customer_id !== (int) $origin->customer_id || $approved->amount !== $origin->amount
+            || $origin->state !== 'applied' || $origin->currency !== 'IDR'
+            || $expectedKind === null || $entry === null || $entry->kind !== $expectedKind || (int) $entry->amount !== (int) $origin->amount
+            || $accountId === null || (int) $entry->customer_balance_account_id !== (int) $accountId) {
+            throw new InvalidArgumentException('Reversal requires its approved, fully linked original adjustment.');
+        }
+
+        return $this->apply(Customer::findOrFail($approved->customer_id), StoreBalanceEntryKind::AdminAdjustmentReversal,
+            $approved->amount, 'balance_adjustment', $origin->id, 'balance-adjustment:'.$origin->id.':reversal:v1');
     }
 
     public function debit(
@@ -371,11 +435,13 @@ final class StoreBalanceLedger
 
     private function assertProjectionIsConsistent(CustomerBalanceAccount $account, Customer $customer): void
     {
+        $debits = StoreBalanceEntryKind::debitValues();
+        $placeholders = implode(', ', array_fill(0, count($debits), '?'));
         $ledgerBalance = (int) StoreBalanceEntry::query()
             ->where('customer_balance_account_id', $account->id)
             ->selectRaw(
-                'COALESCE(SUM(CASE WHEN kind = ? THEN -amount ELSE amount END), 0) AS ledger_balance',
-                [StoreBalanceEntryKind::PurchaseDebit->value],
+                "COALESCE(SUM(CASE WHEN kind IN ({$placeholders}) THEN -amount ELSE amount END), 0) AS ledger_balance",
+                $debits,
             )
             ->value('ledger_balance');
 
