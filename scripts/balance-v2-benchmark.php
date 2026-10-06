@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Queue;
 
 require __DIR__.'/../src/vendor/autoload.php';
 require __DIR__.'/fixtures/balance-v2/vendor/autoload.php';
+require __DIR__.'/balance-v2-acceptance.php';
 
 /** Shared monotonic clock for scheduled arrivals and duration measurements. */
 function benchmarkTime(): float
@@ -413,16 +414,16 @@ do {
     $creditsDone = ! $receiptReport->creditsHaveMore;
 } while (! $receiptsDone || ! $creditsDone);
 $correct = $correct && $receiptsInspected === $customers && $receiptFindings === 0;
-$targets = true;
-foreach (['usdt', 'idr'] as $currency) {
-    $targets = $targets && $summaries['steady'][$currency.'_read']['scheduled_latency_ms']['p95'] <= 100
-        && $summaries['steady'][$currency.'_posting']['scheduled_latency_ms']['p95'] <= 250
-        && $summaries['steady'][$currency.'_posting']['lock_query_ms']['p99'] <= 500
-        && $summaries['burst'][$currency.'_posting']['lag_ms']['p99'] <= 250;
+$expected = [];
+foreach ($phases as [$phase, $seconds, $reads, $postings]) {
+    $expected[$phase] = ['reads' => $seconds * $reads, 'postings' => $seconds * $postings];
 }
+$targetChecks = balanceV2Acceptance($summaries, $expected);
+$targets = ! in_array(false, $targetChecks, true);
 file_put_contents($artifacts.'/result.json', json_encode([
     'profile' => $short ? 'diagnostic-not-capacity-evidence' : 'representative-local-fixture',
     'correctness_passed' => $correct, 'load_targets_passed' => $targets,
+    'target_checks' => $targetChecks,
     'reconciliation_seconds' => $reconciliationSeconds, 'reconciliation_chunks_ms' => distribution($chunks),
     'accounts_inspected' => $inspected, 'findings' => $findings,
     'idr_accounts_inspected' => $customers, 'idr_findings' => $idrFindings,
@@ -439,8 +440,8 @@ $lines = [
     'Commit: `'.trim(file_get_contents($artifacts.'/commit.txt')).'`; see worktree patch/status and copied source hashes for the exact code.', '',
     'Profile: '.($short ? '**diagnostic only; duration gate not met**' : 'representative local disposable fixtures; not production capacity').'.', '',
     "Dataset: $customers Customers; ".($customers * 100).' entries **per currency** before load; 24 independent load workers.', '',
-    '| Phase | Operation | Count | p50 ms | p95 ms | p99 ms | Scheduled p95 ms | Query p95 | Completed/s |',
-    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    '| Phase | Operation | Count | p50 ms | p95 ms | p99 ms | Arrival p95 ms | Queries p95 | Lock-query p99 ms | Completed/s |',
+    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
 ];
 foreach ($summaries as $phase => $summary) {
     foreach (['usdt_read', 'usdt_posting', 'idr_read', 'idr_posting'] as $operation) {
@@ -448,14 +449,14 @@ foreach ($summaries as $phase => $summary) {
         $lines[] = sprintf('| %s | %s | %d | %.3f | %.3f | %.3f | %.3f | %d | %.3f |',
             $phase, $operation, $row['latency_ms']['count'], $row['latency_ms']['p50'],
             $row['latency_ms']['p95'], $row['latency_ms']['p99'], $row['scheduled_latency_ms']['p95'],
-            $row['queries']['p95'], $row['throughput_s']);
+            $row['queries']['p95'], $row['lock_query_ms']['p99'], $row['throughput_s']);
     }
 }
 $lines = [...$lines, '',
     'Load targets: '.($targets ? 'passed' : '**failed; no target relaxation**').'. Correctness: '.($correct ? 'passed' : '**failed**').'.', '',
     "Full USDT history: $inspected accounts / $findings findings; IDR history: $customers accounts / $idrFindings findings.", '',
     "Synthetic USDT receipts: $receiptsInspected inspected / $receiptFindings findings.", '',
-    'See result.json for reconciliation timings, operations.json for reservations/history/provider budgets/fairness and Redis backlog recovery, load.json for lock bounds and scheduling lag.', '',
+    'See result.json for account, signed-ledger, accounting and receipt reconciliation. operations.json reports history/reservation percentiles, reservation outcomes, provider outage budgets and fairness, and Redis backlog age/drain/replay. load.json retains per-worker scheduled and execution observations; negative-control SLO checks are in acceptance-evaluation.json.', '',
     'Query plans and PostgreSQL wait samples/logs are retained. FOR UPDATE durations bound wait and include execution/transport. CPU, memory, filesystem and container details are in adjacent artifacts.', '',
     'Synthetic funding/purchase sources and HTTP/RPC fixtures do not qualify custody, live provider latency, treasury backing or production capacity. The ledger benchmark excludes controller/inventory/checkout latency. No production deployment, receipt claim or funding activation occurred.',
 ];

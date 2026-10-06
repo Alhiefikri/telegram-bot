@@ -62,7 +62,8 @@ git -C "$ROOT_DIR" rev-parse HEAD >"$ARTIFACT_DIR/commit.txt"
 git -C "$ROOT_DIR" diff --binary >"$ARTIFACT_DIR/worktree.patch"
 git -C "$ROOT_DIR" status --short >"$ARTIFACT_DIR/worktree-status.txt"
 cp "$ROOT_DIR/scripts/balance-v2-benchmark.php" "$ROOT_DIR/scripts/balance-v2-benchmark.sh" \
-    "$ROOT_DIR/scripts/balance-v2-operational-probes.php" "$ARTIFACT_DIR/"
+    "$ROOT_DIR/scripts/balance-v2-operational-probes.php" "$ROOT_DIR/scripts/balance-v2-acceptance.php" \
+    "$ROOT_DIR/scripts/balance-v2-evaluate.php" "$ARTIFACT_DIR/"
 cp "$ROOT_DIR/scripts/fixtures/balance-v2/composer.lock" "$ARTIFACT_DIR/tooling-composer.lock"
 sha256sum "$ARTIFACT_DIR"/balance-v2-* >"$ARTIFACT_DIR/sources.sha256"
 cd "$ROOT_DIR/src"

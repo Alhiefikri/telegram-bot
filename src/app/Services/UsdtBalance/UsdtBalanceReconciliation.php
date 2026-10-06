@@ -76,32 +76,58 @@ final class UsdtBalanceReconciliation
         $debits = UsdtBalanceEntryKind::debitValues();
         $placeholders = implode(', ', array_fill(0, count($debits), '?'));
 
-        $ledger = DB::table('customer_usdt_balance_entries')
-            ->selectRaw(
-                "customer_usdt_balance_account_id as account_id, COUNT(*) as entry_count, MIN(account_sequence) as min_sequence, MAX(account_sequence) as max_sequence, MAX(id) as latest_entry_id, SUM(CASE WHEN kind IN ({$placeholders}) THEN -amount_micro ELSE amount_micro END) as signed_sum",
-                $debits,
-            )
-            ->whereIn('customer_usdt_balance_account_id', (clone $scope)->select('id'))
-            ->groupBy('customer_usdt_balance_account_id');
+        $entriesForAccount = fn () => DB::table('customer_usdt_balance_entries')
+            ->whereColumn('customer_usdt_balance_account_id', 'accounts.id');
+        $base = DB::query()->fromSub($scope, 'accounts');
+        $accountColumns = [
+            'accounts.id as account_id',
+            'accounts.customer_id',
+            'accounts.balance_micro',
+            'accounts.version',
+            'accounts.last_entry_id',
+            'accounts.frozen_reason',
+        ];
 
-        return DB::query()->fromSub($scope, 'accounts')
-            ->leftJoinSub($ledger, 'ledger', 'ledger.account_id', '=', 'accounts.id')
-            ->leftJoin('customer_usdt_balance_entries as latest', 'latest.id', '=', 'ledger.latest_entry_id')
-            ->select([
-                'accounts.id as account_id',
-                'accounts.customer_id',
-                'accounts.balance_micro',
-                'accounts.version',
-                'accounts.last_entry_id',
-                'accounts.frozen_reason',
-                'ledger.entry_count',
-                'ledger.min_sequence',
-                'ledger.max_sequence',
-                'ledger.signed_sum',
-                'latest.id as latest_entry_id',
-                'latest.account_sequence as latest_sequence',
-                'latest.balance_after_micro as latest_balance_after',
-            ]);
+        if (DB::getDriverName() === 'pgsql') {
+            // Make the account key an outer parameter in PostgreSQL's plan.
+            // A correlated WHERE IN was decorrelated into a full ledger scan.
+            $ledger = $entriesForAccount()->selectRaw(
+                "COUNT(*) as entry_count, MIN(account_sequence) as min_sequence, MAX(account_sequence) as max_sequence, SUM(CASE WHEN kind IN ({$placeholders}) THEN -amount_micro ELSE amount_micro END) as signed_sum",
+                $debits,
+            );
+            $latest = $entriesForAccount()->select([
+                'id as latest_entry_id',
+                'account_sequence as latest_sequence',
+                'balance_after_micro as latest_balance_after',
+            ])->orderByDesc('id')->limit(1);
+
+            return $base->joinLateral($ledger, 'ledger')
+                ->leftJoinLateral($latest, 'latest')
+                ->select([
+                    ...$accountColumns,
+                    'ledger.entry_count',
+                    'ledger.min_sequence',
+                    'ledger.max_sequence',
+                    'ledger.signed_sum',
+                    'latest.latest_entry_id',
+                    'latest.latest_sequence',
+                    'latest.latest_balance_after',
+                ]);
+        }
+
+        // SQLite retains the one-statement snapshot with correlated
+        // projections; PostgreSQL uses LATERAL to prevent aggregate flattening.
+        $entries = $entriesForAccount();
+        $latest = (clone $entries)->orderByDesc('id')->limit(1);
+
+        return $base->select($accountColumns)
+            ->selectSub((clone $entries)->selectRaw('COUNT(*)'), 'entry_count')
+            ->selectSub((clone $entries)->selectRaw('MIN(account_sequence)'), 'min_sequence')
+            ->selectSub((clone $entries)->selectRaw('MAX(account_sequence)'), 'max_sequence')
+            ->selectSub((clone $entries)->selectRaw("SUM(CASE WHEN kind IN ({$placeholders}) THEN -amount_micro ELSE amount_micro END)", $debits), 'signed_sum')
+            ->selectSub((clone $latest)->select('id'), 'latest_entry_id')
+            ->selectSub((clone $latest)->select('account_sequence'), 'latest_sequence')
+            ->selectSub((clone $latest)->select('balance_after_micro'), 'latest_balance_after');
     }
 
     private function assess(object $row): ?UsdtBalanceDriftFinding
