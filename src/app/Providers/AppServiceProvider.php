@@ -73,6 +73,7 @@ use App\Services\Telegram\TelegramCallbackAckState;
 use App\Services\Telegram\TelegramCallbackHandlerPipeline;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramConfiguredCheckoutPaymentIntentSelector;
+use App\Services\UsdtReceivers\UsdtDepositReceiverProvisioners;
 use App\Services\UsdtTreasury\UsdtTreasuryAssetRegistry;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
@@ -118,6 +119,13 @@ class AppServiceProvider extends ServiceProvider
         // reports missing custody input instead of any fabricated backing.
         $this->app->singleton(UsdtTreasuryAssetRegistry::class, fn ($app): UsdtTreasuryAssetRegistry => new UsdtTreasuryAssetRegistry(
             $app->tagged('usdt-treasury-asset-providers'),
+        ));
+        // USDT deposit receiver provisioners are approved custody adapters: a
+        // provider may be tagged only after the H1 custody/capacity gates pass.
+        // Until then the registry stays empty and allocation fails closed
+        // instead of falling back to a shared address.
+        $this->app->singleton(UsdtDepositReceiverProvisioners::class, fn ($app): UsdtDepositReceiverProvisioners => new UsdtDepositReceiverProvisioners(
+            $app->tagged('usdt-deposit-receiver-provisioners'),
         ));
         $this->app->singleton(CheckoutPaymentPreparationResolver::class, function ($app) {
             return new CheckoutPaymentPreparationResolver([

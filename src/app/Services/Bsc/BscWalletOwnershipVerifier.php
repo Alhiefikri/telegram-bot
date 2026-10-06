@@ -24,12 +24,28 @@ final class BscWalletOwnershipVerifier implements BscWalletOwnershipVerifierInte
             return false;
         }
 
+        return $this->verifyMessage(
+            (string) $receiver->address_normalized,
+            (int) $receiver->chain_id,
+            (string) $challenge->message,
+            $walletType,
+            $signature,
+        );
+    }
+
+    public function verifyMessage(
+        string $addressNormalized,
+        int $chainId,
+        string $message,
+        string $walletType,
+        string $signature,
+    ): bool {
         return match (strtolower(trim($walletType))) {
-            'eoa' => $this->eoa->matchesAddress($challenge->message, $signature, $receiver->address_normalized),
-            'erc1271', 'smart_contract' => $this->rpc->chainId() === (int) $receiver->chain_id
+            'eoa' => $this->eoa->matchesAddress($message, $signature, $addressNormalized),
+            'erc1271', 'smart_contract' => $this->rpc->chainId() === $chainId
                 && $this->rpc->isValidErc1271Signature(
-                    $receiver->address_normalized,
-                    BscEip191::messageHashHex($challenge->message),
+                    $addressNormalized,
+                    BscEip191::messageHashHex($message),
                     $signature,
                 ),
             default => false,

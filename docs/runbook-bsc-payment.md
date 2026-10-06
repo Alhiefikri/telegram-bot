@@ -59,6 +59,24 @@ If an explicit submitted TX hash proves a transfer was included after expiry or 
 
 Readiness/RPC failures are retried with a bounded cadence only while the Payment is pending and its Order remains `pending_payment`. The scheduled reconciler does not select expired, cancelled, completed, failed, or paid Orders; amount-unique history scans stop when an Order becomes terminal. Interactive refreshes and queued jobs also stop there, except that one already-queued legacy TX-hash job may finish a targeted receipt check so evidence submitted before expiry can reach manual review. That terminal hash check is not retried. Transfers first reported after expiry require manual operator review; the scheduler does not keep scanning chain history to discover them. Mismatch, duplicate hash, manual-review, and active-backlog alerts are deduplicated before being sent to the configured owner chat. Inspect the admin Order detail for the selected public evidence fields and the allowlisted explorer link.
 
+## Receiver ownership registry (checkout vs Customer deposit)
+
+Every BSC USDT receiver address is claimed permanently and channel-exclusively in `usdt_receiver_address_claims` (#549, [U4 doc](balance-u4-receiver-ownership.md)):
+
+- Checkout receivers added from Admin or `BscReceiverManager` take the `checkout` claim. A checkout address can never be registered again as a Customer deposit receiver, and deleting an unreferenced checkout receiver does not release the claim.
+- Customer-exclusive deposit receivers (future USDT top-up rail) are registered from the console, never from Admin, and bind the address to exactly one Customer:
+
+  ```bash
+  php artisan usdt-receivers:register --customer-id=123 --address=0x… --actor=owner@example.com
+  php artisan usdt-receivers:verify --receiver=1 --challenge=<uuid> --wallet-type=eoa --signature=0x…
+  php artisan usdt-receivers:retire --receiver=1 --reason="rotasi address" --actor=owner@example.com
+  ```
+
+  `--actor` must resolve to an Owner user; `--telegram-id` may replace `--customer-id` when the Customer is selected by exact numeric Telegram ID. Add `--manual-verified` only to record the explicitly acknowledged high-risk Owner custody attestation instead of a signed ownership challenge.
+- One non-retired receiver per Customer; rotate by retiring the old receiver and registering a new address. Retired rows stay monitored and immutable, and no address is ever reassigned to another Customer.
+- Custody provisioning adapters are registered only through the container tag `usdt-deposit-receiver-provisioners`, which is intentionally empty until the H1 custody/capacity gates pass. Until then a Customer without a registered address reports capacity unavailable and no invoice can be created; there is no shared-address fallback.
+- Never edit claims, receiver identity columns or retirement columns directly in the database: PostgreSQL triggers and model guards reject those writes, and rollback must not delete claims or receiver history.
+
 ## Disable and rollback
 
 For an operational stop, turn off the database `bsc_payment_enabled` setting. Do not remove the RPC/token configuration and do not edit existing receiver or `payment_bsc_details` snapshots. New checkout selectors hide BSC immediately after the committed Storefront cache invalidation; historical nonterminal Payments continue through the shared lifecycle/reconciliation path, while terminal Orders remain out of automatic reconciliation.

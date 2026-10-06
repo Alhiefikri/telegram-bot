@@ -3,12 +3,15 @@
 namespace App\Services\Bsc;
 
 use App\Enums\BscReceiverVerificationStatus;
+use App\Enums\UsdtReceiverChannel;
 use App\Exceptions\BscReceiverChallengeException;
+use App\Exceptions\UsdtReceiverAddressConflict;
 use App\Jobs\SendBscReceiverMutationNotification;
 use App\Models\BscPaymentReceiver;
 use App\Models\BscReceiverOwnershipChallenge;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\UsdtReceivers\UsdtReceiverAddressClaims;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -20,6 +23,7 @@ final class BscReceiverManager
 {
     public function __construct(
         private readonly BscWalletOwnershipVerifierInterface $ownershipVerifier,
+        private readonly UsdtReceiverAddressClaims $addressClaims,
         private readonly AuditLogger $auditLogger,
     ) {}
 
@@ -36,7 +40,20 @@ final class BscReceiverManager
                     throw new BscReceiverChallengeException('BSC Receiving Address sudah terdaftar. Nonaktifkan record lama atau gunakan address lain.');
                 }
 
+                // The global receiver registry rejects addresses already owned by
+                // the Customer-exclusive USDT deposit channel, so the checkout
+                // pool and top-up receivers can never share an address.
+                try {
+                    $claim = $this->addressClaims->claim($chainId, $address, UsdtReceiverChannel::Checkout);
+                } catch (UsdtReceiverAddressConflict $exception) {
+                    throw new BscReceiverChallengeException(
+                        'BSC Receiving Address sudah terdaftar. Nonaktifkan record lama atau gunakan address lain.',
+                        previous: $exception,
+                    );
+                }
+
                 $receiver = BscPaymentReceiver::create([
+                    'address_claim_id' => $claim->getKey(),
                     'label' => $label,
                     'address' => $address,
                     'chain_id' => $chainId,
@@ -233,6 +250,9 @@ final class BscReceiverManager
             $lockedReceiver = BscPaymentReceiver::query()->lockForUpdate()->findOrFail($receiver->getKey());
             if (! $lockedReceiver->isVerified()) {
                 throw new BscReceiverChallengeException('Receiver harus diverifikasi sebelum dapat diaktifkan.');
+            }
+            if ($lockedReceiver->addressClaim()->first()?->channel !== UsdtReceiverChannel::Checkout) {
+                throw new BscReceiverChallengeException('Address ini tidak lagi eksklusif untuk pool checkout BSC.');
             }
             if ((int) $lockedReceiver->chain_id !== $chainId
                 || strtolower((string) $lockedReceiver->token_contract) !== $tokenContract

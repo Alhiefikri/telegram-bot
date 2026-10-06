@@ -52,4 +52,9 @@ class Customer extends Model implements Authenticatable
     {
         return $this->hasOne(CustomerBalanceAccount::class);
     }
+
+    public function usdtDepositReceivers()
+    {
+        return $this->hasMany(CustomerUsdtDepositReceiver::class);
+    }
 }
