@@ -23,9 +23,7 @@ final class UsdtBalanceReconciliation
     {
         $this->assertInputs($customerId, $afterAccountId, $limit);
 
-        $rows = $this->accountQuery()
-            ->when($customerId !== null, fn ($query) => $query->where('accounts.customer_id', $customerId))
-            ->when($afterAccountId !== null, fn ($query) => $query->where('accounts.id', '>', $afterAccountId))
+        $rows = $this->accountQuery($customerId, $afterAccountId, limit: $limit + 1)
             ->orderBy('accounts.id')
             ->limit($limit + 1)
             ->get();
@@ -58,35 +56,37 @@ final class UsdtBalanceReconciliation
      */
     public function inspectAccount(int $accountId): ?UsdtBalanceDriftFinding
     {
-        $row = $this->accountQuery()->where('accounts.id', $accountId)->first();
+        $row = $this->accountQuery(accountId: $accountId)->first();
 
         return $row === null ? null : $this->assess($row);
     }
 
-    private function accountQuery()
+    private function accountQuery(?int $customerId = null, ?int $afterAccountId = null, ?int $accountId = null, ?int $limit = null)
     {
+        // Bound the input history as well as the output page. Applying LIMIT
+        // only after global grouped joins repeatedly reads unrelated accounts.
+        // Both copies of this scope share the same SQL snapshot, so an active
+        // writer still cannot manufacture a reconciliation finding.
+        $scope = DB::table('customer_usdt_balance_accounts')
+            ->when($customerId !== null, fn ($query) => $query->where('customer_id', $customerId))
+            ->when($afterAccountId !== null, fn ($query) => $query->where('id', '>', $afterAccountId))
+            ->when($accountId !== null, fn ($query) => $query->where('id', $accountId))
+            ->orderBy('id')
+            ->when($limit !== null, fn ($query) => $query->limit($limit));
         $debits = UsdtBalanceEntryKind::debitValues();
         $placeholders = implode(', ', array_fill(0, count($debits), '?'));
 
         $ledger = DB::table('customer_usdt_balance_entries')
             ->selectRaw(
-                "customer_usdt_balance_account_id as account_id, COUNT(*) as entry_count, MIN(account_sequence) as min_sequence, MAX(account_sequence) as max_sequence, SUM(CASE WHEN kind IN ({$placeholders}) THEN -amount_micro ELSE amount_micro END) as signed_sum",
+                "customer_usdt_balance_account_id as account_id, COUNT(*) as entry_count, MIN(account_sequence) as min_sequence, MAX(account_sequence) as max_sequence, MAX(id) as latest_entry_id, SUM(CASE WHEN kind IN ({$placeholders}) THEN -amount_micro ELSE amount_micro END) as signed_sum",
                 $debits,
             )
+            ->whereIn('customer_usdt_balance_account_id', (clone $scope)->select('id'))
             ->groupBy('customer_usdt_balance_account_id');
 
-        $latest = DB::table('customer_usdt_balance_entries as entries')
-            ->select([
-                'entries.customer_usdt_balance_account_id as account_id',
-                'entries.id as latest_entry_id',
-                'entries.account_sequence as latest_sequence',
-                'entries.balance_after_micro as latest_balance_after',
-            ])
-            ->whereRaw('entries.id = (select MAX(inner_entries.id) from customer_usdt_balance_entries as inner_entries where inner_entries.customer_usdt_balance_account_id = entries.customer_usdt_balance_account_id)');
-
-        return DB::table('customer_usdt_balance_accounts as accounts')
+        return DB::query()->fromSub($scope, 'accounts')
             ->leftJoinSub($ledger, 'ledger', 'ledger.account_id', '=', 'accounts.id')
-            ->leftJoinSub($latest, 'latest', 'latest.account_id', '=', 'accounts.id')
+            ->leftJoin('customer_usdt_balance_entries as latest', 'latest.id', '=', 'ledger.latest_entry_id')
             ->select([
                 'accounts.id as account_id',
                 'accounts.customer_id',
@@ -98,9 +98,9 @@ final class UsdtBalanceReconciliation
                 'ledger.min_sequence',
                 'ledger.max_sequence',
                 'ledger.signed_sum',
-                'latest.latest_entry_id',
-                'latest.latest_sequence',
-                'latest.latest_balance_after',
+                'latest.id as latest_entry_id',
+                'latest.account_sequence as latest_sequence',
+                'latest.balance_after_micro as latest_balance_after',
             ]);
     }
 

@@ -1,0 +1,29 @@
+# Balance V2 performance evidence (#560)
+
+Run `scripts/balance-v2-benchmark.sh` from the repository root. It creates disposable PostgreSQL 16 and Redis 7 containers on randomly allocated loopback ports. It never accepts an existing database or Redis endpoint. Both containers are removed on exit; timestamped evidence remains under ignored `artifacts/balance-v2/`. The optional Predis transport is installed from the isolated, locked Composer manifest in `scripts/fixtures/balance-v2/`; it changes no application dependency or production configuration.
+
+`--smoke` checks the harness with 100 Customers and 10,000 entries per currency. `--quick` uses the representative dataset with short diagnostic durations. Neither mode proves the 30-minute capacity gate. The default profile seeds 10,000 Customers, **1,000,000 entries in each currency**, and balanced USDT accounting counterparts. Fixture history uses synthetic source identities; it is not evidence of real deposits, custody backing or qualified provider receipts.
+
+The default runs 50 reads/s and 10 postings/s **per currency concurrently** for 1,800 seconds, then a 60-second 5x burst, then a 60-second hot-account phase at the burst rate. Twenty-four independent PHP workers reopen their own PostgreSQL connections. Each operation has a fixed scheduled arrival: the report includes both execution latency and latency from its scheduled arrival so saturation cannot disappear through coordinated omission. Distinct writers use disjoint account sets; hot writers deliberately share one account. USDT postings call the typed ledger purchase boundary; IDR postings call the existing full-history-validated credit boundary. This measures internal owners, not complete checkout/inventory/controller latency.
+
+Evidence includes:
+
+- Commit SHA, dirty patch/status, copies and SHA-256 of the harness, locked transport dependencies, CPU/memory/filesystem details and Docker configuration.
+- Dataset/stack versions, raw per-worker observations and p50/p95/p99 for latency, scheduled latency, scheduling lag, query count, SQL duration and lock-query duration; completed throughput and error counts.
+- Real owner-generated `EXPLAIN (ANALYZE, BUFFERS)` plans, PostgreSQL lock-wait samples at 100ms and server lock-wait logs. A `FOR UPDATE` duration includes execution and transport and is a conservative wait bound, not a fabricated exact lock-wait measurement.
+- Four-process funding-reservation saturation for distinct and hot Customers, per-operation throughput/query/lock/latency distributions and a no-oversubscription check. Approved H0-v1 removes business exposure caps; the measured constraint is one active funding target per Customer. The shared policy safety lock remains explicit.
+- Bounded provider scheduler ticks through outage and recovery, request counts, durable checkpoints, receiver fairness and scheduler query plans. RPC fixture methods reject calls inside DB transactions. Synthetic observations never qualify provider access or authorize money.
+- Actual Laravel Redis queue jobs lost with `FLUSHDB` on the isolated Redis connection, durable PostgreSQL rediscovery through `telegram:recover-outbound`, handler delivery against HTTP fixtures, drained backlog and replay without additional delivery.
+- Full USDT account-history reconciliation in 200-account pages with a persisted diagnostic checkpoint, exact accounting comparisons and bounded IDR signed-history checks after load. Money guards remain enabled throughout.
+
+The draft targets are p95 read ≤100ms, p95 internal posting ≤250ms and p99 different-account lock wait ≤500ms. Scheduled latency is used for the latency gate; lock-query duration supplies a conservative lock-wait gate. Burst scheduling lag must drain. A failure exits nonzero and retains raw evidence; targets are not automatically relaxed. Smoke/quick success is never described as V2 acceptance. Production capacity requires representative deployment hardware and operator sign-off; this harness touches only local disposable fixtures.
+
+Context7 references used for instrumentation: PostgreSQL 16 [EXPLAIN/BUFFERS](https://www.postgresql.org/docs/16/using-explain.html), [wait events](https://www.postgresql.org/docs/16/monitoring-stats.html), [pg_locks](https://www.postgresql.org/docs/16/view-pg-locks.html); Laravel 13 [query listeners](https://github.com/laravel/docs/blob/13.x/database.md), [Predis connections](https://github.com/laravel/docs/blob/13.x/redis.md) and [after-commit Redis queues](https://github.com/laravel/docs/blob/13.x/queues.md).
+
+## Current acceptance status
+
+Implementation and diagnostic verification are in progress. The complete 30-minute run, representative query-plan assessment, measured fixes/retests and reviewable PR evidence are still required. #560 and downstream readiness stay open until that evidence is recorded. No production deployment or funding activation is included.
+
+Diagnostics found and reproduced receiver starvation after outage recovery: second-resolution `last_attempt_at` tied all previously visited receivers, so rapid budgeted ticks repeatedly selected low receiver IDs. The scheduling timestamp now retains microseconds in PostgreSQL and in the writer. The same-second regression is included in the PostgreSQL release manifest and concurrency gate.
+
+The initial million-entry diagnostic reconciled 10,000 USDT accounts with zero findings in 58.168 seconds (200-account chunk p50 713.115ms / p95 1774.013ms / p99 2391.642ms). It overlapped regression work, so it is diagnostic evidence, not an isolated capacity measurement. Reconciliation now scopes the history aggregate to the selected account page and finds the newest entry through that same aggregate; exact signed sums, sequence counts and cursor comparisons remain mandatory within one SQL snapshot. The final benchmark must retest this change and retain its query plan.

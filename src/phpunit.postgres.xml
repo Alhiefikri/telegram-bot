@@ -6,6 +6,7 @@
 >
     <testsuites>
         <testsuite name="PostgreSQL release integration">
+            <file>tests/Feature/BscUsdtTransferIngestionTest.php</file>
             <file>tests/Feature/Telegram/WebhookIngressTest.php</file>
             <file>tests/Feature/ProductInventoryRaceTest.php</file>
             <file>tests/Feature/StorefrontProductCheckoutTest.php</file>

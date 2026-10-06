@@ -487,6 +487,36 @@ final class UsdtBalanceReconciliationTest extends TestCase
         $this->assertNull($report['accounts']['next_cursor']);
     }
 
+    public function test_scoped_pages_retain_drift_detection_and_empty_accounts(): void
+    {
+        $healthy = $this->customer(910030);
+        $drifted = $this->customer(910031);
+        $empty = $this->customer(910032);
+        $this->credit($healthy, 1_000_000, 'page-healthy');
+        $this->credit($drifted, 2_000_000, 'page-drifted');
+        $driftedAccount = CustomerUsdtBalanceAccount::query()->where('customer_id', $drifted->id)->sole();
+        DB::table('customer_usdt_balance_accounts')->where('id', $driftedAccount->id)->update(['balance_micro' => 1]);
+        DB::table('customer_usdt_balance_accounts')->insert([
+            'customer_id' => $empty->id, 'currency' => 'USDT', 'balance_micro' => 0,
+            'version' => 0, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $reader = app(UsdtBalanceReconciliation::class);
+        $first = $reader->inspect(null, null, 1);
+        $this->assertSame(1, $first->accountsInspected);
+        $this->assertTrue($first->isConsistent());
+        $this->assertTrue($first->hasMore);
+        $second = $reader->inspect(null, $first->nextCursor, 1);
+        $this->assertSame(1, $second->accountsInspected);
+        $this->assertCount(1, $second->findings);
+        $this->assertSame((int) $drifted->id, $second->findings[0]->customerId);
+        $third = $reader->inspect(null, $second->nextCursor, 1);
+        $this->assertSame(1, $third->accountsInspected);
+        $this->assertTrue($third->isConsistent());
+        $this->assertFalse($third->hasMore);
+        $this->assertTrue($reader->inspect((int) $healthy->id, null, 1000)->isConsistent());
+        $this->assertNotNull($reader->inspectAccount((int) $driftedAccount->id));
+    }
+
     public function test_customer_scoping_limits_the_report_without_hiding_orphan_receipts(): void
     {
         $scoped = $this->customer(910021);

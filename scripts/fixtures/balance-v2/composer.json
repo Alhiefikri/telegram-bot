@@ -1,0 +1,7 @@
+{
+    "name": "local/balance-v2-benchmark-tooling",
+    "description": "Optional disposable benchmark transport; not an application dependency",
+    "require": {
+        "predis/predis": "^3.0"
+    }
+}
