@@ -54,6 +54,23 @@ final class UsdtMicroAmount
         return new self($units);
     }
 
+    /**
+     * Exact, zero-safe display form in canonical USDT units with trailing
+     * zeros removed (e.g. 1500000 -> "1.5", 0 -> "0"). Formatting never
+     * divides by a float.
+     */
+    public static function formatUnits(int $units): string
+    {
+        if ($units < 0) {
+            throw new InvalidArgumentException('USDT display amounts cannot be negative.');
+        }
+
+        $decimal = BigDecimal::ofUnscaledValue($units, self::SCALE)->toString();
+        $trimmed = rtrim(rtrim($decimal, '0'), '.');
+
+        return $trimmed === '' || $trimmed === '0' ? '0' : $trimmed;
+    }
+
     public static function fromRawTokenUnits(string $rawUnits, int $tokenDecimals): self
     {
         if ($tokenDecimals < 0 || $tokenDecimals > self::MAX_TOKEN_DECIMALS) {

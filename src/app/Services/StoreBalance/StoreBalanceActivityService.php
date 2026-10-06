@@ -287,6 +287,12 @@ final class StoreBalanceActivityService
     }
 
     /**
+     * Rows are ordered by (created_at, rank, id) descending. Whether a row of
+     * another source belongs beyond the cursor depends on how this source's
+     * rank compares with the cursor's rank: a lower-ranked row may share the
+     * cursor timestamp and still belong to the page, a higher-ranked one may
+     * not. Comparing only the timestamp drops same-second rows at a boundary.
+     *
      * @param  Builder<StoreBalanceTopUp|StoreBalanceEntry>  $query
      */
     private function applyCursor(
@@ -296,25 +302,37 @@ final class StoreBalanceActivityService
         bool $newer,
     ): void {
         $timestamp = $cursor->occurredAt();
-        $timestampOperator = $newer ? '>' : '<';
-        $sameTimestampOperator = $newer ? '>' : '<';
+        $operator = $newer ? '>' : '<';
 
-        if (($newer && $sourceRank < $cursor->rank()) || (! $newer && $sourceRank > $cursor->rank())) {
-            $query->where('created_at', $newer ? '>=' : '<=', $timestamp);
+        if ($newer) {
+            if ($sourceRank > $cursor->rank()) {
+                $query->where('created_at', '>=', $timestamp);
 
-            return;
+                return;
+            }
+            if ($sourceRank < $cursor->rank()) {
+                $query->where('created_at', '>', $timestamp);
+
+                return;
+            }
+        } else {
+            if ($sourceRank < $cursor->rank()) {
+                $query->where('created_at', '<=', $timestamp);
+
+                return;
+            }
+            if ($sourceRank > $cursor->rank()) {
+                $query->where('created_at', '<', $timestamp);
+
+                return;
+            }
         }
 
-        if (($newer && $sourceRank > $cursor->rank()) || (! $newer && $sourceRank < $cursor->rank())) {
-            $query->where('created_at', $newer ? '>' : '<', $timestamp);
-
-            return;
-        }
-        $query->where(function (Builder $same) use ($timestamp, $sameTimestampOperator, $cursor): void {
-            $same->where('created_at', $sameTimestampOperator, $timestamp)
-                ->orWhere(function (Builder $tie) use ($timestamp, $cursor, $sameTimestampOperator): void {
+        $query->where(function (Builder $same) use ($timestamp, $operator, $cursor): void {
+            $same->where('created_at', $operator, $timestamp)
+                ->orWhere(function (Builder $tie) use ($timestamp, $operator, $cursor): void {
                     $tie->where('created_at', '=', $timestamp)
-                        ->where('id', $sameTimestampOperator, $cursor->id);
+                        ->where('id', $operator, $cursor->id);
                 });
         });
     }

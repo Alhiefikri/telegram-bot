@@ -169,7 +169,9 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $keyboard = $edit['reply_markup']['inline_keyboard'];
         $this->assertSame('balance:add', $keyboard[0][0]['callback_data']);
         $this->assertSame('balance:activity', $keyboard[1][0]['callback_data']);
-        $this->assertSame(['menu:back', 'menu:home'], array_column($keyboard[2], 'callback_data'));
+        $this->assertSame('usdt:history', $keyboard[2][0]['callback_data']);
+        $this->assertSame(['menu:back', 'menu:home'], array_column($keyboard[3], 'callback_data'));
+        $this->assertStringContainsString('💎 Saldo USDT: 0 USDT', $this->editCopy($edit));
 
         $this->postTelegramWebhook($this->callbackUpdate(45413, 'balance-activity', 'balance:activity', [], 45411, 'private', $root->message_id))->assertOk();
 

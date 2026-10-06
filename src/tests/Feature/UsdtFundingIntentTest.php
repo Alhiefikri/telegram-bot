@@ -95,14 +95,34 @@ class UsdtFundingIntentTest extends TestCase
         $this->assertNoMoneyOrOutbound();
     }
 
-    public function test_wrong_nonce_message_and_root_generation_cannot_confirm(): void
+    public function test_wrong_nonce_is_rejected_and_render_generation_advance_keeps_own_confirmation(): void
     {
-        $nonce = $this->preview()->intent->nonce;
+        $intent = $this->preview()->intent;
         $this->assertSame('stale', $this->action(str_repeat('f', 32))->outcome);
-        $this->assertSame('unauthorized', app(TelegramUsdtFundingActions::class)->callback('951001', '951001', 'private', 101, 'usdt:confirm:'.$nonce)->outcome);
+        $this->assertSame('unauthorized', app(TelegramUsdtFundingActions::class)->callback('951001', '951001', 'private', 101, 'usdt:confirm:'.$intent->nonce)->outcome);
+
+        // Rendering the canonical message advances its render generation; the
+        // Customer's own confirmation on the same message stays valid.
         $this->root->update(['generation' => 2]);
-        $this->assertSame('stale', $this->action($nonce)->outcome);
+        $this->assertSame('confirmed', $this->action($intent->nonce)->outcome);
+        $this->assertSame(1, CustomerUsdtTopUp::query()->count());
+    }
+
+    public function test_replaced_canonical_message_cannot_confirm_its_old_preview(): void
+    {
+        $intent = $this->preview()->intent;
+        $this->root->update(['message_id' => 101, 'generation' => 2]);
+
+        $this->assertSame('stale', app(UsdtFundingIntentService::class)->claim(
+            $this->customer,
+            '951001',
+            (int) $this->root->id,
+            101,
+            $intent->nonce,
+            'confirm',
+        )->outcome);
         $this->assertSame(0, CustomerUsdtTopUp::query()->count());
+        $this->assertSame(0, DB::table('customer_usdt_funding_reservations')->count());
     }
 
     public function test_cancel_and_expire_previews_never_reserve_or_prepare(): void

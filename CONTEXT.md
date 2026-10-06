@@ -205,8 +205,12 @@ _Avoid_: Store Balance USDT, non-custodial wallet, Supplier Balance
 One immutable ledger row recording a single economic effect on a Customer USDT Balance — a funding credit, purchase debit, refund credit, or linked reversal debit — with its exact positive micro-USDT amount, per-account sequence, typed economic source, request fingerprint and unique idempotency claim. Reapplying the same source, key or fingerprint returns the existing entry; a changed payload conflicts.
 _Avoid_: USDT transaction, balance mutation, wallet row
 
+**Customer USDT Balance History**:
+The bounded, Customer-scoped presentation read of one Customer's USDT balance activity: immutable ledger entries plus funding targets that have no resolution yet. It is keyset-paginated through a signed, Customer-scoped cursor with a 25-row default and 100-row maximum, and its status text is never money authority — only a linked ledger entry means credited funds.
+_Avoid_: account statement, money authority, shared balance cache
+
 **USDT Funding Intent**:
-A Customer-owned expiring confirmation binding exact micro-USDT credit, application fee/payable amount, policy/terms versions, exclusive receiver/payment terms, private chat/canonical message/root generation and opaque nonce. U6 persists this preview without provider, invoice, Payment, receipt, ledger or outbound effects; cancellation/expiry ends only the local preview.
+A Customer-owned expiring confirmation binding exact micro-USDT credit, application fee/payable amount, policy/terms versions, exclusive receiver/payment terms, private chat and canonical message identity plus an opaque nonce. U6 persists this preview without provider, invoice, Payment, receipt, ledger or outbound effects; cancellation/expiry ends only the local preview, and a replaced canonical message (not a mere re-render) invalidates it.
 _Avoid_: USDT invoice, deposit receipt, available funds
 
 **USDT Top-up**:

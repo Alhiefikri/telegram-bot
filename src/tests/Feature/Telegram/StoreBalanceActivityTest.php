@@ -107,7 +107,7 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
         $this->assertSame('credited', $olderPage->items[0]->state);
     }
 
-    public function test_equal_timestamps_keep_top_up_and_entry_cursor_boundaries_strict(): void
+    public function test_equal_timestamps_keep_same_second_rows_reachable_in_both_directions(): void
     {
         $this->travelTo('2026-07-28 10:10:00 UTC');
         $customer = Customer::factory()->create(['telegram_id' => 46303, 'locale' => 'en']);
@@ -132,11 +132,59 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
         $this->assertNotNull($topUpItem);
         $this->assertNotNull($debitItem);
 
+        // Entries rank newer than a top-up row inside one timestamp, so the
+        // rows above the top-up are the same-second entries that are not
+        // already presented by that top-up row itself.
         $newerFromTopUp = app(StoreBalanceActivityService::class)->newerPage($customer, $topUpItem->cursor());
-        $this->assertCount(0, $newerFromTopUp->items);
+        $this->assertCount(2, $newerFromTopUp->items);
+        $this->assertFalse(collect($newerFromTopUp->items)->contains(fn ($item) => $item->isTopUp()));
 
+        // Walking older from an entry still reaches the lower-ranked top-up
+        // row of the same timestamp exactly once.
         $olderFromDebit = app(StoreBalanceActivityService::class)->olderPage($customer, $debitItem->cursor());
-        $this->assertFalse(collect($olderFromDebit->items)->contains(fn ($item) => $item->isTopUp()));
+        $this->assertTrue(collect($olderFromDebit->items)->contains(fn ($item) => $item->isTopUp()));
+        $topUps = collect($olderFromDebit->items)->filter(fn ($item) => $item->isTopUp());
+        $this->assertCount(1, $topUps);
+    }
+
+    public function test_same_second_top_up_row_at_a_page_boundary_is_never_lost(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        $customer = Customer::factory()->create(['telegram_id' => 46304, 'locale' => 'en']);
+        $account = CustomerBalanceAccount::query()->create(['customer_id' => $customer->id, 'balance' => 0, 'version' => 0]);
+        $at = now()->startOfSecond();
+        foreach (range(1, StoreBalanceActivityService::PAGE_SIZE) as $index) {
+            StoreBalanceEntry::query()->create([
+                'customer_balance_account_id' => $account->id,
+                'kind' => StoreBalanceEntryKind::TopUpCredit,
+                'amount' => 1000,
+                'balance_after' => $index * 1000,
+                'source_type' => 'manual_test',
+                'source_id' => 'boundary:'.$index,
+                'idempotency_key' => 'boundary:'.$index,
+                'created_at' => $at,
+            ]);
+        }
+        $topUp = $this->makeTopUp($customer, StoreBalanceTopUpStatus::Pending, 'created', $at);
+
+        $service = app(StoreBalanceActivityService::class);
+        $firstPage = $service->firstPage($customer);
+        $this->assertCount(StoreBalanceActivityService::PAGE_SIZE, $firstPage->items);
+        $this->assertNotNull($firstPage->olderCursor);
+        $this->assertFalse(collect($firstPage->items)->contains(fn ($item) => $item->isTopUp()));
+
+        $olderPage = $service->olderPage($customer, $firstPage->olderCursor);
+        $this->assertNotNull($olderPage);
+        $topUpItems = collect($olderPage->items)->filter(fn ($item) => $item->isTopUp());
+        $this->assertCount(1, $topUpItems, 'The same-second top-up row beyond the page boundary must be reachable.');
+        $this->assertSame('#'.$topUp->id, $topUpItems->first()->reference);
+
+        $back = $service->newerPage($customer, $olderPage->newerCursor);
+        $this->assertNotNull($back);
+        $this->assertSame(
+            array_map(static fn ($item): string => $item->type.':'.$item->id, $firstPage->items),
+            array_map(static fn ($item): string => $item->type.':'.$item->id, $back->items),
+        );
     }
 
     public function test_paid_top_up_without_an_exact_credit_is_support_review_without_available_amount(): void

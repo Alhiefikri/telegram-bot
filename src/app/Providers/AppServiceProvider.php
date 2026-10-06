@@ -67,6 +67,7 @@ use App\Services\Telegram\Callbacks\TelegramOrderCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramOrderTxtCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramPaymentProofCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramReceiptActionCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramUsdtFundingCallbackHandler;
 use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackAckState;
@@ -169,6 +170,7 @@ class AppServiceProvider extends ServiceProvider
             $app->make(TelegramLocaleCallbackHandler::class),
             $app->make(TelegramBalanceFundingCallbackHandler::class),
             $app->make(TelegramBalanceActivityCallbackHandler::class),
+            $app->make(TelegramUsdtFundingCallbackHandler::class),
             $app->make(TelegramHomeCallbackHandler::class),
             $app->make(TelegramAdminPaymentCallbackHandler::class),
             $app->make(TelegramBroadcastCallbackHandler::class),

@@ -69,7 +69,7 @@ final class UsdtFundingIntentService
             ];
             $identity = [
                 'customer_id' => (int) $customer->id, 'telegram_navigation_root_id' => $rootId,
-                'chat_id' => $chatId, 'canonical_message_id' => $messageId, 'root_generation' => (int) $root->generation,
+                'chat_id' => $chatId, 'canonical_message_id' => $messageId,
                 'currency' => 'USDT', 'rail' => CustomerUsdtFundingRail::BscUsdt->value,
                 'amount_micro' => $amount->units(), 'fee_micro' => $policy->applicationFeeMicro(),
                 'payable_micro' => $amount->units() + $policy->applicationFeeMicro(),
@@ -89,6 +89,10 @@ final class UsdtFundingIntentService
                 'v' => 1, 'identity' => $identity, 'nonce' => $nonce, 'expires_at_epoch' => $expiresAt->getTimestamp(),
             ], JSON_THROW_ON_ERROR));
             $intent = CustomerUsdtFundingIntent::query()->create($identity + [
+                // A render advances the root generation on every canonical
+                // edit, so it is a snapshot only: the root row plus canonical
+                // message id own intent identity, never the render counter.
+                'root_generation' => (int) $root->generation,
                 'nonce' => $nonce, 'request_fingerprint' => $fingerprint, 'state' => 'pending',
                 'version' => 1, 'created_at' => now(), 'expires_at' => $expiresAt,
             ]);
@@ -110,8 +114,11 @@ final class UsdtFundingIntentService
                 return new UsdtFundingIntentResult('stale');
             }
             $intent = CustomerUsdtFundingIntent::query()->where('customer_id', $customer->id)->where('nonce', $nonce)->lockForUpdate()->first();
+            // Identity is the root row plus canonical message id: every render
+            // advances the stored generation, so it can never be an identity
+            // version. A replaced root message fails this comparison.
             if ($intent === null || $intent->chat_id !== $chatId || $intent->telegram_navigation_root_id !== $rootId
-                || $intent->canonical_message_id !== $messageId || $intent->root_generation !== (int) $root->generation) {
+                || $intent->canonical_message_id !== $messageId) {
                 return new UsdtFundingIntentResult('stale');
             }
             // Replays never re-reserve using a changed policy or create new work.

@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\CustomerUsdtFundingRail;
 use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\TelegramNavigationRenderOutcome;
 use App\Enums\TelegramNavigationScreen;
@@ -21,6 +22,9 @@ use App\Services\StoreBalance\StoreBalanceSnapshot;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPresentation;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
+use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Services\UsdtFunding\CustomerUsdtFundingGate;
 use App\Support\Money;
 
 class TelegramMenuIntents
@@ -42,6 +46,8 @@ class TelegramMenuIntents
         private TelegramBalanceActivityToken $activityTokens,
         private StoreBalanceFundingPolicyManager $fundingPolicies,
         private TelegramUiIcons $uiIcons,
+        private CustomerUsdtBalanceLedger $usdtBalances,
+        private CustomerUsdtFundingGate $usdtFundingGate,
     ) {}
 
     public function sendLanguagePicker(string $chatId, ?Customer $customer = null, bool $isPrivateChat = true): void
@@ -270,29 +276,30 @@ class TelegramMenuIntents
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'balance.activity.unavailable');
             $lines[] = $this->locale->translate($customer, 'balance.activity.support');
-
-            return new TelegramNavigationSurface(
-                TelegramNavigationScreen::Balance,
-                $this->locale->code($customer),
-                $this->captions->html(implode("\n", $lines)),
-                ['inline_keyboard' => [$this->navigationRow($customer)]],
-            );
         }
 
         if ($page === null) {
+            $usdt = $this->usdtBalanceSection($customer);
+            $lines = array_merge($lines, $usdt['lines']);
+            $keyboard = [];
+            if ($balance->isAvailable()) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'balance.add'),
+                    'callback_data' => 'balance:add',
+                ]];
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'balance.activity.view'),
+                    'callback_data' => 'balance:activity',
+                ]];
+            }
+
             return new TelegramNavigationSurface(
                 TelegramNavigationScreen::Balance,
                 $this->locale->code($customer),
                 $this->captions->html(implode("\n", $lines)),
                 ['inline_keyboard' => [
-                    [[
-                        'text' => $this->locale->translate($customer, 'balance.add'),
-                        'callback_data' => 'balance:add',
-                    ]],
-                    [[
-                        'text' => $this->locale->translate($customer, 'balance.activity.view'),
-                        'callback_data' => 'balance:activity',
-                    ]],
+                    ...$keyboard,
+                    ...$usdt['rows'],
                     $this->navigationRow($customer),
                 ]],
             );
@@ -365,6 +372,46 @@ class TelegramMenuIntents
             $this->captions->html(implode("\n", $lines)),
             ['inline_keyboard' => $keyboard],
         );
+    }
+
+    /**
+     * USDT section of the private Saldo screen. A drifted projection or a
+     * frozen account is shown as a localized unavailable/recovery state, never
+     * as a fabricated zero, and never offers a funding action.
+     *
+     * @return array{lines: list<string>, rows: list<list<array<string, string>>>}
+     */
+    private function usdtBalanceSection(Customer $customer): array
+    {
+        $snapshot = $this->usdtBalances->snapshot($customer);
+        $lines = [''];
+        if (! $snapshot->isAvailable()) {
+            $lines[] = $this->locale->translate($customer, 'balance.usdt.unavailable');
+        } elseif ($snapshot->isFrozen()) {
+            $lines[] = $this->locale->translate($customer, 'balance.usdt.frozen');
+        } else {
+            $lines[] = $this->locale->translate($customer, 'balance.usdt.available', [
+                'amount' => UsdtMicroAmount::formatUnits($snapshot->balanceMicro()),
+            ]);
+        }
+
+        $rows = [[[
+            'text' => $this->locale->translate($customer, 'balance.usdt.history.button'),
+            'callback_data' => 'usdt:history',
+        ]]];
+
+        if ($snapshot->isAvailable() && ! $snapshot->isFrozen()) {
+            if ($this->usdtFundingGate->availability(CustomerUsdtFundingRail::BscUsdt)->available) {
+                array_unshift($rows, [[
+                    'text' => $this->locale->translate($customer, 'balance.usdt.topup.button'),
+                    'callback_data' => 'balance:usdt',
+                ]]);
+            } else {
+                $lines[] = $this->locale->translate($customer, 'balance.usdt.topup.unavailable');
+            }
+        }
+
+        return ['lines' => $lines, 'rows' => $rows];
     }
 
     private function activityAmount(StoreBalanceActivityItem $item): string
