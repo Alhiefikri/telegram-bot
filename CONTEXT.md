@@ -238,8 +238,16 @@ The single durable open funding target slot per Customer across rails, created w
 _Avoid_: USDT Top-up, quota bucket, balance hold
 
 **USDT Funding Pause**:
-An Owner-controlled operational pause of one USDT scope (funding, spending, or one rail) with a required reason and audit. A funding or rail pause blocks new targets only: settlement, refund and reconciliation of money already observed continue.
-_Avoid_: ledger freeze, account freeze, automatic resume
+An Owner-controlled operational pause of one USDT scope (funding, spending, one rail, or balance receipt delivery) with a required reason and audit. A funding, rail or delivery pause blocks new targets or their receipt messages only: settlement, refund, reversal and reconciliation of money already observed continue, and a deferred receipt stays durable until it is delivered after resume.
+_Avoid_: ledger freeze, account freeze, automatic resume, message loss
+
+**Balance Operations Alert**:
+A durable, deduplicated operational alert about Customer USDT Balance evidence — reconciliation drift, receipt collision, treasury coverage, unresolved reorg loss, stuck funding/settlement/delivery work, a frozen account or an open restore gate — announced to the administrator exactly once per episode and fingerprint. It carries counts, sanitized aggregate amounts, run references and scope names only, never customer identity or chain evidence.
+_Avoid_: money authority, customer notification, log line
+
+**Balance Restore Gate**:
+A post-restore block on new Customer USDT funding and spending after a database restore, kept open until authoritative external evidence for the lost window is replayed and a full reconciliation run recorded after that replay shows zero unexplained drift. It never deletes ledger, receipt or claim history, never refunds automatically and never reopens itself.
+_Avoid_: automatic recovery, funding authorization, migration rollback
 
 **BSC Capability Qualification**:
 The result of probing the BNB Smart Chain RPC surface required by a future USDT funding rail — chain identity, token contract code/decimals, `finalized` block depth behind head, canonical receipt consistency, and bounded transfer-log access — classified as verified, unsupported, or unknown. Only verified capabilities qualify; mismatch or unknown evidence fails closed. A qualified result is RPC evidence only, never funding, custody, provisioning, or legal authorization.

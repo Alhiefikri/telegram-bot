@@ -50,6 +50,7 @@ class RecoverTelegramOutboundEffects extends Command
         $ledger->readyToDispatchQuery(now())
             ->whereIn('effect_type', [
                 TelegramOutboundEffectType::BalanceAdjustmentNotice->value,
+                TelegramOutboundEffectType::BalanceOperationsAlert->value,
                 TelegramOutboundEffectType::OwnerCompensationNotification->value,
                 TelegramOutboundEffectType::UsdtRefundReceipt->value,
                 TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,

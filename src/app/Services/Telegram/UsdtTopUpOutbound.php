@@ -2,10 +2,12 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\BalanceOperationMetric;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtTopUp;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Operations\BalanceOperationEventRecorder;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use RuntimeException;
@@ -20,6 +22,8 @@ final class UsdtTopUpOutbound
         private readonly TelegramOutboundEffectDispatcher $dispatcher,
         private readonly TelegramBotClient $bot,
         private readonly TelegramOutboundResponseValidator $responses,
+        private readonly TelegramBalanceReceiptDeliveryPause $deliveryPause,
+        private readonly BalanceOperationEventRecorder $metrics,
     ) {}
 
     public function recordReceipt(CustomerUsdtTopUp $target, CustomerUsdtBalanceEntry $entry, bool $late): TelegramOutboundEffect
@@ -49,8 +53,16 @@ final class UsdtTopUpOutbound
         }
         $claimed = $this->ledger->claim((string) $effect->id);
         if ($claimed === null) {
+            // A claim refused while the Owner delivery pause is active is a
+            // deferred delivery, not a failure: the effect stays durable.
+            if ($this->deliveryPause->pausesEffect((string) $effect->effect_type)) {
+                $this->metrics->record(BalanceOperationMetric::OutboundDeliveryOutcome, 'skipped_paused');
+            }
+
             return;
         }
+
+        $this->metrics->record(BalanceOperationMetric::OutboundDeliveryOutcome, 'claimed');
         try {
             $message = $claimed->outcome_metadata['message'] ?? null;
             if (! is_string($message) || $message === '') {
@@ -61,11 +73,14 @@ final class UsdtTopUpOutbound
             $response = $this->bot->sendMessage((string) $claimed->telegram_chat_id, $message, options: ['parse_mode' => null]);
             $messageId = $this->responses->messageIdFromResponse($response, 'USDT balance receipt');
             $this->ledger->finalizeSent((string) $claimed->id, $claimed->claim_token, $messageId);
+            $this->metrics->record(BalanceOperationMetric::OutboundDeliveryOutcome, 'sent');
         } catch (Throwable $error) {
             if ($this->ledger->isAmbiguous($error)) {
                 $this->ledger->finalizeUnknown((string) $claimed->id, $claimed->claim_token, $error);
+                $this->metrics->record(BalanceOperationMetric::OutboundDeliveryOutcome, 'unknown');
             } else {
                 $this->ledger->finalizeFailed((string) $claimed->id, $claimed->claim_token, $error, $this->ledger->retryAfterSeconds($error));
+                $this->metrics->record(BalanceOperationMetric::OutboundDeliveryOutcome, 'failed');
             }
         }
     }
