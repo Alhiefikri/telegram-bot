@@ -9,6 +9,7 @@ use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtBalanceReconciliation;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\UsdtPurchase;
+use App\Services\UsdtBalance\UsdtReceiptReconciliation;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Bootstrap\BootProviders;
@@ -120,17 +121,35 @@ DB::statement("insert into customers (id, telegram_id, first_name, created_at, u
     select n, 990000000+n, 'Benchmark', now(), now() from generate_series(1, ?) n", [$customers]);
 DB::statement("insert into customer_usdt_balance_accounts
     (id, customer_id, currency, balance_micro, version, last_entry_id, created_at, updated_at)
-    select n, n, 'USDT', 100000000, 100, n*100, now(), now() from generate_series(1, ?) n", [$customers]);
+    select n, n, 'USDT', 99999901, 100, n*100, now(), now() from generate_series(1, ?) n", [$customers]);
 DB::statement("insert into customer_usdt_balance_entries
     (id, customer_usdt_balance_account_id, account_sequence, kind, amount_micro,
     balance_after_micro, source_type, source_id, idempotency_key, request_fingerprint, created_at)
-    select (a-1)*100+s, a, s, 'funding_credit', 1000000, s*1000000,
-    'customer_usdt_top_up', 'fixture-'||a||'-'||s, 'fixture-'||a||'-'||s,
+    select (a-1)*100+s, a, s, case when s=1 then 'funding_credit' else 'purchase_debit' end,
+    case when s=1 then 100000000 else 1 end, 100000000-(s-1),
+    case when s=1 then 'customer_usdt_top_up' else 'order' end,
+    case when s=1 then 'fixture-fund-'||a else '56000000-0000-4000-8000-'||lpad(((a-1)*100+s)::text,12,'0') end,
+    'fixture-'||a||'-'||s,
     repeat('a',64), now() from generate_series(1, ?) a cross join generate_series(1,100) s", [$customers]);
 DB::statement("insert into customer_usdt_balance_accounting_events
     (customer_usdt_balance_entry_id,currency,amount_micro,debit_account,credit_account,source_fingerprint,created_at)
-    select id,'USDT',amount_micro,'usdt_settlement_asset','customer_usdt_liability',request_fingerprint,created_at
+    select id,'USDT',amount_micro,
+    case when kind='funding_credit' then 'usdt_settlement_asset' else 'customer_usdt_liability' end,
+    case when kind='funding_credit' then 'customer_usdt_liability' else 'usdt_sale' end,request_fingerprint,created_at
     from customer_usdt_balance_entries");
+DB::statement("with fixtures as (
+    select n, '0x'||md5(n::text)||md5('receipt-'||n::text) as tx_hash from generate_series(1, ?) n
+    ) insert into external_money_receipts
+    (canonical_key,provider,identity_kind,account_namespace,reference,chain_id,tx_hash,log_index,
+    beneficiary,currency,amount_units,decimals,status,target_type,target_id,fingerprint,claimed_at,created_at,updated_at)
+    select 'bsc:56:'||tx_hash||':0','bsc','bsc_log','benchmark',substring(tx_hash from 3),56,tx_hash,0,
+    'customer:'||n,'USDT','100000000000000000000',18,'claimed','customer_usdt_top_up','fixture-fund-'||n,
+    repeat('b',64),now(),now(),now() from fixtures", [$customers]);
+DB::statement("insert into external_money_receipt_aliases (external_money_receipt_id,alias_key,alias_type,created_at)
+    select id,canonical_key,'bsc_log',now() from external_money_receipts");
+DB::statement('insert into external_money_receipt_parent_claims
+    (chain_id,tx_hash,external_money_receipt_id,status,target_type,target_id,created_at,updated_at)
+    select chain_id,tx_hash,id,status,target_type,target_id,now(),now() from external_money_receipts');
 DB::statement('insert into customer_balance_accounts (id, customer_id, balance, created_at, updated_at)
     select n, n, 100000000, now(), now() from generate_series(1, ?) n', [$customers]);
 DB::statement("insert into store_balance_entries
@@ -145,7 +164,8 @@ DB::statement('ANALYZE');
 file_put_contents($artifacts.'/dataset.json', json_encode([
     'customers' => $customers, 'usdt_entries' => $customers * $entriesPerAccount,
     'idr_entries' => $customers * $entriesPerAccount,
-    'distribution' => '100 entries/account; 100 USDT/account; synthetic funding history and accounting',
+    'distribution' => 'USDT: one receipt-backed synthetic 100 USDT funding plus 99 micro-unit purchases/account; IDR: 100 synthetic funding entries/account',
+    'synthetic_usdt_receipts' => $customers,
     'seed' => 560, 'seed_seconds' => benchmarkTime() - $seedStart,
     'php' => PHP_VERSION, 'postgres' => DB::selectOne('select version() as version')->version,
     'laravel' => app()->version(), 'smoke' => $smoke, 'short' => $short,
@@ -375,6 +395,24 @@ for ($after = 0; $after < $customers; $after += 200) {
     $idrFindings += (int) $result->n;
 }
 $correct = $correct && $idrFindings === 0;
+$receiptStart = benchmarkTime();
+$receiptCursor = null;
+$creditCursor = null;
+$receiptFindings = 0;
+$receiptsInspected = 0;
+$receiptsDone = false;
+$creditsDone = false;
+do {
+    $receiptReport = app(UsdtReceiptReconciliation::class)->inspect(null,
+        $receiptsDone ? PHP_INT_MAX : $receiptCursor, $creditsDone ? PHP_INT_MAX : $creditCursor, 1000);
+    $receiptFindings += count($receiptReport->findings);
+    $receiptsInspected += $receiptReport->receiptsInspected;
+    $receiptCursor = $receiptReport->nextReceiptCursor;
+    $creditCursor = $receiptReport->nextCreditCursor;
+    $receiptsDone = ! $receiptReport->receiptsHasMore;
+    $creditsDone = ! $receiptReport->creditsHaveMore;
+} while (! $receiptsDone || ! $creditsDone);
+$correct = $correct && $receiptsInspected === $customers && $receiptFindings === 0;
 $targets = true;
 foreach (['usdt', 'idr'] as $currency) {
     $targets = $targets && $summaries['steady'][$currency.'_read']['scheduled_latency_ms']['p95'] <= 100
@@ -389,8 +427,10 @@ file_put_contents($artifacts.'/result.json', json_encode([
     'accounts_inspected' => $inspected, 'findings' => $findings,
     'idr_accounts_inspected' => $customers, 'idr_findings' => $idrFindings,
     'accounting_mismatches' => (int) $accounting->mismatches,
+    'receipts_inspected' => $receiptsInspected, 'receipt_findings' => $receiptFindings,
+    'receipt_reconciliation_seconds' => benchmarkTime() - $receiptStart,
     'limitations' => ['Local disposable hardware, not production capacity.',
-        'Synthetic ledger sources do not prove custody, provider qualification or receipt coverage.',
+        'Synthetic ledger/receipt fixtures do not prove custody or provider qualification.',
         'Lock-query duration bounds wait; pg_stat_activity samples and server logs complement it.',
         'Application ledger benchmark excludes controller, checkout inventory and external provider latency.'],
 ], JSON_PRETTY_PRINT));
@@ -414,6 +454,7 @@ foreach ($summaries as $phase => $summary) {
 $lines = [...$lines, '',
     'Load targets: '.($targets ? 'passed' : '**failed; no target relaxation**').'. Correctness: '.($correct ? 'passed' : '**failed**').'.', '',
     "Full USDT history: $inspected accounts / $findings findings; IDR history: $customers accounts / $idrFindings findings.", '',
+    "Synthetic USDT receipts: $receiptsInspected inspected / $receiptFindings findings.", '',
     'See result.json for reconciliation timings, operations.json for reservations/history/provider budgets/fairness and Redis backlog recovery, load.json for lock bounds and scheduling lag.', '',
     'Query plans and PostgreSQL wait samples/logs are retained. FOR UPDATE durations bound wait and include execution/transport. CPU, memory, filesystem and container details are in adjacent artifacts.', '',
     'Synthetic funding/purchase sources and HTTP/RPC fixtures do not qualify custody, live provider latency, treasury backing or production capacity. The ledger benchmark excludes controller/inventory/checkout latency. No production deployment, receipt claim or funding activation occurred.',
