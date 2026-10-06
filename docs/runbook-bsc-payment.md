@@ -50,7 +50,7 @@ The application uses the existing `BINANCE_VERIFICATION_QUEUE` / `binance-verifi
 
 ## Verification and review
 
-`BscPaymentVerification` is the only authority for receipt decoding and claims. For a new amount-unique Payment, a bounded server-side transfer-log match is only a lookup candidate; the verifier still requires a successful receipt, BNB Smart Chain chain ID 56, the approved USDT contract, the snapshotted receiver, the exact integer token amount, an inclusion block inside the Payment window, and the configured confirmation policy. A legacy submitted TX hash follows the same receipt predicate without the log-discovery step.
+`BscPaymentVerification` is the checkout authority for receipt decoding and claims; the separate USDT balance watch-only rail below does not invoke this Order lifecycle. For a new amount-unique Payment, a bounded server-side transfer-log match is only a lookup candidate; the verifier still requires a successful receipt, BNB Smart Chain chain ID 56, the approved USDT contract, the snapshotted receiver, the exact integer token amount, an inclusion block inside the Payment window, and the configured confirmation policy. A legacy submitted TX hash follows the same receipt predicate without the log-discovery step.
 Canonical ERC-20 `Transfer(address,address,uint256)` logs use topic0 `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`. The readiness probe accepts an empty `eth_getLogs` response and checks only a recent scanner chunk, so it verifies provider filter capability but not event-signature correctness or access to older blocks needed by a Payment scan. Use a provider that serves the full scan window and prove the automatic path with a controlled low-value Payment after release.
 
 An exact transfer included before the deadline may use the short technical confirmation grace. `orders:expire-pending` skips only when the detail contains matching authoritative confirming evidence. A future timestamp without that evidence is not a valid grace and the Order expires normally.
@@ -76,6 +76,26 @@ Every BSC USDT receiver address is claimed permanently and channel-exclusively i
 - One non-retired receiver per Customer; rotate by retiring the old receiver and registering a new address. Retired rows stay monitored and immutable, and no address is ever reassigned to another Customer.
 - Custody provisioning adapters are registered only through the container tag `usdt-deposit-receiver-provisioners`, which is intentionally empty until the H1 custody/capacity gates pass. Until then a Customer without a registered address reports capacity unavailable and no invoice can be created; there is no shared-address fallback.
 - Never edit claims, receiver identity columns or retirement columns directly in the database: PostgreSQL triggers and model guards reject those writes, and rollback must not delete claims or receiver history.
+
+## USDT balance watch-only rail: disposable technical verification only
+
+U5 #550 implements an actual RPC adapter for U4's verified operator-controlled Customer receivers. This is separate from checkout's shared receiver/unique-amount strategy. H1 qualification is still missing; readiness reports `fundingAuthorized=false`, and new local rail invoices are restricted to disposable `local`/`testing` environments. Do not change production `APP_ENV` to bypass this gate. Do not publish payable instructions, accept real Customer funds, run a canary or treat synthetic receipts as custody/backing evidence.
+
+`createOrRecover` uses one trusted reference, Customer, exact USDT amount and deadline; confirmed intents/customer adapters are U6/U9, not a console replacement for authorization. It persists a local invoice and scan enrollment together. A lost response is recovered by the same reference without an external create or an alternate receiver. Immutable epoch-second windows, zero application fee, network/token/receiver/finality snapshots and one non-overlapping window per receiver are enforced; existing snapshots remain inspectable after expiry/retirement.
+
+In a disposable environment with synthetic RPC evidence:
+
+```bash
+php artisan usdt-bsc:scan --json --limit=25 --pages=2 --requests=32
+php artisan usdt-bsc:scan --json --after=<next_after> --limit=25 --pages=2 --requests=32
+php artisan usdt-bsc:scan --receiver=<id> --from-block=<explicit-first-block> --json
+```
+
+The first two commands rediscover durable enrollment after worker/Redis loss; pass the returned `next_after` for keyset pagination and restart at zero after the inventory traversal. The third command enrolls an explicit receiver history window; later calls must retain its original first block. Retired enrolled receivers remain monitored. The operation budget is shared across receivers per command; each page spans at most 1,000 blocks and 100 logs, with a 1 MiB RPC response ceiling. Empty validated pages advance, but malformed, oversized, RPC-unavailable or budget-incomplete pages do not.
+
+Observations and checkpoint writes are not global receipt claims or balance credits. A successful receipt must independently pass exact single-log attribution, canonical hash, payment-window and finalized checks before U7 can claim and settle it. Missing finality remains pending; invalid/multi-log evidence enters review. Canonical checkpoint/log/page changes latch receiver review and retain immutable history; do not clear or rewind a finalized checkpoint by SQL. U8 owns incident resolution and freezing after a settled reorg.
+
+No new scheduler, funding UI, Telegram delivery path or production activation is installed by U5. Checkout's `bsc_payment_enabled` toggle is not approval of Customer USDT funding. Technical evidence and limitations: [A1/U5 report](balance-a1-bsc-capability.md#11-implementasi-dan-evidence-teknis-u5-2026-10-06).
 
 ## Disable and rollback
 
