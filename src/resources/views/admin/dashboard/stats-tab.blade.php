@@ -734,6 +734,19 @@
                     </x-admin-dashboard.card>
                 @endif
 
+                @if ($canViewBalanceReports)
+                    <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Laporan saldo Customer">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Customer balance</p>
+                                <h2 class="mt-1 font-display text-base font-bold text-neo-ink">Laporan saldo, ledger, top-up, review, dan treasury</h2>
+                                <p class="mt-1 text-xs font-semibold leading-5 text-brand-muted">Akses baca-saja dengan filter Telegram ID exact, saldo IDR/USDT terpisah, dan referensi tersamarkan.</p>
+                            </div>
+                            <a href="{{ route('admin.store-balance.reports.index') }}" class="inline-flex min-h-11 w-full items-center justify-center rounded-xl border-2 border-neo-ink bg-brand-yellow px-4 py-2 text-sm font-black text-neo-ink shadow-neo-sm sm:w-auto">Buka laporan saldo</a>
+                        </div>
+                    </x-admin-dashboard.card>
+                @endif
+
                 <x-admin-dashboard.card
                     id="admin-checkout-maintenance"
                     data-admin-return-target

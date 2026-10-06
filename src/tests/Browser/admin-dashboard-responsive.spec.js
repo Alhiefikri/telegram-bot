@@ -26,6 +26,8 @@ const customerCheckoutViewports = [
 ];
 const customerCheckoutTestPrefix = "customer checkout:";
 
+const customerBalanceLoginToken = "a".repeat(64);
+
 test.beforeAll(async () => {
   const tempDir = mkdtempSync(
     path.join(tmpdir(), "telegram-bot-admin-responsive-")
@@ -126,6 +128,15 @@ test("admin dashboard exposes the shared theme preference control", async ({
   page,
 }) => {
   await login(page);
+  const balanceReportsLink = page.getByRole("link", {
+    name: "Buka laporan saldo",
+  });
+  await expect(balanceReportsLink).toBeVisible();
+  await expect(balanceReportsLink).toHaveAttribute(
+    "href",
+    /\/admin\/store-balance\/reports/
+  );
+
   await expect(
     page.locator('script[type="module"][src*="/assets/app-"]')
   ).toHaveCount(1);
@@ -316,6 +327,49 @@ test("customer checkout: opens canonical page checkout from the landing catalog"
   ).toBeVisible();
   await expect(page.locator("#checkout-form")).toBeVisible();
   await expect(page.locator('input[name="product_id"]')).toBeAttached();
+});
+
+test("customer checkout: opens the authenticated balance overview across mobile viewports", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto(
+    `${baseUrl}/akun/login-link#token=${customerBalanceLoginToken}`,
+    { waitUntil: "domcontentloaded" }
+  );
+  await page.waitForURL(`${baseUrl}/akun/pesanan`);
+  await page.getByRole("link", { name: "Saldo saya" }).click();
+
+  await expect(page).toHaveURL(/\/akun\/saldo/);
+  await expect(page.getByRole("heading", { name: "Saldo saya" })).toBeVisible();
+  await expect(page.getByText("Rp 12.345", { exact: true })).toBeVisible();
+  await expect(page.getByText("0 USDT", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Halaman ini hanya-baca. Top-up, pembayaran, dan perubahan saldo tidak tersedia melalui web."
+    )
+  ).toBeVisible();
+
+  for (const viewport of [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+    { width: 768, height: 900 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expectNoDocumentOverflow(page);
+    await expect(
+      page.getByRole("heading", { name: "Saldo saya" })
+    ).toBeVisible();
+  }
+
+  await page
+    .getByRole("navigation", { name: "Pilih mata uang saldo" })
+    .getByRole("link", { name: "USDT", exact: true })
+    .click();
+  await expect(page).toHaveURL(/currency=USDT/);
+  await expect(page.getByText("Belum ada aktivitas USDT")).toBeVisible();
+  await expectNoDocumentOverflow(page);
 });
 
 test("customer checkout: keeps canonical checkout usable without JavaScript", async ({
@@ -5088,6 +5142,8 @@ use App\Models\ProductFamily;
 use App\Models\ProductFamilySlugRedirect;
 use App\Models\ProductStockItem;
 use App\Models\User;
+use App\Models\CustomerLoginLink;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -5123,6 +5179,29 @@ Customer::query()->updateOrCreate(
         'username' => 'balance_adjustment_qa',
         'locale' => 'id',
     ],
+);
+
+$balanceCustomer = Customer::query()->updateOrCreate(
+    ['email' => 'balance-browser@example.test'],
+    [
+        'telegram_id' => 9007199254740995,
+        'first_name' => 'Browser Balance Customer',
+        'username' => 'balance_browser',
+        'email_verified_at' => now(),
+    ],
+);
+$loginToken = str_repeat('a', 64);
+CustomerLoginLink::query()->create([
+    'email' => $balanceCustomer->email,
+    'token_hash' => hash('sha256', $loginToken),
+    'expires_at' => now()->addMinutes(15),
+    'requested_ip' => '127.0.0.1',
+]);
+app(StoreBalanceLedger::class)->creditTopUp(
+    $balanceCustomer,
+    12_345,
+    'browser-balance-credit',
+    'browser-balance:credit',
 );
 
 $category = Category::query()->firstOrCreate(

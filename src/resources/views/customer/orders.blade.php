@@ -13,6 +13,7 @@
             </div>
             <div class="flex gap-2">
                 <a href="{{ route('customer.claim.create') }}" class="neo-button bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white">Klaim pesanan</a>
+                <a href="{{ route('customer.balance.show') }}" class="neo-button bg-white px-4 py-3 text-sm font-black">Saldo saya</a>
                 <form method="POST" action="{{ route('customer.logout') }}">
                     @csrf
                     <button class="rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 py-3 text-sm font-black">Keluar</button>

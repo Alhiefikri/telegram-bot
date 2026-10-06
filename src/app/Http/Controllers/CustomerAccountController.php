@@ -6,8 +6,13 @@ use App\Http\Requests\CustomerLoginLinkRequest;
 use App\Http\Requests\CustomerOrderClaimRequest;
 use App\Models\Order;
 use App\Services\Customer\CustomerAuthenticationService;
+use App\Services\Customer\CustomerBalanceActivityCursorToken;
+use App\Services\Customer\CustomerBalanceOverviewReader;
 use App\Services\Customer\CustomerOrderClaimService;
 use App\Services\Customer\CustomerOwnedOrderQuery;
+use App\Services\StoreBalance\StoreBalanceActivityService;
+use App\Services\UsdtBalance\CustomerUsdtActivityService;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Storefront\StorefrontPresenter;
 use App\Storefront\StorefrontSeo;
 use App\Storefront\StorefrontShopOrderPresenter;
@@ -110,6 +115,163 @@ class CustomerAccountController extends Controller
         ]);
     }
 
+    public function balance(
+        Request $request,
+        CustomerBalanceOverviewReader $overview,
+        StoreBalanceActivityService $storeActivity,
+        CustomerUsdtActivityService $usdtActivity,
+        CustomerBalanceActivityCursorToken $activityTokens,
+        StorefrontPresenter $storefront,
+        StorefrontSeo $seo,
+    ): Response {
+        $filters = $request->validate([
+            'currency' => ['sometimes', 'string', 'in:IDR,USDT'],
+            'direction' => ['sometimes', 'string', 'in:older,newer'],
+            'cursor' => ['sometimes', 'string', 'max:1024'],
+        ]);
+        $currency = $filters['currency'] ?? 'IDR';
+        $direction = $filters['direction'] ?? null;
+        $token = $filters['cursor'] ?? null;
+
+        if (($direction === null) !== ($token === null)) {
+            abort(404);
+        }
+
+        $customer = $request->user('customer');
+        if ($currency === 'IDR') {
+            $cursor = $token === null
+                ? null
+                : $activityTokens->decodeStoreBalanceToken($token, (int) $customer->getKey());
+            if ($token !== null && $cursor === null) {
+                abort(404);
+            }
+            $page = $storeActivity->pageForCustomer(
+                $customer,
+                $cursor,
+                $direction === 'newer',
+                StoreBalanceActivityService::WEB_PAGE_SIZE,
+            );
+            if ($page === null) {
+                abort(404);
+            }
+            $olderToken = $page->hasOlder && $page->olderCursor !== null
+                ? $activityTokens->storeBalanceToken((int) $customer->getKey(), $page->olderCursor)
+                : null;
+            $newerToken = $page->hasNewer && $page->newerCursor !== null
+                ? $activityTokens->storeBalanceToken((int) $customer->getKey(), $page->newerCursor)
+                : null;
+            $activityRows = array_map(fn ($item): array => [
+                'kind' => match ($item->kind) {
+                    'top_up' => 'Top-up',
+                    'compensation' => 'Kompensasi',
+                    'adjustment' => 'Penyesuaian',
+                    'adjustment_reversal' => 'Pembalikan penyesuaian',
+                    'purchase' => 'Pembelian',
+                    'refund' => 'Pengembalian',
+                    default => 'Aktivitas saldo',
+                },
+                'state' => match ($item->state) {
+                    'credited' => 'Dikreditkan',
+                    'recovered' => 'Dipulihkan',
+                    'compensated' => 'Dikompensasi',
+                    'pending' => 'Menunggu',
+                    'uncertain' => 'Perlu pemeriksaan',
+                    'expired' => 'Kedaluwarsa',
+                    'review' => 'Sedang ditinjau',
+                    'failed' => 'Gagal',
+                    'debited' => 'Didebit',
+                    'refunded' => 'Dikembalikan',
+                    default => 'Status tidak diketahui',
+                },
+                'amount' => $item->signedAmount === null
+                    ? 'Nominal '.$this->formatIdr($item->amount)
+                    : (($item->signedAmount < 0 ? '−' : '+').$this->formatIdr(abs($item->signedAmount))),
+                'reference' => $item->reference,
+                'occurred_at' => $item->occurredAt->format('d M Y H:i'),
+            ], $page->items);
+        } else {
+            $cursor = $token === null
+                ? null
+                : $activityTokens->decodeUsdtToken($token, (int) $customer->getKey());
+            if ($token !== null && $cursor === null) {
+                abort(404);
+            }
+            if ($direction !== null && $cursor === null) {
+                abort(404);
+            }
+            $page = $direction === null
+                ? $usdtActivity->firstPage($customer, CustomerUsdtActivityService::DEFAULT_PAGE_SIZE)
+                : ($direction === 'older'
+                    ? $usdtActivity->olderPage($customer, $cursor, CustomerUsdtActivityService::DEFAULT_PAGE_SIZE)
+                    : $usdtActivity->newerPage($customer, $cursor, CustomerUsdtActivityService::DEFAULT_PAGE_SIZE));
+            if ($page === null) {
+                abort(404);
+            }
+            $olderToken = $page->hasOlder && $page->olderCursor !== null
+                ? $activityTokens->usdtToken((int) $customer->getKey(), $page->olderCursor)
+                : null;
+            $newerToken = $page->hasNewer && $page->newerCursor !== null
+                ? $activityTokens->usdtToken((int) $customer->getKey(), $page->newerCursor)
+                : null;
+            $activityRows = array_map(fn ($item): array => [
+                'kind' => $item->kind === 'top_up' ? 'Top-up' : match ($item->kind) {
+                    'funding_credit' => 'Saldo masuk',
+                    'purchase_debit' => 'Pembelian',
+                    'refund_credit' => 'Pengembalian',
+                    'reversal_debit' => 'Pembalikan',
+                    default => 'Aktivitas saldo',
+                },
+                'state' => match ($item->state) {
+                    'credited' => 'Dikreditkan',
+                    'debited' => 'Didebit',
+                    'refunded' => 'Dikembalikan',
+                    'reversed' => 'Dibalik',
+                    default => 'Menunggu',
+                },
+                'amount' => $item->signedMicro === null
+                    ? 'Nominal '.UsdtMicroAmount::formatUnits($item->amountMicro).' USDT'
+                    : (($item->signedMicro < 0 ? '−' : '+').UsdtMicroAmount::formatUnits(abs($item->signedMicro)).' USDT'),
+                'reference' => $item->reference,
+                'occurred_at' => $item->occurredAt->format('d M Y H:i'),
+            ], $page->items);
+        }
+
+        $pageLinks = [
+            'older' => $olderToken === null ? null : route('customer.balance.show', ['currency' => $currency, 'direction' => 'older', 'cursor' => $olderToken]),
+            'newer' => $newerToken === null ? null : route('customer.balance.show', ['currency' => $currency, 'direction' => 'newer', 'cursor' => $newerToken]),
+        ];
+        $balanceOverview = $overview->forCustomer($customer);
+        $idrBalanceDisplay = $balanceOverview->storeBalance->isAvailable()
+            ? $this->formatIdr($balanceOverview->storeBalance->balance())
+            : null;
+        $usdtBalanceDisplay = $balanceOverview->usdtBalance->isAvailable()
+            ? UsdtMicroAmount::formatUnits($balanceOverview->usdtBalance->balanceMicro()).' USDT'
+            : null;
+        $metadata = $seo->privatePage(
+            'Saldo saya | '.$storefront->brand(),
+            'Ringkasan dan riwayat saldo milik akun pelanggan yang sedang masuk.',
+        );
+
+        return $this->view($request, 'customer.balance', [
+            'storefront' => $storefront,
+            'brand' => $storefront->brand(),
+            'copy' => config('storefront'),
+            'homeUrl' => route('storefront.home'),
+            'customer' => $customer,
+            'overview' => $balanceOverview,
+            'idrBalanceDisplay' => $idrBalanceDisplay,
+            'usdtBalanceDisplay' => $usdtBalanceDisplay,
+            'currency' => $currency,
+            'activityRows' => $activityRows,
+            'pageLinks' => $pageLinks,
+            'ordersUrl' => route('customer.orders.index'),
+            'pageTitle' => $metadata->title,
+            'pageDescription' => $metadata->description,
+            'canonicalUrl' => $metadata->canonicalUrl,
+            'metadata' => $metadata,
+        ]);
+    }
+
     public function show(Request $request, string $order, StorefrontShopOrderPresenter $presenter): Response
     {
         $ownedOrder = Order::query()->whereKey($order)->where('customer_id', $request->user('customer')->getKey())->firstOrFail();
@@ -161,6 +323,14 @@ class CustomerAccountController extends Controller
         }
 
         return redirect()->route('customer.orders.show', $order);
+    }
+
+    private function formatIdr(int $amount): string
+    {
+        $digits = (string) $amount;
+        $grouped = preg_replace('/\\B(?=(?:\\d{3})+(?!\\d))/', '.', $digits);
+
+        return 'Rp '.($grouped ?? $digits);
     }
 
     private function view(Request $request, string $view, array $data): Response

@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->redirectGuestsTo(fn (Request $request) => route('customer.account'));
         $middleware->alias([
             'admin.access' => AuthorizeAdminAccess::class,
             'admin.bsc-owner' => AuthorizeBscReceiverMutation::class,
