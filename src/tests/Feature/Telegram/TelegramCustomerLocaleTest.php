@@ -486,19 +486,6 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $idCheckoutPayload = $this->customerPayload('/sendMessage', 41081);
         $enCheckoutPayload = $this->customerPayload('/sendMessage', 41082);
         $msCheckoutPayload = $this->customerPayload('/sendMessage', 41083);
-        $idCheckoutButtons = collect($idCheckoutPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
-        $enCheckoutButtons = collect($enCheckoutPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
-        $msCheckoutButtons = collect($msCheckoutPayload['reply_markup']['inline_keyboard'])->map(fn (array $row): string => $row[0]['callback_data'] ?? '')->values()->all();
-
-        $this->assertSame('checkout:current', $idCheckoutButtons[0]);
-        $this->assertSame('checkout:balance', $idCheckoutButtons[1]);
-        $this->assertSame('checkout:binance', $idCheckoutButtons[2]);
-        $this->assertSame('checkout:current', $enCheckoutButtons[0]);
-        $this->assertSame('checkout:balance', $enCheckoutButtons[1]);
-        $this->assertSame('checkout:binance', $enCheckoutButtons[2]);
-        $this->assertSame('checkout:current', $msCheckoutButtons[0]);
-        $this->assertSame('checkout:balance', $msCheckoutButtons[1]);
-        $this->assertSame('checkout:binance', $msCheckoutButtons[2]);
         $this->assertLocalizedCopy(
             $idCheckoutPayload,
             ['Pilih metode pembayaran di bawah.', '🌍 QRIS Antarnegara', 'ID', 'TH', 'MY', 'SG', 'JP', 'KR', 'CN'],

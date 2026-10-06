@@ -163,6 +163,9 @@ class OrderStateMachine implements OrderLifecycle
                 if (! $lockedPayment) {
                     throw new InvalidOrderTransition('Payment is not attached to order.');
                 }
+                if ($lockedPayment->provider === PaymentProvider::USDT_BALANCE) {
+                    throw new InvalidOrderTransition('USDT Balance refunds require the original-currency entitlement settlement (U11).');
+                }
 
                 $this->supplierFulfillment()->assertRefundable($order);
                 if ($lockedPayment->provider !== 'store_balance'

@@ -20,6 +20,7 @@ use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\Pakasir\PakasirCallbackProcessor;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirProviderReadiness;
+use App\Services\PaymentReceiptReport;
 use App\Services\ProviderVerification\ProviderVerificationProfile;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
@@ -27,6 +28,7 @@ use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Warranty\WarrantyOrderAccess;
 use App\Storefront\StorefrontInvoiceUrl;
+use App\Support\Money;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\RateLimiter;
@@ -83,7 +85,7 @@ class TelegramOrderIntents
             if ($order->orderItems->count() > 3) {
                 $lines[] = $this->locale->translate($customer, 'order.status.more_items', ['count' => $order->orderItems->count() - 3]);
             }
-            $lines[] = $this->locale->translate($customer, 'order.detail.total', ['amount' => $this->locale->idr($order->total_amount)]);
+            $lines[] = $this->locale->translate($customer, 'order.detail.total', ['amount' => $this->orderAmount($customer, $order, $payment)]);
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'order.status.states', [
                 'payment_status' => $this->locale->paymentStatus($customer, $paymentStatus),
@@ -139,13 +141,23 @@ class TelegramOrderIntents
             ->where('created_at', '>=', $month)
             ->where('created_at', '<', $month->copy()->addMonth())
             ->where('payment_status', PaymentStatus::Paid)
-            ->selectRaw('COUNT(*) as paid_count, COALESCE(SUM(total_amount), 0) as paid_total')
+            ->selectRaw("COUNT(*) as paid_count, COALESCE(SUM(CASE WHEN currency = 'IDR' THEN total_amount ELSE 0 END), 0) as paid_total")
             ->first();
+
+        $currencyTotals = app(PaymentReceiptReport::class)->customerTransactionTotals((int) $customer->id, $month, $month->copy()->addMonth());
 
         return $this->locale->translate($customer, 'order.status.month_totals', [
             'count' => (int) $totals->paid_count,
-            'amount' => $this->locale->idr((int) $totals->paid_total),
+            'amount' => $this->locale->idr((int) $totals->paid_total)
+                .($currencyTotals['USDT'] > 0 ? ' / '.Money::usdt($currencyTotals['USDT']) : ''),
         ]);
+    }
+
+    private function orderAmount(Customer $customer, Order $order, ?Payment $payment): string
+    {
+        return strtoupper((string) $payment?->currency) === 'USDT'
+            ? Money::usdt((int) $payment->amount)
+            : $this->locale->idr((int) $order->total_amount);
     }
 
     public function monthFromCallback(string $data): ?Carbon
@@ -387,7 +399,7 @@ class TelegramOrderIntents
             ).' x '.$item->quantity;
         }
         $lines[] = $this->locale->translate($customer, 'order.detail.total', [
-            'amount' => 'Rp '.number_format($order->total_amount, 0, ',', '.'),
+            'amount' => $this->orderAmount($customer, $order, $payment),
         ]);
         if ($payment) {
             $lines[] = $this->locale->translate($customer, 'order.detail.payment', [

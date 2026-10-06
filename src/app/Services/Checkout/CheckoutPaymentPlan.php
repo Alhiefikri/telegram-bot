@@ -10,6 +10,7 @@ use App\Services\Checkout\PaymentPlan\KlikQrisCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\ManualQrisCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\SakurupiahCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\StoreBalanceCheckoutPaymentSnapshot;
+use App\Services\Checkout\PaymentPlan\UsdtBalanceCheckoutPaymentSnapshot;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use InvalidArgumentException;
@@ -61,6 +62,7 @@ final readonly class CheckoutPaymentPlan
             CheckoutPaymentPreparationIdentity::key('manual', 'BINANCE_PAY_ID') => BinancePayCheckoutPaymentSnapshot::class,
             CheckoutPaymentPreparationIdentity::key('manual', 'USDT_BEP20') => BscCheckoutPaymentSnapshot::class,
             CheckoutPaymentPreparationIdentity::key('store_balance', 'STORE_BALANCE') => StoreBalanceCheckoutPaymentSnapshot::class,
+            CheckoutPaymentPreparationIdentity::key('usdt_balance', 'USDT_BALANCE') => UsdtBalanceCheckoutPaymentSnapshot::class,
             default => null,
         };
 

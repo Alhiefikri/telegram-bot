@@ -2,6 +2,7 @@
 
 namespace App\Services\PaidInvoice;
 
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use RuntimeException;
 
 /**
@@ -842,9 +843,7 @@ final class PaidInvoiceRenderer
             return '—';
         }
         if ($currency === 'USDT') {
-            $value = rtrim(rtrim(number_format($amount / 1_000_000, 6, '.', ''), '0'), '.');
-
-            return ($value !== '' ? $value : '0').' USDT';
+            return UsdtMicroAmount::formatUnits($amount).' USDT';
         }
 
         $formatted = number_format($amount, 0, ',', '.');

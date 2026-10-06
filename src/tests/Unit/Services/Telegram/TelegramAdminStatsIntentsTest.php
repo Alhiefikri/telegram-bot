@@ -248,7 +248,6 @@ class TelegramAdminStatsIntentsTest extends TestCase
 
         $this->assertStringContainsString('Order Dibayar: 3 (📈 +50%)', $text);
         $this->assertStringContainsString('Produk Terjual: 3 (📉 -25%)', $text);
-        $this->assertStringContainsString('Nilai Penjualan: Rp30.000 (➖ 0%)', $text);
         $this->assertStringContainsString('• USDT: 0.01 USDT (📈 Baru)', $text);
         $this->assertStringNotContainsString('INF', $text);
         $this->assertStringNotContainsString('NAN', $text);

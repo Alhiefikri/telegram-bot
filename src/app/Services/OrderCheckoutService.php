@@ -8,6 +8,7 @@ use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
 use App\Models\Customer;
+use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -23,11 +24,16 @@ use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\Checkout\CheckoutPricingSnapshot;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
+use App\Services\Checkout\UsdtBalanceCheckoutPaymentPreparation;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
+use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Services\UsdtBalance\UsdtPurchase;
+use App\Services\UsdtFunding\CustomerUsdtFundingGate;
 use App\Support\PaymentProvider;
 use DateTimeInterface;
 use Illuminate\Database\QueryException;
@@ -48,6 +54,8 @@ class OrderCheckoutService
         private readonly CheckoutMaintenance $maintenance,
         private readonly TelegramOutboundEffectService $outboundEffects,
         private readonly StoreBalanceLedger $storeBalance,
+        private readonly CustomerUsdtBalanceLedger $usdtBalance,
+        private readonly CustomerUsdtFundingGate $usdtFundingGate,
         private readonly OrderLifecycle $lifecycle,
         private readonly SupplierFulfillmentService $supplierFulfillment,
     ) {}
@@ -102,6 +110,7 @@ class OrderCheckoutService
         ?DateTimeInterface $termsAcceptedAt,
     ): Order {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
+            $this->assertCheckoutCustomer($existing, $cart);
             $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
 
             return $existing;
@@ -114,6 +123,7 @@ class OrderCheckoutService
             if ($existing?->order_status === OrderStatus::Cancelled) {
                 $lockedCart->update(['status' => CartStatus::Active]);
             } elseif ($existing) {
+                $this->assertCheckoutCustomer($existing, $lockedCart);
                 $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
 
                 return $existing;
@@ -124,6 +134,22 @@ class OrderCheckoutService
             throw new InvalidCheckout('Cart is not active.');
         }
         $storeBalanceCustomer = null;
+        $usdtBalanceCustomer = null;
+        if (strtolower(trim($paymentIntent->provider())) === PaymentProvider::USDT_BALANCE) {
+            $usdtBalanceCustomer = Customer::query()->findOrFail($lockedCart->customer_id);
+            if ($usdtBalanceCustomer->telegram_id === null) {
+                throw new InvalidCheckout('USDT Balance checkout is available only for Telegram customers.');
+            }
+
+            // Cart → selected account → policy read barrier → maintenance →
+            // stock/supplier resources. Shared readers do not serialize all
+            // Customers; Owner pause writers take the exclusive policy lock.
+            $this->usdtBalance->lockForTransaction($usdtBalanceCustomer);
+            CustomerUsdtFundingPolicy::query()
+                ->where('singleton_key', CustomerUsdtFundingPolicy::SINGLETON_KEY)
+                ->sharedLock()->first();
+            $this->usdtFundingGate->assertSpendingAvailable();
+        }
         if (strtolower(trim($paymentIntent->provider())) === PaymentProvider::STORE_BALANCE) {
             $storeBalanceCustomer = Customer::query()->findOrFail($lockedCart->customer_id);
             if ($storeBalanceCustomer->telegram_id === null) {
@@ -200,6 +226,17 @@ class OrderCheckoutService
             pricing: $pricing,
         ));
         $isStoreBalance = $paymentPlan->postCreationBehavior() === CheckoutPostCreationBehavior::StoreBalancePaid;
+        $isUsdtBalance = $paymentPlan->postCreationBehavior() === CheckoutPostCreationBehavior::UsdtBalancePaid;
+        if ($isUsdtBalance) {
+            if ($paymentPlan->provider() !== PaymentProvider::USDT_BALANCE
+                || $paymentPlan->method() !== UsdtBalanceCheckoutPaymentPreparation::METHOD
+                || $paymentPlan->orderCurrency() !== 'USDT'
+                || $paymentPlan->paymentCurrency() !== 'USDT'
+                || $paymentPlan->amount() !== $pricing->usdtTotal()
+                || $usdtBalanceCustomer === null) {
+                throw new InvalidCheckout('USDT Balance checkout requires the complete positive micro-USDT Order total.');
+            }
+        }
         if ($isStoreBalance) {
             if ($paymentPlan->orderCurrency() !== 'IDR'
                 || $paymentPlan->paymentCurrency() !== 'IDR'
@@ -264,6 +301,18 @@ class OrderCheckoutService
                 idempotencyKey: 'order:'.$order->getKey().':debit',
             );
             $this->lifecycle->applyPaymentPaid($payment);
+        } elseif ($isUsdtBalance) {
+            $this->usdtBalance->debitPurchase(
+                $usdtBalanceCustomer,
+                new UsdtPurchase(
+                    (int) $usdtBalanceCustomer->getKey(),
+                    UsdtMicroAmount::fromUnits($paymentPlan->amount()),
+                    (string) $order->getKey(),
+                    (string) $payment->getKey(),
+                ),
+                'order:'.$order->getKey().':usdt:debit',
+            );
+            $this->lifecycle->applyPaymentPaid($payment);
         } else {
             $this->outboundEffects->recordCheckoutInstructions($order, $payment, $lockedCart->customer);
             $this->outboundEffects->recordAdminOrderPendingNotification($order);
@@ -276,13 +325,21 @@ class OrderCheckoutService
 
     private function assertStoreBalanceEligibility(Cart $cart, CheckoutPaymentIntent $paymentIntent): void
     {
-        if (strtolower(trim($paymentIntent->provider())) !== PaymentProvider::STORE_BALANCE) {
+        if (! in_array(strtolower(trim($paymentIntent->provider())), [PaymentProvider::STORE_BALANCE, PaymentProvider::USDT_BALANCE], true)) {
             return;
         }
 
         $cart->loadMissing('customer');
         if ($cart->customer?->telegram_id === null) {
-            throw new InvalidCheckout('Store Balance checkout is available only for Telegram customers.');
+            throw new InvalidCheckout('Balance checkout is available only for Telegram customers.');
+        }
+    }
+
+    private function assertCheckoutCustomer(Order $order, Cart $cart): void
+    {
+        $customerId = Cart::query()->whereKey($cart->getKey())->value('customer_id');
+        if ($customerId === null || (int) $order->customer_id !== (int) $customerId) {
+            throw new InvalidCheckout('Checkout key belongs to another Customer.');
         }
     }
 

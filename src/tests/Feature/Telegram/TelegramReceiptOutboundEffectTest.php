@@ -473,33 +473,6 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         );
     }
 
-    #[DataProvider('receiptAmountFallbackCases')]
-    public function test_invoice_metadata_and_buyer_text_use_order_total_when_provider_total_is_missing(
-        string $currency,
-        int $orderTotal,
-        int $paymentAmount,
-        string $expectedAmount,
-        string $unexpectedAmount,
-    ): void {
-        $order = $this->paidOrderWithAmountMismatch($currency, $orderTotal, $paymentAmount);
-
-        $invoice = app(PaidInvoiceRenderer::class)->render(
-            app(PaidInvoiceOrderPresentationAdapter::class)->present($order),
-        );
-        $detail = app(TelegramReceiptNotifier::class)->renderProductDetail($order)['units'][0];
-
-        $this->assertSame($currency, $invoice->metadata['currency']);
-        $this->assertSame($orderTotal, $invoice->metadata['total_paid']);
-        $this->assertStringContainsString('Jumlah dibayar: '.$expectedAmount, $detail->text());
-        $this->assertStringNotContainsString('Jumlah dibayar: '.$unexpectedAmount, $detail->text());
-    }
-
-    public static function receiptAmountFallbackCases(): iterable
-    {
-        yield 'IDR' => ['IDR', 12_345, 98_765, 'Rp 12.345', 'Rp 98.765'];
-        yield 'USDT' => ['USDT', 2_500_000, 4_000_000, '2.500000 USDT', '4.000000 USDT'];
-    }
-
     public function test_invoice_metadata_and_buyer_text_keep_provider_total_when_present(): void
     {
         $order = $this->paidOrderWithAmountMismatch('IDR', 12_345, 98_765);

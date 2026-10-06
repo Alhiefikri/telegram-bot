@@ -14,6 +14,8 @@ final class PaymentProvider
 
     public const STORE_BALANCE = 'store_balance';
 
+    public const USDT_BALANCE = 'usdt_balance';
+
     /** @return list<string> */
     public static function allowed(): array
     {
@@ -23,7 +25,7 @@ final class PaymentProvider
     /** @return list<string> */
     public static function known(): array
     {
-        return [self::MANUAL, self::PAKASIR, self::KLIKQRIS, self::SAKURUPIAH, self::STORE_BALANCE];
+        return [self::MANUAL, self::PAKASIR, self::KLIKQRIS, self::SAKURUPIAH, self::STORE_BALANCE, self::USDT_BALANCE];
     }
 
     public static function normalize(mixed $provider): string
@@ -40,6 +42,7 @@ final class PaymentProvider
             self::KLIKQRIS => 'KlikQRIS',
             self::SAKURUPIAH => 'Sakurupiah',
             self::STORE_BALANCE => 'Store Balance',
+            self::USDT_BALANCE => 'Customer USDT Balance',
             default => 'Manual',
         };
     }

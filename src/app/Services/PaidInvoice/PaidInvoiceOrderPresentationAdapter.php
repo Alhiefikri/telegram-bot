@@ -123,7 +123,7 @@ final class PaidInvoiceOrderPresentationAdapter
 
     private function totalPaid(Payment $payment, Order $order, string $currency): int
     {
-        if ($currency === 'USDT' && in_array(strtoupper((string) $payment->method), ['BINANCE_PAY_ID', 'USDT_BEP20'], true)) {
+        if ($currency === 'USDT') {
             return max(0, (int) $payment->amount);
         }
 
@@ -190,6 +190,7 @@ final class PaidInvoiceOrderPresentationAdapter
         $label = match ($method) {
             'api_qris', 'qris' => 'QRIS',
             'binance_pay_id' => 'Binance Pay',
+            'usdt_balance' => 'USDT Balance',
             'hosted' => 'Pakasir',
             'qr_manual' => 'QR Manual',
             default => $label !== '' ? $label : $method,
