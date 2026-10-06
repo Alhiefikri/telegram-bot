@@ -39,7 +39,11 @@ final class RecoverUsdtTopUps extends Command
             if ($requests >= 32) {
                 break;
             }
-            DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $stream->receiver_id)->update(['last_attempt_at' => now()]);
+            // Keep sub-second ordering across adjacent budgeted ticks. Rounding
+            // every attempt to one second repeatedly favors low receiver IDs
+            // after an outage gave all streams the same timestamp.
+            DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $stream->receiver_id)
+                ->update(['last_attempt_at' => now()->format('Y-m-d H:i:s.u')]);
             try {
                 $report = $ingestion->scan((int) $stream->receiver_id, (int) $stream->first_block, 2, 32 - $requests);
                 $requests += $report['requests'];

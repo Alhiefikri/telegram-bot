@@ -13,9 +13,11 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\BscUsdtRailRpcFixture;
 use Tests\TestCase;
 
+#[Group('postgres-release')]
 final class BscUsdtTransferIngestionTest extends TestCase
 {
     private BscUsdtRailRpcFixture $rpc;
@@ -182,6 +184,39 @@ final class BscUsdtTransferIngestionTest extends TestCase
         $this->artisan('usdt-bsc:scan', ['--requests' => '101'])->assertExitCode(2);
         $this->artisan('usdt-bsc:scan', ['--receiver' => (string) $this->receiver->getKey()])->assertExitCode(2);
         $this->assertSame([], $this->rpc->calls);
+    }
+
+    #[Group('concurrency')]
+    public function test_recovery_rotates_receivers_when_budgeted_ticks_share_one_second(): void
+    {
+        $owner = User::query()->where('role', UserRole::Owner)->firstOrFail();
+        $registry = app(UsdtDepositReceiverRegistry::class);
+        $receivers = [$this->receiver];
+        for ($i = 1; $i < 12; $i++) {
+            $receiver = $registry->register(Customer::factory()->create(),
+                '0x'.str_pad(dechex($i), 40, '0', STR_PAD_LEFT), $owner)->receiver;
+            $receivers[] = $registry->manualVerify($receiver, true, $owner);
+        }
+        foreach ($receivers as $receiver) {
+            DB::table('usdt_bsc_scan_checkpoints')->insert([
+                'receiver_id' => $receiver->id, 'first_block' => 100, 'version' => 0, 'updated_at' => now(),
+            ]);
+        }
+        $second = now()->startOfSecond()->toImmutable();
+        // An outage already visited every receiver in the same timestamp
+        // bucket, so none has the NULL-first advantage on recovery.
+        DB::table('usdt_bsc_scan_checkpoints')->update(['last_attempt_at' => $second]);
+        for ($tick = 0; $tick < 6; $tick++) {
+            $this->travelTo($second->addMicroseconds(($tick + 1) * 100));
+            $this->rpc->calls = [];
+            Artisan::call('usdt-funding:recover', ['--limit' => 25, '--json' => true]);
+            $report = json_decode(trim(Artisan::output()), true, flags: JSON_THROW_ON_ERROR);
+            $this->assertLessThanOrEqual(32, $report['scan_requests']);
+            $this->assertLessThanOrEqual(32, count($this->rpc->calls));
+        }
+        $this->assertSame(12, DB::table('usdt_bsc_scan_checkpoints')->where('last_block', 105)->count(),
+            'A shared timestamp must not repeatedly send the request budget to the first receivers.');
+        $this->assertNoMoney();
     }
 
     private function scan(): array
