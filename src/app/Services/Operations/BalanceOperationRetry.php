@@ -82,7 +82,7 @@ final class BalanceOperationRetry
 
         $detector = $container->bound(ConcurrencyErrorDetectorContract::class)
             ? $container->make(ConcurrencyErrorDetectorContract::class)
-            : new ConcurrencyErrorDetector();
+            : new ConcurrencyErrorDetector;
 
         return $detector->causedByConcurrencyError($exception);
     }

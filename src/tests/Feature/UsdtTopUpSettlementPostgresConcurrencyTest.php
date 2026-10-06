@@ -39,6 +39,8 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
 
     private CustomerUsdtTopUp $target;
 
+    private BscUsdtRailRpcFixture $rpc;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -57,13 +59,13 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
         CustomerUsdtFundingPolicy::current()->update(['funding_enabled' => true, 'version' => 1]);
         $registry = app(UsdtDepositReceiverRegistry::class);
         $registry->manualVerify($registry->register($this->customer, BscUsdtRailRpcFixture::ADDRESS, $owner)->receiver, true, $owner);
-        $rpc = new BscUsdtRailRpcFixture;
-        $this->app->instance(BscVerificationRpcClientInterface::class, $rpc);
+        $this->rpc = new BscUsdtRailRpcFixture;
+        $this->app->instance(BscVerificationRpcClientInterface::class, $this->rpc);
         $actions = app(TelegramUsdtFundingActions::class);
         $nonce = $actions->preview('951001', '951001', 'private', 100, '1')->intent->nonce;
         $this->target = $actions->callback('951001', '951001', 'private', 100, 'usdt:confirm:'.$nonce)->topUp;
         app(UsdtTopUpPreparation::class)->prepare($this->target->id);
-        $rpc->timestamp = now()->timestamp + 5;
+        $this->rpc->timestamp = now()->timestamp + 5;
         app(UsdtTopUpSettlement::class)->submit($this->customer, $this->target->id, BscUsdtRailRpcFixture::TX);
     }
 
@@ -76,6 +78,34 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
         } finally {
             parent::tearDown();
         }
+    }
+
+    public function test_process_death_after_durable_claim_is_recovered_without_a_second_effect(): void
+    {
+        $parentPid = getmypid();
+        $results = $this->runConcurrentWorkers(1, function () use ($parentPid): string {
+            // The claim transaction has committed before the RPC inspection
+            // begins. Killing this worker therefore leaves only a leased,
+            // durable database obligation for the recovery sweep to reclaim.
+            $this->rpc->onCall = static function () use ($parentPid): void {
+                if (getmypid() !== $parentPid) {
+                    posix_kill(getmypid(), SIGKILL);
+                }
+            };
+
+            app(UsdtTopUpSettlement::class)->check($this->target->id);
+
+            return 'unexpectedly_completed';
+        }, 'usdt-settlement-crash');
+
+        $this->assertFalse($results[0]['ok'], json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(SIGKILL, $results[0]['signal'] ?? null, json_encode($results, JSON_THROW_ON_ERROR));
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+
+        $this->travel(3)->minutes();
+        app(UsdtTopUpSettlement::class)->recover();
+
+        $this->assertSingleSettlement();
     }
 
     public function test_callback_poll_and_expiry_commit_one_economic_resolution(): void

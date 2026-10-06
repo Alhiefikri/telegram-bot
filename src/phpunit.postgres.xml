@@ -18,13 +18,25 @@
             <file>tests/Feature/KlikQrisWebhookPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SakurupiahInvoiceLifecyclePostgresConcurrencyTest.php</file>
             <file>tests/Feature/PostgresExtensionLifecycleTest.php</file>
+            <file>tests/Feature/AdminBalanceAdjustmentTest.php</file>
+            <file>tests/Feature/AdminBalanceAdjustmentPostgresConcurrencyTest.php</file>
             <file>tests/Feature/StoreBalanceOwnerCompensationTest.php</file>
             <file>tests/Feature/Telegram/StoreBalanceOwnerAlertTest.php</file>
             <file>tests/Feature/Telegram/StoreBalanceTopUpChannelProofTest.php</file>
             <file>tests/Feature/StoreBalancePostgresConcurrencyTest.php</file>
+            <file>tests/Feature/BalanceOperationsPostgresConcurrencyTest.php</file>
             <file>tests/Feature/ExternalMoneyReceiptPostgresConcurrencyTest.php</file>
             <file>tests/Feature/ExternalMoneyReceiptWriterPostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtFundingIntentPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/UsdtFundingPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/CustomerUsdtBalancePostgresConcurrencyTest.php</file>
+            <file>tests/Feature/UsdtBalanceCheckoutPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/UsdtReceiverOwnershipPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/UsdtReconciliationPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/UsdtReorgIncidentPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/UsdtTopUpReviewPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/UsdtTopUpSettlementPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/BscUsdtRailPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SupplierClientTest.php</file>
             <file>tests/Feature/SupplierAdminTest.php</file>
             <file>tests/Feature/SupplierAvailabilityTest.php</file>
@@ -39,6 +51,8 @@
             <file>tests/Feature/BuyMailWarrantyPostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtOrderRefundTest.php</file>
             <file>tests/Feature/UsdtOrderRefundPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/PakasirWebhookTest.php</file>
+            <file>tests/Feature/Telegram/TelegramNavigationRootPostgresConcurrencyTest.php</file>
             <file>tests/Feature/BuyMailWebhookTest.php</file>
             <file>tests/Feature/WarrantyAdminTest.php</file>
             <file>tests/Feature/WarrantyClaimTest.php</file>

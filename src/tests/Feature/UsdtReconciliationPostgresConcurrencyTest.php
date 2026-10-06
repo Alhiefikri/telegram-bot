@@ -17,9 +17,9 @@ use App\Services\UsdtTreasury\UsdtTreasuryMovements;
 use App\Services\UsdtTreasury\UsdtTreasuryMovementStatus;
 use Brick\Math\BigInteger;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
+use Tests\Support\PostgresTestDatabase;
 use Tests\TestCase;
 use Throwable;
 
@@ -41,9 +41,11 @@ final class UsdtReconciliationPostgresConcurrencyTest extends TestCase
         }
 
         $this->assertSafeConcurrencyDatabase();
-        if (! Schema::hasTable('usdt_balance_reconciliation_runs')) {
-            $this->artisan('migrate:fresh', ['--force' => true])->assertSuccessful();
-        }
+        // This class writes aggregate claims, treasury movements and balance
+        // history. Cleaning only the Customer fixture leaves economic rows
+        // from an earlier concurrency class in the shared disposable DB and
+        // makes the final liability assertion order-dependent.
+        $this->assertSame(0, PostgresTestDatabase::migrateFresh());
     }
 
     protected function tearDown(): void

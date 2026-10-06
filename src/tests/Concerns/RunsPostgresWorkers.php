@@ -18,7 +18,7 @@ trait RunsPostgresWorkers
 {
     /**
      * @param  callable(int): string  $work
-     * @return list<array{ok: bool, value?: string, class?: string, exit_code: int}>
+     * @return list<array{ok: bool, value?: string, class?: string, exit_code: int, signal?: int|null}>
      */
     protected function runConcurrentWorkers(int $count, callable $work, string $workspacePrefix = 'usdt-race'): array
     {
@@ -93,7 +93,7 @@ trait RunsPostgresWorkers
 
     /**
      * @param  array<int, int>  $children
-     * @return list<array{ok: bool, value?: string, class?: string, exit_code: int}>
+     * @return list<array{ok: bool, value?: string, class?: string, exit_code: int, signal?: int|null}>
      */
     protected function collectResults(array $children, string $directory): array
     {
@@ -106,6 +106,7 @@ trait RunsPostgresWorkers
                 ? json_decode((string) file_get_contents($resultPath), true, flags: JSON_THROW_ON_ERROR)
                 : ['ok' => false, 'class' => RuntimeException::class];
             $result['exit_code'] = pcntl_wifexited($status) ? pcntl_wexitstatus($status) : 255;
+            $result['signal'] = pcntl_wifsignaled($status) ? pcntl_wtermsig($status) : null;
             $results[] = $result;
         }
 
@@ -134,7 +135,7 @@ trait RunsPostgresWorkers
     }
 
     /**
-     * @param  list<array{ok: bool, value?: string, class?: string, exit_code: int}>  $results
+     * @param  list<array{ok: bool, value?: string, class?: string, exit_code: int, signal?: int|null}>  $results
      */
     protected function assertWorkersSucceeded(array $results): void
     {

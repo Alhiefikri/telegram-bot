@@ -9,7 +9,11 @@ use App\Models\CustomerBalanceAccount;
 use App\Models\StoreBalanceEntry;
 use App\Models\User;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Http\Request;
+use Illuminate\Session\TokenMismatchException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
@@ -76,6 +80,29 @@ final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabase
                 'reason' => 'The route must remain closed before U1.',
             ])
             ->assertNotFound();
+    }
+
+    public function test_balance_adjustment_mutation_is_csrf_protected_in_production(): void
+    {
+        $middleware = new class($this->app, app(Encrypter::class)) extends PreventRequestForgery
+        {
+            protected function runningUnitTests()
+            {
+                return false;
+            }
+        };
+        $session = app('session.store');
+        $session->start();
+        $request = Request::create(
+            route('admin.store-balance.adjustments.previews.store'),
+            'POST',
+            ['telegram_id' => '901541', 'amount' => '1000', 'reason' => 'CSRF boundary'],
+        );
+        $request->setLaravelSession($session);
+
+        $this->expectException(TokenMismatchException::class);
+
+        $middleware->handle($request, fn () => response('ok'));
     }
 
     public function test_search_works_when_the_customer_has_no_username(): void

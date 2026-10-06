@@ -984,6 +984,47 @@ SH);
         $this->assertStringContainsString('junit-gate-report.php', $concurrencyGate);
     }
 
+    public function test_postgresql_release_manifest_covers_every_tagged_feature_file(): void
+    {
+        $configPath = base_path('phpunit.postgres.xml');
+        $config = file_get_contents($configPath);
+        $this->assertIsString($config);
+
+        preg_match_all('/<file>([^<]+)<\/file>/', $config, $matches);
+        $listed = array_fill_keys($matches[1] ?? [], true);
+        $missing = [];
+        $featureRoot = base_path('tests/Feature');
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($featureRoot));
+        $postgresReleaseAttribute = sprintf("Group('%s')", 'postgres-release');
+
+        foreach ($files as $file) {
+            if (! $file->isFile() || $file->getExtension() !== 'php') {
+                continue;
+            }
+
+            $contents = file_get_contents($file->getPathname());
+            if (! is_string($contents) || ! str_contains($contents, $postgresReleaseAttribute)) {
+                continue;
+            }
+
+            $relative = str_replace(
+                DIRECTORY_SEPARATOR,
+                '/',
+                substr($file->getPathname(), strlen(base_path()) + 1),
+            );
+            if (! isset($listed[$relative])) {
+                $missing[] = $relative;
+            }
+        }
+
+        sort($missing);
+        $this->assertSame([], $missing, 'Every postgres-release feature file must be listed in phpunit.postgres.xml.');
+
+        foreach (array_keys($listed) as $relative) {
+            $this->assertFileExists(base_path($relative), "PostgreSQL release manifest references missing file [{$relative}].");
+        }
+    }
+
     public function test_failed_job_recovery_workflow_is_targeted_locked_and_verifies_the_queue(): void
     {
         $workflow = base_path('../.github/workflows/recover-failed-jobs.yml');

@@ -358,17 +358,26 @@ final class AdminBalanceAdjustmentTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(3, StoreBalanceEntry::query()->count());
 
         $nonIdr = (string) Str::uuid();
-        DB::table('balance_adjustment_requests')->insert([
-            'id' => $nonIdr, 'customer_id' => $customer->id, 'owner_user_id' => $owner->id,
-            'telegram_id' => (string) $customer->telegram_id, 'username' => null,
-            'session_binding' => hash('sha256', 'non-idr'), 'credential_binding' => hash('sha256', 'non-idr'),
-            'mode' => 'single_owner', 'currency' => 'USD', 'amount' => 5000, 'reason' => 'Non-IDR fixture',
-            'category' => 'owner_attested', 'source_id' => null, 'receipt_fingerprint' => null,
-            'fingerprint' => hash('sha256', 'non-idr'), 'version' => 1, 'state' => 'applied',
-            'ledger_entry_id' => null, 'expires_at' => now(), 'resolved_at' => now(),
-            'created_at' => now(), 'updated_at' => now(),
-        ]);
-        $this->rejects('invalid_original_adjustment', fn () => $service->requestReversal($owner, (string) $customer->telegram_id, $nonIdr));
+        $inserted = false;
+        try {
+            DB::table('balance_adjustment_requests')->insert([
+                'id' => $nonIdr, 'customer_id' => $customer->id, 'owner_user_id' => $owner->id,
+                'telegram_id' => (string) $customer->telegram_id, 'username' => null,
+                'session_binding' => hash('sha256', 'non-idr'), 'credential_binding' => hash('sha256', 'non-idr'),
+                'mode' => 'single_owner', 'currency' => 'USD', 'amount' => 5000, 'reason' => 'Non-IDR fixture',
+                'category' => 'owner_attested', 'source_id' => null, 'receipt_fingerprint' => null,
+                'fingerprint' => hash('sha256', 'non-idr'), 'version' => 1, 'state' => 'applied',
+                'ledger_entry_id' => null, 'expires_at' => now(), 'resolved_at' => now(),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $inserted = true;
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('balance_adjustment_money_check', $exception->getMessage());
+        }
+
+        if ($inserted) {
+            $this->rejects('invalid_original_adjustment', fn () => $service->requestReversal($owner, (string) $customer->telegram_id, $nonIdr));
+        }
     }
 
     public function test_reversal_with_insufficient_available_funds_is_a_safe_review_without_debit(): void
