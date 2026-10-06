@@ -27,6 +27,7 @@ use App\Services\ProductCredentialAllocator;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\Warranty\RemainderRefundService;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -47,9 +48,10 @@ class ManualFulfillmentResolutionService
         return DB::transaction(function () use ($review, $actor, $action, $reason, $refundReference, $refundResult, $ip) {
             $initial = ManualFulfillmentReview::query()->findOrFail($review->id);
             $initialPayment = Payment::query()->findOrFail($initial->payment_id);
-            if ($action === 'refund' && $initialPayment->provider === 'store_balance') {
+            if ($action === 'refund' && in_array($initialPayment->provider, ['store_balance', 'usdt_balance'], true)) {
                 $customer = Order::findOrFail($initial->order_id)->customer;
-                app(StoreBalanceLedger::class)->lockForTransaction($customer);
+                $ledger = $initialPayment->provider === 'usdt_balance' ? app(CustomerUsdtBalanceLedger::class) : app(StoreBalanceLedger::class);
+                $ledger->lockForTransaction($customer);
             }
             Order::query()->lockForUpdate()->findOrFail($initial->order_id);
             Payment::query()->where('order_id', $initial->order_id)->orderBy('id')->lockForUpdate()->get();
@@ -184,7 +186,7 @@ class ManualFulfillmentResolutionService
         $order = Order::findOrFail($review->order_id);
         app(SupplierFulfillmentService::class)->assertRefundable($order);
         $payment = Payment::query()->findOrFail($review->payment_id);
-        if ($payment->provider === 'store_balance') {
+        if (in_array($payment->provider, ['store_balance', 'usdt_balance'], true)) {
             $this->orders->applyPaymentRefunded($payment);
 
             return $this->markResolved($review, ManualFulfillmentReview::STATE_REFUNDED, $actor, $reason, null, 'success');

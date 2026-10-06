@@ -34,7 +34,7 @@ class UsdtBalanceSourceTest extends TestCase
         $this->assertSame('order', $purchase->sourceType());
         $this->assertSame('order-1', $purchase->sourceId());
 
-        $refund = new UsdtRefund(7, $this->units(1_000_000), 'refund-1', 'order-1', 42);
+        $refund = new UsdtRefund(7, $this->units(1_000_000), 'refund-1', 'order-1', 42, 'payment-1');
         $this->assertSame(UsdtBalanceEntryKind::RefundCredit, $refund->kind());
         $this->assertSame('order_refund', $refund->sourceType());
         $this->assertSame('refund-1', $refund->sourceId());
@@ -72,7 +72,7 @@ class UsdtBalanceSourceTest extends TestCase
             new VerifiedUsdtFunding(7, $this->units(2_500_000), 'topup-2', 'receipt-1', 'v1'),
             new VerifiedUsdtFunding(7, $this->units(2_500_000), 'topup-1', 'receipt-2', 'v1'),
             new VerifiedUsdtFunding(7, $this->units(2_500_000), 'topup-1', 'receipt-1', 'v2'),
-            new UsdtRefund(7, $this->units(2_500_000), 'topup-1', 'order-1', 1),
+            new UsdtRefund(7, $this->units(2_500_000), 'topup-1', 'order-1', 1, 'payment-1'),
         ];
 
         foreach ($changed as $other) {
@@ -87,7 +87,7 @@ class UsdtBalanceSourceTest extends TestCase
             fn () => new VerifiedUsdtFunding(7, $this->units(1_000_000), '', 'receipt-1', 'v1'),
             fn () => new VerifiedUsdtFunding(7, $this->units(1_000_000), str_repeat('a', 65), 'receipt-1', 'v1'),
             fn () => new UsdtPurchase(7, $this->units(1_000_000), 'order-1', ''),
-            fn () => new UsdtRefund(7, $this->units(1_000_000), 'refund-1', 'order-1', 0),
+            fn () => new UsdtRefund(7, $this->units(1_000_000), 'refund-1', 'order-1', 0, 'payment-1'),
             fn () => new ApprovedUsdtReversal(7, $this->units(1_000_000), 0, 'approval-1'),
             fn () => new ApprovedUsdtReversal(7, $this->units(1_000_000), 42, ''),
         ];
@@ -107,7 +107,7 @@ class UsdtBalanceSourceTest extends TestCase
         $sources = [
             new VerifiedUsdtFunding(7, $this->units(1_000_000), 'topup-1', 'receipt-1', 'v1'),
             new UsdtPurchase(7, $this->units(1_000_000), 'order-1', 'payment-1'),
-            new UsdtRefund(7, $this->units(1_000_000), 'refund-1', 'order-1', 42),
+            new UsdtRefund(7, $this->units(1_000_000), 'refund-1', 'order-1', 42, 'payment-1'),
             new ApprovedUsdtReversal(7, $this->units(1_000_000), 42, 'approval-1'),
         ];
 

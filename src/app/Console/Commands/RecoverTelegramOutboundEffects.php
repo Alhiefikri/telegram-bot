@@ -51,6 +51,7 @@ class RecoverTelegramOutboundEffects extends Command
             ->whereIn('effect_type', [
                 TelegramOutboundEffectType::BalanceAdjustmentNotice->value,
                 TelegramOutboundEffectType::OwnerCompensationNotification->value,
+                TelegramOutboundEffectType::UsdtRefundReceipt->value,
                 TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
                 TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,

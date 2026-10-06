@@ -37,6 +37,8 @@
             <file>tests/Feature/BuyMailClientTest.php</file>
             <file>tests/Feature/BuyMailFulfillmentTest.php</file>
             <file>tests/Feature/BuyMailWarrantyPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/UsdtOrderRefundTest.php</file>
+            <file>tests/Feature/UsdtOrderRefundPostgresConcurrencyTest.php</file>
             <file>tests/Feature/BuyMailWebhookTest.php</file>
             <file>tests/Feature/WarrantyAdminTest.php</file>
             <file>tests/Feature/WarrantyClaimTest.php</file>

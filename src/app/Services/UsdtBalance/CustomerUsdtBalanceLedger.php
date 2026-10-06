@@ -116,22 +116,7 @@ final class CustomerUsdtBalanceLedger
     public function refundEntitlement(Customer $customer, UsdtRefund $source, string $idempotencyKey): UsdtBalanceMutationResult
     {
         return $this->apply($customer, $source, $idempotencyKey, function (CustomerUsdtBalanceAccount $account) use ($source): void {
-            $original = CustomerUsdtBalanceEntry::query()->whereKey($source->originalEntryId)->first();
-            if ($original === null
-                || (int) $original->customer_usdt_balance_account_id !== (int) $account->id
-                || $original->kind !== UsdtBalanceEntryKind::PurchaseDebit
-                || $original->source_type !== 'order'
-                || $original->source_id !== $source->orderId) {
-                throw new InvalidArgumentException('USDT refund requires the original purchase debit of the same Order.');
-            }
-
-            $refunded = (int) CustomerUsdtBalanceEntry::query()
-                ->where('original_entry_id', $original->id)
-                ->where('kind', UsdtBalanceEntryKind::RefundCredit)
-                ->sum('amount_micro');
-            if ($source->amountMicro() > (int) $original->amount_micro - $refunded) {
-                throw new InvalidArgumentException('USDT refund exceeds the remaining original purchase debit.');
-            }
+            app(UsdtOrderRefundService::class)->validate($account, $source);
         });
     }
 

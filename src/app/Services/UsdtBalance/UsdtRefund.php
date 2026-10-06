@@ -18,9 +18,12 @@ final class UsdtRefund extends UsdtBalanceSource
         public readonly string $refundId,
         public readonly string $orderId,
         public readonly int $originalEntryId,
+        public readonly string $paymentId,
+        public readonly bool $fullOrder = false,
     ) {
         self::assertIdentifier('refund id', $refundId);
         self::assertIdentifier('order id', $orderId);
+        self::assertIdentifier('payment id', $paymentId);
         if ($originalEntryId <= 0) {
             throw new InvalidArgumentException('USDT refund requires the original ledger entry id.');
         }
@@ -34,12 +37,12 @@ final class UsdtRefund extends UsdtBalanceSource
 
     public function sourceType(): string
     {
-        return 'order_refund';
+        return $this->fullOrder ? 'order' : 'order_refund';
     }
 
     public function sourceId(): string
     {
-        return $this->refundId;
+        return $this->fullOrder ? $this->orderId : $this->refundId;
     }
 
     public function originalEntryId(): ?int
@@ -63,6 +66,8 @@ final class UsdtRefund extends UsdtBalanceSource
             'refund_id' => $this->refundId,
             'order_id' => $this->orderId,
             'original_entry_id' => $this->originalEntryId,
+            'payment_id' => $this->paymentId,
+            'full_order' => $this->fullOrder,
         ];
     }
 }

@@ -44,7 +44,7 @@ final class UsdtTopUpOutbound
 
     public function deliver(TelegramOutboundEffect $effect): void
     {
-        if ($effect->effect_type !== TelegramOutboundEffectType::UsdtTopUpReceipt->value) {
+        if (! in_array($effect->effect_type, [TelegramOutboundEffectType::UsdtTopUpReceipt->value, TelegramOutboundEffectType::UsdtRefundReceipt->value], true)) {
             throw new InvalidArgumentException('Unsupported USDT receipt effect.');
         }
         $claimed = $this->ledger->claim((string) $effect->id);
@@ -59,7 +59,7 @@ final class UsdtTopUpOutbound
                 return;
             }
             $response = $this->bot->sendMessage((string) $claimed->telegram_chat_id, $message, options: ['parse_mode' => null]);
-            $messageId = $this->responses->messageIdFromResponse($response, 'USDT top-up receipt');
+            $messageId = $this->responses->messageIdFromResponse($response, 'USDT balance receipt');
             $this->ledger->finalizeSent((string) $claimed->id, $claimed->claim_token, $messageId);
         } catch (Throwable $error) {
             if ($this->ledger->isAmbiguous($error)) {

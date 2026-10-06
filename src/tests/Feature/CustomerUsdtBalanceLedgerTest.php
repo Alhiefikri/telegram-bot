@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\UsdtBalanceEntryKind;
 use App\Exceptions\InsufficientStoreBalance;
@@ -13,6 +15,8 @@ use App\Models\CustomerBalanceAccount;
 use App\Models\CustomerUsdtBalanceAccount;
 use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\Order;
+use App\Models\OrderRefund;
+use App\Models\Payment;
 use App\Models\StoreBalanceEntry;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\UsdtBalance\ApprovedUsdtReversal;
@@ -195,41 +199,28 @@ final class CustomerUsdtBalanceLedgerTest extends TestCase
         $this->assertSame(0, DB::table('customer_usdt_balance_accounting_events')->count());
     }
 
-    public function test_refund_requires_the_original_purchase_debit_and_caps_cumulative_credits(): void
+    public function test_refund_rejects_an_unverified_entitlement_even_with_an_original_purchase(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 902108]);
-        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'currency' => 'USDT',
+            'order_status' => OrderStatus::Completed, 'payment_status' => PaymentStatus::Paid]);
+        $payment = Payment::factory()->create(['order_id' => $order->id, 'provider' => 'usdt_balance',
+            'method' => 'USDT_BALANCE', 'amount' => 2_500_000, 'currency' => 'USDT',
+            'status' => PaymentStatus::Paid, 'paid_at' => now()]);
         $ledger = $this->ledger();
         $ledger->creditVerifiedTopUp($customer, $this->funding($customer->id), 'usdt:fund');
-        $debit = $ledger->debitPurchase($customer, new UsdtPurchase($customer->id, UsdtMicroAmount::fromUnits(2_500_000), (string) $order->id, 'payment-1'), 'order:order-1:debit');
-
-        $refund = new UsdtRefund($customer->id, UsdtMicroAmount::fromUnits(1_500_000), 'refund-1', (string) $order->id, $debit->entryId);
-        $first = $ledger->refundEntitlement($customer, $refund, 'order-refund:refund-1');
-
-        $this->assertTrue($first->applied);
-        $this->assertSame(4_000_000, $ledger->snapshot($customer)->balanceMicro());
-
-        $event = DB::table('customer_usdt_balance_accounting_events')
-            ->where('customer_usdt_balance_entry_id', $first->entryId)->sole();
-        $this->assertSame('usdt_sale_refund', $event->debit_account);
-        $this->assertSame('customer_usdt_liability', $event->credit_account);
-
+        $debit = $ledger->debitPurchase($customer, new UsdtPurchase($customer->id, UsdtMicroAmount::fromUnits(2_500_000),
+            (string) $order->id, (string) $payment->id), 'order:order-1:debit');
+        $refund = OrderRefund::create(['order_id' => $order->id, 'payment_id' => $payment->id,
+            'customer_id' => $customer->id, 'amount' => 1_500_000, 'currency' => 'USDT', 'state' => 'requested']);
         try {
-            $ledger->refundEntitlement($customer, new UsdtRefund($customer->id, UsdtMicroAmount::fromUnits(1_500_000), 'refund-2', (string) $order->id, $debit->entryId), 'order-refund:refund-2');
-            $this->fail('Expected the cumulative cap to reject the second refund.');
+            $ledger->refundEntitlement($customer, new UsdtRefund($customer->id, UsdtMicroAmount::fromUnits(1_500_000),
+                $refund->id, (string) $order->id, $debit->entryId, (string) $payment->id), 'order-refund:'.$refund->id);
+            $this->fail('Unverified entitlement credited USDT.');
         } catch (InvalidArgumentException) {
-            $this->addToAssertionCount(1);
+            $this->assertSame(2_500_000, $ledger->snapshot($customer)->balanceMicro());
+            $this->assertSame(0, CustomerUsdtBalanceEntry::where('kind', UsdtBalanceEntryKind::RefundCredit)->count());
         }
-
-        try {
-            $ledger->refundEntitlement($customer, new UsdtRefund($customer->id, UsdtMicroAmount::fromUnits(1_500_000), 'refund-3', 'order-2', $debit->entryId), 'order-refund:refund-3');
-            $this->fail('Expected a foreign Order refund to be rejected.');
-        } catch (InvalidArgumentException) {
-            $this->addToAssertionCount(1);
-        }
-
-        $this->assertSame(4_000_000, $ledger->snapshot($customer)->balanceMicro());
-        $this->assertSame(1, CustomerUsdtBalanceEntry::query()->where('kind', UsdtBalanceEntryKind::RefundCredit)->count());
     }
 
     public function test_reversal_is_full_linked_and_allowed_only_once_with_mirrored_accounting(): void

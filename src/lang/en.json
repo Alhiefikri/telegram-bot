@@ -204,6 +204,8 @@
   "balance.usdt.input.invalid": "Invalid USDT amount. Use a value such as /usdt 1.5 (at most six decimal places).",
   "balance.usdt.stale": "This session is out of date. Start again from the Balance menu.",
   "balance.usdt.receipt.title": "USDT top-up settled",
+  "balance.usdt.refund.title": "USDT refund credited",
+  "order.guidance.usdt_balance_refunded": "Your USDT payment was refunded. :amount USDT was restored to your USDT balance without IDR conversion.",
   "balance.usdt.receipt.credit": "Credited to USDT balance: :amount USDT",
   "balance.usdt.receipt.reference": "Receipt: :reference",
   "balance.usdt.receipt.late": "Late payment verified; the original top-up was credited once.",

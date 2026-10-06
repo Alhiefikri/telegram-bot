@@ -204,6 +204,8 @@
   "balance.usdt.input.invalid": "Jumlah USDT tidak sah. Gunakan nilai seperti /usdt 1.5 (maksimum enam tempat perpuluhan).",
   "balance.usdt.stale": "Sesi ini sudah lapuk. Mulakan semula dari menu Baki.",
   "balance.usdt.receipt.title": "Tambah baki USDT berjaya",
+  "balance.usdt.refund.title": "Bayaran balik USDT dikreditkan",
+  "order.guidance.usdt_balance_refunded": "Bayaran USDT anda telah dipulangkan. :amount USDT dikembalikan ke baki USDT tanpa penukaran IDR.",
   "balance.usdt.receipt.credit": "Dikreditkan ke baki USDT: :amount USDT",
   "balance.usdt.receipt.reference": "Resit: :reference",
   "balance.usdt.receipt.late": "Bayaran lewat disahkan; tambah baki asal dikreditkan sekali.",

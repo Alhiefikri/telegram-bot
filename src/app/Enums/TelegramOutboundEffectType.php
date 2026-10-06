@@ -33,4 +33,5 @@ enum TelegramOutboundEffectType: string
     case BalanceAdjustmentNotice = 'balance.adjustment_notice';
     case SupplierHealth = 'admin.supplier_health';
     case UsdtTopUpReceipt = 'usdt.top_up_receipt';
+    case UsdtRefundReceipt = 'usdt.refund_receipt';
 }

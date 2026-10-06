@@ -204,6 +204,8 @@
   "balance.usdt.input.invalid": "Nominal USDT tidak valid. Gunakan nilai seperti /usdt 1.5 (maksimal enam angka desimal).",
   "balance.usdt.stale": "Sesi ini sudah usang. Mulai lagi dari menu Saldo.",
   "balance.usdt.receipt.title": "Top-up USDT berhasil",
+  "balance.usdt.refund.title": "Refund USDT berhasil",
+  "order.guidance.usdt_balance_refunded": "Pembayaran USDT kamu sudah dikembalikan. :amount USDT dikembalikan ke saldo USDT, tanpa konversi IDR.",
   "balance.usdt.receipt.credit": "Dikreditkan ke saldo USDT: :amount USDT",
   "balance.usdt.receipt.reference": "Tanda terima: :reference",
   "balance.usdt.receipt.late": "Pembayaran terlambat terverifikasi; top-up asli dikreditkan satu kali.",

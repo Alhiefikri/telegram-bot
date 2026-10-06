@@ -623,6 +623,38 @@ class TelegramOutboundEffectService
         ]);
     }
 
+    public function recordUsdtRefundReceipt(CustomerUsdtBalanceEntry $entry): ?TelegramOutboundEffect
+    {
+        $customer = $entry->account->customer;
+        $chatId = (string) $customer->telegram_id;
+        if (preg_match('/^[1-9][0-9]{0,18}$/D', $chatId) !== 1) {
+            return null;
+        }
+        $locale = $customer->locale ?? 'id';
+        $translations = app(TelegramLocale::class);
+        $order = Order::findOrFail($entry->refund_order_id);
+        $message = implode("\n", [
+            $translations->translateLocale($locale, 'balance.usdt.refund.title'),
+            $translations->translateLocale($locale, 'balance.usdt.receipt.credit', [
+                'amount' => UsdtMicroAmount::fromUnits($entry->amount_micro)->decimal(),
+            ]),
+            $order->invoice_number,
+            $translations->translateLocale($locale, 'balance.usdt.receipt.reference', ['reference' => (string) $entry->id]),
+        ]);
+        $key = 'usdt-refund:'.$entry->id.':receipt:v1';
+
+        return TelegramOutboundEffect::firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectType::UsdtRefundReceipt->value,
+            'source_type' => CustomerUsdtBalanceEntry::class, 'source_id' => (string) $entry->id,
+            'target_type' => 'customer', 'telegram_chat_id' => $chatId,
+            'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE, 'telegram_method' => 'sendMessage',
+            'locale' => $locale, 'template_version' => 'usdt-refund-receipt-v1',
+            'state' => TelegramOutboundEffectState::Pending->value, 'attempts' => 0, 'next_attempt_at' => now(),
+            'outcome_metadata' => ['delivery_context' => 'usdt_refund_receipt', 'message' => $message],
+        ]);
+    }
+
     public function recordSupplierHealth(SupplierHealthEvent $event, string $chatId): TelegramOutboundEffect
     {
         $key = 'supplier-health:'.$event->id;
@@ -2056,7 +2088,7 @@ class TelegramOutboundEffectService
                     'delivery_context' => 'explicit_resend',
                     'duplicate_risk_acknowledged' => true,
                     'supersedes_effect_id' => (string) $locked->getKey(),
-                    ...($locked->effect_type === TelegramOutboundEffectType::UsdtTopUpReceipt->value
+                    ...(in_array($locked->effect_type, [TelegramOutboundEffectType::UsdtTopUpReceipt->value, TelegramOutboundEffectType::UsdtRefundReceipt->value], true)
                         ? ['message' => $locked->outcome_metadata['message'] ?? null] : []),
                 ],
             ]);

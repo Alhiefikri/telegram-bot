@@ -10,7 +10,6 @@ use App\Enums\UsdtBalanceEntryKind;
 use App\Exceptions\CustomerUsdtFundingUnavailable;
 use App\Exceptions\InsufficientUsdtBalance;
 use App\Exceptions\InvalidCheckout;
-use App\Exceptions\InvalidOrderTransition;
 use App\Exceptions\UsdtBalanceFrozenException;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -174,17 +173,20 @@ final class UsdtBalanceCheckoutTest extends TestCase
         $this->checkout($foreignCart->fresh(), 'guest');
     }
 
-    public function test_usdt_order_cannot_be_marked_refunded_without_original_currency_credit(): void
+    public function test_full_refund_restores_original_usdt_and_replay_does_not_credit_again(): void
     {
-        [$customer, , $cart] = $this->fixture();
-        $order = $this->checkout($cart, 'refund-gate');
-        try {
-            app(OrderLifecycle::class)->applyPaymentRefunded($order->payments->sole());
-            $this->fail('Expected U11 entitlement gate.');
-        } catch (InvalidOrderTransition) {
-            $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
-            $this->assertSame(3_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
-        }
+        [$customer, $product, $cart] = $this->fixture();
+        $order = $this->checkout($cart, 'refund-original');
+        $payment = $order->payments->sole();
+        $first = app(OrderLifecycle::class)->applyPaymentRefunded($payment);
+        $replay = app(OrderLifecycle::class)->applyPaymentRefunded($payment);
+        $this->assertTrue($first->newlyApplied);
+        $this->assertFalse($replay->newlyApplied);
+        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->assertSame(5_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(1, CustomerUsdtBalanceEntry::where('kind', UsdtBalanceEntryKind::RefundCredit)->count());
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertNotNull(ProductStockItem::where('order_item_id', $order->orderItems()->sole()->id)->sole()->retired_at);
     }
 
     private function fixture(int $funds = 5_000_000, int $quantity = 1): array

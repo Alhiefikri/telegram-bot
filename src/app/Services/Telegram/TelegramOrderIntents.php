@@ -26,6 +26,7 @@ use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\Warranty\WarrantyOrderAccess;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Support\Money;
@@ -512,6 +513,11 @@ class TelegramOrderIntents
             );
         }
         if ($paymentStatus === PaymentStatus::Refunded) {
+            if ($payment?->provider === PaymentProvider::USDT_BALANCE) {
+                return $this->locale->translate($customer, 'order.guidance.usdt_balance_refunded', [
+                    'amount' => UsdtMicroAmount::fromUnits($payment->amount)->decimal(),
+                ]);
+            }
             if (strtolower(trim((string) $payment?->provider)) === PaymentProvider::STORE_BALANCE) {
                 return $this->locale->translate($customer, 'order.guidance.store_balance_refunded', [
                     'amount' => 'Rp '.number_format((int) ($payment?->amount ?? $order->total_amount), 0, ',', '.'),

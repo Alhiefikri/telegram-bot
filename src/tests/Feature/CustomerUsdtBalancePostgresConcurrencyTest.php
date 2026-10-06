@@ -2,23 +2,25 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\UsdtBalanceEntryKind;
 use App\Exceptions\InsufficientUsdtBalance;
 use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceAccount;
 use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\Order;
+use App\Models\Payment;
+use App\Services\OrderLifecycle;
 use App\Services\UsdtBalance\ApprovedUsdtReversal;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\UsdtPurchase;
-use App\Services\UsdtBalance\UsdtRefund;
 use App\Services\UsdtBalance\VerifiedUsdtFunding;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
-use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Concerns\RunsPostgresWorkers;
+use Tests\Support\PostgresTestDatabase;
 use Tests\TestCase;
 
 #[Group('concurrency')]
@@ -39,9 +41,7 @@ final class CustomerUsdtBalancePostgresConcurrencyTest extends TestCase
         }
 
         $this->assertSafeConcurrencyDatabase();
-        if (! Schema::hasTable('customer_usdt_balance_entries')) {
-            $this->artisan('migrate:fresh', ['--force' => true])->assertSuccessful();
-        }
+        $this->assertSame(0, PostgresTestDatabase::migrateFresh());
     }
 
     protected function tearDown(): void
@@ -140,42 +140,31 @@ final class CustomerUsdtBalancePostgresConcurrencyTest extends TestCase
         $this->assertProjectionMatchesLedger($customer, 20_000);
     }
 
-    public function test_postgres_competing_refunds_cannot_exceed_the_original_debit(): void
+    public function test_postgres_competing_full_refunds_share_one_original_currency_effect(): void
     {
         $this->requirePostgresConcurrency();
-
         $customer = $this->createCustomer(906104);
-        $order = Order::factory()->create(['customer_id' => $customer->id]);
+        $order = Order::factory()->create(['customer_id' => $customer->id, 'currency' => 'USDT',
+            'order_status' => OrderStatus::Completed, 'payment_status' => PaymentStatus::Paid]);
+        $payment = Payment::factory()->create(['order_id' => $order->id, 'provider' => 'usdt_balance',
+            'method' => 'USDT_BALANCE', 'amount' => 2_500_000, 'currency' => 'USDT',
+            'status' => PaymentStatus::Paid, 'paid_at' => now()]);
         $ledger = app(CustomerUsdtBalanceLedger::class);
-        $ledger->creditVerifiedTopUp(
-            $customer,
-            new VerifiedUsdtFunding((int) $customer->id, UsdtMicroAmount::fromUnits(5_000_000), 'topup-refund-race', 'receipt-refund-race', 'v1'),
-            'usdt:refund-race-credit',
-        );
-        $debit = $ledger->debitPurchase(
-            $customer,
-            new UsdtPurchase((int) $customer->id, UsdtMicroAmount::fromUnits(2_500_000), (string) $order->id, 'payment-refund-race'),
-            'order:refund-race-debit',
-        );
+        $ledger->creditVerifiedTopUp($customer,
+            new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits(5_000_000), 'topup-refund-race', 'receipt-refund-race', 'v1'),
+            'usdt:refund-race-credit');
+        $ledger->debitPurchase($customer, new UsdtPurchase($customer->id, UsdtMicroAmount::fromUnits(2_500_000),
+            (string) $order->id, (string) $payment->id), 'order:refund-race-debit');
+        $results = $this->runConcurrentWorkers(2, function () use ($payment): string {
+            $result = app(OrderLifecycle::class)->applyPaymentRefunded(Payment::findOrFail($payment->id));
 
-        $results = $this->runConcurrentWorkers(2, function (int $index) use ($customer, $order, $debit): string {
-            $result = app(CustomerUsdtBalanceLedger::class)->refundEntitlement(
-                Customer::query()->findOrFail($customer->id),
-                new UsdtRefund((int) $customer->id, UsdtMicroAmount::fromUnits(2_000_000), 'refund-race-'.$index, (string) $order->id, $debit->entryId),
-                'order-refund:refund-race-'.$index,
-            );
-
-            return $result->applied ? 'Applied' : 'Replayed';
+            return $result->newlyApplied ? 'Applied' : 'Replayed';
         });
-
-        $this->assertCount(1, array_filter($results, static fn (array $result): bool => ($result['value'] ?? null) === 'Applied'), json_encode($results, JSON_THROW_ON_ERROR));
-        $failures = array_values(array_filter($results, static fn (array $result): bool => ($result['ok'] ?? false) === false));
-        $this->assertCount(1, $failures, json_encode($results, JSON_THROW_ON_ERROR));
-        $this->assertSame(InvalidArgumentException::class, $failures[0]['class'] ?? null);
-
-        $this->assertSame(1, CustomerUsdtBalanceEntry::query()->where('kind', UsdtBalanceEntryKind::RefundCredit)->count());
-        $this->assertSame(4_500_000, $this->balanceOf($customer));
-        $this->assertProjectionMatchesLedger($customer, 4_500_000);
+        $this->assertWorkersSucceeded($results);
+        $this->assertCount(1, array_filter($results, fn ($result) => $result['value'] === 'Applied'));
+        $this->assertSame(1, CustomerUsdtBalanceEntry::where('kind', UsdtBalanceEntryKind::RefundCredit)->count());
+        $this->assertSame(5_000_000, $this->balanceOf($customer));
+        $this->assertProjectionMatchesLedger($customer, 5_000_000);
     }
 
     public function test_postgres_reversal_and_spend_race_keeps_one_economic_effect(): void
@@ -471,6 +460,7 @@ final class CustomerUsdtBalancePostgresConcurrencyTest extends TestCase
         // Truncate bypasses the row-level immutability triggers, which is the
         // only supported way to remove an append-only ledger after a test.
         DB::statement('TRUNCATE customer_usdt_balance_accounting_events, customer_usdt_balance_entries, customer_usdt_balance_accounts RESTART IDENTITY CASCADE');
+        Payment::query()->whereIn('order_id', Order::query()->whereIn('customer_id', $this->createdCustomerIds)->select('id'))->delete();
         Order::query()->whereIn('customer_id', $this->createdCustomerIds)->delete();
         Customer::query()->whereIn('id', $this->createdCustomerIds)->delete();
         $this->createdCustomerIds = [];
