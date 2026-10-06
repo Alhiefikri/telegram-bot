@@ -26,6 +26,7 @@ final readonly class UsdtTreasuryCoverageReport
         public BigInteger $projectedLiabilityMicro,
         public BigInteger $unresolvedDepositMicro,
         public BigInteger $overcreditedMicro,
+        public BigInteger $accountedFundingFeeMicro,
         public BigInteger $movementInMicro,
         public BigInteger $movementOutMicro,
         public int $movementCount,
@@ -35,6 +36,10 @@ final readonly class UsdtTreasuryCoverageReport
         public ?BigInteger $unexplainedMicro,
         public UsdtTreasuryCoverageVerdict $verdict,
         public array $findings,
+        public ?BigInteger $reorgExposureMicro = null,
+        public ?BigInteger $reorgSpentExposureMicro = null,
+        public int $reorgIncidentCount = 0,
+        public int $authorizedRecoveryCaseCount = 0,
     ) {}
 
     public function isFinding(): bool
@@ -52,6 +57,11 @@ final readonly class UsdtTreasuryCoverageReport
             'projected_liability_micro' => $this->projectedLiabilityMicro->toString(),
             'unresolved_deposit_micro' => $this->unresolvedDepositMicro->toString(),
             'overcredited_micro' => $this->overcreditedMicro->toString(),
+            'reorg_exposure_micro' => ($this->reorgExposureMicro ?? BigInteger::zero())->toString(),
+            'reorg_spent_exposure_micro' => ($this->reorgSpentExposureMicro ?? BigInteger::zero())->toString(),
+            'reorg_incident_count' => $this->reorgIncidentCount,
+            'authorized_recovery_case_count' => $this->authorizedRecoveryCaseCount,
+            'accounted_funding_fee_micro' => $this->accountedFundingFeeMicro->toString(),
             'movement_in_micro' => $this->movementInMicro->toString(),
             'movement_out_micro' => $this->movementOutMicro->toString(),
             'movement_count' => $this->movementCount,

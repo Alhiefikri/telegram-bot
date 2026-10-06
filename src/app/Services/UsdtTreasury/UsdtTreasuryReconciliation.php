@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\DB;
  * unresolved deposits against qualified custody assets reported by approved
  * adapters and audited treasury movements:
  *
- *     expected custody = liability + unresolved deposits + movements in - movements out
+ *     expected custody = liability + unresolved deposits + accounted fees + movements in - movements out
  *
  * A negative unexplained variance is a backing deficit, a positive one is an
  * unexplained surplus; both are findings. When no approved adapter exists the
@@ -39,13 +39,32 @@ final class UsdtTreasuryReconciliation
         $ledgerLiability = $this->signedLedgerSum($customerId);
         $projectedLiability = $this->projectedLiabilitySum($customerId);
         $totals = $this->movements->totals();
+        $feeSum = DB::table('customer_usdt_top_up_fee_events as fees')
+            ->join('customer_usdt_top_ups as targets', 'targets.id', '=', 'fees.top_up_id')
+            ->when($customerId !== null, fn ($query) => $query->where('targets.customer_id', $customerId))
+            ->sum('fees.amount_micro');
+        $accountedFees = BigInteger::of((string) $feeSum);
 
-        $values = [
+        $incidents = DB::table('usdt_reorg_incidents')
+            ->when($customerId !== null, fn ($query) => $query->where('customer_id', $customerId));
+        $reorgExposure = BigInteger::of((string) (clone $incidents)->sum('exposure_micro'));
+        $spentExposure = BigInteger::of((string) (clone $incidents)->sum('spent_exposure_micro'));
+        $incidentCount = (clone $incidents)->count();
+        $recoveryCount = DB::table('usdt_reorg_recovery_cases as cases')
+            ->join('usdt_reorg_incidents as incidents', 'incidents.id', '=', 'cases.incident_id')
+            ->when($customerId !== null, fn ($query) => $query->where('incidents.customer_id', $customerId))->count();
+        // Authorizing a recovery case is not recovered money. Keep the entire
+        // original exposure visible even when customer liability was spent.
+        $reorgFindings = $incidentCount > 0 ? ['unresolved_reorg_loss'] : [];
+
+        $values = ['reorgExposureMicro' => $reorgExposure, 'reorgSpentExposureMicro' => $spentExposure,
+            'reorgIncidentCount' => $incidentCount, 'authorizedRecoveryCaseCount' => $recoveryCount,
             'customerId' => $customerId,
             'ledgerLiabilityMicro' => $ledgerLiability,
             'projectedLiabilityMicro' => $projectedLiability,
             'unresolvedDepositMicro' => $unresolvedDepositMicro,
             'overcreditedMicro' => $overcreditedMicro,
+            'accountedFundingFeeMicro' => $accountedFees,
             'movementInMicro' => $totals->inMicro,
             'movementOutMicro' => $totals->outMicro,
             'movementCount' => $totals->movementCount,
@@ -61,11 +80,11 @@ final class UsdtTreasuryReconciliation
                 custodyAssetsMicro: $this->totalAvailableAssets($custody),
                 unexplainedMicro: null,
                 verdict: UsdtTreasuryCoverageVerdict::NotEvaluated,
-                findings: [],
+                findings: $reorgFindings,
             );
         }
 
-        $required = $ledgerLiability->plus($unresolvedDepositMicro);
+        $required = $ledgerLiability->plus($unresolvedDepositMicro)->plus($accountedFees);
         $custodyState = $this->custodyState($custody);
         $availableAssets = $this->totalAvailableAssets($custody);
 
@@ -76,7 +95,7 @@ final class UsdtTreasuryReconciliation
                 custodyAssetsMicro: $availableAssets,
                 unexplainedMicro: null,
                 verdict: UsdtTreasuryCoverageVerdict::NotRequired,
-                findings: [],
+                findings: $reorgFindings,
             );
         }
 
@@ -87,7 +106,7 @@ final class UsdtTreasuryReconciliation
                 custodyAssetsMicro: null,
                 unexplainedMicro: null,
                 verdict: UsdtTreasuryCoverageVerdict::Unverifiable,
-                findings: ['missing_custody_input'],
+                findings: [...$reorgFindings, 'missing_custody_input'],
             );
         }
 
@@ -106,7 +125,7 @@ final class UsdtTreasuryReconciliation
             custodyAssetsMicro: $availableAssets,
             unexplainedMicro: $unexplained,
             verdict: $verdict,
-            findings: $verdict->isFinding() ? ['unexplained_variance'] : [],
+            findings: [...$reorgFindings, ...($verdict->isFinding() ? ['unexplained_variance'] : [])],
         );
     }
 

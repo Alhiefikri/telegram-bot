@@ -198,7 +198,7 @@ _Avoid_: Transaction, balance mutation, adjustment row
 The following balance-extension terms originate in the **proposed** contracts under [ADR-0019](docs/adr/0019-idr-usdt-economic-sources-and-receipt-claims.md), issue #537, and the A1 capability report. They describe downstream contracts, not currently available features or approved funding providers. Store Balance continues to mean the existing IDR ledger; the external money receipt registry and claim seam are implemented additively (R1 #541) and R2 #542 backfills legacy identities, routes every external payment writer through the registry, and records ambiguous evidence as reservations without activating funding. I1 #543 implements the IDR adjustment service under the accepted H0-v1 single-Owner overlay; I2 #544 adds a gated IDR Dashboard flow; I3 #545 adds the linked full reversal under the same password boundary; U1 #546 adds the separate Customer USDT account, immutable ledger, accounting events and exact micro-USDT contract while funding stays disabled. R2 implementation decisions are recorded in [ADR-0022](docs/adr/0022-external-money-receipt-backfill-and-reservations.md). U4 #549 implements the global receiver-ownership registry — permanent channel-exclusive address claims plus Customer-exclusive deposit receivers — while custody provisioning stays fail-closed and funding remains disabled.
 
 **Customer USDT Balance**:
-A Customer-owned shopping balance held in a separate USDT account and immutable ledger, denominated in integer micro-USDT. The additive account/entry/accounting-event schema, typed economic sources and exact micro-USDT contract exist; no funding rail, top-up, checkout, refund or production activation is part of them. It is a store liability, with no implicit conversion to Store Balance and no application custody of private keys.
+A Customer-owned shopping balance held in a separate USDT account and immutable ledger, denominated in integer micro-USDT. U7 credits verified final, attributable top-ups atomically with receipt ownership, economic resolution, accounting and durable Telegram receipt work; new funding remains local/testing-only. Checkout, refunds and production authorization remain separate gates. It is a store liability, with no implicit conversion to Store Balance and no application custody of private keys.
 _Avoid_: Store Balance USDT, non-custodial wallet, Supplier Balance
 
 **Customer USDT Balance Entry**:
@@ -210,8 +210,20 @@ A Customer-owned expiring confirmation binding exact micro-USDT credit, applicat
 _Avoid_: USDT invoice, deposit receipt, available funds
 
 **USDT Top-up**:
-A confirmed Customer funding target with an immutable identity, currency, amount, fee, receiver/token/network/finality and payment deadline snapshot, one U3 active-target reservation and durable provider-preparation work. U6 atomically creates these facts and returns the same target on confirmation replay; preparation/recovery retains that reference after unknown outcomes and never switches receivers. U5 supplies the watch-only local BSC invoice and inspection. Only verified attributable final evidence and one economic resolution can credit Customer USDT Balance; expiry does not prove absence of money. U7 settlement and production funding authorization remain separate gates.
+A confirmed Customer funding target with an immutable identity, currency, amount, fee, receiver/token/network/finality and payment deadline snapshot, one U3 active-target reservation and durable preparation/settlement work. U6 confirmation replay returns the same target; U5 preparation retains its reference and never switches receivers. U7 accepts authenticated lookup hints into a durable inbox, verifies authoritative chain evidence outside transactions and consumes one receipt under DB lease/version fencing. Exact final late money can settle the original source once; expiry retains unresolved exposure, while settled, compensated and externally returned sources never reopen. Receipt delivery failure cannot change money. Production funding authorization remains a separate gate.
 _Avoid_: Order Payment, automatic currency conversion
+
+**USDT Exception Resolution**:
+An immutable, single economic resolution of a confirmed USDT Top-up, approved by a fresh Owner per-action password and backed by authoritative finalized transfer evidence. Revised settlement or compensation credits the actual exactly representable deposit less the original fee without rewriting the original invoice; external return requires a distinct verified outgoing receipt and an authenticated Customer destination authorization. Unknown, ambiguous, sub-micro and additional deposits remain unresolved rather than becoming rounded or arbitrary credits.
+_Avoid_: invoice overwrite, screenshot approval, manual USDT grant, maker-checker requirement
+
+**USDT Reorg Incident**:
+An immutable record that previously credited funding has lost canonical chain evidence, freezing its Customer account while preserving all original receipts and ledger history. Total exposure and conservatively allocated available/spent exposure remain visible as unresolved treasury loss, including when Customer liability is zero.
+_Avoid_: automatic chargeback, history deletion, negative Customer balance, settled loss
+
+**USDT Reorg Recovery Case**:
+An Owner-authorized, per-action-password-confirmed case for a USDT Reorg Incident. Its `authorized_unresolved` status permits recovery investigation but neither closes the loss nor creates assets, charges the Customer or releases the account freeze.
+_Avoid_: automatic recovery, loss settlement, Customer debit authorization
 
 **USDT Funding Policy**:
 The versioned DB/Admin configuration for Customer USDT top-up funding: Owner activation flag, bounded confirmation TTL, nonnegative exact application fee, published terms version and Owner pause controls. H0-v1 disables business minimum/maximum/per-Customer/aggregate caps, presets and the beta allowlist, so the policy holds no cap value; representational and overflow guards remain. Changing it never creates a ledger entry, reservation or provider target.

@@ -10,6 +10,8 @@ use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\BalanceAdjustmentRequest;
 use App\Models\Customer;
+use App\Models\CustomerUsdtBalanceEntry;
+use App\Models\CustomerUsdtTopUp;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\ProductPriceChangeEvent;
@@ -29,6 +31,7 @@ use App\Models\WarrantyClaim;
 use App\Services\AuditLogger;
 use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -577,6 +580,46 @@ class TelegramOutboundEffectService
             'locale' => $customer?->locale ?? 'id', 'template_version' => 'balance-adjustment-v1',
             'state' => TelegramOutboundEffectState::Pending->value, 'attempts' => 0, 'next_attempt_at' => now(),
             'outcome_metadata' => ['delivery_context' => 'balance_adjustment', 'message' => $message],
+        ]);
+    }
+
+    public function recordUsdtTopUpReceipt(
+        CustomerUsdtTopUp $target,
+        CustomerUsdtBalanceEntry $entry,
+        bool $late,
+    ): TelegramOutboundEffect {
+        $customer = Customer::query()->findOrFail($target->customer_id);
+        $chatId = (string) $customer->telegram_id;
+        if (preg_match('/^[1-9][0-9]{0,18}$/D', $chatId) !== 1) {
+            throw new InvalidArgumentException('USDT receipt recipient unavailable.');
+        }
+        $locale = $customer->locale ?? 'id';
+        $translations = app(TelegramLocale::class);
+        $message = implode("\n", [
+            $translations->translateLocale($locale, 'balance.usdt.receipt.title'),
+            $translations->translateLocale($locale, 'balance.usdt.receipt.credit', [
+                'amount' => UsdtMicroAmount::fromUnits($entry->amount_micro)->decimal(),
+            ]),
+            $translations->translateLocale($locale, 'balance.usdt.receipt.reference', ['reference' => $target->id]),
+            ...((int) $entry->amount_micro !== (int) $target->amount_micro ? [
+                $translations->translateLocale($locale, 'balance.usdt.receipt.revised', [
+                    'original' => UsdtMicroAmount::fromUnits($target->amount_micro)->decimal(),
+                    'approved' => UsdtMicroAmount::fromUnits($entry->amount_micro)->decimal(),
+                ]),
+            ] : []),
+            ...($late ? [$translations->translateLocale($locale, 'balance.usdt.receipt.late')] : []),
+        ]);
+        $key = 'usdt-top-up:'.$target->id.':receipt:v1';
+
+        return TelegramOutboundEffect::firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectType::UsdtTopUpReceipt->value,
+            'source_type' => CustomerUsdtTopUp::class, 'source_id' => $target->id,
+            'target_type' => 'customer', 'telegram_chat_id' => $chatId,
+            'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE, 'telegram_method' => 'sendMessage',
+            'locale' => $locale, 'template_version' => 'usdt-top-up-receipt-v1',
+            'state' => TelegramOutboundEffectState::Pending->value, 'attempts' => 0, 'next_attempt_at' => now(),
+            'outcome_metadata' => ['delivery_context' => 'usdt_top_up_receipt', 'message' => $message],
         ]);
     }
 
@@ -2013,6 +2056,8 @@ class TelegramOutboundEffectService
                     'delivery_context' => 'explicit_resend',
                     'duplicate_risk_acknowledged' => true,
                     'supersedes_effect_id' => (string) $locked->getKey(),
+                    ...($locked->effect_type === TelegramOutboundEffectType::UsdtTopUpReceipt->value
+                        ? ['message' => $locked->outcome_metadata['message'] ?? null] : []),
                 ],
             ]);
 
@@ -2804,6 +2849,9 @@ class TelegramOutboundEffectService
 
         if ($effect->source_type === StoreBalanceTopUp::class) {
             return 'Balance top-up #'.substr((string) $effect->source_id, 0, 12);
+        }
+        if ($effect->source_type === CustomerUsdtTopUp::class) {
+            return 'USDT top-up #'.substr((string) $effect->source_id, 0, 12);
         }
 
         if ($effect->source_type === TelegramBroadcastRecipient::class) {

@@ -51,6 +51,7 @@ final class TelegramOutboundEffectPolicy
         'balance_top_up_not_payable',
         'balance_top_up_expired',
         'balance_top_up_receipt_missing',
+        'usdt_receipt_missing',
         'balance_top_up_not_paid',
         'balance_owner_compensation_missing',
         'balance_owner_compensation_not_eligible',
@@ -87,6 +88,7 @@ final class TelegramOutboundEffectPolicy
         TelegramOutboundEffectType::WarrantyDeadlineReminder->value => 3,
         TelegramOutboundEffectType::BalanceAdjustmentNotice->value => 3,
         TelegramOutboundEffectType::SupplierHealth->value => 3,
+        TelegramOutboundEffectType::UsdtTopUpReceipt->value => 3,
         TelegramOutboundEffectType::ReceiptCredentials->value => self::RECEIPT_MAX_ATTEMPTS,
         TelegramOutboundEffectType::ReceiptTxtDownload->value => self::RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS,
         TelegramOutboundEffectType::ReceiptOrderActions->value => self::RECEIPT_ACTIONS_MAX_ATTEMPTS,
@@ -106,6 +108,7 @@ final class TelegramOutboundEffectPolicy
     private const ATTEMPTS_EXHAUSTED_CODES = [
         TelegramOutboundEffectType::WarrantyDeadlineReminder->value => 'warranty_deadline_reminder_attempts_exhausted',
         TelegramOutboundEffectType::SupplierHealth->value => 'supplier_health_attempts_exhausted',
+        TelegramOutboundEffectType::UsdtTopUpReceipt->value => 'usdt_top_up_receipt_attempts_exhausted',
         TelegramOutboundEffectType::ReceiptCredentials->value => 'receipt_attempts_exhausted',
         TelegramOutboundEffectType::ReceiptTxtDownload->value => 'receipt_txt_download_attempts_exhausted',
         TelegramOutboundEffectType::ReceiptOrderActions->value => 'receipt_actions_attempts_exhausted',

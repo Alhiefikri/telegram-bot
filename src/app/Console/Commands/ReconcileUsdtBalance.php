@@ -177,6 +177,16 @@ final class ReconcileUsdtBalance extends Command
             $treasury->movementCount,
         ));
 
+        if ($treasury->reorgIncidentCount > 0) {
+            $this->warn(sprintf(
+                'REORG_LOSS incidents=%d exposure_micro=%s spent_exposure_micro=%s authorized_recovery_cases=%d status=unresolved',
+                $treasury->reorgIncidentCount,
+                $treasury->reorgExposureMicro?->toString() ?? '0',
+                $treasury->reorgSpentExposureMicro?->toString() ?? '0',
+                $treasury->authorizedRecoveryCaseCount,
+            ));
+        }
+
         $accounting = $result->accounting;
         $this->line(sprintf(
             'ACCOUNTING consumer=%s pending=%d claimed=%d aggregated=%d consistent=%s',

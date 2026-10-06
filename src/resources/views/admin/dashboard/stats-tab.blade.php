@@ -712,6 +712,7 @@
                             <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full text-[11px]">
                                 Simpan kebijakan top-up USDT
                             </x-admin-dashboard.button>
+                        <a href="{{ route('admin.store-balance.usdt-review.index') }}" class="inline-flex min-h-11 items-center font-bold underline">Review deposit USDT dan insiden</a>
                         </form>
                     @else
                         <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">

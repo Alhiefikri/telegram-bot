@@ -46,6 +46,7 @@ use App\Http\Controllers\Admin\AdminSupplierController;
 use App\Http\Controllers\Admin\AdminSupportSettingsController;
 use App\Http\Controllers\Admin\AdminTelegramOutboundEffectController;
 use App\Http\Controllers\Admin\AdminTelegramWelcomeBannerController;
+use App\Http\Controllers\Admin\AdminUsdtTopUpReviewController;
 use App\Http\Controllers\Admin\AdminWarrantyController;
 use App\Http\Controllers\CustomerAccountController;
 use App\Http\Controllers\StorefrontController;
@@ -182,6 +183,13 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('previews/{adjustment}/confirm', [AdminBalanceAdjustmentController::class, 'confirm'])->name('previews.confirm');
                 Route::post('previews/{adjustment}/cancel', [AdminBalanceAdjustmentController::class, 'cancel'])->name('previews.cancel');
                 Route::post('reversals', [AdminBalanceAdjustmentController::class, 'reversal'])->name('reversals.store');
+            });
+            Route::prefix('store-balance/usdt-review')->name('store-balance.usdt-review.')->middleware('admin.store-balance-owner')->group(function (): void {
+                Route::get('/', [AdminUsdtTopUpReviewController::class, 'index'])->name('index');
+                Route::post('previews', [AdminUsdtTopUpReviewController::class, 'preview'])->name('previews.store');
+                Route::post('previews/{review}/confirm', [AdminUsdtTopUpReviewController::class, 'confirm'])->whereUuid('review')->name('previews.confirm');
+                Route::post('recovery-previews', [AdminUsdtTopUpReviewController::class, 'recoveryPreview'])->name('recovery-previews.store');
+                Route::post('recovery-previews/{recovery}/confirm', [AdminUsdtTopUpReviewController::class, 'recoveryConfirm'])->whereUuid('recovery')->name('recovery-previews.confirm');
             });
             Route::post('store-balance/funding-policy', AdminStoreBalanceFundingPolicyController::class)->name('store-balance.funding-policy.update');
             Route::post('store-balance/usdt-policy', AdminCustomerUsdtFundingPolicyController::class)

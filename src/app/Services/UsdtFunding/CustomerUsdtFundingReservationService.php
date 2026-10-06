@@ -13,6 +13,7 @@ use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\CustomerUsdtFundingReservation;
+use App\Models\CustomerUsdtTopUp;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -280,13 +281,48 @@ final class CustomerUsdtFundingReservationService
         }, 5);
     }
 
+    /** Reviewed entry must already be atomically linked to an immutable resolution. */
+    public function markReviewedSettled(Customer $customer, int $reservationId, int $entryId, string $topUpId, string $reviewId): void
+    {
+        if (DB::transactionLevel() === 0) {
+            throw new CustomerUsdtFundingReservationConflict('Reviewed settlement requires caller money transaction.');
+        }
+        $reservation = $this->lockOwned($customer, $reservationId);
+        $resolution = DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $topUpId)
+            ->where('review_request_id', $reviewId)->where('entry_id', $entryId)->first();
+        $entry = CustomerUsdtBalanceEntry::query()->whereKey($entryId)->where('source_type', 'customer_usdt_top_up')
+            ->where('source_id', $topUpId)->where('kind', UsdtBalanceEntryKind::FundingCredit->value)->first();
+        $owner = $entry === null ? null : DB::table('customer_usdt_balance_accounts')
+            ->where('id', $entry->customer_usdt_balance_account_id)->value('customer_id');
+        $review = DB::table('usdt_top_up_review_requests')->where('id', $reviewId)->where('top_up_id', $topUpId)->first();
+        $target = CustomerUsdtTopUp::query()->whereKey($topUpId)->where('reservation_id', $reservationId)->first();
+        if ($resolution === null || $entry === null || $review === null || $target === null
+            || ! in_array($resolution->kind, ['settled', 'resolved_by_compensation'], true)
+            || (int) $owner !== (int) $customer->id || $reservation->resolved_at !== null
+            || (int) $entry->amount_micro !== (int) $review->amount_micro - (int) $target->fee_micro
+            || (int) $resolution->resolved_amount_micro !== (int) $review->amount_micro) {
+            throw new CustomerUsdtFundingReservationConflict('Reviewed funding source does not match its evidence-backed resolution.');
+        }
+        $reservation->forceFill(['state' => CustomerUsdtFundingReservationState::Settled,
+            'resolved_at' => now(), 'resolution_kind' => 'settled',
+            'resolution_reference' => $reviewId, 'resolution_actor' => 'owner:'.$review->owner_user_id,
+            'settled_entry_id' => $entryId])->save();
+    }
+
     public function release(
         Customer $customer,
         int $reservationId,
         CustomerUsdtFundingRelease $release,
     ): CustomerUsdtFundingReservationResult {
         return DB::transaction(function () use ($customer, $reservationId, $release): CustomerUsdtFundingReservationResult {
+            Customer::query()->whereKey($customer->id)->lockForUpdate()->firstOrFail();
+            DB::table('customer_usdt_balance_accounts')->where('customer_id', $customer->id)->lockForUpdate()->first();
+            $target = CustomerUsdtTopUp::query()->where('reservation_id', $reservationId)
+                ->where('customer_id', $customer->id)->lockForUpdate()->first();
             $reservation = $this->lockOwned($customer, $reservationId);
+            if ($target !== null) {
+                throw new CustomerUsdtFundingReservationConflict('Confirmed top-ups require authenticated evidence-backed UsdtTopUpReview resolution.');
+            }
 
             if ($reservation->state->isResolved()) {
                 if ($reservation->state === CustomerUsdtFundingReservationState::Released

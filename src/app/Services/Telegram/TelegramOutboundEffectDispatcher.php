@@ -28,6 +28,7 @@ use App\Jobs\SendTelegramBroadcastBatch;
 use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
 use App\Jobs\SendTelegramReceiptTxt;
+use App\Jobs\SendUsdtTopUpReceipt;
 use App\Jobs\SendWarrantyDeadlineReminder;
 use App\Jobs\SendWarrantyNotification;
 use App\Models\ProductPriceChangeNotificationRecipient;
@@ -61,6 +62,7 @@ final class TelegramOutboundEffectDispatcher
             TelegramOutboundEffectType::WarrantyDeadlineReminder->value => SendWarrantyDeadlineReminder::dispatch((string) $effect->id),
             TelegramOutboundEffectType::BalanceAdjustmentNotice->value => SendBalanceAdjustmentNotice::dispatch((string) $effect->id),
             TelegramOutboundEffectType::SupplierHealth->value => SendSupplierHealthNotification::dispatch((string) $effect->id),
+            TelegramOutboundEffectType::UsdtTopUpReceipt->value => SendUsdtTopUpReceipt::dispatch((string) $effect->id),
             TelegramOutboundEffectType::ManualCheckoutInstructions->value => SendManualCheckoutNotifications::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,

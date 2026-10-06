@@ -3,6 +3,7 @@
 namespace App\Services\UsdtBalance;
 
 use App\Enums\UsdtBalanceEntryKind;
+use App\Services\StoreBalance\ApprovedBalanceAdjustment;
 
 /**
  * A finalized, attributable funding receipt claimed for one Customer USDT
@@ -17,6 +18,8 @@ final class VerifiedUsdtFunding extends UsdtBalanceSource
         public readonly string $topUpId,
         public readonly string $receiptId,
         public readonly string $evidenceVersion,
+        public readonly ?string $reviewRequestId = null,
+        public readonly ?ApprovedBalanceAdjustment $reviewAuthority = null,
     ) {
         self::assertIdentifier('top-up id', $topUpId);
         self::assertIdentifier('receipt id', $receiptId);
@@ -50,6 +53,7 @@ final class VerifiedUsdtFunding extends UsdtBalanceSource
             'top_up_id' => $this->topUpId,
             'receipt_id' => $this->receiptId,
             'evidence_version' => $this->evidenceVersion,
+            ...($this->reviewRequestId === null ? [] : ['review_request_id' => $this->reviewRequestId]),
         ];
     }
 }

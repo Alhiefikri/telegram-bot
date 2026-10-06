@@ -7,11 +7,16 @@ use App\Models\TelegramNavigationRoot;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtFunding\UsdtFundingIntentResult;
 use App\Services\UsdtFunding\UsdtFundingIntentService;
+use App\Services\UsdtTopUps\UsdtTopUpReview;
+use Illuminate\Auth\Access\AuthorizationException;
 
 /** U6 boundary for U9 presentation. Caller supplies authenticated update facts. */
 final class TelegramUsdtFundingActions
 {
-    public function __construct(private readonly UsdtFundingIntentService $intents) {}
+    public function __construct(
+        private readonly UsdtFundingIntentService $intents,
+        private readonly UsdtTopUpReview $reviews,
+    ) {}
 
     public function preview(string $actorId, string $chatId, string $chatType, int $messageId, string $amount): UsdtFundingIntentResult
     {
@@ -48,6 +53,18 @@ final class TelegramUsdtFundingActions
         }
 
         return 'usdt:'.$action.':'.$nonce;
+    }
+
+    /** U8 authorization seam; update actor/chat/root facts come from the trusted channel adapter. */
+    public function authorizeExternalReturn(string $actorId, string $chatId, string $chatType, int $messageId,
+        string $topUpId, string $amount, string $destinationAddress, string $nonce): object
+    {
+        $context = $this->context($actorId, $chatId, $chatType, $messageId);
+        if ($context === null) {
+            throw new AuthorizationException('External-return authorization requires the registered Customer private chat and current root.');
+        }
+
+        return $this->reviews->authorizeExternalReturn($context['customer'], $topUpId, $amount, $destinationAddress, $nonce);
     }
 
     /** @return array{customer: Customer, root: TelegramNavigationRoot}|null */

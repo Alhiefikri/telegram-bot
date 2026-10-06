@@ -4,6 +4,8 @@ namespace App\Services\StoreBalance;
 
 use App\Exceptions\BalanceAdjustmentRejected;
 use App\Models\BalanceAdjustmentRequest;
+use App\Models\UsdtReorgRecoveryRequest;
+use App\Models\UsdtTopUpReviewRequest;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -16,7 +18,7 @@ final class BalanceAdjustmentPasswordConfirmation
 {
     public function __construct(private readonly TelegramOutboundEffectService $outbound, private readonly AuditLogger $audit) {}
 
-    public function verify(User $actor, string $password, BalanceAdjustmentRequest $request): ApprovedBalanceAdjustment
+    public function verify(User $actor, string $password, BalanceAdjustmentRequest|UsdtTopUpReviewRequest|UsdtReorgRecoveryRequest $request): ApprovedBalanceAdjustment
     {
         if (DB::transactionLevel() !== 0) {
             throw new BalanceAdjustmentRejected('authentication_requires_independent_transaction');

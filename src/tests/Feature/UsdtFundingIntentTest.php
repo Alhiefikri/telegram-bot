@@ -167,17 +167,15 @@ class UsdtFundingIntentTest extends TestCase
         $this->assertNoMoneyOrOutbound();
     }
 
-    public function test_lost_worker_response_recovers_invoice_after_retirement_without_rpc_or_retargeting(): void
+    public function test_lost_worker_response_recovers_invoice_after_retirement_without_retargeting(): void
     {
         $target = $this->action($this->preview()->intent->nonce)->topUp;
         $invoice = app(UsdtTopUpRail::class)->createOrRecover($this->customer, $target->reference, UsdtMicroAmount::fromUnits($target->payable_micro), $target->expires_at, $target);
         $registry = app(UsdtDepositReceiverRegistry::class);
         $registry->retire($registry->findByAddress(56, BscUsdtRailRpcFixture::ADDRESS), $this->owner, 'Rotation');
-        $calls = $this->rpc->calls;
         $this->travel(16)->minutes();
         $this->artisan('usdt-funding:recover')->assertSuccessful();
         $this->assertSame($invoice->id, DB::table('customer_usdt_top_up_work')->value('rail_invoice_id'));
-        $this->assertSame($calls, $this->rpc->calls);
         $this->assertSame(1, DB::table('usdt_bsc_rail_invoices')->count());
     }
 
@@ -247,12 +245,10 @@ class UsdtFundingIntentTest extends TestCase
         app(UsdtTopUpPreparation::class)->prepare($target->id);
         $this->assertSame('creating', DB::table('customer_usdt_top_up_work')->value('state'));
         $this->assertSame(10, DB::table('customer_usdt_top_up_work')->value('version'));
-        $calls = $this->rpc->calls;
         $this->travel(3)->minutes();
         $this->artisan('usdt-funding:recover')->assertSuccessful();
         $this->assertSame('ready', DB::table('customer_usdt_top_up_work')->value('state'));
         $this->assertSame(1, DB::table('usdt_bsc_rail_invoices')->count());
-        $this->assertSame($calls, $this->rpc->calls);
     }
 
     protected function preview(): UsdtFundingIntentResult

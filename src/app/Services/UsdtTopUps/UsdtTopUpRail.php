@@ -15,5 +15,5 @@ interface UsdtTopUpRail
 
     public function createOrRecover(Customer $customer, string $reference, UsdtMicroAmount $amount, CarbonImmutable $expiresAt, ?CustomerUsdtTopUp $target = null): UsdtBscRailInvoice;
 
-    public function inspect(Customer $customer, string $reference, string $transactionHash): BscFinalReceiptInspection;
+    public function inspect(Customer $customer, string $reference, string $transactionHash, bool $allowLate = false): BscFinalReceiptInspection;
 }

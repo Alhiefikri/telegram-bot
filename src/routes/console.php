@@ -18,6 +18,7 @@ Schedule::command('suppliers:recover-warranty --limit=25')->everyMinute()->witho
 // Deadline reminders are materialized from durable PostgreSQL unit state; the
 // queue job is only the delivery wakeup and the effect ledger survives Redis loss.
 Schedule::command('suppliers:notify-warranty-deadlines --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
+Schedule::command('usdt-funding:recover --limit=25 --json')->everyMinute()->withoutOverlapping(2)->runInBackground();
 $klikQrisEnvironment = KlikQrisEnvironment::runtime();
 if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnvironment)) {
     Schedule::command((string) config('services.klikqris.reconciliation_command', 'klikqris:reconcile --chunk=100'))

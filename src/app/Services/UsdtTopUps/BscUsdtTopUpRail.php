@@ -141,7 +141,12 @@ final class BscUsdtTopUpRail implements UsdtTopUpRail
                     throw new DomainException('BSC receiver changed during invoice preparation; no fallback assignment is permitted.');
                 }
                 if (UsdtBscRailInvoice::query()->where('receiver_id', $snapshot->receiverId)
-                    ->where('expires_at_epoch', '>=', $now->getTimestamp())->exists()) {
+                    ->where('expires_at_epoch', '>=', $now->getTimestamp())
+                    ->whereNotExists(function ($query): void {
+                        $query->selectRaw('1')->from('customer_usdt_top_ups as targets')
+                            ->join('customer_usdt_top_up_resolutions as resolutions', 'resolutions.top_up_id', '=', 'targets.id')
+                            ->whereColumn('targets.reference', 'usdt_bsc_rail_invoices.reference');
+                    })->exists()) {
                     throw new DomainException('An overlapping BSC invoice already owns this receiver payment window.');
                 }
 
@@ -178,7 +183,7 @@ final class BscUsdtTopUpRail implements UsdtTopUpRail
         }
     }
 
-    public function inspect(Customer $customer, string $reference, string $transactionHash): BscFinalReceiptInspection
+    public function inspect(Customer $customer, string $reference, string $transactionHash, bool $allowLate = false): BscFinalReceiptInspection
     {
         $this->outsideTransaction();
         $this->validateReference($reference);
@@ -237,7 +242,7 @@ final class BscUsdtTopUpRail implements UsdtTopUpRail
                 $hash, $receipt, $block, $latest, $finalized,
                 $invoice->token_contract, $invoice->receiver_address,
                 $this->amounts->expectedTokenUnits($invoice->payable_micro, $invoice->token_decimals),
-                $invoice->token_decimals, $invoice->starts_at_epoch, $invoice->expires_at_epoch,
+                $invoice->token_decimals, $invoice->starts_at_epoch, $allowLate ? PHP_INT_MAX : $invoice->expires_at_epoch,
                 $invoice->minimum_confirmations,
             );
         } catch (BscRpcException) {

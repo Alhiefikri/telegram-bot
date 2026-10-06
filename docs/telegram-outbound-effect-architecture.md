@@ -102,6 +102,21 @@ inspect `TelegramOutboundEffectState` or query Store Balance effects
 themselves. Delivery-state transitions remain owned by the shared ledger
 protocol.
 
+`UsdtTopUpOutbound` is the additive Customer USDT top-up receipt family
+(`usdt.top_up_receipt`, issue #552), not an extension of the IDR top-up model.
+The settlement transaction materializes one localized exact-amount snapshot
+through `TelegramOutboundEffectService`; `SendUsdtTopUpReceipt` uses the
+existing dispatcher and ledger protocol. Both `usdt-funding:recover` and the
+generic due-effect sweep can rediscover the committed effect after Redis loss.
+The family has three definite-failure attempts. Ambiguous send/ACK and expired
+delivery leases retain the existing `unknown`/Manual Delivery Review rules.
+Explicit operator resend copies the original receipt snapshot into a new
+effect version with duplicate-risk acknowledgement; it never reruns settlement
+or changes the original ambiguous effect. Review summaries redact the target
+and exclude the stored message. Funding source, receipt, ledger and notification
+identities remain distinct; receipt delivery failure never changes money.
+
+
 The review service and review projection are a narrow adapter for operator
 actions across families. They reuse the ledger protocol and do not introduce a
 second claim or ambiguity protocol.

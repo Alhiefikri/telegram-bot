@@ -96,17 +96,25 @@ final class UsdtReceiptReconciliation
     private function receiptQuery(?int $customerId, ?int $afterReceiptId, int $limit)
     {
         return DB::table('external_money_receipts as receipts')
+            ->leftJoin('customer_usdt_top_ups as top_ups', DB::raw('CAST(top_ups.id AS TEXT)'), '=', 'receipts.target_id')
+            ->leftJoin('customer_usdt_top_up_resolutions as resolutions', DB::raw('CAST(resolutions.top_up_id AS TEXT)'), '=', 'receipts.target_id')
+            ->leftJoin('external_money_receipts as returned', 'returned.id', '=', 'resolutions.refund_receipt_id')
+            ->leftJoin('external_money_receipts as deposited', 'deposited.id', '=', 'resolutions.receipt_id')
             ->leftJoin('customer_usdt_balance_entries as entries', function ($join): void {
                 $join->on('entries.source_id', '=', 'receipts.target_id')
                     ->where('entries.source_type', '=', self::FUNDING_SOURCE_TYPE)
-                    ->where('entries.kind', '=', UsdtBalanceEntryKind::FundingCredit->value);
+                    ->where('entries.kind', '=', UsdtBalanceEntryKind::FundingCredit->value)
+                    ->where(fn ($receipt) => $receipt->whereNull('resolutions.top_up_id')
+                        ->orWhereColumn('resolutions.receipt_id', 'receipts.id'));
             })
             ->leftJoin('customer_usdt_balance_accounts as accounts', 'accounts.id', '=', 'entries.customer_usdt_balance_account_id')
+            ->leftJoin('customer_usdt_top_up_fee_events as fees', 'fees.receipt_id', '=', 'receipts.id')
             ->where('receipts.target_type', ExternalMoneyReceiptTargetType::CustomerUsdtTopUp->value)
             ->when($afterReceiptId !== null, fn ($query) => $query->where('receipts.id', '>', $afterReceiptId))
             ->when($customerId !== null, fn ($query) => $query->where(fn ($scoped) => $scoped
                 ->where('accounts.customer_id', $customerId)
-                ->orWhereNull('entries.id')))
+                ->orWhere('top_ups.customer_id', $customerId)
+                ->orWhere(fn ($unattributed) => $unattributed->whereNull('entries.id')->whereNull('top_ups.id'))))
             ->orderBy('receipts.id')
             ->limit($limit + 1)
             ->select([
@@ -119,7 +127,14 @@ final class UsdtReceiptReconciliation
                 'receipts.target_id',
                 'entries.id as entry_id',
                 'entries.amount_micro as credited_micro',
-                'accounts.customer_id',
+                DB::raw('COALESCE(accounts.customer_id, top_ups.customer_id) AS customer_id'),
+                'fees.amount_micro as accounted_fee_micro',
+                'resolutions.kind as resolution_kind',
+                'resolutions.receipt_id as resolution_receipt_id',
+                'resolutions.refund_receipt_id',
+                'resolutions.resolved_amount_micro',
+                'returned.status as return_status',
+                'deposited.status as deposit_status',
             ]);
     }
 
@@ -154,6 +169,16 @@ final class UsdtReceiptReconciliation
         $zero = BigInteger::zero();
         $currency = (string) $receipt->currency;
         $receiptMicro = $this->exactMicro($receipt);
+        // Only the exact two permanently linked receipts close an external return.
+        if ($receipt->resolution_kind === 'externally_refunded' && $receipt->refund_receipt_id !== null
+            && in_array((int) $receipt->receipt_id, [(int) $receipt->resolution_receipt_id, (int) $receipt->refund_receipt_id], true)
+            && $receipt->status !== ExternalMoneyReceiptStatus::Review->value && $receiptMicro !== null
+            && $currency === UsdtMicroAmount::CURRENCY
+            && $receipt->return_status === ExternalMoneyReceiptStatus::Claimed->value
+            && $receipt->deposit_status === ExternalMoneyReceiptStatus::Claimed->value
+            && $receiptMicro === (string) $receipt->resolved_amount_micro) {
+            return ['finding' => null, 'unresolved' => $zero, 'overcredited' => $zero];
+        }
         $settled = $receipt->entry_id !== null;
         $creditedMicro = $settled ? (string) (int) $receipt->credited_micro : null;
 
@@ -189,7 +214,7 @@ final class UsdtReceiptReconciliation
             ];
         }
 
-        $difference = BigInteger::of($receiptMicro)->minus($creditedMicro);
+        $difference = BigInteger::of($receiptMicro)->minus($creditedMicro)->minus((string) ($receipt->accounted_fee_micro ?? 0));
         $held = $receipt->status === ExternalMoneyReceiptStatus::Review->value;
 
         if ($difference->isZero() && ! $held) {

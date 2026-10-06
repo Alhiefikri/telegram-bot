@@ -9,6 +9,7 @@ use App\Exceptions\UsdtBalanceProjectionMismatchException;
 use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceAccount;
 use App\Models\CustomerUsdtBalanceEntry;
+use App\Models\UsdtTopUpReviewRequest;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -80,7 +81,31 @@ final class CustomerUsdtBalanceLedger
 
     public function creditVerifiedTopUp(Customer $customer, VerifiedUsdtFunding $source, string $idempotencyKey): UsdtBalanceMutationResult
     {
-        return $this->apply($customer, $source, $idempotencyKey);
+        return $this->apply($customer, $source, $idempotencyKey, function () use ($customer, $source): void {
+            if ($source->reviewRequestId === null) {
+                return;
+            }
+            $reviewModel = UsdtTopUpReviewRequest::query()->whereKey($source->reviewRequestId)
+                ->where('top_up_id', $source->topUpId)->first();
+            if ($reviewModel === null || $source->reviewAuthority === null) {
+                throw new InvalidArgumentException('Reviewed funding requires password-confirmed typed authority.');
+            }
+            $source->reviewAuthority->assertMatches($reviewModel);
+            $review = $reviewModel;
+            $target = DB::table('customer_usdt_top_ups')->where('id', $source->topUpId)->where('customer_id', $customer->id)->first();
+            $receipt = DB::table('external_money_receipts')->where('id', $source->receiptId)
+                ->where('target_id', $source->topUpId)->where('target_type', 'customer_usdt_top_up')->where('currency', 'USDT')->first();
+            $evidence = DB::table('customer_usdt_top_up_evidence')->where('id', $source->evidenceVersion)
+                ->where('top_up_id', $source->topUpId)->where('status', 'verified')->first();
+            if ($review === null || $target === null || $receipt === null || $evidence === null
+                || ! in_array($review->decision, ['settled', 'resolved_by_compensation'], true)
+                || $review->expires_at->isPast()
+                || $receipt->status !== 'claimed' || $receipt->beneficiary !== 'customer:'.$customer->id
+                || (int) $review->amount_micro - (int) $target->fee_micro !== $source->amountMicro()
+                || UsdtMicroAmount::fromRawTokenUnits($receipt->amount_units, (int) $receipt->decimals)->units() !== (int) $review->amount_micro) {
+                throw new InvalidArgumentException('Reviewed funding requires its exact globally claimed verified source.');
+            }
+        });
     }
 
     public function debitPurchase(Customer $customer, UsdtPurchase $source, string $idempotencyKey): UsdtBalanceMutationResult

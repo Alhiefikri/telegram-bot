@@ -2,6 +2,8 @@
 
 namespace App\Services\UsdtTopUps;
 
+use App\Models\Customer;
+use App\Models\CustomerUsdtBalanceAccount;
 use App\Models\CustomerUsdtDepositReceiver;
 use App\Services\Bsc\BscChainFacts;
 use App\Services\Bsc\BscFinalReceiptInspector;
@@ -89,7 +91,7 @@ final class BscUsdtTransferIngestion
                 return $report('pending', 'canonical_finality_unavailable');
             }
             if ($canonicalFinal !== $finalized) {
-                $this->hold($receiverId, (int) $checkpoint->version, 'finalized_block_changed');
+                $this->hold($receiverId, (int) $checkpoint->version, 'finalized_block_changed', ['expected' => $finalized, 'observed' => $canonicalFinal]);
 
                 return $report('review', 'finalized_block_changed');
             }
@@ -101,7 +103,7 @@ final class BscUsdtTransferIngestion
                         return $report('pending', 'checkpoint_block_unavailable');
                     }
                     if ($anchor['number'] !== (int) $checkpoint->last_block || $anchor['hash'] !== $checkpoint->last_block_hash) {
-                        $this->hold($receiverId, (int) $checkpoint->version, 'checkpoint_reorg');
+                        $this->hold($receiverId, (int) $checkpoint->version, 'checkpoint_reorg', ['expected_number' => $checkpoint->last_block, 'expected_hash' => $checkpoint->last_block_hash, 'observed' => $anchor]);
 
                         return $report('review', 'checkpoint_reorg');
                     }
@@ -145,7 +147,7 @@ final class BscUsdtTransferIngestion
                         $blocks[$number] = $facts;
                     }
                     if ($blocks[$number]['hash'] !== $blockHash) {
-                        $this->hold($receiverId, (int) $checkpoint->version, 'log_block_reorg');
+                        $this->hold($receiverId, (int) $checkpoint->version, 'log_block_reorg', ['expected_hash' => $blockHash, 'observed' => $blocks[$number]]);
 
                         return $report('review', 'log_block_reorg');
                     }
@@ -155,7 +157,7 @@ final class BscUsdtTransferIngestion
                     return $report('pending', 'page_boundary_unavailable');
                 }
                 if ($afterBoundary !== $boundary) {
-                    $this->hold($receiverId, (int) $checkpoint->version, 'page_boundary_reorg');
+                    $this->hold($receiverId, (int) $checkpoint->version, 'page_boundary_reorg', ['expected' => $boundary, 'observed' => $afterBoundary]);
 
                     return $report('review', 'page_boundary_reorg');
                 }
@@ -165,7 +167,7 @@ final class BscUsdtTransferIngestion
                         return $report('pending', 'checkpoint_block_unavailable');
                     }
                     if ($afterAnchor['hash'] !== $checkpoint->last_block_hash) {
-                        $this->hold($receiverId, (int) $checkpoint->version, 'checkpoint_reorg');
+                        $this->hold($receiverId, (int) $checkpoint->version, 'checkpoint_reorg', ['expected_number' => $checkpoint->last_block, 'expected_hash' => $checkpoint->last_block_hash, 'observed' => $afterAnchor]);
 
                         return $report('review', 'checkpoint_reorg');
                     }
@@ -217,9 +219,34 @@ final class BscUsdtTransferIngestion
         }
     }
 
-    private function hold(int $receiverId, int $version, string $reason): void
+    private function hold(int $receiverId, int $version, string $reason, array $evidence): void
     {
-        DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $receiverId)->where('version', $version)->whereNull('review_reason')
-            ->update(['review_reason' => $reason, 'version' => $version + 1, 'updated_at' => now()]);
+        DB::transaction(function () use ($receiverId, $version, $reason, $evidence): void {
+            $receiver = CustomerUsdtDepositReceiver::query()->findOrFail($receiverId);
+            // Same Customer -> account -> receiver -> checkpoint graph as
+            // settlement/reorg finalization. Containment commits with detection,
+            // while bounded monitoring materializes individual incidents later.
+            Customer::query()->whereKey($receiver->customer_id)->lockForUpdate()->firstOrFail();
+            $account = CustomerUsdtBalanceAccount::query()->where('customer_id', $receiver->customer_id)->lockForUpdate()->first();
+            CustomerUsdtDepositReceiver::query()->whereKey($receiverId)->lockForUpdate()->firstOrFail();
+            $checkpoint = DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $receiverId)->lockForUpdate()->firstOrFail();
+            if ((int) $checkpoint->version !== $version || $checkpoint->review_reason !== null) {
+                return;
+            }
+            DB::table('usdt_reorg_receiver_evidence')->insert([
+                'receiver_id' => $receiverId, 'checkpoint_version' => $version + 1,
+                'reason' => $reason, 'evidence' => json_encode($evidence, JSON_THROW_ON_ERROR), 'created_at' => now(),
+            ]);
+            DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $receiverId)->update([
+                'review_reason' => $reason, 'version' => $version + 1, 'updated_at' => now(),
+            ]);
+            $credited = DB::table('customer_usdt_top_up_resolutions as resolutions')
+                ->join('customer_usdt_top_ups as targets', 'targets.id', '=', 'resolutions.top_up_id')
+                ->where('targets.receiver_id', $receiverId)->whereNotNull('resolutions.entry_id')->exists();
+            if ($account !== null && $credited) {
+                DB::table('customer_usdt_balance_accounts')->where('id', $account->id)->whereNull('frozen_reason')
+                    ->update(['frozen_reason' => 'usdt_receiver_reorg:'.$receiverId, 'updated_at' => now()]);
+            }
+        }, 5);
     }
 }

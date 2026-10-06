@@ -170,6 +170,9 @@ final class UsdtFundingIntentService
                 'top_up_id' => $id, 'state' => 'pending', 'version' => 1, 'attempts' => 0,
                 'next_attempt_at' => now(), 'updated_at' => now(),
             ]);
+            DB::table('customer_usdt_top_up_settlement_work')->insert([
+                'top_up_id' => $id, 'next_check_at' => now(), 'updated_at' => now(),
+            ]);
             $this->transition($intent, 'confirmed');
 
             return new UsdtFundingIntentResult('confirmed', $intent, $target);

@@ -17,6 +17,7 @@ Exactness rules:
 - liability is the **signed ledger sum** (canonical), with the mutable projection sum reported alongside so a mismatch is visible twice — once per account and once as a total;
 - receipt amounts are converted from raw token units with the U1 `UsdtMicroAmount::fromRawTokenUnits` contract; a non-representable amount is a finding and is never summed;
 - receipt partitioning is exact: only `target_type = customer_usdt_top_up` and `currency = USDT` enter the USDT subledger partition, and each finding carries its own customer (when attributable), provider (rail) and currency.
+- U7 binds a settled target to its specific resolution receipt, so additional deposits cannot masquerade as the original credit. Accounted application fees remain separate from Customer liability and unresolved money; their append-only fee events contribute `accounted_funding_fee_micro` to expected custody assets.
 
 The whole read phase runs inside one read-only `REPEATABLE READ` transaction on PostgreSQL, so a concurrent posting can never be observed as a false drift. Custody observations are resolved **before** that snapshot opens, so no provider/RPC call ever extends a database transaction.
 
@@ -39,7 +40,7 @@ The whole read phase runs inside one read-only `REPEATABLE READ` transaction on 
 - By default every drifted account is **frozen** (scoped to that account) by re-proving the drift under the same account row lock every ledger posting takes. A stale finding never freezes a healthy account, an already frozen account is not frozen twice, and a failed freeze is isolated per account (`failed`) so the rest of the run completes. Freezing writes only `frozen_reason`: no entry, projection or accounting row is created or repaired. Unfreezing is a deliberate operator action (O2 [#558](https://github.com/Alhiefikri/telegram-bot/issues/558)).
 - Every run appends one sanitized `usdt_balance_reconciliation_runs` row (component totals, verdict, findings, freeze outcomes, actor). The row contains no names, Telegram ids, e-mail, receipt evidence payloads, secrets or chain hashes; it is the durable alert/evidence artifact that #558 consumes. Rows and treasury movements are append-only (PostgreSQL triggers plus model guards).
 - Pagination is exact: each facet fetches `limit + 1` rows, so `has_more`/`next_cursor` never claim a page that does not exist. The three cursors are independent internal ids, not capabilities.
-- With `--customer`, custody coverage is reported as `not_evaluated` (custody is a store-wide fact; a per-customer comparison would be fabricated). Orphan receipts are unattributable until #551 links top-up targets to Customers, so they stay visible in scoped runs instead of being hidden.
+- With `--customer`, custody coverage is reported as `not_evaluated` (custody is a store-wide fact; a per-customer comparison would be fabricated). U6/U7 top-up ownership scopes attributed unresolved receipts exactly; legacy orphans without any attributable target remain visible in scoped runs instead of being hidden.
 
 ### `usdt-balance:aggregate-accounting`
 
@@ -70,6 +71,7 @@ Coverage math (all `BigInteger`, global scope only):
 ```
 expected custody = liability (signed ledger sum)
                  + unresolved deposits (orphan/held receipts + positive receipt differences)
+                 + accounted funding fees
                  + movements in - movements out
 unexplained      = observed custody - expected custody
 ```
@@ -100,14 +102,14 @@ Restore replay behaviour:
 
 PostgreSQL triggers reject UPDATE/DELETE on the two append-only tables; checks enforce the USDT currency, positive amounts, direction and scope/state enums. IDR tables, writers and readers are untouched.
 
-The receipt target `customer_usdt_top_up` was added to `ExternalMoneyReceiptTargetType`/`MoneyReceiptTarget` as the canonical namespace for a USDT top-up target: its target id is the top-up id, which is also the `customer_usdt_top_up` USDT ledger source id, so a claimed funding receipt and its settled entry share one economic identity (#551 will mint top-ups under this contract).
+The receipt target `customer_usdt_top_up` is the canonical namespace for a U6 USDT top-up target: its target id is the top-up id, also the `customer_usdt_top_up` USDT ledger source id. U7 consumes the global claim together with one immutable economic resolution and credit; reconciliation matches that resolution's receipt and subtracts only a committed application-fee accounting event.
 
 ## 6. Limitations and downstream ownership
 
 - No custody/provider/adapter is approved; every store with USDT liability reports `unverifiable` until H1 passes. That is the intended fail-closed state, not a defect.
 - Reconciliation never freezes on receipt or coverage findings (they have no safe account scope yet); it reports and exits non-zero.
 - Durable alert delivery, metrics, pause wiring and restore/rollback runbooks belong to O2 [#558](https://github.com/Alhiefikri/telegram-bot/issues/558); this ticket provides the run evidence they consume.
-- Settlement of a top-up (and therefore the ledger's `VerifiedUsdtFunding` call) is U7 [#552](https://github.com/Alhiefikri/telegram-bot/issues/552); the receipt/funding linkage implemented here is the contract that settlement must satisfy.
+- U7 [#552](https://github.com/Alhiefikri/telegram-bot/issues/552) owns settlement and the ledger's `VerifiedUsdtFunding` call. It preserves this reconciliation contract; public funding activation and approved custody observations remain separate gates.
 - Unreceipted-credit scanning only sees `customer_usdt_top_up` sources; other funding rails would need their own partition before activation.
 - SQLite/sync tests prove behaviour, not locking. Only the PostgreSQL lanes prove the snapshot, claim races and trigger enforcement.
 

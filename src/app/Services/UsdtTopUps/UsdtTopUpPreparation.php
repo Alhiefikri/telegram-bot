@@ -67,7 +67,8 @@ final class UsdtTopUpPreparation
         }
         DB::transaction(function () use ($id, $claim, $target, $invoice, $error): void {
             $work = DB::table('customer_usdt_top_up_work')->where('top_up_id', $id)->lockForUpdate()->first();
-            if ($work === null || $work->lease_token !== $claim['token'] || (int) $work->version !== $claim['version']) {
+            if ($work === null || $work->lease_token !== $claim['token'] || (int) $work->version !== $claim['version']
+                || $work->lease_until === null || CarbonImmutable::parse($work->lease_until)->isPast()) {
                 return;
             }
             DB::table('customer_usdt_top_up_work')->where('top_up_id', $id)->update([
