@@ -362,7 +362,8 @@ final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabase
             ->assertOk()
             ->assertSee('Preview reversal IDR')
             ->assertSee('Konfirmasi reversal')
-            ->assertSee('Adjustment asal');
+            ->assertSee('Adjustment asal')
+            ->assertSee('Rp 5.000 · Owner received the funds.');
 
         $response = $this->actingAs($owner)->post(
             route('admin.store-balance.adjustments.previews.confirm', ['adjustment' => $reversal->id]),

@@ -49,7 +49,7 @@ final class AdminBalanceAdjustmentController extends Controller
         $previewId = $request->query('preview');
         $preview = is_string($previewId) && Str::isUuid($previewId)
             ? BalanceAdjustmentPreview::query()
-                ->select(['id', 'customer_id', 'owner_user_id', 'telegram_id', 'username', 'amount', 'reason', 'category', 'fingerprint', 'version', 'state', 'ledger_entry_id', 'expires_at', 'resolved_at'])
+                ->select(['id', 'customer_id', 'owner_user_id', 'telegram_id', 'username', 'amount', 'reason', 'category', 'source_id', 'fingerprint', 'version', 'state', 'ledger_entry_id', 'expires_at', 'resolved_at'])
                 ->whereKey($previewId)
                 ->where('owner_user_id', $owner->id)
                 ->whereIn('category', ['owner_attested', 'reversal'])
