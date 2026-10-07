@@ -197,6 +197,38 @@ An actual fresh available-capacity transition still uses the existing `Inventory
 
 Outside-bot handoff quantities are included in the fulfilled quantity when calculating remaining manual delivery or missing-unit refunds. Exact-order recovery after even a partial handoff settles the original debit and leaves the remaining customer obligation in review; it never allocates the original full payload again. Automatic receipt materialization and delivery also check handoff records, including source discovery after a lost queue wakeup. An empty history list has no verified dispatch coverage and stays inconclusive. Proof forms bind the decision to the Purchase ID shown when opened, so a stale submission cannot release a different attempt's hold.
 
+### Missing Telegram receipt recovery — invoice `INV-20261005-01M4627XZT628TRQWH2SP343CW`
+
+The production snapshot for Order `01a10c23-f7fa-70c5-91f9-5842998107af` proved Paid/Completed and Supplier Fulfillment `delivered`, but had no Telegram receipt marker or receipt effect. It did not establish whether the after-commit dispatch, worker materialization, or another runtime step failed. Do not attribute this invoice to scheduler OOM; that has separate ownership in #570.
+
+1. In private Admin Order detail, verify Payment is `paid`, Order is `completed`, each Supplier Fulfillment is `delivered`, and the original supplier purchase/delivery is already recorded. Check the customer delivery field separately; supplier completion is not Telegram receipt delivery.
+2. Check `orders.telegram_receipt_sent_at` and inspect only receipt ledger identity/state (never `outcome_metadata`, message payload, or credentials):
+
+   ```sql
+   SELECT order_status, payment_status, telegram_receipt_sent_at
+   FROM orders
+   WHERE invoice_number = 'INV-20261005-01M4627XZT628TRQWH2SP343CW';
+
+   SELECT effect_group_key, sequence, state, attempts, telegram_message_id
+   FROM telegram_outbound_effects
+   WHERE source_type = 'App\Models\Order'
+     AND source_id = '01a10c23-f7fa-70c5-91f9-5842998107af'
+     AND effect_type = 'receipt.credentials'
+   ORDER BY effect_group_key, sequence;
+   ```
+
+3. If any receipt effect is `unknown` or `manual_review`, stop automatic recovery. Verify the customer chat and resolve that same effect in Manual Delivery Review; do not create a credential replacement or explicit resend without duplicate-risk review. Existing `pending`/eligible `failed` effects belong to normal ledger retry.
+4. Only when the receipt marker is NULL, no receipt effect group/resend exists, Payment is Paid, all Supplier Fulfillments are delivered, there is no external manual handoff, and the customer has a Telegram destination, run the normal chunked recovery command (also scheduled every minute):
+
+   ```sh
+   php artisan telegram:recover-outbound --chunk=25 --queue=notifications
+   ```
+
+   Source recovery materializes from this Order and its already allocated Product Stock Items. It does not settle payment again, call a supplier, or allocate stock. Repeated runs use the deterministic receipt group and ledger claim.
+5. Re-run the read-only checks. A pending effect is a queued delivery, not proof of receipt; only the completed group sets `telegram_receipt_sent_at`. If the group remains absent, inspect sanitized `telegram.receipt_recovery_failed` logs by Order ID, stage, and error code. Never copy raw exception text or credential data into logs/tickets. An `unknown`/`manual_review` effect always requires operator evidence; it is never auto-resent.
+
+This same procedure applies to a future missing receipt: do not replay supplier fulfillment, payment settlement, or raw `SendTelegramReceipt(force=true)` as a shortcut.
+
 The history timestamp range must also end no later than the captured HTTP observation time. A future timestamp produces `provider_clock_inconsistent`, keeps the result inconclusive, and cannot authorize hold release. The form leaves provider timezone blank so an operator supplies its confirmed IANA timezone explicitly.
 
 Local #565 verification includes the customer handoff/recovery/receipt and no-debit evidence regressions, fresh/stale supplier capacity transitions, traced successful/unknown recipient delivery, Admin render states, and the PostgreSQL two-worker no-debit race (one hold release, one evidence row, one audit row). The final full PostgreSQL concurrency group passed **226 tests / 2,137 assertions**, with zero failures, errors or skips and exit code 0. Source files under `src/app`, `database`, `resources` and `tests` had the same aggregate SHA-256 before and after the run: `b3a43b35793dfdb17cb2718258895688dea0706eac19cfe772a276081d403d37`. JUnit and debug output are retained locally at `/tmp/telegram-bot-565-gate-v2-junit.xml` and `/tmp/telegram-bot-565-gate-v2-phpunit.log`.

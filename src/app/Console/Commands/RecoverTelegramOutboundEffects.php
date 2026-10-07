@@ -22,6 +22,8 @@ use App\Services\Telegram\TelegramOutboundEffectRecovery;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class RecoverTelegramOutboundEffects extends Command
 {
@@ -225,12 +227,34 @@ class RecoverTelegramOutboundEffects extends Command
                     }
 
                     if (in_array($order->order_status->value, ['processing', 'completed'], true)
-                        && $order->payment_status->value === 'paid'
-                        && $outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS) === null) {
-                        $effect = $outboundEffects->recordReceipt($order, $order->customer);
-                        if ($effect !== null) {
-                            $dispatcher->dispatch($effect, now()->toISOString());
-                            $dispatched++;
+                        && $order->payment_status->value === 'paid') {
+                        $stage = 'receipt_materialization';
+
+                        try {
+                            if ($outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS) === null) {
+                                $effect = $outboundEffects->recordReceipt($order, $order->customer);
+                                if ($effect !== null) {
+                                    $stage = 'receipt_dispatch';
+                                    $dispatcher->dispatch($effect, now()->toISOString());
+                                    $dispatched++;
+                                    Log::info('telegram.receipt_recovery_materialized', [
+                                        'order_id' => (string) $order->getKey(),
+                                        'stage' => $stage,
+                                        'status' => 'dispatched',
+                                        'effect_id' => (string) $effect->getKey(),
+                                    ]);
+                                }
+                            }
+                        } catch (Throwable $exception) {
+                            Log::warning('telegram.receipt_recovery_failed', [
+                                'order_id' => (string) $order->getKey(),
+                                'stage' => $stage,
+                                'status' => 'failed',
+                                'error_code' => $stage === 'receipt_dispatch'
+                                    ? 'receipt_dispatch_failed'
+                                    : 'receipt_materialization_failed',
+                                'exception' => $exception::class,
+                            ]);
                         }
                     }
 

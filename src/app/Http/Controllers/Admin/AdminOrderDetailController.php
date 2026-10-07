@@ -81,7 +81,7 @@ class AdminOrderDetailController extends Controller
             $deliveryStatus = match ($fulfillment->state) {
                 'delivered' => $fulfillment->manual_handoffs_exists
                     ? 'Selesai · diserahkan di luar bot'
-                    : ($order->telegram_receipt_sent_at !== null ? 'Receipt Telegram tercatat terkirim' : 'Fulfillment tersedia · receipt Telegram belum terkonfirmasi'),
+                    : ($order->telegram_receipt_sent_at !== null ? 'Supplier fulfillment selesai · receipt Telegram tercatat terkirim' : 'Supplier fulfillment selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review'),
                 'review' => 'Perlu review operator',
                 'cancelled' => 'Dibatalkan',
                 default => 'Sedang diproses',

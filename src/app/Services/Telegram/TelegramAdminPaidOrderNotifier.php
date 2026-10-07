@@ -97,7 +97,7 @@ class TelegramAdminPaidOrderNotifier
         if ($fulfillments->isEmpty()) {
             $status = $order->order_status?->value ?? (string) $order->order_status;
             $deliveryState = $status === 'completed'
-                ? ($order->telegram_receipt_sent_at !== null ? 'Receipt Telegram tercatat terkirim' : 'Fulfillment selesai · receipt Telegram belum terkonfirmasi')
+                ? ($order->telegram_receipt_sent_at !== null ? 'Receipt Telegram tercatat terkirim' : 'Fulfillment selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review')
                 : $this->deliveryLabel($status);
 
             return ['Pengiriman pelanggan: '.$deliveryState, 'Pembelian supplier: tidak digunakan'];
@@ -115,7 +115,7 @@ class TelegramAdminPaidOrderNotifier
             } elseif ($fulfillment->state === 'delivered') {
                 $deliveryState = $order->telegram_receipt_sent_at !== null
                     ? 'Receipt Telegram tercatat terkirim'
-                    : 'Fulfillment tersedia · receipt Telegram belum terkonfirmasi';
+                    : 'Supplier fulfillment selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review';
             }
             $delivery[] = $productName.': '.$deliveryState;
 

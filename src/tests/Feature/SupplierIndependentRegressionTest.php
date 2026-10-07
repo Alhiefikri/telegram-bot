@@ -725,16 +725,16 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         $this->assertNull($order->fresh()->telegram_receipt_sent_at);
         $owner = User::factory()->create(['role' => 'owner']);
         $this->actingAs($owner)->get(route('admin.orders.show', $order))
-            ->assertOk()->assertSee('Fulfillment tersedia · receipt Telegram belum terkonfirmasi');
+            ->assertOk()->assertSee('Supplier fulfillment selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review');
         $this->get('/admin?tab=penjualan')->assertOk()
-            ->assertSee('fulfillment tersedia · receipt Telegram belum terkonfirmasi');
+            ->assertSee('supplier selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review');
         Http::swap(new Factory);
         Http::preventStrayRequests();
         config()->set('services.telegram.token', 'test-token');
         Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
         app(TelegramAdminPaidOrderNotifier::class)->sendEffect($order, '123456');
         $text = (string) Http::recorded()->sole()[0]['text'];
-        $this->assertStringContainsString('Fulfillment tersedia · receipt Telegram belum terkonfirmasi', $text);
+        $this->assertStringContainsString('Supplier fulfillment selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review', $text);
     }
 
     public function test_read_only_order_roles_see_delivery_status_without_private_supplier_economics(): void

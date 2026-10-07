@@ -28,6 +28,8 @@ use App\Services\UsdtBalance\UsdtOrderRefundService;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class OrderStateMachine implements OrderLifecycle
 {
@@ -686,7 +688,21 @@ class OrderStateMachine implements OrderLifecycle
 
     private function dispatchReceiptMaterialization(Order $order): void
     {
-        SendTelegramReceipt::dispatch((string) $order->getKey())
-            ->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
+        DB::afterCommit(function () use ($order): void {
+            try {
+                SendTelegramReceipt::dispatch((string) $order->getKey())
+                    ->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
+            } catch (Throwable $exception) {
+                Log::warning('telegram.receipt_handoff_dispatch_failed', [
+                    'order_id' => (string) $order->getKey(),
+                    'stage' => 'order_lifecycle_after_commit',
+                    'status' => 'failed',
+                    'error_code' => 'receipt_dispatch_failed',
+                    'exception' => $exception::class,
+                ]);
+
+                throw $exception;
+            }
+        });
     }
 }

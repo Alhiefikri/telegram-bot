@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\InventoryMovementType;
+use App\Enums\TelegramOutboundEffectState;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
@@ -31,6 +32,8 @@ use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Telegram\ReceiptDeliveryPipeline;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -45,6 +48,91 @@ class SupplierFulfillmentTest extends TestCase
         parent::setUp();
         Queue::fake();
         Http::preventStrayRequests();
+    }
+
+    public function test_supplier_completion_without_materialized_receipt_is_recovered_without_reallocating(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        config()->set('services.telegram.token', 'test-token');
+        $messageId = 900000;
+        Http::fake(function ($request) use (&$messageId) {
+            if (str_contains($request->url(), 'api.telegram.org')) {
+                return Http::response(['ok' => true, 'result' => ['message_id' => ++$messageId]]);
+            }
+
+            return Http::response([
+                'status' => 'delivered',
+                'orderId' => 'supplier-receipt-recovery',
+                'quantity' => 1,
+                'total_cost' => '1',
+                'deliveredKeys' => ['original-supplier-credential'],
+            ]);
+        });
+
+        $fulfillment = SupplierFulfillment::query()->where('order_id', $order->id)->sole();
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertSame(0, $order->telegramOutboundEffects()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->count());
+        $this->assertSame(1, $fulfillment->purchases()->count());
+        $this->assertSame(1, $fulfillment->orderItem->stockItems()->count());
+        Http::assertSentCount(1);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+
+        $receiptEffects = $order->telegramOutboundEffects()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS);
+        $this->assertNotNull($receiptEffects->first());
+        $this->assertSame(
+            TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->getKey()),
+            $receiptEffects->first()->effect_group_key,
+        );
+        $effectCountAfterRecovery = $receiptEffects->count();
+
+        $groupKey = (string) $receiptEffects->first()->effect_group_key;
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $pipeline = app(ReceiptDeliveryPipeline::class);
+        $effect = $ledger->nextReceiptEffect($groupKey);
+        while ($effect !== null) {
+            $pipeline->deliver($effect, dispatchNext: false);
+            $effect = $ledger->nextReceiptEffect($groupKey, (int) $effect->sequence);
+        }
+
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertSame(
+            [TelegramOutboundEffectState::Sent],
+            $receiptEffects->orderBy('sequence')->pluck('state')->unique()->values()->all(),
+        );
+        $containsCredential = function (mixed $value) use (&$containsCredential): bool {
+            if (is_string($value)) {
+                return str_contains($value, 'original-supplier-credential');
+            }
+            if (! is_array($value)) {
+                return false;
+            }
+            foreach ($value as $nestedValue) {
+                if ($containsCredential($nestedValue)) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+        $credentialSent = Http::recorded(fn ($request): bool => $containsCredential($request->data()));
+        $this->assertNotEmpty($credentialSent);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+
+        $this->assertSame($effectCountAfterRecovery, $receiptEffects->count());
+        $this->assertSame(1, $fulfillment->purchases()->count());
+        $this->assertSame(1, $fulfillment->orderItem->stockItems()->count());
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
     }
 
     public function test_local_first_mixed_order_remains_paid_processing_until_complete_private_delivery(): void

@@ -50,6 +50,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
 use PHPUnit\Framework\Assert;
@@ -58,6 +59,46 @@ use Tests\Support\TelegramBotTestSupport;
 
 class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
 {
+    public function test_receipt_recovery_continues_after_one_orders_materialization_fails_and_logs_safely(): void
+    {
+        Queue::fake();
+        $first = $this->multiProductStructuredReceiptOrder();
+        [$second] = $this->paidSingleStructuredReceiptOrder('en', CredentialAccessMethod::None);
+        $firstOrderId = (string) $first->getKey();
+        $original = app(TelegramOutboundEffectService::class);
+        $outboundEffects = Mockery::mock($original)->makePartial();
+        $outboundEffects->shouldReceive('recordReceipt')
+            ->twice()
+            ->andReturnUsing(function (Order $order, ?Customer $customer = null) use ($firstOrderId, $original) {
+                if ((string) $order->getKey() === $firstOrderId) {
+                    throw new \RuntimeException('credential payload must not be logged');
+                }
+
+                return $original->recordReceipt($order, $customer);
+            });
+        app()->instance(TelegramOutboundEffectService::class, $outboundEffects);
+        Log::spy();
+
+        $this->artisan('telegram:recover-outbound')->assertSuccessful();
+
+        $this->assertNull($original->forOrder(
+            $firstOrderId,
+            TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+        ));
+        $this->assertNotNull($original->forOrder(
+            (string) $second->getKey(),
+            TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+        ));
+        Log::shouldHaveReceived('warning')
+            ->with('telegram.receipt_recovery_failed', Mockery::on(
+                fn (array $context): bool => $context['order_id'] === $firstOrderId
+                    && $context['stage'] === 'receipt_materialization'
+                    && $context['error_code'] === 'receipt_materialization_failed'
+                    && ! str_contains(json_encode($context, JSON_THROW_ON_ERROR), 'credential payload must not be logged'),
+            ))
+            ->once();
+    }
+
     public function test_paid_lifecycle_defers_receipt_planning_and_rendering_until_after_transaction(): void
     {
         Queue::fake();

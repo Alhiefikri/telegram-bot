@@ -45,6 +45,7 @@ use App\Services\Warranty\RefundAllocation;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -766,7 +767,22 @@ final class SupplierFulfillmentService
                 app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
             }
         }
-        DB::afterCommit(fn () => SendTelegramReceipt::dispatch((string) $order->id)->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE));
+        DB::afterCommit(function () use ($order): void {
+            try {
+                SendTelegramReceipt::dispatch((string) $order->id)
+                    ->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
+            } catch (Throwable $exception) {
+                Log::warning('telegram.receipt_handoff_dispatch_failed', [
+                    'order_id' => (string) $order->getKey(),
+                    'stage' => 'supplier_fulfillment_after_commit',
+                    'status' => 'failed',
+                    'error_code' => 'receipt_dispatch_failed',
+                    'exception' => $exception::class,
+                ]);
+
+                throw $exception;
+            }
+        });
     }
 
     public function retryAfterTopup(int $id): void

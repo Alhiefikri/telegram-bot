@@ -208,6 +208,8 @@ pending ledger group if the process stops after group commit but before queue
 dispatch. Replaying materialization uses the canonical group key. The plan
 and invoice preflight keep existing render-failure and text-fallback behavior.
 
+The source-recovery pass isolates each Order: a materialization or queue-dispatch exception is logged with the Order ID, stage, status, allowlisted error code, and exception class, then the scan continues. It never logs the exception message, credentials, or queued payload. If an effect committed before dispatch failed, the next pass sees the pending ledger row; row locking and the ledger claim still prevent duplicate delivery. `telegram_receipt_sent_at` remains a projection of a fully completed receipt group, not proof inferred from Supplier Fulfillment.
+
 Store Balance settlement is a deferred-materialization exception. The
 `StoreBalanceTopUpService` transaction commits the authoritative top-up and
 ledger state, then emits `StoreBalanceTopUpSettled`. The after-commit
@@ -304,6 +306,13 @@ proves that a later unit remains pending after credential ambiguity.
 `test_recovery_repairs_a_complete_sent_receipt_without_resending_it` proves
 that recovery repairs a lost completion projection without redispatching the
 receipt.
+
+`SupplierFulfillmentTest::test_supplier_completion_without_materialized_receipt_is_recovered_without_reallocating`
+proves that a Paid/Completed supplier Order with its original allocation but
+no receipt effect is rediscovered without another supplier purchase or stock
+allocation. `TelegramReceiptOutboundEffectTest::test_receipt_recovery_continues_after_one_orders_materialization_fails_and_logs_safely`
+proves one Order's preparation error does not block later Orders and that the
+diagnostic excludes exception text.
 
 Manual payment-proof recovery evidence is kept at
 `src/tests/Feature/Telegram/TelegramLifecycleOutboundEffectTest.php`:

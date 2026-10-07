@@ -9,6 +9,8 @@ use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class SendTelegramReceipt implements ShouldQueueAfterCommit
 {
@@ -50,6 +52,16 @@ class SendTelegramReceipt implements ShouldQueueAfterCommit
             if ($effect !== null) {
                 $pipeline->deliver($effect);
             }
+        } catch (Throwable $exception) {
+            Log::warning('telegram.receipt_materialization_failed', [
+                'order_id' => $this->orderId,
+                'stage' => 'receipt_job_materialization',
+                'status' => 'failed',
+                'error_code' => 'receipt_materialization_failed',
+                'exception' => $exception::class,
+            ]);
+
+            throw $exception;
         } finally {
             DogfoodTiming::log('dogfood.telegram.receipt_job_finished', DogfoodTiming::queryStats() + [
                 'correlation_id' => DogfoodTiming::correlation($this->orderId),

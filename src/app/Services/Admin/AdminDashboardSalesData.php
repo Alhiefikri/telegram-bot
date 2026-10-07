@@ -152,7 +152,7 @@ final class AdminDashboardSalesData
         $deliveryStates = $fulfillments->map(fn (SupplierFulfillment $fulfillment): string => match ($fulfillment->state) {
             'delivered' => $fulfillment->manual_handoffs_exists
                 ? 'selesai · diserahkan di luar bot'
-                : ($order->telegram_receipt_sent_at !== null ? 'receipt Telegram terkirim' : 'fulfillment tersedia · receipt Telegram belum terkonfirmasi'),
+                : ($order->telegram_receipt_sent_at !== null ? 'supplier selesai · receipt Telegram terkirim' : 'supplier selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review'),
             'review' => 'perlu review',
             'cancelled' => 'dibatalkan',
             default => 'sedang diproses',
