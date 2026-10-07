@@ -470,15 +470,19 @@ collect_release_diagnostics() {
     fi
   fi
   rm -f "$health_summary_temp"
-  compose logs --tail=120 app web scheduler 2>&1 \
+  compose logs --tail=120 2>&1 \
     | "$REDACTOR_PATH" \
     > "$RELEASE_ARTIFACT_DIR/compose.log" || true
 }
 
 verify_service_images() {
   local expected_image_id container_id running_image service
+  local services="app scheduler"
+  if compose config --services | grep -qx outbound-recovery; then
+    services="$services outbound-recovery"
+  fi
   expected_image_id="$(docker image inspect "$1" --format '{{.Id}}')"
-  for service in app scheduler; do
+  for service in $services; do
     container_id="$(compose ps -q "$service")"
     [ -n "$container_id" ] || return 1
     running_image="$(docker inspect "$container_id" --format '{{.Image}}')"
@@ -519,11 +523,22 @@ wait_for_health() {
 
   for attempt in $(seq 1 "${RELEASE_HEALTH_ATTEMPTS:-36}"); do
     if compose_root exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null; then
-      return 0
+      break
     fi
     [ "$attempt" -lt "${RELEASE_HEALTH_ATTEMPTS:-36}" ] || return 1
     sleep "${RELEASE_HEALTH_INTERVAL:-5}"
   done
+
+  if compose config --services | grep -qx outbound-recovery; then
+    for attempt in $(seq 1 "${RELEASE_HEALTH_ATTEMPTS:-36}"); do
+      if compose_root exec -T outbound-recovery php artisan ops:health --outbound-recovery-heartbeat=180 </dev/null; then
+        return 0
+      fi
+      [ "$attempt" -lt "${RELEASE_HEALTH_ATTEMPTS:-36}" ] || return 1
+      sleep "${RELEASE_HEALTH_INTERVAL:-5}"
+    done
+  fi
+  return 0
 }
 
 verify_release_gates() {
@@ -589,6 +604,10 @@ load_previous_release() {
 restore_previous_release() {
   local failure_reason="${FAILURE_REASON:-deploy-failed}"
   local candidate_queue_connection candidate_queue_image
+  local producers="scheduler app"
+  if compose config --services | grep -qx outbound-recovery; then
+    producers="$producers outbound-recovery"
+  fi
   candidate_queue_image="${APP_IMAGE:-$(release_state_value app_image)}"
   if [ -n "$candidate_queue_image" ]; then
     APP_IMAGE="$candidate_queue_image"
@@ -606,9 +625,9 @@ restore_previous_release() {
     fi
 
     echo "Stopping candidate producers before checking Redis queue state for a database-driver rollback."
-    if ! compose stop --timeout 150 scheduler app; then
+    if ! compose stop --timeout 150 $producers; then
       echo "Rollback blocked: candidate producers could not be stopped safely." >&2
-      APP_IMAGE="$candidate_queue_image" compose up -d --no-build app scheduler || true
+      APP_IMAGE="$candidate_queue_image" compose up -d --no-build $producers || true
       record_result "${failure_reason}-rollback-failed"
       write_release_state "rollback-failed"
       return 1
@@ -619,7 +638,7 @@ restore_previous_release() {
       -e APP_OPTIMIZE=false \
       app artisan ops:check-queue-depth --include-reserved-and-delayed --max=0 </dev/null; then
       echo "Rollback blocked: Redis queue is not empty or could not be inspected; keep Redis available and recover queued work before switching drivers." >&2
-      APP_IMAGE="$candidate_queue_image" compose up -d --no-build app scheduler || true
+      APP_IMAGE="$candidate_queue_image" compose up -d --no-build $producers || true
       record_result "${failure_reason}-rollback-failed"
       write_release_state "rollback-failed"
       return 1

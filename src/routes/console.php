@@ -79,16 +79,7 @@ Schedule::command('bsc:reconcile --chunk=100')->everyMinute()->withoutOverlappin
 Schedule::command('orders:expire-pending')->everyMinute()->withoutOverlapping();
 Schedule::command('telegram:recover-updates --queue=default')->everyMinute()->withoutOverlapping();
 Schedule::command('telegram:forward-payment-proofs --chunk=100')->everyMinute()->withoutOverlapping();
-// Recovery is the safety net for effects whose after-commit dispatch was lost.
-// Keep its mutex bounded so a killed scheduler cannot suppress recovery for a
-// full day (Laravel's default withoutOverlapping expiry is 24 hours). The
-// ledger sweep can run longer than ten minutes, so the bound must stay above
-// the observed sweep duration; otherwise the mutex expires mid-run and the
-// next tick starts a second overlapping sweep in the background.
-Schedule::command('telegram:recover-outbound --chunk=25 --queue=notifications')
-    ->everyMinute()
-    ->withoutOverlapping(45)
-    ->runInBackground();
+// The outbound recovery worker owns this bounded sweep in its dedicated container.
 Schedule::command('telegram:reconcile-stock-notifications --chunk=25')
     ->everyMinute()
     ->withoutOverlapping(45)

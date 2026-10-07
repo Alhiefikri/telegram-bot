@@ -188,6 +188,7 @@ final class StoreBalanceTopUpOutbound
     public function recoverMissingInstructions(int $chunk = 100): int
     {
         return $this->recoverMissingFromQuery(
+            'topup_instructions',
             $this->missingInstructionsQuery(),
             $chunk,
             fn (StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult => $this->handoffInstructions($topUp),
@@ -201,6 +202,7 @@ final class StoreBalanceTopUpOutbound
     public function recoverMissingReceipts(int $chunk = 100): int
     {
         return $this->recoverMissingFromQuery(
+            'topup_receipts',
             $this->missingReceiptsQuery(),
             $chunk,
             fn (StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult => $this->handoffReceipt($topUp),
@@ -214,6 +216,7 @@ final class StoreBalanceTopUpOutbound
     public function recoverMissingOwnerAlerts(int $chunk = 100): int
     {
         return $this->recoverMissingFromQuery(
+            'topup_owner_alerts',
             $this->missingOwnerAlertsQuery(),
             $chunk,
             fn (StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult => $this->handoffOwnerAlert($topUp),
@@ -228,6 +231,7 @@ final class StoreBalanceTopUpOutbound
     public function recoverMissingChannelProofs(int $chunk = 100): int
     {
         return $this->recoverMissingFromQuery(
+            'topup_channel_proofs',
             $this->missingChannelProofsQuery(),
             $chunk,
             fn (StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult => $this->handoffChannelProof($topUp),
@@ -509,18 +513,17 @@ final class StoreBalanceTopUpOutbound
      * @param  Builder<StoreBalanceTopUp>  $query
      * @param  Closure(StoreBalanceTopUp): StoreBalanceTopUpOutboundResult  $handoff
      */
-    private function recoverMissingFromQuery(Builder $query, int $chunk, Closure $handoff): int
+    private function recoverMissingFromQuery(string $facet, Builder $query, int $chunk, Closure $handoff): int
     {
         if ($chunk < 1 || $chunk > 1000) {
             throw new InvalidArgumentException('Store Balance top-up outbound chunk must be between 1 and 1000.');
         }
 
+        $topUps = app(TelegramOutboundRecoveryPage::class)->load($facet, $query, $chunk);
         $dispatches = 0;
-        $query->chunkById($chunk, function ($topUps) use (&$dispatches, $handoff): void {
-            foreach ($topUps as $topUp) {
-                $dispatches += $handoff($topUp)->isAccepted() ? 1 : 0;
-            }
-        });
+        foreach ($topUps as $topUp) {
+            $dispatches += $handoff($topUp)->isAccepted() ? 1 : 0;
+        }
 
         return $dispatches;
     }

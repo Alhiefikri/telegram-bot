@@ -191,7 +191,7 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
             $orders[] = [$order, $effect, $case];
         }
 
-        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])
             ->assertSuccessful();
 
         foreach ($orders as [$order, $effect, $case]) {
@@ -206,7 +206,7 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
             $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
         }
 
-        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])
             ->assertSuccessful();
 
         $deletions = Http::recorded(fn ($request) => str_ends_with($request->url(), '/deleteMessage'));

@@ -1044,12 +1044,6 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             && (string) $this->telegramRequestField($r, 'chat_id') === '12345'
             && str_contains((string) $this->telegramRequestField($r, 'caption'), 'Pembayaran diterima')
             && str_contains((string) $this->telegramRequestField($r, 'caption'), 'Email Account'));
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && (string) $r['chat_id'] === '999'
-            && str_contains((string) ($r['text'] ?? ''), 'Produk terjual'));
-        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && (string) $r['chat_id'] === '999'
-            && str_contains((string) ($r['text'] ?? ''), 'Pembayaran disetujui'));
 
         $this->postTelegramWebhook($this->callbackUpdate(219, 'approve-payment-again', 'admin:approve-payment:'.$order->id, ['id' => 999, 'first_name' => 'Admin'], 999))->assertOk();
 

@@ -108,19 +108,20 @@ final class ManualPaymentProofDeliveryPipeline
     public function reconcileSentProjections(int $chunk = 100): int
     {
         $repaired = 0;
+        $effects = app(TelegramOutboundRecoveryPage::class)->load(
+            'sent_manual_payment_proof_projections',
+            TelegramOutboundEffect::query()
+                ->where('source_type', Payment::class)
+                ->where('effect_type', TelegramOutboundEffectType::ManualPaymentProof->value)
+                ->where('state', TelegramOutboundEffectState::Sent->value),
+            max(1, $chunk),
+        );
 
-        TelegramOutboundEffect::query()
-            ->where('source_type', Payment::class)
-            ->where('effect_type', TelegramOutboundEffectType::ManualPaymentProof->value)
-            ->where('state', TelegramOutboundEffectState::Sent->value)
-            ->orderBy('id')
-            ->chunkById(max(1, $chunk), function ($effects) use (&$repaired): void {
-                foreach ($effects as $effect) {
-                    if ($this->synchronizeSentProjection($effect)) {
-                        $repaired++;
-                    }
-                }
-            });
+        foreach ($effects as $effect) {
+            if ($this->synchronizeSentProjection($effect)) {
+                $repaired++;
+            }
+        }
 
         return $repaired;
     }

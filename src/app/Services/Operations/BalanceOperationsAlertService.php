@@ -59,6 +59,10 @@ final class BalanceOperationsAlertService
 
     public const ALERT_ACCOUNT_FROZEN = 'account_frozen';
 
+    public const ALERT_SCHEDULER_RUNTIME_FAILURE = 'scheduler_runtime_failure';
+
+    public const ALERT_TELEGRAM_RECOVERY_RUNTIME_FAILURE = 'telegram_recovery_runtime_failure';
+
     /** @var list<string> */
     public const ALERT_KEYS = [
         self::ALERT_RECONCILIATION_DRIFT,
@@ -72,6 +76,8 @@ final class BalanceOperationsAlertService
         self::ALERT_RESTORE_GATE_OPEN,
         self::ALERT_DELIVERY_PAUSED,
         self::ALERT_ACCOUNT_FROZEN,
+        self::ALERT_SCHEDULER_RUNTIME_FAILURE,
+        self::ALERT_TELEGRAM_RECOVERY_RUNTIME_FAILURE,
     ];
 
     private const TOP_UP_DUE_STATES = ['pending', 'creating', 'creation_unknown'];
@@ -99,8 +105,59 @@ final class BalanceOperationsAlertService
 
     public function evaluate(): BalanceOperationsAlertEvaluation
     {
-        $signals = $this->signals();
+        return $this->reconcileSignals($this->signals());
+    }
 
+    public function reconcileSchedulerRuntime(
+        string $component,
+        bool $healthy,
+        ?string $reason = null,
+    ): BalanceOperationsAlertEvaluation {
+        $key = match ($component) {
+            'scheduler' => self::ALERT_SCHEDULER_RUNTIME_FAILURE,
+            'outbound-recovery' => self::ALERT_TELEGRAM_RECOVERY_RUNTIME_FAILURE,
+            default => throw new \InvalidArgumentException('Unknown runtime alert component.'),
+        };
+        $reasonLabels = [
+            'schedule_exit' => 'schedule:run keluar dengan status non-zero',
+            'cycle_interrupted' => 'proses scheduler berhenti di tengah satu siklus',
+            'oom_kill' => 'cgroup mencatat proses scheduler terkena OOM-kill',
+            'recovery_exit' => 'proses recovery keluar dengan status non-zero',
+            'recovery_timeout' => 'proses recovery melewati batas waktu eksekusi',
+            'recovery_interrupted' => 'proses recovery berhenti saat sweep berjalan',
+        ];
+        $componentReasons = $component === 'scheduler'
+            ? ['schedule_exit', 'cycle_interrupted', 'oom_kill']
+            : ['recovery_exit', 'recovery_timeout', 'recovery_interrupted'];
+
+        if (! $healthy && (! in_array($reason, $componentReasons, true) || ! isset($reasonLabels[$reason]))) {
+            throw new \InvalidArgumentException('Unknown runtime alert reason.');
+        }
+
+        $summary = $healthy
+            ? 'Kondisi runtime pulih.'
+            : sprintf(
+                '%s gagal: %s.',
+                $component === 'scheduler' ? 'Scheduler' : 'Recovery outbound Telegram',
+                $reasonLabels[$reason],
+            );
+
+        return $this->reconcileSignals([[
+            'key' => $key,
+            'active' => ! $healthy,
+            'severity' => BalanceAlertSeverity::Critical,
+            'summary' => $summary,
+            'evidence' => [
+                'component' => $component,
+            ],
+        ]]);
+    }
+
+    /**
+     * @param  list<array{key: string, active: bool, severity: BalanceAlertSeverity, summary: string, evidence: array<string, int|string>}>  $signals
+     */
+    private function reconcileSignals(array $signals): BalanceOperationsAlertEvaluation
+    {
         $totals = ['opened' => 0, 'updated' => 0, 'resolved' => 0, 'notified' => 0, 'delivery_pending' => 0];
         $effects = [];
 

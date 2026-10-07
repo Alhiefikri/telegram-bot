@@ -171,30 +171,27 @@ final class ReceiptDeliveryPipeline
     public function reconcileMissingActionPanels(int $chunk = 100, bool $dispatch = false): int
     {
         $materialized = 0;
+        $effects = app(TelegramOutboundRecoveryPage::class)->load(
+            'missing_receipt_action_panels',
+            TelegramOutboundEffect::query()
+                ->where('source_type', Order::class)
+                ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
+                ->where('template_version', TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION)
+                ->where('sequence', 1)
+                ->where('state', TelegramOutboundEffectState::Sent->value)
+                ->whereNotNull('effect_group_key'),
+            max(1, $chunk),
+        );
 
-        TelegramOutboundEffect::query()
-            ->where('source_type', Order::class)
-            ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
-            ->where('template_version', TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION)
-            ->where('sequence', 1)
-            ->where('state', TelegramOutboundEffectState::Sent->value)
-            ->whereNotNull('effect_group_key')
-            ->orderBy('id')
-            ->chunkById(max(1, $chunk), function ($effects) use (&$materialized, $dispatch): void {
-                foreach ($effects as $first) {
-                    $last = TelegramOutboundEffect::query()
-                        ->where('effect_group_key', $first->effect_group_key)
-                        ->orderByDesc('sequence')
-                        ->first();
-                    if ($last === null) {
-                        continue;
-                    }
-
-                    if ($this->materializeCompletedActionPanel($last, $dispatch) !== null) {
-                        $materialized++;
-                    }
-                }
-            });
+        foreach ($effects as $first) {
+            $last = TelegramOutboundEffect::query()
+                ->where('effect_group_key', $first->effect_group_key)
+                ->orderByDesc('sequence')
+                ->first();
+            if ($last !== null && $this->materializeCompletedActionPanel($last, $dispatch) !== null) {
+                $materialized++;
+            }
+        }
 
         return $materialized;
     }
@@ -210,64 +207,55 @@ final class ReceiptDeliveryPipeline
      */
     public function reconcileCompletedProjections(int $chunk = 100, bool $dispatchCleanup = true): array
     {
-        $repairedOrderIds = [];
-        // Polymorphic source_id is text while Order IDs are UUIDs on PostgreSQL;
-        // collect matching source IDs before querying the typed Order key.
-        $receiptOrderIds = TelegramOutboundEffect::query()
+        $orders = app(TelegramOutboundRecoveryPage::class)->load(
+            'completed_receipt_projections',
+            Order::query()
+                ->whereNull('telegram_receipt_sent_at')
+                ->whereExists(function ($effects): void {
+                    $effects
+                        ->selectRaw('1')
+                        ->from('telegram_outbound_effects as sent_receipt_effects')
+                        ->where('sent_receipt_effects.source_type', Order::class)
+                        ->where('sent_receipt_effects.effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
+                        ->where('sent_receipt_effects.state', TelegramOutboundEffectState::Sent->value)
+                        ->whereNotNull('sent_receipt_effects.effect_group_key')
+                        ->whereRaw('sent_receipt_effects.source_id = CAST(orders.id AS TEXT)');
+                })
+                ->select('id'),
+            max(1, $chunk),
+        );
+        $orderIds = $orders->modelKeys();
+        if ($orderIds === []) {
+            return [];
+        }
+
+        $sentEffects = TelegramOutboundEffect::query()
             ->where('source_type', Order::class)
             ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
             ->where('state', TelegramOutboundEffectState::Sent->value)
             ->whereNotNull('effect_group_key')
-            ->distinct()
-            ->pluck('source_id')
-            ->map(static fn (mixed $id): string => (string) $id)
-            ->all();
+            ->whereIn('source_id', array_map(static fn ($id): string => (string) $id, $orderIds))
+            ->orderBy('source_id')
+            ->orderBy('effect_group_key')
+            ->orderBy('sequence')
+            ->get()
+            ->groupBy(static fn (TelegramOutboundEffect $effect): string => (string) $effect->source_id);
 
-        if ($receiptOrderIds === []) {
-            return $repairedOrderIds;
+        $repairedOrderIds = [];
+        foreach ($orders as $order) {
+            $effectsForOrder = $sentEffects->get((string) $order->getKey());
+            if ($effectsForOrder === null) {
+                continue;
+            }
+
+            foreach ($effectsForOrder->groupBy('effect_group_key') as $group) {
+                $last = $group->last();
+                if ($last !== null && $this->synchronizeSentProjection($last, $order->getKey(), dispatchCleanup: $dispatchCleanup)) {
+                    $repairedOrderIds[] = (string) $order->getKey();
+                    break;
+                }
+            }
         }
-
-        Order::query()
-            ->whereNull('telegram_receipt_sent_at')
-            ->whereIn('id', $receiptOrderIds)
-            ->select('id')
-            ->orderBy('id')
-            ->chunkById(max(1, $chunk), function ($orders) use (&$repairedOrderIds, $dispatchCleanup): void {
-                $orderIds = $orders->modelKeys();
-                if ($orderIds === []) {
-                    return;
-                }
-
-                $sentEffects = TelegramOutboundEffect::query()
-                    ->where('source_type', Order::class)
-                    ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
-                    ->where('state', TelegramOutboundEffectState::Sent->value)
-                    ->whereNotNull('effect_group_key')
-                    ->whereIn('source_id', array_map(
-                        static fn ($id): string => (string) $id,
-                        $orderIds,
-                    ))
-                    ->orderBy('source_id')
-                    ->orderBy('effect_group_key')
-                    ->orderBy('sequence')
-                    ->get()
-                    ->groupBy(fn (TelegramOutboundEffect $effect): string => (string) $effect->source_id);
-
-                foreach ($orders as $order) {
-                    $effectsForOrder = $sentEffects->get((string) $order->getKey());
-                    if ($effectsForOrder === null) {
-                        continue;
-                    }
-
-                    foreach ($effectsForOrder->groupBy('effect_group_key') as $group) {
-                        $last = $group->last();
-                        if ($last !== null && $this->synchronizeSentProjection($last, $order->getKey(), dispatchCleanup: $dispatchCleanup)) {
-                            $repairedOrderIds[] = (string) $order->getKey();
-                            break;
-                        }
-                    }
-                }
-            });
 
         return $repairedOrderIds;
     }

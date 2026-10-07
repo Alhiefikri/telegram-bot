@@ -178,24 +178,25 @@ final class CheckoutInstructionDeliveryPipeline
     public function reconcileSentProjections(int $chunk = 100): int
     {
         $repaired = 0;
+        $effects = app(TelegramOutboundRecoveryPage::class)->load(
+            'sent_checkout_instruction_projections',
+            TelegramOutboundEffect::query()
+                ->where('source_type', Order::class)
+                ->whereIn('effect_type', self::EFFECT_TYPES)
+                ->where('state', TelegramOutboundEffectState::Sent->value)
+                ->whereNotNull('telegram_message_id'),
+            max(1, $chunk),
+        );
 
-        TelegramOutboundEffect::query()
-            ->where('source_type', Order::class)
-            ->whereIn('effect_type', self::EFFECT_TYPES)
-            ->where('state', TelegramOutboundEffectState::Sent->value)
-            ->whereNotNull('telegram_message_id')
-            ->orderBy('id')
-            ->chunkById(max(1, $chunk), function ($effects) use (&$repaired): void {
-                foreach ($effects as $effect) {
-                    if ($this->synchronizeSentProjection(
-                        $effect,
-                        (string) $effect->telegram_message_id,
-                        $effect->sent_at ?? now(),
-                    )) {
-                        $repaired++;
-                    }
-                }
-            });
+        foreach ($effects as $effect) {
+            if ($this->synchronizeSentProjection(
+                $effect,
+                (string) $effect->telegram_message_id,
+                $effect->sent_at ?? now(),
+            )) {
+                $repaired++;
+            }
+        }
 
         return $repaired;
     }

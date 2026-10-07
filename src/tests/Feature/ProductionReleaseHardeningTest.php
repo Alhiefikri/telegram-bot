@@ -1166,6 +1166,28 @@ SH);
             ->expectsOutputToContain('Scheduler heartbeat: stale')
             ->assertFailed();
 
+        $recoveryHeartbeat = storage_path('framework/telegram-outbound-recovery-heartbeat');
+        @unlink($recoveryHeartbeat);
+
+        $this->artisan('ops:health', ['--outbound-recovery-heartbeat' => 180])
+            ->expectsOutputToContain('Outbound recovery heartbeat: missing')
+            ->assertFailed();
+
+        file_put_contents($recoveryHeartbeat, now()->toISOString());
+        touch($recoveryHeartbeat, time());
+
+        $this->artisan('ops:health', ['--outbound-recovery-heartbeat' => 180])
+            ->expectsOutputToContain('Outbound recovery heartbeat: ok')
+            ->assertSuccessful();
+
+        touch($recoveryHeartbeat, time() - 181);
+
+        $this->artisan('ops:health', ['--outbound-recovery-heartbeat' => 180])
+            ->expectsOutputToContain('Outbound recovery heartbeat: stale')
+            ->assertFailed();
+
+        @unlink($recoveryHeartbeat);
+
         @unlink($heartbeat);
     }
 

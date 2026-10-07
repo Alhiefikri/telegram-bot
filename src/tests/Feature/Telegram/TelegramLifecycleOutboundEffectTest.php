@@ -253,7 +253,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
 
         Queue::fake();
 
-        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])
             ->assertSuccessful();
 
         Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
@@ -523,7 +523,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         Queue::fake();
         Http::preventStrayRequests();
 
-        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])
             ->assertSuccessful();
 
         $repairedPending = $pendingOrder->fresh();
@@ -545,7 +545,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         Queue::assertNotPushed(SendAdminOrderExpiredNotification::class);
 
         $pendingNotifiedAt = $repairedPending->admin_pending_order_notified_at;
-        $this->artisan('telegram:recover-outbound', ['--chunk' => 1])
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])
             ->assertSuccessful();
         $this->assertTrue($pendingNotifiedAt->equalTo($pendingOrder->fresh()->admin_pending_order_notified_at));
         Queue::assertNotPushed(

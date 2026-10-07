@@ -169,6 +169,14 @@ done
 command=${1:-}
 shift || true
 case "$command" in
+  config)
+    if [ "${1:-}" = "--services" ]; then
+      printf 'app\nscheduler\n'
+      if printf '%s' "$current_image" | grep -q bbbbbbbb; then
+        printf 'outbound-recovery\n'
+      fi
+    fi
+    ;;
   ps)
     if [ "${1:-}" = "-q" ]; then printf '%s-container\n' "${2:-app}"; fi
     ;;
@@ -227,6 +235,7 @@ case "$command" in
       exit 1
     fi
     if printf '%s' "$*" | grep -q 'ops:health'; then
+      if [ "$scenario" = "outbound-recovery-health-failure" ] && printf '%s' "$current_image" | grep -q bbbbbbbb && printf '%s' "$*" | grep -q -- '--outbound-recovery-heartbeat'; then exit 1; fi
       if { [ "$scenario" = "application-health-failure" ] || [ "$scenario" = "legacy-bootstrap-health-failure" ] || [ "$scenario" = "reconcile-failure" ] || [ "$scenario" = "redis-backlog-rollback" ]; } && printf '%s' "$current_image" | grep -q bbbbbbbb; then exit 1; fi
       if [ "$scenario" = "rollback-failure" ]; then exit 1; fi
     fi
@@ -331,7 +340,7 @@ SCRIPT
       grep -q 'requested_stock_item_ids' "$artifacts/credential-identity-conflicts.json" || fail "sanitized conflict diagnostic artifact is missing"
       ! grep -q 'compose .* up -d --no-build --remove-orphans' "$workspace/commands.log" || fail "identity backfill failure cut over application services"
       ;;
-    application-health-failure|legacy-bootstrap-health-failure)
+    application-health-failure|legacy-bootstrap-health-failure|outbound-recovery-health-failure)
       grep -q "APP_IMAGE=$recorded_previous_image" "$workspace/commands.log" || fail "health failure did not restore previous image"
       grep -q 'rollback succeeded' "$workspace/stderr" || fail "successful rollback outcome was not explicit"
       ;;
@@ -405,6 +414,7 @@ run_scenario migration-failure 1 migration-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario identity-backfill-failure 1 credential-identity-backfill-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario identity-backfill-key-failure 1 credential-identity-backfill-failed-no-cutover "$PREVIOUS_IMAGE"
 run_scenario application-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
+run_scenario outbound-recovery-health-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario use-persisted-fingerprint-key 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario rollback-failure 21 deploy-failed-rollback-failed "$PREVIOUS_IMAGE"
 run_scenario external-smoke-rollback 0 external-smoke-failed-rollback-succeeded "$PREVIOUS_IMAGE"

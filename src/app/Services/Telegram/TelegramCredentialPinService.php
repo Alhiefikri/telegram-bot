@@ -65,41 +65,31 @@ final class TelegramCredentialPinService
      */
     public function reconcileMissingPins(int $chunk = 100): int
     {
+        $effects = app(TelegramOutboundRecoveryPage::class)->load(
+            'missing_credential_pins',
+            TelegramOutboundEffect::query()
+                ->where('source_type', Order::class)
+                ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
+                ->where('state', TelegramOutboundEffectState::Sent->value)
+                ->whereNotNull('telegram_message_id')
+                ->whereJsonContains('outcome_metadata', ['contains_credentials' => true]),
+            max(1, $chunk),
+        );
+        $orders = Order::query()
+            ->with('customer')
+            ->whereIn('id', $effects->pluck('source_id')->map(static fn (mixed $id): string => (string) $id)->all())
+            ->whereNull('telegram_credential_pinned_at')
+            ->whereNull('telegram_credential_message_id')
+            ->get()
+            ->keyBy(static fn (Order $order): string => (string) $order->getKey());
         $pinned = 0;
 
-        TelegramOutboundEffect::query()
-            ->where('source_type', Order::class)
-            ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
-            ->where('state', TelegramOutboundEffectState::Sent->value)
-            ->whereNotNull('telegram_message_id')
-            ->whereJsonContains('outcome_metadata', ['contains_credentials' => true])
-            ->orderBy('id')
-            ->chunkById(max(1, $chunk), function ($effects) use (&$pinned): void {
-                $orderIds = $effects
-                    ->pluck('source_id')
-                    ->map(static fn (mixed $id): string => (string) $id)
-                    ->unique()
-                    ->values()
-                    ->all();
-                if ($orderIds === []) {
-                    return;
-                }
-
-                $orders = Order::query()
-                    ->with('customer')
-                    ->whereIn('id', $orderIds)
-                    ->whereNull('telegram_credential_pinned_at')
-                    ->whereNull('telegram_credential_message_id')
-                    ->get()
-                    ->keyBy(static fn (Order $order): string => (string) $order->getKey());
-
-                foreach ($effects as $effect) {
-                    $order = $orders->get((string) $effect->source_id);
-                    if ($order instanceof Order && $this->pin($order, $effect)) {
-                        $pinned++;
-                    }
-                }
-            });
+        foreach ($effects as $effect) {
+            $order = $orders->get((string) $effect->source_id);
+            if ($order instanceof Order && $this->pin($order, $effect)) {
+                $pinned++;
+            }
+        }
 
         return $pinned;
     }

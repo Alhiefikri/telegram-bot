@@ -127,31 +127,32 @@ final class AdminOrderNotificationDeliveryPipeline
     public function reconcileSentProjections(int $chunk = 100): int
     {
         $repaired = 0;
+        $effects = app(TelegramOutboundRecoveryPage::class)->load(
+            'sent_admin_order_projections',
+            TelegramOutboundEffect::query()
+                ->where('source_type', Order::class)
+                ->whereIn('effect_type', self::EFFECT_TYPES)
+                ->where('state', TelegramOutboundEffectState::Sent->value)
+                ->whereNotNull('telegram_message_id')
+                // An explicit resend is the only sent version allowed to repair.
+                ->whereNotExists(function ($newer): void {
+                    $newer
+                        ->selectRaw('1')
+                        ->from('telegram_outbound_effects as newer_admin_effects')
+                        ->whereColumn('newer_admin_effects.source_type', 'telegram_outbound_effects.source_type')
+                        ->whereColumn('newer_admin_effects.source_id', 'telegram_outbound_effects.source_id')
+                        ->whereColumn('newer_admin_effects.effect_type', 'telegram_outbound_effects.effect_type')
+                        ->where('newer_admin_effects.state', TelegramOutboundEffectState::Sent->value)
+                        ->whereColumn('newer_admin_effects.sequence', '>', 'telegram_outbound_effects.sequence');
+                }),
+            max(1, $chunk),
+        );
 
-        TelegramOutboundEffect::query()
-            ->where('source_type', Order::class)
-            ->whereIn('effect_type', self::EFFECT_TYPES)
-            ->where('state', TelegramOutboundEffectState::Sent->value)
-            ->whereNotNull('telegram_message_id')
-            // An explicit resend is the only sent version allowed to repair.
-            ->whereNotExists(function ($newer): void {
-                $newer
-                    ->selectRaw('1')
-                    ->from('telegram_outbound_effects as newer_admin_effects')
-                    ->whereColumn('newer_admin_effects.source_type', 'telegram_outbound_effects.source_type')
-                    ->whereColumn('newer_admin_effects.source_id', 'telegram_outbound_effects.source_id')
-                    ->whereColumn('newer_admin_effects.effect_type', 'telegram_outbound_effects.effect_type')
-                    ->where('newer_admin_effects.state', TelegramOutboundEffectState::Sent->value)
-                    ->whereColumn('newer_admin_effects.sequence', '>', 'telegram_outbound_effects.sequence');
-            })
-            ->orderBy('id')
-            ->chunkById(max(1, $chunk), function ($effects) use (&$repaired): void {
-                foreach ($effects as $effect) {
-                    if ($this->synchronizeSentProjection($effect, preservePendingCleanup: true)) {
-                        $repaired++;
-                    }
-                }
-            });
+        foreach ($effects as $effect) {
+            if ($this->synchronizeSentProjection($effect, preservePendingCleanup: true)) {
+                $repaired++;
+            }
+        }
 
         return $repaired;
     }

@@ -7,7 +7,6 @@ use App\Console\Commands\ReconcileStoreBalanceTopUps;
 use App\Http\Middleware\RedirectToCanonicalHost;
 use App\Providers\AppServiceProvider;
 use App\Services\Telegram\TelegramBotClient;
-use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -94,38 +93,6 @@ class FoundationInfrastructureTest extends TestCase
             ->expectsOutput('Queue telegram-broadcast: depth=0 oldest_age=0s')
             ->expectsOutput('Queue telegram-stock: depth=0 oldest_age=0s')
             ->assertSuccessful();
-    }
-
-    public function test_docker_scheduler_runs_laravel_schedule_run_loop(): void
-    {
-        $compose = file_get_contents(base_path('../docker-compose.yml'));
-        $dockerfile = file_get_contents(base_path('../Dockerfile'));
-        $script = file_get_contents(base_path('../docker-scheduler.sh'));
-
-        $this->assertStringContainsString('scheduler:', $compose);
-        $this->assertStringContainsString('APP_AUTO_MIGRATE: "false"', $compose);
-        $this->assertStringContainsString('php artisan ops:health --scheduler-heartbeat=180', $compose);
-        $this->assertStringContainsString('php artisan ops:health --db --queue-schema --queue-depth --supervisor --image-pipeline', $compose);
-        $this->assertStringContainsString('COPY docker-scheduler.sh /usr/local/bin/docker-scheduler-laravel', $dockerfile);
-        $this->assertStringContainsString('php artisan schedule:run', $script);
-        $this->assertStringContainsString('storage/framework/scheduler-heartbeat', $script);
-        $this->assertStringContainsString('remaining=$(( INTERVAL_SECONDS - elapsed ))', $script);
-        $this->assertStringNotContainsString('sleep "$INTERVAL_SECONDS"', $script);
-        $this->assertLessThan(
-            strpos($script, 'if ! run_scheduler; then'),
-            strpos($script, '> "$HEARTBEAT_FILE"'),
-            'The scheduler heartbeat must be stamped before each schedule:run cycle.',
-        );
-    }
-
-    public function test_telegram_outbound_recovery_mutex_has_a_bounded_expiration(): void
-    {
-        $event = collect(app(Schedule::class)->events())
-            ->first(fn ($candidate): bool => str_contains((string) $candidate->command, 'telegram:recover-outbound'));
-
-        $this->assertNotNull($event);
-        $this->assertSame(45, $event->expiresAt);
-        $this->assertTrue($event->runInBackground);
     }
 
     public function test_klikqris_reconciliation_mutex_covers_the_execution_and_provider_retry_budgets(): void

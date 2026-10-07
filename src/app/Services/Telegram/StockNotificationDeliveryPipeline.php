@@ -287,39 +287,40 @@ class StockNotificationDeliveryPipeline
 
     public function reconcile(int $chunk = 100): int
     {
-        $limit = max(1, $chunk);
-        $ledgerRecipientIds = $this->ledger()->readyToDispatchQuery(effectType: TelegramOutboundEffectType::StockNotificationRecipient->value)
-            ->where('source_type', StockNotificationRecipient::class)
-            ->orderBy('id')
-            ->limit($limit)
-            ->pluck('source_id');
+        $pages = app(TelegramOutboundRecoveryPage::class);
+        $ledgerRecipientIds = $pages->load(
+            'stock_ready_recipients',
+            $this->ledger()->readyToDispatchQuery(effectType: TelegramOutboundEffectType::StockNotificationRecipient->value)
+                ->where('source_type', StockNotificationRecipient::class),
+            $chunk,
+        )->pluck('source_id');
         $recipientMovementIds = StockNotificationRecipient::query()
             ->whereIn('id', $ledgerRecipientIds)
             ->with('event:id,inventory_movement_id')
             ->get()
             ->pluck('event.inventory_movement_id')->filter()->unique()->values();
-        $unmaterializedMovementIds = StockNotificationRecipient::query()
-            ->whereNull('sent_at')
-            ->whereNull('terminal_failed_at')
-            ->where('attempts', '<', self::MAX_ATTEMPTS)
-            ->whereNotExists(function ($effects): void {
-                $effects
-                    ->selectRaw('1')
-                    ->from('telegram_outbound_effects')
-                    ->where('telegram_outbound_effects.source_type', StockNotificationRecipient::class)
-                    ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
-                    ->whereRaw('telegram_outbound_effects.source_id = CAST(stock_notification_recipients.id AS TEXT)');
-            })
-            ->with('event:id,inventory_movement_id')
-            ->orderBy('id')
-            ->limit($limit)
-            ->get()
-            ->pluck('event.inventory_movement_id')->filter()->unique()->values();
-        $unmaterializedEventMovementIds = StockNotificationEvent::query()
-            ->whereNull('recipients_snapshotted_at')
-            ->orderBy('id')
-            ->limit($limit)
-            ->pluck('inventory_movement_id');
+        $unmaterializedMovementIds = $pages->load(
+            'stock_unmaterialized_recipients',
+            StockNotificationRecipient::query()
+                ->whereNull('sent_at')
+                ->whereNull('terminal_failed_at')
+                ->where('attempts', '<', self::MAX_ATTEMPTS)
+                ->whereNotExists(function ($effects): void {
+                    $effects
+                        ->selectRaw('1')
+                        ->from('telegram_outbound_effects')
+                        ->where('telegram_outbound_effects.source_type', StockNotificationRecipient::class)
+                        ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
+                        ->whereRaw('telegram_outbound_effects.source_id = CAST(stock_notification_recipients.id AS TEXT)');
+                })
+                ->with('event:id,inventory_movement_id'),
+            $chunk,
+        )->pluck('event.inventory_movement_id')->filter()->unique()->values();
+        $unmaterializedEventMovementIds = $pages->load(
+            'stock_unmaterialized_events',
+            StockNotificationEvent::query()->whereNull('recipients_snapshotted_at'),
+            $chunk,
+        )->pluck('inventory_movement_id');
 
         $movementIds = $recipientMovementIds
             ->merge($unmaterializedMovementIds)

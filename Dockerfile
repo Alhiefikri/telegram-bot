@@ -79,7 +79,7 @@ RUN mkdir -p /opt/lhiestore-public-storefront \
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint-laravel
 COPY docker-scheduler.sh /usr/local/bin/docker-scheduler-laravel
-
+COPY docker-outbound-recovery.sh /usr/local/bin/docker-outbound-recovery-laravel
 RUN rm -rf public/storage \
     && rm -rf database/seeders database/factories tests resources/css resources/js \
     && rm -f .env.example README.md package.json package-lock.json phpunit.xml phpunit.concurrency.xml vite.config.js \
@@ -87,6 +87,7 @@ RUN rm -rf public/storage \
     && mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views storage/app/private storage/app/public bootstrap/cache \
     && chmod +x /usr/local/bin/docker-entrypoint-laravel \
     && chmod +x /usr/local/bin/docker-scheduler-laravel \
+    && chmod +x /usr/local/bin/docker-outbound-recovery-laravel \
     && chown -R laravel:laravel /var/www/html \
     && chmod -R ug+rwX storage bootstrap/cache
 

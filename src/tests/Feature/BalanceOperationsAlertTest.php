@@ -79,6 +79,49 @@ final class BalanceOperationsAlertTest extends TestCase
         $this->assertCount(1, $effects);
     }
 
+    public function test_runtime_failure_notifies_once_per_episode_and_resolution(): void
+    {
+        $first = $this->service()->reconcileSchedulerRuntime('outbound-recovery', false, 'recovery_timeout');
+        $repeat = $this->service()->reconcileSchedulerRuntime('outbound-recovery', false, 'recovery_exit');
+
+        $this->assertSame(1, $first->opened);
+        $this->assertSame(1, $first->notified);
+        $this->assertSame(1, $repeat->updated);
+        $this->assertSame(0, $repeat->notified);
+        $this->assertCount(1, $this->alertEffects());
+
+        $episode = BalanceOperationsAlertEpisode::query()->sole();
+        $this->assertSame(BalanceOperationsAlertService::ALERT_TELEGRAM_RECOVERY_RUNTIME_FAILURE, $episode->alert_key);
+        $this->assertSame(BalanceAlertState::Open, $episode->state);
+        $this->assertSame(2, $episode->occurrences);
+
+        $resolved = $this->service()->reconcileSchedulerRuntime('outbound-recovery', true);
+
+        $this->assertSame(1, $resolved->resolved);
+        $this->assertSame(1, $resolved->notified);
+        $this->assertSame(BalanceAlertState::Resolved, $episode->fresh()->state);
+        $this->assertCount(2, $this->alertEffects());
+        $resolution = $this->alertEffects()->first(
+            fn (TelegramOutboundEffect $effect): bool => ($effect->outcome_metadata['alert_state'] ?? null) === 'resolved',
+        );
+        $this->assertNotNull($resolution);
+        $this->assertStringStartsWith('[SELESAI]', $this->messageOf($resolution));
+    }
+
+    public function test_scheduler_runtime_alert_command_opens_alert_for_scheduler_oom(): void
+    {
+        $this->artisan('ops:scheduler-runtime-alert', [
+            'component' => 'scheduler',
+            'state' => 'failed',
+            '--reason' => 'oom_kill',
+        ])->assertSuccessful();
+
+        $episode = BalanceOperationsAlertEpisode::query()->sole();
+        $this->assertSame(BalanceOperationsAlertService::ALERT_SCHEDULER_RUNTIME_FAILURE, $episode->alert_key);
+        $this->assertSame(BalanceAlertState::Open, $episode->state);
+        $this->assertSame(1, $this->alertEffects()->count());
+    }
+
     public function test_changed_fingerprint_materializes_a_second_effect(): void
     {
         $this->reviewReceipt();

@@ -197,36 +197,36 @@ final class AdminBroadcastDeliveryPipeline
     public function reconcileSentProjections(int $chunk = 100): int
     {
         $repaired = 0;
+        $effects = app(TelegramOutboundRecoveryPage::class)->load(
+            'sent_admin_broadcast_projections',
+            TelegramOutboundEffect::query()
+                ->where('source_type', TelegramBroadcastRecipient::class)
+                ->where('effect_type', TelegramOutboundEffectType::AdminBroadcastRecipient->value)
+                ->where('state', TelegramOutboundEffectState::Sent->value),
+            max(1, $chunk),
+        );
+        $broadcastIds = [];
 
-        TelegramOutboundEffect::query()
-            ->where('source_type', TelegramBroadcastRecipient::class)
-            ->where('effect_type', TelegramOutboundEffectType::AdminBroadcastRecipient->value)
-            ->where('state', TelegramOutboundEffectState::Sent->value)
-            ->orderBy('id')
-            ->chunkById(max(1, $chunk), function ($effects) use (&$repaired): void {
-                $broadcastIds = [];
+        foreach ($effects as $effect) {
+            $recipient = TelegramBroadcastRecipient::query()
+                ->whereKey($effect->source_id)
+                ->first(['id', 'broadcast_id']);
+            if ($recipient === null) {
+                continue;
+            }
 
-                foreach ($effects as $effect) {
-                    $recipient = TelegramBroadcastRecipient::query()
-                        ->whereKey($effect->source_id)
-                        ->first(['id', 'broadcast_id']);
-                    if ($recipient === null) {
-                        continue;
-                    }
+            if ($this->synchronizeSentProjection($effect)) {
+                $repaired++;
+            }
+            $broadcastIds[(int) $recipient->broadcast_id] = true;
+        }
 
-                    if ($this->synchronizeSentProjection($effect)) {
-                        $repaired++;
-                    }
-                    $broadcastIds[(int) $recipient->broadcast_id] = true;
-                }
-
-                foreach (array_keys($broadcastIds) as $broadcastId) {
-                    DB::transaction(
-                        fn (): bool => $this->syncAdminBroadcastProjection((int) $broadcastId),
-                        5,
-                    );
-                }
-            });
+        foreach (array_keys($broadcastIds) as $broadcastId) {
+            DB::transaction(
+                fn (): bool => $this->syncAdminBroadcastProjection((int) $broadcastId),
+                5,
+            );
+        }
 
         return $repaired;
     }

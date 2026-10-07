@@ -71,15 +71,32 @@ artifacts after the contract migration.
 
 ## Runtime recovery contract
 
-The scheduler runs `telegram:recover-outbound --queue=notifications` every
-minute with a bounded 10-minute overlap mutex. Production cutover also runs
-`schedule:clear-cache`, so a mutex left by the previous scheduler cannot
-suppress recovery for Laravel's default 24-hour expiry. Run the command
-manually after an outage or queue-worker interruption:
+The dedicated `outbound-recovery` Compose service owns this sweep; the
+scheduler does not launch it with `runInBackground`. It starts one child every
+60 seconds with `--chunk=25 --queue=notifications --max-items=25
+--max-seconds=35`. `max-items` bounds each recovery facet, and each facet uses
+a rotating keyset cursor for fairness; the cursor is only a cache hint, so a
+Redis restart cannot lose work. PostgreSQL statements have a 5-second session
+timeout. At 45 seconds the supervisor sends SIGTERM and escalates to SIGKILL
+after at most 2 seconds, keeping the child lifetime below the 60-second cadence.
+Telegram API requests retain their explicit 10-second request and 3-second connect timeouts.
+
+For an isolated one-shot run, use the bounded command:
 
 ```sh
-php artisan telegram:recover-outbound --chunk=100 --queue=notifications
+php artisan telegram:recover-outbound --chunk=25 --queue=notifications --max-items=25 --max-seconds=35
 ```
+
+The command requires `pcntl` for its hard 35-second alarm. Prefer the
+supervised container for production operation so process-age/RSS observation,
+the external deadline, heartbeat, and runtime alerts remain active.
+
+The worker writes `storage/framework/telegram-outbound-recovery-heartbeat`
+only after a successful sweep. The `ops:health --outbound-recovery-heartbeat=180`
+check fails when this heartbeat is missing or stale. Each supervised child logs
+its PID, age, and sampled/peak RSS; the supervisor sends SIGTERM at 45 seconds
+and escalates to SIGKILL within 2 seconds. Do not run a second worker against
+the same storage concurrently.
 
 The command first asks `TelegramOutboundEffectRecovery` to fence expired
 `sending` leases as `unknown`. It then asks `ReceiptDeliveryPipeline` to
@@ -136,6 +153,52 @@ An `unknown` row is an Ambiguous Telegram Delivery. Recovery must never reset
 it to `pending` or silently send it again. `manual_review` is likewise not
 dispatchable. A definite `failed` row is retried only when the family policy
 allows it and its next-attempt time is due.
+
+### Runtime supervision and alerts
+
+The scheduler wrapper updates `storage/framework/scheduler-heartbeat` only
+after a successful `schedule:run`. A non-zero exit opens the durable
+`scheduler_runtime_failure` episode; recovery resolves it through the same
+Telegram Outbound Effect path. The wrapper also compares cgroup v2
+`memory.events` OOM-kill counts and reports new kills through that episode.
+The recovery container reports interrupted, failed, or timed-out child runs
+through `telegram_recovery_runtime_failure`; repeated failures dedupe within
+the open episode.
+
+The production release gate verifies the recovery container's image and waits
+for its successful-sweep heartbeat before accepting a candidate. Rollback to a
+release without this service retains the older health contract. A Redis-to-
+database rollback stops the recovery producer alongside app and scheduler
+before checking that the Redis queue is empty.
+
+Local Docker validation for issue #570 used an isolated PostgreSQL/Redis stack
+with 2,000 pending effects and the actual scheduler/recovery entrypoints at
+384 MiB and 0.35 CPU each. Four recovery sweeps finished successfully in
+3.646–4.924 seconds and enqueued 100 notifications (25 per sweep). Over a
+185-second observation window, sampled memory peaked at 55.87 MiB for recovery
+and 307.5 MiB for scheduler; both containers reported `OOMKilled=false` and
+`RestartCount=0`. The scheduler fixture lacked Pakasir credentials and logged
+Pakasir reconciliation failures, so this is not evidence of a fully configured
+production scheduler. A separate runtime smoke verified one durable alert
+effect across repeated OOM/non-zero signals, SIGKILL escalation for a child
+ignoring SIGTERM, and failed health checks for both stale heartbeats.
+
+Both liveness checks can be exercised together:
+
+```sh
+php artisan ops:health --scheduler-heartbeat=180 --outbound-recovery-heartbeat=180
+```
+
+After a production rollout, preserve before/after evidence from the actual
+containers. Check that scheduler and recovery logs contain no recurring
+`Killed`, non-zero scheduler exits, or over-deadline child terminations, and
+that inspect reports no scheduler OOM kill:
+
+```sh
+docker compose logs --since=1h scheduler outbound-recovery
+docker inspect $(docker compose ps -q scheduler outbound-recovery) \
+  --format '{{.Name}} OOMKilled={{.State.OOMKilled}} Memory={{.HostConfig.Memory}} RestartCount={{.RestartCount}}'
+```
 
 ### Admin Broadcast handoff
 

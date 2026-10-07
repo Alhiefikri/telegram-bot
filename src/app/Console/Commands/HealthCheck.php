@@ -26,7 +26,8 @@ class HealthCheck extends Command
         {--image-pipeline : Check GD capabilities used by invoice rendering and product image processing.}
         {--bsc : Check enabled BSC readiness and pending verification backlog.}
         {--sakurupiah : Check enabled Sakurupiah readiness, schedule, and bounded verification backlog.}
-        {--scheduler-heartbeat= : Maximum scheduler heartbeat age in seconds.}';
+        {--scheduler-heartbeat= : Maximum scheduler heartbeat age in seconds.}
+        {--outbound-recovery-heartbeat= : Maximum outbound recovery heartbeat age in seconds.}';
 
     protected $description = 'Check operational health for database, queue backends, supervisor-managed processes, and scheduler liveness.';
 
@@ -175,27 +176,47 @@ class HealthCheck extends Command
         }
 
         if ($this->option('scheduler-heartbeat') !== null) {
-            $maxAgeSeconds = (int) $this->option('scheduler-heartbeat');
-            $heartbeatPath = storage_path('framework/scheduler-heartbeat');
+            $healthy = $this->checkHeartbeat(
+                'Scheduler',
+                storage_path('framework/scheduler-heartbeat'),
+                (int) $this->option('scheduler-heartbeat'),
+            ) && $healthy;
+        }
 
-            if ($maxAgeSeconds <= 0) {
-                $healthy = false;
-                $this->error('Scheduler heartbeat: max age must be greater than 0 seconds');
-            } elseif (! is_file($heartbeatPath)) {
-                $healthy = false;
-                $this->error('Scheduler heartbeat: missing');
-            } else {
-                $ageSeconds = time() - filemtime($heartbeatPath);
-
-                if ($ageSeconds > $maxAgeSeconds) {
-                    $healthy = false;
-                    $this->error("Scheduler heartbeat: stale ({$ageSeconds}s old, max {$maxAgeSeconds}s)");
-                } else {
-                    $this->info("Scheduler heartbeat: ok ({$ageSeconds}s old)");
-                }
-            }
+        if ($this->option('outbound-recovery-heartbeat') !== null) {
+            $healthy = $this->checkHeartbeat(
+                'Outbound recovery',
+                storage_path('framework/telegram-outbound-recovery-heartbeat'),
+                (int) $this->option('outbound-recovery-heartbeat'),
+            ) && $healthy;
         }
 
         return $healthy ? self::SUCCESS : self::FAILURE;
+    }
+
+    private function checkHeartbeat(string $name, string $path, int $maxAgeSeconds): bool
+    {
+        if ($maxAgeSeconds <= 0) {
+            $this->error("{$name} heartbeat: max age must be greater than 0 seconds");
+
+            return false;
+        }
+
+        if (! is_file($path)) {
+            $this->error("{$name} heartbeat: missing");
+
+            return false;
+        }
+
+        $ageSeconds = time() - filemtime($path);
+        if ($ageSeconds > $maxAgeSeconds) {
+            $this->error("{$name} heartbeat: stale ({$ageSeconds}s old, max {$maxAgeSeconds}s)");
+
+            return false;
+        }
+
+        $this->info("{$name} heartbeat: ok ({$ageSeconds}s old)");
+
+        return true;
     }
 }

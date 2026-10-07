@@ -108,12 +108,11 @@ final class TelegramOutboundEffectRecovery
         return $this->checkoutInstructions->reconcileSentProjections($chunk);
     }
 
-    public function recoverExpiredLeases(?CarbonInterface $before = null): int
+    public function recoverExpiredLeases(?CarbonInterface $before = null, int $limit = 100): int
     {
         $at = $before ?? now();
-        $count = $this->ledger->recoverExpiredLeases($at);
-
-        TelegramOutboundEffect::query()
+        $count = $this->ledger->recoverExpiredLeases($at, $limit);
+        $leaseEffects = TelegramOutboundEffect::query()
             ->where('state', TelegramOutboundEffectState::Unknown->value)
             ->where('last_error_code', 'lease_expired')
             ->where(function ($query) use ($at): void {
@@ -125,8 +124,9 @@ final class TelegramOutboundEffectRecovery
                 TelegramOutboundEffectType::StockNotificationRecipient->value,
                 TelegramOutboundEffectType::PriceChangeNotificationRecipient->value,
                 TelegramOutboundEffectType::PriceChangeStoreChannel->value,
-            ])
-            ->get()
+            ]);
+        app(TelegramOutboundRecoveryPage::class)
+            ->load('expired_lease_projections', $leaseEffects, $limit)
             ->each(function (TelegramOutboundEffect $effect): void {
                 if (in_array($effect->effect_type, [
                     TelegramOutboundEffectType::PriceChangeNotificationRecipient->value,

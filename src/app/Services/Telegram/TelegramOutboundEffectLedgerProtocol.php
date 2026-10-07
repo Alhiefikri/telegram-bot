@@ -264,15 +264,18 @@ class TelegramOutboundEffectLedgerProtocol
         });
     }
 
-    public function recoverExpiredLeases(?CarbonInterface $before = null): int
+    public function recoverExpiredLeases(?CarbonInterface $before = null, int $limit = 100): int
     {
         $before ??= now();
+        $limit = max(1, min(1000, $limit));
 
-        return DB::transaction(function () use ($before): int {
+        return DB::transaction(function () use ($before, $limit): int {
             $effects = TelegramOutboundEffect::query()
                 ->where('state', TelegramOutboundEffectState::Sending->value)
                 ->whereNotNull('lease_until')
                 ->where('lease_until', '<=', $before)
+                ->orderBy('id')
+                ->limit($limit)
                 ->lockForUpdate()
                 ->get();
 

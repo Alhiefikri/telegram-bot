@@ -1021,22 +1021,32 @@ Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php)
 - `pakasir:reconcile --chunk=100` tiap menit untuk payment legacy;
 - `binance:reconcile --chunk=100` tiap menit;
 - `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;
-- recovery Telegram updates/outbound and payment proofs tiap menit; `telegram:recover-outbound` mengubah lease kadaluarsa menjadi `unknown`, memperbaiki projection sent manual payment-proof/receipt/Sales Proof yang marker atau read projection-nya hilang, menyinkronkan projection recipient Stock Notification dan aggregate Inventory Movement untuk lease yang dipagari menjadi `unknown`, lalu hanya mengirim effect `pending`/`failed` yang dispatchable; recipient `unknown` tetap tidak dikirim ulang dan tidak menyelesaikan movement.
+- Telegram updates/payment-proof recovery and `telegram:reconcile-stock-notifications --chunk=25` remain scheduler work; the heavier `telegram:recover-outbound` ledger/projection sweep is owned by a dedicated supervised container.
 
-- `telegram:recover-outbound` also repairs sent checkout-instruction effects
-  whose Order notification marker is null before the cleanup scan, copying
-  ledger metadata and never redispatching the already-sent effect. Unknown and
-  manual-review effects remain outside this repair.
+- The dedicated worker's bounded `telegram:recover-outbound` sweep also
+  repairs sent checkout-instruction effects whose Order notification marker is
+  null before the cleanup scan, copying ledger metadata and never
+  redispatching the already-sent effect. Unknown and manual-review effects
+  remain outside this repair.
 
-- `telegram:recover-outbound` also repairs sent Admin Order-notification
-  effects whose Order projection is stale, restoring safe pending metadata and
-  pending/paid/expired timestamps. Only the latest sent version repairs a
-  source/type projection; sent effects are never redispatched.
+- The same sweep repairs sent Admin Order-notification effects whose Order
+  projection is stale, restoring safe pending metadata and pending/paid/expired
+  timestamps. Only the latest sent version repairs a source/type projection;
+  sent effects are never redispatched.
 - `usdt-balance:reconcile --limit=500 --json` dan `usdt-balance:aggregate-accounting --limit=2000 --json` tiap lima menit (mutex 10 menit), `ops:balance-alerts --json` tiap lima menit, dan `usdt-balance:metrics --prune-days=30 --json` harian (#558). Rekonsiliasi terjadwal adalah jendela bounded per facet; sweep penuh lintas cursor tetap aksi operator (runbook). Alerts dan metrik tidak menyentuh uang dan tetap berjalan ketika funding/spending/delivery dijeda.
 - cleanup login links tiap jam dan retained data tiap hari;
 - daily admin stats job di queue `notifications`.
 
-Scheduler service hanya menjalankan `php artisan schedule:run`; jangan menggandakan jadwal dengan menjalankan command reconciliation sebagai daemon lain.
+The Docker `scheduler` service runs only `php artisan schedule:run` with a
+384 MiB memory limit. It updates its heartbeat only after a clean cycle and
+reports non-zero exits and cgroup OOM-kills through durable scheduler alert
+episodes. The separate `outbound-recovery` service also has a 384 MiB limit
+and runs one child per minute: per-facet pages are capped at 25, PostgreSQL
+statements at 5 seconds, the recovery command at 35 seconds, and the supervisor
+signals the child at 45 seconds before escalating to SIGKILL within 2 seconds.
+It logs process age/RSS and updates its own heartbeat only after success; both
+liveness checks expire after 180 seconds. Do not add outbound recovery back to
+scheduler `runInBackground`.
 
 `SendDailyAdminStatsNotification` mengirim Rekap Kemarin melalui `TelegramAdminStatsIntents`. Judul diberikan sebagai teks Unicode mentah ke formatter, yang merender icon tepat sekali. Jangan memanggil `renderLegacyIcons()` lagi pada judul yang sudah dirender: fallback glyph dapat cocok dengan source icon yang sama dan menghasilkan wrapper `<tg-emoji>` bersarang. `TelegramBotClient` mengubah wrapper internal yang valid menjadi entity `custom_emoji` untuk pesan plain text, atau Unicode fallback jika Telegram menolak custom emoji; marker `data-omp-icon` tidak boleh tampil kepada admin. Perhitungan statistik dan tombol Mini App Dashboard tetap terpisah dari rendering icon.
 
