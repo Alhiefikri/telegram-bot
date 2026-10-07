@@ -446,7 +446,7 @@ $lines = [
 foreach ($summaries as $phase => $summary) {
     foreach (['usdt_read', 'usdt_posting', 'idr_read', 'idr_posting'] as $operation) {
         $row = $summary[$operation];
-        $lines[] = sprintf('| %s | %s | %d | %.3f | %.3f | %.3f | %.3f | %d | %.3f |',
+        $lines[] = sprintf('| %s | %s | %d | %.3f | %.3f | %.3f | %.3f | %d | %.3f | %.3f |',
             $phase, $operation, $row['latency_ms']['count'], $row['latency_ms']['p50'],
             $row['latency_ms']['p95'], $row['latency_ms']['p99'], $row['scheduled_latency_ms']['p95'],
             $row['queries']['p95'], $row['lock_query_ms']['p99'], $row['throughput_s']);

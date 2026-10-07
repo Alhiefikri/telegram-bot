@@ -20,6 +20,14 @@ The draft targets are p95 internal read ≤100ms, p95 internal posting ≤250ms 
 
 Context7 references used for instrumentation: PostgreSQL 16 [EXPLAIN/BUFFERS](https://www.postgresql.org/docs/16/using-explain.html), [wait events](https://www.postgresql.org/docs/16/monitoring-stats.html), [pg_locks](https://www.postgresql.org/docs/16/view-pg-locks.html); Laravel 13 [query listeners](https://github.com/laravel/docs/blob/13.x/database.md), [Predis connections](https://github.com/laravel/docs/blob/13.x/redis.md) and [after-commit Redis queues](https://github.com/laravel/docs/blob/13.x/queues.md).
 
+## Report-generation correction after #574
+
+A disposable `--smoke` reproduction found two evidence-delivery bugs: report rows omitted `Completed/s` because the `sprintf()` format had one fewer conversion than its arguments, and the wrapper copied the evaluator without executing it. The report now includes both the lock-query p99 bound and measured throughput. The wrapper automatically writes `acceptance-evaluation.json` and `evaluation.log` whenever `result.json` exists, even after an SLO failure, while preserving nonzero benchmark/evaluator exits. Runs that abort before producing results are not evaluated.
+
+The corrected smoke run retained evidence at `artifacts/balance-v2/20261007T065754Z-312388/`: all 12 report rows matched `load.json`, all seven negative controls passed, 100 accounts in each currency and 100 synthetic receipts reconciled without findings, and reservation/provider/Redis-loss probes passed. Evaluation of the original failing smoke retained `passed = false` and exit 1. These are diagnostic runs, not a new 30-minute capacity qualification; thresholds and ledger behavior are unchanged.
+
+Formatting semantics were checked through Context7 against the PHP [`sprintf()` manual](https://www.php.net/manual/en/function.sprintf.php): each conversion specification consumes a parameter.
+
 ## Current acceptance status
 
 ## Measured run

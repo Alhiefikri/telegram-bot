@@ -67,5 +67,15 @@ cp "$ROOT_DIR/scripts/balance-v2-benchmark.php" "$ROOT_DIR/scripts/balance-v2-be
 cp "$ROOT_DIR/scripts/fixtures/balance-v2/composer.lock" "$ARTIFACT_DIR/tooling-composer.lock"
 sha256sum "$ARTIFACT_DIR"/balance-v2-* >"$ARTIFACT_DIR/sources.sha256"
 cd "$ROOT_DIR/src"
+benchmark_status=0
 php "$ROOT_DIR/scripts/balance-v2-benchmark.php" "$PORT" "$ARTIFACT_DIR" "${1:-}" "$REDIS_PORT" \
-    2>&1 | tee "$ARTIFACT_DIR/run.log"
+    2>&1 | tee "$ARTIFACT_DIR/run.log" || benchmark_status=$?
+# A completed run may miss its SLOs. Retain its evaluation and negative
+# controls anyway, without masking the original benchmark failure.
+evaluation_status=0
+if [[ -f "$ARTIFACT_DIR/result.json" ]]; then
+    php "$ROOT_DIR/scripts/balance-v2-evaluate.php" "$ARTIFACT_DIR" \
+        2>&1 | tee "$ARTIFACT_DIR/evaluation.log" || evaluation_status=$?
+fi
+if [[ "$benchmark_status" -ne 0 ]]; then exit "$benchmark_status"; fi
+exit "$evaluation_status"
