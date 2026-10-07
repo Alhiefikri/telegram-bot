@@ -159,12 +159,14 @@ final class BalanceReleaseReadinessReport
         }
 
         $findings = is_array($run->findings) ? $run->findings : [];
+        $scope = $findings['scope'] ?? null;
         $accounts = $findings['accounts'] ?? null;
         $receipts = $findings['receipts'] ?? null;
         $treasury = $findings['treasury'] ?? null;
         $accounting = $findings['accounting'] ?? null;
 
-        if (! is_array($accounts) || ! is_array($receipts) || ! is_array($treasury) || ! is_array($accounting)
+        if (! is_array($scope) || ($scope['complete'] ?? false) !== true
+            || ! is_array($accounts) || ! is_array($receipts) || ! is_array($treasury) || ! is_array($accounting)
             || ($accounts['has_more'] ?? true) !== false
             || ($receipts['receipts_has_more'] ?? true) !== false
             || ($receipts['credits_have_more'] ?? true) !== false
