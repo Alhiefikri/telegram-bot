@@ -14,6 +14,7 @@ use App\Models\TelegramNavigationRoot;
 use App\Models\User;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\Telegram\TelegramUsdtFundingActions;
+use App\Services\UsdtBalance\UsdtReceiptReconciliation;
 use App\Services\UsdtFunding\CustomerUsdtFundingRelease;
 use App\Services\UsdtFunding\CustomerUsdtFundingReservationService;
 use App\Services\UsdtReceivers\UsdtDepositReceiverRegistry;
@@ -146,6 +147,9 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
             }
         });
         $this->assertWorkersSucceeded($results);
+        // SKIP LOCKED can defer a target while the rejected release holds it.
+        // The persisted due work must settle on the next recovery sweep.
+        app(UsdtTopUpSettlement::class)->recover();
         $resolution = DB::table('customer_usdt_top_up_resolutions')->sole();
         $this->assertSame('settled', $resolution->kind);
         $this->assertSame($resolution->kind === 'settled' ? 1 : 0, DB::table('customer_usdt_balance_entries')->count());
@@ -172,10 +176,25 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
             }
         });
         $this->assertWorkersSucceeded($results);
+        // A skipped live lock is durable deferral, not a lost settlement.
+        app(UsdtTopUpSettlement::class)->recover();
         $kind = DB::table('customer_usdt_top_up_resolutions')->value('kind');
         $this->assertSame('settled', $kind);
         $this->assertSame($kind === 'settled' ? 1 : 0, DB::table('customer_usdt_balance_entries')->count());
         $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
+    }
+
+    public function test_parallel_mismatched_deposit_recovery_records_one_unresolved_receipt_without_credit(): void
+    {
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '1250000000000000000')];
+        $results = $this->runConcurrentWorkers(3, fn (): string => app(UsdtTopUpSettlement::class)->recover() ? 'checked' : 'deferred');
+        $this->assertWorkersSucceeded($results);
+        app(UsdtTopUpSettlement::class)->recover();
+        $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->value('state'));
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertSame('1250000', app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100)->unresolvedDepositMicro->toString());
     }
 
     public function test_abandoned_lease_is_reclaimed_by_only_one_worker(): void

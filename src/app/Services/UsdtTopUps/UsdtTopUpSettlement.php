@@ -217,10 +217,10 @@ final class UsdtTopUpSettlement
             ]);
             $inboxState = $inspection->status === 'pending' ? 'pending' : 'review';
             $error = $inspection->reason;
-            if ($inspection->verified() && $inspection->evidence !== null) {
+            if (($inspection->verified() || $inspection->reason === 'canonical_final_amount_mismatch') && $inspection->evidence !== null) {
                 $evidence = $inspection->evidence;
                 $amount = UsdtMicroAmount::fromRawTokenUnits($evidence->amountUnits, $invoice->token_decimals);
-                if ($amount->units() !== (int) $target->payable_micro || $evidence->txHash !== $claim['inbox']->tx_hash
+                if (($inspection->verified() && $amount->units() !== (int) $target->payable_micro) || $evidence->txHash !== $claim['inbox']->tx_hash
                     || $evidence->tokenContract !== $invoice->token_contract || $evidence->receiverAddress !== $invoice->receiver_address
                     || $evidence->blockTimestamp === null || $evidence->blockTimestamp->getTimestamp() < $invoice->starts_at_epoch
                     || $evidence->blockHash === null || ($evidence->confirmations ?? 0) < $invoice->minimum_confirmations) {
@@ -235,7 +235,11 @@ final class UsdtTopUpSettlement
                 $outcome = $this->receipts->claim($receipt);
                 if ($outcome->allowsMoneyEffect()) {
                     $receiptId = DB::table('external_money_receipts')->where('canonical_key', $receipt->canonicalKey())->value('id');
-                    if (! in_array($state, self::TERMINAL, true) && $reservation->resolved_at === null) {
+                    if (! $inspection->verified()) {
+                        // Claim actual funds once, but leave the invoice and
+                        // balance untouched until an authorized resolution.
+                        $error = $inspection->reason;
+                    } elseif (! in_array($state, self::TERMINAL, true) && $reservation->resolved_at === null) {
                         $entry = $this->ledger->creditVerifiedTopUp($customer,
                             new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits($target->amount_micro),
                                 $target->id, (string) $receiptId, (string) $evidenceId), 'usdt-top-up:'.$target->id);

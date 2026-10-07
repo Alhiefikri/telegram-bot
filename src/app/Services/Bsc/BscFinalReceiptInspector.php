@@ -72,10 +72,13 @@ final class BscFinalReceiptInspector
         }
         // One physical transfer only; never sum logs or ignore another deposit
         // because only one of several happens to match the expected amount.
-        if (count($decoded->transfers) !== 1 || count($decoded->exactTransfers) !== 1) {
+        if (count($decoded->transfers) !== 1) {
             return new BscFinalReceiptInspection('review', 'transfer_mismatch_or_ambiguous');
         }
-        $evidence = $decoded->exactTransfers[0];
+        $evidence = $decoded->transfers[0];
+        if ($evidence->tokenContract !== strtolower($contract) || $evidence->receiverAddress !== strtolower($receiver)) {
+            return new BscFinalReceiptInspection('review', 'transfer_mismatch_or_ambiguous');
+        }
         try {
             UsdtMicroAmount::fromRawTokenUnits($evidence->amountUnits, $decimals);
         } catch (InvalidArgumentException) {
@@ -102,7 +105,13 @@ final class BscFinalReceiptInspector
             return new BscFinalReceiptInspection('review', 'finalized_hash_changed');
         }
 
-        return new BscFinalReceiptInspection('verified', 'canonical_final_transfer',
+        // Authentic funds and invoice eligibility are separate facts. Preserve
+        // fully validated actual money for treasury even when it cannot settle
+        // the requested amount automatically.
+        $matchesAmount = $evidence->amountUnits === $expectedUnits;
+
+        return new BscFinalReceiptInspection($matchesAmount ? 'verified' : 'review',
+            $matchesAmount ? 'canonical_final_transfer' : 'canonical_final_amount_mismatch',
             $evidence->withChainFacts(Carbon::createFromTimestampUTC($canonical['timestamp']), $head['number'] - $receiptNumber + 1));
     }
 

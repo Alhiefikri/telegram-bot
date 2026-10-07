@@ -24,6 +24,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\BscUsdtRailRpcFixture;
 use Tests\Support\UsdtTopUpTestCase;
 
@@ -72,6 +73,21 @@ class UsdtTopUpSettlementTest extends UsdtTopUpTestCase
         $this->assertSame(1, CustomerUsdtBalanceEntry::count());
     }
 
+    public function test_mismatched_deposit_waits_for_finality_then_recovers_as_unresolved_money(): void
+    {
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '1250000000000000000')];
+        $this->rpc->finalized = 99;
+        $this->settle();
+        $this->assertSame('pending', DB::table('customer_usdt_top_up_inbox')->value('state'));
+        $this->assertSame(0, DB::table('external_money_receipts')->count());
+        $this->rpc->finalized = 105;
+        $this->travel(1)->minutes();
+        app(UsdtTopUpSettlement::class)->recover();
+        $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->value('state'));
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+        $this->assertSame('1250000', app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100)->unresolvedDepositMicro->toString());
+    }
+
     public function test_wrong_amount_is_review_not_available_money(): void
     {
         $this->rpc->receipt['logs'][0]['data'] = '0x'.str_pad(dechex(1), 64, '0', STR_PAD_LEFT);
@@ -82,6 +98,71 @@ class UsdtTopUpSettlementTest extends UsdtTopUpTestCase
         $this->travel(20)->minutes();
         app(UsdtTopUpSettlement::class)->recover();
         $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->value('state'));
+    }
+
+    #[DataProvider('mismatchedDeposits')]
+    public function test_final_mismatched_deposit_is_unresolved_treasury_money_once(string $raw, string $micro): void
+    {
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: $raw)];
+        $this->settle();
+        $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->value('state'));
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+        $report = app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100);
+        $this->assertSame($micro, $report->unresolvedDepositMicro->toString());
+        $this->assertCount(1, $report->findings);
+        $coverage = app(UsdtTreasuryReconciliation::class)->inspect(null, $report->unresolvedDepositMicro, $report->overcreditedMicro);
+        $this->assertSame('unverifiable', $coverage->verdict->value);
+        $custody = UsdtTreasuryAssetObservation::available('fixture_custody', $micro, now());
+        $this->assertSame('consistent', app(UsdtTreasuryReconciliation::class)
+            ->inspect(null, $report->unresolvedDepositMicro, $report->overcreditedMicro, [$custody])->verdict->value);
+        // Replay the durable hint, as after recovery, without duplicating funds.
+        DB::table('customer_usdt_top_up_inbox')->update(['state' => 'pending', 'next_check_at' => now()]);
+        $this->travel(1)->minutes();
+        $this->settle();
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+        $this->assertSame($micro, app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100)->unresolvedDepositMicro->toString());
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+    }
+
+    public static function mismatchedDeposits(): array
+    {
+        return [
+            'underpayment' => ['750000000000000000', '750000'],
+            'overpayment' => ['1250000000000000000', '1250000'],
+        ];
+    }
+
+    #[DataProvider('unsafeMismatchedDeposits')]
+    public function test_mismatched_amount_does_not_bypass_authenticity_or_finality(string $mutation): void
+    {
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '1250000000000000000')];
+        switch ($mutation) {
+            case 'wrong_token': $this->rpc->receipt['logs'][0]['address'] = '0x'.str_repeat('1', 40);
+                break;
+            case 'wrong_receiver': $this->rpc->receipt['logs'][0]['topics'][2] = '0x'.str_repeat('0', 24).str_repeat('1', 40);
+                break;
+            case 'failed': $this->rpc->receipt['status'] = '0x0';
+                break;
+            case 'unfinalized': $this->rpc->finalized = 99;
+                break;
+            case 'reorg': $this->rpc->receipt['blockHash'] = $this->rpc->receipt['logs'][0]['blockHash'] = '0x'.str_repeat('1', 64);
+                break;
+            case 'multiple': $this->rpc->receipt['logs'][] = $this->rpc->log(index: 1);
+                break;
+            case 'before_invoice': $this->rpc->timestamp = $this->target->created_at->timestamp - 1;
+                break;
+        }
+        $this->settle();
+        $this->assertSame(0, DB::table('external_money_receipts')->count());
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+    }
+
+    public static function unsafeMismatchedDeposits(): array
+    {
+        return array_combine(
+            $cases = ['wrong_token', 'wrong_receiver', 'failed', 'unfinalized', 'reorg', 'multiple', 'before_invoice'],
+            array_map(static fn (string $case): array => [$case], $cases),
+        );
     }
 
     public function test_lost_or_expired_lease_rejects_result_and_recovers_after_worker_death(): void

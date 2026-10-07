@@ -23,6 +23,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\BscUsdtRailRpcFixture;
 use Tests\Support\UsdtTopUpTestCase;
 
@@ -68,6 +69,40 @@ class UsdtTopUpReviewTest extends UsdtTopUpTestCase
         $this->travel(1)->minutes();
         $this->settle();
         $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+    }
+
+    #[DataProvider('mismatchedDeposits')]
+    public function test_review_resolves_recorded_actual_deposit_without_losing_or_double_counting_it(string $raw, string $decimal, string $micro): void
+    {
+        $original = $this->target->getAttributes();
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: $raw)];
+        $this->settle();
+        $report = app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100);
+        $this->assertSame($micro, $report->unresolvedDepositMicro->toString());
+        $receiptId = DB::table('external_money_receipts')->value('id');
+        $preview = $this->review('settled', $decimal);
+        $resolution = $this->confirmReview($preview);
+        $this->assertSame((int) $receiptId, (int) $resolution->receipt_id);
+        $this->confirmReview($preview);
+        DB::table('customer_usdt_top_up_inbox')->update(['state' => 'pending', 'next_check_at' => now()]);
+        $this->travel(1)->minutes();
+        $this->settle();
+        $report = app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100);
+        $this->assertSame([], $report->findings);
+        $this->assertSame('0', $report->unresolvedDepositMicro->toString());
+        $this->assertSame((int) $micro, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
+        foreach (['external_money_receipts', 'customer_usdt_balance_entries', 'customer_usdt_balance_accounting_events', 'customer_usdt_top_up_resolutions'] as $table) {
+            $this->assertSame(1, DB::table($table)->count(), $table);
+        }
+        $this->assertSame($original, $this->target->fresh()->getAttributes());
+    }
+
+    public static function mismatchedDeposits(): array
+    {
+        return [
+            'underpayment' => ['750000000000000000', '0.75', '750000'],
+            'overpayment' => ['1250000000000000000', '1.25', '1250000'],
+        ];
     }
 
     public function test_compensation_is_real_deposit_funding_not_arbitrary_grant(): void
@@ -250,15 +285,15 @@ class UsdtTopUpReviewTest extends UsdtTopUpTestCase
             BscUsdtRailRpcFixture::TX, 'Return', '0x'.str_repeat('c', 64), '0x'.str_repeat('9', 40));
     }
 
-    protected function refundFixture(): object
+    protected function refundFixture(string $decimal = '1', string $raw = '1000000000000000000'): object
     {
         $destination = '0x'.str_repeat('7', 40);
         $authorization = app(TelegramUsdtFundingActions::class)->authorizeExternalReturn(
-            '951001', '951001', 'private', 100, $this->target->id, '1', $destination, str_repeat('n', 32));
+            '951001', '951001', 'private', 100, $this->target->id, $decimal, $destination, str_repeat('n', 32));
         $inbound = $this->rpc->receipt;
         $outbound = $inbound;
         $outbound['transactionHash'] = '0x'.str_repeat('c', 64);
-        $outbound['logs'] = [$this->rpc->log(receiver: $destination)];
+        $outbound['logs'] = [$this->rpc->log(amount: $raw, receiver: $destination)];
         $outbound['logs'][0]['transactionHash'] = $outbound['transactionHash'];
         $outbound['logs'][0]['topics'][1] = '0x'.str_repeat('0', 24).substr(BscUsdtRailRpcFixture::ADDRESS, 2);
         $calls = 0;
@@ -283,6 +318,27 @@ class UsdtTopUpReviewTest extends UsdtTopUpTestCase
         $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
         $this->assertSame([], app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100)->findings);
         $this->assertSame('released', DB::table('customer_usdt_funding_reservations')->value('state'));
+    }
+
+    #[DataProvider('mismatchedDeposits')]
+    public function test_external_return_resolves_actual_mismatched_deposit_once(string $raw, string $decimal, string $micro): void
+    {
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: $raw)];
+        $this->settle();
+        $this->assertSame($micro, app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100)->unresolvedDepositMicro->toString());
+        $receiptId = DB::table('external_money_receipts')->value('id');
+        $authorization = $this->refundFixture($decimal, $raw);
+        $preview = app(UsdtTopUpReview::class)->request($this->reviewOwner, $this->target->id, 'externally_refunded', $decimal,
+            BscUsdtRailRpcFixture::TX, 'Verified actual return', '0x'.str_repeat('c', 64), $authorization->id);
+        $resolution = $this->confirmReview($preview);
+        $this->confirmReview($preview);
+        $this->assertSame((int) $receiptId, (int) $resolution->receipt_id);
+        $report = app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100);
+        $this->assertSame([], $report->findings);
+        $this->assertSame('0', $report->unresolvedDepositMicro->toString());
+        $this->assertSame(2, DB::table('external_money_receipts')->count());
+        $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
     }
 
     public function test_later_receipt_after_review_compensation_never_reopens_credit(): void
