@@ -197,8 +197,8 @@ final class UsdtTopUpReview
         $refund = $preview->decision === 'externally_refunded'
             ? $this->inspect($invoice, $preview->refund_transaction_hash, $amount, $preview->refund_address,
                 $evidence->blockTimestamp->timestamp) : null;
-        if ($evidence->sanitizedPayload() != $preview->chain_evidence
-            || $refund?->sanitizedPayload() != $preview->refund_evidence) {
+        if (! $this->matchesPreviewEvidence($evidence, $preview->chain_evidence)
+            || ! $this->matchesPreviewEvidence($refund, $preview->refund_evidence)) {
             throw new DomainException('External evidence changed; request a fresh preview.');
         }
         $authority = $this->passwords->verify($this->owner($actor), $password, $preview);
@@ -309,6 +309,19 @@ final class UsdtTopUpReview
         }
 
         return $inspection->evidence;
+    }
+
+    /** Confirmation count is a moving chain fact; transaction identity/finality facts remain bound. */
+    private function matchesPreviewEvidence(?BscTransferEvidence $evidence, ?array $previewEvidence): bool
+    {
+        if ($evidence === null || $previewEvidence === null) {
+            return $evidence === null && $previewEvidence === null;
+        }
+
+        $current = $evidence->sanitizedPayload();
+        unset($current['confirmations'], $previewEvidence['confirmations']);
+
+        return $current === $previewEvidence;
     }
 
     private function invoice(CustomerUsdtTopUp $target): UsdtBscRailInvoice

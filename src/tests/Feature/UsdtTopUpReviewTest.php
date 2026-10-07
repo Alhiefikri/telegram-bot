@@ -71,6 +71,17 @@ class UsdtTopUpReviewTest extends UsdtTopUpTestCase
         $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
     }
 
+    public function test_confirmation_growth_does_not_invalidate_unchanged_final_evidence(): void
+    {
+        $preview = $this->review();
+        $this->rpc->head++;
+
+        $resolution = $this->confirmReview($preview);
+
+        $this->assertSame('settled', $resolution->kind);
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+    }
+
     #[DataProvider('mismatchedDeposits')]
     public function test_review_resolves_recorded_actual_deposit_without_losing_or_double_counting_it(string $raw, string $decimal, string $micro): void
     {
