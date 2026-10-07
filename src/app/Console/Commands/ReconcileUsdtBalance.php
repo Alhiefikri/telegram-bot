@@ -29,7 +29,8 @@ final class ReconcileUsdtBalance extends Command
         {--cursor= : Resume after this account id.}
         {--receipt-cursor= : Resume receipts after this receipt id.}
         {--credit-cursor= : Resume unreceipted funding credits after this entry id.}
-        {--limit=200 : Maximum rows inspected per facet (1-1000).}
+        {--complete : Inspect every page of every facet in one snapshot; no Customer or resume cursors.}
+        {--limit=200 : Rows per page per facet (1-1000).}
         {--no-freeze : Report drift without freezing the scoped accounts.}
         {--actor= : Operator identity to record on the run evidence.}
         {--json : Print the sanitized JSON report.}';
@@ -110,6 +111,7 @@ final class ReconcileUsdtBalance extends Command
             afterAccountId: $accountCursor,
             afterReceiptId: $receiptCursor,
             afterCreditId: $creditCursor,
+            complete: (bool) $this->option('complete'),
         );
     }
 

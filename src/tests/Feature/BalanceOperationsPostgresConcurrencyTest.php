@@ -108,6 +108,54 @@ final class BalanceOperationsPostgresConcurrencyTest extends TestCase
         $this->assertSame(0, CustomerUsdtFundingReservation::query()->count());
     }
 
+    public function test_postgres_restore_rejects_clean_first_page_with_later_account_drift(): void
+    {
+        $this->requirePostgresConcurrency('Balance operations');
+
+        $first = $this->createCustomer(908210);
+        $second = $this->createCustomer(908211);
+        foreach ([$first, $second] as $customer) {
+            DB::table('customer_usdt_balance_accounts')->insert([
+                'customer_id' => $customer->id,
+                'currency' => 'USDT',
+                'balance_micro' => 0,
+                'version' => 0,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+        $secondAccount = DB::table('customer_usdt_balance_accounts')->where('customer_id', $second->id)->value('id');
+        DB::table('customer_usdt_balance_accounts')->where('id', $secondAccount)->update(['version' => 1]);
+
+        $gate = app(BalanceRestoreGateService::class);
+        $gate->open(now()->subHours(2), now()->subHour(), 'paginated restore drill', 'operator-a');
+        $gate->replay(25, 'operator-a');
+        $this->artisan('usdt-balance:reconcile', ['--limit' => 1, '--no-freeze' => true])->assertSuccessful();
+        $run = UsdtBalanceReconciliationRun::query()->latest('id')->firstOrFail();
+        $this->assertSame(UsdtReconciliationVerdict::Consistent, $run->verdict);
+        $this->assertTrue($run->findings['accounts']['has_more']);
+
+        try {
+            $gate->close('operator-a');
+            $this->fail('A clean first page must not reopen transactions while a later account is unchecked.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString('incomplete', $exception->getMessage());
+        }
+
+        $this->artisan('usdt-balance:reconcile', ['--complete' => true, '--limit' => 1, '--no-freeze' => true])->assertFailed();
+        $completeRun = UsdtBalanceReconciliationRun::query()->latest('id')->firstOrFail();
+        $this->assertSame(1, $completeRun->account_finding_count);
+        $this->assertFalse($completeRun->findings['accounts']['has_more']);
+        $this->assertSame('findings', $completeRun->verdict->value);
+
+        try {
+            $gate->close('operator-a');
+            $this->fail('Later-page drift must keep the restore gate closed.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString('unexplained drift', $exception->getMessage());
+        }
+    }
+
     public function test_postgres_delivery_pause_defers_concurrent_claims(): void
     {
         $this->requirePostgresConcurrency('Balance operations');

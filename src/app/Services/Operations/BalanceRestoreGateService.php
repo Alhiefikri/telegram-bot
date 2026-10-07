@@ -240,6 +240,20 @@ final class BalanceRestoreGateService
                 throw new InvalidArgumentException('Restore cannot reopen: run usdt-balance:reconcile after the replay.');
             }
 
+            // "full" identifies the Customer scope, not pagination coverage.
+            // Only a scan from the beginning that exhausted all three facets
+            // can prove the restored population was checked. Missing legacy
+            // pagination evidence is not proof of completion.
+            $coverage = $run->findings ?? [];
+            if ((int) $run->cursor_after !== 0
+                || (int) $run->receipt_cursor_after !== 0
+                || (int) $run->credit_cursor_after !== 0
+                || ($coverage['accounts']['has_more'] ?? null) !== false
+                || ($coverage['receipts']['receipts_has_more'] ?? null) !== false
+                || ($coverage['receipts']['credits_have_more'] ?? null) !== false) {
+                throw new InvalidArgumentException('Restore cannot reopen: reconciliation coverage is incomplete; run usdt-balance:reconcile --complete after the replay.');
+            }
+
             if ($run->verdict->value !== 'consistent'
                 || (int) $run->account_finding_count !== 0
                 || (int) $run->receipt_finding_count !== 0

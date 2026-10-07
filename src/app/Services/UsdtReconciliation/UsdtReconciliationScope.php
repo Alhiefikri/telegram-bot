@@ -5,10 +5,9 @@ namespace App\Services\UsdtReconciliation;
 use InvalidArgumentException;
 
 /**
- * Bounded scope of one USDT reconciliation run: one optional Customer, one
- * page size and independent keyset cursors per facet. Nothing is scanned
- * unbounded and no cursor is a capability: it is a plain internal id that
- * only narrows the read.
+ * Scope of one USDT reconciliation run: one optional Customer, one page size
+ * and independent keyset cursors per facet. Complete scans start at the
+ * beginning and consume every page in one consistent snapshot.
  */
 final readonly class UsdtReconciliationScope
 {
@@ -20,6 +19,7 @@ final readonly class UsdtReconciliationScope
         public ?int $afterAccountId = null,
         public ?int $afterReceiptId = null,
         public ?int $afterCreditId = null,
+        public bool $complete = false,
     ) {
         if ($limit < 1 || $limit > self::MAX_LIMIT) {
             throw new InvalidArgumentException('USDT reconciliation limit must be between 1 and '.self::MAX_LIMIT.'.');
@@ -34,6 +34,10 @@ final readonly class UsdtReconciliationScope
                 throw new InvalidArgumentException("USDT reconciliation {$label} must not be negative.");
             }
         }
+
+        if ($complete && ($customerId !== null || $afterAccountId !== null || $afterReceiptId !== null || $afterCreditId !== null)) {
+            throw new InvalidArgumentException('A complete USDT reconciliation cannot use a Customer or resume cursor.');
+        }
     }
 
     /** @return array<string, mixed> */
@@ -46,6 +50,7 @@ final readonly class UsdtReconciliationScope
             'after_account_id' => $this->afterAccountId,
             'after_receipt_id' => $this->afterReceiptId,
             'after_credit_id' => $this->afterCreditId,
+            'complete' => $this->complete,
         ];
     }
 }

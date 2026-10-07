@@ -57,13 +57,13 @@ php artisan usdt-balance:restore-replay --limit=25 --scan --scan-limit=25 --scan
 
    The replay (a) re-inspects every non-terminal USDT funding target against authoritative chain evidence, (b) optionally runs the durable receiver scan (`usdt-bsc:scan`) so transfers inside the window are observed again, and (c) quarantines non-terminal balance deliveries as `unknown`. A failed inspection or a failed scan is recorded in the gate evidence and blocks reopening.
 
-6. **Reconcile** the restored database:
+6. **Reconcile the restored database completely.** A single bounded page is never enough evidence for reopening:
 
 ```bash
-php artisan usdt-balance:reconcile --limit=500 --actor=operator-a --json
-# full sweep when the bounded window is not the whole population:
-php artisan usdt-balance:reconcile --limit=1000 --json
+php artisan usdt-balance:reconcile --complete --limit=500 --actor=operator-a --json
 ```
+
+   `--complete` consumes every account, receipt and unreceipted-credit page inside one PostgreSQL repeatable-read snapshot. `--cursor`, `--receipt-cursor`, `--credit-cursor` and `--customer` are not valid with it. Resumed or partial runs remain useful diagnostics but cannot close the restore gate.
 
 7. **Reopen** only with zero unexplained drift (the command refuses otherwise):
 
@@ -71,9 +71,10 @@ php artisan usdt-balance:reconcile --limit=1000 --json
 php artisan usdt-balance:restore-close --actor=owner-a --json
 ```
 
-   `restore-close` requires a replay completed after the gate opened **and** a full-scope reconciliation run recorded after that replay with `verdict=consistent`, zero account findings, zero receipt findings and `unexplained_micro = 0`. The refusal messages name the missing step exactly (`run usdt-balance:reconcile after the replay`, `still reports unexplained drift`, `evidence replay reported failed inspections`, `receiver evidence scan failed`).
+   `restore-close` requires a replay completed after the gate opened and a complete, beginning-to-end reconciliation run recorded after that replay with `verdict=consistent`, zero account findings, zero receipt findings and `unexplained_micro = 0`. The refusal messages name the missing step exactly (`run usdt-balance:reconcile --complete after the replay`, `still reports unexplained drift`, `evidence replay reported failed inspections`, `receiver evidence scan failed`).
 
 8. **Resume deliveries deliberately** — see §3. Then restart schedulers/workers.
+
 
 ### Verification queries after any restore
 

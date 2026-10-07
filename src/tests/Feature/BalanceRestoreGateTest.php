@@ -259,6 +259,24 @@ final class BalanceRestoreGateTest extends TestCase
         $this->assertSame(TelegramOutboundEffectState::Unknown, $second->refresh()->state);
     }
 
+    public function test_complete_reconciliation_can_close_a_clean_restore(): void
+    {
+        $gate = app(BalanceRestoreGateService::class);
+        $gate->open(now()->subHours(2), now()->subHour(), 'complete clean drill', 'operator-a');
+        $gate->replay(25, 'operator-a');
+
+        $this->artisan('usdt-balance:reconcile', [
+            '--complete' => true,
+            '--limit' => 1,
+            '--no-freeze' => true,
+        ])->assertSuccessful();
+
+        $closed = $gate->close('operator-a');
+
+        $this->assertSame('cleared', $closed->state->value);
+        $this->assertSame(0, $closed->cleared_evidence['unquarantined_deliveries']);
+    }
+
     /** @param  array<string, mixed>  $overrides */
     private function recordRun(array $overrides): void
     {
@@ -269,7 +287,7 @@ final class BalanceRestoreGateTest extends TestCase
             'created_at' => now()->addSecond(),
             'verdict' => 'consistent',
             'accounts_inspected' => 0,
-            'findings' => ['currency' => 'USDT', 'treasury' => ['unexplained_micro' => '0', 'verdict' => 'not_required']],
+            'findings' => ['currency' => 'USDT', 'accounts' => ['has_more' => false], 'receipts' => ['receipts_has_more' => false, 'credits_have_more' => false], 'treasury' => ['unexplained_micro' => '0', 'verdict' => 'not_required']],
         ] + $overrides);
     }
 

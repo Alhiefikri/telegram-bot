@@ -4,9 +4,12 @@ namespace App\Services\UsdtReconciliation;
 
 use App\Services\UsdtBalance\UsdtAccountingAggregator;
 use App\Services\UsdtBalance\UsdtBalanceReconciliation;
+use App\Services\UsdtBalance\UsdtBalanceReconciliationReport;
 use App\Services\UsdtBalance\UsdtReceiptReconciliation;
+use App\Services\UsdtBalance\UsdtReceiptReconciliationReport;
 use App\Services\UsdtTreasury\UsdtTreasuryAssetRegistry;
 use App\Services\UsdtTreasury\UsdtTreasuryReconciliation;
+use Brick\Math\BigInteger;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -35,13 +38,17 @@ final class UsdtReconciliation
         $custody = $this->treasuryAssets->observeAll();
 
         return $this->duringConsistentSnapshot(function () use ($scope, $custody): UsdtReconciliationResult {
-            $accounts = $this->accounts->inspect($scope->customerId, $scope->afterAccountId, $scope->limit);
-            $receipts = $this->receipts->inspect(
-                $scope->customerId,
-                $scope->afterReceiptId,
-                $scope->afterCreditId,
-                $scope->limit,
-            );
+            $accounts = $scope->complete
+                ? $this->inspectAllAccounts($scope->limit)
+                : $this->accounts->inspect($scope->customerId, $scope->afterAccountId, $scope->limit);
+            $receipts = $scope->complete
+                ? $this->inspectAllReceipts($scope->limit)
+                : $this->receipts->inspect(
+                    $scope->customerId,
+                    $scope->afterReceiptId,
+                    $scope->afterCreditId,
+                    $scope->limit,
+                );
             $accounting = $this->accounting->status(UsdtAccountingAggregator::DEFAULT_CONSUMER);
             $treasury = $this->treasury->inspect(
                 $scope->customerId,
@@ -59,6 +66,53 @@ final class UsdtReconciliation
                 checkedAt: now(),
             );
         });
+    }
+
+    private function inspectAllAccounts(int $limit): UsdtBalanceReconciliationReport
+    {
+        $cursor = null;
+        $inspected = 0;
+        $findings = [];
+        do {
+            $page = $this->accounts->inspect(null, $cursor, $limit);
+            $inspected += $page->accountsInspected;
+            foreach ($page->findings as $finding) {
+                $findings[] = $finding;
+            }
+            $cursor = $page->nextCursor;
+        } while ($page->hasMore);
+
+        return new UsdtBalanceReconciliationReport($inspected, $findings, null, false);
+    }
+
+    private function inspectAllReceipts(int $limit): UsdtReceiptReconciliationReport
+    {
+        $receiptCursor = null;
+        $creditCursor = null;
+        $receiptsInspected = 0;
+        $creditsInspected = 0;
+        $findings = [];
+        $unresolved = BigInteger::zero();
+        $overcredited = BigInteger::zero();
+        do {
+            $page = $this->receipts->inspect(null, $receiptCursor, $creditCursor, $limit);
+            $receiptsInspected += $page->receiptsInspected;
+            $creditsInspected += $page->unreceiptedCreditsInspected;
+            foreach ($page->findings as $finding) {
+                $findings[] = $finding;
+            }
+            $unresolved = $unresolved->plus($page->unresolvedDepositMicro);
+            $overcredited = $overcredited->plus($page->overcreditedMicro);
+            // An exhausted facet must not restart at null while the other
+            // continues. No PostgreSQL bigint id can exceed PHP_INT_MAX.
+            $receiptCursor = $page->receiptsHasMore ? $page->nextReceiptCursor : PHP_INT_MAX;
+            $creditCursor = $page->creditsHaveMore ? $page->nextCreditCursor : PHP_INT_MAX;
+        } while ($page->receiptsHasMore || $page->creditsHaveMore);
+
+        return new UsdtReceiptReconciliationReport(
+            $receiptsInspected, $creditsInspected, $findings,
+            null, null, false, false, $unresolved, $overcredited,
+        );
     }
 
     /**
