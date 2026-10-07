@@ -161,9 +161,14 @@ final class SupplierFulfillmentService
         }
         $request = DB::transaction(fn () => $this->claim($fulfillmentId), 5);
         if ($request === null) {
+            app(SupplierOrderHistoryReconciliationService::class)->reconcileAutomatically($fulfillmentId);
+
             return;
         }
         [$purchase, $supplier, $sku, $token, $read] = $request;
+        if (! $read && ! $this->startDispatch($purchase, $token)) {
+            return;
+        }
         try {
             if ($supplier->provider === 'buymail' && ! $read && $purchase->replay_count > 0) {
                 $result = app(BuyMailClient::class)->recoverPurchase($supplier, $purchase->quantity, $purchase->reference, $purchase->dispatched_at,
@@ -181,11 +186,11 @@ final class SupplierFulfillmentService
     {
         $due = SupplierFulfillment::query()
             ->select('supplier_fulfillments.id')
-            ->withExists([
-                'purchases as has_buymail_purchase' => fn ($query) => $query->whereHas('supplier', fn ($supplier) => $supplier->where('provider', 'buymail')),
-                'reservedSupplier as has_buymail_reservation' => fn ($query) => $query->where('provider', 'buymail'),
-            ])
-            ->whereIn('state', ['pending', 'purchasing', 'awaiting_delivery'])
+            ->where(fn ($query) => $query->whereIn('state', ['pending', 'purchasing', 'awaiting_delivery'])
+                ->orWhere(fn ($review) => $review->where('state', 'review')->whereHas('currentPurchase', fn ($purchase) => $purchase
+                    ->whereIn('state', ['ambiguous', 'review'])->whereNull('supplier_order_id')->whereNull('committed_at')->whereNotNull('dispatched_at')
+                    ->whereHas('supplier', fn ($supplier) => $supplier->where('provider', 'toolorax'))
+                    ->has('historyReconciliations', '<', 3, 'and', fn ($history) => $history->whereNull('actor_user_id')))))
             ->where(fn ($q) => $q->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now()))
             ->orderBy('next_attempt_at')->orderBy('id')->limit(max(1, min($max, 500)))->get();
         $started = microtime(true);
@@ -194,16 +199,30 @@ final class SupplierFulfillmentService
             if (microtime(true) - $started >= 45) {
                 break;
             }
-            $id = $fulfillment->id;
-            if ($fulfillment->has_buymail_purchase || $fulfillment->has_buymail_reservation) {
-                ProcessSupplierFulfillment::dispatch($id);
-            } else {
-                $this->process($id);
-            }
+            ProcessSupplierFulfillment::dispatch($fulfillment->id);
             $processed++;
         }
 
         return ['processed' => $processed];
+    }
+
+    /** Commit transport intent separately from the claim, before any financial HTTP. */
+    private function startDispatch(SupplierPurchase $purchase, string $token): bool
+    {
+        return DB::transaction(function () use ($purchase, $token): bool {
+            $locked = SupplierPurchase::query()->lockForUpdate()->findOrFail($purchase->id);
+            if ($locked->claim_token !== $token || ! $locked->lease_expires_at?->isFuture()) {
+                return false;
+            }
+            DB::table('supplier_purchase_dispatches')->insert([
+                'supplier_purchase_id' => $locked->id, 'claim_token' => $token,
+                'started_at' => now(), 'outcome' => 'started',
+            ]);
+            $locked->update(['dispatched_at' => $locked->dispatched_at ?? now()]);
+            $purchase->dispatched_at = $locked->dispatched_at;
+
+            return true;
+        }, 5);
     }
 
     private function claim(int $id): ?array
@@ -225,8 +244,13 @@ final class SupplierFulfillmentService
             return null;
         }
         if ($purchase?->state === 'sending' && $purchase->supplier_order_id === null) {
+            DB::table('supplier_purchase_dispatches')->where('claim_token', $purchase->claim_token)
+                ->whereNull('finished_at')->update(['finished_at' => now(), 'outcome' => 'unknown', 'error_code' => 'dispatch_outcome_unknown']);
             $provider = SupplierProvider::tryFrom($suppliers->get($purchase->supplier_id)->provider);
-            if ($provider === SupplierProvider::BuyMail && $purchase->dispatched_at !== null) {
+            if ($purchase->dispatched_at === null) {
+                // No transport intent was committed. No financial HTTP was authorized.
+                $purchase->update(['state' => 'reserved']);
+            } elseif ($provider === SupplierProvider::BuyMail) {
                 $purchase->update(['state' => 'reserved', 'replay_count' => $purchase->replay_count + 1]);
             } elseif ($suppliers->get($purchase->supplier_id)->is_active && $provider?->supportsIdempotency() && $purchase->replay_count === 0 && $purchase->dispatched_at?->gte(now()->subMinutes(10))) {
                 $purchase->update(['state' => 'reserved', 'replay_count' => 1]);
@@ -266,7 +290,7 @@ final class SupplierFulfillmentService
         }
         $token = (string) Str::uuid();
         $lease = $suppliers->get($purchase->supplier_id)->provider === 'buymail' ? now()->addMinutes(5) : now()->addMinutes(2);
-        $purchase->update(['state' => $read ? 'awaiting_delivery' : 'sending', 'claim_token' => $token, 'lease_expires_at' => $lease, 'dispatched_at' => $purchase->dispatched_at ?? now()]);
+        $purchase->update(['state' => $read ? 'awaiting_delivery' : 'sending', 'claim_token' => $token, 'lease_expires_at' => $lease]);
         $f->update(['state' => $read ? 'awaiting_delivery' : 'purchasing', 'next_attempt_at' => $lease]);
 
         return [$purchase, $suppliers->get($purchase->supplier_id), $catalog->get($purchase->supplier_catalog_item_id), $token, $read];
@@ -282,6 +306,10 @@ final class SupplierFulfillmentService
         $purchase = SupplierPurchase::query()->lockForUpdate()->findOrFail($purchaseId);
         if ($purchase->claim_token !== $token || $f->current_purchase_id !== $purchase->id) {
             return;
+        }
+        if (! $read) {
+            DB::table('supplier_purchase_dispatches')->where('claim_token', $token)->whereNull('finished_at')
+                ->update(['finished_at' => now(), 'outcome' => $result->outcome, 'error_code' => $result->errorCode]);
         }
         $purchase->forceFill(['claim_token' => null, 'lease_expires_at' => null, 'last_error' => $result->errorCode]);
         if ($suppliers->get($purchase->supplier_id)->provider === 'buymail' && ! $result->identityTrusted

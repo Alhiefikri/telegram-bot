@@ -28,6 +28,8 @@ use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -70,6 +72,83 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
         $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
         $this->assertSame(0, $product->fresh()->stock);
+    }
+
+    #[Group('postgres-release')]
+    public function test_killed_queue_worker_retains_dispatch_episode_and_recovers_one_evidence_decision(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture();
+        $supplier->update(['provider' => 'toolorax', 'currency' => 'USD']);
+        $sku->update(['external_id' => '4']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        config()->set('queue.connections.supplier.driver', 'database');
+        app()->forgetInstance('queue');
+        Queue::clearResolvedInstance('queue');
+        app(SupplierFulfillmentService::class)->recover();
+        DB::disconnect();
+        $pid = pcntl_fork();
+        $this->assertNotSame(-1, $pid);
+        if ($pid === 0) {
+            DB::purge();
+            DB::reconnect();
+            Http::fake(function ($request) {
+                if ($request->method() !== 'POST') {
+                    throw new \RuntimeException('Expected original financial POST.');
+                }
+                posix_kill(getmypid(), SIGKILL);
+                exit(90);
+            });
+            Artisan::call('queue:work', ['connection' => 'supplier', '--queue' => 'suppliers', '--once' => true, '--tries' => 1, '--timeout' => 120]);
+            exit(91);
+        }
+        pcntl_waitpid($pid, $status);
+        $this->assertTrue(pcntl_wifsignaled($status));
+        $this->assertSame(SIGKILL, pcntl_wtermsig($status));
+        DB::reconnect();
+        $purchase = SupplierPurchase::sole();
+        $episode = DB::table('supplier_purchase_dispatches')->where('supplier_purchase_id', $purchase->id)->sole();
+        $this->assertSame('started', $episode->outcome);
+        $this->assertSame($purchase->claim_token, $episode->claim_token);
+        $this->assertNull($episode->finished_at);
+        $purchase->update(['lease_expires_at' => now()->subSecond()]);
+        $fulfillment->update(['next_attempt_at' => now()->subSecond()]);
+        Http::fake(function ($request) {
+            $this->assertSame('GET', $request->method());
+
+            return Http::response(['ok' => true, 'count' => 1, 'orders' => [[
+                'order_code' => 'unrelated-old-order', 'product_id' => 8, 'quantity' => 1,
+                'total' => '1.000', 'status' => 'fulfilled', 'created_at' => now()->subHour()->format('Y-m-d H:i:s'),
+            ]]]);
+        });
+        $this->assertSame(['processed' => 1], app(SupplierFulfillmentService::class)->recover());
+        Http::assertNothingSent();
+        Artisan::call('queue:work', ['connection' => 'supplier', '--queue' => 'suppliers', '--once' => true, '--tries' => 1, '--timeout' => 120]);
+        $this->assertSame(['processed' => 0], app(SupplierFulfillmentService::class)->recover());
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        Http::assertSentCount(1);
+        $this->assertSame('ambiguous', $purchase->fresh()->state);
+        $this->assertNotNull($purchase->fresh()->health_review_episode);
+        $this->assertSame('unknown', DB::table('supplier_purchase_dispatches')->where('id', $episode->id)->value('outcome'));
+        $this->assertSame('history_timezone_unverified', $purchase->historyReconciliations()->sole()->error_code);
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, ProductStockItem::count());
+        $this->assertSame(1, SupplierPurchase::count());
+        $actor = User::factory()->create(['role' => UserRole::Owner]);
+        $history = app(SupplierOrderHistoryReconciliationService::class)
+            ->reconcile($fulfillment->id, $actor, (string) config('app.timezone'));
+        $this->assertSame('no_order', $history->outcome);
+        for ($replay = 0; $replay < 2; $replay++) {
+            app(SupplierFulfillmentService::class)->confirmNoDebit(
+                $fulfillment->id, $actor, '', 'Provider timezone attested and complete history verified.',
+                evidenceSource: 'provider_history', historyReconciliationId: $history->id,
+            );
+        }
+        $this->assertSame('rejected', $purchase->fresh()->state);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $purchase->evidence()->where('kind', 'no_debit')->count());
     }
 
     public function test_checkout_wallet_race_commits_only_one_customer_when_balance_covers_one_unit(): void

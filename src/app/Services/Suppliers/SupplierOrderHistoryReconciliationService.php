@@ -24,6 +24,24 @@ final class SupplierOrderHistoryReconciliationService
 
     public function reconcile(int $fulfillmentId, User $actor, string $timezone, ?string $ip = null, ?int $expectedPurchaseId = null): SupplierOrderHistoryReconciliation
     {
+        return $this->scan($fulfillmentId, $actor, $timezone, $ip, $expectedPurchaseId);
+    }
+
+    /** At most three read-only scans; evidence never automatically releases a hold. */
+    public function reconcileAutomatically(int $fulfillmentId): ?SupplierOrderHistoryReconciliation
+    {
+        if (! SupplierFulfillment::query()->whereKey($fulfillmentId)->where('state', 'review')->exists()) {
+            return null;
+        }
+        try {
+            return $this->scan($fulfillmentId, null, 'UTC');
+        } catch (InvalidOrderTransition) {
+            return null;
+        }
+    }
+
+    private function scan(int $fulfillmentId, ?User $actor, string $timezone, ?string $ip = null, ?int $expectedPurchaseId = null): SupplierOrderHistoryReconciliation
+    {
         $request = DB::transaction(function () use ($fulfillmentId, $actor, $timezone, $expectedPurchaseId): array {
             $initial = SupplierFulfillment::query()->findOrFail($fulfillmentId);
             $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
@@ -45,11 +63,22 @@ final class SupplierOrderHistoryReconciliationService
             if ($supplier->provider !== 'toolorax') {
                 throw new InvalidOrderTransition('Riwayat order terstruktur belum didukung provider ini.');
             }
+            $latest = $purchase->historyReconciliations()->latest('id')->first();
+            if ($latest?->error_code === 'scan_in_progress' && $latest->requested_at->greaterThan(now()->subMinutes(3))) {
+                throw new InvalidOrderTransition('An order-history scan already owns this purchase.');
+            }
+            if ($actor === null) {
+                if ($fulfillment->state !== 'review' || $fulfillment->next_attempt_at?->isFuture()
+                    || $purchase->historyReconciliations()->whereNull('actor_user_id')->count() >= 3) {
+                    throw new InvalidOrderTransition('Automatic order-history budget is not due.');
+                }
+                $fulfillment->update(['next_attempt_at' => now()->addMinutes(5)]);
+            }
 
             $requestedAt = now();
             $reconciliation = SupplierOrderHistoryReconciliation::query()->create([
                 'supplier_purchase_id' => $purchase->id,
-                'actor_user_id' => $actor->id,
+                'actor_user_id' => $actor?->id,
                 'outcome' => SupplierOrderHistoryReconciliation::OUTCOME_INCONCLUSIVE,
                 'error_code' => 'scan_in_progress',
                 'requested_limit' => SupplierClient::TOOL_ORAX_ORDER_HISTORY_LIMIT,
@@ -68,6 +97,13 @@ final class SupplierOrderHistoryReconciliationService
             $snapshot = $this->client->orderHistory($supplier, $timezone);
             $observedAt = CarbonImmutable::now();
             [$outcome, $errorCode, $coverageStart, $coverageEnd, $candidateIds] = $this->classify($snapshot, $dispatchAt, $reconciliation->requested_at, $observedAt, $purchaseId);
+            if ($actor === null && $snapshot->orders !== []) {
+                // ShopBot returns offset-free timestamps. UTC is a parsing placeholder,
+                // not provider qualification; only an operator can attest its timezone.
+                $outcome = SupplierOrderHistoryReconciliation::OUTCOME_INCONCLUSIVE;
+                $errorCode = 'history_timezone_unverified';
+                $coverageStart = $coverageEnd = null;
+            }
             $attributes = [
                 'outcome' => $outcome,
                 'error_code' => $errorCode,
@@ -97,6 +133,11 @@ final class SupplierOrderHistoryReconciliationService
             $purchase = SupplierPurchase::query()->whereKey($purchaseId)->lockForUpdate()->firstOrFail();
             $locked = SupplierOrderHistoryReconciliation::query()->whereKey($reconciliation->id)->lockForUpdate()->firstOrFail();
             $locked->forceFill($attributes)->save();
+            $fulfillment = SupplierFulfillment::query()->findOrFail($fulfillmentId);
+            if ($actor === null && $fulfillment->current_purchase_id === $purchaseId && $fulfillment->state === 'review') {
+                $finished = $purchase->historyReconciliations()->whereNull('actor_user_id')->count() >= 3;
+                $fulfillment->update(['next_attempt_at' => $finished ? null : now()->addMinutes(5)]);
+            }
             $this->audit->log('supplier_purchase.order_history_reconciled', $purchase, null, [
                 'reconciliation_id' => $locked->id,
                 'outcome' => $locked->outcome,

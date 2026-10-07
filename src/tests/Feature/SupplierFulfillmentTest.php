@@ -3,10 +3,10 @@
 namespace Tests\Feature;
 
 use App\Enums\InventoryMovementType;
-use App\Enums\TelegramOutboundEffectState;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
+use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
 use App\Exceptions\InvalidOrderTransition;
 use App\Models\Cart;
@@ -237,6 +237,7 @@ class SupplierFulfillmentTest extends TestCase
         app(SupplierFulfillmentService::class)->process($f->id);
         $this->travel(2)->minutes();
         app(SupplierFulfillmentService::class)->recover();
+        app(SupplierFulfillmentService::class)->process($f->id);
         $this->travelBack();
         Http::assertSentCount(2);
         Http::assertSent(fn ($request) => $request->method() === 'GET' && str_ends_with($request->url(), '/orders/known-order'));
@@ -267,6 +268,7 @@ class SupplierFulfillmentTest extends TestCase
         }
         $this->travel(2)->minutes();
         app(SupplierFulfillmentService::class)->recover();
+        app(SupplierFulfillmentService::class)->process($f->id);
         $this->travelBack();
         Http::assertSentCount(2);
         Http::assertSent(fn ($request) => $request->method() === 'GET' && str_ends_with($request->url(), '/orders/economic-recovery'));
@@ -389,6 +391,7 @@ class SupplierFulfillmentTest extends TestCase
         $purchase = SupplierPurchase::create(['supplier_fulfillment_id' => $f->id, 'supplier_id' => $supplier->id, 'supplier_catalog_item_id' => $sku->id, 'reference' => (string) Str::uuid(), 'quantity' => 1, 'expected_cost_micros' => 1_000_000, 'exchange_rate_idr' => 1000, 'state' => 'sending', 'claim_token' => (string) Str::uuid(), 'lease_expires_at' => now()->subMinute(), 'dispatched_at' => now()->subMinutes(3)]);
         $f->update(['state' => 'purchasing', 'current_purchase_id' => $purchase->id, 'next_attempt_at' => now()->subMinute()]);
         app(SupplierFulfillmentService::class)->recover();
+        app(SupplierFulfillmentService::class)->process($f->id);
         Http::assertNothingSent();
         $this->assertSame('ambiguous', $purchase->fresh()->state);
         $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
@@ -405,6 +408,7 @@ class SupplierFulfillmentTest extends TestCase
         $f->update(['state' => 'purchasing', 'current_purchase_id' => $purchase->id, 'next_attempt_at' => now()->subMinute()]);
         Http::fake(fn () => Http::response(['status' => 'delivered', 'orderId' => 'replayed-order', 'quantity' => 1, 'total_cost' => '1', 'deliveredKeys' => ['original-reference-delivery']]));
         app(SupplierFulfillmentService::class)->recover();
+        app(SupplierFulfillmentService::class)->process($f->id);
         app(SupplierFulfillmentService::class)->recover();
         Http::assertSentCount(1);
         Http::assertSent(fn ($request) => $request->header('Idempotency-Key') === [$reference]);
@@ -432,6 +436,7 @@ class SupplierFulfillmentTest extends TestCase
         $this->assertSame(1_000_000, $alternative->fresh()->reserved_balance_micros);
         $this->travel(1)->minutes();
         app(SupplierFulfillmentService::class)->recover();
+        app(SupplierFulfillmentService::class)->process($f->id);
         $this->travelBack();
         Http::assertSentCount(2);
         $this->assertSame('delivered', $f->fresh()->state);

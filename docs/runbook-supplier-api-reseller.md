@@ -130,6 +130,74 @@ level nol, supplier HTTP nol. Gunakan `SupplierHealthTest` dan
 
 The application buys external units only after authoritative customer payment. It saves dispatch intent before HTTP, sends outside database locks, then persists evidence before customer delivery. A timeout is not proof of rejection.
 
+### Supervised purchase transport and crash evidence (#571)
+
+`suppliers:recover` only dispatches `ProcessSupplierFulfillment` to connection
+`supplier`, queue `suppliers`, for every provider. It never executes purchase
+HTTP. The existing `laravel-supplier-worker` Supervisor program runs these jobs
+with `tries=1`, `timeout=120`; the job fails on timeout and connection
+`retry_after=180` exceeds that timeout. PostgreSQL discovery, not Redis job
+survival, owns recovery.
+
+The claim commits first. Immediately before financial transport, a second
+transaction fences the live claim token and persists a
+`supplier_purchase_dispatches` episode (`id`, Purchase FK, token, `started_at`,
+`finished_at`, outcome and sanitized error). `dispatched_at` is set at this
+transport-intent boundary, not when a fresh Purchase is claimed. A missing
+intent and null `dispatched_at` mean a crashed claim did not authorize HTTP and
+may resume. An intent means **possibly sent**, not proof the socket transmitted
+or the provider accepted it: recovery marks its unfinished episode `unknown`
+and retains the hold unless existing documented idempotency or provider
+evidence resolves it. Legacy nonnull `dispatched_at` remains conservative.
+The Purchase ID/reference, dispatch episode ID/token and durable review episode
+provide reconciliation identity even after the active claim token is cleared.
+
+Unknown-identity ToolOraX purchases are rediscovered in review and scanned by
+the same supplier worker: at most three automatic GETs, 100 rows each, five
+minutes between attempts. A persisted `scan_in_progress` row and the locked
+Purchase/Order prevent concurrent scans; interrupted scans consume their
+budget and remain inspectable. System scans have `actor_user_id = null`.
+ShopBot timestamps have no offset, so automated UTC parsing is only a
+placeholder: nonempty scans are `inconclusive` /
+`history_timezone_unverified`, with no authoritative coverage interval.
+Empty/truncated/unavailable reads never prove no-debit either. The worker
+does not guess an order ID, POST again, or release a hold. An operator attests
+the actual provider timezone, runs the existing history GET, then confirms
+no-debit from a complete `no_order` scan or confirms debit through exact-order
+GET. Both decisions remain audited and idempotent.
+
+Inspect dispatch evidence read-only, without dumping keys or delivery payloads:
+
+```sql
+SELECT id, supplier_purchase_id, claim_token, started_at, finished_at, outcome, error_code
+FROM supplier_purchase_dispatches
+WHERE supplier_purchase_id = <purchase-id>
+ORDER BY id;
+```
+
+Verification uses `SupplierIndependentRegressionTest` and the PostgreSQL
+`SupplierPostgresConcurrencyTest`: the crash case kills a real `queue:work`
+process with SIGKILL after financial dispatch starts, recovers one unknown
+episode without a second POST, preserves the hold, then proves one no-debit
+decision through the existing evidence action. A disposable PostgreSQL smoke
+also exercised the actual recovery command and a separate worker process:
+scheduler HTTP=0/pending → worker committed-intent POST → delivered/hold=0.
+No real provider purchase is part of either scenario.
+
+After release, inspect `supervisorctl status laravel-supplier-worker:*`, worker
+job logs and the episode rows for an approved ordinary fulfillment. Correlate
+its Purchase/reference with `ProcessSupplierFulfillment`; verify that the
+scheduler only discovers/enqueues it. Production process observation is a
+release gate, not evidence supplied by the local smoke. Do not trigger a real
+purchase, retry Purchase #93, clear its hold, or kill production processes just
+to test this fix.
+
+Queue settings were checked with Context7 against the official
+[Laravel 13 queue documentation](https://github.com/laravel/docs/blob/13.x/queues.md):
+supervised workers, after-commit dispatch, timeout below `retry_after`, and
+Supervisor shutdown grace above the longest job duration.
+
+
 CSxStore's authenticated order responses use `status: completed` with boolean
 `success: true`. The adapter recognizes that combination only for CSxStore;
 exact order/SKU identity, quantity, actual cost and complete distinct delivery
@@ -285,7 +353,7 @@ php artisan suppliers:recover --limit=25
 
 The scheduler launches bounded sync/recovery first each minute in the background with a two-minute overlap mutex, before synchronous payment/notification sweeps. Sync skips accounts observed less than one minute ago, keeps the five-minute freshness gate, uses attempted-at ordering for fairness and a durable per-account read lease. Stock-notification reconciliation also runs in the background, using family-scoped ledger queries and PostgreSQL recovery cursor indexes; historical terminal Telegram HTTP 400/403 failures no longer occupy its dispatch index. Recovery discovers durable PostgreSQL work even if Redis lost a wakeup job. Provider request budgets, bounded snapshots/bodies/catalog counts and freshness gates are safety boundaries; increasing only a row limit does not remove them.
 
-Recovery classifies fulfillment providers and claim upload priority in batch queries, not one lookup per record. New, undispatched warranty proofs retain the urgent `supplier-refunds` queue; polling and already-dispatched claims use `supplier-claims`. Customer catalog reads use Product availability projections without querying each supplier.
+Recovery selects due fulfillment IDs in one bounded query and queues every provider without inline HTTP. Warranty recovery classifies claim upload priority in batch queries: new, undispatched proofs retain the urgent `supplier-refunds` queue; polling and already-dispatched claims use `supplier-claims`. Customer catalog reads use Product availability projections without querying each supplier.
 
 ProdSeller's list omits stock counts, so sync reads each missing product detail
 in groups of at most five concurrent GET requests within the same 40-second

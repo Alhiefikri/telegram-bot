@@ -14,6 +14,8 @@ final class ProcessSupplierFulfillment implements ShouldQueue
 
     public int $timeout = 120;
 
+    public bool $failOnTimeout = true;
+
     public function __construct(public readonly int $fulfillmentId)
     {
         $this->onConnection('supplier')->onQueue('suppliers');

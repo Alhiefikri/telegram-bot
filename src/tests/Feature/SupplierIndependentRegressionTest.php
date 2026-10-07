@@ -821,6 +821,97 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         $this->assertSame('4.000000', $connection['available_balance']);
     }
 
+    public function test_recovery_only_enqueues_non_buymail_purchase_without_scheduler_transport(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        Http::fake(fn () => Http::response(['ok' => false], 500));
+        Queue::fake();
+
+        $this->assertSame(['processed' => 1], app(SupplierFulfillmentService::class)->recover());
+
+        Http::assertNothingSent();
+        $this->assertSame('pending', $fulfillment->fresh()->state);
+        $this->assertSame(0, SupplierPurchase::count());
+        Queue::assertPushed(ProcessSupplierFulfillment::class, fn ($job) => $job->fulfillmentId === $fulfillment->id);
+    }
+
+    public function test_pre_transport_crash_can_resume_non_idempotent_purchase_without_guessing(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        $purchase = SupplierPurchase::create([
+            'supplier_fulfillment_id' => $fulfillment->id, 'supplier_id' => Supplier::sole()->id,
+            'supplier_catalog_item_id' => SupplierCatalogItem::sole()->id, 'reference' => (string) Str::uuid(),
+            'quantity' => 1, 'expected_cost_micros' => 1_000_000, 'exchange_rate_idr' => 1000,
+            'state' => 'sending', 'claim_token' => (string) Str::uuid(), 'lease_expires_at' => now()->subSecond(),
+        ]);
+        $fulfillment->update(['state' => 'purchasing', 'current_purchase_id' => $purchase->id, 'next_attempt_at' => now()->subSecond()]);
+        Http::fake(function () use ($purchase) {
+            $this->assertNotNull($purchase->fresh()->dispatched_at);
+            $this->assertDatabaseHas('supplier_purchase_dispatches', [
+                'supplier_purchase_id' => $purchase->id, 'claim_token' => $purchase->fresh()->claim_token, 'outcome' => 'started',
+            ]);
+
+            return Http::response(['ok' => true, 'order' => ['order_code' => 'resumed-order', 'status' => 'fulfilled',
+                'product_id' => 4, 'quantity' => 1, 'total' => '1.000', 'delivered_keys' => ['resumed-key']]]);
+        });
+
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        Http::assertSentCount(1);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(0, $purchase->fresh()->replay_count);
+        $this->assertSame(OrderStatus::Completed, $fulfillment->fresh()->order->order_status);
+        $this->assertSame('resumed-key', ProductStockItem::sole()->secret);
+    }
+
+    public function test_automatic_unknown_outcome_history_reads_stop_after_three_without_releasing_hold(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        Http::fake(fn () => throw new ConnectionException('Possible debit.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $purchase = SupplierPurchase::sole();
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response(['ok' => true, 'count' => 0, 'orders' => []]));
+        for ($attempt = 0; $attempt < 4; $attempt++) {
+            app(SupplierFulfillmentService::class)->recover();
+            (new ProcessSupplierFulfillment($fulfillment->id))->handle(app(SupplierFulfillmentService::class));
+            $this->travel(5)->minutes();
+        }
+        $this->travelBack();
+
+        Http::assertSentCount(3);
+        $this->assertSame(3, $purchase->historyReconciliations()->whereNull('actor_user_id')->count());
+        $this->assertSame('ambiguous', $purchase->fresh()->state);
+        $this->assertSame(1_000_000, Supplier::sole()->reserved_balance_micros);
+        $this->assertNull($fulfillment->fresh()->next_attempt_at);
+        $this->assertSame(['processed' => 0], app(SupplierFulfillmentService::class)->recover());
+    }
+
+    public function test_automatic_history_with_unqualified_provider_timezone_cannot_authorize_no_debit(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        Http::fake(fn () => throw new ConnectionException('Possible debit.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response(['ok' => true, 'count' => 1, 'orders' => [[
+            'order_code' => 'old-unrelated-order', 'product_id' => 8, 'quantity' => 1, 'total' => '1.000',
+            'status' => 'fulfilled', 'created_at' => now()->subDay()->format('Y-m-d H:i:s'),
+        ]]]));
+        (new ProcessSupplierFulfillment($fulfillment->id))->handle(app(SupplierFulfillmentService::class));
+        $history = SupplierPurchase::sole()->historyReconciliations()->sole();
+        $this->assertSame('inconclusive', $history->outcome);
+        $this->assertSame('history_timezone_unverified', $history->error_code);
+        $this->assertNull($history->coverage_start);
+        $this->assertSame(1_000_000, Supplier::sole()->reserved_balance_micros);
+        $this->expectException(InvalidOrderTransition::class);
+        app(SupplierFulfillmentService::class)->confirmNoDebit(
+            $fulfillment->id, User::factory()->create(['role' => 'owner']), '', 'No qualified timezone.',
+            evidenceSource: 'provider_history', historyReconciliationId: $history->id,
+        );
+    }
+
     private function paidSupplierOrder(int $quantity = 1, string $provider = 'aivault'): array
     {
         Queue::fake();
