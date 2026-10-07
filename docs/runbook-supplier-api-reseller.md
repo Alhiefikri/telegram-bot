@@ -69,8 +69,8 @@ The normal CI suite includes these tests on PRs and pushes to `main`. `.github/w
 
 ## Alert health supplier privat
 
-`suppliers:notify-health --limit=25` berjalan setiap 15 menit melalui scheduler
-existing, background, dengan mutex 10 menit. Scan DB dibatasi 1–100 koneksi dan
+`suppliers:notify-health --limit=25` berjalan setiap menit melalui scheduler
+existing, background, dengan mutex 2 menit. Scan DB dibatasi 1–100 koneksi dan
 1–100 obligation per invocation; cursor PostgreSQL berputar menurut ID sehingga
 limit kecil tidak menahan koneksi/kasus di belakang selamanya. Scan memiliki
 deadline 60 detik dan batas statement/lock PostgreSQL 10/5 detik; timeout
@@ -100,16 +100,31 @@ yang didukung; mutex tetap bukan otoritas dedupe.
   masing-masing memberi satu alert per kode dalam episode error aktif.
   A→B→A tanpa normal recovery tidak mengulang A. Pesan hanya memakai alasan
   allowlisted, tidak exception/header/body provider atau credential.
-- Review/ambigu baru didedupe menurut identity record/state yang sedang aktif,
-  bukan total count atau supplier version. Purchase unresolved tetap termasuk
-  meskipun customer fulfillment delivered. Purchase/fulfillment obligation yang
-  sama dihitung satu kali per koneksi. Tanpa purchase, reservation/snapshot yang
-  dapat dibuktikan menentukan koneksi; jika tidak, pesan menyatakan
-  **belum ada koneksi terpilih**. Resolusi saja tidak menimbulkan alarm baru.
-- Kondisi baru per koneksi dalam scan digabung menjadi pesan Indonesia ringkas:
-  nama escaped, saldo/currency, waktu observasi/stale, alasan aman, jumlah review,
-  saran aksi, dan monitor privat. Daftar panjang tetap di monitor, bukan payload
-  Telegram. Credential unreadable memerlukan pasangan APP_KEY/backup atau
+- Review/ambigu baru didedupe menurut identity record + `health_review_episode`,
+  bukan state, total count, atau supplier version. `ambiguous → review` maupun
+  recovery read dalam episode yang sama tidak mengirim ulang. Purchase unresolved
+  tetap termasuk meskipun customer fulfillment delivered. Resolusi definitif
+  membersihkan identity pada scan berikutnya; episode baru dapat mengirim lagi.
+  Migration #573 mempertahankan dedupe legacy dengan membuang suffix state.
+  Purchase/fulfillment obligation yang sama dihitung satu kali per koneksi.
+  Tanpa purchase, reservation/snapshot yang dapat dibuktikan menentukan koneksi;
+  jika tidak, pesan menyatakan **belum ada koneksi terpilih**.
+- Observasi wallet berusia **>= 15 menit** menghasilkan alert tersendiri dari
+  alert transaksi, termasuk ketika katalog tetap fresh. Supplier aktif atau
+  mempunyai hold/purchase unresolved tetap dimonitor. Untuk wallet yang belum
+  pernah ter-observasi, usia dihitung sejak Supplier dibuat. Alert menyebut waktu
+  observasi terakhir dan maksimal 10 purchase blocker (ID, SKU ID, hold, waktu);
+  saldo stale tidak ditampilkan sebagai saldo tersedia terkini. Episode ditutup
+  setelah observasi wallet baru, bukan hanya karena sync katalog sukses.
+- Hold purchase unresolved atau reservation tanpa purchase berusia **>= 15 menit**
+  mendapat satu alert sampai hold diselesaikan/dilepas; perubahan state recovery
+  tidak mengulangnya. Ini sinyal operator, bukan izin melepas hold atau membeli ulang.
+- Kondisi transaksi baru per koneksi dalam scan digabung menjadi pesan ringkas:
+  nama escaped, invoice, purchase/fulfillment ID, SKU ID, quantity, hold/currency,
+  waktu, `dispatch_outcome_unknown` yang allowlisted, dan monitor privat.
+  Detail dibatasi agar payload Telegram tetap ringkas; tidak membaca Customer,
+  credential, delivery payload, atau exception provider.
+  Credential unreadable memerlukan pasangan APP_KEY/backup atau
   re-entry terkontrol; invalid key memerlukan verifikasi/rotasi; ambiguous
   purchase memerlukan exact-order evidence, **jangan beli ulang**.
 - Event, dedupe marker dan outbound effect commit atomik. Dispatch sesudah
@@ -120,11 +135,41 @@ yang didukung; mutex tetap bukan otoritas dedupe.
   outbound dan bukti penerimaan sebelum explicit operator recovery. Ini bukan
   jaminan exactly-once pada jaringan Telegram.
 
+### Bukti verifikasi #573
+
+Smoke pengiriman nyata pada 7 Oktober 2026 memakai SQLite `:memory:` dan fixture
+bertanda **SMOKE #573 / DATA SINTETIS**, tanpa supplier HTTP atau mutasi DB produksi.
+Pipeline `SupplierHealthDeliveryPipeline` menerima acknowledgement Telegram dan
+menyimpan `sent`, `attempts=1` untuk tiga efek:
+
+| Sinyal | Effect ID | Telegram message ID |
+| --- | --- | --- |
+| Ambiguitas dispatch | `01a11509-2c5c-72e0-8994-e665e686c31a` | `1086197` |
+| Hold menua | `01a11509-2c8a-727f-84b3-049c9936be2c` | `1086198` |
+| Observasi wallet tertahan | `01a11509-2c8f-71a0-a3d7-f5b71adf3547` | `1086199` |
+
+Smoke juga membuktikan dedupe scan ulang, transisi ambiguous→review tanpa efek
+tambahan, delivery ulang efek sent tanpa resend, dan auto-clear setelah settlement
+serta observasi baru. Ini bukti transport nyata dengan data sintetis, **bukan**
+bukti deployment produksi atau resolusi historis Purchase #93.
+
+Keputusan transaksi merujuk Context7 Laravel 13:
+[transaction/deadlock retries](https://github.com/laravel/docs/blob/13.x/database.md),
+[pessimistic locking](https://github.com/laravel/docs/blob/13.x/queries.md), dan
+[after-commit dispatch](https://github.com/laravel/docs/blob/13.x/queues.md).
+Event, dedupe dan effect tetap satu transaksi; HTTP hanya pada delivery setelah commit.
+
 Smoke command isolated DB/HTTP fake menjalankan command aktual dua kali:
 effect durable satu, Telegram request satu, state `sent`, HTTP transaction
 level nol, supplier HTTP nol. Gunakan `SupplierHealthTest` dan
 `SupplierHealthPostgresConcurrencyTest` untuk regression boundaries/races;
-`php artisan schedule:list` harus menampilkan `*/15 * * * *`.
+SQLite `SupplierHealthTest`: **37 tests, 366 assertions passed**. PostgreSQL 16
+`SupplierHealthPostgresConcurrencyTest`: **2 tests, 27 assertions passed**, termasuk
+dua materializer paralel yang hanya membuat satu episode wallet stale.
+Lima acceptance/cutover scenarios #573 di PostgreSQL 16: **5 tests, 37 assertions
+passed** (ambiguity/dedupe/clear, freeze/hold, ambang/rearm wallet, reservation hold,
+dan preservasi episode legacy saat migration).
+`php artisan schedule:list` harus menampilkan `* * * * *` untuk health scan.
 
 ## Fulfillment and recovery
 

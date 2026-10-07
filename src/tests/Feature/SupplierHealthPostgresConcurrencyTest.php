@@ -76,4 +76,26 @@ final class SupplierHealthPostgresConcurrencyTest extends TestCase
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
         $this->assertSame(1, $effect->fresh()->attempts);
     }
+
+    public function test_concurrent_materializers_commit_one_stale_wallet_episode(): void
+    {
+        Supplier::forceCreate([
+            'name' => 'Frozen private connection', 'provider' => 'prodseller', 'api_key' => 'fixture-health-race',
+            'currency' => 'USDT', 'currency_confirmed' => true, 'exchange_rate_idr' => 1000,
+            'balance_micros' => 5_000_000, 'reserved_balance_micros' => 1_000_000,
+            'low_balance_threshold_micros' => 0, 'is_active' => true,
+            'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5),
+            'balance_observed_at' => now()->subMinutes(16),
+        ]);
+        $results = $this->race([
+            fn () => app(SupplierHealthService::class)->materialize(1),
+            fn () => app(SupplierHealthService::class)->materialize(1),
+        ]);
+        $this->assertSame(1, array_sum($results));
+        $this->assertSame(1, SupplierHealthEvent::count());
+        $this->assertSame(1, TelegramOutboundEffect::where('effect_type', TelegramOutboundEffectType::SupplierHealth->value)->count());
+        $this->assertTrue((bool) DB::table('supplier_health_states')->value('balance_stale_active'));
+        $this->assertSame(0, app(SupplierHealthService::class)->materialize(1));
+        Http::assertNothingSent();
+    }
 }

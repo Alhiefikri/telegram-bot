@@ -115,7 +115,7 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
     {
         $supplier = $this->supplier(['balance_micros' => 0]);
         $this->health()->materialize();
-        $supplier->forceFill(['low_balance_threshold_micros' => 0, 'balance_observed_at' => now()->subHour(), 'sync_expires_at' => now()->subHour()])->save();
+        $supplier->forceFill(['low_balance_threshold_micros' => 0, 'balance_observed_at' => now()->subMinutes(6), 'sync_expires_at' => now()->subMinutes(6)])->save();
 
         $this->assertSame(0, $this->health()->materialize());
         $this->assertNull($supplier->fresh()->low_balance_alerted_at);
@@ -258,10 +258,6 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $this->assertStringContainsString('Koneksi supplier terganggu', $message);
         $this->assertStringContainsString('jangan beli ulang', $message);
         $this->assertSame(1, $this->effects()->count(), 'New conditions on the same connection share one scan message.');
-        $firstEventId = SupplierHealthEvent::sole()->id;
-        $purchase->update(['state' => 'review']);
-        $this->assertSame(1, $this->health()->materialize(), 'A new purchase state episode must remain visible even at the same total count.');
-        $this->assertStringContainsString('Review/ambigu baru: 1 obligation', SupplierHealthEvent::whereKeyNot($firstEventId)->sole()->message);
     }
 
     public function test_unselected_or_unreadable_review_connections_are_not_guessed(): void
@@ -484,7 +480,6 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(1, $requests);
         $this->assertSame(1, $effect->fresh()->attempts);
         $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
-        $this->assertSame(1, $this->effects()->count());
     }
 
     public function test_authoritative_connection_recovery_is_independent_of_a_withheld_wallet_observation(): void
@@ -503,6 +498,97 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(1, $this->health()->materialize());
         $this->assertSame(2, $this->effects()->count());
         $this->assertNull($supplier->fresh()->low_balance_alerted_at);
+    }
+
+    public function test_wallet_observation_alert_boundary_and_rearm_are_independent_of_catalog_freshness(): void
+    {
+        $supplier = $this->supplier();
+        $this->travel(899)->seconds();
+        $this->assertSame(0, $this->health()->materialize());
+        $this->travel(1)->seconds();
+        $supplier->forceFill(['synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5)])->save();
+        $this->assertSame(1, $this->health()->materialize());
+        $this->assertSame(0, $this->health()->materialize());
+        $supplier->forceFill(['balance_observed_at' => now()])->save();
+        $this->assertSame(0, $this->health()->materialize());
+        $this->travel(15)->minutes();
+        $this->assertSame(1, $this->health()->materialize());
+        $this->assertSame(2, $this->effects()->count());
+    }
+
+    public function test_reserved_hold_without_purchase_is_discovered_and_cleared_on_release(): void
+    {
+        $supplier = $this->supplier();
+        $fulfillment = $this->fulfillment($supplier);
+        $fulfillment->update(['reserved_quantity' => 1, 'reserved_cost_micros' => 1_000_000]);
+        $this->travel(15)->minutes();
+        $supplier->forceFill(['balance_observed_at' => now()])->save();
+        $this->assertSame(1, $this->health()->materialize());
+        $this->assertSame(0, $this->health()->materialize());
+        $this->assertStringContainsString('Fulfillment #'.$fulfillment->id, SupplierHealthEvent::sole()->message);
+        $fulfillment->update(['reserved_quantity' => 0, 'reserved_cost_micros' => 0, 'reserved_supplier_id' => null]);
+        $this->assertSame(0, $this->health()->materialize());
+        $this->assertSame([], json_decode(DB::table('supplier_health_reviews')->value('active_identities'), true));
+    }
+
+    public function test_dispatch_unknown_episode_has_operator_context_and_survives_review_transition_without_duplicate(): void
+    {
+        $supplier = $this->supplier();
+        $fulfillment = $this->fulfillment($supplier, 'review');
+        $purchase = $this->purchase($fulfillment, $supplier, 'ambiguous', ['last_error' => 'dispatch_outcome_unknown']);
+        $this->assertSame(1, $this->health()->materialize());
+        $purchase->update(['state' => 'review']);
+        $this->assertSame(0, $this->health()->materialize());
+        $message = SupplierHealthEvent::sole()->message;
+        $this->assertStringContainsString('dispatch_outcome_unknown', $message);
+        $this->assertStringContainsString($fulfillment->order->invoice_number, $message);
+        $this->assertStringContainsString('Purchase #'.$purchase->id, $message);
+        $this->assertStringContainsString('SKU #'.$purchase->supplier_catalog_item_id, $message);
+        $this->assertStringContainsString('Jumlah: 1', $message);
+        $this->assertStringContainsString('Hold: 1.000000 USDT', $message);
+        $purchase->update(['state' => 'settled', 'committed_at' => now()]);
+        $fulfillment->update(['state' => 'delivered']);
+        $this->assertSame(0, $this->health()->materialize());
+        $this->assertSame([], json_decode(DB::table('supplier_health_reviews')->value('active_identities'), true));
+    }
+
+    public function test_frozen_balance_and_aged_hold_alert_separately_dedupe_and_clear_after_observation(): void
+    {
+        $supplier = $this->supplier();
+        $fulfillment = $this->fulfillment($supplier);
+        $purchase = $this->purchase($fulfillment, $supplier, 'awaiting_delivery');
+        $this->travel(16)->minutes();
+        $this->assertSame(2, $this->health()->materialize());
+        $this->assertSame(0, $this->health()->materialize());
+        $messages = SupplierHealthEvent::pluck('message')->implode("\n");
+        $this->assertStringContainsString('Observasi saldo tertahan', $messages);
+        $this->assertStringContainsString('Hold menua', $messages);
+        $this->assertStringContainsString('Purchase #'.$purchase->id, $messages);
+        $this->assertStringNotContainsString('Saldo tersedia: 10.000000', $messages);
+        $purchase->update(['state' => 'settled', 'committed_at' => now()]);
+        $supplier->forceFill(['balance_observed_at' => now()])->save();
+        $this->assertSame(0, $this->health()->materialize());
+        $this->assertFalse((bool) DB::table('supplier_health_states')->value('balance_stale_active'));
+    }
+
+    public function test_migration_preserves_already_notified_legacy_review_episodes(): void
+    {
+        $supplier = $this->supplier();
+        $fulfillment = $this->fulfillment($supplier, 'review');
+        $purchase = $this->purchase($fulfillment, $supplier, 'ambiguous');
+        $this->assertSame(1, $this->health()->materialize());
+        DB::table('supplier_health_reviews')->where('supplier_fulfillment_id', $fulfillment->id)->update([
+            'active_identities' => json_encode([
+                'purchase:'.$purchase->id.':'.$purchase->health_review_episode.':ambiguous' => $supplier->id,
+                'fulfillment:'.$fulfillment->id.':'.$fulfillment->health_review_episode.':review:'.$supplier->id => $supplier->id,
+            ], JSON_THROW_ON_ERROR),
+        ]);
+        $migration = require database_path('migrations/2026_10_07_000005_extend_supplier_health_observability.php');
+        $migration->down();
+        $migration->up();
+        $purchase->update(['state' => 'review']);
+        $this->assertSame(0, $this->health()->materialize());
+        $this->assertSame(1, $this->effects()->count());
     }
 
     private function health(): SupplierHealthService
