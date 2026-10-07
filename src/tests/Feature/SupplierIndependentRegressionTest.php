@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\OrderStatus;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\ProcessSupplierFulfillment;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -15,20 +16,30 @@ use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
+use App\Models\SupplierManualHandoff;
+use App\Models\SupplierOrderHistoryReconciliation;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardProductsData;
+use App\Services\Admin\AdminSupplierDashboardData;
+use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\Suppliers\SupplierAvailability;
+use App\Services\Suppliers\SupplierClient;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
+use App\Services\Telegram\TelegramAdminPaidOrderNotifier;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\NonTransactionalDatabaseTestCase;
 
@@ -294,20 +305,536 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         Http::assertSentCount(2);
     }
 
-    private function paidSupplierOrder(int $quantity = 1): array
+    public function test_operator_can_record_external_handoff_without_allocating_or_sending_a_second_credential(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder(2);
+        Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+
+        $review = ManualFulfillmentReview::query()->where('order_id', $order->id)->sole();
+        $owner = User::factory()->create(['role' => 'owner']);
+        Queue::fake([SendTelegramReceipt::class]);
+
+        $resolved = app(ManualFulfillmentResolutionService::class)->recordExternalHandoff(
+            $review,
+            $owner,
+            $fulfillment->id,
+            2,
+            'Dua unit diserahkan langsung setelah pelanggan menghubungi support.',
+        );
+
+        $this->assertSame(ManualFulfillmentReview::STATE_FULFILLED, $resolved->state);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame('delivered', $fulfillment->fresh()->state);
+        $this->assertSame('ambiguous', SupplierPurchase::sole()->fresh()->state);
+        $this->assertSame(2_000_000, Supplier::sole()->fresh()->reserved_balance_micros);
+        $this->assertSame(0, ProductStockItem::query()->where('order_item_id', $fulfillment->order_item_id)->count());
+        $this->assertDatabaseHas('supplier_manual_handoffs', [
+            'supplier_fulfillment_id' => $fulfillment->id,
+            'quantity' => 2,
+            'actor_user_id' => $owner->id,
+        ]);
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+        $this->actingAs($owner)->get(route('admin.orders.show', $order))
+            ->assertOk()
+            ->assertSee('Status pembayaran: paid')
+            ->assertSee('Pengiriman pelanggan')
+            ->assertSee('Selesai · diserahkan di luar bot')
+            ->assertSee('Pembelian supplier')
+            ->assertSee('ambiguous');
+        $this->get('/admin?tab=penjualan')
+            ->assertOk()
+            ->assertSee('Pengiriman pelanggan:')
+            ->assertSee('Pembelian supplier:')
+            ->assertSee('ambigu');
+
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response([
+            'status' => 'pending',
+            'order_id' => 'confirmed-original-purchase',
+            'service_id' => 'review-sku',
+            'quantity' => 2,
+            'total_cost' => '2',
+        ]));
+        app(SupplierFulfillmentService::class)->confirmDebit(
+            $fulfillment->id,
+            $owner,
+            'confirmed-original-purchase',
+            2,
+            2_000_000,
+            'Provider order history and exact-order GET confirm quantity and cost.',
+        );
+        app(SupplierFulfillmentService::class)->confirmDebit(
+            $fulfillment->id, $owner, 'confirmed-original-purchase', 2, 2_000_000,
+            'Provider order history and exact-order GET confirm quantity and cost.',
+        );
+
+        $this->assertSame(0, Supplier::sole()->fresh()->reserved_balance_micros);
+        $this->assertSame(8_000_000, Supplier::sole()->fresh()->balance_micros);
+        $this->assertNotNull(SupplierPurchase::sole()->fresh()->committed_at);
+        $this->assertDatabaseHas('supplier_purchase_evidence', [
+            'supplier_purchase_id' => SupplierPurchase::sole()->id,
+            'kind' => 'debit_confirmed',
+            'provider_reference' => 'confirmed-original-purchase',
+        ]);
+        $this->assertSame(0, ProductStockItem::query()->where('order_item_id', $fulfillment->order_item_id)->count());
+        $this->assertNull(app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh()));
+    }
+
+    public function test_explicit_no_debit_evidence_releases_an_ambiguous_hold_once_without_retrying_purchase(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $owner = User::factory()->create(['role' => 'owner']);
+
+        $purchase = app(SupplierFulfillmentService::class)->confirmNoDebit(
+            $fulfillment->id,
+            $owner,
+            'provider-case-565-1',
+            'Provider support case explicitly confirms no order or debit.',
+        );
+
+        $this->assertSame('rejected', $purchase->state);
+        $this->assertSame(0, Supplier::sole()->fresh()->reserved_balance_micros);
+        $this->assertSame(0, SupplierCatalogItem::sole()->fresh()->reserved_quantity);
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $service = app(SupplierFulfillmentService::class);
+        $replay = $service->confirmNoDebit(
+            $fulfillment->id,
+            $owner,
+            'provider-case-565-1',
+            'Provider support case explicitly confirms no order or debit.',
+        );
+        $this->assertSame($purchase->id, $replay->id);
+        $this->assertSame(1, SupplierPurchase::sole()->evidence()->where('kind', 'no_debit')->count());
+        $this->assertDatabaseHas('supplier_purchase_evidence', [
+            'supplier_purchase_id' => $purchase->id,
+            'kind' => 'no_debit',
+            'evidence_source' => 'provider_case',
+            'actor_user_id' => $owner->id,
+        ]);
+        app(SupplierFulfillmentService::class)->assertRefundable($order);
+        $this->addToAssertionCount(1);
+        $this->assertSame(1, SupplierPurchase::query()->count());
+    }
+
+    public function test_partial_external_handoff_submission_replay_is_idempotent_and_does_not_overcount_units(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder(2);
+        Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $review = ManualFulfillmentReview::query()->where('order_id', $order->id)->sole();
+        $owner = User::factory()->create(['role' => 'owner']);
+        $firstKey = (string) Str::uuid();
+        $resolution = app(ManualFulfillmentResolutionService::class);
+        $first = $resolution->recordExternalHandoff($review, $owner, $fulfillment->id, 1, 'Unit pertama diserahkan manual.', idempotencyKey: $firstKey);
+        $replay = $resolution->recordExternalHandoff($review, $owner, $fulfillment->id, 1, 'Unit pertama diserahkan manual.', idempotencyKey: $firstKey);
+
+        $this->assertSame(ManualFulfillmentReview::STATE_PENDING, $first->state);
+        $this->assertSame(ManualFulfillmentReview::STATE_PENDING, $replay->state);
+        $this->assertSame(1, SupplierManualHandoff::query()->where('supplier_fulfillment_id', $fulfillment->id)->count());
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+
+        $resolution->recordExternalHandoff($review->fresh(), $owner, $fulfillment->id, 1, 'Unit kedua diserahkan manual.', idempotencyKey: (string) Str::uuid());
+
+        $this->assertSame(2, SupplierManualHandoff::query()->where('supplier_fulfillment_id', $fulfillment->id)->count());
+        $this->assertSame(2, (int) SupplierManualHandoff::query()->where('supplier_fulfillment_id', $fulfillment->id)->sum('quantity'));
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(2_000_000, Supplier::sole()->fresh()->reserved_balance_micros);
+    }
+
+    public function test_original_recovery_after_partial_external_handoff_settles_economics_without_allocating_replacement_units(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder(2);
+        Http::fake(fn () => throw new ConnectionException('Possible debit.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
+        $owner = User::factory()->create(['role' => 'owner']);
+        app(ManualFulfillmentResolutionService::class)->recordExternalHandoff($review, $owner, $fulfillment->id, 1, 'One unit handed over.');
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response([
+            'status' => 'delivered', 'order_id' => 'partial-handoff-original',
+            'service_id' => 'review-sku', 'quantity' => 2, 'total_cost' => '2',
+            'products' => ['original-A', 'original-B'],
+        ]));
+        app(SupplierFulfillmentService::class)->recoverOrder($fulfillment->id, 'partial-handoff-original');
+        $this->assertSame(0, ProductStockItem::count());
+        $this->assertSame(0, Supplier::sole()->reserved_balance_micros);
+        $this->assertNotNull(SupplierPurchase::sole()->committed_at);
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+    }
+
+    public function test_toolorax_complete_history_covering_dispatch_is_durable_no_debit_evidence(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $owner = User::factory()->create(['role' => 'owner']);
+        $oldOrderAt = now()->subHour()->format('Y-m-d H:i:s');
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(function () use ($oldOrderAt) {
+            return Http::response(['ok' => true, 'count' => 1, 'orders' => [[
+                'order_code' => 'old-provider-order', 'product_id' => 8, 'quantity' => 1,
+                'total' => '1.000', 'status' => 'fulfilled', 'channel' => 'api', 'created_at' => $oldOrderAt,
+            ]]]);
+        });
+
+        $reconciliation = app(SupplierOrderHistoryReconciliationService::class)->reconcile(
+            $fulfillment->id,
+            $owner,
+            'Asia/Jakarta',
+        );
+        Http::assertSent(fn ($request): bool => $request->method() === 'GET'
+            && str_starts_with($request->url(), 'https://shopbot.00969600.xyz/shop-api/v1/orders?limit=100'),
+            json_encode(Http::recorded()->map(fn ($recorded) => [$recorded[0]->method(), $recorded[0]->url()])));
+
+        $this->assertSame(SupplierOrderHistoryReconciliation::OUTCOME_NO_ORDER, $reconciliation->outcome, (string) $reconciliation->error_code);
+        $this->assertSame(1, $reconciliation->row_count);
+        $this->assertLessThanOrEqual($reconciliation->dispatch_at->getTimestamp(), $reconciliation->coverage_start->getTimestamp());
+        $this->assertSame('Asia/Jakarta', $reconciliation->history_timezone);
+        $this->assertNotNull($reconciliation->response_sha256);
+        $this->assertSame([], $reconciliation->candidate_order_ids);
+
+        $purchase = app(SupplierFulfillmentService::class)->confirmNoDebit(
+            $fulfillment->id,
+            $owner,
+            '',
+            'Complete ShopBot order history spans dispatch and contains no order for this SKU.',
+            evidenceSource: 'provider_history',
+            historyReconciliationId: $reconciliation->id,
+        );
+
+        $this->assertSame('rejected', $purchase->state);
+        $this->assertSame(0, Supplier::sole()->fresh()->reserved_balance_micros);
+        $this->assertDatabaseHas('supplier_purchase_evidence', [
+            'supplier_purchase_id' => $purchase->id,
+            'history_reconciliation_id' => $reconciliation->id,
+            'evidence_source' => 'provider_history',
+        ]);
+        app(SupplierFulfillmentService::class)->assertRefundable($order);
+    }
+
+    public function test_toolorax_saturated_history_is_durable_but_cannot_release_hold(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $owner = User::factory()->create(['role' => 'owner']);
+        $oldOrderAt = now()->subHour()->format('Y-m-d H:i:s');
+        $orders = [];
+        for ($index = 0; $index < SupplierClient::TOOL_ORAX_ORDER_HISTORY_LIMIT; $index++) {
+            $orders[] = [
+                'order_code' => 'history-order-'.$index,
+                'product_id' => 8,
+                'quantity' => 1,
+                'total' => '1.000',
+                'status' => 'fulfilled',
+                'channel' => 'api',
+                'created_at' => $oldOrderAt,
+            ];
+        }
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response(['ok' => true, 'count' => count($orders), 'orders' => $orders]));
+
+        $reconciliation = app(SupplierOrderHistoryReconciliationService::class)->reconcile($fulfillment->id, $owner, 'Asia/Jakarta');
+
+        $this->assertSame(SupplierOrderHistoryReconciliation::OUTCOME_LIMIT_REACHED, $reconciliation->outcome, (string) $reconciliation->error_code);
+        $this->assertSame('history_limit_reached', $reconciliation->error_code);
+        $this->assertSame(100, $reconciliation->row_count);
+        try {
+            app(SupplierFulfillmentService::class)->confirmNoDebit(
+                $fulfillment->id,
+                $owner,
+                '',
+                'Attempt to use a truncated history result.',
+                evidenceSource: 'provider_history',
+                historyReconciliationId: $reconciliation->id,
+            );
+            $this->fail('A limit-reached history result must not release the purchase hold.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame(1_000_000, Supplier::sole()->fresh()->reserved_balance_micros);
+            $this->assertNull(SupplierPurchase::sole()->fresh()->committed_at);
+        }
+    }
+
+    public function test_empty_history_cannot_establish_dispatch_coverage(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        Http::fake(fn () => throw new ConnectionException('Possible debit.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response(['ok' => true, 'count' => 0, 'orders' => []]));
+        $owner = User::factory()->create(['role' => 'owner']);
+        $scan = app(SupplierOrderHistoryReconciliationService::class)->reconcile($fulfillment->id, $owner, 'Asia/Jakarta');
+        $this->assertSame('inconclusive', $scan->outcome);
+        $this->assertSame('dispatch_outside_history_window', $scan->error_code);
+        $this->assertSame(1_000_000, Supplier::sole()->reserved_balance_micros);
+    }
+
+    public function test_future_provider_timestamps_cannot_authorize_no_debit_with_an_unverified_clock_basis(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        Http::fake(fn () => throw new ConnectionException('Possible debit.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response(['ok' => true, 'count' => 2, 'orders' => [
+            ['order_code' => 'older-history-row', 'product_id' => 8, 'quantity' => 1,
+                'total' => '1', 'status' => 'fulfilled', 'created_at' => now()->subDay()->format('Y-m-d H:i:s')],
+            ['order_code' => 'future-history-row', 'product_id' => 8, 'quantity' => 1,
+                'total' => '1', 'status' => 'fulfilled', 'created_at' => now()->addHours(3)->format('Y-m-d H:i:s')],
+        ]]));
+        $owner = User::factory()->create(['role' => 'owner']);
+        $scan = app(SupplierOrderHistoryReconciliationService::class)->reconcile($fulfillment->id, $owner, 'Asia/Jakarta');
+        $this->assertSame('inconclusive', $scan->outcome);
+        $this->assertSame('provider_clock_inconsistent', $scan->error_code);
+        $this->assertSame(1_000_000, Supplier::sole()->reserved_balance_micros);
+    }
+
+    public function test_stale_operator_proof_cannot_release_a_different_current_purchase(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder();
+        Http::fake(fn () => throw new ConnectionException('Possible debit.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $purchase = SupplierPurchase::sole();
+        $owner = User::factory()->create(['role' => 'owner']);
+        $this->actingAs($owner)->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson(route('admin.suppliers.operate', $fulfillment), [
+                'action' => 'no_debit', 'purchase_id' => $purchase->id + 1,
+                'proof_source' => 'provider_case', 'proof_reference' => 'case-old-purchase',
+                'proof_note' => 'The provider confirmed an earlier purchase was not debited.',
+            ])->assertStatus(409);
+        $this->assertSame('ambiguous', $purchase->fresh()->state);
+        $this->assertSame(1_000_000, Supplier::sole()->reserved_balance_micros);
+    }
+
+    public function test_older_no_order_scan_cannot_override_a_newer_candidate_order_history(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $owner = User::factory()->create(['role' => 'owner']);
+        $oldOrderAt = now()->subHour()->format('Y-m-d H:i:s');
+        $candidateOrderAt = SupplierPurchase::sole()->dispatched_at->timezone('Asia/Jakarta')->addMinute()->format('Y-m-d H:i:s');
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fakeSequence()
+            ->push(['ok' => true, 'count' => 1, 'orders' => [[
+                'order_code' => 'old-order-before-dispatch', 'product_id' => 8, 'quantity' => 1,
+                'total' => '1.000', 'status' => 'fulfilled', 'created_at' => $oldOrderAt,
+            ]]])
+            ->push(['ok' => true, 'count' => 1, 'orders' => [[
+                'order_code' => 'candidate-after-dispatch', 'product_id' => 4, 'quantity' => 1,
+                'total' => '1.000', 'status' => 'fulfilled', 'created_at' => $candidateOrderAt,
+            ]]]);
+
+        $noOrderScan = app(SupplierOrderHistoryReconciliationService::class)->reconcile($fulfillment->id, $owner, 'Asia/Jakarta');
+        $this->travel(61)->seconds();
+        $candidateScan = app(SupplierOrderHistoryReconciliationService::class)->reconcile($fulfillment->id, $owner, 'Asia/Jakarta');
+
+        $this->assertSame(SupplierOrderHistoryReconciliation::OUTCOME_NO_ORDER, $noOrderScan->outcome);
+        $this->assertSame(SupplierOrderHistoryReconciliation::OUTCOME_CANDIDATE_ORDERS, $candidateScan->outcome);
+        $this->assertSame(['candidate-after-dispatch'], $candidateScan->candidate_order_ids);
+        try {
+            app(SupplierFulfillmentService::class)->confirmNoDebit(
+                $fulfillment->id,
+                $owner,
+                '',
+                'Attempt to use stale no-order scan.',
+                evidenceSource: 'provider_history',
+                historyReconciliationId: $noOrderScan->id,
+            );
+            $this->fail('A newer candidate history result must invalidate an older no-order conclusion.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame(1_000_000, Supplier::sole()->fresh()->reserved_balance_micros);
+            $this->assertNull(SupplierPurchase::sole()->fresh()->committed_at);
+        }
+    }
+
+    public function test_debit_confirmation_requires_exact_get_quantity_and_cost_match(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response(['ok' => true, 'order' => [
+            'order_code' => 'order-confirmed-debit', 'product_id' => 4, 'quantity' => 1,
+            'total' => '1.000', 'status' => 'fulfilled', 'delivered_keys' => ['provider-unit'],
+        ]]));
+
+        try {
+            app(SupplierFulfillmentService::class)->confirmDebit(
+                $fulfillment->id,
+                User::factory()->create(['role' => 'owner']),
+                'order-confirmed-debit',
+                2,
+                1_000_000,
+                'Operator values match the provider order history.',
+            );
+            $this->fail('A supplier GET with a different quantity must not settle the purchase.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame('ambiguous', SupplierPurchase::sole()->fresh()->state);
+            $this->assertNull(SupplierPurchase::sole()->fresh()->committed_at);
+            $this->assertSame(1_000_000, Supplier::sole()->fresh()->reserved_balance_micros);
+            $this->assertSame(0, ProductStockItem::query()->count());
+            $this->assertDatabaseMissing('supplier_purchase_evidence', ['kind' => 'debit_confirmed']);
+        }
+    }
+
+    public function test_admin_paid_notification_states_payment_customer_delivery_and_supplier_purchase_separately(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        config()->set('services.telegram.token', 'test-token');
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
+
+        app(TelegramAdminPaidOrderNotifier::class)->sendEffect($order, '123456');
+
+        $recorded = Http::recorded();
+        $this->assertCount(1, $recorded, json_encode($recorded->map(fn ($pair) => [$pair[0]->url(), $pair[0]->data()])));
+        $text = (string) ($recorded->first()[0]['text'] ?? '');
+        $this->assertStringContainsString('Status pembayaran: Paid', $text, $text);
+        $this->assertStringContainsString('Pengiriman pelanggan:', $text, $text);
+        $this->assertStringContainsString('Perlu review operator', $text, $text);
+        $this->assertStringContainsString('Pembelian supplier:', $text, $text);
+        $this->assertStringContainsString('ambiguous', $text, $text);
+        $this->assertStringNotContainsString('Produk terjual!', $text, $text);
+    }
+
+    public function test_completed_supplier_acquisition_without_receipt_does_not_claim_customer_delivery(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        Http::fake(fn () => Http::response([
+            'status' => 'delivered', 'order_id' => 'acquired-but-not-sent',
+            'service_id' => 'review-sku', 'quantity' => 1, 'total_cost' => '1',
+            'products' => ['fixture-delivery'],
+        ]));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+        $owner = User::factory()->create(['role' => 'owner']);
+        $this->actingAs($owner)->get(route('admin.orders.show', $order))
+            ->assertOk()->assertSee('Fulfillment tersedia · receipt Telegram belum terkonfirmasi');
+        $this->get('/admin?tab=penjualan')->assertOk()
+            ->assertSee('fulfillment tersedia · receipt Telegram belum terkonfirmasi');
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        config()->set('services.telegram.token', 'test-token');
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
+        app(TelegramAdminPaidOrderNotifier::class)->sendEffect($order, '123456');
+        $text = (string) Http::recorded()->sole()[0]['text'];
+        $this->assertStringContainsString('Fulfillment tersedia · receipt Telegram belum terkonfirmasi', $text);
+    }
+
+    public function test_read_only_order_roles_see_delivery_status_without_private_supplier_economics(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        Http::fake(fn () => throw new ConnectionException('Possible debit.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        foreach (['finance', 'support'] as $role) {
+            $actor = User::factory()->create(['role' => $role]);
+            $this->actingAs($actor)->get(route('admin.orders.show', $order))
+                ->assertOk()->assertSee('Perlu review operator')
+                ->assertDontSee('Disposable independent review')
+                ->assertDontSee('Observasi wallet terakhir:')
+                ->assertDontSee('biaya perkiraan')
+                ->assertViewHas('canViewSupplierOperations', false);
+        }
+    }
+
+    public function test_owner_dashboard_records_external_handoff_only_after_password_confirmation(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $review = ManualFulfillmentReview::query()->where('order_id', $order->id)->sole();
+        $owner = User::factory()->create(['role' => 'owner']);
+
+        $this->actingAs($owner)
+            ->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.manual-fulfillment-reviews.resolve', $review), [
+                'action' => 'hand_off',
+                'fulfillment_id' => $fulfillment->id,
+                'handoff_quantity' => 1,
+                'handoff_key' => (string) Str::uuid(),
+                'reason' => 'Diserahkan langsung oleh operator setelah verifikasi pelanggan.',
+            ])
+            ->assertRedirect(route('admin.manual-fulfillment-reviews.show', $review));
+
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertDatabaseHas('supplier_manual_handoffs', ['supplier_fulfillment_id' => $fulfillment->id, 'actor_user_id' => $owner->id]);
+    }
+
+    public function test_owner_dashboard_records_no_debit_evidence_before_releasing_hold(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $owner = User::factory()->create(['role' => 'owner']);
+
+        $this->actingAs($owner)
+            ->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.suppliers.operate', $fulfillment), [
+                'action' => 'no_debit',
+                'purchase_id' => SupplierPurchase::sole()->id,
+                'proof_source' => 'provider_statement',
+                'proof_reference' => 'history-window-2026-10-06T20:55+08:00',
+                'proof_note' => 'The provider history covers the dispatch time and has no matching order.',
+            ])
+            ->assertRedirect(route('admin.suppliers.purchases'));
+
+        $this->assertSame('rejected', SupplierPurchase::sole()->fresh()->state);
+        $this->assertSame(0, Supplier::sole()->fresh()->reserved_balance_micros);
+        $this->assertDatabaseHas('supplier_purchase_evidence', ['kind' => 'no_debit', 'actor_user_id' => $owner->id]);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+    }
+
+    public function test_admin_supplier_dashboard_distinguishes_last_wallet_observation_from_catalog_sync(): void
+    {
+        $this->paidSupplierOrder();
+        $supplier = Supplier::sole();
+        $observedAt = now()->subMinutes(10);
+        $supplier->forceFill([
+            'balance_micros' => 5_000_000,
+            'reserved_balance_micros' => 1_000_000,
+            'balance_observed_at' => $observedAt,
+            'synced_at' => now(),
+            'sync_expires_at' => now()->addMinutes(5),
+        ])->save();
+
+        $connection = app(AdminSupplierDashboardData::class)->forTab()['connections']->sole();
+
+        $this->assertSame($observedAt->toIso8601String(), $connection['balance_observed_at']);
+        $this->assertTrue($connection['balance_uncertain']);
+        $this->assertTrue($connection['has_unresolved_hold']);
+        $this->assertSame('4.000000', $connection['available_balance']);
+    }
+
+    private function paidSupplierOrder(int $quantity = 1, string $provider = 'aivault'): array
     {
         Queue::fake();
         Http::preventStrayRequests();
         $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0, 'price_amount' => 5000]);
         $supplier = Supplier::forceCreate([
-            'name' => 'Disposable independent review', 'provider' => 'aivault',
-            'api_key' => 'independent-review-fake-key', 'currency' => 'USD',
+            'name' => 'Disposable independent review', 'provider' => $provider,
+            'api_key' => 'independent-review-fake-key', 'currency' => $provider === 'prodseller' ? 'USDT' : 'USD',
             'currency_confirmed' => true, 'exchange_rate_idr' => 1000,
             'balance_micros' => 10_000_000, 'is_active' => true,
             'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5),
         ]);
         $sku = SupplierCatalogItem::create([
-            'supplier_id' => $supplier->id, 'external_id' => 'review-sku',
+            'supplier_id' => $supplier->id, 'external_id' => $provider === 'toolorax' ? '4' : 'review-sku',
             'name' => 'Disposable SKU', 'unit_price_micros' => 1_000_000,
             'stock' => 10, 'orderable' => true, 'requires_input' => false,
             'synced_at' => now(), 'price_tiers' => [], 'bulk_discounts' => [],

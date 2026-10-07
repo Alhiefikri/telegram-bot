@@ -356,6 +356,15 @@
                             <span x-text="`${manageStockSummary.available} tersedia · ${manageStockSummary.reserved} dipesan · ${manageStockSummary.paid} paid`">0 tersedia · 0 dipesan · 0 paid</span>
                         </div>
 
+                        <x-admin-dashboard.notice tone="warning" x-show="manageStockSupplierCapacity === 0 && manageStockSupplierCapacityReasons.length > 0" class="mb-3 rounded-[0.45rem] p-3 text-xs">
+                            <p class="font-black">Kapasitas supplier aman: 0 unit</p>
+                            <ul class="mt-1 list-disc space-y-1 pl-4">
+                                <template x-for="reason in manageStockSupplierCapacityReasons" :key="reason">
+                                    <li x-text="reason"></li>
+                                </template>
+                            </ul>
+                        </x-admin-dashboard.notice>
+
                         <x-admin-dashboard.notice tone="neutral" x-show="manageStockTruncated" class="mb-2 rounded-[0.45rem] p-2 text-[11px]">
                             Ringkasan menghitung semua akun. Hanya 25 akun terbaru per status yang ditampilkan di riwayat.
                         </x-admin-dashboard.notice>

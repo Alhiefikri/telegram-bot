@@ -8,11 +8,13 @@ use App\Enums\TelegramOutboundEffectState;
 use App\Models\Order;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Models\SupplierFulfillment;
 use App\Models\TelegramOutboundEffect;
 use App\Services\PaymentReceiptReport;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\Money;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 
 final class AdminDashboardSalesData
 {
@@ -86,18 +88,28 @@ final class AdminDashboardSalesData
                         'updated_at',
                     ]),
             ])
-            ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
+            ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at', 'telegram_receipt_sent_at'])
             ->when($statuses !== null, fn ($query) => $query->whereIn('order_status', array_map(fn (OrderStatus $status): string => $status->value, $statuses)))
             ->withCount('orderItems')
             ->latest()
             ->paginate(self::ORDERS_PER_PAGE, ['*'], 'sales_page')
             ->withQueryString();
 
+        $orderIds = $paginator->getCollection()->modelKeys();
+        $supplierFulfillments = SupplierFulfillment::query()
+            ->select(['id', 'order_id', 'state'])
+            ->with(['purchases:id,supplier_fulfillment_id,state'])
+            ->withExists('manualHandoffs')
+            ->whereIn('order_id', $orderIds)
+            ->orderBy('id')
+            ->get()
+            ->groupBy('order_id');
         $orders = $paginator->getCollection()
-            ->map(function (Order $order) use ($canRetrySalesProof): array {
+            ->map(function (Order $order) use ($canRetrySalesProof, $supplierFulfillments): array {
                 $earning = $this->paidReceiptLabel($order);
                 $orderStatusTone = $this->orderStatusTone($order->order_status);
                 $paymentStatusTone = $this->paymentStatusTone($order->payment_status);
+                $supplierProgress = $this->supplierProgress($supplierFulfillments->get($order->id, collect()), $order);
 
                 return [
                     'id' => $order->id,
@@ -113,6 +125,8 @@ final class AdminDashboardSalesData
                     'payment_status_label' => $this->paymentStatusLabel($order->payment_status),
                     'payment_status_tone' => $paymentStatusTone,
                     'payment_attention' => $this->paymentAttention($order),
+                    'supplier_delivery_status' => $supplierProgress['delivery'] ?? null,
+                    'supplier_purchase_status' => $supplierProgress['purchase'] ?? null,
                     'price' => Money::idr($order->total_amount),
                     'earning' => $earning['label'],
                     'earning_amount' => $earning['amount'],
@@ -125,6 +139,41 @@ final class AdminDashboardSalesData
             ->all();
 
         return [$orders, $this->pagination($paginator)];
+    }
+
+    /** @param Collection<int, SupplierFulfillment> $fulfillments
+     * @return array{delivery:string,purchase:string}|null
+     */
+    private function supplierProgress(Collection $fulfillments, Order $order): ?array
+    {
+        if ($fulfillments->isEmpty()) {
+            return null;
+        }
+        $deliveryStates = $fulfillments->map(fn (SupplierFulfillment $fulfillment): string => match ($fulfillment->state) {
+            'delivered' => $fulfillment->manual_handoffs_exists
+                ? 'selesai · diserahkan di luar bot'
+                : ($order->telegram_receipt_sent_at !== null ? 'receipt Telegram terkirim' : 'fulfillment tersedia · receipt Telegram belum terkonfirmasi'),
+            'review' => 'perlu review',
+            'cancelled' => 'dibatalkan',
+            default => 'sedang diproses',
+        })->unique()->implode(', ');
+        $purchaseStates = $fulfillments->flatMap(fn (SupplierFulfillment $fulfillment) => $fulfillment->purchases->pluck('state'))
+            ->map(fn (string $state): string => match ($state) {
+                'ambiguous' => 'ambigu',
+                'review' => 'perlu review',
+                'settled' => 'debit tercatat',
+                'delivered' => 'selesai',
+                'rejected' => 'ditolak · no-debit terbukti',
+                'sending' => 'sedang dikirim',
+                'awaiting_delivery' => 'menunggu hasil provider',
+                'reserved', 'pending' => 'menunggu dispatch',
+                default => 'belum diketahui',
+            })->unique()->implode(', ');
+
+        return [
+            'delivery' => $deliveryStates,
+            'purchase' => $purchaseStates === '' ? 'belum ada request supplier' : $purchaseStates,
+        ];
     }
 
     /**

@@ -82,8 +82,10 @@ final class MissingFulfillmentRefundService
 
     public static function acquired(SupplierFulfillment $f): int
     {
-        return ProductStockItem::query()->where('order_item_id', $f->order_item_id)
+        $allocated = ProductStockItem::query()->where('order_item_id', $f->order_item_id)
             ->whereHas('supplierPurchase', fn ($q) => $q->where('supplier_fulfillment_id', $f->id)->whereNull('warranty_claim_id'))->count();
+
+        return $allocated + (int) $f->manualHandoffs()->sum('quantity');
     }
 
     public function confirmExternal(User $actor, OrderRefund $initial, int $amount, string $currency, string $reference, string $result): OrderRefund

@@ -30,7 +30,8 @@
                     <p class="mt-1 text-sm font-semibold text-brand-muted">{{ $customerLabel }} · {{ $createdAtLabel }}</p>
                 </div>
                 <div class="text-right text-sm font-bold">
-                    <p>{{ $statusLabel }}</p>
+                    <p>Status order: {{ $orderStatusLabel }}</p>
+                    <p class="mt-1">Status pembayaran: {{ $paymentStatusLabel }}</p>
                     <p class="mt-1">{{ $total }}</p>
                 </div>
             </div>
@@ -57,6 +58,62 @@
                         @endforelse
                     </ul>
                 </x-admin-dashboard.card>
+            </div>
+
+            <x-admin-dashboard.notice tone="neutral" class="mt-4 rounded-xl text-sm">
+                Pembayaran, pengiriman pelanggan, dan pembelian supplier dicatat terpisah. Status Paid hanya mengonfirmasi pembayaran.
+            </x-admin-dashboard.notice>
+            @if ($hasPendingSupplierPurchase)
+                <x-admin-dashboard.notice tone="warning" class="mt-3 rounded-xl text-sm font-bold">
+                    Ada purchase supplier yang belum memiliki hasil ekonomi final. Lihat state dan hold per purchase sebelum mengambil keputusan berikutnya.
+                </x-admin-dashboard.notice>
+            @endif
+
+            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                <x-admin-dashboard.card padding="sm" tone="slate" shadow="none" class="rounded-xl border">
+                    <p class="text-xs font-bold uppercase text-brand-muted">Pengiriman pelanggan</p>
+                    @if ($supplierFulfillments !== [])
+                        <ul class="mt-2 space-y-3 text-sm font-semibold">
+                            @foreach ($supplierFulfillments as $fulfillment)
+                                <li>
+                                    <p>{{ $fulfillment['product_name'] }} · {{ $fulfillment['quantity'] }} unit</p>
+                                    <p class="font-black">{{ $fulfillment['delivery_status'] }}</p>
+                                    @foreach ($fulfillment['handoffs'] as $handoff)
+                                        <p class="mt-1 text-xs text-brand-muted">Handoff {{ $handoff['quantity'] }} unit oleh {{ $handoff['operator'] }} · {{ $handoff['at'] }} · {{ $handoff['note'] }}</p>
+                                    @endforeach
+                                </li>
+                            @endforeach
+                        </ul>
+                    @else
+                        <p class="mt-2 text-sm font-black">{{ $orderStatusLabel }}</p>
+                    @endif
+                </x-admin-dashboard.card>
+
+                @if ($canViewSupplierOperations)
+                <x-admin-dashboard.card padding="sm" tone="slate" shadow="none" class="rounded-xl border">
+                    <p class="text-xs font-bold uppercase text-brand-muted">Pembelian supplier</p>
+                    @if ($supplierFulfillments !== [])
+                        <ul class="mt-2 space-y-3 text-sm font-semibold">
+                            @foreach ($supplierFulfillments as $fulfillment)
+                                <li>
+                                    <p>{{ $fulfillment['product_name'] }} · hold {{ $fulfillment['reserved_quantity'] }} unit / {{ $fulfillment['reserved_cost'] }}</p>
+                                    @if ($fulfillment['last_wallet_observed_at'])
+                                        <p class="text-xs text-brand-muted">Observasi wallet terakhir: {{ $fulfillment['last_wallet_observed_at'] }}</p>
+                                    @endif
+                                    @forelse ($fulfillment['purchases'] as $purchase)
+                                        <p class="mt-1">#{{ $purchase['id'] }} · {{ $purchase['supplier_name'] }} · {{ $purchase['state'] }} · order {{ $purchase['supplier_order_id'] ?? 'belum diketahui' }}</p>
+                                        <p class="text-xs text-brand-muted">{{ $purchase['quantity'] }} unit · biaya perkiraan {{ $purchase['expected_cost'] }} {{ $purchase['currency'] }} · aktual {{ $purchase['actual_cost'] ?? 'belum terbukti' }} · {{ $purchase['committed_at'] ?? 'belum diselesaikan' }}</p>
+                                    @empty
+                                        <p class="mt-1">Belum ada purchase dikirim.</p>
+                                    @endforelse
+                                </li>
+                            @endforeach
+                        </ul>
+                    @else
+                        <p class="mt-2 text-sm font-black">Tidak menggunakan purchase supplier.</p>
+                    @endif
+                </x-admin-dashboard.card>
+                @endif
             </div>
 
             @if ($paymentAttention)

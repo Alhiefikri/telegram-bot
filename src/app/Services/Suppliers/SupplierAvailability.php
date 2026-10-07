@@ -42,6 +42,119 @@ final class SupplierAvailability
         }
     }
 
+    /** @return list<string> Safe operator-facing reasons; no supplier API payload or credential is exposed. */
+    public function explainZeroCapacity(Product $product): array
+    {
+        $product->loadMissing(['supplierPricePolicy', 'quantityPriceTiers']);
+        $sources = ProductSupplierSource::query()
+            ->where('product_id', $product->id)
+            ->with(['catalogItem.supplier'])
+            ->orderBy('priority')->orderBy('id')->get();
+        if ($sources->isEmpty()) {
+            return ['Belum ada mapping SKU supplier untuk produk ini.'];
+        }
+
+        $reasons = [];
+        foreach ($sources as $source) {
+            $item = $source->catalogItem;
+            $supplier = $item?->supplier;
+            if (! $source->is_active) {
+                $reasons[] = 'Ada mapping supplier yang dinonaktifkan.';
+
+                continue;
+            }
+            if ($item === null || $supplier === null) {
+                $reasons[] = 'Mapping SKU supplier tidak lengkap.';
+
+                continue;
+            }
+            if ($product->supplierPricePolicy === null) {
+                $reasons[] = 'Kebijakan harga supplier belum disetel.';
+
+                continue;
+            }
+            if (! $supplier->is_active) {
+                $reasons[] = 'Koneksi supplier nonaktif.';
+
+                continue;
+            }
+            if ($supplier->purchase_paused_until?->isFuture()) {
+                $reasons[] = 'Pembelian supplier sedang dijeda sampai '.$supplier->purchase_paused_until->timezone(config('app.timezone'))->format('Y-m-d H:i T').'.';
+
+                continue;
+            }
+            if (! $supplier->currency_confirmed || ($item->currency !== null && $item->currency !== $supplier->currency)) {
+                $reasons[] = 'Mata uang supplier belum terkonfirmasi atau tidak cocok dengan SKU.';
+
+                continue;
+            }
+            if ($supplier->synced_at === null || $supplier->sync_expires_at === null
+                || ! $supplier->sync_expires_at->isFuture() || $item->synced_at === null) {
+                $reasons[] = 'Observasi katalog supplier sudah stale; sinkronkan sebelum kapasitas dapat digunakan.';
+
+                continue;
+            }
+            if (! $item->orderable || $item->requires_input) {
+                $reasons[] = $item->requires_input
+                    ? 'SKU memerlukan input atau aktivasi manual.'
+                    : 'SKU supplier tidak dapat dipesan.';
+
+                continue;
+            }
+            if ($item->stock === null) {
+                $reasons[] = 'Stok SKU supplier belum diketahui.';
+
+                continue;
+            }
+            if ($item->stock <= $item->reserved_quantity) {
+                $reasons[] = 'Semua unit SKU supplier sedang ditahan atau stoknya nol.';
+
+                continue;
+            }
+            if ($supplier->balance_micros === null) {
+                $reasons[] = 'Saldo supplier belum pernah diamati.';
+
+                continue;
+            }
+
+            try {
+                $oneUnitCost = $this->pricing->costMicros($item, 1);
+                if ($oneUnitCost === null) {
+                    $reasons[] = 'Biaya SKU supplier tidak valid.';
+
+                    continue;
+                }
+                $availableWallet = max(0, $supplier->balance_micros - $supplier->reserved_balance_micros);
+                if ($availableWallet < $oneUnitCost) {
+                    $observed = $supplier->balance_observed_at?->timezone(config('app.timezone'))->format('Y-m-d H:i T');
+                    $reasons[] = 'Saldo tersedia setelah hold tidak cukup untuk satu unit'.($observed === null ? '.' : ' (observasi wallet '.$observed.').');
+
+                    continue;
+                }
+
+                $localQuantity = $product->localAvailableStock();
+                $quote = $this->retail->quote($product, $localQuantity + 1);
+                $policy = $product->supplierPricePolicy;
+                $minimumRetail = (int) $policy->minimum_profit_idr + (int) $policy->buffer_idr;
+                $maximumCost = $this->pricing->maximumCostIdr($policy, $quote->effectiveIdrUnitAmount, 1);
+                $costIdr = SupplierMoney::costIdr($oneUnitCost, (int) $supplier->exchange_rate_idr);
+                if ($quote->effectiveIdrUnitAmount < $minimumRetail || $costIdr > $maximumCost) {
+                    $reasons[] = 'Harga retail atau profit guard tidak menutup biaya supplier, buffer, dan profit minimum.';
+
+                    continue;
+                }
+
+                if ($this->pricing->capacity($product, $supplier, $item, $policy) === 0) {
+                    $reasons[] = 'Tier harga atau batas kapasitas aman menutup pembelian pada jumlah berikutnya.';
+                }
+            } catch (InvalidArgumentException) {
+                $reasons[] = 'Harga, kurs, atau batas pembelian tidak dapat dihitung dengan aman.';
+            }
+        }
+
+        return array_slice(array_values(array_unique($reasons ?: ['Tidak ada source supplier yang memenuhi semua syarat pembelian aman.'])), 0, 8);
+    }
+
     /** Caller owns ascending Product -> Supplier -> CatalogItem locks and complete mapped collections. */
     public function refreshLocked(Collection $products, Collection $suppliers, Collection $catalogItems, Collection $sources): void
     {

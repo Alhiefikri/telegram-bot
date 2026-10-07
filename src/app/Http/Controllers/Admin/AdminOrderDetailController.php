@@ -10,11 +10,13 @@ use App\Models\AuditLog;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
+use App\Models\SupplierFulfillment;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardSalesData;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\Admin\AdminPaymentOperations;
 use App\Services\Bsc\BscExplorerUrl;
+use App\Services\Suppliers\SupplierMoney;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\Money;
 use App\Support\PaymentProvider;
@@ -28,12 +30,14 @@ class AdminOrderDetailController extends Controller
     public function __invoke(Request $request, Order $order, AdminDashboardSalesData $salesData, AdminOrderOperations $operations, BscExplorerUrl $bscExplorer, AdminPaymentOperations $paymentOperations): View
     {
         $user = $request->attributes->get('adminUser');
+        $canViewSupplierOperations = $user?->role?->canManageStoreOperations() === true;
 
         Gate::authorize('view', $order);
 
         $order->load([
             'customer',
             'orderItems',
+            'orderItems.supplierFulfillment' => fn ($query) => $query->withExists('manualHandoffs'),
             'payments' => function ($payments): void {
                 $payments
                     ->withCount('paymentEvents')
@@ -56,19 +60,75 @@ class AdminOrderDetailController extends Controller
             'telegramOutboundEffects',
             'salesProofPost',
         ]);
+        if ($canViewSupplierOperations) {
+            $order->load([
+                'orderItems.supplierFulfillment' => fn ($query) => $query->withExists('manualHandoffs'),
+                'orderItems.supplierFulfillment.currentPurchase.supplier',
+                'orderItems.supplierFulfillment.manualHandoffs.actor',
+                'orderItems.supplierFulfillment.purchases.supplier',
+            ]);
+        }
 
         $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID');
         $payload = is_array($binancePayment?->provider_payload) ? $binancePayment->provider_payload : [];
         $hasMismatchEvidence = $operations->hasPendingBinanceMismatch($order);
         $bscPayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL && $payment->method === 'USDT_BEP20');
+        $supplierFulfillments = $order->orderItems->map(function ($item) use ($order, $canViewSupplierOperations): ?array {
+            $fulfillment = $item->supplierFulfillment;
+            if (! $fulfillment instanceof SupplierFulfillment) {
+                return null;
+            }
+            $deliveryStatus = match ($fulfillment->state) {
+                'delivered' => $fulfillment->manual_handoffs_exists
+                    ? 'Selesai · diserahkan di luar bot'
+                    : ($order->telegram_receipt_sent_at !== null ? 'Receipt Telegram tercatat terkirim' : 'Fulfillment tersedia · receipt Telegram belum terkonfirmasi'),
+                'review' => 'Perlu review operator',
+                'cancelled' => 'Dibatalkan',
+                default => 'Sedang diproses',
+            };
+
+            return [
+                'fulfillment_id' => $fulfillment->id,
+                'product_name' => $item->product_name,
+                'quantity' => $fulfillment->quantity,
+                'delivery_status' => $deliveryStatus,
+                'reserved_quantity' => $fulfillment->reserved_quantity,
+                'reserved_cost' => SupplierMoney::decimal($fulfillment->reserved_cost_micros),
+                'last_wallet_observed_at' => $canViewSupplierOperations ? $fulfillment->currentPurchase?->supplier?->balance_observed_at
+                    ?->timezone(config('app.timezone'))->format('Y-m-d H:i:s T') : null,
+                'purchases' => $canViewSupplierOperations ? $fulfillment->purchases->map(fn ($purchase): array => [
+                    'id' => $purchase->id,
+                    'state' => $purchase->state,
+                    'supplier_name' => $purchase->supplier?->name ?? 'Supplier tidak tersedia',
+                    'supplier_order_id' => $purchase->supplier_order_id,
+                    'quantity' => $purchase->quantity,
+                    'expected_cost' => SupplierMoney::decimal($purchase->expected_cost_micros),
+                    'actual_cost' => $purchase->actual_cost_micros === null ? null : SupplierMoney::decimal($purchase->actual_cost_micros),
+                    'currency' => $purchase->supplier?->currency ?? 'USD',
+                    'committed_at' => $purchase->committed_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s T'),
+                ])->values()->all() : [],
+                'handoffs' => $canViewSupplierOperations ? $fulfillment->manualHandoffs->map(fn ($handoff): array => [
+                    'quantity' => $handoff->quantity,
+                    'operator' => $handoff->actor?->name ?? 'operator dihapus',
+                    'at' => $handoff->handed_off_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s T'),
+                    'note' => $handoff->note,
+                ])->values()->all() : [],
+            ];
+        })->filter()->values()->all();
+        $hasPendingSupplierPurchase = collect($supplierFulfillments)->flatMap(fn (array $fulfillment): array => $fulfillment['purchases'])
+            ->contains(fn (array $purchase): bool => in_array($purchase['state'], ['sending', 'awaiting_delivery', 'ambiguous', 'review'], true));
 
         return view('admin.orders.show', [
             'order' => $order,
             'customerLabel' => $order->customer?->first_name ?: ($order->customer?->username ? '@'.$order->customer->username : 'Pelanggan'),
             'createdAtLabel' => $order->created_at?->format('d M Y H:i'),
             'total' => Money::idr($order->total_amount),
-            'statusLabel' => $order->order_status->value.' / '.$order->payment_status->value,
+            'orderStatusLabel' => $order->order_status->value,
+            'paymentStatusLabel' => $order->payment_status->value,
             'itemLabels' => $order->orderItems->map(fn ($item): string => $item->product_name.' × '.$item->quantity)->all(),
+            'supplierFulfillments' => $supplierFulfillments,
+            'canViewSupplierOperations' => $canViewSupplierOperations,
+            'hasPendingSupplierPurchase' => $hasPendingSupplierPurchase,
             'paymentLabels' => $order->payments->map(fn ($payment): string => $payment->payment_method_label.' · '.$payment->status->value.' · '.($payment->paid_at?->format('d M Y H:i') ?? 'belum paid'))->all(),
             'paymentAttention' => $salesData->paymentAttention($order),
             'canCancelRelease' => $order->order_status === OrderStatus::PendingPayment && $order->payment_status === PaymentStatus::Pending,

@@ -4,6 +4,7 @@ namespace App\Services\Admin;
 
 use App\Models\Product;
 use App\Models\Supplier;
+use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierMoney;
 
 final class AdminSupplierDashboardData
@@ -22,6 +23,10 @@ final class AdminSupplierDashboardData
                 'low_balance' => $available !== null && $available <= (int) $supplier->low_balance_threshold_micros,
                 'synced_at' => $supplier->synced_at?->toIso8601String(),
                 'expires_at' => $supplier->sync_expires_at?->toIso8601String(),
+                'balance_observed_at' => $supplier->balance_observed_at?->toIso8601String(),
+                'balance_uncertain' => $supplier->balance_micros === null
+                    || $supplier->balance_observed_at?->lte(now()->subSeconds(SupplierCatalogSync::FRESHNESS_SECONDS)) !== false,
+                'has_unresolved_hold' => (int) $supplier->reserved_balance_micros > 0,
                 'sync_error' => $supplier->last_error !== null ? $this->syncFailureMessage($supplier) : null,
                 'webhook_url' => $supplier->provider === 'buymail' ? route('buymail.webhook', $supplier->id) : null,
                 'webhook_configured' => $supplier->getRawOriginal('webhook_secret') !== null,

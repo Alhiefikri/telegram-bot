@@ -72,6 +72,12 @@
                                 <span class="text-xs font-bold text-brand-muted">{{ $order['item_count'] }} item</span>
                                 <a href="{{ $order['detail_url'] }}" class="text-xs font-bold text-neo-ink underline">Detail order</a>
                             </div>
+                            @if ($order['supplier_delivery_status'] !== null)
+                                <div class="mt-2 grid gap-1 rounded-lg bg-brand-bg p-2 text-xs font-semibold">
+                                    <p>Pengiriman pelanggan: <span class="font-black">{{ $order['supplier_delivery_status'] }}</span></p>
+                                    <p>Pembelian supplier: <span class="font-black">{{ $order['supplier_purchase_status'] }}</span></p>
+                                </div>
+                            @endif
                             @if ($order['payment_attention'])
                                 <x-admin-dashboard.notice :tone="$order['payment_attention']['tone']" class="mt-3 rounded-xl text-xs">
                                     <span class="font-black uppercase">{{ $order['payment_attention']['label'] }}:</span> {{ $order['payment_attention']['message'] }}

@@ -245,6 +245,8 @@ export default function adminDashboard(initialState = {}) {
     manageStockProductStock: 0,
     manageStockItems: [],
     manageStockAvailableCount: 0,
+    manageStockSupplierCapacity: 0,
+    manageStockSupplierCapacityReasons: [],
     manageStockSummary: { available: 0, reserved: 0, paid: 0 },
     manageStockTruncated: false,
     manageStockAddPayload: null,
@@ -1043,6 +1045,12 @@ export default function adminDashboard(initialState = {}) {
           })
         ),
         manageStockAvailableCount: product.availableStockItemCount || 0,
+        manageStockSupplierCapacity: product.supplierAvailableCapacity || 0,
+        manageStockSupplierCapacityReasons: Array.isArray(
+          product.supplierCapacityReasons
+        )
+          ? product.supplierCapacityReasons
+          : [],
         manageStockSummary: product.stockSummary || {
           available: product.availableStockItemCount || 0,
           reserved: 0,
@@ -1071,6 +1079,8 @@ export default function adminDashboard(initialState = {}) {
       this.manageStockSelectedIds = [];
       this.manageStockItems = [];
       this.manageStockSummary = { available: 0, reserved: 0, paid: 0 };
+      this.manageStockSupplierCapacity = 0;
+      this.manageStockSupplierCapacityReasons = [];
       this.manageStockTruncated = false;
 
       try {

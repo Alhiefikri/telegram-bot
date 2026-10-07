@@ -282,6 +282,7 @@ final class ReceiptDeliveryPipeline
         return $order->payment_status === PaymentStatus::Paid
             && in_array($order->order_status, [OrderStatus::PendingPayment, OrderStatus::Processing, OrderStatus::Completed], true)
             && $order->customer?->telegram_id !== null
+            && ! app(SupplierFulfillmentService::class)->hasExternalHandoff($order)
             && ! app(SupplierFulfillmentService::class)->hasPending($order);
     }
 

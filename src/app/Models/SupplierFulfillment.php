@@ -51,6 +51,11 @@ class SupplierFulfillment extends Model
         return $this->belongsTo(SupplierPurchase::class, 'current_purchase_id');
     }
 
+    public function manualHandoffs(): HasMany
+    {
+        return $this->hasMany(SupplierManualHandoff::class);
+    }
+
     public function reservedSupplier(): BelongsTo
     {
         return $this->belongsTo(Supplier::class, 'reserved_supplier_id');

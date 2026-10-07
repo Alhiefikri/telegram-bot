@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 #[Fillable(['supplier_fulfillment_id', 'supplier_id', 'supplier_catalog_item_id', 'reference', 'supplier_order_id', 'quantity', 'observed_quantity', 'expected_cost_micros', 'actual_cost_micros', 'exchange_rate_idr', 'state', 'claim_token', 'lease_expires_at', 'dispatched_at', 'replay_count', 'next_attempt_at', 'delivery_payload', 'trusted_delivery_payload', 'last_error', 'committed_at'])]
@@ -43,5 +45,20 @@ class SupplierPurchase extends Model
     public function catalogItem(): BelongsTo
     {
         return $this->belongsTo(SupplierCatalogItem::class, 'supplier_catalog_item_id');
+    }
+
+    public function evidence(): HasMany
+    {
+        return $this->hasMany(SupplierPurchaseEvidence::class);
+    }
+
+    public function historyReconciliations(): HasMany
+    {
+        return $this->hasMany(SupplierOrderHistoryReconciliation::class);
+    }
+
+    public function latestHistoryReconciliation(): HasOne
+    {
+        return $this->hasOne(SupplierOrderHistoryReconciliation::class)->latestOfMany();
     }
 }

@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Enums\InventoryMovementType;
+use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\MaterializeProductWaitlist;
 use App\Jobs\SendProductStockNotifications;
+use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Product;
 use App\Models\ProductSupplierSource;
@@ -13,11 +15,15 @@ use App\Models\StockNotificationEvent;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
 use App\Models\SupplierPricePolicy;
+use App\Models\TelegramOutboundEffect;
+use App\Services\Admin\AdminDashboardProductsData;
 use App\Services\ProductWaitlistNotificationService;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramCatalogProjectionCache;
+use App\Services\Telegram\TelegramProductNotificationService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -53,6 +59,21 @@ final class SupplierAvailabilityTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->method() === 'POST');
     }
 
+    public function test_admin_stock_modal_explains_zero_safe_capacity_when_supplier_stock_is_positive_but_wallet_is_empty(): void
+    {
+        [$product, $supplier] = $this->mapped();
+        $this->snapshot('0', 20);
+        $this->assertTrue(app(SupplierCatalogSync::class)->sync($supplier));
+
+        $payload = app(AdminDashboardProductsData::class)->stockManagementFor($product->fresh());
+
+        $this->assertSame(20, SupplierCatalogItem::query()->sole()->stock);
+        $this->assertSame(0, $payload['supplierAvailableCapacity']);
+        $this->assertSame(0, $payload['availableStock']);
+        $this->assertContains('Saldo tersedia setelah hold tidak cukup untuk satu unit (observasi wallet '.now()->format('Y-m-d H:i T').').', $payload['supplierCapacityReasons']);
+        $this->assertSame(0, Product::query()->findOrFail($product->id)->stock);
+    }
+
     public function test_product_transition_events_dedupe_repeated_sync_and_recover_lost_dispatch(): void
     {
         [$product, $supplier] = $this->mapped();
@@ -72,6 +93,87 @@ final class SupplierAvailabilityTest extends TestCase
         app(ProductWaitlistNotificationService::class)->reconcile();
         Queue::assertPushed(SendProductStockNotifications::class, 1);
         Queue::assertPushed(MaterializeProductWaitlist::class, 1);
+    }
+
+    public function test_real_supplier_restock_materializes_one_recipient_and_unknown_telegram_delivery_is_not_resent(): void
+    {
+        [$product, $supplier] = $this->mapped();
+        Customer::factory()->create(['telegram_id' => 399031, 'locale' => 'id']);
+        $this->snapshot('10', 20);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        $movement = InventoryMovement::query()->sole();
+        $event = StockNotificationEvent::query()->sole();
+        $this->assertSame(1, Customer::query()->whereNotNull('telegram_id')->count());
+        $batch = app(TelegramProductNotificationService::class)->stockAddedDeliveryBatch($product, 10, 0, 10, promotedTierResolved: true);
+        $this->assertCount(1, $batch['deliveries'], json_encode($batch));
+
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        $sendCount = 0;
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => function () use (&$sendCount): never {
+                $sendCount++;
+                throw new ConnectionException('connection closed after Telegram may have accepted the message');
+            },
+        ]);
+        (new SendProductStockNotifications($movement->id))->handle(app(StockNotificationDeliveryPipeline::class));
+
+        $this->assertSame(1, $event->recipients()->count(), 'Event recipient snapshot was not materialized: '.json_encode([
+            'snapshot_at' => $event->fresh()->recipients_snapshotted_at,
+            'cursor' => $event->fresh()->materialization_cursor,
+            'movement' => $movement->fresh()->only(['type', 'quantity', 'available_before', 'available_after', 'became_unavailable']),
+            'customer_count' => Customer::query()->whereNotNull('telegram_id')->count(),
+        ]));
+        $this->assertSame(1, $sendCount, 'The snapshotted recipient was not attempted once: '.json_encode(TelegramOutboundEffect::query()->get(['state', 'attempts', 'last_error_code', 'last_error'])->toArray()));
+        $recipient = $event->recipients()->sole();
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->state);
+        $this->assertSame(1, $effect->attempts);
+        $this->assertSame(1, $recipient->fresh()->attempts);
+        $this->assertNull($recipient->fresh()->sent_at);
+        $this->assertSame(0, app(StockNotificationDeliveryPipeline::class)->reconcile());
+
+        (new SendProductStockNotifications($movement->id))->handle(app(StockNotificationDeliveryPipeline::class));
+
+        $this->assertSame(1, $sendCount);
+        $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+    }
+
+    public function test_supplier_restock_delivery_is_durable_and_replayed_job_does_not_send_twice(): void
+    {
+        [$product, $supplier] = $this->mapped();
+        Customer::factory()->create(['telegram_id' => 399032, 'locale' => 'id']);
+        $this->snapshot('10', 20);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        $this->assertSame(1, InventoryMovement::query()->count());
+        $this->assertSame(1, StockNotificationEvent::query()->count());
+        $movement = InventoryMovement::query()->sole();
+
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        $sendCount = 0;
+        Http::fake([
+            'https://api.telegram.org/*/sendMessage' => function () use (&$sendCount) {
+                $sendCount++;
+
+                return Http::response(['ok' => true, 'result' => ['message_id' => 8841]]);
+            },
+        ]);
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+        (new SendProductStockNotifications($movement->id))->handle($pipeline);
+        (new SendProductStockNotifications($movement->id))->handle($pipeline);
+
+        $recipient = StockNotificationEvent::query()->sole()->recipients()->sole();
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame(1, $sendCount);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->state, json_encode($effect->only(['last_error_code', 'last_error', 'outcome_metadata'])));
+        $this->assertSame(1, $effect->attempts);
+        $this->assertSame($effect->sent_at->getTimestamp(), $recipient->sent_at->getTimestamp());
+        $this->assertSame(1, TelegramOutboundEffect::query()->count());
+        $this->assertSame(10, $product->fresh()->availableStock());
+        Http::assertSentCount(1);
     }
 
     public function test_failed_read_expiry_and_same_observation_recovery_do_not_create_false_restock(): void

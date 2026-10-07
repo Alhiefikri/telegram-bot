@@ -5,6 +5,7 @@ namespace App\Services\Suppliers;
 use App\Enums\SupplierProvider;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
@@ -25,6 +26,8 @@ final class SupplierClient
     private const DETAIL_CONCURRENCY = 5;
 
     private const MAX_QUANTITY = 10_000;
+
+    public const TOOL_ORAX_ORDER_HISTORY_LIMIT = 100;
 
     public function snapshot(Supplier $supplier): SupplierCatalogSnapshot
     {
@@ -216,6 +219,92 @@ final class SupplierClient
         $payload = $this->read($supplier, $path.rawurlencode($orderId), allowInactive: true);
 
         return $this->result($supplier, $payload, null, $orderId, $productId, $reference);
+    }
+
+    /** Read the documented, bounded ToolOraX order history. It never mutates provider state. */
+    public function orderHistory(Supplier $supplier, string $timezone): SupplierOrderHistorySnapshot
+    {
+        if ($supplier->provider !== SupplierProvider::ToolOrax->value) {
+            throw new SupplierUnavailable('order_history_unsupported');
+        }
+        try {
+            new \DateTimeZone($timezone);
+        } catch (Throwable) {
+            throw new SupplierUnavailable('invalid_history_timezone');
+        }
+
+        $payload = $this->read(
+            $supplier,
+            '/orders?limit='.self::TOOL_ORAX_ORDER_HISTORY_LIMIT,
+            hrtime(true) + 12_000_000_000,
+            allowInactive: true,
+        );
+        if (($payload['ok'] ?? null) !== true
+            || ! is_int($payload['count'] ?? null)
+            || $payload['count'] < 0
+            || ! is_array($payload['orders'] ?? null)
+            || ! array_is_list($payload['orders'])
+            || count($payload['orders']) > self::TOOL_ORAX_ORDER_HISTORY_LIMIT
+            || $payload['count'] < count($payload['orders'])) {
+            throw new SupplierUnavailable('invalid_order_history');
+        }
+
+        $orders = [];
+        $seenOrderIds = [];
+        foreach ($payload['orders'] as $row) {
+            if (! is_array($row)) {
+                throw new SupplierUnavailable('invalid_order_history');
+            }
+            $productId = $row['product_id'] ?? null;
+            if (is_string($productId) && ctype_digit($productId) && strlen($productId) <= 10) {
+                $productId = (int) $productId;
+            }
+            $orderId = $this->identifier($row['order_code'] ?? null);
+            if (isset($seenOrderIds[$orderId])) {
+                throw new SupplierUnavailable('invalid_order_history');
+            }
+            $seenOrderIds[$orderId] = true;
+            $productId = $this->integer($productId, 1, 2_147_483_647);
+            $quantity = $this->integer($row['quantity'] ?? null, 1, self::MAX_QUANTITY);
+            $total = $this->money($row['total'] ?? null, roundUp: false);
+            $status = $this->text($row['status'] ?? null, 40);
+            $createdAtValue = $this->text($row['created_at'] ?? null, 32);
+            try {
+                $createdAt = CarbonImmutable::createFromFormat('!Y-m-d H:i:s', $createdAtValue, $timezone);
+            } catch (Throwable) {
+                throw new SupplierUnavailable('invalid_order_history');
+            }
+            $errors = CarbonImmutable::getLastErrors();
+            if ($createdAt === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
+                || $createdAt->format('Y-m-d H:i:s') !== $createdAtValue) {
+                throw new SupplierUnavailable('invalid_order_history');
+            }
+            $orders[] = [
+                'order_id' => $orderId,
+                'product_id' => $productId,
+                'quantity' => $quantity,
+                'total_micros' => $total,
+                'status' => $status,
+                'created_at' => $createdAt,
+            ];
+        }
+
+        $digestRows = array_map(static fn (array $row): array => [
+            'order_id' => $row['order_id'],
+            'product_id' => $row['product_id'],
+            'quantity' => $row['quantity'],
+            'total_micros' => $row['total_micros'],
+            'status' => $row['status'],
+            'created_at' => $row['created_at']->format('Y-m-d H:i:s'),
+        ], $orders);
+
+        return new SupplierOrderHistorySnapshot(
+            self::TOOL_ORAX_ORDER_HISTORY_LIMIT,
+            $payload['count'],
+            $orders,
+            $timezone,
+            hash('sha256', json_encode($digestRows, JSON_THROW_ON_ERROR)),
+        );
     }
 
     private function ready(Supplier $supplier, bool $allowInactive = false): SupplierProvider

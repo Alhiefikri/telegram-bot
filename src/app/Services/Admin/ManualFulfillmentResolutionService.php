@@ -15,7 +15,10 @@ use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
+use App\Models\ProductStockItem;
 use App\Models\SupplierFulfillment;
+use App\Models\SupplierManualHandoff;
+use App\Models\SupplierPurchase;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\GuestOrderNotificationService;
@@ -30,6 +33,7 @@ use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\Warranty\RemainderRefundService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 class ManualFulfillmentResolutionService
@@ -67,6 +71,120 @@ class ManualFulfillmentResolutionService
                 'reject' => $this->reject($locked, $actor, $reason, $ip),
                 default => throw new InvalidOrderTransition('Unknown manual fulfillment resolution.'),
             };
+        }, attempts: 5);
+    }
+
+    /**
+     * Records customer delivery performed outside the Store Bot. The original
+     * supplier purchase remains unresolved: its hold stays in place until
+     * independently proven as either a debit or no-debit.
+     */
+    public function recordExternalHandoff(ManualFulfillmentReview $review, User $actor, int $fulfillmentId, int $quantity, string $reason, ?string $ip = null, ?string $idempotencyKey = null): ManualFulfillmentReview
+    {
+        if ($quantity < 1) {
+            throw new InvalidOrderTransition('Jumlah penyerahan harus lebih dari nol.');
+        }
+        $idempotencyKey ??= (string) Str::uuid();
+        if (! Str::isUuid($idempotencyKey) || trim($reason) === '') {
+            throw new InvalidOrderTransition('Kunci penyerahan tidak valid.');
+        }
+        $reason = trim($reason);
+
+        return DB::transaction(function () use ($review, $actor, $fulfillmentId, $quantity, $reason, $ip, $idempotencyKey): ManualFulfillmentReview {
+            $initial = ManualFulfillmentReview::query()->findOrFail($review->id);
+            $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
+            Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+            app(SupplierFulfillmentService::class)->lockForReview($order);
+            $locked = ManualFulfillmentReview::query()->lockForUpdate()->findOrFail($initial->id);
+            if ($locked->reason !== 'supplier_fulfillment') {
+                throw new InvalidOrderTransition('Handoff hanya tersedia untuk review fulfillment supplier yang masih terbuka.');
+            }
+            if ($order->payment_status !== PaymentStatus::Paid || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
+                throw new InvalidOrderTransition('Handoff hanya tersedia untuk pesanan berbayar yang aktif.');
+            }
+
+            $fulfillment = SupplierFulfillment::query()
+                ->whereKey($fulfillmentId)
+                ->where('order_id', $order->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $existing = SupplierManualHandoff::query()
+                ->where('supplier_fulfillment_id', $fulfillment->id)
+                ->where('idempotency_key', $idempotencyKey)
+                ->first();
+            if ($existing !== null) {
+                if ($existing->actor_user_id !== $actor->id || $existing->quantity !== $quantity || $existing->note !== $reason) {
+                    throw new InvalidOrderTransition('Kunci penyerahan sudah digunakan untuk data berbeda.');
+                }
+
+                return $locked->fresh();
+            }
+            if ($locked->state !== ManualFulfillmentReview::STATE_PENDING) {
+                throw new InvalidOrderTransition('Review ini sudah diselesaikan.');
+            }
+            if ($fulfillment->state !== 'review') {
+                throw new InvalidOrderTransition('Fulfillment ini tidak menunggu handoff manual.');
+            }
+            if (SupplierPurchase::query()->where('supplier_fulfillment_id', $fulfillment->id)
+                ->where('lease_expires_at', '>', now())->exists()) {
+                throw new InvalidOrderTransition('Purchase masih berjalan; tunggu hasilnya sebelum mencatat handoff.');
+            }
+
+            $alreadyHandedOff = SupplierManualHandoff::query()
+                ->where('supplier_fulfillment_id', $fulfillment->id)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->sum('quantity');
+            $allocated = ProductStockItem::query()->where('order_item_id', $fulfillment->order_item_id)
+                ->whereHas('supplierPurchase', fn ($query) => $query->where('supplier_fulfillment_id', $fulfillment->id)->whereNull('warranty_claim_id'))->count();
+            $remainingObligation = max(0, $fulfillment->quantity - $allocated - (int) $fulfillment->refunded_quantity);
+            if ($alreadyHandedOff + $quantity > $remainingObligation) {
+                throw new InvalidOrderTransition('Jumlah handoff melebihi kewajiban fulfillment.');
+            }
+
+            $handoff = SupplierManualHandoff::query()->create([
+                'supplier_fulfillment_id' => $fulfillment->id,
+                'actor_user_id' => $actor->id,
+                'idempotency_key' => $idempotencyKey,
+                'quantity' => $quantity,
+                'note' => $reason,
+                'handed_off_at' => now(),
+            ]);
+            $this->audit->log('supplier_fulfillment.external_handoff_recorded', $handoff, null, [
+                'fulfillment_id' => $fulfillment->id,
+                'quantity' => $quantity,
+                'note' => $reason,
+            ], $actor, $ip);
+
+            if ($alreadyHandedOff + $quantity < $remainingObligation) {
+                return $locked->fresh();
+            }
+
+            // Do not release the supplier hold or alter the unresolved purchase.
+            // recoverOrder() recognizes delivered fulfillments and settles only
+            // the original economic evidence without materializing credentials.
+            $fulfillment->update([
+                'state' => 'delivered',
+                'delivered_at' => now(),
+                'next_attempt_at' => null,
+                'last_error' => 'external_handoff_completed',
+            ]);
+
+            if (SupplierFulfillment::query()->where('order_id', $order->id)->where('state', '!=', 'delivered')->exists()) {
+                return $locked->fresh();
+            }
+
+            $order->update(['order_status' => OrderStatus::Completed]);
+            $this->guestOrderNotifications->record($order, GuestOrderNotificationEvent::FulfillmentCompleted);
+            $resolved = $this->markResolved($locked, ManualFulfillmentReview::STATE_FULFILLED, $actor, $reason);
+            $this->audit->log('manual_fulfillment_review.external_handoff_completed', $locked, ['state' => ManualFulfillmentReview::STATE_PENDING], [
+                'fulfillment_id' => $fulfillment->id,
+                'quantity' => $quantity,
+                'order_status' => OrderStatus::Completed->value,
+            ], $actor, $ip);
+
+            return $resolved;
         }, attempts: 5);
     }
 

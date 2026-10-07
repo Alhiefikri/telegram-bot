@@ -26,9 +26,14 @@ use App\Models\Supplier;
 use App\Models\SupplierAccountUnit;
 use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
+use App\Models\SupplierManualHandoff;
+use App\Models\SupplierOrderHistoryReconciliation;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Models\SupplierPurchaseEvidence;
+use App\Models\User;
 use App\Models\WarrantyClaim;
+use App\Services\AuditLogger;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\GuestOrderNotificationService;
 use App\Services\InventoryLedger;
@@ -45,7 +50,7 @@ use Throwable;
 
 final class SupplierFulfillmentService
 {
-    public function __construct(private readonly SupplierClient $client, private readonly SupplierPricing $pricing, private readonly SupplierAvailability $availability) {}
+    public function __construct(private readonly SupplierClient $client, private readonly SupplierPricing $pricing, private readonly SupplierAvailability $availability, private readonly AuditLogger $audit) {}
 
     /** Checkout already owns all Product locks. Lock all candidate resources once, globally ordered. */
     public function lockCheckoutResources(Collection $products): void
@@ -94,6 +99,11 @@ final class SupplierFulfillmentService
     public function hasPending(Order $order): bool
     {
         return SupplierFulfillment::query()->where('order_id', $order->id)->where('state', '!=', 'delivered')->exists();
+    }
+
+    public function hasExternalHandoff(Order $order): bool
+    {
+        return SupplierManualHandoff::query()->whereHas('fulfillment', fn ($query) => $query->where('order_id', $order->id))->exists();
     }
 
     public function paid(Order $order): void
@@ -261,7 +271,7 @@ final class SupplierFulfillmentService
         return [$purchase, $suppliers->get($purchase->supplier_id), $catalog->get($purchase->supplier_catalog_item_id), $token, $read];
     }
 
-    private function finalize(int $id, int $purchaseId, string $token, SupplierOrderResult $result, bool $read): void
+    private function finalize(int $id, int $purchaseId, string $token, SupplierOrderResult $result, bool $read, ?array $debitEvidence = null): void
     {
         $initial = SupplierFulfillment::findOrFail($id);
         $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
@@ -282,7 +292,26 @@ final class SupplierFulfillmentService
             return;
         }
         if ($suppliers->get($purchase->supplier_id)->provider === 'buymail' && $result->identityTrusted && $result->deliveryTrusted) {
+            if ($debitEvidence !== null && ($result->orderId !== $debitEvidence['order_id']
+                || $result->requestedQuantity !== $debitEvidence['quantity']
+                || $result->quantity !== $purchase->quantity || $result->costMicros !== $debitEvidence['cost_micros'])) {
+                $purchase->forceFill(['state' => 'review', 'last_error' => 'operator_evidence_mismatch'])->save();
+                $this->review($f, $order, 'operator_evidence_mismatch');
+
+                return;
+            }
             $this->finalizeBuyMail($f, $order, $purchase, $result, $suppliers, $catalog);
+            if ($debitEvidence !== null && $purchase->committed_at !== null) {
+                SupplierPurchaseEvidence::query()->firstOrCreate(
+                    ['supplier_purchase_id' => $purchase->id, 'kind' => SupplierPurchaseEvidence::KIND_DEBIT_CONFIRMED],
+                    ['actor_user_id' => $debitEvidence['actor']->id, 'evidence_source' => 'provider_exact_order',
+                        'provider_reference' => $debitEvidence['order_id'], 'note' => $debitEvidence['note'], 'observed_at' => now()],
+                );
+                $this->audit->log('supplier_purchase.debit_confirmed', $purchase, null, [
+                    'supplier_order_id' => $result->orderId, 'quantity' => $result->requestedQuantity,
+                    'cost_micros' => $result->costMicros, 'currency' => 'IDR',
+                ], $debitEvidence['actor'], $debitEvidence['ip']);
+            }
 
             return;
         }
@@ -338,10 +367,44 @@ final class SupplierFulfillmentService
         $deliveries = $purchase->trusted_delivery_payload ?? [];
         $quantityMatches = $purchase->observed_quantity === $purchase->quantity;
         $economicProof = $result->identityTrusted && $purchase->supplier_order_id !== null && $quantityMatches;
+        if ($debitEvidence !== null) {
+            $matchesConfirmation = $economicProof
+                && $purchase->supplier_order_id === $debitEvidence['order_id']
+                && $purchase->observed_quantity === $debitEvidence['quantity']
+                && $purchase->actual_cost_micros === $debitEvidence['cost_micros'];
+            if ($matchesConfirmation) {
+                $evidence = SupplierPurchaseEvidence::query()->firstOrCreate(
+                    ['supplier_purchase_id' => $purchase->id, 'kind' => SupplierPurchaseEvidence::KIND_DEBIT_CONFIRMED],
+                    [
+                        'actor_user_id' => $debitEvidence['actor']->id,
+                        'evidence_source' => 'provider_exact_order',
+                        'provider_reference' => $debitEvidence['order_id'],
+                        'note' => $debitEvidence['note'],
+                        'observed_at' => now(),
+                    ],
+                );
+                if ($evidence->actor_user_id === $debitEvidence['actor']->id
+                    && $evidence->provider_reference === $debitEvidence['order_id']
+                    && $evidence->note === $debitEvidence['note']) {
+                    $this->audit->log('supplier_purchase.debit_confirmed', $purchase, null, [
+                        'supplier_order_id' => $debitEvidence['order_id'],
+                        'quantity' => $debitEvidence['quantity'],
+                        'cost_micros' => $debitEvidence['cost_micros'],
+                        'currency' => $suppliers->get($purchase->supplier_id)->currency,
+                    ], $debitEvidence['actor'], $debitEvidence['ip']);
+                }
+            } else {
+                $purchase->forceFill(['state' => 'ambiguous', 'last_error' => 'operator_evidence_mismatch'])->save();
+                $this->review($f, $order, 'operator_evidence_mismatch');
+
+                return;
+            }
+        }
         if ($purchase->committed_at === null && $purchase->actual_cost_micros !== null && $economicProof) {
             $this->commitDebit($f, $purchase, $suppliers, $catalog);
         }
-        if ($f->state === 'delivered' && $economicProof && $purchase->committed_at !== null && $purchase->actual_cost_micros !== null) {
+        $hasExternalHandoff = SupplierManualHandoff::query()->where('supplier_fulfillment_id', $f->id)->exists();
+        if (($f->state === 'delivered' || $hasExternalHandoff) && $economicProof && $purchase->committed_at !== null && $purchase->actual_cost_micros !== null) {
             // Manual replacement already satisfied customer delivery. Recover
             // only the original acquisition's economics, never reopen delivery
             // or allocate a second set of credentials.
@@ -350,6 +413,9 @@ final class SupplierFulfillmentService
                 'next_attempt_at' => null,
                 'last_error' => SupplierMoney::costIdr($purchase->actual_cost_micros, $purchase->exchange_rate_idr) > $f->maximum_cost_idr ? 'cost_mismatch' : null,
             ])->save();
+            if ($f->state !== 'delivered') {
+                $this->review($f, $order, 'external_handoff_remaining');
+            }
             $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
 
             return;
@@ -566,7 +632,9 @@ final class SupplierFulfillmentService
         $acquired = ProductStockItem::query()->where('order_item_id', $f->order_item_id)
             ->whereHas('supplierPurchase', fn ($q) => $q->where('supplier_fulfillment_id', $f->id)->whereNull('warranty_claim_id'))->count();
 
-        return max(0, $f->quantity - $acquired - (int) $f->refunded_quantity);
+        $handedOff = (int) SupplierManualHandoff::query()->where('supplier_fulfillment_id', $f->id)->sum('quantity');
+
+        return max(0, $f->quantity - $acquired - (int) $f->refunded_quantity - $handedOff);
     }
 
     public function completeMissingRefund(SupplierFulfillment $initial, OrderRefund $refund): void
@@ -648,8 +716,11 @@ final class SupplierFulfillmentService
 
             return;
         }
-        if ($f->state === 'delivered') {
+        if ($f->state === 'delivered' || SupplierManualHandoff::query()->where('supplier_fulfillment_id', $f->id)->exists()) {
             // Manual replacement already satisfied the customer; only settle original economics.
+            if ($f->state !== 'delivered') {
+                $this->review($f, $order, 'external_handoff_remaining');
+            }
             $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
 
             return;
@@ -733,8 +804,179 @@ final class SupplierFulfillmentService
         }, 5);
     }
 
+    /**
+     * Accepts a human-reviewed, durable no-debit proof. This does not create
+     * a replacement purchase or delivery; it only retires the original hold.
+     */
+    public function confirmNoDebit(
+        int $id,
+        User $actor,
+        string $providerReference,
+        string $note,
+        ?string $ip = null,
+        string $evidenceSource = 'provider_case',
+        ?int $historyReconciliationId = null,
+        ?int $expectedPurchaseId = null,
+    ): SupplierPurchase {
+        if (! in_array($evidenceSource, ['provider_case', 'provider_statement', 'provider_history'], true)
+            || trim($note) === ''
+            || ($evidenceSource !== 'provider_history' && trim($providerReference) === '')
+            || ($evidenceSource === 'provider_history' && $historyReconciliationId === null)) {
+            throw new InvalidOrderTransition('Bukti no-debit dan catatan verifikasi wajib diisi.');
+        }
+
+        return DB::transaction(function () use ($id, $actor, $providerReference, $note, $ip, $evidenceSource, $historyReconciliationId, $expectedPurchaseId): SupplierPurchase {
+            $initial = SupplierFulfillment::query()->findOrFail($id);
+            $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
+            Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+            [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
+            $fulfillment = $fulfillments->get($id) ?? throw new InvalidOrderTransition('Fulfillment tidak ditemukan.');
+            $purchase = $fulfillment->current_purchase_id === null
+                ? null
+                : SupplierPurchase::query()->lockForUpdate()->find($fulfillment->current_purchase_id);
+            if ($expectedPurchaseId !== null && $purchase?->id !== $expectedPurchaseId) {
+                throw new InvalidOrderTransition('Purchase berubah sejak form dibuka. Muat ulang bukti.');
+            }
+            $existingEvidence = $purchase === null ? null : SupplierPurchaseEvidence::query()
+                ->where('supplier_purchase_id', $purchase->id)
+                ->where('kind', SupplierPurchaseEvidence::KIND_NO_DEBIT)
+                ->lockForUpdate()
+                ->first();
+            if ($existingEvidence !== null) {
+                $expectedReference = $evidenceSource === 'provider_history'
+                    ? 'history-scan#'.$historyReconciliationId
+                    : trim($providerReference);
+                if ($existingEvidence->actor_user_id !== $actor->id
+                    || $existingEvidence->evidence_source !== $evidenceSource
+                    || $existingEvidence->provider_reference !== $expectedReference
+                    || $existingEvidence->history_reconciliation_id !== $historyReconciliationId
+                    || $existingEvidence->note !== trim($note)) {
+                    throw new InvalidOrderTransition('Bukti no-debit purchase ini sudah direkam dengan data berbeda.');
+                }
+
+                return $purchase;
+            }
+            if ($purchase === null || $purchase->committed_at !== null || $purchase->supplier_order_id !== null
+                || $purchase->lease_expires_at?->isFuture() || ! in_array($purchase->state, ['ambiguous', 'review'], true)) {
+                throw new InvalidOrderTransition('Purchase ini belum dapat dikonfirmasi no-debit.');
+            }
+
+            $historyEvidence = null;
+            if ($evidenceSource === 'provider_history') {
+                $historyEvidence = SupplierOrderHistoryReconciliation::query()
+                    ->whereKey($historyReconciliationId)
+                    ->where('supplier_purchase_id', $purchase->id)
+                    ->lockForUpdate()
+                    ->first();
+                $latestHistoryId = SupplierOrderHistoryReconciliation::query()
+                    ->where('supplier_purchase_id', $purchase->id)
+                    ->orderByDesc('observed_at')->orderByDesc('id')
+                    ->value('id');
+                if ($historyEvidence === null
+                    || (int) $latestHistoryId !== (int) $historyEvidence->id
+                    || $historyEvidence->outcome !== SupplierOrderHistoryReconciliation::OUTCOME_NO_ORDER
+                    || $historyEvidence->requested_at->lessThan($purchase->dispatched_at)
+                    || $historyEvidence->observed_at->lessThan($historyEvidence->requested_at)
+                    || $historyEvidence->observed_at->lessThan($purchase->dispatched_at)
+                    || $historyEvidence->row_count >= $historyEvidence->requested_limit
+                    || $historyEvidence->reported_count !== $historyEvidence->row_count
+                    || $historyEvidence->coverage_start === null
+                    || $historyEvidence->coverage_end === null
+                    || $historyEvidence->coverage_end->greaterThan($historyEvidence->observed_at)
+                    || $historyEvidence->coverage_start->greaterThan($purchase->dispatched_at)) {
+                    throw new InvalidOrderTransition('Riwayat supplier tidak membuktikan bahwa jendela lengkap mencakup waktu dispatch.');
+                }
+            }
+
+            SupplierPurchaseEvidence::query()->create([
+                'supplier_purchase_id' => $purchase->id,
+                'actor_user_id' => $actor->id,
+                'history_reconciliation_id' => $historyEvidence?->id,
+                'kind' => SupplierPurchaseEvidence::KIND_NO_DEBIT,
+                'evidence_source' => $evidenceSource,
+                'provider_reference' => $historyEvidence === null ? trim($providerReference) : 'history-scan#'.$historyEvidence->id,
+                'note' => trim($note),
+                'observed_at' => now(),
+            ]);
+            $this->unhold($fulfillment, $suppliers, $catalog);
+            $purchase->update(['state' => 'rejected', 'last_error' => 'provider_no_debit_confirmed', 'next_attempt_at' => null]);
+            if ($fulfillment->state !== 'delivered') {
+                $fulfillment->update(['state' => 'review', 'next_attempt_at' => null, 'last_error' => 'provider_no_debit_confirmed']);
+            }
+            $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
+            $this->audit->log('supplier_purchase.no_debit_confirmed', $purchase, ['state' => 'ambiguous'], [
+                'evidence_source' => $evidenceSource,
+                'evidence_reference' => $historyEvidence === null ? trim($providerReference) : 'history-scan#'.$historyEvidence->id,
+                'fulfillment_id' => $fulfillment->id,
+            ], $actor, $ip);
+
+            return $purchase->fresh();
+        }, 5);
+    }
+
     /** An operator supplies an exact order identity; quantity/cost evidence must match on GET. */
     public function recoverOrder(int $id, string $orderId): void
+    {
+        $this->recoverOrderWithEvidence($id, $orderId);
+    }
+
+    public function confirmDebit(int $id, User $actor, string $orderId, int $quantity, int $costMicros, string $note, ?string $ip = null, ?int $expectedPurchaseId = null): SupplierPurchase
+    {
+        if ($quantity < 1 || $costMicros < 1 || trim($note) === '') {
+            throw new InvalidOrderTransition('Supplier order, jumlah, biaya, dan catatan bukti wajib valid.');
+        }
+        if (preg_match('/\A[A-Za-z0-9._:-]{1,128}\z/', $orderId) !== 1) {
+            throw new InvalidOrderTransition('Invalid order identity.');
+        }
+
+        $existing = DB::transaction(function () use ($id, $orderId, $quantity, $costMicros, $expectedPurchaseId): ?SupplierPurchase {
+            $initial = SupplierFulfillment::query()->findOrFail($id);
+            $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
+            Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+            [$fulfillments] = $this->lockedOrderResources($order);
+            $fulfillment = $fulfillments->get($id);
+            $purchase = $fulfillment?->current_purchase_id === null
+                ? null
+                : SupplierPurchase::query()->whereKey($fulfillment->current_purchase_id)->lockForUpdate()->first();
+            if ($expectedPurchaseId !== null && $purchase?->id !== $expectedPurchaseId) {
+                throw new InvalidOrderTransition('Purchase berubah sejak form dibuka. Muat ulang bukti.');
+            }
+            $evidence = $purchase?->evidence()->where('kind', SupplierPurchaseEvidence::KIND_DEBIT_CONFIRMED)->first();
+            if ($evidence === null) {
+                return null;
+            }
+            if ($purchase->supplier_order_id !== $orderId || $purchase->observed_quantity !== $quantity
+                || $purchase->actual_cost_micros !== $costMicros || $evidence->provider_reference !== $orderId) {
+                throw new InvalidOrderTransition('Purchase ini sudah dikonfirmasi dengan bukti ekonomi berbeda.');
+            }
+
+            return $purchase;
+        }, 5);
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $evidence = [
+            'actor' => $actor,
+            'order_id' => $orderId,
+            'quantity' => $quantity,
+            'cost_micros' => $costMicros,
+            'note' => trim($note),
+            'ip' => $ip,
+            'purchase_id' => $expectedPurchaseId,
+        ];
+        $this->recoverOrderWithEvidence($id, $orderId, $evidence);
+
+        $purchase = SupplierFulfillment::query()->findOrFail($id)->currentPurchase;
+        $confirmed = $purchase?->evidence()->where('kind', SupplierPurchaseEvidence::KIND_DEBIT_CONFIRMED)->exists() === true;
+        if (! $confirmed || $purchase->supplier_order_id !== $orderId || $purchase->observed_quantity !== $quantity || $purchase->actual_cost_micros !== $costMicros) {
+            throw new InvalidOrderTransition('Data supplier tidak cocok dengan bukti debit yang dimasukkan. Hold tetap memerlukan pemeriksaan.');
+        }
+
+        return $purchase->fresh();
+    }
+
+    private function recoverOrderWithEvidence(int $id, string $orderId, ?array $debitEvidence = null): void
     {
         if (DB::transactionLevel() !== 0) {
             throw new InvalidOrderTransition('Recovery transport cannot run inside a transaction.');
@@ -742,7 +984,7 @@ final class SupplierFulfillmentService
         if (preg_match('/\A[A-Za-z0-9._:-]{1,128}\z/', $orderId) !== 1) {
             throw new InvalidOrderTransition('Invalid order identity.');
         }
-        $request = DB::transaction(function () use ($id): array {
+        $request = DB::transaction(function () use ($id, $debitEvidence): array {
             $initial = SupplierFulfillment::findOrFail($id);
             $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
             Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
@@ -750,8 +992,14 @@ final class SupplierFulfillmentService
             $f = $fulfillments->get($id);
             $this->assertActive($order);
             $purchase = SupplierPurchase::findOrFail($f->current_purchase_id);
+            if (($debitEvidence['purchase_id'] ?? null) !== null && $purchase->id !== $debitEvidence['purchase_id']) {
+                throw new InvalidOrderTransition('Purchase berubah sejak form dibuka. Muat ulang bukti.');
+            }
             if ($purchase->lease_expires_at?->isFuture() || ! in_array($purchase->state, ['ambiguous', 'review', 'awaiting_delivery'], true)) {
                 throw new InvalidOrderTransition('This purchase is not eligible for recovery.');
+            }
+            if ($debitEvidence !== null && ($purchase->state === 'awaiting_delivery' || $purchase->supplier_order_id !== null)) {
+                throw new InvalidOrderTransition('Bukti debit hanya dapat dikonfirmasi untuk purchase ambigu tanpa order ID.');
             }
             $token = (string) Str::uuid();
             $purchase->update(['claim_token' => $token, 'lease_expires_at' => now()->addMinutes(2)]);
@@ -769,7 +1017,14 @@ final class SupplierFulfillmentService
         if (($purchase->supplier_order_id === null && ($result->orderId !== $orderId || $requestedQuantity !== $purchase->quantity || $result->costMicros === null)) || ($purchase->supplier_order_id !== null && $purchase->supplier_order_id !== $orderId)) {
             $result = new SupplierOrderResult('ambiguous', null, null, null, [], 'order_identity_mismatch');
         }
-        DB::transaction(fn () => $this->finalize($id, $purchase->id, $token, $result, true), 5);
+        if ($debitEvidence !== null
+            && ($result->orderId !== $debitEvidence['order_id']
+                || $requestedQuantity !== $debitEvidence['quantity']
+                || $result->costMicros !== $debitEvidence['cost_micros'])) {
+            $result = new SupplierOrderResult('ambiguous', null, null, null, [], 'operator_evidence_mismatch');
+            $debitEvidence = null;
+        }
+        DB::transaction(fn () => $this->finalize($id, $purchase->id, $token, $result, true, $debitEvidence), 5);
     }
 
     public function provideManualCredentials(int $id, array $credentials): void

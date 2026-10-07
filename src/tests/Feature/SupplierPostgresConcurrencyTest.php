@@ -19,6 +19,7 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Models\SupplierPurchaseEvidence;
 use App\Models\User;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
@@ -30,6 +31,7 @@ use App\Services\Suppliers\SupplierFulfillmentService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -116,6 +118,42 @@ final class SupplierPostgresConcurrencyTest extends TestCase
             $this->assertSame(1, $posts);
             $this->assertSame(1, ProductStockItem::count());
         }
+    }
+
+    #[Group('postgres-release')]
+    public function test_duplicate_no_debit_confirmations_release_one_hold_and_record_one_evidence_row(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::query()->where('order_id', $order->id)->sole();
+        $purchase = SupplierPurchase::query()->create([
+            'supplier_fulfillment_id' => $fulfillment->id,
+            'supplier_id' => $supplier->id,
+            'supplier_catalog_item_id' => $sku->id,
+            'reference' => (string) Str::uuid(),
+            'quantity' => 1,
+            'expected_cost_micros' => 1_000_000,
+            'exchange_rate_idr' => 1000,
+            'state' => 'ambiguous',
+            'dispatched_at' => now()->subMinute(),
+        ]);
+        $fulfillment->forceFill(['state' => 'review', 'current_purchase_id' => $purchase->id])->save();
+        $actor = User::factory()->create(['role' => UserRole::Owner]);
+        $reference = 'provider-case-concurrent-no-debit';
+        $note = 'Provider confirmed there is no order and no debit.';
+
+        $results = $this->race([
+            fn (): array => ['state' => app(SupplierFulfillmentService::class)->confirmNoDebit($fulfillment->id, $actor, $reference, $note)->state],
+            fn (): array => ['state' => app(SupplierFulfillmentService::class)->confirmNoDebit($fulfillment->id, $actor, $reference, $note)->state],
+        ]);
+
+        $this->assertSame([['state' => 'rejected'], ['state' => 'rejected']], $results);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(0, $sku->fresh()->reserved_quantity);
+        $this->assertSame(1, SupplierPurchaseEvidence::query()->where('supplier_purchase_id', $purchase->id)->where('kind', 'no_debit')->count());
+        $this->assertSame(1, AuditLog::query()->where('action', 'supplier_purchase.no_debit_confirmed')->count());
+        $this->assertSame(1, SupplierPurchase::query()->count());
     }
 
     public function test_sync_racing_checkout_keeps_wallet_and_sku_commitments(): void

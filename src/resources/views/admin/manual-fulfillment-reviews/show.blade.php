@@ -32,6 +32,22 @@
                     <div class="sm:col-span-2"><dt class="text-brand-muted">Refund provider</dt><dd>{{ $review->refund_provider_reference }} ({{ $review->refund_provider_result }})</dd></div>
                 @endif
             </dl>
+            @if ($handoffFulfillments->isNotEmpty())
+                <section class="mt-5 rounded-xl border border-brand-border p-4">
+                    <h2 class="font-black">Pengiriman pelanggan & pembelian supplier</h2>
+                    <p class="mt-1 text-sm text-brand-muted">Status paid membuktikan pembayaran saja. Handoff eksternal menyelesaikan pelanggan, tetapi hold dan pembelian supplier tetap menunggu bukti ekonomi.</p>
+                    <div class="mt-3 grid gap-3">
+                        @foreach ($handoffFulfillments as $fulfillment)
+                            <article class="rounded-lg bg-brand-bg p-3 text-sm">
+                                <p><span class="font-bold">Fulfillment #{{ $fulfillment->id }}</span> · pelanggan: <span class="font-bold">{{ $fulfillment->state === 'delivered' ? 'selesai' : 'belum selesai' }}</span> · {{ $fulfillment->quantity }} unit</p>
+                                @foreach ($fulfillment->manualHandoffs as $handoff)
+                                    <p class="mt-2 text-brand-muted">Handoff {{ $handoff->quantity }} unit oleh {{ $handoff->actor?->name ?? 'operator dihapus' }} pada {{ $handoff->handed_off_at?->format('d M Y H:i') }}: {{ $handoff->note }}</p>
+                                @endforeach
+                            </article>
+                        @endforeach
+                    </div>
+                </section>
+            @endif
         </x-admin-dashboard.card>
         @can('resolve', $review)
             @if ($review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING)
@@ -40,11 +56,21 @@
                     @if ($errors->has('review'))<p class="mt-2 text-sm font-bold text-red-700">{{ $errors->first('review') }}</p>@endif
                     <form method="POST" action="{{ route('admin.manual-fulfillment-reviews.resolve', $review) }}" class="mt-4 grid gap-3">
                         @csrf
+                        <input type="hidden" name="handoff_key" value="{{ $handoffKey }}">
                         <label class="text-sm font-bold">Decision
-                            <select name="action" class="mt-1 block w-full rounded border-brand-border"><option value="fulfill">Fulfill</option><option value="refund">Refund</option><option value="reject">Reject</option></select>
+                            <select name="action" class="mt-1 block w-full rounded border-brand-border"><option value="fulfill">Fulfill</option>@if ($review->reason === 'supplier_fulfillment')<option value="hand_off">Sudah diserahkan di luar bot</option>@endif<option value="refund">Refund</option><option value="reject">Reject</option></select>
                         </label>
+                        @if ($review->reason === 'supplier_fulfillment')
+                            <label class="text-sm font-bold">Fulfillment yang diserahkan di luar bot
+                                <select name="fulfillment_id" class="mt-1 block w-full rounded border-brand-border"><option value="">Pilih fulfillment</option>@foreach ($handoffFulfillments->where('state', 'review') as $fulfillment)<option value="{{ $fulfillment->id }}">#{{ $fulfillment->id }} · {{ $fulfillment->quantity }} unit</option>@endforeach</select>
+                            </label>
+                            <label class="text-sm font-bold">Jumlah unit diserahkan
+                                <input name="handoff_quantity" type="number" min="1" step="1" class="mt-1 block w-full rounded border-brand-border">
+                            </label>
+                        @endif
                         <label class="text-sm font-bold">Auditable reason
                             <textarea name="reason" required maxlength="2000" class="mt-1 block w-full rounded border-brand-border"></textarea>
+                            @if ($review->reason === 'supplier_fulfillment')<small class="mt-1 block text-brand-muted">Untuk handoff luar bot, tulis waktu/keterangan singkat di catatan ini. Jangan masukkan password atau credential.</small>@endif
                         </label>
                         <label class="text-sm font-bold">Refund provider reference (refund only)
                             <input name="refund_provider_reference" class="mt-1 block w-full rounded border-brand-border">

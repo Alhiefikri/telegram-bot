@@ -15,6 +15,7 @@ use App\Models\ProductStockItem;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\Pricing\ProductQuantityPricing;
+use App\Services\Suppliers\SupplierAvailability;
 use App\Storefront\StorefrontBanners;
 use App\Storefront\StorefrontProductPlaceholder;
 use App\Support\Money;
@@ -29,6 +30,7 @@ final class AdminDashboardProductsData
         private readonly StorefrontProductPlaceholder $placeholder,
         private readonly CatalogBrowse $catalog,
         private readonly StorefrontBanners $banners,
+        private readonly SupplierAvailability $supplierAvailability,
     ) {}
 
     /**
@@ -309,6 +311,10 @@ final class AdminDashboardProductsData
             'stock' => (int) $product->stock,
             'reservedStock' => (int) $product->reserved_stock,
             'availableStock' => $product->availableStock(),
+            'supplierAvailableCapacity' => $product->supplierAvailableStock(),
+            'supplierCapacityReasons' => $product->supplierAvailableStock() === 0
+                ? $this->supplierAvailability->explainZeroCapacity($product)
+                : [],
             'stockItems' => $stockItems,
             'bulkDeleteUrl' => route('admin.products.stock-items.bulk-destroy', $product),
             'availableStockItemCount' => $product->availableStockItemCount(),

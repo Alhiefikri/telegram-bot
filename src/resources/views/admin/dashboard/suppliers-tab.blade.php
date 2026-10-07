@@ -38,11 +38,14 @@
                         <div class="supplier-metric"><dt class="supplier-muted text-xs font-bold">Ditahan · {{ $connection['currency'] }}</dt><dd class="mt-1 break-words text-lg font-bold">{{ $connection['held_balance'] }}</dd></div>
                     </dl>
                     @if($connection['low_balance'])<p role="status" class="supplier-alert">Saldo supplier rendah / tidak mencukupi. Isi saldo sebelum mencoba kembali fulfillment.</p>@endif
+                    @if($connection['has_unresolved_hold'])<p role="status" class="supplier-alert">Dana ditahan oleh purchase yang belum terbukti. Saldo tersedia sudah dikurangi hold; jangan menganggap debit supplier sudah pasti terjadi atau melepasnya tanpa bukti.</p>@endif
+                    @if($connection['balance_uncertain'])<p role="status" class="supplier-alert">Observasi saldo belum segar atau belum tersedia. Kapasitas pembelian aman dapat nol sampai observasi wallet baru diterima.</p>@endif
                     @if($connection['sync_error'])<p role="status" class="supplier-alert">{{ $connection['sync_error'] }}</p>@endif
                     @if($connection['refunds_disabled'])<p role="status" class="supplier-alert">Refund supplier dinonaktifkan. Sumber Gmail ini tidak menerima pembelian baru sampai dukungan refund aktif kembali.</p>@endif
                     @if($connection['purchase_paused_until'])<p role="status" class="supplier-alert">Batas harian supplier tercapai. Pembelian baru ditunda sampai {{ $connection['purchase_paused_until'] }}.</p>@endif
                     <dl class="supplier-muted grid gap-2 text-xs leading-relaxed">
                         <div><dt class="font-bold">Sinkron terakhir</dt><dd class="break-words">{{ $connection['synced_at'] ?? 'Belum sinkron' }}</dd></div>
+                        <div><dt class="font-bold">Saldo terakhir diamati</dt><dd class="break-words">{{ $connection['balance_observed_at'] ?? 'Belum pernah diamati' }}</dd></div>
                         <div><dt class="font-bold">Berlaku sampai</dt><dd class="break-words">{{ $connection['expires_at'] ?? 'Tidak segar' }} · Versi {{ $connection['version'] }}</dd></div>
                     </dl>
                     @if($connection['webhook_url'])

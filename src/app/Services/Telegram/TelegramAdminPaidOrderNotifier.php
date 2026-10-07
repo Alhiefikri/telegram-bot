@@ -7,6 +7,7 @@ use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\SupplierFulfillment;
 use App\Services\PaymentReceiptReport;
 use App\Support\DogfoodTiming;
 
@@ -61,12 +62,13 @@ class TelegramAdminPaidOrderNotifier
         $payment = $this->relevantPayment($order);
 
         $lines = [
-            $this->uiIcons->renderLegacyIcons('🔔 Produk terjual!'),
+            $this->uiIcons->renderLegacyIcons('🔔 Pembayaran diterima'),
             '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
             'Pembeli: '.$this->buyerLabel($order),
             'Sumber: '.$this->sourceLabel($order),
-            'Status: Pembayaran selesai',
+            'Status pembayaran: Paid',
+            ...$this->fulfillmentStatusLines($order),
             'Metode: '.$this->paymentLabel($payment),
             'Earning: '.$this->earningLabel($payment, $order),
             '',
@@ -82,6 +84,61 @@ class TelegramAdminPaidOrderNotifier
         ];
 
         return implode("\n", $lines);
+    }
+
+    /** @return list<string> */
+    private function fulfillmentStatusLines(Order $order): array
+    {
+        $fulfillments = SupplierFulfillment::query()
+            ->with(['currentPurchase', 'purchases', 'manualHandoffs'])
+            ->where('order_id', $order->getKey())
+            ->orderBy('id')
+            ->get();
+        if ($fulfillments->isEmpty()) {
+            $status = $order->order_status?->value ?? (string) $order->order_status;
+            $deliveryState = $status === 'completed'
+                ? ($order->telegram_receipt_sent_at !== null ? 'Receipt Telegram tercatat terkirim' : 'Fulfillment selesai · receipt Telegram belum terkonfirmasi')
+                : $this->deliveryLabel($status);
+
+            return ['Pengiriman pelanggan: '.$deliveryState, 'Pembelian supplier: tidak digunakan'];
+        }
+
+        $items = $order->orderItems->keyBy('id');
+        $delivery = [];
+        $purchases = [];
+        foreach ($fulfillments as $fulfillment) {
+            $item = $items->get($fulfillment->order_item_id);
+            $productName = trim((string) ($item?->product_name ?: 'Produk'));
+            $deliveryState = $this->deliveryLabel($fulfillment->state);
+            if ($fulfillment->state === 'delivered' && $fulfillment->manualHandoffs->isNotEmpty()) {
+                $deliveryState = 'Selesai · handoff luar bot dicatat';
+            } elseif ($fulfillment->state === 'delivered') {
+                $deliveryState = $order->telegram_receipt_sent_at !== null
+                    ? 'Receipt Telegram tercatat terkirim'
+                    : 'Fulfillment tersedia · receipt Telegram belum terkonfirmasi';
+            }
+            $delivery[] = $productName.': '.$deliveryState;
+
+            foreach ($fulfillment->purchases as $purchase) {
+                $purchases[] = 'purchase #'.$purchase->id.' '.$purchase->state;
+            }
+        }
+
+        return [
+            'Pengiriman pelanggan: '.implode('; ', array_slice($delivery, 0, 3)),
+            'Pembelian supplier: '.($purchases === [] ? 'belum dikirim' : implode('; ', array_slice($purchases, 0, 3))),
+        ];
+    }
+
+    private function deliveryLabel(string $state): string
+    {
+        return match ($state) {
+            'completed', 'delivered' => 'Selesai',
+            'review' => 'Perlu review operator',
+            'cancelled' => 'Dibatalkan',
+            'processing', 'pending', 'purchasing', 'reserved', 'awaiting_delivery' => 'Sedang diproses',
+            default => 'Belum dipastikan',
+        };
     }
 
     private function earningLabel(?Payment $payment, Order $order): string

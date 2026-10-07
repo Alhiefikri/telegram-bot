@@ -20,6 +20,7 @@ use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierManager;
 use App\Services\Suppliers\SupplierMoney;
+use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
 use App\Services\Suppliers\SupplierPricing;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -148,7 +149,8 @@ final class AdminSupplierController extends Controller
     {
         $this->authorizeManager($request);
         $purchases = SupplierPurchase::query()->select(['id', 'supplier_fulfillment_id', 'supplier_id', 'reference', 'supplier_order_id', 'quantity', 'expected_cost_micros', 'actual_cost_micros', 'state', 'last_error', 'created_at', 'updated_at'])->orderByDesc('id')->paginate(25);
-        $fulfillments = SupplierFulfillment::query()->select(['id', 'order_id', 'order_item_id', 'quantity', 'state', 'last_error', 'created_at'])
+        $fulfillments = SupplierFulfillment::query()->with(['currentPurchase.supplier', 'currentPurchase.latestHistoryReconciliation'])
+            ->select(['id', 'order_id', 'order_item_id', 'quantity', 'state', 'last_error', 'current_purchase_id', 'created_at'])
             ->where(fn ($query) => $query->whereNotIn('state', ['delivered', 'cancelled'])
                 ->orWhereHas('purchases', fn ($purchases) => $purchases->whereNotIn('state', ['delivered', 'settled', 'rejected', 'cancelled'])))
             ->orderByDesc('id')->paginate(25, ['*'], 'fulfillments_page');
@@ -156,7 +158,7 @@ final class AdminSupplierController extends Controller
         return view('admin.suppliers.purchases', compact('purchases', 'fulfillments'));
     }
 
-    public function operate(SupplierAdminRequest $request, SupplierFulfillment $fulfillment, SupplierFulfillmentService $service)
+    public function operate(SupplierAdminRequest $request, SupplierFulfillment $fulfillment, SupplierFulfillmentService $service, SupplierOrderHistoryReconciliationService $history)
     {
         app(SupplierOperationConfirmation::class)->requireRecent($request);
         try {
@@ -164,6 +166,33 @@ final class AdminSupplierController extends Controller
                 'retry' => $service->retryAfterTopup((int) $fulfillment->id),
                 'recover' => $service->recoverOrder((int) $fulfillment->id, $request->string('supplier_order_id')->toString()),
                 'manual' => $service->provideManualCredentials((int) $fulfillment->id, array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $request->string('credentials')->toString())), fn (string $value): bool => $value !== ''))),
+                'no_debit' => $service->confirmNoDebit(
+                    (int) $fulfillment->id,
+                    $request->attributes->get('adminUser'),
+                    $request->string('proof_reference')->toString(),
+                    $request->string('proof_note')->toString(),
+                    $request->ip(),
+                    $request->string('proof_source')->toString(),
+                    $request->filled('history_reconciliation_id') ? $request->integer('history_reconciliation_id') : null,
+                    $request->integer('purchase_id'),
+                ),
+                'debit_confirmed' => $service->confirmDebit(
+                    (int) $fulfillment->id,
+                    $request->attributes->get('adminUser'),
+                    $request->string('supplier_order_id')->toString(),
+                    $request->integer('debit_quantity'),
+                    $request->integer('debit_cost_micros'),
+                    $request->string('proof_note')->toString(),
+                    $request->ip(),
+                    $request->integer('purchase_id'),
+                ),
+                'history' => $history->reconcile(
+                    (int) $fulfillment->id,
+                    $request->attributes->get('adminUser'),
+                    $request->string('history_timezone')->toString(),
+                    $request->ip(),
+                    $request->integer('purchase_id'),
+                ),
             };
         } catch (InvalidOrderTransition|InsufficientStock|\DomainException|InvalidArgumentException|ValidationException $exception) {
             // Operational errors may contain delivery data: never echo them.
