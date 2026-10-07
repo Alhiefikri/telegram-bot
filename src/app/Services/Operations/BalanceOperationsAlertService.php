@@ -18,6 +18,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Models\UsdtBalanceReconciliationRun;
 use App\Services\Telegram\TelegramAdminAccess;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
+use Brick\Math\BigInteger;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
@@ -443,7 +444,7 @@ final class BalanceOperationsAlertService
      */
     private function treasuryCoverageSignal(?UsdtBalanceReconciliationRun $run): array
     {
-        $liability = (int) ($run?->liability_micro ?? 0);
+        $liability = (string) ($run?->liability_micro ?? '0');
         $custodyState = $run?->custody_state;
         $treasuryFindings = is_array($run?->findings) ? ($run->findings['treasury']['findings'] ?? []) : [];
         $treasuryFindings = is_array($treasuryFindings) ? $treasuryFindings : [];
@@ -452,7 +453,7 @@ final class BalanceOperationsAlertService
         $badCustody = $custodyState === null || in_array($custodyState, ['unavailable', 'unsupported', 'missing'], true);
 
         $active = $run !== null
-            && (($liability > 0 && $badCustody) || $missingCustodyInput || $unexplainedVariance);
+            && ((! BigInteger::of($liability)->isZero() && $badCustody) || $missingCustodyInput || $unexplainedVariance);
 
         return [
             'key' => self::ALERT_TREASURY_COVERAGE,
@@ -461,7 +462,7 @@ final class BalanceOperationsAlertService
             'summary' => $run === null
                 ? 'Belum ada run rekonsiliasi penuh.'
                 : sprintf(
-                    'Coverage treasury USDT belum terverifikasi pada rekonsiliasi penuh terakhir (run #%d): liabilitas %d micro-USDT, custody %s.',
+                    'Coverage treasury USDT belum terverifikasi pada rekonsiliasi penuh terakhir (run #%d): liabilitas %s micro-USDT, custody %s.',
                     (int) $run->id,
                     $liability,
                     $custodyState === null || $custodyState === '' ? 'tidak tersedia' : $custodyState,

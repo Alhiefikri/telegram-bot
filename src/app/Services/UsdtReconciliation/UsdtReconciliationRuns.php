@@ -4,7 +4,6 @@ namespace App\Services\UsdtReconciliation;
 
 use App\Models\UsdtBalanceReconciliationRun;
 use App\Services\UsdtBalance\UsdtBalanceFreezeOutcome;
-use Brick\Math\BigInteger;
 use InvalidArgumentException;
 
 /**
@@ -48,12 +47,12 @@ final class UsdtReconciliationRuns
             'account_finding_count' => count($result->accounts->findings),
             'drift_frozen_count' => $frozen,
             'receipt_finding_count' => count($result->receipts->findings),
-            'liability_micro' => $result->treasury->ledgerLiabilityMicro->toInt(),
-            'unresolved_deposit_micro' => $result->receipts->unresolvedDepositMicro->toInt(),
+            'liability_micro' => $result->treasury->ledgerLiabilityMicro->toString(),
+            'unresolved_deposit_micro' => $result->receipts->unresolvedDepositMicro->toString(),
             'custody_state' => $result->treasury->custodyState,
-            'custody_assets_micro' => $this->nullableInt($result->treasury->custodyAssetsMicro),
-            'movement_in_micro' => $result->treasury->movementInMicro->toInt(),
-            'movement_out_micro' => $result->treasury->movementOutMicro->toInt(),
+            'custody_assets_micro' => $result->treasury->custodyAssetsMicro?->toString(),
+            'movement_in_micro' => $result->treasury->movementInMicro->toString(),
+            'movement_out_micro' => $result->treasury->movementOutMicro->toString(),
             'movement_count' => $result->treasury->movementCount,
             'aggregate_pending_events' => $result->accounting->pendingEvents,
             'actor' => $actor,
@@ -61,8 +60,4 @@ final class UsdtReconciliationRuns
         ]);
     }
 
-    private function nullableInt(?BigInteger $value): ?int
-    {
-        return $value?->toInt();
-    }
 }

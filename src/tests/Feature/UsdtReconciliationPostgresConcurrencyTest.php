@@ -13,6 +13,7 @@ use App\Services\UsdtBalance\VerifiedUsdtFunding;
 use App\Services\UsdtReconciliation\UsdtReconciliation;
 use App\Services\UsdtReconciliation\UsdtReconciliationScope;
 use App\Services\UsdtTreasury\UsdtTreasuryMovementInput;
+use App\Services\UsdtReconciliation\UsdtReconciliationRuns;
 use App\Services\UsdtTreasury\UsdtTreasuryMovements;
 use App\Services\UsdtTreasury\UsdtTreasuryMovementStatus;
 use Brick\Math\BigInteger;
@@ -119,6 +120,35 @@ final class UsdtReconciliationPostgresConcurrencyTest extends TestCase
             $this->cleanupWorkspace($directory);
             DB::reconnect();
         }
+    }
+
+    public function test_postgres_reconciliation_run_preserves_aggregate_totals_above_php_integer_capacity(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $first = $this->createCustomer(907103);
+        $second = $this->createCustomer(907104);
+        $ledger = app(CustomerUsdtBalanceLedger::class);
+        $amount = 5_000_000_000_000_000_000;
+
+        $ledger->creditVerifiedTopUp(
+            $first,
+            new VerifiedUsdtFunding((int) $first->id, UsdtMicroAmount::fromUnits($amount), 'topup-overflow-a', 'receipt-overflow-a', 'v1'),
+            'usdt:overflow-a',
+        );
+        $ledger->creditVerifiedTopUp(
+            $second,
+            new VerifiedUsdtFunding((int) $second->id, UsdtMicroAmount::fromUnits($amount), 'topup-overflow-b', 'receipt-overflow-b', 'v1'),
+            'usdt:overflow-b',
+        );
+
+        $result = app(UsdtReconciliation::class)->run(new UsdtReconciliationScope(limit: 50));
+        $run = app(UsdtReconciliationRuns::class)->record($result);
+
+        $this->assertSame('10000000000000000000', $result->treasury->ledgerLiabilityMicro->toString());
+        $this->assertSame('10000000000000000000', (string) $run->liability_micro);
+        $this->assertSame('5000000000000000000', (string) DB::table('customer_usdt_balance_accounts')->where('customer_id', $first->id)->value('balance_micro'));
+        $this->assertSame('5000000000000000000', (string) DB::table('customer_usdt_balance_accounts')->where('customer_id', $second->id)->value('balance_micro'));
     }
 
     public function test_postgres_concurrent_accounting_claims_never_double_count(): void
