@@ -354,6 +354,96 @@ The recorded read-only production evidence in [#570](https://github.com/Alhiefik
 
 The Purchase #46 snapshot in #565 shows 1,853 raw SKU units, a 0.98 USDT hold for two units, and 10.68 USDT as the last wallet observation. Those values alone do not explain a capacity of zero: freshness, mapping, quantity-tier/profit policy and held units are also required. Likewise, a restock event must be joined to its recipient and outbound-effect outcomes to attribute a missing notification. The root cause for those historical reports remains unproven from the published snapshots; an OOM finding does not establish the cause of every missing restock or receipt. The Admin diagnostics and existing durable event/recipient recovery provide the concrete evidence to collect on recurrence.
 
+### Historical capacity/restock evidence capture (#575)
+
+**Authorized production audit, 7 October 2026, starting 14:18 WIB:** the Owner authorized SSH production diagnosis in the current conversation. Target `VM-0-7-ubuntu`, application timezone `Asia/Jakarta`; database capture used bounded PostgreSQL `REPEATABLE READ READ ONLY` transactions (read-only flag observed `on`, statement/lock deadlines 5/1 seconds). No production write, supplier HTTP, recovery command, Telegram send, hold release or deployment was performed.
+
+The affected Product is **#5**, from Order Item #3679 / Fulfillment #49. Retained records establish these transitions and recipient outcomes on **5 October 2026 (WIB)**:
+
+| Movement → Event | Time / capacity | Recipients / Effects | Telegram acknowledged | HTTP 403 | Unknown |
+| --- | --- | --- | --- | --- | --- |
+| #8377 → #735 | 18:38:45 / 0→6 | 2,409 / 2,409 | 2,054 | 354 | 1 |
+| #8421 → #750 | 23:24:27 / 0→7 | 2,413 / 2,413 | 2,058 | 354 | 1 |
+
+Both Event snapshots completed; recipient/effect counts match. Each includes **one Store Channel Effect in `sent`**, with the remaining rows addressed to Customers. Thus these two restocks were materialized and dispatched, not missing at the event/dispatch boundary. HTTP 403 is a recorded Telegram rejection; its specific reason is not established by the safe error code alone. Unknown recipient #845650 / Effect `39ecc9d9-54fb-4789-ad5a-b63fdef36378` (Event #735) and recipient #849854 / Effect `e0afae0c-ffbf-48a9-9957-50240569e60c` (Event #750) each have one attempt and `telegram_transport_ambiguous`; preserve Manual Delivery Review, not blind resend. API acknowledgement does not prove customer reading.
+
+The preceding zero transitions are also retained: Movement #8376 at 18:37:13 (3→0), and #8420 at 23:21:31 (2→0). Their sold-out events #734/#749 have 1,708/1,063 Effects marked `sold_out_stale`: outdated sold-out messages were suppressed after capacity returned, not failed restock delivery. No further Product #5 `availability` Movements exist in the audited half-open interval 6 October 00:00 through 7 October 14:30. This does not prove every historical observation remained fresh or positive: projection expiry does not create an authoritative zero Movement.
+
+Recovered local audit output from 5 October 19:28–19:29 records SKU #20900 unit cost 490,000 micro-USDT, stock 1,853, reserved quantity 2, wallet 10,680,000 micros and held funds 980,000 micros. At that later observation, wallet/stock bounds alone permit 19 units, so that hold alone does not explain zero. The current 7 October 14:19 capture has fresh active mapping, zero holds, wallet 2,289,999 micros, cost 380,000 micros, stock 350 and retail Rp11,000 / minimum profit Rp2,500; application capacity is six, reproduced through the actual Availability owner in an isolated smoke.
+
+**Remaining capacity attribution gap:** no retained per-transition pricing/freshness/mapping/wallet/SKU decision snapshot was found in the audited records. Audit #3848 records retail Rp12,000→Rp13,000 at 18:38:29 and #3849 a source move at 18:38:45, but temporal proximity is not proof that price or priority caused the recovery. Current mutable rows and the later 19:28 snapshot cannot reconstruct the inputs at 18:37:13. Do not label ambiguity, OOM, price, priority or expiry as the historical cause without that evidence.
+
+Source identity: running app/scheduler image digest `ghcr.io/alhiefikri/telegram-bot@sha256:d311c00f6b6624665fbfde3c1f469c69430ea72ffc4faa2127080099d9fbe072`, started 4 October; host checkout SHA `56294d70bdda9c9a0722a6b7c2eb3949211f1e81` is not proof of image SHA (image revision label absent). Deployed Availability source includes stale-to-fresh suppression, but lacks the newer `explainZeroCapacity()` Admin diagnostics. Historical scheduler log query for 5 October 18:30–19:00 returned no lines; Docker retention is three 10 MiB files, not guaranteed time coverage. Current scheduler logs show repeated non-zero `schedule:run` warnings while supplier observations continue to advance; these are not proof of the earlier capacity cause and runtime remediation stays in #570/#571. Direct host access to application log storage was permission-denied; no privilege escalation was used.
+
+**Remediation decision:** no application defect was proven in these restock outcomes. Do not retry terminal 403 or unknown Effects, announce every supplier sync, relax profit/freshness guards or remove purchase holds. Existing #565 Admin diagnostics should be rolled out only through the separately authorized CI/deployment process, not direct SSH patching. For a future zero-capacity report, the operator/agent collects the bounded capture below; the Owner does not need to assemble SQL artifacts manually.
+
+Verification: `SupplierAvailabilityTest` passed 19 tests / 170 assertions. An isolated application smoke (SQLite memory, queue fake, HTTP blocked) proved the old wallet/hold bounds permit 19 units under explicitly synthetic fresh/eligible inputs, stale→same-fresh creates no extra restock, an unprofitable synthetic cost gives zero despite positive raw stock, profitable retail restores capacity, and the captured current economics give six units. The synthetic cost/price scenario is not historical attribution. Context7's [Telegram Bot API response/sendMessage contract](https://core.telegram.org/bots/api) confirms that `ok=true`/returned Message is API success, not a read receipt; failure and flood-control response parameters remain distinct.
+
+**Subsequent reproduced application defect / #575 fix:** `SupplierAvailability::refreshLocked()` took the earliest expiry of every positive-capacity source, although the advertised quantity is the maximum supported by one source, not their sum. A primary expiring in one minute and a fully capable fallback expiring in five minutes therefore made public stock zero after two minutes. The failing-before regression observed `availableStock() = 0` instead of 10 through the real Product boundary. This reproduces an intermittent false-zero pattern; it does not retrospectively prove the cause of the 5 October zero transitions.
+
+The corrected projection pairs its capacity with the expiry of a source supporting that **entire** range. Equal-capacity sources choose the latest expiry; a smaller-capacity source neither shortens nor extends the larger range's cutoff. When the source backing the largest range expires, the scalar projection still fails closed until normal refresh reprojects the smaller remaining range. All-source expiry, quantity/profit constraints and purchase holds remain unchanged. Stale-to-same-fresh recovery still does not announce a fabricated restock: correcting a false unavailable presentation is not permission to broadcast every sync.
+
+Seven additional `SupplierAvailabilityTest` regressions cover equal-capacity fallback longevity, a smaller short-lived fallback, a larger short-lived fallback that cannot borrow the smaller source's expiry, all-source expiry, lost restock wakeup after projection expiry, partial delivery recovery without duplicates, and mixed sent/terminal-403/unknown outcomes without resend. The focused `SupplierAvailabilityTest|SupplierPricingTest|SupplierIndependentRegressionTest|ProductInventoryRaceTest|ProductStockIntakeTest` run passed **153 tests / 1,194 assertions**. Actual isolated application smoke proved public availability after primary expiry, no false sold-out/restock cycle, authoritative zero-wallet rejection, durable genuine 0→10 restock, recovery of the lost wakeup, one acknowledged simulated Telegram send on job replay and unchanged commitments. These runs used disposable local data and blocked/fake HTTP, not production purchases or customer sends.
+
+The fix retains the existing transaction/lock order and after-commit durable notification handoff. Context7 Laravel 13 references: [transactional pessimistic locks](https://github.com/laravel/docs/blob/13.x/queries.md), [transaction retry semantics](https://github.com/laravel/docs/blob/13.x/database.md), and [queued jobs/database transactions](https://github.com/laravel/docs/blob/13.x/queues.md). No new ENV, schema, financial policy or notification retry policy is introduced. Application remediation exists in the local worktree; release to production remains a separate authorized CI/CD operation.
+
+PostgreSQL 16 verification on a disposable local database: `SupplierPostgresConcurrencyTest` passed **9 tests / 108 assertions**, with `--fail-on-skipped` and no skips. This includes sync racing checkout, shared-wallet lock ordering and supplier purchase/recovery races. The temporary database container and application smoke script were removed; no production database was used.
+
+The final expanded `SupplierAvailabilityTest` run passed **26 tests / 209 assertions** after test cleanup, up from the initial 19-test suite.
+
+For a recurrence, capture **before** sync, recovery or an Admin change:
+
+1. Obtain explicit read-only authorization naming host/environment, Product IDs, incident window, approved tables/logs, maximum rows/pages and private artifact destination. Alternatively accept sanitized captured artifacts. Issue #575 itself does not grant production access. Do not guess a host, retrieve credentials, invoke supplier HTTP, or run `suppliers:sync`, `suppliers:recover`, `telegram:recover-outbound` or notification jobs as audit commands: they mutate state and/or enqueue transport.
+2. Record capture start/end in UTC and application timezone, the reported surface/quantity and observed capacity, immutable deployed commit/image digest, application timezone and DB timezone. Bound log collection to the approved window and redact tokens, customer identities, message bodies, credentials and raw provider responses. Keep private economic facts out of customer-facing reports.
+3. Use an approved read-only SQL connection and one short snapshot per bounded page. PostgreSQL `REPEATABLE READ` keeps reads within that transaction on a stable snapshot; a later page is a new observation, not an atomic continuation. Stop on timeout or row/page budget and label the capture incomplete. Do not hold an idle transaction open while collecting logs.
+
+   ```sql
+   BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+   SET LOCAL statement_timeout = '5s';
+   SET LOCAL lock_timeout = '1s';
+   SET LOCAL idle_in_transaction_session_timeout = '10s';
+   SELECT CURRENT_TIMESTAMP AS captured_at,
+          current_setting('TimeZone') AS database_timezone;
+   -- Approved, bounded SELECTs only.
+   ROLLBACK;
+   ```
+
+4. From the same snapshot, allowlist the affected Product's active/deleted state, `stock`, `reserved_stock`, `supplier_available_stock`, `supplier_available_until`, base prices and quantity tiers; count only local Available credentials (`supplier_purchase_id`, `order_item_id`, `retired_at` all NULL), retaining whether local credential history exists. Capture each mapped source ID/rank/active flag and SKU/Supplier ID. For Supplier retain activity/currency confirmation/pause, conversion rate, `balance_micros`, `reserved_balance_micros`, `balance_observed_at`, `synced_at`, `sync_expires_at`, version and safe error code; for SKU retain currency, stock/reserved quantity, orderability/input flag, unit micros, price tiers/bulk discounts and observation time. Capture Product price-policy mode, markup, profit, buffer, minimum-profit, rounding and version. Never use `SELECT *` or export encrypted payloads/keys. Include unresolved Purchase/Fulfillment IDs, quantity, hold, commit/debit status and dispatch episode timestamps/outcomes; customer handoff completion is not supplier economic resolution.
+5. Discover Inventory Movements by exact Product ID and approved half-open time window, ordered by ID with an `id > :after_movement_id` cursor and `LIMIT 101` (100 rows plus an overflow sentinel). Retain ID, type, quantity, `available_before`, `available_after`, `became_unavailable`, creation time and notification marker. Include the last prior movement when authorized; distinguish an authoritative zero→positive observation from stale→fresh suppression. Record the returned last ID and whether the sentinel/page budget leaves undiscovered rows.
+6. For each selected Movement, query its full notification chain in bounded recipient-ID pages. Bind `:movement_id` and `:after_recipient_id` (initially zero) as parameters, not pasted user text. Run inside the read-only block above. The source discriminator and effect type are required; another Effect on the same numeric source ID is not delivery evidence.
+
+   ```sql
+   SELECT m.id AS movement_id, m.available_before, m.available_after,
+          n.id AS event_id, n.kind, n.recipients_snapshotted_at,
+          n.materialization_cursor,
+          r.id AS recipient_id, r.recipient_type,
+          r.sent_at AS recipient_sent_at, r.failed_at,
+          r.terminal_failed_at, r.attempts AS recipient_attempts,
+          e.id AS effect_id, e.state, e.attempts AS effect_attempts,
+          e.next_attempt_at, e.lease_until, e.sent_at AS effect_sent_at,
+          e.unknown_at, e.manual_review_at, e.last_error_code,
+          e.telegram_message_id
+   FROM inventory_movements AS m
+   LEFT JOIN stock_notification_events AS n ON n.inventory_movement_id = m.id
+   LEFT JOIN stock_notification_recipients AS r ON r.stock_notification_event_id = n.id
+   LEFT JOIN telegram_outbound_effects AS e
+     ON e.source_type = 'App\Models\StockNotificationRecipient'
+    AND e.source_id = CAST(r.id AS TEXT)
+    AND e.effect_type = 'stock.notification_recipient'
+   WHERE m.id = :movement_id
+     AND (r.id IS NULL OR r.id > :after_recipient_id)
+   ORDER BY r.id, e.id
+   LIMIT 101;
+   ```
+
+   Keep the overflow row for the next page; advance by the last fully captured recipient, not past the sentinel. Confirm the deployed ledger's recipient-effect uniqueness before using this cursor; multiple matching Effects require a composite recipient/effect cursor rather than dropping rows. Restrict any expected-recipient lookup to an authorized identity and report opaque recipient IDs, not Telegram IDs. An absent recipient cannot establish exclusion reason without retained eligibility/preferences and materialization-time evidence.
+7. Classify each boundary separately: no Event is an event-registration/retention gap; NULL `recipients_snapshotted_at` is incomplete materialization; a completed snapshot with no recipients needs audience/eligibility evidence; recipient without Effect is effect-materialization work; pending/due failed Effect without a dispatch claim needs worker/queue evidence. `sent` with Telegram message ID is an API acknowledgement, not proof the customer read it. Terminal failure explains that recipient's non-delivery; `unknown`/`manual_review` remains unproven and must not be blindly resent. The Movement notification marker alone is not a sent count.
+8. Correlate sanitized scheduler/stock-worker/outbound logs with those exact IDs and timestamps, including dispatch, rate-limit deferral, worker interruption and recovery discovery. Record log/DB retention start/end and unavailable artifacts. Report observations, missing evidence and causal inference separately. Only a reproduced defect at the existing Availability or Stock Notification owner boundary authorizes a code fix/regression; preserve freshness suppression, purchase ambiguity holds and unknown-Telegram review.
+
+The audit transaction pattern was checked through Context7's PostgreSQL 16 documentation: [BEGIN / read-only modes](https://www.postgresql.org/docs/16/sql-begin.html) and [Repeatable Read snapshot semantics](https://www.postgresql.org/docs/16/transaction-iso.html). Snapshot isolation is a capture tool, not a replacement for the application's financial locks or a historical time-travel query.
+
+### Local incident-boundary verification
+
 Focused local regressions:
 
 ```sh

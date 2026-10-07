@@ -207,11 +207,13 @@ final class SupplierAvailability
                     }
                 }
                 $candidate = $this->pricing->capacity($product, $supplier, $item, $policy);
-                if ($candidate > 0) {
-                    // One source can fill the advertised range; do not double-count one wallet/SKU.
-                    $capacity = max($capacity, $candidate);
-                    // Conservative cutoff: all included sources remain fresh through this instant.
-                    $until = $until === null || $supplier->sync_expires_at->lessThan($until) ? $supplier->sync_expires_at : $until;
+                if ($candidate > $capacity) {
+                    // One source must support the entire advertised range through its cutoff.
+                    $capacity = $candidate;
+                    $until = $supplier->sync_expires_at;
+                } elseif ($candidate > 0 && $candidate === $capacity && $supplier->sync_expires_at->greaterThan($until)) {
+                    // An equally capable fallback can keep that range available for longer.
+                    $until = $supplier->sync_expires_at;
                 }
             }
             if ($capacity === 0 && $hasStaleSource) {

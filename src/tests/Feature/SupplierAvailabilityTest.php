@@ -12,6 +12,7 @@ use App\Models\Product;
 use App\Models\ProductSupplierSource;
 use App\Models\ProductWaitlistEvent;
 use App\Models\StockNotificationEvent;
+use App\Models\StockNotificationRecipient;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
 use App\Models\SupplierPricePolicy;
@@ -296,6 +297,167 @@ final class SupplierAvailabilityTest extends TestCase
         $this->assertSame(1, InventoryMovement::query()->count());
     }
 
+    public function test_shorter_lived_source_cannot_expire_capacity_also_supported_by_a_fresh_fallback(): void
+    {
+        [$product, $supplier] = $this->mapped();
+        $this->snapshot('10', 20);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        $supplier->forceFill(['sync_expires_at' => now()->addMinute()])->save();
+        $this->freshFallback($product, 10000000, 5);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->travel(2)->minutes();
+
+        $this->assertSame(10, $product->fresh()->availableStock());
+        $this->assertTrue(Product::query()->availableForPurchase()->whereKey($product->id)->exists());
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->assertSame(1, InventoryMovement::query()->count());
+    }
+
+    public function test_smaller_short_lived_fallback_does_not_shorten_the_larger_source_projection(): void
+    {
+        [$product, $supplier] = $this->mapped();
+        $this->snapshot('10', 20);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        $this->freshFallback($product, 3000000, 1);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->travel(2)->minutes();
+
+        $this->assertSame(10, $product->fresh()->availableStock());
+        $this->assertTrue(Product::query()->availableForPurchase()->whereKey($product->id)->exists());
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+    }
+
+    public function test_longer_lived_smaller_source_cannot_extend_the_larger_advertised_range(): void
+    {
+        [$product, $supplier] = $this->mapped();
+        $this->snapshot('3', 20);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        $this->freshFallback($product, 10000000, 1);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->assertSame(10, $product->fresh()->availableStock());
+        $this->travel(2)->minutes();
+
+        $this->assertSame(0, $product->fresh()->availableStock());
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->assertSame(3, $product->fresh()->availableStock());
+        $this->assertSame(1, InventoryMovement::query()->count());
+    }
+
+    public function test_capacity_still_expires_when_every_equally_capable_source_is_stale(): void
+    {
+        [$product, $supplier] = $this->mapped();
+        $this->snapshot('10', 20);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        $supplier->forceFill(['sync_expires_at' => now()->addMinute()])->save();
+        $this->freshFallback($product, 10000000, 2);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->travel(3)->minutes();
+
+        $this->assertSame(0, $product->fresh()->availableStock());
+        $this->assertFalse(Product::query()->availableForPurchase()->whereKey($product->id)->exists());
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->assertSame(0, $product->fresh()->availableStock());
+        $this->assertSame(1, InventoryMovement::query()->count());
+    }
+
+    public function test_lost_supplier_restock_wakeup_is_recovered_and_delivered_after_projection_expiry(): void
+    {
+        [$product, $supplier] = $this->mapped();
+        Customer::factory()->create(['telegram_id' => 399040, 'locale' => 'id']);
+        $this->snapshot('0', 20);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        $this->snapshot('10', 20);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        $movement = InventoryMovement::query()->sole();
+        Queue::fake();
+        $this->travel(6)->minutes();
+        $this->assertSame(0, $product->fresh()->availableStock());
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+        $this->assertSame(1, $pipeline->reconcile());
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 8842]])]);
+
+        (new SendProductStockNotifications($movement->id))->handle($pipeline);
+        $effect = TelegramOutboundEffect::query()->sole();
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->state);
+        $this->assertSame(8842, (int) $effect->telegram_message_id);
+        $this->assertNotNull(StockNotificationRecipient::query()->sole()->sent_at);
+        $this->assertSame(0, $pipeline->reconcile());
+        Http::assertSentCount(1);
+    }
+
+    public function test_supplier_restock_recovery_resumes_the_remaining_delivery_batch_without_duplicates(): void
+    {
+        [, $supplier] = $this->mapped();
+        $count = StockNotificationDeliveryPipeline::JOB_BATCH_SIZE + 1;
+        for ($index = 0; $index < $count; $index++) {
+            Customer::factory()->create(['telegram_id' => 399100 + $index, 'locale' => 'id']);
+        }
+        $this->snapshot('10', 20);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        $movement = InventoryMovement::query()->sole();
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        $destinations = [];
+        Http::fake(['https://api.telegram.org/*/sendMessage' => function ($request) use (&$destinations) {
+            $destinations[] = (string) $request['chat_id'];
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 9000 + count($destinations)]]);
+        }]);
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+        (new SendProductStockNotifications($movement->id))->handle($pipeline);
+        $this->assertCount($count - 1, $destinations);
+        Queue::fake();
+        $this->travel(2)->seconds();
+        $this->assertSame(1, $pipeline->reconcile());
+        (new SendProductStockNotifications($movement->id))->handle($pipeline);
+
+        $expected = array_map('strval', range(399100, 399100 + $count - 1));
+        sort($destinations);
+        sort($expected);
+        $this->assertSame($expected, $destinations);
+        $this->assertSame($count, TelegramOutboundEffect::query()->where('state', 'sent')->count());
+        $this->assertSame(0, $pipeline->reconcile());
+    }
+
+    public function test_mixed_restock_delivery_never_resends_success_terminal_rejection_or_unknown(): void
+    {
+        [, $supplier] = $this->mapped();
+        foreach ([399050, 399051, 399052] as $telegramId) {
+            Customer::factory()->create(['telegram_id' => $telegramId, 'locale' => 'id']);
+        }
+        $this->snapshot('10', 20);
+        app(SupplierCatalogSync::class)->sync($supplier);
+        $movement = InventoryMovement::query()->sole();
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        $attempts = [];
+        Http::fake(['https://api.telegram.org/*/sendMessage' => function ($request) use (&$attempts) {
+            $id = (string) $request['chat_id'];
+            $attempts[$id] = ($attempts[$id] ?? 0) + 1;
+            if ($id === '399052') {
+                throw new ConnectionException('Unobserved Telegram response.');
+            }
+
+            return $id === '399051'
+                ? Http::response(['ok' => false, 'error_code' => 403], 403)
+                : Http::response(['ok' => true, 'result' => ['message_id' => 8843]]);
+        }]);
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+        (new SendProductStockNotifications($movement->id))->handle($pipeline);
+        $states = TelegramOutboundEffect::query()->get()->keyBy('telegram_chat_id');
+        $this->assertSame(TelegramOutboundEffectState::Sent, $states['399050']->state);
+        $this->assertSame(TelegramOutboundEffectState::Failed, $states['399051']->state);
+        $this->assertNull($states['399051']->next_attempt_at);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $states['399052']->state);
+        $this->travel(6)->minutes();
+        $this->assertSame(0, $pipeline->reconcile());
+        (new SendProductStockNotifications($movement->id))->handle($pipeline);
+        ksort($attempts);
+        $this->assertSame(['399050' => 1, '399051' => 1, '399052' => 1], $attempts);
+    }
+
     public function test_automatic_price_changes_retain_retail_tiers_and_fail_closed_when_schedule_would_break(): void
     {
         [$product, $supplier] = $this->mapped();
@@ -436,6 +598,25 @@ final class SupplierAvailabilityTest extends TestCase
         $this->artisan('suppliers:sync', ['--limit' => 1])->assertSuccessful();
         $this->assertSame(10000000, $healthy->fresh()->balance_micros);
         $this->assertNotNull($failed->fresh()->sync_attempted_at);
+    }
+
+    private function freshFallback(Product $product, int $balanceMicros, int $freshMinutes): void
+    {
+        $supplier = Supplier::query()->create([
+            'name' => 'Fresh fallback', 'provider' => 'prodseller', 'api_key' => 'fixture-fallback',
+            'currency' => 'USDT', 'currency_confirmed' => true, 'exchange_rate_idr' => 16000, 'is_active' => true,
+        ]);
+        $supplier->forceFill([
+            'balance_micros' => $balanceMicros, 'synced_at' => now(), 'sync_expires_at' => now()->addMinutes($freshMinutes),
+        ])->save();
+        $item = SupplierCatalogItem::query()->create([
+            'supplier_id' => $supplier->id, 'external_id' => 'fallback', 'name' => 'Equivalent SKU',
+            'currency' => 'USDT', 'unit_price_micros' => 1000000, 'stock' => 20,
+            'orderable' => true, 'requires_input' => false, 'synced_at' => now(),
+        ]);
+        ProductSupplierSource::query()->create([
+            'product_id' => $product->id, 'supplier_catalog_item_id' => $item->id, 'priority' => 2, 'is_active' => true,
+        ]);
     }
 
     private function mapped(int $stock = 0): array
