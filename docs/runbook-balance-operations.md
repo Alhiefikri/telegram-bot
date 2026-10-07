@@ -75,7 +75,7 @@ Instrumented retry seams: `CustomerUsdtBalanceLedger`, `ExternalMoneyReceiptClai
 2. Do **not** delete ledger entries, receipts or resolutions, and do not debit the customer. The freeze is the protection.
 3. Re-run the recovery sweep: `php artisan usdt-funding:recover --limit=25 --json` (re-derives canonical evidence, keeps original receipts).
 4. Owner decision: request + password-confirm an authorized recovery case (U8 `UsdtReorgIncidentService`), which records `authorized_unresolved`; the loss stays visible as unresolved treasury exposure.
-5. Reopening: `usdt-balance:unfreeze` refuses any account whose freeze reason starts with `usdt_reorg_incident:` or that has an incident row. The freeze is cleared only after the loss is resolved through the authorized process, never by clearing a string.
+5. Reopening: `usdt-balance:unfreeze` refuses any account whose freeze reason starts with `usdt_reorg_incident:` or `usdt_receiver_reorg:`, that has an incident row, or whose Customer has durable receiver reorg evidence (including retired receivers). Scanner evidence keeps the hold before the monitor creates an incident and when a pre-existing drift freeze hides the reorg marker. The freeze is cleared only after the loss is resolved through the authorized process, never by clearing a string.
 
 ### 4.2 Treasury deficit / coverage shortfall
 
@@ -100,7 +100,7 @@ php artisan usdt-balance:unfreeze --customer=<id> --reason="drift repaired" --ac
 php artisan usdt-balance:unfreeze --customer=<id> --reason="drift repaired" --actor=<operator> --json
 ```
 
-The command locks the account row and re-inspects it: a remaining drift (`status=drift_remains`) or any reorg incident (`status=reorg_hold`) keeps the freeze. A successful unfreeze clears only `frozen_reason` and writes audit action `usdt_balance.account_unfrozen`; projection balances, entries and receipts are never written.
+The command locks the account row and re-inspects it: a remaining drift (`status=drift_remains`) or any receiver reorg marker/evidence or incident (`status=reorg_hold`) keeps the freeze. Only recognized `reconciliation_drift:<issue>` reasons are eligible; every other reason stays held (`status=unsupported_freeze`). Dry-run applies the same checks. A successful unfreeze clears only `frozen_reason` and writes audit action `usdt_balance.account_unfrozen`; projection balances, entries and receipts are never written.
 
 ## 5. Scheduled cadence (owner: this ticket)
 

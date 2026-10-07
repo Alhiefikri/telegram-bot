@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\TelegramNavigationMediaKind;
 use App\Enums\TelegramNavigationScreen;
+use App\Enums\UsdtBalanceUnfreezeStatus;
 use App\Enums\UserRole;
 use App\Exceptions\BalanceAdjustmentRejected;
 use App\Exceptions\UsdtBalanceFrozenException;
@@ -14,11 +15,13 @@ use App\Models\ManualPaymentSetting;
 use App\Models\TelegramNavigationRoot;
 use App\Models\User;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
+use App\Services\Operations\UsdtBalanceAccountUnfreeze;
 use App\Services\Telegram\TelegramUsdtFundingActions;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\UsdtPurchase;
 use App\Services\UsdtReceivers\UsdtDepositReceiverRegistry;
+use App\Services\UsdtTopUps\BscUsdtTransferIngestion;
 use App\Services\UsdtTopUps\UsdtReorgIncidentService;
 use App\Services\UsdtTopUps\UsdtTopUpPreparation;
 use App\Services\UsdtTopUps\UsdtTopUpSettlement;
@@ -26,6 +29,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Concerns\RunsPostgresWorkers;
 use Tests\Support\BscUsdtRailRpcFixture;
@@ -130,6 +134,62 @@ final class UsdtReorgIncidentPostgresConcurrencyTest extends TestCase
         $this->assertSame($balance, (int) $incident->available_exposure_micro);
         $this->assertSame($balance === 0 ? 2 : 1, DB::table('customer_usdt_balance_entries')->count());
         $this->assertSame(0, DB::table('usdt_reorg_recovery_cases')->count());
+    }
+
+    public static function receiverFreezeReasons(): array
+    {
+        return [
+            'receiver reorg freeze' => [null],
+            'reorg detected while already drift-frozen' => ['reconciliation_drift:balance_mismatch'],
+        ];
+    }
+
+    #[DataProvider('receiverFreezeReasons')]
+    public function test_receiver_reorg_blocks_unfreeze_and_spending_before_incident_materialization(?string $existingFreeze): void
+    {
+        $rpc = app(BscVerificationRpcClientInterface::class);
+        $scanner = app(BscUsdtTransferIngestion::class);
+        $rpc->head = 120;
+        $rpc->finalized = 115;
+        $firstBlock = (int) DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $this->target->receiver_id)->value('first_block');
+        $scanner->scan($this->target->receiver_id, $firstBlock);
+        DB::table('customer_usdt_balance_accounts')->update(['frozen_reason' => $existingFreeze]);
+        $rpc->finalized = 116;
+        $rpc->blockOverrides[115] = ['number' => '0x73', 'hash' => '0x'.str_repeat('f', 64),
+            'timestamp' => '0x'.dechex($rpc->timestamp)];
+        $this->assertSame('checkpoint_reorg', $scanner->scan($this->target->receiver_id, $firstBlock)['reason']);
+        $this->assertSame(1, DB::table('usdt_reorg_receiver_evidence')->count());
+        $this->assertSame(0, DB::table('usdt_reorg_incidents')->count());
+        $frozenReason = $existingFreeze ?? 'usdt_receiver_reorg:'.$this->target->receiver_id;
+        $this->assertSame($frozenReason, DB::table('customer_usdt_balance_accounts')->value('frozen_reason'));
+        $entries = DB::table('customer_usdt_balance_entries')->get()->toJson();
+        $receipts = DB::table('external_money_receipts')->get()->toJson();
+        $preview = app(UsdtBalanceAccountUnfreeze::class)->unfreeze($this->customer, 'attempt', 'operator', dryRun: true);
+
+        $results = $this->runConcurrentWorkers(3, function (int $index): string {
+            $status = app(UsdtBalanceAccountUnfreeze::class)->unfreeze($this->customer, 'attempt', 'operator')->status;
+            try {
+                app(CustomerUsdtBalanceLedger::class)->debitPurchase($this->customer,
+                    new UsdtPurchase($this->customer->id, UsdtMicroAmount::fromUnits(1), 'gap-order-'.$index, 'gap-payment-'.$index),
+                    'gap-purchase-'.$index);
+
+                return $status->value.':spent';
+            } catch (UsdtBalanceFrozenException) {
+                return $status->value.':frozen';
+            }
+        });
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame(['reorg_hold:frozen', 'reorg_hold:frozen', 'reorg_hold:frozen'], array_column($results, 'value'));
+        $this->assertSame(UsdtBalanceUnfreezeStatus::ReorgHold, $preview->status);
+        $this->assertSame($frozenReason, DB::table('customer_usdt_balance_accounts')->value('frozen_reason'));
+        $this->assertSame(1_000_000, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
+        $this->assertSame($entries, DB::table('customer_usdt_balance_entries')->get()->toJson());
+        $this->assertSame($receipts, DB::table('external_money_receipts')->get()->toJson());
+        $this->assertSame(0, DB::table('audit_logs')->where('action', 'usdt_balance.account_unfrozen')->count());
+        $this->assertSame(0, DB::table('usdt_reorg_incidents')->count());
+        $this->assertSame(1, app(UsdtReorgIncidentService::class)->recover(1));
+        $this->assertSame(UsdtBalanceUnfreezeStatus::ReorgHold,
+            app(UsdtBalanceAccountUnfreeze::class)->unfreeze($this->customer, 'attempt', 'operator')->status);
     }
 
     public function test_parallel_owner_confirmation_persists_one_authorized_unresolved_case(): void

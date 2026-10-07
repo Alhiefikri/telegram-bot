@@ -2,6 +2,7 @@
 
 namespace App\Services\Operations;
 
+use App\Enums\UsdtBalanceDriftIssue;
 use App\Enums\UsdtBalanceUnfreezeStatus;
 use App\Models\Customer;
 use App\Services\AuditLogger;
@@ -15,8 +16,8 @@ use InvalidArgumentException;
  * (#558).
  *
  * A freeze is written by reconciliation drift detection or by a reorg
- * incident. Only a drift freeze may be cleared, and only when a fresh
- * re-inspection of the same account under the account row lock proves the
+ * receiver detection or incident. Only a recognized drift freeze may be
+ * cleared, and only when a fresh re-inspection under the account row lock proves the
  * drift is gone. A reorg incident keeps the freeze: the loss is resolved by
  * the authorized U8 recovery process, never by clearing the reason. The
  * service never writes a ledger entry, projection balance or receipt.
@@ -55,9 +56,22 @@ final class UsdtBalanceAccountUnfreeze
                 return $this->result(UsdtBalanceUnfreezeStatus::NotFrozen, $customer, $accountId, null, [], $actor, $reason);
             }
 
+            // Scanner containment commits under this same account lock before
+            // the monitor materializes incidents. Its evidence must also win
+            // when an existing drift freeze hid the receiver reorg marker.
             if (str_starts_with($frozenReason, 'usdt_reorg_incident:')
-                || DB::table('usdt_reorg_incidents')->where('account_id', $accountId)->exists()) {
+                || str_starts_with($frozenReason, 'usdt_receiver_reorg:')
+                || DB::table('usdt_reorg_incidents')->where('account_id', $accountId)->exists()
+                || DB::table('usdt_reorg_receiver_evidence as evidence')
+                    ->join('customer_usdt_deposit_receivers as receivers', 'receivers.id', '=', 'evidence.receiver_id')
+                    ->where('receivers.customer_id', $account->customer_id)
+                    ->exists()) {
                 return $this->result(UsdtBalanceUnfreezeStatus::ReorgHold, $customer, $accountId, $frozenReason, [], $actor, $reason);
+            }
+
+            if (! str_starts_with($frozenReason, 'reconciliation_drift:')
+                || UsdtBalanceDriftIssue::tryFrom(substr($frozenReason, strlen('reconciliation_drift:'))) === null) {
+                return $this->result(UsdtBalanceUnfreezeStatus::UnsupportedFreeze, $customer, $accountId, $frozenReason, [], $actor, $reason);
             }
 
             $finding = $this->reconciliation->inspectAccount($accountId);

@@ -16,6 +16,7 @@ enum UsdtBalanceUnfreezeStatus: string
     case MissingAccount = 'missing_account';
     case DriftRemains = 'drift_remains';
     case ReorgHold = 'reorg_hold';
+    case UnsupportedFreeze = 'unsupported_freeze';
 
     public function isSuccess(): bool
     {

@@ -12,6 +12,7 @@ use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\VerifiedUsdtFunding;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -59,6 +60,39 @@ final class UsdtBalanceUnfreezeTest extends TestCase
 
         $this->assertSame(UsdtBalanceUnfreezeStatus::ReorgHold, $result->status);
         $this->assertSame('usdt_reorg_incident:7', $account->refresh()->frozen_reason);
+    }
+
+    public static function nonDriftFreezeReasons(): array
+    {
+        return [
+            'unknown safety hold' => ['security_review:7'],
+            'unrecognized drift cause' => ['reconciliation_drift:unknown'],
+            'empty reason' => [''],
+        ];
+    }
+
+    #[DataProvider('nonDriftFreezeReasons')]
+    public function test_unfreeze_refuses_any_unrecognized_freeze_reason(string $reason): void
+    {
+        $customer = $this->customerWithBalance(1_000_000);
+        $account = $this->freeze($customer, $reason);
+        foreach ([true, false] as $dryRun) {
+            $result = app(UsdtBalanceAccountUnfreeze::class)->unfreeze($customer, 'attempt', 'operator-a', dryRun: $dryRun);
+            $this->assertSame(UsdtBalanceUnfreezeStatus::UnsupportedFreeze, $result->status);
+            $this->assertSame($reason, $account->refresh()->frozen_reason);
+        }
+        $this->assertSame(0, AuditLog::query()->where('action', 'usdt_balance.account_unfrozen')->count());
+    }
+
+    public function test_unfreeze_refuses_receiver_reorg_marker_even_without_evidence(): void
+    {
+        $customer = $this->customerWithBalance(1_000_000);
+        $account = $this->freeze($customer, 'usdt_receiver_reorg:7');
+        foreach ([true, false] as $dryRun) {
+            $result = app(UsdtBalanceAccountUnfreeze::class)->unfreeze($customer, 'attempt', 'operator-a', dryRun: $dryRun);
+            $this->assertSame(UsdtBalanceUnfreezeStatus::ReorgHold, $result->status);
+            $this->assertSame('usdt_receiver_reorg:7', $account->refresh()->frozen_reason);
+        }
     }
 
     public function test_dry_run_proves_eligibility_without_clearing_the_freeze(): void
