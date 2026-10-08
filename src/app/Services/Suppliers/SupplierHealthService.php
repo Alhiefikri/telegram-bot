@@ -137,7 +137,7 @@ final class SupplierHealthService
                     && ($supplier->is_active || $supplier->reserved_balance_micros > 0
                         || SupplierPurchase::where('supplier_id', $id)->whereNull('committed_at')
                             ->whereIn('state', ['sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists());
-                if ($stale && !(bool) ($state?->balance_stale_active ?? false)) {
+                if ($stale && ! (bool) ($state?->balance_stale_active ?? false)) {
                     // Wallet observation is its own alert, never bundled as a transaction failure.
                     $groups['balance:'.$id] = ['balance_stale' => true, 'supplier_id' => $id];
                 }
@@ -290,13 +290,13 @@ final class SupplierHealthService
         foreach ($fulfillment->purchases as $purchase) {
             if ($purchase->committed_at === null
                 && in_array($purchase->state, ['sending', 'ambiguous', 'awaiting_delivery', 'review'], true)
-                && (!$agedOnly || $purchase->created_at->lte(now()->subSeconds(self::HOLD_ALERT_SECONDS)))) {
+                && (! $agedOnly || $purchase->created_at->lte(now()->subSeconds(self::HOLD_ALERT_SECONDS)))) {
                 $identities['hold:purchase:'.$purchase->id] = $purchase->supplier_id;
             }
         }
         if ($fulfillment->reserved_quantity > 0 && $fulfillment->reserved_supplier_id !== null
             && $fulfillment->purchases->isEmpty()
-            && (!$agedOnly || $fulfillment->created_at->lte(now()->subSeconds(self::HOLD_ALERT_SECONDS)))) {
+            && (! $agedOnly || $fulfillment->created_at->lte(now()->subSeconds(self::HOLD_ALERT_SECONDS)))) {
             $identities['hold:fulfillment:'.$fulfillment->id] = $fulfillment->reserved_supplier_id;
         }
 
