@@ -39,6 +39,7 @@ production image job elevates only itself to `packages: write`.
   - Prepares PHP 8.4, Node 24, Composer dependencies, npm dependencies, and admin assets once for all application test lanes. This avoids repeating toolchain setup on a single serial runner.
   - Enforces Laravel Pint and keeps the fast SQLite suite parallel via ParaTest (`composer test -- --parallel`).
   - Before pushing PHP changes, run `cd src && ./vendor/bin/pint` and then `./vendor/bin/pint --test`; CI checks the whole tree, including migrations and tests.
+  - Rollback restores the public release marker as soon as application image alignment is proven, before runtime health checks. A failed heartbeat must not leave the candidate SHA advertised after the previous image has been restored; rollback health still fails closed.
   - Runs the customer Playwright smoke against the already-built assets instead of rebuilding them in a separate job.
   - Runs the authoritative PostgreSQL release lane in the same isolated job against a PostgreSQL 16 service with health checking and CI-only credentials, matching production's database major version.
   - Applies every migration to an empty PostgreSQL database, runs production-critical Telegram update, inventory, checkout, payment, and queue-state integration tests, then executes the process-level concurrency deploy gate with unexpected skips treated as failures.

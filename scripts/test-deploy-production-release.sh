@@ -61,6 +61,10 @@ run_scenario() {
     printf '%s\n' "$previous_image" > "$workspace/current-image"
   fi
   printf '%s\n' "$scenario" > "$workspace/scenario"
+  cat "$workspace/head" > "$workspace/release-marker"
+  if [ "$scenario" = "rollback-failure" ]; then
+    printf '%s\n' "$CANDIDATE_COMMIT" > "$workspace/release-marker"
+  fi
   : > "$workspace/commands.log"
   : > "$workspace/.env"
   if [ "$scenario" = "use-persisted-fingerprint-key" ]; then
@@ -223,9 +227,10 @@ case "$command" in
   exec)
     current_image=$(cat "$MOCK_WORKSPACE/current-image")
     if printf '%s' "$*" | grep -q 'release-sha.txt'; then
-      printf '%s\n' "$(cat "$MOCK_WORKSPACE/head")" > "$MOCK_WORKSPACE/release-marker"
       if printf '%s' "$*" | grep -q 'cat /var/www/html/public/release-sha.txt'; then
         cat "$MOCK_WORKSPACE/release-marker"
+      else
+        printf '%s\n' "$(cat "$MOCK_WORKSPACE/head")" > "$MOCK_WORKSPACE/release-marker"
       fi
     fi
     if [ "$scenario" = "queue-failure" ] && printf '%s' "$*" | grep -q 'ops:check-queue-depth'; then
@@ -346,6 +351,7 @@ SCRIPT
       ;;
     rollback-failure)
       grep -q 'rollback failed' "$workspace/stderr" || fail "failed rollback outcome was not explicit"
+      assert_eq "$(cat "$workspace/release-marker")" "$PREVIOUS_COMMIT"
       ;;
     external-smoke-rollback)
       grep -q "APP_IMAGE=$previous_image" "$workspace/commands.log" || fail "external smoke rollback did not restore previous image"

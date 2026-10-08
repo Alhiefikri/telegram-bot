@@ -671,11 +671,13 @@ restore_previous_release() {
     return 1
   fi
 
+  # The marker identifies the running image, not its health. Repair it once
+  # image alignment is proven even if a later runtime health gate fails.
   if verify_service_images "$PREVIOUS_IMAGE" \
-    && wait_for_health \
-    && verify_app_url \
     && write_release_marker "$PREVIOUS_COMMIT" \
-    && verify_release_marker "$PREVIOUS_COMMIT"; then
+    && verify_release_marker "$PREVIOUS_COMMIT" \
+    && wait_for_health \
+    && verify_app_url; then
     APP_IMAGE="$PREVIOUS_IMAGE"
     record_result "${failure_reason}-rollback-succeeded"
     write_release_state "rollback-succeeded"

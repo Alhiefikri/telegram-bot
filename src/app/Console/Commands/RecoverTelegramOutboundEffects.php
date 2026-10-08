@@ -85,34 +85,42 @@ class RecoverTelegramOutboundEffects extends Command
             $recovery->reconcileSentCheckoutInstructionProjections($pageLimit);
             $recovery->reconcileSentAdminOrderProjections($pageLimit);
 
-            $dispatchableEffects = $ledger->readyToDispatchQuery(now())
-                ->whereIn('effect_type', [
-                    TelegramOutboundEffectType::BalanceAdjustmentNotice->value,
-                    TelegramOutboundEffectType::BalanceOperationsAlert->value,
-                    TelegramOutboundEffectType::OwnerCompensationNotification->value,
-                    TelegramOutboundEffectType::UsdtRefundReceipt->value,
-                    TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
-                    TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
-                    TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,
-                    TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
-                    TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
-                    TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
-                    TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP,
-                    TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT,
-                    TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_OWNER_ALERT,
-                    TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_CHANNEL_PROOF,
-                    TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
-                    TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD,
-                    TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS,
-                    TelegramOutboundEffectService::TYPE_ADMIN_PENDING,
-                    TelegramOutboundEffectService::TYPE_ADMIN_PAID,
-                    TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
-                    TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF,
-                    TelegramOutboundEffectService::TYPE_SALES_PROOF,
-                    TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION,
-                    TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL,
-                ]);
-            $pages->load('dispatchable_effects', $dispatchableEffects, $pageLimit)
+            $dispatchTypes = [
+                TelegramOutboundEffectType::BalanceAdjustmentNotice->value,
+                TelegramOutboundEffectType::BalanceOperationsAlert->value,
+                TelegramOutboundEffectType::OwnerCompensationNotification->value,
+                TelegramOutboundEffectType::UsdtRefundReceipt->value,
+                TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
+                TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP,
+                TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT,
+                TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_OWNER_ALERT,
+                TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_CHANNEL_PROOF,
+                TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+                TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD,
+                TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS,
+                TelegramOutboundEffectService::TYPE_ADMIN_PENDING,
+                TelegramOutboundEffectService::TYPE_ADMIN_PAID,
+                TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
+                TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF,
+                TelegramOutboundEffectService::TYPE_SALES_PROOF,
+                TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION,
+                TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL,
+            ];
+            // Scope each branch to its family so PostgreSQL uses the existing
+            // dispatch-family index instead of walking the full ledger by ID.
+            // The outer page keeps one global limit and fairness cursor.
+            $dispatchableEffects = $ledger->readyToDispatchQuery(now(), array_shift($dispatchTypes));
+            foreach ($dispatchTypes as $effectType) {
+                $dispatchableEffects->unionAll($ledger->readyToDispatchQuery(now(), $effectType));
+            }
+            $dispatchPage = $dispatchableEffects->getModel()->newQuery()
+                ->fromSub($dispatchableEffects, 'telegram_outbound_effects');
+            $pages->load('dispatchable_effects', $dispatchPage, $pageLimit)
                 ->each(function ($effect) use (&$dispatched, $dispatcher): void {
                     $dispatcher->dispatch($effect, now()->toISOString());
                     $dispatched++;

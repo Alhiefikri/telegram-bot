@@ -214,7 +214,7 @@ final class TelegramOutboundEffectPolicy
                                                     ->where('receipt_predecessors.state', '<>', TelegramOutboundEffectState::Sent->value)
                                                     ->where(function ($resolvedInvoice): void {
                                                         $resolvedInvoice
-                                                            ->where('receipt_predecessors.state', 'not in', [
+                                                            ->whereNotIn('receipt_predecessors.state', [
                                                                 TelegramOutboundEffectState::Failed->value,
                                                                 TelegramOutboundEffectState::Unknown->value,
                                                             ])

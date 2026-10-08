@@ -514,6 +514,23 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         );
     }
 
+    public function test_recovery_waits_for_pending_legacy_invoice_before_dispatching_detail(): void
+    {
+        Queue::fake();
+        $invoice = $this->recordLegacyReceiptGroup($this->paidOrderWithoutCredentials());
+        $detail = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $invoice->effect_group_key)
+            ->where('sequence', 2)
+            ->firstOrFail();
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+
+        $this->assertFalse($ledger->readyToDispatchQuery(now(), $detail->effect_type)->whereKey($detail->id)->exists());
+
+        $invoice->forceFill(['state' => TelegramOutboundEffectState::Unknown])->save();
+
+        $this->assertTrue($ledger->readyToDispatchQuery(now(), $detail->effect_type)->whereKey($detail->id)->exists());
+    }
+
     public function test_invoice_metadata_and_buyer_text_keep_provider_total_when_present(): void
     {
         $order = $this->paidOrderWithAmountMismatch('IDR', 12_345, 98_765);
