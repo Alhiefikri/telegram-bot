@@ -461,8 +461,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Diamond', (string) $categoryData['text']);
         $this->assertStringContainsString('Diamond Habis', (string) $categoryData['text']);
         $this->assertStringContainsString('Rp15.000', (string) $categoryData['text']);
-        $this->assertSame('product:'.$product->id, $categoryData['reply_markup']['inline_keyboard'][0][0]['callback_data']);
-        $this->assertSame('product:'.$emptyProduct->id, $categoryData['reply_markup']['inline_keyboard'][1][0]['callback_data']);
+        $this->assertProductEntryCallback($product->id, $categoryData['reply_markup']['inline_keyboard'][0][0]['callback_data']);
+        $this->assertProductEntryCallback($emptyProduct->id, $categoryData['reply_markup']['inline_keyboard'][1][0]['callback_data']);
         $this->assertSame('catalog:categories', $categoryData['reply_markup']['inline_keyboard'][2][0]['callback_data']);
 
         $this->postTelegramWebhook($this->callbackUpdate(122, 'back-categories', 'back:categories'))->assertOk();
@@ -561,7 +561,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             $entryButtons = array_merge(...array_slice($keyboard, 0, $entryCount));
             $this->assertCount($entryCount, $entryButtons);
             foreach ($entryButtons as $button) {
-                $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', (string) ($button['callback_data'] ?? ''));
+                $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*:o[a-f0-9]{16}$/', (string) ($button['callback_data'] ?? ''));
                 $this->assertContains($button['style'] ?? null, ['primary', 'danger']);
             }
             if ($count > 10) {
@@ -659,7 +659,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertSame('primary', $request['reply_markup']['inline_keyboard'][0][0]['style'] ?? null);
         $this->assertStringContainsString('Rp35.000', (string) $request['text']);
         $this->assertStringNotContainsString('1.5 USDT', (string) $request['text']);
-        $this->assertSame('product:'.$product->id, $request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null);
+        $this->assertProductEntryCallback($product->id, $request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null);
         $this->assertCount(1, $request['reply_markup']['inline_keyboard'][1] ?? []);
         $this->assertSame('katalog', $request['reply_markup']['inline_keyboard'][1][0]['callback_data'] ?? null);
 
@@ -696,10 +696,11 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertSame('katalog', $keyboard[11][0]['callback_data']);
 
         $buttons = array_merge(...$productRows);
-        $this->assertSame(
-            $products->sortBy('name')->take(10)->map(fn (Product $product): string => 'product:'.$product->id)->values()->all(),
-            array_column($buttons, 'callback_data'),
-        );
+        $ordered = $products->sortBy('name')->take(10)->values();
+        $this->assertCount($ordered->count(), $buttons);
+        foreach ($ordered as $index => $product) {
+            $this->assertProductEntryCallback($product->id, $buttons[$index]['callback_data']);
+        }
         foreach ($buttons as $button) {
             $this->assertSame('primary', $button['style'] ?? null);
         }
@@ -759,8 +760,8 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && ($request['reply_markup']['inline_keyboard'][1][0]['text'] ?? null) === '2. Pilih'
             && ($request['reply_markup']['inline_keyboard'][0][0]['style'] ?? null) === 'primary'
             && ($request['reply_markup']['inline_keyboard'][1][0]['style'] ?? null) === 'danger'
-            && ($request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? null) === 'product:'.$matching->id
-            && ($request['reply_markup']['inline_keyboard'][1][0]['callback_data'] ?? null) === 'product:'.$empty->id
+            && preg_match('/^product:'.$matching->id.':o[a-f0-9]{16}$/', (string) ($request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? '')) === 1
+            && preg_match('/^product:'.$empty->id.':o[a-f0-9]{16}$/', (string) ($request['reply_markup']['inline_keyboard'][1][0]['callback_data'] ?? '')) === 1
             && ($request['reply_markup']['inline_keyboard'][2][0]['callback_data'] ?? null) === 'katalog');
     }
 
@@ -800,6 +801,40 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains($r['text'], 'Total: Rp25.000')
             && str_contains(json_encode($r->data()), 'detail:pay:qris:'.$product->id.':')
             && ! str_contains($r['text'], 'Pilih jumlah'));
+    }
+
+    public function test_search_result_detail_back_returns_to_the_search_results(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12348, 'locale' => 'id']);
+        $category = Category::factory()->create(['name' => 'Kategori Cari']);
+        $product = Product::factory()->create([
+            'name' => 'Cari Origin Product',
+            'category_id' => $category->id,
+            'price_amount' => 20000,
+            'stock' => 4,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(129, '/cari origin', [], 12348))->assertOk();
+        $search = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Hasil pencarian'))->last()[0]->data();
+        $entryCallback = $search['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->assertProductEntryCallback($product->id, $entryCallback);
+
+        $this->postTelegramWebhook($this->callbackUpdate(130, 'search-origin-open', $entryCallback, [], 12348))->assertOk();
+        $selection = app(TelegramIntentSession::class)->get($customer);
+        $this->assertIsArray($selection);
+        $this->assertSame(substr($entryCallback, -16), $selection['originToken']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(131, 'search-origin-back', 'detail:back:'.$product->id.':'.$selection['interactionToken'], [], 12348))->assertOk();
+
+        $restored = Http::recorded(fn ($request): bool => (str_ends_with($request->url(), '/sendMessage') || str_ends_with($request->url(), '/editMessageText'))
+            && str_contains((string) ($request['text'] ?? ''), 'Hasil pencarian'))->last();
+        $this->assertNotNull($restored);
+        $this->assertStringContainsString('Cari Origin Product', (string) $restored[0]['text']);
+        $this->assertStringNotContainsString('Kategori: Kategori Cari', (string) $restored[0]['text']);
+        $this->assertNull(app(TelegramIntentSession::class)->get($customer));
     }
 
     public function test_cari_without_matching_keyword_sends_fallback_to_catalog(): void
@@ -1235,7 +1270,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
             $this->assertIsArray($singleFamilyButton);
             $this->assertStringContainsString($locale['multi_label'], $multiFamilyButton['text']);
             $this->assertStringContainsString($locale['single_label'], $singleFamilyButton['text']);
-            $this->assertSame('product:'.$singleProduct->id, $singleFamilyButton['callback_data']);
+            $this->assertProductEntryCallback($singleProduct->id, $singleFamilyButton['callback_data']);
             foreach ($selectorButtons as $selectorButton) {
                 if ($selectorButton === $multiFamilyButton || $selectorButton === $singleFamilyButton) {
                     continue;
@@ -1321,7 +1356,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         foreach ($productRows as $row) {
             $this->assertCount(1, $row);
             $this->assertSame('primary', $row[0]['style'] ?? null);
-            $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*$/', $row[0]['callback_data']);
+            $this->assertMatchesRegularExpression('/^product:[1-9][0-9]*:o[a-f0-9]{16}$/', $row[0]['callback_data']);
         }
         if ($count > 10) {
             $this->assertSame(sprintf('category:%d:page:2', $category->id), $keyboard[$entryCount][0]['callback_data']);

@@ -257,53 +257,68 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
 
     private function handleBack(TelegramCallbackContext $context, int $productId, string $token): void
     {
-        $this->session->withLock($context->customer, function () use ($context, $productId, $token): void {
+        // The selection is validated and released while the interaction lock is
+        // held; the destination screen renders outside it, because the lock is
+        // not reentrant and rendering a list releases the selection again.
+        $selection = $this->session->withLock($context->customer, function () use ($context, $productId, $token): ?array {
             $selection = $this->currentSelection($context->customer, $productId, $token, ['browsing']);
             if ($selection === null) {
-                $this->sendStale($context);
-
-                return;
+                return null;
             }
-
-            $familyId = $selection['familyId'] ?? null;
-            $familyPage = $selection['familyPage'] ?? null;
-            $familyListPage = $selection['familyListPage'] ?? 1;
-            $product = Product::whereKey($productId)->first();
             $this->session->forget($context->customer);
-            if (is_int($familyId) && $familyId > 0 && is_int($familyPage) && $familyPage > 0
-                && is_int($familyListPage) && $familyListPage > 0) {
-                $opened = $this->catalog->openFamilyOptions(
-                    $context->customer,
-                    $context->chatId,
-                    $familyId,
-                    $familyPage,
-                    returnPage: $familyListPage,
-                    expectedProductId: $productId,
-                    originToken: is_string($selection['familyOriginToken'] ?? null) ? $selection['familyOriginToken'] : null,
-                    messageId: $context->messageId,
-                );
-                $this->bot->answerCallbackQuery(
-                    $context->callbackQueryId,
-                    $opened ? null : $this->locale->translate($context->customer, 'catalog.selection.stale'),
-                );
 
-                return;
-            }
-            if (! $product) {
-                $this->sendUnavailable($context);
+            return $selection;
+        });
+        if ($selection === null) {
+            $this->sendStale($context);
 
-                return;
-            }
+            return;
+        }
 
-            $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->catalog->sendCategoryProducts(
+        $familyId = $selection['familyId'] ?? null;
+        $familyPage = $selection['familyPage'] ?? null;
+        $familyListPage = $selection['familyListPage'] ?? 1;
+        if (is_int($familyId) && $familyId > 0 && is_int($familyPage) && $familyPage > 0
+            && is_int($familyListPage) && $familyListPage > 0) {
+            $opened = $this->catalog->openFamilyOptions(
                 $context->customer,
                 $context->chatId,
-                $product->category_id ? (string) $product->category_id : 'uncategorized',
-                1,
-                $context->messageId,
+                $familyId,
+                $familyPage,
+                returnPage: $familyListPage,
+                expectedProductId: $productId,
+                originToken: is_string($selection['familyOriginToken'] ?? null) ? $selection['familyOriginToken'] : null,
+                messageId: $context->messageId,
             );
-        });
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $opened ? null : $this->locale->translate($context->customer, 'catalog.selection.stale'),
+            );
+
+            return;
+        }
+        $originToken = is_string($selection['originToken'] ?? null) ? $selection['originToken'] : null;
+        if ($originToken !== null
+            && $this->catalog->openCatalogOrigin($context->customer, $context->chatId, $originToken, $context->messageId)) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+            return;
+        }
+        $product = Product::whereKey($productId)->first();
+        if (! $product) {
+            $this->sendUnavailable($context);
+
+            return;
+        }
+
+        $this->bot->answerCallbackQuery($context->callbackQueryId);
+        $this->catalog->sendCategoryProducts(
+            $context->customer,
+            $context->chatId,
+            $product->category_id ? (string) $product->category_id : 'uncategorized',
+            1,
+            $context->messageId,
+        );
     }
 
     /** @param  list<string>  $modes */

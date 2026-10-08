@@ -57,6 +57,18 @@ abstract class TelegramBotTestSupport extends TestCase
         ]);
     }
 
+    /**
+     * Catalog entries carry the origin token of the list they were rendered
+     * from, so their product detail can return to that exact list.
+     */
+    protected function assertProductEntryCallback(int $productId, mixed $callbackData): void
+    {
+        $this->assertMatchesRegularExpression(
+            '/\Aproduct:'.$productId.':o[a-f0-9]{16}\z/D',
+            (string) $callbackData,
+        );
+    }
+
     protected function telegramRequestField(Request $request, string $field): mixed
     {
         $data = $request->data();

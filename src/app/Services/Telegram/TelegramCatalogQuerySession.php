@@ -117,10 +117,24 @@ final class TelegramCatalogQuerySession
         return $state !== null && ($state['type'] ?? null) === 'family' ? $state : null;
     }
 
-    /** @return array<string, mixed>|null */
+    /**
+     * The browse list a token resolves to: the origin snapshot a family screen
+     * captured, or the current browse state itself when a Product Detail was
+     * opened straight from that list.
+     *
+     * @return array<string, mixed>|null
+     */
     public function originForToken(Customer $customer, string $token): ?array
     {
-        $state = $this->familyState($customer);
+        $state = $this->state($customer);
+        if ($state === null) {
+            return null;
+        }
+
+        if (($state['type'] ?? null) !== 'family') {
+            return hash_equals((string) $state['token'], $token) ? $state : null;
+        }
+
         $origin = $state['origin'] ?? null;
 
         return is_array($origin)

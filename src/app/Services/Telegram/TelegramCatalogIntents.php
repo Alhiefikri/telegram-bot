@@ -415,7 +415,7 @@ class TelegramCatalogIntents
     }
 
     /**
-     * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}|null  $navigation
+     * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}|null  $navigation
      */
     public function sendProductDetail(Customer $customer, string $chatId, Product $product, ?array $navigation = null, ?int $messageId = null): void
     {
@@ -453,8 +453,8 @@ class TelegramCatalogIntents
     }
 
     /**
-     * @param  array{productId: int, quantity: int, interactionToken: string, locale: string, mode: string, familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}|null  $selection
-     * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}|null  $navigation
+     * @param  array{productId: int, quantity: int, interactionToken: string, locale: string, mode: string, familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}|null  $selection
+     * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}|null  $navigation
      */
     public function renderProductDetail(Customer $customer, string $chatId, Product $product, ?array $selection, ?int $availableStock = null, ?int $messageId = null, ?array $navigation = null): void
     {
@@ -565,12 +565,20 @@ class TelegramCatalogIntents
                 ]];
             }
             $familyBackCallback = $this->familyOptionsCallback($navigation);
+            $originBackCallback = $this->originBackCallback($navigation);
+            if ($familyBackCallback !== null) {
+                $backText = $this->locale->translate($customer, 'catalog.family.back_options');
+                $backCallback = $familyBackCallback;
+            } elseif ($originBackCallback !== null) {
+                $backText = $this->locale->translate($customer, 'catalog.family.back_list');
+                $backCallback = $originBackCallback;
+            } else {
+                $backText = $this->locale->translate($customer, 'catalog.back_categories');
+                $backCallback = $product->category_id ? 'category:'.$product->category_id : 'category:uncategorized';
+            }
             $keyboard[] = [[
-                'text' => $familyBackCallback !== null
-                    ? $this->locale->translate($customer, 'catalog.family.back_options')
-                    : $this->locale->translate($customer, 'catalog.back_categories'),
-                'callback_data' => $familyBackCallback
-                    ?? ($product->category_id ? 'category:'.$product->category_id : 'category:uncategorized'),
+                'text' => $backText,
+                'callback_data' => $backCallback,
             ]];
         }
 
@@ -1170,12 +1178,10 @@ class TelegramCatalogIntents
             if ($family !== null) {
                 $singleOption = $family->optionCount === 1 ? ($family->members[0] ?? null) : null;
                 if ($singleOption instanceof CatalogProductReadModel) {
-                    $callback = 'product:'.$singleOption->id;
+                    $callback = 'product:'.$singleOption->id.$this->originSuffix($originToken);
                 } else {
-                    $callback = 'family:options:'.$this->familyTokens->options($family->id, 1, $listPage);
-                    if ($originToken !== null) {
-                        $callback .= ':o'.$originToken;
-                    }
+                    $callback = 'family:options:'.$this->familyTokens->options($family->id, 1, $listPage)
+                        .$this->originSuffix($originToken);
                 }
                 $icon = $singleOption instanceof CatalogProductReadModel
                     ? $this->catalogIcon($singleOption)
@@ -1199,7 +1205,7 @@ class TelegramCatalogIntents
                         ))
                         : $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
                     ...($mode === 'catalog' ? $icon->buttonFields() : []),
-                    'callback_data' => 'product:'.$product->id,
+                    'callback_data' => 'product:'.$product->id.$this->originSuffix($originToken),
                     'style' => $product->isAvailable ? 'primary' : 'danger',
                 ];
             }
@@ -1499,28 +1505,66 @@ class TelegramCatalogIntents
     }
 
     /** @param  array<string, mixed>|null  $selection */
-    /** @return array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string} */
+    /** @return array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string} */
     private function navigationFromSelection(?array $selection): array
     {
-        if (! is_array($selection)
-            || ! is_int($selection['familyId'] ?? null)
-            || ! is_int($selection['familyPage'] ?? null)) {
+        if (! is_array($selection)) {
             return [];
         }
 
-        $navigation = [
-            'familyId' => $selection['familyId'],
-            'familyPage' => $selection['familyPage'],
-            'familyListPage' => is_int($selection['familyListPage'] ?? null) && $selection['familyListPage'] > 0
-                ? $selection['familyListPage']
-                : 1,
-        ];
-        if (is_string($selection['familyOriginToken'] ?? null)
-            && preg_match('/\A[a-f0-9]{16}\z/D', $selection['familyOriginToken']) === 1) {
-            $navigation['familyOriginToken'] = $selection['familyOriginToken'];
+        $navigation = [];
+        if (is_int($selection['familyId'] ?? null) && is_int($selection['familyPage'] ?? null)) {
+            $navigation = [
+                'familyId' => $selection['familyId'],
+                'familyPage' => $selection['familyPage'],
+                'familyListPage' => is_int($selection['familyListPage'] ?? null) && $selection['familyListPage'] > 0
+                    ? $selection['familyListPage']
+                    : 1,
+            ];
+            if (is_string($selection['familyOriginToken'] ?? null)
+                && preg_match('/\A[a-f0-9]{16}\z/D', $selection['familyOriginToken']) === 1) {
+                $navigation['familyOriginToken'] = $selection['familyOriginToken'];
+            }
+        }
+        if (is_string($selection['originToken'] ?? null)
+            && preg_match('/\A[a-f0-9]{16}\z/D', $selection['originToken']) === 1) {
+            $navigation['originToken'] = $selection['originToken'];
         }
 
         return $navigation;
+    }
+
+    /**
+     * The list a catalog entry was rendered from, carried into the callbacks of
+     * that entry so the screen it opens can return to the exact list. A missing
+     * or malformed token leaves that destination with its own fallback.
+     */
+    private function originSuffix(?string $originToken): string
+    {
+        return is_string($originToken) && preg_match('/\A[a-f0-9]{16}\z/D', $originToken) === 1
+            ? ':o'.$originToken
+            : '';
+    }
+
+    /**
+     * The back callback for a Product Detail opened straight from a browse list:
+     * a single-plan family or a standalone Product, which skip the plan list. The
+     * stateless origin token resolves to the list the customer tapped, exactly
+     * like the plan list back button, so the detail does not detour through the
+     * category list of the Product.
+     *
+     * @param  array<string, mixed>|null  $navigation
+     */
+    private function originBackCallback(?array $navigation): ?string
+    {
+        $token = $navigation['originToken'] ?? null;
+        if (! is_string($token) || preg_match('/\A[a-f0-9]{16}\z/D', $token) !== 1) {
+            return null;
+        }
+
+        // The page segment stays unused: the origin token resolves to the page
+        // the list was rendered with.
+        return 'family:list:1:o'.$token;
     }
 
     /** @return array<string, mixed>|null */

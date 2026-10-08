@@ -15,6 +15,7 @@ use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramCatalogIntents;
+use App\Services\Telegram\TelegramCatalogQuerySession;
 use App\Services\Telegram\TelegramFamilyCallbackToken;
 use App\Services\Telegram\TelegramIntentSession;
 use Illuminate\Database\Events\QueryExecuted;
@@ -66,7 +67,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $familyCallback = $familyButton['callback_data'];
         $this->assertStringStartsWith('family:options:v', $familyCallback);
         $this->assertCount(1, $keyboard[0]);
-        $this->assertSame('product:'.$standalone->id, $keyboard[1][0]['callback_data']);
+        $this->assertProductEntryCallback($standalone->id, $keyboard[1][0]['callback_data']);
         $this->assertStringContainsString('Spotify Standalone', $keyboard[1][0]['text']);
         $this->assertStringContainsString('Stok 2', $keyboard[1][0]['text']);
         $this->assertCount(1, $keyboard[1]);
@@ -131,12 +132,12 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $button = $catalog['reply_markup']['inline_keyboard'][0][0];
         $this->assertStringContainsString('Customer-facing Product Name', $button['text']);
         $this->assertStringNotContainsString('Old Family Label', $button['text']);
-        $this->assertSame('product:'.$product->id, $button['callback_data']);
+        $this->assertProductEntryCallback($product->id, $button['callback_data']);
         $this->postTelegramWebhook($this->messageUpdate(41021, '/cari customer-facing', [], 41020))->assertOk();
         $search = $this->lastMessageContaining('Hasil pencarian: customer-facing');
         $this->assertStringContainsString('Customer-facing Product Name', (string) $search['text']);
         $this->assertStringNotContainsString('Old Family Label', (string) $search['text']);
-        $this->assertSame('product:'.$product->id, $search['reply_markup']['inline_keyboard'][0][0]['callback_data']);
+        $this->assertProductEntryCallback($product->id, $search['reply_markup']['inline_keyboard'][0][0]['callback_data']);
     }
 
     public function test_family_options_aggregate_sold_quantity_across_paid_processing_variants(): void
@@ -1234,7 +1235,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Multiple Sold Out', $multipleButton['text']);
         $this->assertStringContainsString('Habis', $multipleButton['text']);
         $this->assertSame('danger', $singleButton['style']);
-        $this->assertSame('product:'.$singleProduct->id, $singleButton['callback_data']);
+        $this->assertProductEntryCallback($singleProduct->id, $singleButton['callback_data']);
         $this->assertSame('danger', $multipleButton['style']);
         $this->assertStringStartsWith('family:options:v', $multipleButton['callback_data']);
 
@@ -1548,7 +1549,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(41130, '/produk', [], 41130))->assertOk();
         $catalog = $this->lastMessageContaining('Spotify Solo');
         $entryButton = $catalog['reply_markup']['inline_keyboard'][0][0];
-        $this->assertSame('product:'.$product->id, $entryButton['callback_data']);
+        $this->assertProductEntryCallback($product->id, $entryButton['callback_data']);
         $this->assertStringContainsString('Stok 5', $entryButton['text']);
         $this->assertStringNotContainsString('Plan', $entryButton['text']);
         $this->assertSame('primary', $entryButton['style']);
@@ -1579,7 +1580,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(41132, '/produk', [], 41131))->assertOk();
         $catalog = $this->lastMessageContaining('Viu Solo');
         $entryButton = $catalog['reply_markup']['inline_keyboard'][0][0];
-        $this->assertSame('product:'.$product->id, $entryButton['callback_data']);
+        $this->assertProductEntryCallback($product->id, $entryButton['callback_data']);
         $this->assertStringContainsString('Habis', $entryButton['text']);
         $this->assertSame('danger', $entryButton['style']);
 
@@ -1588,6 +1589,186 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Stok kosong', (string) $detail['text']);
         $this->assertStringNotContainsString('family:options:v', json_encode($detail, JSON_THROW_ON_ERROR));
         $this->assertStringNotContainsString('detail:pay:', json_encode($detail, JSON_THROW_ON_ERROR));
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+    }
+
+    public function test_single_plan_family_detail_back_returns_to_the_list_it_was_opened_from(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41310, 'locale' => 'id']);
+        $category = Category::factory()->create(['name' => 'Kategori Asal']);
+        $family = ProductFamily::factory()->create(['name' => 'Asal Solo', 'slug' => 'asal-solo']);
+        $product = Product::factory()->create([
+            'name' => 'Asal Solo 1 Bulan',
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Solo 1 Bulan',
+            'category_id' => $category->id,
+            'price_amount' => 45000,
+            'stock' => 5,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(41310, '/produk', [], 41310))->assertOk();
+        $catalog = $this->lastMessageContaining('Pilih keluarga atau produk');
+        $entryCallback = $catalog['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->assertProductEntryCallback($product->id, $entryCallback);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41311, 'origin-open', $entryCallback, [], 41310))->assertOk();
+        $this->assertStringContainsString('Detail produk', (string) $this->lastMessageContaining('Asal Solo 1 Bulan')['text']);
+        $selection = app(TelegramIntentSession::class)->get($customer);
+        $this->assertIsArray($selection);
+        $this->assertArrayNotHasKey('familyId', $selection);
+        $this->assertSame(substr($entryCallback, -16), $selection['originToken']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41312, 'origin-back', 'detail:back:'.$product->id.':'.$selection['interactionToken'], [], 41310))->assertOk();
+
+        $restored = $this->lastMessageContaining('Pilih keluarga atau produk');
+        $entryTexts = collect($restored['reply_markup']['inline_keyboard'])->flatten(1)->pluck('text')->implode(' | ');
+        $this->assertStringContainsString('Asal Solo', $entryTexts);
+        $this->assertStringNotContainsString('Kategori: ', (string) $restored['text']);
+        $menuButton = collect($restored['reply_markup']['inline_keyboard'])->flatten(1)
+            ->first(fn (array $button): bool => ($button['callback_data'] ?? null) === 'family:back:menu');
+        $this->assertIsArray($menuButton, 'Daftar asal harus tetap menyediakan jalan pulang ke menu.');
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->body(), 'Filter kategori opsional'));
+        $this->assertNull(app(TelegramIntentSession::class)->get($customer));
+    }
+
+    public function test_sold_out_single_plan_detail_back_returns_to_the_list_it_was_opened_from(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 41320, 'locale' => 'id']);
+        $category = Category::factory()->create(['name' => 'Kategori Habis']);
+        $family = ProductFamily::factory()->create(['name' => 'Habis Solo', 'slug' => 'habis-solo']);
+        $product = Product::factory()->create([
+            'name' => 'Habis Solo 1 Bulan',
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Solo 1 Bulan',
+            'category_id' => $category->id,
+            'stock' => 1,
+            'reserved_stock' => 1,
+            'is_active' => true,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(41320, '/produk', [], 41320))->assertOk();
+        $catalog = $this->lastMessageContaining('Pilih keluarga atau produk');
+        $entryCallback = $catalog['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->assertProductEntryCallback($product->id, $entryCallback);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41321, 'sold-origin-open', $entryCallback, [], 41320))->assertOk();
+        $detail = $this->lastMessageContaining('Stok kosong');
+        $backButton = collect($detail['reply_markup']['inline_keyboard'])->flatten(1)
+            ->first(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'family:list:'));
+        $this->assertIsArray($backButton, 'Detail habis harus menawarkan kembali ke daftar asal.');
+        $this->assertSame('⬅️ Kembali ke daftar', $backButton['text']);
+        $this->assertSame('family:list:1:o'.substr($entryCallback, -16), $backButton['callback_data']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41322, 'sold-origin-back', $backButton['callback_data'], [], 41320))->assertOk();
+
+        $restored = $this->lastMessageContaining('Pilih keluarga atau produk');
+        $entryTexts = collect($restored['reply_markup']['inline_keyboard'])->flatten(1)->pluck('text')->implode(' | ');
+        $this->assertStringContainsString('Habis Solo', $entryTexts);
+        $this->assertStringNotContainsString('Kategori: ', (string) $restored['text']);
+    }
+
+    public function test_category_list_detail_back_restores_the_same_category_list(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41340, 'locale' => 'id']);
+        $category = Category::factory()->create(['name' => 'Kategori Sama']);
+        $family = ProductFamily::factory()->create(['name' => 'Sama Solo', 'slug' => 'sama-solo']);
+        $product = Product::factory()->create([
+            'name' => 'Sama Solo 1 Bulan',
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Solo 1 Bulan',
+            'category_id' => $category->id,
+            'stock' => 4,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41340, 'category-asal', 'category:'.$category->id, [], 41340))->assertOk();
+        $categoryList = $this->lastMessageContaining('Kategori: Kategori Sama');
+        $entryCallback = $categoryList['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->assertProductEntryCallback($product->id, $entryCallback);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41341, 'category-origin-open', $entryCallback, [], 41340))->assertOk();
+        $this->assertStringContainsString('Detail produk', (string) $this->lastMessageContaining('Sama Solo 1 Bulan')['text']);
+        $selection = app(TelegramIntentSession::class)->get($customer);
+        $this->assertIsArray($selection);
+        $this->assertSame(substr($entryCallback, -16), $selection['originToken']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41342, 'category-origin-back', 'detail:back:'.$product->id.':'.$selection['interactionToken'], [], 41340))->assertOk();
+
+        $restored = $this->lastMessageContaining('Kategori: Kategori Sama');
+        $this->assertStringContainsString('Sama Solo', (string) $restored['text']);
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->body(), 'Filter kategori opsional'));
+        $this->assertNull(app(TelegramIntentSession::class)->get($customer));
+    }
+
+    public function test_detail_back_falls_back_to_the_category_list_when_the_origin_token_expired(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41350, 'locale' => 'id']);
+        $category = Category::factory()->create(['name' => 'Kategori Kedaluwarsa']);
+        $family = ProductFamily::factory()->create(['name' => 'Lama Solo', 'slug' => 'lama-solo']);
+        $product = Product::factory()->create([
+            'name' => 'Lama Solo 1 Bulan',
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Solo 1 Bulan',
+            'category_id' => $category->id,
+            'stock' => 3,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(41350, '/produk', [], 41350))->assertOk();
+        $catalog = $this->lastMessageContaining('Pilih keluarga atau produk');
+        $entryCallback = $catalog['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->assertProductEntryCallback($product->id, $entryCallback);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41351, 'expired-origin-open', $entryCallback, [], 41350))->assertOk();
+        $selection = app(TelegramIntentSession::class)->get($customer);
+        $this->assertIsArray($selection);
+
+        app(TelegramCatalogQuerySession::class)->forget($customer);
+        $this->postTelegramWebhook($this->callbackUpdate(41352, 'expired-origin-back', 'detail:back:'.$product->id.':'.$selection['interactionToken'], [], 41350))->assertOk();
+
+        $restored = $this->lastMessageContaining('Kategori: Kategori Kedaluwarsa');
+        $this->assertStringContainsString('Lama Solo', (string) $restored['text']);
+        $this->assertNull(app(TelegramIntentSession::class)->get($customer));
+    }
+
+    public function test_product_entry_origin_token_is_bound_to_the_chat_and_the_rendered_list(): void
+    {
+        $this->fakeTelegramHttp();
+        $owner = Customer::factory()->create(['telegram_id' => 41330, 'locale' => 'id']);
+        $other = Customer::factory()->create(['telegram_id' => 41331, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Token Solo', 'slug' => 'token-solo']);
+        $product = Product::factory()->create([
+            'name' => 'Token Solo 1 Bulan',
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Solo 1 Bulan',
+            'stock' => 3,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->messageUpdate(41330, '/produk', [], 41330))->assertOk();
+        $catalog = $this->lastMessageContaining('Token Solo');
+        $entryCallback = $catalog['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        $this->assertProductEntryCallback($product->id, $entryCallback);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41331, 'foreign-origin', $entryCallback, [], 41331))->assertOk();
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'foreign-origin'
+            && str_contains((string) ($request['text'] ?? ''), 'sudah tidak berlaku'));
+        $this->assertNull(app(TelegramIntentSession::class)->get($other));
+        $this->assertNull(app(TelegramIntentSession::class)->get($owner));
+
+        $this->postTelegramWebhook($this->callbackUpdate(41332, 'forged-origin', 'product:'.$product->id.':o'.str_repeat('a', 16), [], 41330))->assertOk();
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'forged-origin'
+            && str_contains((string) ($request['text'] ?? ''), 'sudah tidak berlaku'));
+        $this->assertNull(app(TelegramIntentSession::class)->get($owner));
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->body(), 'Detail produk'));
         $this->assertSame(0, Cart::count());
         $this->assertSame(0, Order::count());
     }

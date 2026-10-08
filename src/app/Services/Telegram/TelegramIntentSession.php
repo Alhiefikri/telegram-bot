@@ -31,7 +31,8 @@ class TelegramIntentSession
      *     familyId?: int,
      *     familyPage?: int,
      *     familyListPage?: int,
-     *     familyOriginToken?: string
+     *     familyOriginToken?: string,
+     *     originToken?: string
      * }|null
      */
     public function get(Customer $customer): ?array
@@ -56,6 +57,10 @@ class TelegramIntentSession
             || (isset($state['familyId']) && (! is_int($state['familyId']) || $state['familyId'] < 1))
             || (isset($state['familyPage']) && (! is_int($state['familyPage']) || $state['familyPage'] < 1))
             || (isset($state['familyListPage']) && (! is_int($state['familyListPage']) || $state['familyListPage'] < 1))
+            || (isset($state['originToken']) && (
+                ! is_string($state['originToken'])
+                || preg_match('/\A[a-f0-9]{16}\z/D', $state['originToken']) !== 1
+            ))
             || (isset($state['familyOriginToken']) && (
                 ! is_string($state['familyOriginToken'])
                 || preg_match('/\A[a-f0-9]{16}\z/D', $state['familyOriginToken']) !== 1
@@ -79,8 +84,8 @@ class TelegramIntentSession
     }
 
     /**
-     * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}  $context
-     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing', familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}
+     * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}  $context
+     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing', familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}
      */
     public function start(Customer $customer, int $productId, int $quantity, string $locale, array $context = []): array
     {
@@ -108,7 +113,7 @@ class TelegramIntentSession
     }
 
     /**
-     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'awaiting_custom_quantity', previousQuantity: int, familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}
+     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'awaiting_custom_quantity', previousQuantity: int, familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}
      */
     public function awaitCustomQuantity(Customer $customer, array $state, string $locale): array
     {
@@ -127,7 +132,7 @@ class TelegramIntentSession
     }
 
     /**
-     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing', familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string}
+     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing', familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}
      */
     public function browsing(Customer $customer, array $state, int $quantity, string $locale): array
     {
@@ -156,25 +161,28 @@ class TelegramIntentSession
         Cache::forget('telegram:selected-product:'.$customer->telegram_id);
     }
 
-    /** @return array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string} */
+    /** @return array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string} */
     private function navigationContext(array $context): array
     {
+        $navigation = [];
         $familyId = $context['familyId'] ?? null;
         $familyPage = $context['familyPage'] ?? null;
         $familyListPage = $context['familyListPage'] ?? 1;
-        if (! is_int($familyId) || $familyId < 1 || ! is_int($familyPage) || $familyPage < 1
-            || ! is_int($familyListPage) || $familyListPage < 1) {
-            return [];
+        if (is_int($familyId) && $familyId > 0 && is_int($familyPage) && $familyPage > 0
+            && is_int($familyListPage) && $familyListPage > 0) {
+            $navigation = [
+                'familyId' => $familyId,
+                'familyPage' => $familyPage,
+                'familyListPage' => $familyListPage,
+            ];
+            if (is_string($context['familyOriginToken'] ?? null)
+                && preg_match('/\A[a-f0-9]{16}\z/D', $context['familyOriginToken']) === 1) {
+                $navigation['familyOriginToken'] = $context['familyOriginToken'];
+            }
         }
-
-        $navigation = [
-            'familyId' => $familyId,
-            'familyPage' => $familyPage,
-            'familyListPage' => $familyListPage,
-        ];
-        if (is_string($context['familyOriginToken'] ?? null)
-            && preg_match('/\A[a-f0-9]{16}\z/D', $context['familyOriginToken']) === 1) {
-            $navigation['familyOriginToken'] = $context['familyOriginToken'];
+        if (is_string($context['originToken'] ?? null)
+            && preg_match('/\A[a-f0-9]{16}\z/D', $context['originToken']) === 1) {
+            $navigation['originToken'] = $context['originToken'];
         }
 
         return $navigation;

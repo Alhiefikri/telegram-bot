@@ -47,7 +47,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
             || preg_match('/^family:search:[a-f0-9]{16}:[1-9][0-9]{0,18}$/', $context->data) === 1
             || preg_match('/^family:options:v[A-Za-z0-9_-]{1,48}(?::o[a-f0-9]{16}|:s[a-f0-9]{16})?$/', $context->data) === 1
             || preg_match('/^family:select:v[A-Za-z0-9_-]{1,48}$/', $context->data) === 1
-            || preg_match('/^product:([1-9][0-9]*)$/', $context->data) === 1;
+            || preg_match('/^product:([1-9][0-9]*)(?::o[a-f0-9]{16})?$/', $context->data) === 1;
     }
 
     public function handle(TelegramCallbackContext $context): bool
@@ -191,7 +191,13 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
-        if (preg_match('/^product:([1-9][0-9]*)$/', $context->data, $matches)) {
+        if (preg_match('/^product:([1-9][0-9]*)(?::o([a-f0-9]{16}))?$/', $context->data, $matches)) {
+            $originToken = $matches[2] ?? null;
+            if ($originToken !== null && $this->catalogQueries->stateForToken($context->customer, $originToken) === null) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.selection.stale'));
+
+                return true;
+            }
             $product = Product::query()->with(['quantityPriceTiers'])->withAvailability()->publicVisible()->whereKey((int) $matches[1])->first();
             if (! $product) {
                 $this->session->forgetWithLock($context->customer);
@@ -200,9 +206,17 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
                 return true;
             }
             $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->catalogQueries->forget($context->customer);
+            if ($originToken === null) {
+                $this->catalogQueries->forget($context->customer);
+            }
             $this->session->forgetWithLock($context->customer);
-            $this->catalog->sendProductDetail($context->customer, $context->chatId, $product, messageId: $context->messageId);
+            $this->catalog->sendProductDetail(
+                $context->customer,
+                $context->chatId,
+                $product,
+                $originToken === null ? null : ['originToken' => $originToken],
+                $context->messageId,
+            );
 
             return true;
         }

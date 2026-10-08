@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted - 2026-09-26; discovery marker updated 2026-09-30
+Accepted - 2026-09-26; discovery marker updated 2026-09-30; Back navigation revised 2026-10-08
 
 ## Decision
 
@@ -16,9 +16,10 @@ Customer-facing Product Family discovery names one **Product option** a
 - A family whose options are all sold out keeps its existing sold-out label.
 - A family with exactly one public Product option uses that Product's name and
   icon for discovery, keeps its stock label (`📦 Spotify · Stok 5` / `Habis`),
-  and submits `product:<id>`, so pressing it opens that Product Detail and
-  never renders a one-item Plan list screen. The Web Storefront family-card
-  list also displays the Product name.
+  and submits `product:<id>` carrying the origin token of the list it was
+  rendered from, so pressing it opens that Product Detail and never renders a
+  one-item Plan list screen. The Web Storefront family-card list also displays
+  the Product name.
 - The default public sort ranks family entries by descending total sold units
   across their Product options. A sold unit is a quantity from a paid
   Processing or Completed Order. Ranking happens before pagination; ties keep
@@ -36,11 +37,17 @@ checkout, order, inventory, waitlist, and delivery.
 
 - The one-Plan shortcut is decided at the discovery entry
   (`TelegramCatalogIntents::entryKeyboard()`), so catalogue, category, and
-  search listings share it without touching family session/origin state.
+  search listings share it without rendering a Plan list. The entry carries
+  that list's origin token into the Product Detail selection (`originToken`),
+  and `detail:back` restores the same list instead of the category list.
 - Pressing a one-Plan family behaves like a standalone Product entry: Back from
-  Product Detail returns to the product's category list rather than the
-  originating search result. Multi-Plan families keep the origin-preserving
-  family flow.
+  Product Detail returns to the list the entry was pressed in, including a
+  sold-out detail, whose back button reuses `family:list:1:o<token>`. An entry
+  without an origin token — deep link, price-change notification, or broadcast
+  call to action — keeps the product's category list, which is also restored
+  when the origin token is no longer current. Multi-Plan families keep the
+  origin-preserving family flow, and their Plan list back button carries the
+  same token.
 - Committed Order and OrderItem changes invalidate the cached catalog
   projection so the default family sales ranking refreshes.
 - `/start family_<id>` still opens the Plan list, including for a one-Plan
