@@ -1087,14 +1087,19 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'icon' => '🧩',
             'custom_emoji_id' => '5368324170671202286',
         ]);
-        $family = ProductFamily::factory()->create(['name' => 'Canva', 'slug' => 'canva-family-icon-proof']);
+        $family = ProductFamily::factory()->create([
+            'name' => 'Canva',
+            'slug' => 'canva-family-icon-proof',
+            'icon' => '🧩',
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
         Product::factory()->create([
             'name' => 'Canva Family Icon',
             'product_family_id' => $family->id,
             'family_sort_order' => 1,
             'family_option_label' => 'Family Icon',
-            'icon' => '🧩',
-            'custom_emoji_id' => '5368324170671202286',
+            'icon' => null,
+            'custom_emoji_id' => null,
             'stock' => 0,
             'reserved_stock' => 0,
         ]);
@@ -1103,7 +1108,8 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
             'product_family_id' => $family->id,
             'family_sort_order' => 2,
             'family_option_label' => 'Pro',
-            'icon' => '🌸',
+            'icon' => null,
+            'custom_emoji_id' => null,
             'stock' => 5,
             'price_amount' => 34000,
         ]);

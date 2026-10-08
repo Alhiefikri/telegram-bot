@@ -8,7 +8,6 @@ use App\Catalog\CatalogIcon;
 use App\Catalog\CatalogProductReadModel;
 use App\Models\Customer;
 use App\Services\Catalog\CatalogBrowse;
-use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Storefront\StorefrontUrl;
 
 /**
@@ -26,7 +25,6 @@ final class TelegramStockIntents
         private readonly TelegramLocale $locale,
         private readonly CatalogBrowse $browse,
         private readonly CatalogIconResolver $icons,
-        private readonly CatalogFamilyIconResolver $familyIcons,
         private readonly TelegramHtmlCaption $captions,
         private readonly TelegramMessageChunker $chunker,
         private readonly StorefrontUrl $urls,
@@ -147,19 +145,7 @@ final class TelegramStockIntents
 
     private function familyIcon(CatalogFamilyReadModel $family): CatalogIcon
     {
-        $members = array_map(
-            static fn (CatalogProductReadModel $member): array => [
-                'icon' => $member->icon,
-                'customEmojiId' => $member->customEmojiId,
-            ],
-            array_values(array_filter(
-                $family->members,
-                static fn (mixed $member): bool => $member instanceof CatalogProductReadModel,
-            )),
-        );
-        $selection = $this->familyIcons->fromMembers($members);
-
-        return $this->icons->resolve($selection->icon, $selection->customEmojiId);
+        return $this->icons->resolve($family->icon, $family->customEmojiId);
     }
 
     private function escapeHtml(string $value): string

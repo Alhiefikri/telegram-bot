@@ -14,7 +14,7 @@ use Illuminate\Support\Str;
 final class ProductFamilyManagementService
 {
     /** @var list<string> */
-    private const FAMILY_FIELDS = ['name', 'description', 'image_path', 'telegram_image_path', 'sort_order'];
+    private const FAMILY_FIELDS = ['name', 'description', 'icon', 'image_path', 'telegram_image_path', 'sort_order'];
 
     public function __construct(
         private readonly AuditLogger $auditLogger,
@@ -23,7 +23,7 @@ final class ProductFamilyManagementService
     ) {}
 
     /**
-     * @param  array{name: string, description: ?string, sort_order: int, slug?: ?string, image_path?: ?string, telegram_image_path?: ?string}  $attributes
+     * @param  array{name: string, description: ?string, icon?: ?string, sort_order: int, slug?: ?string, image_path?: ?string, telegram_image_path?: ?string}  $attributes
      */
     public function create(array $attributes, User $user, ?string $ip = null): ProductFamily
     {
@@ -34,6 +34,7 @@ final class ProductFamilyManagementService
                         'name' => trim($attributes['name']),
                         'slug' => $this->uniqueSlug($attributes['name']),
                         'description' => $this->nullableTrim($attributes['description'] ?? null),
+                        'icon' => $this->nullableTrim($attributes['icon'] ?? null),
                         'image_path' => $attributes['image_path'] ?? null,
                         'telegram_image_path' => $attributes['telegram_image_path'] ?? null,
                     ]);
@@ -60,7 +61,7 @@ final class ProductFamilyManagementService
     }
 
     /**
-     * @param  array{name: string, description: ?string, sort_order: int, slug?: ?string, image_path?: ?string, telegram_image_path?: ?string}  $attributes
+     * @param  array{name: string, description: ?string, icon?: ?string, sort_order: int, slug?: ?string, image_path?: ?string, telegram_image_path?: ?string}  $attributes
      */
     public function update(ProductFamily $family, array $attributes, User $user, ?string $ip = null): ProductFamily
     {
@@ -79,9 +80,12 @@ final class ProductFamilyManagementService
                 }
 
                 $oldValue = $locked->getAttribute($field);
-                $newValue = $field === 'name'
-                    ? trim((string) $attributes[$field])
-                    : ($field === 'description' ? $this->nullableTrim($attributes[$field]) : $attributes[$field]);
+                $rawValue = $attributes[$field];
+                $newValue = match ($field) {
+                    'name' => trim((string) $rawValue),
+                    'description', 'icon' => $this->nullableTrim(is_string($rawValue) ? $rawValue : null),
+                    default => $rawValue,
+                };
 
                 if ($oldValue === $newValue) {
                     continue;

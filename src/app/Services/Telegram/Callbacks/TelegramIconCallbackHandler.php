@@ -66,6 +66,10 @@ class TelegramIconCallbackHandler implements TelegramCallbackHandler
             return true;
         }
 
+        if (preg_match('/\Aproducticon:family:([0-9]+)\z/', $context->data, $matches) === 1) {
+            return $this->handleFamilyVariants($context, (int) $matches[1]);
+        }
+
         if (preg_match('/\A(producticon|familyicon|menuicon|messageicon):(pick|clear):([0-9]+)\z/', $context->data, $matches) !== 1) {
             return false;
         }
@@ -76,6 +80,20 @@ class TelegramIconCallbackHandler implements TelegramCallbackHandler
             'messageicon' => $this->handleMessageIcon($context, (int) $matches[3], $matches[2] === 'clear'),
             default => $this->handleProduct($context, (int) $matches[3], $matches[2] === 'clear'),
         };
+    }
+
+    private function handleFamilyVariants(TelegramCallbackContext $context, int $familyId): bool
+    {
+        $family = ProductFamily::query()->find($familyId);
+        if (! $family instanceof ProductFamily) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.product_icon.expired'));
+
+            return true;
+        }
+
+        $this->icons->showFamilyVariants($context->customer, $context->chatId, $family, $context->messageId);
+
+        return true;
     }
 
     private function handleFamilyIcon(TelegramCallbackContext $context, int $familyId, bool $clear): bool

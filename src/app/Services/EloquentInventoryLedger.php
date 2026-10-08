@@ -48,7 +48,7 @@ class EloquentInventoryLedger implements InventoryLedger
         $products = Product::withTrashed()
             ->with([
                 'category' => fn ($query) => $query->where('is_active', true),
-                'family:id,name',
+                'family:id,name,icon,custom_emoji_id',
             ])
             ->withAvailability()
             ->whereIn('id', $items->pluck('product_id'))

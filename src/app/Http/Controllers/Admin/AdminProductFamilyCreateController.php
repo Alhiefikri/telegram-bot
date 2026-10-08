@@ -23,6 +23,7 @@ class AdminProductFamilyCreateController extends Controller
             $family = $families->create([
                 'name' => $validated['name'],
                 'description' => $validated['description'] ?? null,
+                'icon' => $validated['icon'] ?? null,
                 'sort_order' => (int) $validated['sort_order'],
                 'image_path' => $imagePath,
                 'telegram_image_path' => $telegramImagePath,

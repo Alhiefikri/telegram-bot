@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\TelegramUiIcon;
 use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramBotClient;
@@ -13,7 +14,7 @@ final class CheckCatalogIcons extends Command
 {
     protected $signature = 'catalog:icons-check {--reset-capability : Forget a remembered custom emoji rejection}';
 
-    protected $description = 'Audit captured product, menu, and message-copy custom emoji identifiers and the custom emoji capability flag.';
+    protected $description = 'Audit captured product, family, menu, and message-copy custom emoji identifiers and the custom emoji capability flag.';
 
     public function handle(TelegramBotClient $bot, CustomEmojiCapability $customEmoji): int
     {
@@ -28,6 +29,11 @@ final class CheckCatalogIcons extends Command
         }
 
         $products = Product::query()
+            ->whereNotNull('custom_emoji_id')
+            ->where('custom_emoji_id', '!=', '')
+            ->orderBy('name')
+            ->get(['id', 'name', 'custom_emoji_id']);
+        $families = ProductFamily::query()
             ->whereNotNull('custom_emoji_id')
             ->where('custom_emoji_id', '!=', '')
             ->orderBy('name')
@@ -63,6 +69,9 @@ final class CheckCatalogIcons extends Command
         foreach ($products as $product) {
             $collect((string) $product->custom_emoji_id, 'product #'.$product->getKey().' ('.$product->name.')');
         }
+        foreach ($families as $family) {
+            $collect((string) $family->custom_emoji_id, 'family #'.$family->getKey().' ('.$family->name.')');
+        }
         foreach ($menuIcons as $icon) {
             $collect((string) $icon->custom_emoji_id, 'menu '.$icon->key);
         }
@@ -71,9 +80,10 @@ final class CheckCatalogIcons extends Command
         }
 
         $this->line(sprintf(
-            'Captured identifiers: %d (products: %d, menu slots: %d, message-copy slots: %d)',
+            'Captured identifiers: %d (products: %d, families: %d, menu slots: %d, message-copy slots: %d)',
             count($ids),
             $products->count(),
+            $families->count(),
             $menuIcons->count(),
             $messageIcons->count(),
         ));

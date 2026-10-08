@@ -6,6 +6,10 @@ Accepted - 2026-09-28
 
 Supersedes [ADR-0013](0013-catalog-brand-icons-from-telegram-custom-emoji.md).
 
+Amended by [ADR-0024](0024-family-owned-catalog-icons-with-product-overrides.md), 2026-10-08: the
+Product Family owns its icon now and every member without an icon of its own inherits it, so the
+"first member supplies the family icon" derivation no longer applies.
+
 ## Context
 
 ADR-0013 introduced a `catalog_brand_icons` registry whose name patterns were

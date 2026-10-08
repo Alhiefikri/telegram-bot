@@ -216,7 +216,11 @@ class ProductStockDeletionFakeSalesProofTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         $this->configureChannel();
         $customer = Customer::factory()->create(['telegram_id' => 710011, 'locale' => 'id']);
-        $family = ProductFamily::factory()->create(['name' => 'ChatGPT']);
+        $family = ProductFamily::factory()->create([
+            'name' => 'ChatGPT',
+            'icon' => '😄',
+            'custom_emoji_id' => '6134246530380472478',
+        ]);
         Product::factory()->create([
             'name' => 'ChatGPT PLUS PRIVATE',
             'product_family_id' => $family->id,
@@ -233,7 +237,7 @@ class ProductStockDeletionFakeSalesProofTest extends TelegramBotTestSupport
             'product_family_id' => $family->id,
             'family_sort_order' => 2,
             'family_option_label' => 'K12',
-            'icon' => '🌸',
+            'icon' => null,
             'custom_emoji_id' => null,
             'stock' => 1,
             'reserved_stock' => 0,

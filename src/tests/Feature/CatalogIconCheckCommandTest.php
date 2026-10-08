@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\TelegramUiIcon;
 use App\Services\Telegram\CustomEmojiCapability;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -16,6 +17,12 @@ class CatalogIconCheckCommandTest extends TestCase
     public function test_the_command_reports_identifiers_that_telegram_still_resolves(): void
     {
         $this->product('QA Gmail Fresh', '5368324170671202286');
+        ProductFamily::factory()->create([
+            'name' => 'QA Family Line',
+            'slug' => 'qa-family-line',
+            'icon' => '🎬',
+            'custom_emoji_id' => '5368324170671202289',
+        ]);
         TelegramUiIcon::query()->where('key', 'menu.products')->sole()->update(['custom_emoji_id' => '5368324170671202287']);
         TelegramUiIcon::query()->where('key', 'message.payment_card')->sole()->update(['custom_emoji_id' => '5368324170671202288']);
         Http::fake([
@@ -25,13 +32,15 @@ class CatalogIconCheckCommandTest extends TestCase
                     ['custom_emoji_id' => '5368324170671202286', 'emoji' => '📩'],
                     ['custom_emoji_id' => '5368324170671202287', 'emoji' => '🛍️'],
                     ['custom_emoji_id' => '5368324170671202288', 'emoji' => '🪙'],
+                    ['custom_emoji_id' => '5368324170671202289', 'emoji' => '🎬'],
                 ],
             ]),
         ]);
 
         $this->artisan('catalog:icons-check')
-            ->expectsOutputToContain('Captured identifiers: 3 (products: 1, menu slots: 1, message-copy slots: 1)')
+            ->expectsOutputToContain('Captured identifiers: 4 (products: 1, families: 1, menu slots: 1, message-copy slots: 1)')
             ->expectsOutputToContain('OK   product #')
+            ->expectsOutputToContain('OK   family #')
             ->expectsOutputToContain('message-copy message.payment_card')
             ->assertExitCode(0);
     }

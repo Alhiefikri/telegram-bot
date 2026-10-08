@@ -819,24 +819,29 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         }
     }
 
-    public function test_captured_product_custom_emoji_renders_in_family_rows_and_product_detail(): void
+    public function test_family_custom_emoji_renders_in_family_rows_and_product_detail(): void
     {
         config()->set('services.telegram.welcome_banner_url', 'catalog-banner-file-id');
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 41200, 'locale' => 'id']);
 
-        $family = ProductFamily::factory()->create(['name' => 'ChatGPT', 'slug' => 'chatgpt']);
+        $family = ProductFamily::factory()->create([
+            'name' => 'ChatGPT',
+            'slug' => 'chatgpt',
+            'icon' => '📩',
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
         foreach ([
-            ['name' => 'ChatGPT Plus 1 Bulan', 'label' => 'Plus 1 Bulan', 'icon' => '📩', 'emoji' => '5368324170671202286'],
-            ['name' => 'ChatGPT Go 1 Bulan', 'label' => 'Go 1 Bulan', 'icon' => null, 'emoji' => null],
+            ['name' => 'ChatGPT Plus 1 Bulan', 'label' => 'Plus 1 Bulan'],
+            ['name' => 'ChatGPT Go 1 Bulan', 'label' => 'Go 1 Bulan'],
         ] as $sortOrder => $productData) {
             Product::factory()->create([
                 'name' => $productData['name'],
                 'product_family_id' => $family->id,
                 'family_sort_order' => $sortOrder + 1,
                 'family_option_label' => $productData['label'],
-                'icon' => $productData['icon'],
-                'custom_emoji_id' => $productData['emoji'],
+                'icon' => null,
+                'custom_emoji_id' => null,
                 'stock' => 2,
                 'reserved_stock' => 0,
             ]);
@@ -869,14 +874,17 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 41230, 'locale' => 'id']);
-        $family = ProductFamily::factory()->create(['name' => 'ChatGPT', 'slug' => 'chatgpt-fallback']);
+        $family = ProductFamily::factory()->create([
+            'name' => 'ChatGPT',
+            'slug' => 'chatgpt-fallback',
+            'icon' => '📩',
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
         Product::factory()->create([
             'name' => 'ChatGPT Plus',
             'product_family_id' => $family->id,
             'family_sort_order' => 1,
             'family_option_label' => 'Plus',
-            'icon' => '📩',
-            'custom_emoji_id' => '5368324170671202286',
             'stock' => 2,
             'reserved_stock' => 0,
         ]);
@@ -885,7 +893,6 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'product_family_id' => $family->id,
             'family_sort_order' => 2,
             'family_option_label' => 'Go',
-            'icon' => '🌸',
             'stock' => 2,
             'reserved_stock' => 0,
         ]);
@@ -903,27 +910,30 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('🌸 ChatGPT Go', (string) $detail['text']);
     }
 
-    public function test_custom_emoji_on_a_later_plan_supplies_the_shared_family_icon_to_plan_buttons(): void
+    public function test_a_family_icon_stays_shared_while_a_plan_keeps_its_own_override(): void
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 41220, 'locale' => 'id']);
-        $family = ProductFamily::factory()->create(['name' => 'Nova Family', 'slug' => 'nova-family']);
+        $family = ProductFamily::factory()->create([
+            'name' => 'Nova Family',
+            'slug' => 'nova-family',
+            'icon' => '📩',
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
         Product::factory()->create([
             'name' => 'Nova 1 Bulan',
             'product_family_id' => $family->id,
             'family_sort_order' => 1,
             'family_option_label' => '1 Bulan',
-            'icon' => '🚀',
             'stock' => 2,
             'reserved_stock' => 0,
         ]);
-        Product::factory()->create([
+        $override = Product::factory()->create([
             'name' => 'Nova 3 Bulan',
             'product_family_id' => $family->id,
             'family_sort_order' => 2,
             'family_option_label' => '3 Bulan',
-            'icon' => '📩',
-            'custom_emoji_id' => '5368324170671202286',
+            'icon' => '🚀',
             'stock' => 2,
             'reserved_stock' => 0,
         ]);
@@ -941,8 +951,15 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $plans = $options['reply_markup']['inline_keyboard'][0];
         $this->assertSame('5368324170671202286', $plans[0]['icon_custom_emoji_id']);
         $this->assertSame('1', $plans[0]['text']);
-        $this->assertSame('5368324170671202286', $plans[1]['icon_custom_emoji_id']);
+        $this->assertSame('5368324170671202286', $plans[1]['icon_custom_emoji_id'], 'Ikon family dipakai tombol plan meski varian punya ikon sendiri.');
         $this->assertSame('2', $plans[1]['text']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(41223, 'select-override-plan', $plans[1]['callback_data'], [], 41220))->assertOk();
+
+        $detail = $this->lastMessageContaining('Nova 3 Bulan');
+        $this->assertStringContainsString('🚀 Nova 3 Bulan', (string) $detail['text'], 'Detail varian memakai ikon khusus varian itu.');
+        $this->assertStringNotContainsString('📩 Nova 3 Bulan', (string) $detail['text']);
+        $this->assertSame('🚀', $override->fresh()->icon, 'Ikon khusus varian tidak diubah oleh render family.');
     }
 
     public function test_product_detail_opened_without_family_navigation_returns_to_the_plan_list(): void
@@ -1035,7 +1052,7 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 41110, 'locale' => 'id']);
-        $family = ProductFamily::factory()->create(['name' => 'Netflix', 'slug' => 'netflix']);
+        $family = ProductFamily::factory()->create(['name' => 'Netflix', 'slug' => 'netflix', 'icon' => '🟥']);
         foreach ([
             ['name' => 'Netflix Premium (No VPN)', 'label' => 'Premium (No VPN)', 'price' => 25000],
             ['name' => 'Netflix Premium (VPN)', 'label' => 'Premium (VPN)', 'price' => 15000],

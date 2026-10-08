@@ -8,6 +8,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Services\Bsc\BscReadiness;
+use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use App\Services\KlikQris\KlikQrisCheckoutSelector;
@@ -39,6 +40,7 @@ class StorefrontProductPresenter
         private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
         private readonly StorefrontProductPlaceholder $placeholder,
         private readonly ProductQuantityPricing $pricing,
+        private readonly CatalogFamilyIconResolver $familyIcons,
     ) {}
 
     public function present(
@@ -87,6 +89,8 @@ class StorefrontProductPresenter
             : ($maintenanceState->active
                 ? 'Checkout maintenance'
                 : ($isBuyable ? 'Beli sekarang' : $checkoutReadiness->label));
+        // A variant without its own icon shows the family icon the catalog uses.
+        $icon = $this->familyIcons->forProduct($product);
 
         return new StorefrontProductPresentation(
             id: (int) $product->id,
@@ -108,8 +112,8 @@ class StorefrontProductPresenter
             productUrl: route('storefront.products.show', $product),
             cover: new StorefrontProductCoverPresentation(
                 theme: StorefrontProductPresentationNormalizer::defaultCoverTheme(),
-                imageUrl: $this->imageUrl($product),
-                icon: $product->icon,
+                imageUrl: $this->imageUrl($product, $icon->icon),
+                icon: $icon->icon,
             ),
             checkoutChoices: $checkoutChoices,
             checkoutReadiness: $checkoutReadiness,
@@ -134,11 +138,11 @@ class StorefrontProductPresenter
             ->sum('quantity');
     }
 
-    private function imageUrl(Product $product): ?string
+    private function imageUrl(Product $product, ?string $icon = null): ?string
     {
         $imageUrl = StorefrontProductPresentationNormalizer::publicStorageUrl($product->image_path);
 
-        return $imageUrl ?? $this->defaultProductImageUrl($product->icon);
+        return $imageUrl ?? $this->defaultProductImageUrl($icon);
     }
 
     private function defaultProductImageUrl(?string $icon = null): ?string

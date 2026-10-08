@@ -1346,23 +1346,13 @@ class TelegramCatalogIntents
     }
 
     /**
-     * One icon for the whole family. A member with a captured custom emoji owns
-     * the family icon together with the plain glyph that capture stored, so the
-     * family and all of its variants follow the icon the owner set in the bot;
-     * otherwise the first plain glyph among the members is used.
+     * One icon for the whole family. The family owns it, and every member
+     * without its own icon inherits it, so the heading and the plan rows always
+     * follow the icon the owner set for the family.
      */
     private function familyIcon(CatalogFamilyReadModel $family): CatalogIcon
     {
-        $members = array_map(
-            static fn (CatalogProductReadModel $member): array => [
-                'icon' => $member->icon,
-                'customEmojiId' => $member->customEmojiId,
-            ],
-            array_values(array_filter($family->members, static fn (mixed $member): bool => $member instanceof CatalogProductReadModel)),
-        );
-        $selection = $this->familyIcons->fromMembers($members);
-
-        return $this->icons->resolve($selection->icon, $selection->customEmojiId);
+        return $this->icons->resolve($family->icon, $family->customEmojiId);
     }
 
     /**

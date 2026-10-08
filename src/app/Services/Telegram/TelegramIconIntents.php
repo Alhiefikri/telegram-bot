@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\TelegramUiIcon;
+use App\Services\Catalog\CatalogFamilyIconResolver;
 use Closure;
 use Throwable;
 
@@ -23,6 +24,7 @@ class TelegramIconIntents
         private TelegramIconCaptureSession $captures,
         private TelegramUiIcons $uiIcons,
         private CatalogIconResolver $catalogIcons,
+        private CatalogFamilyIconResolver $familyIcons,
         private TelegramProductNameRenderer $productNames,
     ) {}
 
@@ -38,23 +40,22 @@ class TelegramIconIntents
 
     public function showProducts(Customer $customer, string $chatId, ?int $messageId = null): void
     {
+        $this->captures->forget($customer);
+
         $families = ProductFamily::query()
-            ->with('products:id,product_family_id,icon,custom_emoji_id')
-            ->orderBy('sort_order')
-            ->orderBy('name')
-            ->orderBy('id')
+            ->catalogOrder()
             ->get();
 
         $buttons = [];
         foreach ($families as $family) {
-            $icon = $this->familySlotIcon($family);
+            $icon = $this->catalogIcons->resolve($family->icon, $family->custom_emoji_id);
 
             $buttons[] = [$this->slotButton(
                 $customer,
                 (string) $family->name,
-                $icon['glyph'],
-                $icon['id'],
-                $icon['captured'],
+                $icon->glyph,
+                $icon->customEmojiId,
+                $family->hasCustomEmoji(),
                 'familyicon:pick:'.$family->getKey(),
             )];
         }
@@ -100,38 +101,42 @@ class TelegramIconIntents
     }
 
     /**
-     * A family icon is set once for the whole product line: the row previews the
-     * variant that already carries a captured emoji, otherwise the first plan
-     * glyph.
-     *
-     * @return array{glyph: string, id: string|null, captured: bool}
+     * The variants an owner can give their own icon. Every row previews the icon
+     * that variant presents now — its own override, or the family icon it
+     * inherits — and the status marker tells the two apart.
      */
-    private function familySlotIcon(ProductFamily $family): array
+    public function showFamilyVariants(Customer $customer, string $chatId, ProductFamily $family, ?int $messageId = null): void
     {
-        $glyph = null;
-        $customEmojiId = null;
-        $captured = false;
+        $this->captures->forget($customer);
 
-        foreach ($family->products as $member) {
-            $memberGlyph = trim((string) $member->icon);
-            if ($glyph === null && $memberGlyph !== '') {
-                $glyph = $memberGlyph;
-            }
+        $products = $family->products()->with('family')->get();
+        $icons = $this->familyIcons->forProducts($products);
 
-            if ($captured || ! $this->hasCapturedEmoji($member)) {
-                continue;
-            }
+        $buttons = [];
+        foreach ($products as $product) {
+            $icon = $icons[(int) $product->getKey()];
 
-            $captured = true;
-            $customEmojiId = $this->catalogIcons->resolve($member->icon, $member->custom_emoji_id)->customEmojiId;
-            $glyph = $memberGlyph !== '' ? $memberGlyph : $glyph;
+            $buttons[] = [$this->slotButton(
+                $customer,
+                (string) $product->name,
+                $icon->icon ?? '',
+                $icon->customEmojiId,
+                $this->hasOwnIcon($product),
+                'producticon:pick:'.$product->getKey(),
+            )];
         }
+        $buttons[] = [$this->backRow($customer, 'familyicon:pick:'.$family->getKey(), 'catalog.product_icon.button_family')];
+        $buttons[] = [$this->backRow($customer, 'producticon:list', 'catalog.product_icon.button_back')];
 
-        return [
-            'glyph' => $glyph ?? $this->catalogIcons->resolve(null, null)->glyph,
-            'id' => $customEmojiId,
-            'captured' => $captured,
-        ];
+        $this->bot->editMessageTextOrSend(
+            $chatId,
+            $this->locale->translate($customer, 'catalog.product_icon.variants_body', [
+                'label' => $family->name,
+                'count' => $products->count(),
+            ]),
+            ['inline_keyboard' => $buttons],
+            $messageId,
+        );
     }
 
     public function promptFamily(Customer $customer, string $chatId, ProductFamily $family, ?int $messageId): void
@@ -141,7 +146,10 @@ class TelegramIconIntents
         $this->bot->editMessageTextOrSend(
             $chatId,
             $this->locale->translate($customer, 'catalog.product_icon.prompt', ['label' => $family->name]),
-            ['inline_keyboard' => [[$this->backRow($customer, 'producticon:list', 'catalog.product_icon.button_back')]]],
+            ['inline_keyboard' => [
+                [$this->familyRow($customer, $family)],
+                [$this->backRow($customer, 'producticon:list', 'catalog.product_icon.button_back')],
+            ]],
             $messageId,
         );
     }
@@ -164,20 +172,24 @@ class TelegramIconIntents
 
         $this->bot->editMessageTextOrSend(
             $chatId,
-            $this->locale->translate($customer, 'catalog.product_icon.prompt', ['label' => $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id)]),
-            ['inline_keyboard' => [[$this->backRow($customer, 'producticon:list', 'catalog.product_icon.button_back')]]],
+            $this->locale->translate($customer, 'catalog.product_icon.prompt', ['label' => $this->productNames->renderProduct($product)]),
+            ['inline_keyboard' => [[$this->backRow($customer, $this->productBackCallback($product), 'catalog.product_icon.button_back')]]],
             $messageId,
         );
     }
 
     public function clearProduct(Customer $customer, string $chatId, Product $product, ?int $messageId): void
     {
-        $product->update(['custom_emoji_id' => null]);
+        // A family variant returns to the icon it inherits, so its whole override
+        // goes; a standalone Product keeps its editable glyph as the text icon.
+        $product->update($product->product_family_id === null
+            ? ['custom_emoji_id' => null]
+            : ['icon' => null, 'custom_emoji_id' => null]);
 
         $this->bot->editMessageTextOrSend(
             $chatId,
-            $this->locale->translate($customer, 'catalog.product_icon.cleared', ['label' => $this->productNames->render($product->name, $product->icon, $product->custom_emoji_id)]),
-            ['inline_keyboard' => [[$this->backRow($customer, 'producticon:list', 'catalog.product_icon.button_back')]]],
+            $this->locale->translate($customer, 'catalog.product_icon.cleared', ['label' => $this->productNames->renderProduct($product->refresh())]),
+            ['inline_keyboard' => [[$this->backRow($customer, $this->productBackCallback($product), 'catalog.product_icon.button_back')]]],
             $messageId,
         );
     }
@@ -361,7 +373,7 @@ class TelegramIconIntents
     }
 
     /**
-     * @param  array{label: string, render_label?: Closure(): string, save_emoji: Closure(string, ?string): void, save_glyph: Closure(string): void|null, clear_callback: string, back_callback: string, back_key: string, saved_key: string, saved_glyph_key: string, not_an_emoji_key: string}  $target
+     * @param  array{label: string, render_label?: Closure(): string, save_emoji: Closure(string, ?string): void, save_glyph: Closure(string): void|null, clear_callback: string, clear_label_key?: string, back_callback: string, back_key: string, saved_key: string, saved_glyph_key: string, not_an_emoji_key: string}  $target
      * @param  array{kind: string, target_id: int, message_id: int|null, expires_at: int}  $pending
      */
     private function confirmCapture(Customer $customer, string $chatId, array $target, array $pending, string $messageKey, bool $offerClear): void
@@ -369,7 +381,7 @@ class TelegramIconIntents
         $rows = [];
         if ($offerClear) {
             $rows[] = [[
-                'text' => $this->locale->translate($customer, 'catalog.product_icon.button_clear'),
+                'text' => $this->locale->translate($customer, $target['clear_label_key'] ?? 'catalog.product_icon.button_clear'),
                 'callback_data' => $target['clear_callback'],
             ]];
         }
@@ -408,7 +420,7 @@ class TelegramIconIntents
 
     /**
      * @param  array{kind: string, target_id: int, message_id: int|null, expires_at: int}  $pending
-     * @return array{label: string, save_emoji: Closure(string, ?string): void, save_glyph: Closure(string): void, clear_callback: string, back_callback: string, back_key: string, saved_key: string, saved_glyph_key: string, not_an_emoji_key: string}|null
+     * @return array{label: string, save_emoji: Closure(string, ?string): void, save_glyph: Closure(string): void, clear_callback: string, clear_label_key?: string, back_callback: string, back_key: string, saved_key: string, saved_glyph_key: string, not_an_emoji_key: string}|null
      */
     private function target(array $pending): ?array
     {
@@ -459,11 +471,11 @@ class TelegramIconIntents
                         $values['icon'] = $emojiGlyph;
                     }
 
-                    // One icon per family: every variant follows the parent.
-                    $family->products()->update($values);
+                    // The family owns the icon; members without an override follow it.
+                    $family->update($values);
                 },
                 // A plain emoji sent in the bot can set the catalog glyph directly.
-                'save_glyph' => static fn (string $glyph) => $family->products()->update(['icon' => $glyph]),
+                'save_glyph' => static fn (string $glyph) => $family->update(['icon' => $glyph]),
                 'clear_callback' => 'familyicon:clear:'.$family->getKey(),
                 'back_callback' => 'producticon:list',
                 'back_key' => 'catalog.product_icon.button_back',
@@ -483,7 +495,7 @@ class TelegramIconIntents
 
         return [
             'label' => $product->name,
-            'render_label' => fn (): string => $this->productNames->render($product->refresh()->name, $product->icon, $product->custom_emoji_id),
+            'render_label' => fn (): string => $this->productNames->renderProduct($product->refresh()),
             'save_emoji' => static function (string $customEmojiId, ?string $emojiGlyph) use ($product): void {
                 $values = ['custom_emoji_id' => $customEmojiId];
                 if ($emojiGlyph !== null) {
@@ -495,7 +507,11 @@ class TelegramIconIntents
             // A plain emoji sent in the bot can set the catalog glyph directly.
             'save_glyph' => static fn (string $glyph) => $product->update(['icon' => $glyph]),
             'clear_callback' => 'producticon:clear:'.$product->getKey(),
-            'back_callback' => 'producticon:list',
+            // A family variant returns to the family icon, so its button says so.
+            'clear_label_key' => $product->product_family_id === null
+                ? 'catalog.product_icon.button_clear'
+                : 'catalog.product_icon.button_restore_family',
+            'back_callback' => $this->productBackCallback($product),
             'back_key' => 'catalog.product_icon.button_back',
             'saved_key' => 'catalog.product_icon.saved',
             'saved_glyph_key' => 'catalog.product_icon.saved_glyph',
@@ -585,6 +601,36 @@ class TelegramIconIntents
     private function hasCapturedEmoji(Product $product): bool
     {
         return trim((string) $product->custom_emoji_id) !== '';
+    }
+
+    /**
+     * A Product whose stored glyph or identifier shadows the family icon; a
+     * Product without either keeps following the family.
+     */
+    private function hasOwnIcon(Product $product): bool
+    {
+        return trim((string) $product->icon) !== '' || $this->hasCapturedEmoji($product);
+    }
+
+    /**
+     * One icon per variant sits one step below its family, so a variant returns
+     * to the family's variant list instead of the whole catalog list.
+     *
+     * @return array{text: string, callback_data: string}
+     */
+    private function familyRow(Customer $customer, ProductFamily $family): array
+    {
+        return [
+            'text' => $this->locale->translate($customer, 'catalog.product_icon.button_variants'),
+            'callback_data' => 'producticon:family:'.$family->getKey(),
+        ];
+    }
+
+    private function productBackCallback(Product $product): string
+    {
+        return $product->product_family_id === null
+            ? 'producticon:list'
+            : 'producticon:family:'.$product->product_family_id;
     }
 
     /**

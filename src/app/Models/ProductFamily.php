@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['name', 'slug', 'description', 'image_path', 'telegram_image_path', 'sort_order'])]
+#[Fillable(['name', 'slug', 'description', 'icon', 'custom_emoji_id', 'image_path', 'telegram_image_path', 'sort_order'])]
 class ProductFamily extends Model
 {
     /** @use HasFactory<ProductFamilyFactory> */
@@ -77,5 +77,14 @@ class ProductFamily extends Model
     public function getAuditSubjectIdAttribute(): string
     {
         return (string) $this->getKey();
+    }
+
+    /**
+     * The family owns one icon every member without its own follows. Only a
+     * captured identifier is reported here; the glyph is an editable fallback.
+     */
+    public function hasCustomEmoji(): bool
+    {
+        return trim((string) $this->custom_emoji_id) !== '';
     }
 }

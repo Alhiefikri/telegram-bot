@@ -41,6 +41,13 @@
                         @error('name', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     </div>
                     <div>
+                        <x-admin-dashboard.field-label for="product-family-icon">Ikon katalog · emoji/karakter (opsional)</x-admin-dashboard.field-label>
+                        <x-admin-dashboard.input id="product-family-icon" name="icon" maxlength="32" placeholder="🎨" autocomplete="off" class="mt-1.5" x-model="familyIcon" />
+                        <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Dipakai semua varian family yang belum punya ikon sendiri. Kosongkan untuk ikon default. Emoji Telegram (Premium) diambil lewat menu 🎨 Ikon Produk di bot.</p>
+                        @error('icon', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                        @error('icon', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                    </div>
+                    <div>
                         <x-admin-dashboard.field-label for="product-family-description">Deskripsi opsional</x-admin-dashboard.field-label>
                         <x-admin-dashboard.textarea id="product-family-description" name="description" rows="3" placeholder="Pilihan paket Netflix" class="mt-1.5" x-model="familyDescription" />
                         @error('description', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror

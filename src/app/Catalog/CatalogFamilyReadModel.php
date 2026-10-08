@@ -26,6 +26,8 @@ final readonly class CatalogFamilyReadModel
         public bool $isAvailable,
         public ?string $createdAt,
         public array $members,
+        public ?string $icon = null,
+        public ?string $customEmojiId = null,
         public ?string $telegramImagePath = null,
         public bool $matchesSearch = false,
     ) {}
@@ -52,6 +54,8 @@ final readonly class CatalogFamilyReadModel
             'is_available' => $this->isAvailable,
             'created_at' => $this->createdAt,
             'members' => array_map(static fn (CatalogProductReadModel $member): array => $member->toArray(), $this->members),
+            'icon' => $this->icon,
+            'custom_emoji_id' => $this->customEmojiId,
             'matches_search' => $this->matchesSearch,
         ];
     }

@@ -32,13 +32,18 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
     public function test_detail_header_follows_the_family_icon_when_the_plan_has_none(): void
     {
         $this->fakeTelegramHttp();
-        $family = ProductFamily::factory()->create(['name' => 'Icon Family', 'slug' => 'icon-family']);
+        $family = ProductFamily::factory()->create([
+            'name' => 'Icon Family',
+            'slug' => 'icon-family',
+            'icon' => '🎬',
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
         Product::factory()->create([
             'name' => 'Icon Family Plan A',
             'product_family_id' => $family->id,
             'family_sort_order' => 1,
-            'icon' => '🎬',
-            'custom_emoji_id' => '5368324170671202286',
+            'icon' => null,
+            'custom_emoji_id' => null,
             'price_amount' => 10000,
             'stock' => 2,
             'reserved_stock' => 0,
@@ -49,7 +54,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
             'name' => 'Icon Family Plan B',
             'product_family_id' => $family->id,
             'family_sort_order' => 2,
-            'icon' => '🤖',
+            'icon' => null,
             'custom_emoji_id' => null,
             'price_amount' => 10000,
             'stock' => 2,

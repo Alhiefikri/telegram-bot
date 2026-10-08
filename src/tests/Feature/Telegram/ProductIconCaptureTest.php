@@ -52,7 +52,7 @@ class ProductIconCaptureTest extends TelegramBotTestSupport
     {
         $this->fakeTelegramHttp();
         $this->adminCustomer(999);
-        $family = ProductFamily::factory()->create(['name' => 'QA Family Line', 'slug' => 'qa-family-line']);
+        $family = ProductFamily::factory()->create(['name' => 'QA Family Line', 'slug' => 'qa-family-line', 'icon' => '🎬']);
         $this->product('QA Family Plan A', '🎬', null, $family);
         $this->product('QA Family Plan B', '🎬', null, $family);
         $this->product('QA Standalone', '📩', null);
@@ -64,14 +64,14 @@ class ProductIconCaptureTest extends TelegramBotTestSupport
         $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
         $labels = array_column($buttons, 'text');
         $callbacks = array_column($buttons, 'callback_data');
-        $this->assertContains('⬜ 🎬 QA Family Line', $labels, 'Family tampil sekali, bukan per varian.');
+        $this->assertContains('⬜ 🎬 QA Family Line', $labels, 'Family tampil sekali dengan ikon milik family, bukan per varian.');
         $this->assertContains('⬜ 📩 QA Standalone', $labels, 'Produk tanpa family tetap bisa diatur sendiri.');
         $this->assertNotContains('⬜ 🎬 QA Family Plan A', $labels);
         $this->assertNotContains('⬜ 🎬 QA Family Plan B', $labels);
         $this->assertContains('familyicon:pick:'.$family->id, $callbacks);
     }
 
-    public function test_a_family_capture_applies_the_icon_to_every_variant(): void
+    public function test_a_family_capture_sets_the_family_icon_without_overwriting_variants(): void
     {
         $this->fakeTelegramHttp([
             'https://api.telegram.org/*/getCustomEmojiStickers' => Http::response([
@@ -81,13 +81,15 @@ class ProductIconCaptureTest extends TelegramBotTestSupport
         ]);
         $this->adminCustomer(999);
         $family = ProductFamily::factory()->create(['name' => 'QA Family Line', 'slug' => 'qa-family-line']);
-        $first = $this->product('QA Family Plan A', '🎬', null, $family);
-        $second = $this->product('QA Family Plan B', '🎬', null, $family);
+        $first = $this->product('QA Family Plan A', null, null, $family);
+        $second = $this->product('QA Family Plan B', '🎯', null, $family);
 
         $this->postTelegramWebhook($this->callbackUpdate(50155, 'pick', 'familyicon:pick:'.$family->id, ['id' => 999], 999, 'private', 777))->assertOk();
 
         $request = $this->sentEditRequest(777);
         $this->assertStringContainsString('QA Family Line', (string) $request['text']);
+        $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
+        $this->assertSame('producticon:family:'.$family->id, $buttons[0]['callback_data'] ?? null, 'Family screen offers the per-product icon list.');
 
         $update = $this->messageUpdate(50156, '🎬', ['id' => 999], 999);
         $update['message']['entities'] = [[
@@ -98,8 +100,94 @@ class ProductIconCaptureTest extends TelegramBotTestSupport
         ]];
         $this->postTelegramWebhook($update)->assertOk();
 
-        $this->assertSame(self::EMOJI_ID, $first->fresh()->custom_emoji_id, 'Varian pertama ikut ikon family.');
-        $this->assertSame(self::EMOJI_ID, $second->fresh()->custom_emoji_id, 'Semua varian ikut ikon family.');
+        $family = $family->fresh();
+        $this->assertSame(self::EMOJI_ID, $family->custom_emoji_id, 'Ikon family disimpan pada family.');
+        $this->assertSame('🎬', $family->icon);
+        $this->assertNull($first->fresh()->custom_emoji_id, 'Varian tanpa ikon sendiri tetap mengikuti family.');
+        $this->assertNull($first->fresh()->icon);
+        $this->assertSame('🎯', $second->fresh()->icon, 'Ikon khusus varian tidak ditimpa ikon family.');
+    }
+
+    public function test_a_variant_list_offers_every_variant_with_its_effective_icon(): void
+    {
+        $this->fakeTelegramHttp();
+        $this->adminCustomer(999);
+        $family = ProductFamily::factory()->create([
+            'name' => 'QA Family Line',
+            'slug' => 'qa-family-line',
+            'icon' => '🎬',
+            'custom_emoji_id' => self::EMOJI_ID,
+        ]);
+        $this->product('QA Family Plan A', null, null, $family);
+        $this->product('QA Family Plan B', '🎯', null, $family);
+
+        $this->postTelegramWebhook($this->callbackUpdate(50160, 'variants', 'producticon:family:'.$family->id, ['id' => 999], 999, 'private', 777))->assertOk();
+
+        $request = $this->sentEditRequest(777);
+        $this->assertStringContainsString('Ikon per Produk', (string) $request['text']);
+        $this->assertStringContainsString('QA Family Line', (string) $request['text']);
+        $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
+        $inherited = collect($buttons)->first(fn (array $button): bool => ($button['callback_data'] ?? null) === 'producticon:pick:'.$family->products()->where('name', 'QA Family Plan A')->value('id'));
+        $override = collect($buttons)->first(fn (array $button): bool => ($button['callback_data'] ?? null) === 'producticon:pick:'.$family->products()->where('name', 'QA Family Plan B')->value('id'));
+
+        $this->assertNotNull($inherited);
+        $this->assertSame('⬜ QA Family Plan A', $inherited['text'], 'Varian tanpa ikon sendiri ditandai belum diatur.');
+        $this->assertSame(self::EMOJI_ID, $inherited['icon_custom_emoji_id'] ?? null, 'Pratinjau memakai ikon family yang diwarisi.');
+        $this->assertNotNull($override);
+        $this->assertSame('✅ 🎯 QA Family Plan B', $override['text'], 'Varian dengan ikon sendiri ditandai sudah diatur.');
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $override);
+        $this->assertSame('producticon:list', $buttons[count($buttons) - 1]['callback_data'] ?? null);
+    }
+
+    public function test_a_variant_capture_stores_an_own_icon_and_clear_releases_it(): void
+    {
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/getCustomEmojiStickers' => Http::response([
+                'ok' => true,
+                'result' => [['custom_emoji_id' => self::EMOJI_ID, 'emoji' => '🤖']],
+            ]),
+        ]);
+        $this->adminCustomer(999);
+        $family = ProductFamily::factory()->create([
+            'name' => 'QA Family Line',
+            'slug' => 'qa-family-line',
+            'icon' => '🎬',
+            'custom_emoji_id' => self::EMOJI_ID,
+        ]);
+        $variant = $this->product('QA Family Plan A', null, null, $family);
+
+        $this->postTelegramWebhook($this->callbackUpdate(50170, 'pick', 'producticon:pick:'.$variant->id, ['id' => 999], 999, 'private', 777))->assertOk();
+        $prompt = $this->sentEditRequest(777);
+        $this->assertStringContainsString('QA Family Plan A', (string) $prompt['text']);
+        $promptButtons = $this->assertValidInlineKeyboard((array) $prompt['reply_markup']);
+        $this->assertSame('producticon:family:'.$family->id, $promptButtons[0]['callback_data'] ?? null, 'Varian kembali ke daftar varian family-nya.');
+
+        $update = $this->messageUpdate(50171, '🤖', ['id' => 999], 999);
+        $update['message']['entities'] = [[
+            'type' => 'custom_emoji',
+            'custom_emoji_id' => self::EMOJI_ID,
+            'offset' => 0,
+            'length' => 2,
+        ]];
+        $this->postTelegramWebhook($update)->assertOk();
+
+        $variant = $variant->fresh();
+        $this->assertSame(self::EMOJI_ID, $variant->custom_emoji_id);
+        $this->assertSame('🤖', $variant->icon);
+        $this->assertSame('🎬', $family->fresh()->icon, 'Ikon family tidak ikut berubah.');
+
+        $confirmRequest = $this->sentEditRequest(777);
+        $confirmButtons = $this->assertValidInlineKeyboard((array) $confirmRequest['reply_markup']);
+        $this->assertSame('🗑️ Kembali ke ikon family', $confirmButtons[0]['text'] ?? null, 'Varian family ditawari kembali ke ikon family, bukan sekadar hapus emoji.');
+
+        $this->postTelegramWebhook($this->callbackUpdate(50172, 'clear', 'producticon:clear:'.$variant->id, ['id' => 999], 999, 'private', 777))->assertOk();
+
+        $variant = $variant->fresh();
+        $this->assertNull($variant->custom_emoji_id, 'Hapus membebaskan varian dari ikon khusus.');
+        $this->assertNull($variant->icon, 'Glyph khusus ikut dibersihkan agar varian mewarisi ikon family.');
+        $clearRequest = $this->sentEditRequest(777);
+        $clearButtons = $this->assertValidInlineKeyboard((array) $clearRequest['reply_markup']);
+        $this->assertSame('producticon:family:'.$family->id, $clearButtons[0]['callback_data'] ?? null);
     }
 
     public function test_the_list_reports_an_empty_catalog_instead_of_stale_brands(): void
@@ -177,6 +265,7 @@ class ProductIconCaptureTest extends TelegramBotTestSupport
         ));
         $buttons = $this->assertValidInlineKeyboard((array) $request['reply_markup']);
         $this->assertSame('producticon:clear:'.$product->id, $buttons[0]['callback_data'] ?? null);
+        $this->assertSame('🗑️ Hapus emoji', $buttons[0]['text'] ?? null, 'Produk tanpa family tetap menawarkan hapus emoji.');
         $this->assertSame('producticon:list', $buttons[1]['callback_data'] ?? null);
     }
 

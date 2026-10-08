@@ -27,6 +27,7 @@ class AdminProductFamilyUpdateController extends Controller
                 'name' => $validated['name'],
                 'slug' => $validated['slug'] ?? null,
                 'description' => $validated['description'] ?? null,
+                'icon' => $request->exists('icon') ? ($validated['icon'] ?? null) : $productFamily->icon,
                 'sort_order' => (int) $validated['sort_order'],
                 ...($newImagePath === null ? [] : ['image_path' => $newImagePath]),
                 ...($newTelegramImagePath === null ? [] : ['telegram_image_path' => $newTelegramImagePath]),

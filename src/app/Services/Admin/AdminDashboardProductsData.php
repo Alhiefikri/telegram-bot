@@ -85,7 +85,7 @@ final class AdminDashboardProductsData
                 : ($entry->product === null ? [] : [$entry->product]))
             ->keyBy('id');
         $products = Product::query()
-            ->with(['category:id,name', 'family:id,name,telegram_image_path', 'quantityPriceTiers:id,product_id,minimum_quantity,price_amount,usdt_price_amount'])
+            ->with(['category:id,name', 'family:id,name,icon,custom_emoji_id,telegram_image_path', 'quantityPriceTiers:id,product_id,minimum_quantity,price_amount,usdt_price_amount'])
             ->withAvailability()
             ->whereIn('id', $productIds->all())
             ->get()
@@ -383,6 +383,7 @@ final class AdminDashboardProductsData
                 'id' => $family->id,
                 'slug' => $family->slug,
                 'name' => $family->name,
+                'icon' => $family->icon,
                 'description' => $family->description,
                 'sortOrder' => $family->sortOrder,
                 'telegramImageUrl' => $family->telegramImagePath === null ? null : $this->images->telegramUrl($family->telegramImagePath),
@@ -448,6 +449,7 @@ final class AdminDashboardProductsData
                     'id' => $family->id,
                     'slug' => $family->slug,
                     'name' => $family->name,
+                    'icon' => $family->icon,
                     'description' => $family->description,
                     'sortOrder' => $family->sortOrder,
                     'telegramImageUrl' => $family->telegramImagePath === null ? null : $this->images->telegramUrl($family->telegramImagePath),

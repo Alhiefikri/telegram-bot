@@ -18,7 +18,9 @@ use App\Models\ProductFamilySlugRedirect;
 use App\Models\ProductStockItem;
 use App\Models\ProductWaitlistSubscription;
 use App\Models\User;
+use App\Services\Admin\AdminDashboardProductsData;
 use App\Services\Catalog\CatalogBrowse;
+use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\ProductWaitlistEmailHasher;
 use App\Services\Telegram\TelegramCatalogProjectionCache;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -109,6 +111,136 @@ class ProductFamilyCatalogTest extends TestCase
             'quantity' => 3,
         ]);
         $this->assertGreaterThan($afterPayment, (int) Cache::get('telegram.catalog.projection.version'));
+    }
+
+    public function test_admin_can_set_clear_and_keep_the_family_catalog_icon(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $family = ProductFamily::factory()->create(['name' => 'Icon Family', 'slug' => 'icon-family']);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.product-families.update', $family), [
+                'name' => 'Icon Family',
+                'sort_order' => 0,
+                'icon' => ' 🎬 ',
+            ])
+            ->assertRedirect();
+
+        $this->assertSame('🎬', $family->fresh()->icon, 'Glyph family di-trim dan disimpan pada family.');
+
+        $this->actingAs($admin)
+            ->patch(route('admin.product-families.update', $family), [
+                'name' => 'Icon Family',
+                'sort_order' => 0,
+                'icon' => '',
+            ])
+            ->assertRedirect();
+
+        $this->assertNull($family->fresh()->icon, 'Field ikon kosong menghapus glyph family.');
+
+        $family->forceFill(['icon' => '🎬'])->save();
+        $this->actingAs($admin)
+            ->patch(route('admin.product-families.update', $family), [
+                'name' => 'Icon Family Renamed',
+                'sort_order' => 0,
+            ])
+            ->assertRedirect();
+
+        $this->assertSame('🎬', $family->fresh()->icon, 'PATCH tanpa field ikon tidak menghapus ikon tersimpan.');
+    }
+
+    public function test_dashboard_family_payload_and_form_expose_the_stored_icon(): void
+    {
+        User::factory()->create(['role' => UserRole::Admin]);
+        $family = ProductFamily::factory()->create([
+            'name' => 'Icon Family',
+            'slug' => 'icon-family',
+            'icon' => '🎬',
+        ]);
+
+        $payload = app(AdminDashboardProductsData::class)->forProducts(true);
+
+        $editPayload = $payload['familyManagement']['families'][0]['edit_payload'];
+        $this->assertSame($family->id, $editPayload['id']);
+        $this->assertSame('🎬', $editPayload['icon']);
+
+        $response = $this->actingAs(User::query()->firstOrFail())
+            ->get(route('admin.dashboard', ['tab' => 'produk']))
+            ->assertOk();
+
+        $response->assertSee('name="icon"', false);
+        $response->assertSee('familyIcon', false);
+    }
+
+    public function test_family_members_without_their_own_icon_inherit_the_family_icon(): void
+    {
+        $family = ProductFamily::factory()->create([
+            'name' => 'Icon Inheritance',
+            'slug' => 'icon-inheritance',
+            'icon' => '🎬',
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
+        $inheriting = Product::factory()->create([
+            'name' => 'Inheriting Plan',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'icon' => null,
+            'custom_emoji_id' => null,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $override = Product::factory()->create([
+            'name' => 'Override Plan',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 2,
+            'icon' => '🚀',
+            'custom_emoji_id' => null,
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+        $standalone = Product::factory()->create([
+            'name' => 'Standalone Plan',
+            'icon' => '📩',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $familyRead = app(CatalogBrowse::class)->showPublicFamily($family->slug);
+        $this->assertSame('🎬', $familyRead->icon);
+        $this->assertSame('5368324170671202286', $familyRead->customEmojiId);
+
+        $members = collect($familyRead->members)->keyBy('id');
+        $this->assertSame('🎬', $members[$inheriting->id]->icon);
+        $this->assertSame('5368324170671202286', $members[$inheriting->id]->customEmojiId, 'Varian tanpa ikon sendiri mewarisi ikon family.');
+        $this->assertSame('🚀', $members[$override->id]->icon, 'Ikon khusus varian menimpa ikon family.');
+        $this->assertNull($members[$override->id]->customEmojiId, 'Override menggantikan seluruh pasangan ikon.');
+        $standaloneIcon = app(CatalogFamilyIconResolver::class)->forProduct($standalone);
+        $this->assertSame('📩', $standaloneIcon->icon, 'Produk tanpa family memakai ikonnya sendiri.');
+        $this->assertNull($standaloneIcon->customEmojiId);
+    }
+
+    public function test_a_captured_family_emoji_is_never_borrowed_from_a_member_override(): void
+    {
+        $family = ProductFamily::factory()->create(['name' => 'No Family Icon', 'slug' => 'no-family-icon']);
+        Product::factory()->create([
+            'name' => 'Member With Own Emoji',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'icon' => '🎬',
+            'custom_emoji_id' => '5368324170671202286',
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $familyRead = app(CatalogBrowse::class)->showPublicFamily($family->slug);
+
+        $this->assertNull($familyRead->icon);
+        $this->assertNull($familyRead->customEmojiId);
+        $this->assertSame('5368324170671202286', $familyRead->members[0]->customEmojiId, 'Ikon varian tetap milik varian itu.');
     }
 
     public function test_public_catalog_collapses_family_members_and_keeps_a_sold_out_family_visible(): void

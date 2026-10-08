@@ -8,6 +8,7 @@ use App\Models\CheckoutMaintenanceSetting;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\ProductFamily;
 use App\Models\StorefrontSetting;
 use App\Storefront\StorefrontProductPresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -314,6 +315,31 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertSame('🎨', $presentation->cover->icon);
         $this->assertSame('PRODUK DIGITAL', $presentation->cover->theme['desc']);
         $this->assertTrue($presentation->cover->hasImage());
+    }
+
+    public function test_product_cover_follows_the_family_icon_when_the_product_has_none(): void
+    {
+        $family = ProductFamily::factory()->create(['name' => 'Cover Family', 'slug' => 'cover-family', 'icon' => '🎬']);
+        $product = $this->availableProduct([
+            'name' => 'Cover Family Plan',
+            'product_family_id' => $family->id,
+            'icon' => null,
+            'image_path' => null,
+        ]);
+
+        $presentation = app(StorefrontProductPresenter::class)->present($product);
+
+        $this->assertSame('🎬', $presentation->cover->icon, 'Kartu produk memakai ikon family saat produk belum punya ikon sendiri.');
+        $this->assertNull($presentation->cover->imageUrl, 'Glyph ikut menentukan placeholder, jadi tidak ada gambar cadangan.');
+
+        $override = $this->availableProduct([
+            'name' => 'Cover Family Override',
+            'product_family_id' => $family->id,
+            'icon' => '🤖',
+            'image_path' => null,
+        ]);
+
+        $this->assertSame('🤖', app(StorefrontProductPresenter::class)->present($override)->cover->icon, 'Ikon produk sendiri menang atas ikon family.');
     }
 
     public function test_product_icon_is_used_before_placeholder_when_no_custom_image_exists(): void

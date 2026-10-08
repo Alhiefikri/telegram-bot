@@ -23,6 +23,8 @@ final class CatalogBrowse
 {
     private const ADMIN_PER_PAGE = 20;
 
+    public function __construct(private readonly CatalogFamilyIconResolver $familyIcons) {}
+
     /** @var list<CatalogFamilyReadModel>|null */
     private ?array $unfilteredAdminFamilies = null;
 
@@ -30,7 +32,7 @@ final class CatalogBrowse
     private const CATEGORY_COLUMNS = ['id', 'name', 'slug', 'description', 'sort_order'];
 
     /** @var list<string> */
-    private const FAMILY_COLUMNS = ['id', 'name', 'slug', 'description', 'image_path', 'telegram_image_path', 'sort_order', 'created_at'];
+    private const FAMILY_COLUMNS = ['id', 'name', 'slug', 'description', 'icon', 'custom_emoji_id', 'image_path', 'telegram_image_path', 'sort_order', 'created_at'];
 
     private const PRODUCT_COLUMNS = [
         'id',
@@ -361,6 +363,7 @@ final class CatalogBrowse
         $optionLabel = trim((string) $product->family_option_label);
         $optionLabel = $optionLabel === '' ? null : $optionLabel;
         $label = $optionLabel ?? trim((string) $product->name);
+        $icon = $this->familyIcons->forProduct($product);
 
         return new CatalogProductReadModel(
             id: (int) $product->getKey(),
@@ -400,8 +403,8 @@ final class CatalogBrowse
             imageUrl: $this->publicImageUrl($product->image_path),
             telegramImagePath: $product->telegram_image_path,
             createdAt: $product->created_at?->toISOString(),
-            icon: $product->icon,
-            customEmojiId: $product->custom_emoji_id,
+            icon: $icon->icon,
+            customEmojiId: $icon->customEmojiId,
         );
     }
 
@@ -413,6 +416,7 @@ final class CatalogBrowse
         $usdtPrices = $members->pluck('usdtPriceAmount')->filter(fn (mixed $price): bool => $price !== null);
         $optionCount = $members->count();
         $availableOptionCount = $members->filter(fn (CatalogProductReadModel $member): bool => $member->isAvailable)->count();
+        $icon = $this->familyIcons->forFamily($family);
 
         return new CatalogFamilyReadModel(
             id: (int) $family->getKey(),
@@ -434,6 +438,8 @@ final class CatalogBrowse
             isAvailable: $availableOptionCount > 0,
             createdAt: $family->created_at?->toISOString(),
             members: $members->all(),
+            icon: $icon->icon,
+            customEmojiId: $icon->customEmojiId,
             matchesSearch: $matchesSearch || ($search !== '' && $this->matchesFamily($family, $search)),
         );
     }
