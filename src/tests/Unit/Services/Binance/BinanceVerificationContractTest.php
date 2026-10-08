@@ -4,8 +4,8 @@ namespace Tests\Unit\Services\Binance;
 
 use App\Services\Binance\BinanceOrderId;
 use App\Services\Binance\BinancePayTransaction;
-use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\TestCase;
 
 class BinanceVerificationContractTest extends TestCase
 {

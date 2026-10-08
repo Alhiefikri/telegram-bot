@@ -140,19 +140,23 @@ final class UsdtFundingIntentService
             }
             if (! $intent->expires_at->isFuture()) {
                 $this->transition($intent, 'expired');
+
                 return new UsdtFundingIntentResult('expired', $intent);
             }
             if ($action === 'cancel') {
                 $this->transition($intent, 'cancelled');
+
                 return new UsdtFundingIntentResult('cancelled', $intent);
             }
             if ($policy === null || $policy->policyVersion() !== $intent->policy_version || $policy->termsVersion() !== $intent->terms_version) {
                 $this->transition($intent, 'superseded');
+
                 return new UsdtFundingIntentResult('stale_policy', $intent);
             }
             $settings = ManualPaymentSetting::query()->where('is_active', true)->lockForUpdate()->first();
             if ($settings === null || ($rail === CustomerUsdtFundingRail::BinancePay && ! $settings->binance_pay_enabled)) {
                 $this->transition($intent, 'superseded');
+
                 return new UsdtFundingIntentResult('stale_terms', $intent);
             }
             if ($rail === CustomerUsdtFundingRail::BscUsdt) {
@@ -162,11 +166,13 @@ final class UsdtFundingIntentService
                     || $settings->bscPaymentTtlMinutes() * 60 !== $intent->payment_snapshot['payment_ttl_seconds']
                     || DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $intent->receiver_id)->whereNotNull('review_reason')->exists()) {
                     $this->transition($intent, 'superseded');
+
                     return new UsdtFundingIntentResult('stale_terms', $intent);
                 }
             } elseif (trim((string) config('services.binance.pay_id')) !== (string) ($intent->payment_snapshot['receiver_pay_id'] ?? '')
                 || trim((string) config('services.binance.pay_uid')) !== (string) ($intent->payment_snapshot['receiver_uid'] ?? '')) {
                 $this->transition($intent, 'superseded');
+
                 return new UsdtFundingIntentResult('stale_terms', $intent);
             }
             if (! $this->available($rail)) {

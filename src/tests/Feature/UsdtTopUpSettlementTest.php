@@ -23,6 +23,7 @@ use App\Services\UsdtTreasury\UsdtTreasuryReconciliation;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\BscUsdtRailRpcFixture;
@@ -35,11 +36,11 @@ class UsdtTopUpSettlementTest extends UsdtTopUpTestCase
         $this->assertSame(0, DB::table('customer_usdt_top_up_inbox')->count());
         $this->rpc->logs = [$this->rpc->log()];
         $this->travel(10)->seconds();
-        \Illuminate\Support\Facades\Artisan::call('usdt-funding:recover');
+        Artisan::call('usdt-funding:recover');
         $this->assertSame(1_000_000, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
         $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
         $this->travel(1)->minutes();
-        \Illuminate\Support\Facades\Artisan::call('usdt-funding:recover');
+        Artisan::call('usdt-funding:recover');
         $this->assertSame(1, CustomerUsdtBalanceEntry::count());
     }
 

@@ -38,7 +38,7 @@ return new class extends Migration
         }
         if (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE customer_usdt_top_up_inbox ALTER COLUMN tx_hash DROP NOT NULL');
-            DB::statement("ALTER TABLE customer_usdt_top_up_inbox ADD CONSTRAINT usdt_inbox_identity_check CHECK (tx_hash IS NOT NULL OR provider_reference IS NOT NULL)");
+            DB::statement('ALTER TABLE customer_usdt_top_up_inbox ADD CONSTRAINT usdt_inbox_identity_check CHECK (tx_hash IS NOT NULL OR provider_reference IS NOT NULL)');
         } else {
             Schema::table('customer_usdt_top_up_inbox', function (Blueprint $table): void {
                 $table->char('tx_hash', 66)->nullable()->change();

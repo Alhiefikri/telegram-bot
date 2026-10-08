@@ -65,6 +65,7 @@ final class UsdtTopUpPreparation
                     ]);
                 }
             }, 5);
+
             return true;
         }
         $invoice = null;

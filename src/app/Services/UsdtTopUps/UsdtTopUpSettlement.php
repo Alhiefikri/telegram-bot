@@ -115,11 +115,13 @@ final class UsdtTopUpSettlement
             }
             if ($target->rail !== 'bsc_usdt' || $target->receiver_id === null) {
                 $this->updateWork($work, ['next_check_at' => now()->addMinute(), 'last_error' => 'wrong_rail']);
+
                 return null;
             }
             $invoice = UsdtBscRailInvoice::query()->where('reference', $target->reference)->first();
             if ($invoice === null) {
                 $this->updateWork($work, ['next_check_at' => now()->addMinute()]);
+
                 return null;
             }
             $observations = DB::table('usdt_bsc_transfer_observations')->where('receiver_id', $target->receiver_id)

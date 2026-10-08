@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\CustomerUsdtFundingRail;
 use App\Models\Customer;
 use App\Models\CustomerUsdtFundingPolicy;
+use App\Models\CustomerUsdtTopUp;
 use App\Models\ManualPaymentSetting;
 use App\Models\TelegramNavigationRoot;
 use App\Services\Telegram\TelegramUsdtFundingActions;
@@ -67,7 +68,7 @@ final class BinanceUsdtTopUpTest extends TestCase
         $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->value('state'));
     }
 
-    private function target(int $telegramId): \App\Models\CustomerUsdtTopUp
+    private function target(int $telegramId): CustomerUsdtTopUp
     {
         $customer = Customer::factory()->create(['telegram_id' => $telegramId]);
         TelegramNavigationRoot::query()->create(['customer_id' => $customer->id, 'chat_id' => (string) $telegramId,
@@ -75,6 +76,7 @@ final class BinanceUsdtTopUpTest extends TestCase
         $actions = app(TelegramUsdtFundingActions::class);
         $preview = $actions->preview((string) $telegramId, (string) $telegramId, 'private', 100, '1.5', CustomerUsdtFundingRail::BinancePay);
         $this->assertSame('opened', $preview->outcome);
+
         return $actions->callback((string) $telegramId, (string) $telegramId, 'private', 100, 'usdt:confirm:'.$preview->intent->nonce)->topUp;
     }
 }

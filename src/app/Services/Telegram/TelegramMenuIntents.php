@@ -448,6 +448,7 @@ class TelegramMenuIntents
             ]],
         );
     }
+
     public function usdRailSurface(Customer $customer): TelegramNavigationSurface
     {
         return new TelegramNavigationSurface(
@@ -507,7 +508,6 @@ class TelegramMenuIntents
             ]],
         );
     }
-
 
     public function addBalanceSurface(
         Customer $customer,

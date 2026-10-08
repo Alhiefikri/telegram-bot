@@ -38,6 +38,7 @@ production image job elevates only itself to `packages: write`.
   - The October 8 supplier sync backoff migration uses prefix `2026_10_08_000004`; `000001`–`000003` belong to the USDT migrations. The supplier migration was renamed before production deployment, without allowlisting the collision.
   - Prepares PHP 8.4, Node 24, Composer dependencies, npm dependencies, and admin assets once for all application test lanes. This avoids repeating toolchain setup on a single serial runner.
   - Enforces Laravel Pint and keeps the fast SQLite suite parallel via ParaTest (`composer test -- --parallel`).
+  - Before pushing PHP changes, run `cd src && ./vendor/bin/pint` and then `./vendor/bin/pint --test`; CI checks the whole tree, including migrations and tests.
   - Runs the customer Playwright smoke against the already-built assets instead of rebuilding them in a separate job.
   - Runs the authoritative PostgreSQL release lane in the same isolated job against a PostgreSQL 16 service with health checking and CI-only credentials, matching production's database major version.
   - Applies every migration to an empty PostgreSQL database, runs production-critical Telegram update, inventory, checkout, payment, and queue-state integration tests, then executes the process-level concurrency deploy gate with unexpected skips treated as failures.

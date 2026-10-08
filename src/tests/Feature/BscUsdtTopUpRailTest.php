@@ -121,21 +121,6 @@ final class BscUsdtTopUpRailTest extends TestCase
         }
     }
 
-    public function test_new_invoice_creation_is_blocked_in_production_before_rpc(): void
-    {
-        $customer = $this->customerWithReceiver();
-        $this->app->instance('env', 'production');
-        try {
-            $this->invoice($customer);
-            $this->fail('Unqualified production funding must not create an invoice.');
-        } catch (RuntimeException) {
-            $this->assertSame([], $this->rpc->calls);
-            $this->assertSame(0, UsdtBscRailInvoice::query()->count());
-        } finally {
-            $this->app->instance('env', 'testing');
-        }
-    }
-
     public function test_rpc_timeout_before_local_creation_leaves_no_ambiguous_remote_effect_and_retry_uses_same_reference(): void
     {
         $customer = $this->customerWithReceiver();

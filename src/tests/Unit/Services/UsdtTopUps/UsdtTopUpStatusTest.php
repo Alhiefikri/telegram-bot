@@ -32,7 +32,6 @@ final class UsdtTopUpStatusTest extends TestCase
         yield 'rejected' => ['rejected', true, false, false];
     }
 
-
     private function target(): CustomerUsdtTopUp
     {
         return (new CustomerUsdtTopUp)->forceFill([

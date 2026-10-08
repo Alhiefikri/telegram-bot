@@ -149,6 +149,7 @@
   "balance.usdt.preview.credit": "Kredit diminta: :amount USDT",
   "balance.usdt.preview.fee": "Fi aplikasi: :amount USDT",
   "balance.usdt.preview.payable": "Jumlah untuk dihantar: :amount USDT",
+  "balance.usdt.preview.rail": "Kaedah: :rail",
   "balance.usdt.preview.network": "Rangkaian: BNB Smart Chain (BEP20)",
   "balance.usdt.preview.token": "Token: USDT",
   "balance.usdt.preview.receiver": "Alamat penerima: :address",

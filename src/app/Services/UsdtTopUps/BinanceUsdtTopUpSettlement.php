@@ -5,7 +5,6 @@ namespace App\Services\UsdtTopUps;
 use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceEntry;
-use App\Models\CustomerUsdtFundingReservation;
 use App\Models\CustomerUsdtTopUp;
 use App\Services\Binance\BinancePayTransaction;
 use App\Services\Binance\BinanceTransactionHistoryReader;
@@ -84,6 +83,7 @@ final class BinanceUsdtTopUpSettlement
                 $this->deferFailed((string) $id);
             }
         }
+
         return $processed;
     }
 
@@ -106,10 +106,12 @@ final class BinanceUsdtTopUpSettlement
                 ->whereNotNull('provider_reference')->where('next_check_at', '<=', now())->orderBy('next_check_at')->orderBy('id')->first();
             if ($inbox === null) {
                 $this->updateWork($work, ['next_check_at' => now()->addMinute()]);
+
                 return null;
             }
             $token = bin2hex(random_bytes(16));
             $this->updateWork($work, ['lease_token' => $token, 'lease_until' => now()->addMinutes(2), 'attempts' => (int) $work->attempts + 1]);
+
             return ['target' => $target, 'work' => $work, 'inbox' => $inbox, 'token' => $token, 'version' => (int) $work->version + 1];
         }, 5);
         if ($claim === null) {
@@ -130,6 +132,7 @@ final class BinanceUsdtTopUpSettlement
             }
         }
         $this->apply($claim, $transaction);
+
         return true;
     }
 
@@ -151,11 +154,13 @@ final class BinanceUsdtTopUpSettlement
                     'state' => 'settled', 'attempts' => (int) $claim['inbox']->attempts + 1, 'next_check_at' => now()->addMinute(),
                 ]);
                 $this->finish($work, ['state' => 'settled', 'next_check_at' => now()->addMinute(), 'last_error' => null]);
+
                 return;
             }
             $state = $resolution?->kind ?? $work->state;
             if ($transaction === null) {
                 $this->finish($work, ['state' => $target->expires_at->isPast() ? 'expired_unresolved' : $state, 'next_check_at' => now()->addMinute(), 'last_error' => 'binance_order_not_found']);
+
                 return;
             }
             $snapshot = is_array($target->payment_snapshot) ? $target->payment_snapshot : [];
@@ -181,6 +186,7 @@ final class BinanceUsdtTopUpSettlement
                     'state' => 'review', 'attempts' => (int) $claim['inbox']->attempts + 1, 'next_check_at' => now()->addMinute(),
                 ]);
                 $this->finish($work, ['state' => in_array($state, self::TERMINAL, true) ? $state : 'manual_review', 'evidence_version' => $evidenceVersion, 'next_check_at' => now()->addMinute(), 'last_error' => 'binance_snapshot_or_amount_mismatch']);
+
                 return;
             }
             $identity = MoneyReceiptIdentity::binancePay($receiverPayId !== null && $receiverPayId !== '' ? 'pay_id' : 'uid', (string) ($receiverPayId !== null && $receiverPayId !== '' ? $receiverPayId : $receiverUid), $transaction->transactionId());
@@ -192,6 +198,7 @@ final class BinanceUsdtTopUpSettlement
             $outcome = $this->receipts->claim($receipt);
             if (! $outcome->allowsMoneyEffect()) {
                 $this->finish($work, ['state' => 'manual_review', 'evidence_version' => $evidenceVersion, 'next_check_at' => now()->addMinute(), 'last_error' => 'receipt_'.$outcome->value]);
+
                 return;
             }
             $receiptId = DB::table('external_money_receipts')->where('canonical_key', $receipt->canonicalKey())->value('id');

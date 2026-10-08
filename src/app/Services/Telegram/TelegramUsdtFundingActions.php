@@ -26,8 +26,7 @@ final class TelegramUsdtFundingActions
         int $messageId,
         string $amount,
         CustomerUsdtFundingRail $rail = CustomerUsdtFundingRail::BscUsdt,
-    ): UsdtFundingIntentResult
-    {
+    ): UsdtFundingIntentResult {
         $context = $this->context($actorId, $chatId, $chatType, $messageId);
         if ($context === null) {
             return new UsdtFundingIntentResult('unauthorized');

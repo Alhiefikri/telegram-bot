@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Bootstrap\ApplicationRateLimiterRegistrar;
 use App\Bootstrap\ProductionConfigurationValidator;
+use App\Enums\CustomerUsdtFundingRail;
 use App\Models\BscPaymentReceiver;
 use App\Models\Category;
 use App\Models\ManualPaymentSetting;
@@ -73,7 +74,6 @@ use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackAckState;
 use App\Services\Telegram\TelegramCallbackHandlerPipeline;
-use App\Enums\CustomerUsdtFundingRail;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramConfiguredCheckoutPaymentIntentSelector;
 use App\Services\UsdtFunding\BinancePayFundingReadiness;

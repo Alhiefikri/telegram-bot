@@ -19,7 +19,6 @@ use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPresentation;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\StoreBalanceTopUpOutboundOutcome;
 use App\Services\Telegram\StoreBalanceTopUpOutboundResult;
-use App\Services\Telegram\TelegramUsdtBalanceIntents;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -31,14 +30,15 @@ use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramNavigationSurface;
+use App\Services\Telegram\TelegramUsdtBalanceIntents;
 use App\Services\Telegram\TelegramUsdtFundingActions;
 use App\Services\Telegram\TelegramUsdtFundingSession;
-use App\Services\UsdtFunding\UsdtFundingIntentResult;
 use Throwable;
 
 final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHandler
 {
     private const ADD_BALANCE = 'balance:add';
+
     private const CURRENCY_PREFIX = 'balance:currency:';
 
     public function __construct(

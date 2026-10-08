@@ -90,11 +90,11 @@ final readonly class BinancePayTransaction
     {
         return $this->currency;
     }
+
     public function successful(): bool
     {
         return $this->status === '' || in_array($this->status, ['SUCCESS', 'COMPLETED', 'PAID'], true);
     }
-
 
     public function transactionTimeMs(): int
     {

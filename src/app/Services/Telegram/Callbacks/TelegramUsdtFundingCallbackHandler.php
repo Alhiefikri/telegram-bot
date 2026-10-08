@@ -5,8 +5,8 @@ namespace App\Services\Telegram\Callbacks;
 use App\Enums\CustomerUsdtFundingRail;
 use App\Models\Customer;
 use App\Models\CustomerUsdtTopUp;
-use App\Services\Bsc\BscTransactionHash;
 use App\Services\Binance\BinanceOrderId;
+use App\Services\Bsc\BscTransactionHash;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -51,6 +51,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
     private const HASH_PREFIX = 'usdt:hash:';
 
     private const ORDER_PREFIX = 'usdt:order:';
+
     public function __construct(
         private readonly TelegramBotClient $bot,
         private readonly TelegramUsdtBalanceIntents $usdt,
@@ -416,6 +417,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             if ($result->topUp->rail === CustomerUsdtFundingRail::BinancePay->value) {
                 $this->hashSession->promptHash($customer, (string) $result->topUp->id);
             }
+
             return [
                 $this->usdt->statusSurface(
                     $customer,
