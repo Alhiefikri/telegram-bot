@@ -12,6 +12,15 @@ final class BalanceReleaseReadinessReportTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_missing_candidate_verification_evidence_blocks_release_evidence(): void
+    {
+        $report = app(BalanceReleaseReadinessReport::class)->report();
+        $checks = collect($report['checks'])->keyBy('key');
+
+        $this->assertSame('blocked', $checks['release_evidence']['status']);
+        $this->assertContains('release_evidence', $report['blocking_checks']);
+    }
+
     public function test_it_fails_closed_without_complete_receipt_and_reconciliation_evidence(): void
     {
         $this->artisan('balance:release-readiness-report', ['--require-ready' => true])
@@ -87,9 +96,10 @@ final class BalanceReleaseReadinessReportTest extends TestCase
         /** @var array<string, mixed> $report */
         $report = json_decode(Artisan::output(), true, 512, JSON_THROW_ON_ERROR);
         $this->assertSame(
-            ['generated_at', 'release_ready', 'blocking_checks', 'checks', 'next_operator_gate'],
+            ['generated_at', 'candidate_sha', 'release_ready', 'blocking_checks', 'checks', 'next_operator_gate'],
             array_keys($report),
         );
+        $this->assertNull($report['candidate_sha']);
         $this->assertNotContains('optional_binance_funding', $report['blocking_checks']);
         $checks = collect($report['checks'])->keyBy('key');
         $this->assertSame(

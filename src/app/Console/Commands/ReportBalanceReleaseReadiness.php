@@ -14,6 +14,8 @@ final class ReportBalanceReleaseReadiness extends Command
     protected $signature = 'balance:release-readiness-report
         {--json : Emit the complete secret-free report as JSON}
         {--max-reconciliation-age=1440 : Maximum age in minutes for full reconciliation evidence (1-10080)}
+        {--candidate-sha= : Exact 40-character candidate commit SHA}
+        {--evidence-manifest= : Path to the candidate verification result index}
         {--require-ready : Exit non-zero unless every required release check passes}';
 
     protected $description = 'Report IDR/Customer USDT release readiness and fail closed on missing evidence.';
@@ -27,12 +29,22 @@ final class ReportBalanceReleaseReadiness extends Command
             return self::FAILURE;
         }
 
-        $report = $reporter->report($maxAge);
+        $report = $reporter->report(
+            $maxAge,
+            $this->option('candidate-sha'),
+            $this->option('evidence-manifest'),
+        );
 
         if ((bool) $this->option('json')) {
             $this->line(json_encode($report, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
         } else {
             $this->line('Balance release ready: '.($report['release_ready'] ? 'true' : 'false'));
+            $this->line('Candidate SHA: '.($report['candidate_sha'] ?? 'missing or invalid'));
+            $releaseEvidence = collect($report['checks'])->firstWhere('key', 'release_evidence')['evidence'];
+            $this->line('Evidence manifest SHA-256: '.($releaseEvidence['manifest_sha256'] ?? 'missing'));
+            foreach ($releaseEvidence['results'] as $key => $result) {
+                $this->line(sprintf('Evidence %s: %s — %s', $key, $result['reason'], $result['reference'] ?? 'missing artifact'));
+            }
             foreach ($report['checks'] as $check) {
                 $this->line(sprintf('%s %s — %s', strtoupper($check['status']), $check['key'], $check['summary']));
             }

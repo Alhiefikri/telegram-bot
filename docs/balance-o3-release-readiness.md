@@ -16,18 +16,27 @@ php artisan balance:money-receipt-cutover-report --require-ready --json
 php artisan usdt-balance:reconcile --limit=1000 --json
 # Continue every printed account / receipt / credit cursor until all three
 # `has_more` values are false. The final run must be verdict=consistent.
-php artisan balance:release-readiness-report --max-reconciliation-age=1440 --json
-php artisan balance:release-readiness-report --max-reconciliation-age=1440 --require-ready
+php artisan balance:release-readiness-report --candidate-sha="$(git rev-parse HEAD)" --evidence-manifest="$BALANCE_RELEASE_EVIDENCE_MANIFEST" --max-reconciliation-age=1440 --json
+php artisan balance:release-readiness-report --candidate-sha="$(git rev-parse HEAD)" --evidence-manifest="$BALANCE_RELEASE_EVIDENCE_MANIFEST" --max-reconciliation-age=1440 --require-ready
 ```
 
 `balance:release-readiness-report` is read-only and secret-free. It combines
 the current receipt cutover, complete full reconciliation (ledger, receipt,
 accounting and treasury), restore gate and USDT policy/readiness state with the
-versioned operational decisions below. `--require-ready` exits non-zero for
-any `blocked` check. A full reconciliation is accepted only when its bounded
-account, receipt and unreceipted-credit cursors are all exhausted; a clean
-first page cannot be used as release evidence. The recorded run must be no
-older than the explicit `--max-reconciliation-age` window.
+candidate-bound verification evidence below. `--require-ready` exits non-zero
+for any `blocked` check. A full reconciliation is accepted only when its
+bounded account, receipt and unreceipted-credit cursors are all exhausted; a
+clean first page cannot be used as release evidence. The recorded run must be
+no older than the explicit `--max-reconciliation-age` window.
+
+The evidence manifest is an operator-recorded JSON index with
+`schema_version: 1`, the exact 40-character `candidate_sha`, and `checks.v1`,
+`checks.v2`, `checks.restore_drill`, and `checks.receipt_cutover`. Each result
+must carry the same candidate SHA, `exit_code: 0`, a retained `artifacts/...`
+reference, and its SHA-256. V2 must use the `full` profile. The report hashes
+the retained files and blocks missing, failed, diagnostic, mismatched, or
+unverifiable evidence; repository paths and fixed historical SHAs alone never
+pass the check.
 
 The report intentionally returns **NO-GO** on the current release because the
 H1 custody/legal/token-provenance/receiver-capacity/treasury evidence is still

@@ -25,10 +25,11 @@ final class BalanceReleaseReadinessReport
         private readonly BalanceRestoreGateReader $restoreGate,
         private readonly CustomerUsdtFundingGate $fundingGate,
         private readonly UsdtFundingRailReadinessRegistry $railReadiness,
+        private readonly BalanceCandidateReleaseEvidence $candidateEvidence,
     ) {}
 
     /** @return array<string, mixed> */
-    public function report(int $maxReconciliationAgeMinutes = 1440): array
+    public function report(int $maxReconciliationAgeMinutes = 1440, ?string $candidateSha = null, ?string $evidenceManifest = null): array
     {
         $cutover = $this->receiptCutover->summary();
         $reconciliation = $this->latestCompleteFullReconciliation($maxReconciliationAgeMinutes);
@@ -36,6 +37,7 @@ final class BalanceReleaseReadinessReport
         $bscFunding = $this->fundingGate->availability(CustomerUsdtFundingRail::BscUsdt);
         $bscReadiness = $this->railReadiness->observe(CustomerUsdtFundingRail::BscUsdt);
         $policy = CustomerUsdtFundingPolicy::current();
+        $releaseEvidence = $this->candidateEvidence->inspect($candidateSha, $evidenceManifest);
 
         $checks = [
             $this->check(
@@ -68,16 +70,11 @@ final class BalanceReleaseReadinessReport
             ),
             $this->check(
                 'release_evidence',
-                'pass',
-                'V1 PostgreSQL/crash evidence and V2 bounded-load evidence are versioned with this release gate.',
-                [
-                    'v1_commit' => 'b44df0c559c1e0a98c182b4db7222fe732c44ae5',
-                    'v1' => 'docs/balance-v1-verification.md',
-                    'v2_commit' => '577d5651e4957ec70908c741a14693b8c4c22445',
-                    'v2' => 'docs/balance-v2-benchmark.md',
-                    'restore_drill' => 'scripts/balance-restore-drill.sh',
-                    'mixed_worker_contract' => 'balance:money-receipt-cutover-report',
-                ],
+                $releaseEvidence['ready'] ? 'pass' : 'blocked',
+                $releaseEvidence['ready']
+                    ? 'All required verification results match the candidate and retained artifacts.'
+                    : 'Candidate verification evidence is missing, failed, mismatched, or incomplete.',
+                $releaseEvidence,
             ),
             $this->check(
                 'idempotent_idr_adjustment_control',
@@ -130,6 +127,7 @@ final class BalanceReleaseReadinessReport
 
         return [
             'generated_at' => now()->utc()->toIso8601String(),
+            'candidate_sha' => $releaseEvidence['candidate_sha'],
             'release_ready' => $blocking === [],
             'blocking_checks' => $blocking,
             'checks' => $checks,
