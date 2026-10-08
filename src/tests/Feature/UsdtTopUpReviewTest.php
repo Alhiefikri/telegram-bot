@@ -12,8 +12,8 @@ use App\Services\MoneyReceipts\MoneyReceiptIdentity;
 use App\Services\MoneyReceipts\MoneyReceiptParentClaim;
 use App\Services\MoneyReceipts\MoneyReceiptTarget;
 use App\Services\MoneyReceipts\VerifiedMoneyReceipt;
-use App\Services\Telegram\Callbacks\TelegramUsdtFundingCallbackHandler;
 use App\Services\Telegram\TelegramBotClient;
+use App\Services\Telegram\TelegramMessageRouter;
 use App\Services\Telegram\TelegramUsdtFundingActions;
 use App\Services\UsdtBalance\UsdtReceiptReconciliation;
 use App\Services\UsdtFunding\CustomerUsdtFundingRelease;
@@ -297,7 +297,7 @@ class UsdtTopUpReviewTest extends UsdtTopUpTestCase
         $bot->shouldReceive('sendMessage')->once()->andReturn(['ok' => true, 'result' => ['message_id' => 101]]);
         $this->app->instance(TelegramBotClient::class, $bot);
         $destination = '0x'.str_repeat('7', 40);
-        app(\App\Services\Telegram\TelegramMessageRouter::class)->route(
+        app(TelegramMessageRouter::class)->route(
             $this->customer,
             '951001',
             ['text' => '/usdt-return '.$this->target->id.' 1 '.$destination],
