@@ -76,10 +76,12 @@ final class UsdtTopUpSettlement
         if ($limit < 1 || $limit > 100) {
             throw new InvalidArgumentException('USDT settlement batch must be between 1 and 100.');
         }
-        $ids = DB::table('customer_usdt_top_up_settlement_work')
-            ->where('next_check_at', '<=', now())
-            ->where(fn ($query) => $query->whereNull('lease_until')->orWhere('lease_until', '<=', now()))
-            ->orderBy('next_check_at')->orderBy('top_up_id')->limit($limit)->pluck('top_up_id');
+        $ids = DB::table('customer_usdt_top_up_settlement_work as work')
+            ->join('customer_usdt_top_ups as targets', 'targets.id', '=', 'work.top_up_id')
+            ->where('targets.rail', 'bsc_usdt')
+            ->where('work.next_check_at', '<=', now())
+            ->where(fn ($query) => $query->whereNull('work.lease_until')->orWhere('work.lease_until', '<=', now()))
+            ->orderBy('work.next_check_at')->orderBy('work.top_up_id')->limit($limit)->pluck('work.top_up_id');
         $processed = 0;
         foreach ($ids as $id) {
             try {
@@ -111,10 +113,13 @@ final class UsdtTopUpSettlement
                 || ($work->lease_until !== null && CarbonImmutable::parse($work->lease_until)->isFuture())) {
                 return null;
             }
+            if ($target->rail !== 'bsc_usdt' || $target->receiver_id === null) {
+                $this->updateWork($work, ['next_check_at' => now()->addMinute(), 'last_error' => 'wrong_rail']);
+                return null;
+            }
             $invoice = UsdtBscRailInvoice::query()->where('reference', $target->reference)->first();
             if ($invoice === null) {
                 $this->updateWork($work, ['next_check_at' => now()->addMinute()]);
-
                 return null;
             }
             $observations = DB::table('usdt_bsc_transfer_observations')->where('receiver_id', $target->receiver_id)

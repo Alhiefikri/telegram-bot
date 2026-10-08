@@ -211,12 +211,12 @@ class UsdtFundingIntentTest extends TestCase
         $this->assertSame(BscUsdtRailRpcFixture::ADDRESS, $target->fresh()->payment_snapshot['receiver_address']);
     }
 
-    public function test_production_funding_is_disabled_even_with_owner_policy_enabled(): void
+    public function test_production_funding_uses_configured_rail_without_environment_gate(): void
     {
         $this->app->instance('env', 'production');
-        $this->assertSame('unavailable', $this->preview()->outcome);
+        $this->assertSame('opened', $this->preview()->outcome);
         $this->assertSame([], $this->rpc->calls);
-        $this->assertSame(0, CustomerUsdtFundingIntent::query()->count());
+        $this->assertSame(1, CustomerUsdtFundingIntent::query()->count());
     }
 
     public function test_fee_addition_is_exact_and_overflow_is_rejected(): void

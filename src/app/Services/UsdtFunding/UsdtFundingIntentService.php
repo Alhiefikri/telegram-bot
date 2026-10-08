@@ -27,17 +27,15 @@ final class UsdtFundingIntentService
         private readonly UsdtDepositReceiverRegistry $receivers,
     ) {}
 
-    public function open(Customer $customer, string $chatId, int $rootId, int $messageId, UsdtMicroAmount $amount): UsdtFundingIntentResult
+    public function open(Customer $customer, string $chatId, int $rootId, int $messageId, UsdtMicroAmount $amount, CustomerUsdtFundingRail $rail = CustomerUsdtFundingRail::BscUsdt): UsdtFundingIntentResult
     {
-        return DB::transaction(function () use ($customer, $chatId, $rootId, $messageId, $amount): UsdtFundingIntentResult {
-            // Shared prefix: policy -> Customer -> root. Customer serializes
-            // the child intent/receiver locks; U3 writers never acquire Customer.
+        return DB::transaction(function () use ($customer, $chatId, $rootId, $messageId, $amount, $rail): UsdtFundingIntentResult {
             $policy = $this->lockPolicy();
             $root = $this->lockRoot($customer, $chatId, $rootId, $messageId);
             if ($root === null) {
                 return new UsdtFundingIntentResult('stale');
             }
-            if ($policy === null) {
+            if ($policy === null || ! $this->available($rail)) {
                 return new UsdtFundingIntentResult('unavailable');
             }
             $active = $this->reservations->activeForCustomer($customer);
@@ -46,35 +44,53 @@ final class UsdtFundingIntentService
                     $active->reservation->sourceType === 'customer_usdt_top_up' && Str::isUuid($active->reservation->sourceId)
                         ? CustomerUsdtTopUp::query()->whereKey($active->reservation->sourceId)->where('customer_id', $customer->id)->first() : null);
             }
-            if (! $this->available()) {
-                return new UsdtFundingIntentResult('unavailable');
-            }
-            $receiver = CustomerUsdtDepositReceiver::query()->where('customer_id', $customer->id)
-                ->whereNotNull('verified_at')->whereNull('retired_at')->lockForUpdate()->first();
+
             $settings = ManualPaymentSetting::query()->where('is_active', true)->lockForUpdate()->first();
-            if ($receiver === null || $settings === null || $policy->applicationFeeMicro() > PHP_INT_MAX - $amount->units()) {
+            if ($settings === null || ($rail === CustomerUsdtFundingRail::BinancePay && ! $settings->binance_pay_enabled)
+                || $policy->applicationFeeMicro() > PHP_INT_MAX - $amount->units()) {
                 return new UsdtFundingIntentResult('unavailable');
             }
-            $snapshot = $this->receivers->snapshotFor($customer);
-            if ($snapshot->tokenContract !== BscReadiness::APPROVED_USDT_CONTRACT || $snapshot->tokenDecimals !== 18
-                || DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $snapshot->receiverId)->whereNotNull('review_reason')->exists()) {
-                return new UsdtFundingIntentResult('unavailable');
+
+            $receiverId = null;
+            if ($rail === CustomerUsdtFundingRail::BscUsdt) {
+                $receiver = CustomerUsdtDepositReceiver::query()->where('customer_id', $customer->id)
+                    ->whereNotNull('verified_at')->whereNull('retired_at')->lockForUpdate()->first();
+                if ($receiver === null) {
+                    return new UsdtFundingIntentResult('unavailable');
+                }
+                $snapshot = $this->receivers->snapshotFor($customer);
+                if ($snapshot->tokenContract !== BscReadiness::APPROVED_USDT_CONTRACT || $snapshot->tokenDecimals !== 18
+                    || DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $snapshot->receiverId)->whereNotNull('review_reason')->exists()) {
+                    return new UsdtFundingIntentResult('unavailable');
+                }
+                $receiverId = $snapshot->receiverId;
+                $terms = [
+                    'receiver_address' => $snapshot->address, 'chain_id' => $snapshot->chainId,
+                    'token_contract' => $snapshot->tokenContract, 'token_decimals' => $snapshot->tokenDecimals,
+                    'custody_namespace' => $snapshot->custodyNamespace,
+                    'minimum_confirmations' => $settings->bscMinConfirmations(), 'requires_finalized_block' => true,
+                    'payment_ttl_seconds' => $settings->bscPaymentTtlMinutes() * 60,
+                ];
+            } else {
+                $payId = trim((string) config('services.binance.pay_id'));
+                $uid = trim((string) config('services.binance.pay_uid'));
+                if ($payId === '' && $uid === '') {
+                    return new UsdtFundingIntentResult('unavailable');
+                }
+                $terms = [
+                    'receiver_pay_id' => $payId !== '' ? $payId : null,
+                    'receiver_uid' => $uid !== '' ? $uid : null,
+                    'payment_ttl_seconds' => $settings->binancePaymentTtlMinutes() * 60,
+                ];
             }
-            $terms = [
-                'receiver_address' => $snapshot->address, 'chain_id' => $snapshot->chainId,
-                'token_contract' => $snapshot->tokenContract, 'token_decimals' => $snapshot->tokenDecimals,
-                'custody_namespace' => $snapshot->custodyNamespace,
-                'minimum_confirmations' => $settings->bscMinConfirmations(), 'requires_finalized_block' => true,
-                'payment_ttl_seconds' => $settings->bscPaymentTtlMinutes() * 60,
-            ];
             $identity = [
                 'customer_id' => (int) $customer->id, 'telegram_navigation_root_id' => $rootId,
                 'chat_id' => $chatId, 'canonical_message_id' => $messageId,
-                'currency' => 'USDT', 'rail' => CustomerUsdtFundingRail::BscUsdt->value,
+                'currency' => 'USDT', 'rail' => $rail->value,
                 'amount_micro' => $amount->units(), 'fee_micro' => $policy->applicationFeeMicro(),
                 'payable_micro' => $amount->units() + $policy->applicationFeeMicro(),
                 'policy_version' => $policy->policyVersion(), 'terms_version' => $policy->termsVersion(),
-                'receiver_id' => $snapshot->receiverId, 'payment_snapshot' => $terms,
+                'receiver_id' => $receiverId, 'payment_snapshot' => $terms,
             ];
             $current = CustomerUsdtFundingIntent::query()->where('customer_id', $customer->id)->where('state', 'pending')->lockForUpdate()->first();
             if ($current !== null) {
@@ -89,9 +105,6 @@ final class UsdtFundingIntentService
                 'v' => 1, 'identity' => $identity, 'nonce' => $nonce, 'expires_at_epoch' => $expiresAt->getTimestamp(),
             ], JSON_THROW_ON_ERROR));
             $intent = CustomerUsdtFundingIntent::query()->create($identity + [
-                // A render advances the root generation on every canonical
-                // edit, so it is a snapshot only: the root row plus canonical
-                // message id own intent identity, never the render counter.
                 'root_generation' => (int) $root->generation,
                 'nonce' => $nonce, 'request_fingerprint' => $fingerprint, 'state' => 'pending',
                 'version' => 1, 'created_at' => now(), 'expires_at' => $expiresAt,
@@ -101,27 +114,24 @@ final class UsdtFundingIntentService
         }, 5);
     }
 
-    public function claim(Customer $customer, string $chatId, int $rootId, int $messageId, string $nonce, string $action): UsdtFundingIntentResult
+    public function claim(Customer $customer, string $chatId, int $rootId, int $messageId, string $nonce, string $action, CustomerUsdtFundingRail $rail = CustomerUsdtFundingRail::BscUsdt): UsdtFundingIntentResult
     {
         if (! in_array($action, ['confirm', 'cancel'], true) || preg_match('/\A[a-f0-9]{32}\z/D', $nonce) !== 1) {
             return new UsdtFundingIntentResult('stale');
         }
 
-        return DB::transaction(function () use ($customer, $chatId, $rootId, $messageId, $nonce, $action): UsdtFundingIntentResult {
+        return DB::transaction(function () use ($customer, $chatId, $rootId, $messageId, $nonce, $action, $rail): UsdtFundingIntentResult {
             $policy = $this->lockPolicy();
             $root = $this->lockRoot($customer, $chatId, $rootId, $messageId);
             if ($root === null) {
                 return new UsdtFundingIntentResult('stale');
             }
             $intent = CustomerUsdtFundingIntent::query()->where('customer_id', $customer->id)->where('nonce', $nonce)->lockForUpdate()->first();
-            // Identity is the root row plus canonical message id: every render
-            // advances the stored generation, so it can never be an identity
-            // version. A replaced root message fails this comparison.
             if ($intent === null || $intent->chat_id !== $chatId || $intent->telegram_navigation_root_id !== $rootId
                 || $intent->canonical_message_id !== $messageId) {
                 return new UsdtFundingIntentResult('stale');
             }
-            // Replays never re-reserve using a changed policy or create new work.
+            $rail = CustomerUsdtFundingRail::from($intent->rail);
             if ($intent->state === 'confirmed') {
                 return new UsdtFundingIntentResult('confirmed', $intent, CustomerUsdtTopUp::query()->where('intent_id', $intent->id)->firstOrFail());
             }
@@ -130,35 +140,41 @@ final class UsdtFundingIntentService
             }
             if (! $intent->expires_at->isFuture()) {
                 $this->transition($intent, 'expired');
-
                 return new UsdtFundingIntentResult('expired', $intent);
             }
             if ($action === 'cancel') {
                 $this->transition($intent, 'cancelled');
-
                 return new UsdtFundingIntentResult('cancelled', $intent);
             }
             if ($policy === null || $policy->policyVersion() !== $intent->policy_version || $policy->termsVersion() !== $intent->terms_version) {
                 $this->transition($intent, 'superseded');
-
                 return new UsdtFundingIntentResult('stale_policy', $intent);
             }
-            $receiver = CustomerUsdtDepositReceiver::query()->whereKey($intent->receiver_id)->lockForUpdate()->first();
             $settings = ManualPaymentSetting::query()->where('is_active', true)->lockForUpdate()->first();
-            if ($receiver === null || ! $receiver->isReadyForAssignment() || $settings === null
-                || $settings->bscMinConfirmations() !== $intent->payment_snapshot['minimum_confirmations']
-                || $settings->bscPaymentTtlMinutes() * 60 !== $intent->payment_snapshot['payment_ttl_seconds']
-                || DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $intent->receiver_id)->whereNotNull('review_reason')->exists()) {
+            if ($settings === null || ($rail === CustomerUsdtFundingRail::BinancePay && ! $settings->binance_pay_enabled)) {
                 $this->transition($intent, 'superseded');
-
                 return new UsdtFundingIntentResult('stale_terms', $intent);
             }
-            if (! $this->available()) {
+            if ($rail === CustomerUsdtFundingRail::BscUsdt) {
+                $receiver = CustomerUsdtDepositReceiver::query()->whereKey($intent->receiver_id)->lockForUpdate()->first();
+                if ($receiver === null || ! $receiver->isReadyForAssignment()
+                    || $settings->bscMinConfirmations() !== $intent->payment_snapshot['minimum_confirmations']
+                    || $settings->bscPaymentTtlMinutes() * 60 !== $intent->payment_snapshot['payment_ttl_seconds']
+                    || DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $intent->receiver_id)->whereNotNull('review_reason')->exists()) {
+                    $this->transition($intent, 'superseded');
+                    return new UsdtFundingIntentResult('stale_terms', $intent);
+                }
+            } elseif (trim((string) config('services.binance.pay_id')) !== (string) ($intent->payment_snapshot['receiver_pay_id'] ?? '')
+                || trim((string) config('services.binance.pay_uid')) !== (string) ($intent->payment_snapshot['receiver_uid'] ?? '')) {
+                $this->transition($intent, 'superseded');
+                return new UsdtFundingIntentResult('stale_terms', $intent);
+            }
+            if (! $this->available($rail)) {
                 return new UsdtFundingIntentResult('unavailable', $intent);
             }
-            $expiresAt = CarbonImmutable::now()->startOfSecond()->addSeconds($intent->payment_snapshot['payment_ttl_seconds']);
+            $expiresAt = CarbonImmutable::now()->startOfSecond()->addSeconds((int) $intent->payment_snapshot['payment_ttl_seconds']);
             $id = (string) Str::uuid();
-            $reserved = $this->reservations->reserve($customer, CustomerUsdtFundingRail::BscUsdt,
+            $reserved = $this->reservations->reserve($customer, $rail,
                 UsdtMicroAmount::fromUnits($intent->amount_micro), 'customer_usdt_top_up', $id, $expiresAt);
             if ($reserved->outcome === CustomerUsdtFundingReservationOutcome::ExistingActive) {
                 return new UsdtFundingIntentResult('active_target', $intent,
@@ -174,7 +190,7 @@ final class UsdtFundingIntentService
                 'request_fingerprint' => $intent->request_fingerprint, 'expires_at' => $expiresAt, 'created_at' => now(),
             ]);
             DB::table('customer_usdt_top_up_work')->insert([
-                'top_up_id' => $id, 'state' => 'pending', 'version' => 1, 'attempts' => 0,
+                'top_up_id' => $id, 'state' => $rail === CustomerUsdtFundingRail::BinancePay ? 'ready' : 'pending', 'version' => 1, 'attempts' => 0,
                 'next_attempt_at' => now(), 'updated_at' => now(),
             ]);
             DB::table('customer_usdt_top_up_settlement_work')->insert([
@@ -222,10 +238,9 @@ final class UsdtFundingIntentService
             ->where('chat_id', $chatId)->where('message_id', $messageId)->lockForUpdate()->first();
     }
 
-    private function available(): bool
+    private function available(CustomerUsdtFundingRail $rail): bool
     {
-        // U5 technical qualification is local/testing only. H1 is still no-go.
-        return app()->environment(['local', 'testing']) && $this->gate->availability(CustomerUsdtFundingRail::BscUsdt)->available;
+        return $this->gate->availability($rail)->available;
     }
 
     private function transition(CustomerUsdtFundingIntent $intent, string $state): void

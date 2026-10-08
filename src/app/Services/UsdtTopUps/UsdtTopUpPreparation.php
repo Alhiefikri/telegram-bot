@@ -18,11 +18,12 @@ final class UsdtTopUpPreparation
     public function recover(int $limit = 25): int
     {
         $this->outsideTransaction();
-        $ids = DB::table('customer_usdt_top_up_work')
-            ->whereIn('state', ['pending', 'creating', 'creation_unknown'])
-            ->where('next_attempt_at', '<=', now())
-            ->where(fn ($query) => $query->whereNull('lease_until')->orWhere('lease_until', '<=', now()))
-            ->orderBy('next_attempt_at')->orderBy('top_up_id')->limit(max(1, min(100, $limit)))->pluck('top_up_id');
+        $ids = DB::table('customer_usdt_top_up_work as work')
+            ->join('customer_usdt_top_ups as targets', 'targets.id', '=', 'work.top_up_id')
+            ->where('targets.rail', 'bsc_usdt')->whereIn('work.state', ['pending', 'creating', 'creation_unknown'])
+            ->where('work.next_attempt_at', '<=', now())
+            ->where(fn ($query) => $query->whereNull('work.lease_until')->orWhere('work.lease_until', '<=', now()))
+            ->orderBy('work.next_attempt_at')->orderBy('work.top_up_id')->limit(max(1, min(100, $limit)))->pluck('work.top_up_id');
         $processed = 0;
         foreach ($ids as $id) {
             $processed += $this->prepare($id) ? 1 : 0;
@@ -54,6 +55,18 @@ final class UsdtTopUpPreparation
             return false;
         }
         $target = CustomerUsdtTopUp::query()->findOrFail($id);
+        if ($target->rail !== 'bsc_usdt') {
+            DB::transaction(function () use ($id, $claim): void {
+                $work = DB::table('customer_usdt_top_up_work')->where('top_up_id', $id)->lockForUpdate()->first();
+                if ($work !== null && $work->lease_token === $claim['token'] && (int) $work->version === $claim['version']) {
+                    DB::table('customer_usdt_top_up_work')->where('top_up_id', $id)->update([
+                        'state' => 'ready', 'version' => $claim['version'] + 1, 'lease_token' => null,
+                        'lease_until' => null, 'next_attempt_at' => now(), 'updated_at' => now(),
+                    ]);
+                }
+            }, 5);
+            return true;
+        }
         $invoice = null;
         $error = null;
         try {
@@ -61,8 +74,6 @@ final class UsdtTopUpPreparation
                 $target->reference, UsdtMicroAmount::fromUnits($target->payable_micro), $target->expires_at, $target);
         } catch (Throwable) {
             // Do not leak RPC endpoints/payloads or drop the confirmed slot.
-            // The local rail has no remote create; unknown means our observed
-            // preparation outcome, not a fictional custody-provider invoice.
             $error = 'rail_preparation_unresolved';
         }
         DB::transaction(function () use ($id, $claim, $target, $invoice, $error): void {

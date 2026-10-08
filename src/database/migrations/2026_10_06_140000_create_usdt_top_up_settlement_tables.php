@@ -34,7 +34,7 @@ return new class extends Migration
             $table->id();
             $table->uuid('top_up_id');
             $table->foreign('top_up_id')->references('id')->on('customer_usdt_top_ups')->restrictOnDelete();
-            $table->char('tx_hash', 66);
+            $table->char('tx_hash', 66)->nullable();
             $table->string('state', 16)->default('pending');
             $table->unsignedInteger('attempts')->default(0);
             $table->timestamp('next_check_at');

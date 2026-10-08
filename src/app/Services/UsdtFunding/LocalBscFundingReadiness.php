@@ -5,7 +5,7 @@ namespace App\Services\UsdtFunding;
 use App\Enums\CustomerUsdtFundingRail;
 use InvalidArgumentException;
 
-/** Technical-only U5 path; never a production funding authorization. */
+/** Readiness for the configured watch-only BSC rail. */
 final class LocalBscFundingReadiness implements UsdtFundingRailReadiness
 {
     public function railKey(): string
@@ -15,9 +15,13 @@ final class LocalBscFundingReadiness implements UsdtFundingRailReadiness
 
     public function readiness(): UsdtFundingRailReadinessObservation
     {
-        return app()->environment(['local', 'testing'])
-            ? UsdtFundingRailReadinessObservation::ready('bsc_watch_only_disposable')
-            : UsdtFundingRailReadinessObservation::unavailable('bsc_watch_only_disposable', 'h1_funding_unqualified');
+        if ((int) config('services.bsc.chain_id', 56) !== 56
+            || strtolower((string) config('services.bsc.usdt_contract')) !== strtolower(\App\Services\Bsc\BscReadiness::APPROVED_USDT_CONTRACT)
+            || ! filled(config('services.bsc.rpc_urls'))) {
+            return UsdtFundingRailReadinessObservation::unavailable('bsc_watch_only', 'bsc_configuration_unavailable');
+        }
+
+        return UsdtFundingRailReadinessObservation::ready('bsc_watch_only');
     }
 
     public function assertRail(CustomerUsdtFundingRail $rail): void

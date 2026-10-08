@@ -30,6 +30,19 @@ use Tests\Support\UsdtTopUpTestCase;
 
 class UsdtTopUpSettlementTest extends UsdtTopUpTestCase
 {
+    public function test_bsc_transfer_is_credited_automatically_without_customer_hash_submission(): void
+    {
+        $this->assertSame(0, DB::table('customer_usdt_top_up_inbox')->count());
+        $this->rpc->logs = [$this->rpc->log()];
+        $this->travel(10)->seconds();
+        \Illuminate\Support\Facades\Artisan::call('usdt-funding:recover');
+        $this->assertSame(1_000_000, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
+        $this->travel(1)->minutes();
+        \Illuminate\Support\Facades\Artisan::call('usdt-funding:recover');
+        $this->assertSame(1, CustomerUsdtBalanceEntry::count());
+    }
+
     public function test_exact_final_receipt_commits_money_resolution_accounting_audit_and_outbound_once(): void
     {
         $snapshot = $this->target->getAttributes();

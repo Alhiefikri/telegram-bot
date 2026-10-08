@@ -2,9 +2,11 @@
 
 namespace App\Services\Telegram\Callbacks;
 
+use App\Enums\CustomerUsdtFundingRail;
 use App\Models\Customer;
 use App\Models\CustomerUsdtTopUp;
 use App\Services\Bsc\BscTransactionHash;
+use App\Services\Binance\BinanceOrderId;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -20,6 +22,7 @@ use App\Services\Telegram\TelegramUsdtBalanceIntents;
 use App\Services\Telegram\TelegramUsdtFundingActions;
 use App\Services\Telegram\TelegramUsdtFundingSession;
 use App\Services\UsdtFunding\UsdtFundingIntentResult;
+use App\Services\UsdtTopUps\BinanceUsdtTopUpSettlement;
 use App\Services\UsdtTopUps\UsdtTopUpSettlement;
 use App\Services\UsdtTopUps\UsdtTopUpStatusReader;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -47,6 +50,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
 
     private const HASH_PREFIX = 'usdt:hash:';
 
+    private const ORDER_PREFIX = 'usdt:order:';
     public function __construct(
         private readonly TelegramBotClient $bot,
         private readonly TelegramUsdtBalanceIntents $usdt,
@@ -55,6 +59,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
         private readonly TelegramUsdtFundingSession $hashSession,
         private readonly UsdtTopUpStatusReader $statuses,
         private readonly UsdtTopUpSettlement $settlement,
+        private readonly BinanceUsdtTopUpSettlement $binanceSettlement,
         private readonly TelegramLocale $locale,
         private readonly TelegramIntentSession $session,
         private readonly TelegramCatalogQuerySession $catalogQueries,
@@ -137,7 +142,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             || $this->tokenFor($data, self::NEWER_PREFIX) !== null) {
             return true;
         }
-        foreach ([self::STATUS_PREFIX, self::CHECK_PREFIX, self::HASH_PREFIX] as $prefix) {
+        foreach ([self::STATUS_PREFIX, self::CHECK_PREFIX, self::HASH_PREFIX, self::ORDER_PREFIX] as $prefix) {
             if ($this->uuidFor($data, $prefix) !== null) {
                 return true;
             }
@@ -209,6 +214,58 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
      * Consume one prompted transaction-hash message as a bounded lookup hint.
      * The hint is never evidence and never credits the balance by itself.
      */
+    /** Consume one prompted Binance Order ID as a bounded lookup hint. */
+    public function handleOrderIdInput(Customer $customer, string $chatId, string $text): bool
+    {
+        $topUpId = $this->hashSession->promptedTopUpId($customer);
+        if ($topUpId === null) {
+            return false;
+        }
+        $target = CustomerUsdtTopUp::query()
+            ->whereKey($topUpId)
+            ->where('customer_id', $customer->id)
+            ->first();
+        if ($target === null) {
+            $this->hashSession->forget($customer);
+
+            return false;
+        }
+        $snapshot = is_array($target->payment_snapshot) ? $target->payment_snapshot : [];
+        $targetRail = $target->rail instanceof CustomerUsdtFundingRail ? $target->rail->value : (string) ($target->rail ?? '');
+        if (($targetRail !== '' ? $targetRail : (string) ($snapshot['rail'] ?? '')) !== CustomerUsdtFundingRail::BinancePay->value) {
+            return false;
+        }
+        if (! $this->statuses->for($target)->acceptsCustomerLookup()) {
+            $this->hashSession->forget($customer);
+            $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_closed');
+
+            return true;
+        }
+        $orderId = BinanceOrderId::normalize(trim($text));
+        if ($orderId === null) {
+            $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.order_invalid');
+
+            return true;
+        }
+        try {
+            $this->binanceSettlement->submit($customer, (string) $target->id, $orderId);
+        } catch (AuthorizationException) {
+            $this->hashSession->forget($customer);
+            $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_closed');
+
+            return true;
+        } catch (InvalidArgumentException) {
+            $this->hashSession->forget($customer);
+            $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_limited');
+
+            return true;
+        }
+        $this->hashSession->forget($customer);
+        $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.order_recorded');
+
+        return true;
+    }
+
     public function handleHashInput(Customer $customer, string $chatId, string $text): bool
     {
         $topUpId = $this->hashSession->promptedTopUpId($customer);
@@ -305,7 +362,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             return $this->previewOutcomeSurface($customer, $result);
         }
 
-        foreach ([self::STATUS_PREFIX, self::CHECK_PREFIX, self::HASH_PREFIX] as $prefix) {
+        foreach ([self::STATUS_PREFIX, self::CHECK_PREFIX, self::HASH_PREFIX, self::ORDER_PREFIX] as $prefix) {
             $targetId = $this->uuidFor($data, $prefix);
             if ($targetId === null) {
                 continue;
@@ -320,9 +377,21 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             $notice = match ($prefix) {
                 self::CHECK_PREFIX => 'balance.usdt.notice.refreshed',
                 self::HASH_PREFIX => 'balance.usdt.notice.hash_prompt',
+                self::ORDER_PREFIX => 'balance.usdt.notice.order_prompt',
                 default => null,
             };
-            if ($prefix === self::HASH_PREFIX) {
+            $targetRail = $target->rail instanceof CustomerUsdtFundingRail ? $target->rail->value : (string) ($target->rail ?? '');
+            if ($prefix === self::CHECK_PREFIX
+                && ($targetRail !== '' ? $targetRail : (string) (is_array($target->payment_snapshot) ? ($target->payment_snapshot['rail'] ?? '') : '')) === CustomerUsdtFundingRail::BinancePay->value) {
+                try {
+                    $this->binanceSettlement->check((string) $target->id);
+                } catch (AuthorizationException|InvalidArgumentException) {
+                    // Status remains the durable, honest state when a check is
+                    // no longer authorized or the provider rejects the hint.
+                }
+            }
+            if (in_array($prefix, [self::HASH_PREFIX, self::ORDER_PREFIX], true)
+                && $this->statuses->for($target)->acceptsCustomerLookup()) {
                 $this->hashSession->promptHash($customer, (string) $target->id);
             }
 
@@ -344,6 +413,9 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             return [$this->usdt->previewSurface($customer, $result->intent), null];
         }
         if ($result->outcome === 'confirmed' && $result->topUp !== null) {
+            if ($result->topUp->rail === CustomerUsdtFundingRail::BinancePay->value) {
+                $this->hashSession->promptHash($customer, (string) $result->topUp->id);
+            }
             return [
                 $this->usdt->statusSurface(
                     $customer,

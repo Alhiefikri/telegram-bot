@@ -24,7 +24,7 @@ return new class extends Migration
             $table->unsignedBigInteger('payable_micro');
             $table->unsignedBigInteger('policy_version');
             $table->unsignedBigInteger('terms_version');
-            $table->foreignId('receiver_id')->constrained('customer_usdt_deposit_receivers')->restrictOnDelete();
+            $table->foreignId('receiver_id')->nullable()->constrained('customer_usdt_deposit_receivers')->restrictOnDelete();
             $table->json('payment_snapshot');
             $table->string('request_fingerprint', 64);
             $table->string('state', 24)->default('pending');
@@ -48,7 +48,7 @@ return new class extends Migration
             $table->unsignedBigInteger('payable_micro');
             $table->unsignedBigInteger('policy_version');
             $table->unsignedBigInteger('terms_version');
-            $table->foreignId('receiver_id')->constrained('customer_usdt_deposit_receivers')->restrictOnDelete();
+            $table->foreignId('receiver_id')->nullable()->constrained('customer_usdt_deposit_receivers')->restrictOnDelete();
             $table->json('payment_snapshot');
             $table->string('request_fingerprint', 64);
             $table->timestamp('expires_at');
@@ -73,7 +73,7 @@ return new class extends Migration
             return;
         }
         foreach (['customer_usdt_funding_intents', 'customer_usdt_top_ups'] as $table) {
-            DB::statement("ALTER TABLE {$table} ADD CONSTRAINT {$table}_money_check CHECK (currency = 'USDT' AND rail = 'bsc_usdt' AND amount_micro > 0 AND fee_micro >= 0 AND payable_micro >= amount_micro AND payable_micro - amount_micro = fee_micro AND policy_version > 0 AND terms_version > 0)");
+            DB::statement("ALTER TABLE {$table} ADD CONSTRAINT {$table}_money_check CHECK (currency = 'USDT' AND rail IN ('bsc_usdt', 'binance_pay') AND amount_micro > 0 AND fee_micro >= 0 AND payable_micro >= amount_micro AND payable_micro - amount_micro = fee_micro AND policy_version > 0 AND terms_version > 0 AND ((rail = 'bsc_usdt' AND receiver_id IS NOT NULL) OR (rail = 'binance_pay' AND receiver_id IS NULL)))");
         }
         DB::statement("ALTER TABLE customer_usdt_funding_intents ADD CONSTRAINT usdt_intent_state_check CHECK (state IN ('pending', 'confirmed', 'cancelled', 'expired', 'superseded') AND version > 0)");
         DB::unprepared(<<<'SQL'

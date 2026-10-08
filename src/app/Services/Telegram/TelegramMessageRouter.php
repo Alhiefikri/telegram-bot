@@ -40,6 +40,7 @@ class TelegramMessageRouter
         private TelegramBscVerifyIntents $bscVerify,
         private TelegramBalanceFundingCallbackHandler $balanceFunding,
         private TelegramUsdtFundingCallbackHandler $usdtFunding,
+        private TelegramUsdtFundingSession $usdtFundingSession,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
@@ -63,6 +64,10 @@ class TelegramMessageRouter
             }
 
             return;
+        }
+
+        if ($isPrivateChat && $text !== '' && str_starts_with($text, '/')) {
+            $this->usdtFundingSession->forget($customer);
         }
 
         if ($text === '/start' || str_starts_with($text, '/start ')) {
@@ -325,7 +330,11 @@ class TelegramMessageRouter
             return;
         }
 
-        if ($isPrivateChat && $this->bscVerify->handleHashInput($customer, $chatId, $text)) {
+        if ($isPrivateChat && $this->balanceFunding->handleUsdtAmountInput($customer, $chatId, $text)) {
+            return;
+        }
+
+        if ($isPrivateChat && $this->usdtFunding->handleOrderIdInput($customer, $chatId, $text)) {
             return;
         }
 

@@ -11,12 +11,15 @@ class TelegramCallbackRouter
         private TelegramCallbackHandlerPipeline $handlers,
         private TelegramChatPrivacyGuard $chatPrivacy,
         private TelegramLocale $locale,
+        private TelegramUsdtFundingSession $usdtFundingSession,
     ) {}
 
     public function route(Customer $customer, string $chatId, string $id, string $data, string $chatType = 'private', ?int $messageId = null): void
     {
         $context = new TelegramCallbackContext($customer, $chatId, $id, $data, $chatType, $messageId);
-
+        // Any callback is navigation: a pending amount prompt must not
+        // survive a flow change (the selected rail callback recreates it).
+        $this->usdtFundingSession->forget($customer);
         if ($this->handlers->dispatch($context, TelegramCallbackStage::BeforePrivacy)) {
             return;
         }

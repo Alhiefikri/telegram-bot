@@ -573,6 +573,7 @@ final class BinancePaymentVerification
                         $transaction->transactionId(),
                         $transaction->currency(),
                         (int) $transaction->amountMicro(),
+                        $transaction->orderId(),
                     );
                 } catch (InvalidArgumentException) {
                     $receipt = null;

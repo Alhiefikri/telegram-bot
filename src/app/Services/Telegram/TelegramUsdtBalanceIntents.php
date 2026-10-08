@@ -69,6 +69,9 @@ final class TelegramUsdtBalanceIntents
     public function previewSurface(Customer $customer, CustomerUsdtFundingIntent $intent): TelegramNavigationSurface
     {
         $snapshot = is_array($intent->payment_snapshot) ? $intent->payment_snapshot : [];
+        $intentRail = $intent->rail instanceof CustomerUsdtFundingRail ? $intent->rail->value : (string) ($intent->rail ?? '');
+        $rail = CustomerUsdtFundingRail::tryFrom($intentRail !== '' ? $intentRail : (string) ($snapshot['rail'] ?? 'bsc_usdt'))
+            ?? CustomerUsdtFundingRail::BscUsdt;
         $lines = [
             $this->locale->translate($customer, 'balance.usdt.preview.title'),
             '━━━━━━━━━━━━━━',
@@ -81,16 +84,14 @@ final class TelegramUsdtBalanceIntents
             $this->locale->translate($customer, 'balance.usdt.preview.payable', [
                 'amount' => $this->usdt((int) $intent->payable_micro),
             ]),
-            $this->locale->translate($customer, 'balance.usdt.preview.network'),
-            $this->locale->translate($customer, 'balance.usdt.preview.token'),
-            $this->locale->translate($customer, 'balance.usdt.preview.receiver', [
-                'address' => (string) ($snapshot['receiver_address'] ?? ''),
+            $this->locale->translate($customer, 'balance.usdt.preview.rail', [
+                'rail' => $this->locale->translate($customer, $rail === CustomerUsdtFundingRail::BinancePay
+                    ? 'balance.usd.binance_pay'
+                    : 'balance.usd.bsc'),
             ]),
-            $this->locale->translate($customer, 'balance.usdt.preview.deadline', [
-                'deadline' => $this->locale->formatDate($customer, $intent->expires_at),
-            ]),
-            '',
-            $this->locale->translate($customer, 'balance.usdt.preview.warning'),
+            $this->locale->translate($customer, $rail === CustomerUsdtFundingRail::BinancePay
+                ? 'balance.usdt.preview.binance_warning'
+                : 'balance.usdt.preview.warning'),
         ];
 
         return new TelegramNavigationSurface(
@@ -109,7 +110,7 @@ final class TelegramUsdtBalanceIntents
                     ],
                     [
                         'text' => $this->locale->translate($customer, 'balance.confirmation.back'),
-                        'callback_data' => self::TOP_UP_CALLBACK,
+                        'callback_data' => 'balance:currency:usd',
                     ],
                 ],
             ]],
@@ -122,6 +123,9 @@ final class TelegramUsdtBalanceIntents
         UsdtTopUpStatus $status,
         ?string $noticeKey = null,
     ): TelegramNavigationSurface {
+        $snapshot = is_array($target->payment_snapshot) ? $target->payment_snapshot : [];
+        $targetRail = $target->rail instanceof CustomerUsdtFundingRail ? $target->rail->value : (string) ($target->rail ?? '');
+        $isBinance = ($targetRail !== '' ? $targetRail : (string) ($snapshot['rail'] ?? '')) === CustomerUsdtFundingRail::BinancePay->value;
         $lines = [
             $this->locale->translate($customer, 'balance.usdt.status.title'),
             '━━━━━━━━━━━━━━',
@@ -145,14 +149,23 @@ final class TelegramUsdtBalanceIntents
             'state' => $this->locale->translate($customer, 'balance.usdt.state.'.$status->state),
         ]);
         if ($status->isAwaitingPayment()) {
-            $lines[] = $this->locale->translate($customer, 'balance.usdt.status.network');
-            $lines[] = $this->locale->translate($customer, 'balance.usdt.status.receiver', [
-                'address' => (string) ($status->receiverAddress ?? ''),
-            ]);
+            if ($isBinance) {
+                $lines[] = $this->locale->translate($customer, 'balance.usdt.status.binance');
+                $lines[] = $this->locale->translate($customer, 'balance.usdt.status.pay_id', [
+                    'pay_id' => (string) ($snapshot['receiver_pay_id'] ?? ''),
+                ]);
+            } else {
+                $lines[] = $this->locale->translate($customer, 'balance.usdt.status.network');
+                $lines[] = $this->locale->translate($customer, 'balance.usdt.status.receiver', [
+                    'address' => (string) ($status->receiverAddress ?? ''),
+                ]);
+            }
             $lines[] = $this->locale->translate($customer, 'balance.usdt.status.deadline', [
                 'deadline' => $this->locale->formatDate($customer, $status->deadline),
             ]);
-            $lines[] = $this->locale->translate($customer, 'balance.usdt.status.warning');
+            $lines[] = $this->locale->translate($customer, $isBinance
+                ? 'balance.usdt.status.binance_warning'
+                : 'balance.usdt.status.warning');
         } else {
             $lines[] = $this->locale->translate($customer, 'balance.usdt.status.'.$status->state.'_note');
         }
@@ -167,11 +180,13 @@ final class TelegramUsdtBalanceIntents
                     'text' => $this->locale->translate($customer, 'balance.usdt.status.check'),
                     'callback_data' => 'usdt:check:'.$target->id,
                 ],
-                [
-                    'text' => $this->locale->translate($customer, 'balance.usdt.status.hash'),
-                    'callback_data' => 'usdt:hash:'.$target->id,
-                ],
             ];
+            if ($isBinance) {
+                $keyboard[0][] = [
+                    'text' => $this->locale->translate($customer, 'balance.usdt.status.order_id'),
+                    'callback_data' => 'usdt:order:'.$target->id,
+                ];
+            }
         }
         $keyboard[] = [$this->historyRow($customer)];
         $keyboard[] = $this->menu->navigationRow($customer);

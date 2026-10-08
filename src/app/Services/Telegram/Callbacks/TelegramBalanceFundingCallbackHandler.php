@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram\Callbacks;
 
+use App\Enums\CustomerUsdtFundingRail;
 use App\Enums\StoreBalanceFundingIntentClaimOutcome;
 use App\Enums\TelegramNavigationRenderOutcome;
 use App\Models\Customer;
@@ -18,6 +19,7 @@ use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPresentation;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\StoreBalanceTopUpOutboundOutcome;
 use App\Services\Telegram\StoreBalanceTopUpOutboundResult;
+use App\Services\Telegram\TelegramUsdtBalanceIntents;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -29,11 +31,15 @@ use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramNavigationSurface;
+use App\Services\Telegram\TelegramUsdtFundingActions;
+use App\Services\Telegram\TelegramUsdtFundingSession;
+use App\Services\UsdtFunding\UsdtFundingIntentResult;
 use Throwable;
 
 final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHandler
 {
     private const ADD_BALANCE = 'balance:add';
+    private const CURRENCY_PREFIX = 'balance:currency:';
 
     public function __construct(
         private readonly TelegramBotClient $bot,
@@ -43,6 +49,9 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         private readonly StoreBalanceFundingIntentService $intents,
         private readonly StoreBalanceTopUpService $topUps,
         private readonly StoreBalanceTopUpOutbound $topUpOutbound,
+        private readonly TelegramUsdtBalanceIntents $usdtBalance,
+        private readonly TelegramUsdtFundingActions $usdtFunding,
+        private readonly TelegramUsdtFundingSession $usdtFundingSession,
         private readonly TelegramLocale $locale,
         private readonly TelegramIntentSession $session,
         private readonly TelegramCatalogQuerySession $catalogQueries,
@@ -65,9 +74,76 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         return $this->amounts->isDepositCommand($text);
     }
 
+    /** Consume a prompted exact USDT amount; invalid input keeps the prompt alive. */
+    public function handleUsdtAmountInput(Customer $customer, string $chatId, string $text): bool
+    {
+        $prompt = $this->usdtFundingSession->promptedAmount($customer);
+        if ($prompt === null || $prompt['chat_id'] !== $chatId) {
+            return false;
+        }
+        $root = $this->roots->currentForChat($customer, $chatId);
+        if ($root === null || (int) $root->id !== $prompt['root_id'] || (int) $root->message_id !== $prompt['message_id']) {
+            $this->usdtFundingSession->forget($customer);
+
+            return false;
+        }
+        $rail = CustomerUsdtFundingRail::tryFrom($prompt['rail']);
+        if ($rail === null) {
+            $this->usdtFundingSession->forget($customer);
+
+            return false;
+        }
+
+        $result = $this->usdtFunding->preview(
+            (string) $customer->telegram_id,
+            $chatId,
+            'private',
+            $prompt['message_id'],
+            trim($text),
+            $rail,
+        );
+        if ($result->outcome !== 'invalid_amount') {
+            $this->usdtFundingSession->forget($customer);
+        }
+        if ($result->outcome === 'invalid_amount') {
+            $this->navigation->presentOnRoot(
+                $root,
+                $chatId,
+                $this->menu->usdAmountSurface($customer, $rail, 'balance.usd.amount.invalid'),
+            );
+
+            return true;
+        }
+        if ($result->outcome === 'unauthorized' || $result->outcome === 'stale') {
+            $this->usdtFundingSession->forget($customer);
+            $this->navigation->presentOnRoot($root, $chatId, $this->menu->usdRailSurface($customer));
+
+            return true;
+        }
+        if (in_array($result->outcome, ['opened', 'replayed'], true) && $result->intent !== null) {
+            $this->navigation->presentOnRoot($root, $chatId, $this->usdtBalance->previewSurface($customer, $result->intent));
+
+            return true;
+        }
+
+        $this->navigation->presentOnRoot(
+            $root,
+            $chatId,
+            $this->menu->usdAmountSurface($customer, $rail, 'balance.usd.amount.unavailable'),
+        );
+
+        return true;
+    }
+
     public function supports(TelegramCallbackContext $context): bool
     {
         return $context->data === self::ADD_BALANCE
+            || in_array($context->data, [
+                self::CURRENCY_PREFIX.'idr',
+                self::CURRENCY_PREFIX.'usd',
+                'balance:usd:binance_pay',
+                'balance:usd:bsc',
+            ], true)
             || StoreBalanceFundingPolicyManager::isPresetCallbackFormat($context->data)
             || StoreBalanceFundingIntentService::isActionCallbackFormat($context->data)
             || StoreBalanceTopUpService::isActionCallbackFormat($context->data);
@@ -159,15 +235,58 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         }
 
         $this->session->forgetWithLock($context->customer);
+        $this->usdtFundingSession->forget($context->customer);
         $this->catalogQueries->forget($context->customer);
 
         if ($context->data === self::ADD_BALANCE) {
+            $outcome = $this->navigation->presentOnRoot(
+                $root,
+                $context->chatId,
+                $this->menu->balanceCurrencySurface($context->customer),
+            );
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
+
+            return true;
+        }
+
+        if ($context->data === self::CURRENCY_PREFIX.'idr') {
             $outcome = $this->presentChooser($root, $context);
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
 
             return true;
         }
 
+        if ($context->data === self::CURRENCY_PREFIX.'usd') {
+            $outcome = $this->navigation->presentOnRoot(
+                $root,
+                $context->chatId,
+                $this->menu->usdRailSurface($context->customer),
+            );
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
+
+            return true;
+        }
+
+        if ($context->data === 'balance:usd:bsc' || $context->data === 'balance:usd:binance_pay') {
+            $rail = $context->data === 'balance:usd:binance_pay'
+                ? CustomerUsdtFundingRail::BinancePay
+                : CustomerUsdtFundingRail::BscUsdt;
+            $this->usdtFundingSession->promptAmount(
+                $context->customer,
+                $context->chatId,
+                (int) $root->id,
+                (int) $root->message_id,
+                $rail->value,
+            );
+            $outcome = $this->navigation->presentOnRoot(
+                $root,
+                $context->chatId,
+                $this->menu->usdAmountSurface($context->customer, $rail),
+            );
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
+
+            return true;
+        }
         $action = StoreBalanceFundingIntentService::actionFromCallback($context->data);
         if ($action !== null) {
             $this->handleAction($root, $context, $action['action'], $action['nonce']);

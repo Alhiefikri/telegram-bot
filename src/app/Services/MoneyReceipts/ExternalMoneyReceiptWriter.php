@@ -153,6 +153,7 @@ final class ExternalMoneyReceiptWriter
         string $transactionId,
         string $currency,
         int $amountUnits,
+        ?string $orderId = null,
     ): ?VerifiedMoneyReceipt {
         $receiver = $this->binanceReceiverFor($payment);
         if ($receiver === null) {
@@ -160,6 +161,14 @@ final class ExternalMoneyReceiptWriter
         }
 
         [$receiverType, $receiverValue] = $receiver;
+        $aliases = [];
+        $orderId = trim((string) $orderId);
+        if ($orderId !== '' && $orderId !== $transactionId) {
+            $aliases[] = new MoneyReceiptAlias(
+                'binance_order_id',
+                MoneyReceiptIdentity::binancePay($receiverType, $receiverValue, $this->referenceSegment($orderId)),
+            );
+        }
 
         return new VerifiedMoneyReceipt(
             identity: MoneyReceiptIdentity::binancePay($receiverType, $receiverValue, $this->referenceSegment($transactionId)),
@@ -172,6 +181,7 @@ final class ExternalMoneyReceiptWriter
                 'provider' => 'binance',
                 'identity' => 'receiver_namespace',
             ],
+            aliases: $aliases,
         );
     }
 

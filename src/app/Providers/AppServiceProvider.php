@@ -73,8 +73,10 @@ use App\Services\Telegram\FakeTelegramBotClient;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackAckState;
 use App\Services\Telegram\TelegramCallbackHandlerPipeline;
+use App\Enums\CustomerUsdtFundingRail;
 use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramConfiguredCheckoutPaymentIntentSelector;
+use App\Services\UsdtFunding\BinancePayFundingReadiness;
 use App\Services\UsdtFunding\LocalBscFundingReadiness;
 use App\Services\UsdtFunding\UsdtFundingRailReadinessRegistry;
 use App\Services\UsdtReceivers\UsdtDepositReceiverProvisioners;
@@ -134,14 +136,17 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(UsdtDepositReceiverProvisioners::class, fn ($app): UsdtDepositReceiverProvisioners => new UsdtDepositReceiverProvisioners(
             $app->tagged('usdt-deposit-receiver-provisioners'),
         ));
-        // Qualified production adapters remain gated. U5's technical-only BSC
-        // path is available in disposable local/testing environments, without
-        // replacing an explicitly registered readiness provider.
+        // Built-in readiness adapters perform only local configuration checks;
+        // Admin activation and each rail's real credential/address checks remain
+        // authoritative for new funding.
         $this->app->singleton(UsdtFundingRailReadinessRegistry::class, function ($app): UsdtFundingRailReadinessRegistry {
             $providers = iterator_to_array($app->tagged('usdt-funding-rail-readiness'));
-            if ($app->environment(['local', 'testing'])
-                && ! collect($providers)->contains(fn ($provider): bool => $provider->railKey() === 'bsc_usdt')) {
+            $keys = collect($providers)->map(fn ($provider): string => $provider->railKey())->all();
+            if (! in_array(CustomerUsdtFundingRail::BscUsdt->value, $keys, true)) {
                 $providers[] = $app->make(LocalBscFundingReadiness::class);
+            }
+            if (! in_array(CustomerUsdtFundingRail::BinancePay->value, $keys, true)) {
+                $providers[] = $app->make(BinancePayFundingReadiness::class);
             }
 
             return new UsdtFundingRailReadinessRegistry($providers);

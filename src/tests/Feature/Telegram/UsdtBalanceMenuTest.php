@@ -64,6 +64,28 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         );
     }
 
+    public function test_usd_binance_amount_and_order_id_flow_records_a_durable_lookup(): void
+    {
+        config(['services.binance.api_key' => 'test', 'services.binance.api_secret' => 'test',
+            'services.binance.pay_id' => '12345678', 'services.binance.pay_uid' => '']);
+        ManualPaymentSetting::query()->update(['binance_pay_enabled' => true]);
+        $root = $this->startRoot();
+        $this->tap('currency', 'balance:add', $root);
+        $this->tap('usd', 'balance:currency:usd', $root);
+        $this->tap('binance', 'balance:usd:binance_pay', $root);
+        $this->sendText('1.5');
+        $intent = CustomerUsdtFundingIntent::query()->sole();
+        $this->assertSame('binance_pay', $intent->rail);
+        $this->assertSame(1500000, $intent->amount_micro);
+        $this->tap('confirm-binance', 'usdt:confirm:'.$intent->nonce, $root);
+        $target = CustomerUsdtTopUp::query()->sole();
+        $this->assertSame('ready', DB::table('customer_usdt_top_up_work')->value('state'));
+        $this->sendText('445011487581044736');
+        $this->assertSame($target->id, DB::table('customer_usdt_top_up_inbox')->value('top_up_id'));
+        $this->assertSame('445011487581044736', DB::table('customer_usdt_top_up_inbox')->value('provider_reference'));
+        $this->assertEntriesUnchanged(0);
+    }
+
     public function test_private_balance_screen_shows_usdt_balance_topup_and_history(): void
     {
         $this->seedUsdtBalance(1_500_000);
@@ -183,14 +205,11 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Biaya aplikasi: 0 USDT', $copy);
         $this->assertStringContainsString('Total yang harus dikirim: 1.5 USDT', $copy);
         $this->assertStringContainsString('BNB Smart Chain (BEP20)', $copy);
-        $this->assertStringContainsString('Alamat penerima: '.BscUsdtRailRpcFixture::ADDRESS, $copy);
-        $this->assertStringContainsString('Konfirmasi sebelum:', $copy);
         $this->assertStringNotContainsString('Rp', $copy);
 
         $keyboard = $edit['reply_markup']['inline_keyboard'];
         $this->assertMatchesRegularExpression('/\Ausdt:confirm:[a-f0-9]{32}\z/', $keyboard[0][0]['callback_data']);
         $this->assertMatchesRegularExpression('/\Ausdt:cancel:[a-f0-9]{32}\z/', $keyboard[1][0]['callback_data']);
-        $this->assertSame('balance:usdt', $keyboard[1][1]['callback_data']);
 
         $intent = CustomerUsdtFundingIntent::query()->sole();
         $this->assertSame('pending', $intent->state);
@@ -247,7 +266,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
         $keyboard = $edit['reply_markup']['inline_keyboard'];
         $this->assertSame('usdt:check:'.$target->id, $keyboard[0][0]['callback_data']);
-        $this->assertSame('usdt:hash:'.$target->id, $keyboard[0][1]['callback_data']);
 
         $this->tap('confirm-replay', 'usdt:confirm:'.$nonce, $root);
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());

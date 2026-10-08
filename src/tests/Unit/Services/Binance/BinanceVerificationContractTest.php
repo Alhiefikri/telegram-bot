@@ -5,6 +5,7 @@ namespace Tests\Unit\Services\Binance;
 use App\Services\Binance\BinanceOrderId;
 use App\Services\Binance\BinancePayTransaction;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class BinanceVerificationContractTest extends TestCase
 {
@@ -58,6 +59,74 @@ class BinanceVerificationContractTest extends TestCase
         ]));
 
         $this->assertTrue($transaction?->isIncomingToConfiguredReceiver('987654321', null));
+    }
+
+    #[DataProvider('invalidTransactions')]
+    public function test_malformed_history_cannot_be_used_as_a_transaction(mixed $payload): void
+    {
+        $this->assertNull(BinancePayTransaction::fromPayload($payload));
+    }
+
+    public static function invalidTransactions(): iterable
+    {
+        yield 'null history' => [null];
+        yield 'string history' => ['transaction'];
+        $valid = ['transactionId' => 'TX12345678', 'amount' => '1.5', 'currency' => 'USDT', 'transactionTime' => 1700000000000];
+        foreach (['transactionId', 'amount', 'currency', 'transactionTime'] as $field) {
+            $payload = $valid;
+            unset($payload[$field]);
+            yield 'missing '.$field => [$payload];
+            yield 'nested '.$field => [array_replace($valid, [$field => ['invalid']])];
+        }
+        foreach (['1.0000001', '0.0000001', '9223372036854.775808', '1e3', 'NaN', '+1'] as $amount) {
+            yield 'invalid amount '.$amount => [array_replace($valid, ['amount' => $amount])];
+        }
+        yield 'invalid timestamp' => [array_replace($valid, ['transactionTime' => 'yesterday'])];
+    }
+
+    #[DataProvider('unsuccessfulStatuses')]
+    public function test_pending_failed_or_unknown_status_is_not_successful(string $status): void
+    {
+        $transaction = BinancePayTransaction::fromPayload($this->payload(['status' => $status]));
+        $this->assertNotNull($transaction);
+        $this->assertFalse($transaction->successful());
+    }
+
+    public static function unsuccessfulStatuses(): iterable
+    {
+        foreach (['PENDING', 'FAILED', 'CANCELLED', 'REFUNDED', 'PROCESSING', 'UNKNOWN'] as $status) {
+            yield $status => [$status];
+        }
+    }
+
+    public function test_debit_zero_and_missing_receiver_never_match_the_receiving_account(): void
+    {
+        foreach ([
+            ['amount' => '-1.5'],
+            ['amount' => '0'],
+            ['receiverInfo' => []],
+            ['receiverInfo' => ['accountId' => 'other', 'binanceId' => 'other']],
+        ] as $override) {
+            $transaction = BinancePayTransaction::fromPayload($this->payload($override));
+            $this->assertNotNull($transaction);
+            $this->assertFalse($transaction->isIncomingToConfiguredReceiver('987654321', '123456789'));
+        }
+    }
+
+    public function test_explicit_account_id_mismatch_does_not_fall_back_to_uid_as_pay_id(): void
+    {
+        $transaction = BinancePayTransaction::fromPayload($this->payload([
+            'receiverInfo' => ['accountId' => 'wrong-pay-id', 'binanceId' => '987654321'],
+        ]));
+        $this->assertFalse($transaction->isIncomingToConfiguredReceiver('987654321', null));
+    }
+
+    public function test_provider_transaction_status_is_used_when_primary_status_is_absent(): void
+    {
+        $failed = BinancePayTransaction::fromPayload($this->payload(['transactionStatus' => 'FAILED']));
+        $paid = BinancePayTransaction::fromPayload($this->payload(['transactionStatus' => 'completed']));
+        $this->assertFalse($failed->successful());
+        $this->assertTrue($paid->successful());
     }
 
     /** @param array<string, mixed> $overrides */

@@ -425,6 +425,90 @@ class TelegramMenuIntents
             : '+'.$this->locale->idr($item->signedAmount);
     }
 
+    public function balanceCurrencySurface(Customer $customer): TelegramNavigationSurface
+    {
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::AddBalance,
+            $this->locale->code($customer),
+            $this->captions->html(implode("\n", [
+                $this->locale->translate($customer, 'balance.currency.title'),
+                '━━━━━━━━━━━━━━',
+                $this->locale->translate($customer, 'balance.currency.prompt'),
+            ])),
+            ['inline_keyboard' => [
+                [[
+                    'text' => $this->locale->translate($customer, 'balance.currency.idr'),
+                    'callback_data' => 'balance:currency:idr',
+                ]],
+                [[
+                    'text' => $this->locale->translate($customer, 'balance.currency.usd'),
+                    'callback_data' => 'balance:currency:usd',
+                ]],
+                $this->navigationRow($customer),
+            ]],
+        );
+    }
+    public function usdRailSurface(Customer $customer): TelegramNavigationSurface
+    {
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::AddBalance,
+            $this->locale->code($customer),
+            $this->captions->html(implode("\n", [
+                $this->locale->translate($customer, 'balance.usd.title'),
+                '━━━━━━━━━━━━━━',
+                $this->locale->translate($customer, 'balance.usd.prompt'),
+            ])),
+            ['inline_keyboard' => [
+                [[
+                    'text' => $this->locale->translate($customer, 'balance.usd.binance_pay'),
+                    'callback_data' => 'balance:usd:binance_pay',
+                ]],
+                [[
+                    'text' => $this->locale->translate($customer, 'balance.usd.bsc'),
+                    'callback_data' => 'balance:usd:bsc',
+                ]],
+                $this->navigationRow($customer),
+            ]],
+        );
+    }
+
+    public function usdAmountSurface(
+        Customer $customer,
+        CustomerUsdtFundingRail $rail,
+        ?string $noticeKey = null,
+    ): TelegramNavigationSurface {
+        $railKey = $rail === CustomerUsdtFundingRail::BinancePay
+            ? 'balance.usd.binance_pay'
+            : 'balance.usd.bsc';
+        $lines = [
+            $this->locale->translate($customer, 'balance.usd.amount.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'balance.usd.amount.rail', [
+                'rail' => $this->locale->translate($customer, $railKey),
+            ]),
+            $this->locale->translate($customer, 'balance.usd.amount.prompt'),
+            $this->locale->translate($customer, 'balance.usd.amount.precision'),
+        ];
+        if ($noticeKey !== null) {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, $noticeKey);
+        }
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::AddBalance,
+            $this->locale->code($customer),
+            $this->captions->html(implode("\n", $lines)),
+            ['inline_keyboard' => [
+                [[
+                    'text' => $this->locale->translate($customer, 'balance.confirmation.cancel'),
+                    'callback_data' => 'balance:currency:usd',
+                ]],
+                $this->navigationRow($customer),
+            ]],
+        );
+    }
+
+
     public function addBalanceSurface(
         Customer $customer,
         ?string $noticeKey = null,

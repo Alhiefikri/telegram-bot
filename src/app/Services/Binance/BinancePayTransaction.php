@@ -14,6 +14,7 @@ final readonly class BinancePayTransaction
         private string $note,
         private string $receiverAccountId,
         private string $receiverBinanceId,
+        private string $status,
         private array $sanitizedPayload,
     ) {}
 
@@ -52,6 +53,7 @@ final readonly class BinancePayTransaction
             note: self::stringValue($payload['note'] ?? null),
             receiverAccountId: $receiverAccountId,
             receiverBinanceId: $receiverBinanceId,
+            status: strtoupper(self::stringValue($payload['status'] ?? $payload['transactionStatus'] ?? null)),
             sanitizedPayload: self::sanitize($payload),
         );
     }
@@ -88,6 +90,11 @@ final readonly class BinancePayTransaction
     {
         return $this->currency;
     }
+    public function successful(): bool
+    {
+        return $this->status === '' || in_array($this->status, ['SUCCESS', 'COMPLETED', 'PAID'], true);
+    }
+
 
     public function transactionTimeMs(): int
     {

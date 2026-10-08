@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Services\Telegram\UsdtTopUpOutbound;
 use App\Services\UsdtFunding\CustomerUsdtFundingReservationService;
 use App\Services\UsdtFunding\UsdtFundingIntentService;
+use App\Services\UsdtTopUps\BinanceUsdtTopUpSettlement;
 use App\Services\UsdtTopUps\BscUsdtTransferIngestion;
 use App\Services\UsdtTopUps\UsdtReorgIncidentService;
 use App\Services\UsdtTopUps\UsdtTopUpPreparation;
@@ -18,7 +19,7 @@ final class RecoverUsdtTopUps extends Command
 
     protected $description = 'Recover confirmed USDT preparation from durable DB work and expire local previews without releasing unresolved money.';
 
-    public function handle(UsdtTopUpPreparation $preparation, UsdtFundingIntentService $intents, CustomerUsdtFundingReservationService $reservations, UsdtTopUpSettlement $settlement, UsdtTopUpOutbound $outbound, BscUsdtTransferIngestion $ingestion, UsdtReorgIncidentService $reorgs): int
+    public function handle(UsdtTopUpPreparation $preparation, UsdtFundingIntentService $intents, CustomerUsdtFundingReservationService $reservations, UsdtTopUpSettlement $settlement, BinanceUsdtTopUpSettlement $binanceSettlement, UsdtTopUpOutbound $outbound, BscUsdtTransferIngestion $ingestion, UsdtReorgIncidentService $reorgs): int
     {
         $raw = (string) $this->option('limit');
         if (preg_match('/\A[1-9][0-9]{0,2}\z/D', $raw) !== 1 || (int) $raw > 100) {
@@ -56,7 +57,9 @@ final class RecoverUsdtTopUps extends Command
         $result = ['expired_intents' => $expired, 'prepared_work' => $prepared, 'scan_requests' => $requests,
             'held_reservations' => $reservations->holdExpired($limit),
             'reorg_incidents' => $reorgs->recover(min(10, $limit)),
-            'settlement_work' => $settlement->recover($limit), 'receipt_dispatches' => $outbound->recover($limit)];
+            'settlement_work' => $settlement->recover($limit),
+            'binance_settlement_work' => $binanceSettlement->recover($limit),
+            'receipt_dispatches' => $outbound->recover($limit)];
         $this->line(json_encode($result, JSON_THROW_ON_ERROR));
 
         return self::SUCCESS;

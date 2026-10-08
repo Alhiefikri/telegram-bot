@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\CustomerUsdtFundingRail;
 use App\Models\Customer;
 use App\Models\TelegramNavigationRoot;
 use App\Services\UsdtBalance\UsdtMicroAmount;
@@ -18,7 +19,14 @@ final class TelegramUsdtFundingActions
         private readonly UsdtTopUpReview $reviews,
     ) {}
 
-    public function preview(string $actorId, string $chatId, string $chatType, int $messageId, string $amount): UsdtFundingIntentResult
+    public function preview(
+        string $actorId,
+        string $chatId,
+        string $chatType,
+        int $messageId,
+        string $amount,
+        CustomerUsdtFundingRail $rail = CustomerUsdtFundingRail::BscUsdt,
+    ): UsdtFundingIntentResult
     {
         $context = $this->context($actorId, $chatId, $chatType, $messageId);
         if ($context === null) {
@@ -30,7 +38,7 @@ final class TelegramUsdtFundingActions
             return new UsdtFundingIntentResult('invalid_amount');
         }
 
-        return $this->intents->open($context['customer'], $chatId, $context['root']->id, $messageId, $money);
+        return $this->intents->open($context['customer'], $chatId, $context['root']->id, $messageId, $money, $rail);
     }
 
     public function callback(string $actorId, string $chatId, string $chatType, int $messageId, string $data): UsdtFundingIntentResult

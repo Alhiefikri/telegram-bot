@@ -31,7 +31,7 @@ use RuntimeException;
 /**
  * Actual watch-only BSC rail for operator-registered public receivers. It never
  * provisions keys, signs, claims a receipt, posts money or invokes OrderLifecycle.
- * H1 remains unqualified: creation is restricted to disposable local/testing.
+ * Creation requires a verified exclusive receiver and configured BSC RPC.
  */
 final class BscUsdtTopUpRail implements UsdtTopUpRail
 {
@@ -89,11 +89,8 @@ final class BscUsdtTopUpRail implements UsdtTopUpRail
         if ($existing !== null) {
             return $this->replay($existing, $customer, $fingerprint);
         }
-        // This is a qualification gate, not an ENV rollout switch. No amount,
-        // receiver, fee or presentation configuration is taken from ENV.
-        if (! app()->environment(['local', 'testing'])) {
-            throw new RuntimeException('H1 funding qualification is incomplete; BSC invoice creation is limited to disposable environments.');
-        }
+        // The configured receiver, token and chain checks below are the
+        // production qualification gate; runtime is not a rollout switch.
         $now = CarbonImmutable::now()->utc()->startOfSecond();
         $expiresAt = $expiresAt->utc()->startOfSecond();
         if ($expiresAt->lessThanOrEqualTo($now)) {
