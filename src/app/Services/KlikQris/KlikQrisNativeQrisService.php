@@ -557,9 +557,8 @@ class KlikQrisNativeQrisService
             return $result;
         }
 
-        if ($topUp->isRecoveryPending()) {
-            return KlikQrisTopUpLifecycleResult::state(KlikQrisNativeQrisOutcome::RecoveryPending);
-        }
+        // A concurrent worker may have only marked the row "creating".
+        // Wait for the single-flight lock so callers can observe its committed quote.
 
         if ($topUp->provider_create_state === 'create_failed') {
             $this->resetTopUpPreRequestFailure($topUp);
