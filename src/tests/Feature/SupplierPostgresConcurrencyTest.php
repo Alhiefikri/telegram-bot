@@ -113,7 +113,6 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         $this->assertSame($purchase->claim_token, $episode->claim_token);
         $this->assertNull($episode->finished_at);
         $purchase->update(['lease_expires_at' => now()->subSecond()]);
-        $fulfillment->update(['next_attempt_at' => now()->subSecond()]);
         Http::fake(function ($request) {
             $this->assertSame('GET', $request->method());
 

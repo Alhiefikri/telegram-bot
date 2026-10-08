@@ -191,7 +191,9 @@ final class SupplierFulfillmentService
                     ->whereIn('state', ['ambiguous', 'review'])->whereNull('supplier_order_id')->whereNull('committed_at')->whereNotNull('dispatched_at')
                     ->whereHas('supplier', fn ($supplier) => $supplier->where('provider', 'toolorax'))
                     ->has('historyReconciliations', '<', 3, 'and', fn ($history) => $history->whereNull('actor_user_id')))))
-            ->where(fn ($q) => $q->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now()))
+            ->where(fn ($q) => $q->whereNull('next_attempt_at')
+                ->orWhere('next_attempt_at', '<=', now())
+                ->orWhereHas('currentPurchase', fn ($purchase) => $purchase->whereNotNull('lease_expires_at')->where('lease_expires_at', '<=', now())))
             ->orderBy('next_attempt_at')->orderBy('id')->limit(max(1, min($max, 500)))->get();
         $started = microtime(true);
         $processed = 0;
