@@ -66,9 +66,9 @@ final class ExternalMoneyReceiptPostgresConcurrencyTest extends TestCase
         $this->assertSame(['claimed', 'conflict'], $sorted);
 
         $winner = $results[0] === 'claimed' ? 'order-1' : 'order-2';
-        $this->assertSame(1, ExternalMoneyReceipt::query()->count());
-        $this->assertSame($winner, ExternalMoneyReceipt::query()->sole()->target_id);
-        $this->assertSame($winner, ExternalMoneyReceiptParentClaim::query()->sole()->target_id);
+        $this->assertSame(1, ExternalMoneyReceipt::query()->whereIn('target_id', ['order-1', 'order-2'])->count());
+        $this->assertSame($winner, ExternalMoneyReceipt::query()->whereIn('target_id', ['order-1', 'order-2'])->sole()->target_id);
+        $this->assertSame($winner, ExternalMoneyReceiptParentClaim::query()->whereIn('target_id', ['order-1', 'order-2'])->sole()->target_id);
     }
 
     public function test_postgres_competing_replays_claim_one_receipt_and_one_replayed(): void

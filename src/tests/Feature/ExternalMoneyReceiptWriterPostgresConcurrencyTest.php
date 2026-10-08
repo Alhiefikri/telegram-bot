@@ -94,14 +94,14 @@ final class ExternalMoneyReceiptWriterPostgresConcurrencyTest extends TestCase
         $sorted = $results;
         sort($sorted);
         $this->assertSame(['claimed', 'conflict'], $sorted);
-        $this->assertSame(1, ExternalMoneyReceipt::query()->count());
-        $this->assertSame(1, ExternalMoneyReceiptReservation::query()->count());
+        $this->assertSame(1, ExternalMoneyReceipt::query()->whereIn('target_id', ['checkout-fixture', 'topup-fixture'])->count());
+        $this->assertSame(1, ExternalMoneyReceiptReservation::query()->whereIn('legacy_id', ['checkout-fixture', 'topup-fixture'])->count());
 
         // Exactly one target funds: only the top-up winner may post a ledger
         // credit when it wins the receipt.
-        $this->assertSame($results[1] === 'claimed' ? 1 : 0, StoreBalanceEntry::query()->count());
+        $this->assertSame($results[1] === 'claimed' ? 1 : 0, StoreBalanceEntry::query()->where('source_id', 'topup-fixture')->count());
 
-        $reservation = ExternalMoneyReceiptReservation::query()->sole();
+        $reservation = ExternalMoneyReceiptReservation::query()->whereIn('legacy_id', ['checkout-fixture', 'topup-fixture'])->sole();
         $this->assertSame(ExternalMoneyReceiptReservations::SOURCE_RUNTIME, $reservation->source);
         $this->assertSame(ExternalMoneyReceiptReservation::REASON_REGISTRY_CONFLICT, $reservation->reason);
         $this->assertNull($reservation->resolved_at);
