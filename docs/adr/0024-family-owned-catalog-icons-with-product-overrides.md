@@ -33,6 +33,13 @@ icon with the family icon as its fallback ("kalau ga di custom dia ambil dari ic
 - An override replaces the whole pair. A Product that stores a glyph without an identifier drops the
   family's premium emoji for that Product instead of mixing one Product glyph with a family
   identifier, because the button icon and the text fallback must describe the same icon.
+- Plan rows, Plan-selection button identifiers, and public `/stock` member rows use each Product's
+  effective pair, not the family heading pair. A glyph-only override omits the family's premium
+  identifier; a premium override uses its own identifier. The family heading remains unchanged.
+  This corrects the initial #590 implementation, which still forced the heading icon onto these
+  member surfaces despite resolving their effective icons in the catalog read model.
+  Context7's [Telegram Bot API reference](https://core.telegram.org/bots/api#inlinekeyboardbutton)
+  confirms that `icon_custom_emoji_id` is optional and independent of the button's action.
 - The Store Bot icon screen keeps one row per family. Picking a family opens the family capture
   prompt plus one `🎯 Ikon per Produk` button that lists the family's variants; each variant row
   previews the icon it presents now, marked ✅ when it carries its own override and ⬜ when it
@@ -53,7 +60,7 @@ icon with the family icon as its fallback ("kalau ga di custom dia ambil dari ic
   override, so that Product shows its own glyph where the catalog previously showed the family icon.
   The owner can clear it from the new variant list to inherit again.
 - A family with no icon of its own presents the default `🛍️` glyph; nothing is inferred from member
-  icons any more, so a member override never leaks into the family heading or its Plan buttons.
+  icons any more, so a member override never leaks into the family heading or discovery entry.
 - The family icon is a nullable pair. An empty identifier falls back to the glyph, and
   `CustomEmojiCapability` keeps degrading to Unicode whenever Telegram rejects custom emoji.
 - Changing a family icon invalidates the Telegram catalog projection cache through the existing

@@ -84,7 +84,7 @@ final class TelegramStockIntents
                 'name' => $this->escapeHtml($family->name),
             ]);
             foreach ($members as $member) {
-                $lines[] = $this->variantLine($customer, $member, $icon);
+                $lines[] = $this->variantLine($customer, $member, $this->catalogIcon($member));
             }
         }
 

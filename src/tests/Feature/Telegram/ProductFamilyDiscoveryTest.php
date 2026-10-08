@@ -937,6 +937,16 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'stock' => 2,
             'reserved_stock' => 0,
         ]);
+        Product::factory()->create([
+            'name' => 'Nova 6 Bulan',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 3,
+            'family_option_label' => '6 Bulan',
+            'icon' => '🎯',
+            'custom_emoji_id' => '5368324170671202287',
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
 
         $this->postTelegramWebhook($this->messageUpdate(41221, '/produk', [], 41220))->assertOk();
         $entry = $this->lastMessageContaining('Nova Family')['reply_markup']['inline_keyboard'][0][0];
@@ -947,12 +957,14 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $options = $this->lastMessageContaining('Pilih Plan Nova Family');
         $this->assertStringContainsString('<tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> Pilih Plan Nova Family', (string) $options['text']);
         $this->assertStringContainsString('01. <tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> 1 Bulan', (string) $options['text']);
-        $this->assertStringContainsString('02. <tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> 3 Bulan', (string) $options['text']);
+        $this->assertStringContainsString('02. 🚀 3 Bulan', (string) $options['text']);
         $plans = $options['reply_markup']['inline_keyboard'][0];
         $this->assertSame('5368324170671202286', $plans[0]['icon_custom_emoji_id']);
         $this->assertSame('1', $plans[0]['text']);
-        $this->assertSame('5368324170671202286', $plans[1]['icon_custom_emoji_id'], 'Ikon family dipakai tombol plan meski varian punya ikon sendiri.');
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $plans[1], 'A glyph-only Product override must not borrow the family premium icon.');
         $this->assertSame('2', $plans[1]['text']);
+        $this->assertStringContainsString('03. <tg-emoji emoji-id="5368324170671202287">🎯</tg-emoji> 6 Bulan', (string) $options['text']);
+        $this->assertSame('5368324170671202287', $options['reply_markup']['inline_keyboard'][1][0]['icon_custom_emoji_id']);
 
         $this->postTelegramWebhook($this->callbackUpdate(41223, 'select-override-plan', $plans[1]['callback_data'], [], 41220))->assertOk();
 
@@ -960,6 +972,12 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('🚀 Nova 3 Bulan', (string) $detail['text'], 'Detail varian memakai ikon khusus varian itu.');
         $this->assertStringNotContainsString('📩 Nova 3 Bulan', (string) $detail['text']);
         $this->assertSame('🚀', $override->fresh()->icon, 'Ikon khusus varian tidak diubah oleh render family.');
+
+        $this->postTelegramWebhook($this->messageUpdate(41224, '/stock', [], 41220))->assertOk();
+        $stock = $this->lastMessageContaining('Nova Family');
+        $this->assertStringContainsString('<tg-emoji emoji-id="5368324170671202286">📩</tg-emoji> 1 Bulan', (string) $stock['text']);
+        $this->assertStringContainsString('🚀 3 Bulan', (string) $stock['text']);
+        $this->assertStringContainsString('<tg-emoji emoji-id="5368324170671202287">🎯</tg-emoji> 6 Bulan', (string) $stock['text']);
     }
 
     public function test_product_detail_opened_without_family_navigation_returns_to_the_plan_list(): void
@@ -1076,8 +1094,6 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('🟥 Pilih Plan Netflix', (string) $options['text']);
         $this->assertStringContainsString('Terjual: 0', (string) $options['text']);
         $this->assertStringContainsString('01. 🟥 Premium (No VPN)', (string) $options['text']);
-        $this->assertStringContainsString('02. 🟥 Premium (VPN)', (string) $options['text']);
-        $this->assertStringContainsString('03. 🟥 Extra', (string) $options['text']);
         $this->assertStringContainsString('Harga: Rp25.000', (string) $options['text']);
         $keyboard = $options['reply_markup']['inline_keyboard'];
         $this->assertCount(2, $keyboard[0]);

@@ -108,7 +108,7 @@ The customer-facing name for one Product option inside a Product Family, used by
 _Avoid_: Variant, SKU, subscription tier
 
 **Family catalog icon**:
-The presentation values a Product Family owns for its whole product line: an optional Unicode glyph plus an optional captured Telegram custom emoji identifier. The Store Bot icon screen captures it once per family, and the Admin Dashboard can edit the glyph. Every member Product that stores no icon of its own inherits it for its family heading, Plan rows, variant detail, notifications, and Order-item snapshots. It stays on the family instead of being copied onto each member, so changing it updates every inheriting member without overwriting a member's own icon.
+The presentation values a Product Family owns for its whole product line: an optional Unicode glyph plus an optional captured Telegram custom emoji identifier. The Store Bot icon screen captures it once per family, and the Admin Dashboard can edit the glyph. The family heading always uses this pair. Every member Product that stores no icon of its own inherits it for Plan rows/buttons, public stock rows, variant detail, notifications, and Order-item snapshots; a member override replaces the pair on those member surfaces without changing the heading. It stays on the family instead of being copied onto each member, so changing it updates every inheriting member without overwriting a member's own icon.
 _Avoid_: Derived family icon, per-variant icon copy
 
 **Product catalog icon**:

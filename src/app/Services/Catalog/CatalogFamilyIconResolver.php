@@ -47,8 +47,8 @@ final class CatalogFamilyIconResolver
     }
 
     /**
-     * The icon a family presents for its heading, plan rows, and plan buttons.
-     * Only the family owns this value; member overrides never leak into it.
+     * The icon a family presents for its heading and discovery entry.
+     * Member Plan rows and buttons use forProduct instead.
      */
     public function forFamily(ProductFamily $family): CatalogIconSelection
     {

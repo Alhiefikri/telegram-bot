@@ -179,7 +179,7 @@ class TelegramCatalogIntents
         $lines[] = '';
         foreach ($pageMembers as $index => $member) {
             $number = $index + 1;
-            $lines[] = $this->familyOptionBlock($customer, $member, $number, $familyIcon);
+            $lines[] = $this->familyOptionBlock($customer, $member, $number, $this->catalogIcon($member));
             if ($index < $pageMembers->count() - 1) {
                 $lines[] = '';
             }
@@ -191,9 +191,9 @@ class TelegramCatalogIntents
         }
         $stateToken = $this->catalogQueries->familyState($customer)['token'] ?? null;
         $optionButtons = $pageMembers
-            ->map(function (CatalogProductReadModel $member, int $index) use ($customer, $familyIcon, $family, $page, $returnPage): array {
+            ->map(function (CatalogProductReadModel $member, int $index) use ($customer, $family, $page, $returnPage): array {
                 $label = [
-                    ...$familyIcon->buttonFields(),
+                    ...$this->catalogIcon($member)->buttonFields(),
                     'text' => $this->locale->translate($customer, 'catalog.family.option_button', [
                         'number' => (string) ($index + 1),
                     ]),
@@ -1334,9 +1334,8 @@ class TelegramCatalogIntents
     }
 
     /**
-     * The detail header follows the family icon when this Product has no captured
-     * custom emoji of its own, so the icon the catalog showed for the family is
-     * the one the customer keeps seeing after opening the detail.
+     * The detail header uses the same effective Product icon as its Plan row:
+     * the whole Product override, otherwise the family pair.
      */
     private function detailIcon(Product $product): CatalogIcon
     {
@@ -1346,9 +1345,8 @@ class TelegramCatalogIntents
     }
 
     /**
-     * One icon for the whole family. The family owns it, and every member
-     * without its own icon inherits it, so the heading and the plan rows always
-     * follow the icon the owner set for the family.
+     * The family owns its heading icon. Member overrides affect only their own
+     * Plan rows, buttons, and detail headers.
      */
     private function familyIcon(CatalogFamilyReadModel $family): CatalogIcon
     {
