@@ -18,6 +18,8 @@ use App\Services\Suppliers\SupplierHealthService;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Factory;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -165,9 +167,104 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(0, $this->health()->materialize(), 'Stale data is not an observed error recovery.');
         $supplier->forceFill(['last_error' => null, 'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5), 'balance_observed_at' => now()])->save();
         $this->assertSame(0, $this->health()->materialize());
+        for ($tick = 0; $tick < 5; $tick++) {
+            $this->travel(3)->minutes();
+            $supplier->forceFill(['synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5), 'balance_observed_at' => now()])->save();
+            $this->assertSame(0, $this->health()->materialize());
+        }
         $supplier->forceFill(['last_error' => 'authentication'])->save();
         $this->assertSame(1, $this->health()->materialize());
         $this->assertSame(3, $this->effects()->count());
+    }
+
+    public function test_brief_success_between_transient_failures_does_not_spam_health_alerts(): void
+    {
+        $supplier = $this->supplier(['last_error' => 'transport']);
+        $this->assertSame(1, $this->health()->materialize());
+        Http::fake(fn ($request) => Http::response(str_ends_with($request->url(), '/balance') ? ['balance' => '10'] : ['products' => []]));
+        $this->assertTrue(app(SupplierCatalogSync::class)->sync($supplier));
+        $supplier->refresh();
+        $this->travel(1)->minutes();
+        $supplier->forceFill(['last_error' => 'transport'])->save();
+        $this->assertSame(0, $this->health()->materialize());
+        $this->assertSame(1, $this->effects()->count());
+    }
+
+    public function test_freshness_gap_does_not_count_as_sustained_error_recovery(): void
+    {
+        $supplier = $this->supplier(['last_error' => 'transport']);
+        $this->assertSame(1, $this->health()->materialize());
+        Http::fake(fn ($request) => Http::response(str_ends_with($request->url(), '/balance') ? ['balance' => '10'] : ['products' => []]));
+        $sync = app(SupplierCatalogSync::class);
+        $this->assertTrue($sync->sync($supplier));
+        $this->travel(16)->minutes();
+        $this->assertTrue($sync->sync($supplier));
+        $this->assertSame(0, $this->health()->materialize());
+        $supplier->refresh()->forceFill(['last_error' => 'transport'])->save();
+        $this->assertSame(0, $this->health()->materialize());
+        $this->assertSame(1, $this->effects()->count());
+    }
+
+    public function test_failed_sync_is_not_retried_by_scheduler_or_manual_action_during_backoff(): void
+    {
+        $supplier = $this->supplier();
+        Http::fake(fn () => Http::response([], 503));
+        $sync = app(SupplierCatalogSync::class);
+        $this->assertFalse($sync->sync($supplier));
+        $this->travel(1)->minutes();
+        $this->assertFalse($sync->sync($supplier));
+        $this->artisan('suppliers:sync', ['--supplier' => $supplier->id])->assertSuccessful();
+        Http::assertSentCount(1);
+        $this->travel(1)->minutes();
+        $this->assertFalse($sync->sync($supplier));
+        Http::assertSentCount(2);
+        $this->travel(2)->minutes();
+        $this->assertFalse($sync->sync($supplier));
+        Http::assertSentCount(2);
+        $this->travel(2)->minutes();
+        $this->assertFalse($sync->sync($supplier));
+        Http::assertSentCount(3);
+    }
+
+    public function test_rate_limit_backoff_survives_cache_loss_and_success_resets_failure_count(): void
+    {
+        $supplier = $this->supplier(['reserved_balance_micros' => 2_000_000]);
+        $observed = $supplier->balance_observed_at;
+        Http::fake(fn () => Http::response([], 429, ['Retry-After' => '900']));
+        $sync = app(SupplierCatalogSync::class);
+        $this->assertFalse($sync->sync($supplier));
+        $this->assertSame(1, $supplier->fresh()->sync_failures);
+        Cache::flush();
+        $this->travel(5)->minutes();
+        $this->assertFalse($sync->sync($supplier));
+        $this->artisan('suppliers:sync')->assertSuccessful();
+        Http::assertSentCount(1);
+        $this->assertTrue($observed->equalTo($supplier->fresh()->balance_observed_at));
+        $this->assertSame(2_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->travel(10)->minutes();
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn ($request) => Http::response(str_ends_with($request->url(), '/balance') ? ['balance' => '8'] : ['products' => []]));
+        $this->assertTrue($sync->sync($supplier));
+        $this->assertSame(0, $supplier->fresh()->sync_failures);
+        $this->assertNull($supplier->fresh()->last_error);
+        $this->assertSame(8_000_000, $supplier->fresh()->balance_micros);
+    }
+
+    public function test_scheduler_spaces_prodseller_catalog_reads_to_leave_recovery_budget(): void
+    {
+        $supplier = $this->supplier(['synced_at' => null, 'sync_expires_at' => null]);
+        $products = array_map(fn ($id) => ['id' => 'sku-'.$id, 'name' => 'Fixture', 'price' => '1', 'stock' => 1], range(1, 30));
+        Http::fake(fn ($request) => Http::response(str_ends_with($request->url(), '/balance') ? ['balance' => '10'] : ['products' => $products]));
+        $this->artisan('suppliers:sync')->assertSuccessful();
+        Http::assertSentCount(2);
+        $this->travel(2)->minutes();
+        $this->artisan('suppliers:sync')->assertSuccessful();
+        Http::assertSentCount(2);
+        $this->travel(1)->minutes();
+        $this->artisan('suppliers:sync')->assertSuccessful();
+        Http::assertSentCount(4);
+        $this->assertTrue($supplier->fresh()->sync_expires_at->isFuture());
     }
 
     public function test_sync_owns_observations_but_only_materialization_owns_low_alert_marker(): void
@@ -494,9 +591,14 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $this->assertNull($supplier->fresh()->balance_observed_at);
         $this->assertNull($supplier->fresh()->last_error);
         $this->assertSame(0, $this->health()->materialize());
+        for ($tick = 0; $tick < 5; $tick++) {
+            $this->travel(3)->minutes();
+            $this->assertTrue(app(SupplierCatalogSync::class)->sync($supplier));
+            $this->assertSame($tick === 4 ? 2 : 0, $this->health()->materialize(), 'The withheld wallet and aged hold retain their separate alerts.');
+        }
         $supplier->refresh()->forceFill(['last_error' => 'authentication'])->save();
         $this->assertSame(1, $this->health()->materialize());
-        $this->assertSame(2, $this->effects()->count());
+        $this->assertSame(4, $this->effects()->count());
         $this->assertNull($supplier->fresh()->low_balance_alerted_at);
     }
 

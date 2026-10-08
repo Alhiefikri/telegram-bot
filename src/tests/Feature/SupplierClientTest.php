@@ -476,6 +476,76 @@ class SupplierClientTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    public function test_upstream_rate_limit_defers_all_accounts_until_retry_after_without_more_http(): void
+    {
+        $this->freezeTime();
+        $supplier = $this->supplier('prodseller');
+        $other = $this->supplier('prodseller')->forceFill(['id' => 124, 'api_key' => 'another-fixture-key']);
+        $this->fake(fn () => Http::response([], 429, ['Retry-After' => '120']));
+        $client = app(SupplierClient::class);
+        foreach ([$supplier, $other, $supplier] as $connection) {
+            try {
+                $client->snapshot($connection);
+                $this->fail('Rate-limited snapshots must fail closed.');
+            } catch (SupplierUnavailable $exception) {
+                $this->assertSame('rate_limited', $exception->errorCode);
+            }
+        }
+        Http::assertSentCount(1);
+        $this->travel(120)->seconds();
+        $fixture = self::fixture('prodseller');
+        $this->fake(fn ($request) => Http::response(match (parse_url($request->url(), PHP_URL_PATH)) {
+            '/v1/balance' => $fixture['account'],
+            '/v1/products' => $fixture['catalog'],
+            default => $fixture['product_detail'],
+        }));
+        $this->assertSame(47, $client->snapshot($supplier)->products[0]->stock);
+        Http::assertSentCount(3);
+    }
+
+    public function test_http_date_retry_after_defers_requests_until_the_advertised_instant(): void
+    {
+        $this->freezeTime();
+        $supplier = $this->supplier('prodseller');
+        $this->fake(fn () => Http::response([], 429, ['Retry-After' => now()->addSeconds(180)->utc()->format(DATE_RFC7231)]));
+        $client = app(SupplierClient::class);
+        foreach ([0, 179] as $seconds) {
+            $this->travel($seconds)->seconds();
+            try {
+                $client->snapshot($supplier);
+                $this->fail('The advertised cooldown must suppress the request.');
+            } catch (SupplierUnavailable $exception) {
+                $this->assertSame('rate_limited', $exception->errorCode);
+                $this->assertSame(180 - $seconds, $exception->retryAfterSeconds);
+            }
+        }
+        Http::assertSentCount(1);
+        $this->travel(1)->seconds();
+        $this->fake(fn ($request) => Http::response(str_ends_with($request->url(), '/balance') ? ['balance' => '10'] : ['products' => []]));
+        $this->assertSame(10_000_000, $client->snapshot($supplier)->balanceMicros);
+        Http::assertSentCount(2);
+    }
+
+    public function test_pooled_detail_rate_limit_stops_subsequent_supplier_reads(): void
+    {
+        $supplier = $this->supplier('prodseller');
+        $this->fake(fn ($request) => match (parse_url($request->url(), PHP_URL_PATH)) {
+            '/v1/balance' => Http::response(['balance' => '10']),
+            '/v1/products' => Http::response(['products' => [['id' => 'sku-1', 'name' => 'Fixture', 'price' => '1']]]),
+            default => Http::response([], 429, ['Retry-After' => '300']),
+        });
+        $client = app(SupplierClient::class);
+        foreach ([0, 1] as $attempt) {
+            try {
+                $client->snapshot($supplier);
+                $this->fail('A rate-limited detail must not produce a snapshot.');
+            } catch (SupplierUnavailable $exception) {
+                $this->assertSame('rate_limited', $exception->errorCode);
+            }
+        }
+        Http::assertSentCount(3);
+    }
+
     public function test_read_budget_is_shared_across_accounts_but_retains_purchase_capacity(): void
     {
         $supplier = $this->supplier('warzone');

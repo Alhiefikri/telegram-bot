@@ -10,6 +10,7 @@ use App\Models\SupplierPurchase;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Throwable;
@@ -20,6 +21,8 @@ final class SupplierHealthService
     public const OBSERVATION_ALERT_SECONDS = 900;
 
     public const HOLD_ALERT_SECONDS = 900;
+
+    public const ERROR_RECOVERY_SECONDS = 900;
 
     private const ERRORS = [
         'authentication' => 'Autentikasi gagal. Verifikasi akses akun supplier.',
@@ -158,15 +161,24 @@ final class SupplierHealthService
                     }
                 }
                 $error = $supplier->last_error;
+                $recoveredAt = $state?->error_recovered_at;
                 if (isset(self::ERRORS[$error]) && ! in_array($error, $codes, true)) {
                     $groups[$id]['errors'][] = $error;
                     $codes[] = $error;
-                } elseif ($error === null && $fresh) {
-                    $codes = [];
+                }
+                if ($error !== null || ! $fresh) {
+                    $recoveredAt = null;
+                } elseif ($fresh && $codes !== []) {
+                    $recoveredAt ??= now()->toDateTimeString();
+                    if (CarbonImmutable::parse($recoveredAt)->lte(now()->subSeconds(self::ERROR_RECOVERY_SECONDS))) {
+                        $codes = [];
+                        $recoveredAt = null;
+                    }
                 }
                 DB::table('supplier_health_states')->updateOrInsert(['supplier_id' => $id], [
                     'low_active' => $lowActive, 'error_codes' => json_encode($codes, JSON_THROW_ON_ERROR),
                     'balance_stale_active' => $stale,
+                    'error_recovered_at' => $recoveredAt,
                 ]);
             }
             $count = 0;
@@ -190,7 +202,10 @@ final class SupplierHealthService
     /** Called under the sync owner's Supplier lock after a valid normal read. */
     public function observeRecovery(Supplier $supplier, bool $balanceObserved): void
     {
-        $values = ['error_codes' => '[]'];
+        // A single successful read is not recovery from a flapping connection.
+        DB::table('supplier_health_states')->where('supplier_id', $supplier->id)->whereNull('error_recovered_at')
+            ->update(['error_recovered_at' => now()]);
+        $values = [];
         if ($supplier->low_balance_threshold_micros <= 0
             || ($balanceObserved && $supplier->balance_micros !== null && $this->available($supplier) > $supplier->low_balance_threshold_micros)) {
             $values['low_active'] = false;
@@ -199,7 +214,9 @@ final class SupplierHealthService
         if ($balanceObserved) {
             $values['balance_stale_active'] = false;
         }
-        DB::table('supplier_health_states')->where('supplier_id', $supplier->id)->update($values);
+        if ($values !== []) {
+            DB::table('supplier_health_states')->where('supplier_id', $supplier->id)->update($values);
+        }
     }
 
     public function dispatchDue(int $limit = 25): int

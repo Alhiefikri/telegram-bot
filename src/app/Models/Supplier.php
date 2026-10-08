@@ -28,6 +28,8 @@ class Supplier extends Model
             'sync_expires_at' => 'immutable_datetime',
             'balance_observed_at' => 'immutable_datetime',
             'sync_attempted_at' => 'immutable_datetime',
+            'sync_next_attempt_at' => 'immutable_datetime',
+            'sync_failures' => 'integer',
             'sync_lease_expires_at' => 'immutable_datetime',
             'low_balance_threshold_micros' => 'integer',
             'low_balance_alerted_at' => 'immutable_datetime',

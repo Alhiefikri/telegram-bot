@@ -31,6 +31,8 @@ final class SyncSuppliers extends Command
                     ->orWhereNull('sync_expires_at')
                     ->orWhere('sync_expires_at', '<=', now()->addMinute())),
             )
+            ->where(fn ($query) => $query->whereNull('sync_next_attempt_at')->orWhere('sync_next_attempt_at', '<=', now())
+                ->when($supplierId !== null, fn ($manual) => $manual->orWhere('sync_failures', 0)))
             ->where(fn ($query) => $query->whereNull('sync_token')->orWhere('sync_lease_expires_at', '<=', now()))
             ->orderByRaw('CASE WHEN sync_attempted_at IS NULL THEN 0 ELSE 1 END')->orderBy('sync_attempted_at')->orderBy('id')
             ->limit($limit)->get();

@@ -191,6 +191,7 @@ final class SupplierAvailabilityTest extends TestCase
         $this->assertSame(10, $product->fresh()->supplier_available_stock);
         app(SupplierAvailability::class)->refreshProducts([$product->id]);
         $this->assertSame(10, $product->fresh()->supplier_available_stock);
+        $this->travel(2)->minutes();
         $this->snapshot('10', 20);
         $this->assertTrue(app(SupplierCatalogSync::class)->sync($supplier));
         $this->assertSame(10, $product->fresh()->availableStock());

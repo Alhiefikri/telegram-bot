@@ -46,8 +46,10 @@ An account supports multiple SKUs with one credential. Adding another SKU from a
 - While any supplier purchase has an unresolved, uncommitted debit, sync retains the existing wallet observation: the provider may already have charged that purchase. Catalog freshness still updates, but local finalization must not subtract the same debit from an already-reduced wallet.
 - If supplier balance is insufficient and no equivalent funded source is available, customer sees the ordinary unavailable state. Private Admin shows the funding warning.
 - A genuine authoritative unavailable-to-available Product transition reuses existing Telegram/Store Channel restock notifications and Web waitlist events. Repeated sync, recovery from a transient outage, or restock of an unused primary while a backup remained available must not create duplicate announcements.
-- Top-up yang dilakukan langsung di supplier dideteksi pada tick sync berikutnya setelah snapshot berusia satu menit; Admin **Sinkron katalog dan saldo** dapat meminta refresh langsung. Provider outage/rate limit dan antrean akun tetap dapat menunda observasi, bukan mengotorisasi stok dari saldo yang belum terbukti.
+- Top-up langsung di supplier dideteksi pada tick sync yang sudah jatuh tempo. Koneksi sehat biasanya dibaca paling cepat tiap menit; ProdSeller memakai interval konservatif `max(60, ceil((jumlah SKU + 2) × 900 / 180))` detik karena setiap SKU bisa membutuhkan detail GET. Ini mengurangi full-catalog polling dan menyisakan budget untuk recovery/purchase. Freshness checkout tetap lima menit; katalog besar yang tidak dapat diperbarui dalam budget akan kedaluwarsa, **bukan** mendapat freshness palsu.
 - Angka public adalah kapasitas pembelian aman, bukan raw stock supplier. Jika tetap 4 setelah sync berhasil, bandingkan saldo tersedia (total dikurangi dana ditahan), biaya/unit, unit ditahan, batas quantity provider, dan harga tier retail mulai quantity 5 terhadap minimum profit/buffer. Saldo dan raw stock besar tidak boleh melewati tier yang membuat pembelian rugi. Purchase dengan debit belum terselesaikan tetap menjaga wallet observation sebelumnya; selesaikan recovery, jangan menghapus hold.
+- Kegagalan sync menyimpan `sync_failures` dan `sync_next_attempt_at` di DB: jeda 2, 4, 8, 16, lalu maksimal 30 menit. HTTP 429 dan local budget exhaustion menunggu setidaknya cooldown yang diketahui; sukses mereset failure count. Scheduler, `--supplier`, dan tombol Admin tidak dapat melewati backoff kegagalan, termasuk setelah Redis/cache hilang. Manual sync koneksi sehat tetap dapat meminta refresh sebelum interval otomatis.
+- Client supplier umum menyimpan cooldown bersama per provider setelah HTTP 429, termasuk response pooled detail; `Retry-After` menerima seconds atau HTTP-date (maksimal satu jam), dengan fallback 15 menit untuk ProdSeller dan satu menit untuk provider lain. Selama cooldown, GET/POST berhenti sebelum HTTP. Local limiter tetap memisahkan read budget dari kapasitas purchase; tidak ada retry POST otomatis atau perubahan aturan ambiguity. BuyMail mempertahankan limiter/cooldown adapter existing.
 
 ### Automated pricing regression
 
@@ -98,8 +100,12 @@ yang didukung; mutex tetap bukan otoritas dedupe.
   history tidak dihapus.
 - Authentication, invalid key, credential unreadable, rate limit, dan transport
   masing-masing memberi satu alert per kode dalam episode error aktif.
-  A→B→A tanpa normal recovery tidak mengulang A. Pesan hanya memakai alasan
-  allowlisted, tidak exception/header/body provider atau credential.
+  A→B→A tidak mengulang A. Episode baru hanya di-rearm setelah **15 menit
+  observasi koneksi sehat**, bukan satu sync sukses di antara error. Error baru
+  atau gap freshness mereset waktu recovery; wallet yang ditahan tidak menghalangi
+  recovery koneksi. Review/hold/low-wallet tetap memakai episode sendiri, tidak
+  disenyapkan oleh cooldown error. Pesan hanya memakai alasan allowlisted,
+  tidak exception/header/body provider atau credential.
 - Review/ambigu baru didedupe menurut identity record + `health_review_episode`,
   bukan state, total count, atau supplier version. `ambiguous → review` maupun
   recovery read dalam episode yang sama tidak mengirim ulang. Purchase unresolved

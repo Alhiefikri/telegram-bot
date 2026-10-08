@@ -20,7 +20,8 @@ final class SupplierCatalogSync
     public function sync(Supplier $supplier): bool
     {
         $connection = Supplier::query()->find($supplier->id);
-        if ($connection === null || ! $connection->is_active) {
+        if ($connection === null || ! $connection->is_active
+            || ($connection->sync_failures > 0 && $connection->sync_next_attempt_at?->isFuture())) {
             return false;
         }
         $token = (string) Str::uuid();
@@ -28,6 +29,8 @@ final class SupplierCatalogSync
         // A durable lease suppresses concurrent scheduler/manual reads without
         // holding a financial transaction across provider HTTP.
         if (Supplier::query()->whereKey($connection->id)->where('version', $version)
+            ->where(fn ($query) => $query->where('sync_failures', 0)
+                ->orWhereNull('sync_next_attempt_at')->orWhere('sync_next_attempt_at', '<=', now()))
             ->where(fn ($query) => $query->whereNull('sync_token')->orWhere('sync_lease_expires_at', '<=', now()))
             ->update(['sync_token' => $token, 'sync_attempted_at' => now(), 'sync_lease_expires_at' => now()->addMinute()]) !== 1) {
             return false;
@@ -40,7 +43,7 @@ final class SupplierCatalogSync
                 return false;
             }
         } catch (SupplierUnavailable $exception) {
-            $this->fail($connection->id, $version, $token, $exception->errorCode);
+            $this->fail($connection->id, $version, $token, $exception->errorCode, $exception->retryAfterSeconds);
 
             return false;
         }
@@ -111,10 +114,19 @@ final class SupplierCatalogSync
                     ->whereNotIn('external_id', array_column($rows, 'external_id'))
                     ->update(['stock' => 0, 'orderable' => false, 'synced_at' => $now, 'updated_at' => $now]);
                 $balance = $balanceBlocked ? $locked->balance_micros : $snapshot->balanceMicros;
+                if ($locked->sync_expires_at?->isFuture() !== true) {
+                    DB::table('supplier_health_states')->where('supplier_id', $locked->id)->update(['error_recovered_at' => null]);
+                }
                 $locked->forceFill([
                     'balance_micros' => $balance,
                     'balance_observed_at' => $balanceBlocked ? $locked->balance_observed_at : $now,
                     'synced_at' => $now,
+                    // Reserve headroom for exact-order recovery and purchases.
+                    // ProdSeller may require a detail GET for every catalog row.
+                    'sync_next_attempt_at' => $now->copy()->addSeconds($locked->provider === 'prodseller'
+                        ? max(60, (int) ceil((count($snapshot->products) + 2) * 900 / 180))
+                        : 60),
+                    'sync_failures' => 0,
                     'sync_expires_at' => $now->copy()->addSeconds(self::FRESHNESS_SECONDS),
                     'sync_token' => null,
                     'sync_lease_expires_at' => null,
@@ -149,7 +161,7 @@ final class SupplierCatalogSync
             ->orderBy('product_id')->pluck('product_id')->unique()->map(fn ($id): int => (int) $id)->values()->all();
     }
 
-    private function fail(int $supplierId, int $version, string $token, string $code): void
+    private function fail(int $supplierId, int $version, string $token, string $code, int $retryAfterSeconds = 0): void
     {
         if ($code === 'currency_mismatch') {
             $ids = $this->affectedProducts($supplierId);
@@ -181,7 +193,18 @@ final class SupplierCatalogSync
             return;
         }
         // Preserve observed data/freshness; a failed GET is not evidence of sold-out inventory.
-        Supplier::query()->whereKey($supplierId)->where('version', $version)->where('sync_token', $token)
-            ->update(['sync_token' => null, 'sync_lease_expires_at' => null, 'last_error' => $code]);
+        DB::transaction(function () use ($supplierId, $version, $token, $code, $retryAfterSeconds): void {
+            $supplier = Supplier::query()->whereKey($supplierId)->lockForUpdate()->first();
+            if ($supplier === null || $supplier->version !== $version || $supplier->sync_token !== $token) {
+                return;
+            }
+            $failures = min(10, $supplier->sync_failures + 1);
+            $delay = max($retryAfterSeconds, min(1800, 120 * (2 ** ($failures - 1))));
+            $supplier->forceFill([
+                'sync_token' => null, 'sync_lease_expires_at' => null, 'last_error' => $code,
+                'sync_failures' => $failures, 'sync_next_attempt_at' => now()->addSeconds($delay),
+            ])->save();
+            DB::table('supplier_health_states')->where('supplier_id', $supplierId)->update(['error_recovered_at' => null]);
+        }, 5);
     }
 }

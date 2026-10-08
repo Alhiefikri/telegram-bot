@@ -6,7 +6,7 @@ use RuntimeException;
 
 final class SupplierUnavailable extends RuntimeException
 {
-    public function __construct(public readonly string $errorCode = 'unavailable')
+    public function __construct(public readonly string $errorCode = 'unavailable', public readonly int $retryAfterSeconds = 0)
     {
         // No provider body, URL, key, or original exception chain is retained.
         parent::__construct('Supplier unavailable: '.$errorCode.'.');

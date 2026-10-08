@@ -342,7 +342,8 @@ final class SupplierClient
     {
         $response = $this->send($supplier, 'GET', $path, deadline: $deadline, allowInactive: $allowInactive);
         if (! $response->successful()) {
-            throw new SupplierUnavailable($this->httpCode($response->status()));
+            throw new SupplierUnavailable($this->httpCode($response->status()),
+                $response->status() === 429 ? $this->retryAfterSeconds(SupplierProvider::from($supplier->provider), $response) : 0);
         }
 
         return $this->payload($response, $supplier->api_key);
@@ -371,6 +372,11 @@ final class SupplierClient
         } catch (Throwable) {
             throw new SupplierUnavailable(hrtime(true) >= $deadline ? 'snapshot_timeout' : 'transport');
         }
+        foreach ($responses as $response) {
+            if ($response instanceof Response) {
+                $this->observeRateLimit($provider, $response);
+            }
+        }
         $details = [];
         foreach ($ids as $id) {
             $response = $responses[$id] ?? null;
@@ -378,7 +384,8 @@ final class SupplierClient
                 throw new SupplierUnavailable(hrtime(true) >= $deadline ? 'snapshot_timeout' : 'transport');
             }
             if (! $response->successful()) {
-                throw new SupplierUnavailable($this->httpCode($response->status()));
+                throw new SupplierUnavailable($this->httpCode($response->status()),
+                    $response->status() === 429 ? $this->retryAfterSeconds($provider, $response) : 0);
             }
             $detail = $this->payload($response, $supplier->api_key);
             if ($this->identifier($detail['id'] ?? null) !== $id) {
@@ -399,12 +406,15 @@ final class SupplierClient
             throw new SupplierUnavailable('snapshot_timeout');
         }
         try {
-            return $this->request($supplier, Http::acceptJson(), $timeout, $headers)
+            $response = $this->request($supplier, Http::acceptJson(), $timeout, $headers)
                 ->send($method, $provider->baseUrl().$path, $method === 'POST' ? ['json' => $body] : []);
         } catch (Throwable) {
             // Even an oversized response can follow a successful purchase.
             throw new SupplierUnavailable($deadline !== null && hrtime(true) >= $deadline ? 'snapshot_timeout' : 'transport');
         }
+        $this->observeRateLimit($provider, $response);
+
+        return $response;
     }
 
     private function request(Supplier $supplier, PendingRequest $request, float $timeout, array $headers = []): PendingRequest
@@ -431,6 +441,40 @@ final class SupplierClient
             ]);
     }
 
+    private function retryAfterSeconds(SupplierProvider $provider, Response $response): int
+    {
+        $retry = trim((string) $response->header('Retry-After'));
+        $seconds = $provider === SupplierProvider::ProdSeller ? 900 : 60;
+        if ($retry !== '' && ctype_digit($retry)) {
+            $seconds = min(3600, max(1, (int) $retry));
+        } elseif ($retry !== '') {
+            try {
+                $seconds = min(3600, max(1, CarbonImmutable::parse($retry)->getTimestamp() - now()->getTimestamp()));
+            } catch (Throwable) {
+                // Malformed headers retain the provider's conservative fallback.
+            }
+        }
+
+        return $seconds;
+    }
+
+    private function observeRateLimit(SupplierProvider $provider, Response $response): void
+    {
+        if ($response->status() !== 429) {
+            return;
+        }
+        $seconds = $this->retryAfterSeconds($provider, $response);
+        $global = 'supplier:budget:'.$provider->value;
+        try {
+            Cache::lock($global.':lock', 5)->block(2, function () use ($global, $seconds): void {
+                $until = max((int) Cache::get($global.':cooldown', 0), now()->getTimestamp() + $seconds);
+                Cache::put($global.':cooldown', $until, $until - now()->getTimestamp());
+            });
+        } catch (Throwable) {
+            throw new SupplierUnavailable('rate_limited', $seconds);
+        }
+    }
+
     private function budget(Supplier $supplier, SupplierProvider $provider, bool $read): void
     {
         [$maximum, $seconds, $readMaximum] = match ($provider) {
@@ -448,6 +492,10 @@ final class SupplierClient
         $account = $global.':'.hash('sha256', $supplier->api_key);
         try {
             Cache::lock($global.':lock', 5)->block(2, function () use ($global, $account, $maximum, $seconds, $readMaximum, $read): void {
+                $remaining = (int) Cache::get($global.':cooldown', 0) - now()->getTimestamp();
+                if ($remaining > 0) {
+                    throw new SupplierUnavailable('rate_limited', $remaining);
+                }
                 $buckets = [$global => $maximum, $account => $maximum];
                 if ($read) {
                     $buckets[$global.':reads'] = $readMaximum;
@@ -455,13 +503,15 @@ final class SupplierClient
                 }
                 foreach ($buckets as $key => $limit) {
                     if (RateLimiter::tooManyAttempts($key, $limit)) {
-                        throw new SupplierUnavailable('rate_limited');
+                        throw new SupplierUnavailable('rate_limited', max(1, RateLimiter::availableIn($key)));
                     }
                 }
                 foreach ($buckets as $key => $limit) {
                     RateLimiter::hit($key, $seconds);
                 }
             });
+        } catch (SupplierUnavailable $exception) {
+            throw $exception;
         } catch (Throwable) {
             throw new SupplierUnavailable('rate_limited');
         }
