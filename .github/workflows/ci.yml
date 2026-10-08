@@ -48,7 +48,7 @@ jobs:
     needs: [workflow-security]
     container:
       image: ubuntu:24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:16-alpine
