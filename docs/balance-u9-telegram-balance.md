@@ -9,6 +9,7 @@ U9 implements work package **P4/P7** of [#536](https://github.com/Alhiefikri/tel
 | USDT section of the private Saldo screen | `TelegramMenuIntents::usdtBalanceSection()` | none: projection read with honest unavailable/frozen states |
 | USDT chooser, exact preview, status and history surfaces | `TelegramUsdtBalanceIntents` | none: rendering only |
 | USDT callback + `/usdt` command adapter | `TelegramUsdtFundingCallbackHandler` | delegates to U6 confirm/cancel/hints; never credits |
+| `/usdt-return <top-up-id> <amount> <destination>` | `TelegramUsdtFundingCallbackHandler` → `TelegramUsdtFundingActions::authorizeExternalReturn()` | records only the Customer-scoped destination authorization; never sends funds |
 | `/usdt <amount>` preview | `TelegramUsdtFundingActions::preview()` (U6) | none before Confirm |
 | bounded personal history read model | `CustomerUsdtActivityService` | none: keyset read of ledger entries and open targets |
 | `usdt:check` / `usdt:hash` status actions | `UsdtTopUpStatusReader`, `UsdtTopUpSettlement::submit()` (U7) | hint only; never evidence |

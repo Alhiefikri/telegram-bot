@@ -77,6 +77,53 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
         return preg_match('/\A\/usdt(?:@[A-Za-z0-9_]{1,32})?(?:[ \t]|\z)/D', trim($text)) === 1;
     }
 
+    public function isExternalReturnCommand(string $text): bool
+    {
+        return preg_match('/\A\/usdt-return(?:@[A-Za-z0-9_]{1,32})?(?:[ \t]|\z)/D', trim($text)) === 1;
+    }
+
+    /**
+     * Record a Customer-authorized external-return destination. This does not
+     * send funds; the Owner review still requires distinct verified outbound
+     * evidence before resolving the top-up.
+     */
+    public function handleExternalReturnCommand(Customer $customer, string $chatId, string $text): void
+    {
+        if (preg_match('/\A\/usdt-return(?:@[A-Za-z0-9_]{1,32})?[ \t]+([0-9a-fA-F-]{36})[ \t]+([^ \t]+)[ \t]+(0x[0-9a-fA-F]{40})\z/D', trim($text), $matches) !== 1) {
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'balance.usdt.return.usage'));
+
+            return;
+        }
+        $root = $this->roots->currentForChat($customer, $chatId)
+            ?? $this->roots->establishText($customer, $chatId, $this->usdt->topUpSurface($customer));
+
+        try {
+            $authorization = $this->funding->authorizeExternalReturn(
+                (string) $customer->telegram_id,
+                $chatId,
+                'private',
+                (int) $root->message_id,
+                $matches[1],
+                $matches[2],
+                $matches[3],
+                bin2hex(random_bytes(16)),
+            );
+        } catch (\Throwable $error) {
+            if (! $error instanceof AuthorizationException && ! $error instanceof \DomainException && ! $error instanceof InvalidArgumentException) {
+                throw $error;
+            }
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'balance.usdt.return.invalid'));
+
+            return;
+        }
+
+        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'balance.usdt.return.authorized', [
+            'authorization' => (string) $authorization->id,
+            'amount' => $matches[2],
+            'destination' => strtolower($matches[3]),
+        ]));
+    }
+
     public function supports(TelegramCallbackContext $context): bool
     {
         $data = $context->data;

@@ -12,6 +12,8 @@ use App\Services\MoneyReceipts\MoneyReceiptIdentity;
 use App\Services\MoneyReceipts\MoneyReceiptParentClaim;
 use App\Services\MoneyReceipts\MoneyReceiptTarget;
 use App\Services\MoneyReceipts\VerifiedMoneyReceipt;
+use App\Services\Telegram\Callbacks\TelegramUsdtFundingCallbackHandler;
+use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramUsdtFundingActions;
 use App\Services\UsdtBalance\UsdtReceiptReconciliation;
 use App\Services\UsdtFunding\CustomerUsdtFundingRelease;
@@ -287,6 +289,27 @@ class UsdtTopUpReviewTest extends UsdtTopUpTestCase
                 $this->assertSame(0, DB::table('usdt_top_up_external_return_authorizations')->count());
             }
         }
+    }
+
+    public function test_private_return_command_routes_customer_authorization_without_sending_funds(): void
+    {
+        $bot = \Mockery::mock(TelegramBotClient::class);
+        $bot->shouldReceive('sendMessage')->once()->andReturn(['ok' => true, 'result' => ['message_id' => 101]]);
+        $this->app->instance(TelegramBotClient::class, $bot);
+        $destination = '0x'.str_repeat('7', 40);
+        app(\App\Services\Telegram\TelegramMessageRouter::class)->route(
+            $this->customer,
+            '951001',
+            ['text' => '/usdt-return '.$this->target->id.' 1 '.$destination],
+            'private',
+        );
+
+        $authorization = DB::table('usdt_top_up_external_return_authorizations')->sole();
+        $this->assertSame($this->target->id, $authorization->top_up_id);
+        $this->assertSame((string) $this->customer->id, (string) $authorization->customer_id);
+        $this->assertSame('1000000', (string) $authorization->amount_micro);
+        $this->assertSame($destination, $authorization->destination_address);
+        $this->assertSame(0, DB::table('usdt_treasury_movements')->count());
     }
 
     public function test_pasted_sender_address_does_not_authorize_external_refund(): void

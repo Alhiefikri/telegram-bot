@@ -110,6 +110,19 @@ class TelegramMessageRouter
             return;
         }
 
+        if ($this->usdtFunding->isExternalReturnCommand($text)) {
+            $this->session->forgetWithLock($customer);
+            $this->catalogQueries->forget($customer);
+            if (! $isPrivateChat) {
+                $this->chatPrivacy->denyMessage($customer, $chatId);
+
+                return;
+            }
+            $this->usdtFunding->handleExternalReturnCommand($customer, $chatId, $text);
+
+            return;
+        }
+
         if ($text === '🛠️ Admin Dashboard') {
             $this->session->forgetWithLock($customer);
             if (! $this->adminAccess->isAdmin($customer, $chatId)) {
@@ -363,6 +376,7 @@ class TelegramMessageRouter
             '/stok',
         ], true)
             || $this->balanceFunding->isDepositCommand($text)
+            || $this->usdtFunding->isExternalReturnCommand($text)
             || $this->usdtFunding->isUsdtCommand($text)
             || str_starts_with($text, '/payment ')
             || str_starts_with($text, '/order ')
