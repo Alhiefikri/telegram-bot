@@ -192,6 +192,17 @@ final class AdminSupplierController extends Controller
                     $request->string('history_timezone')->toString(),
                     $request->ip(),
                     $request->integer('purchase_id'),
+                    $request->filled('purchase_version') ? $request->string('purchase_version')->toString() : null,
+                ),
+                'history_confirm' => $history->confirmCandidate(
+                    (int) $fulfillment->id,
+                    $request->attributes->get('adminUser'),
+                    $request->integer('history_reconciliation_id'),
+                    $request->string('supplier_order_id')->toString(),
+                    $request->string('proof_note')->toString(),
+                    $request->ip(),
+                    $request->integer('purchase_id'),
+                    $request->string('purchase_version')->toString(),
                 ),
             };
         } catch (InvalidOrderTransition|InsufficientStock|\DomainException|InvalidArgumentException|ValidationException $exception) {

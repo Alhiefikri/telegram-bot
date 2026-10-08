@@ -22,9 +22,9 @@ final class SupplierOrderHistoryReconciliationService
         private readonly AuditLogger $audit,
     ) {}
 
-    public function reconcile(int $fulfillmentId, User $actor, string $timezone, ?string $ip = null, ?int $expectedPurchaseId = null): SupplierOrderHistoryReconciliation
+    public function reconcile(int $fulfillmentId, User $actor, string $timezone, ?string $ip = null, ?int $expectedPurchaseId = null, ?string $expectedPurchaseVersion = null): SupplierOrderHistoryReconciliation
     {
-        return $this->scan($fulfillmentId, $actor, $timezone, $ip, $expectedPurchaseId);
+        return $this->scan($fulfillmentId, $actor, $timezone, $ip, $expectedPurchaseId, $expectedPurchaseVersion);
     }
 
     /** At most three read-only scans; evidence never automatically releases a hold. */
@@ -40,9 +40,12 @@ final class SupplierOrderHistoryReconciliationService
         }
     }
 
-    private function scan(int $fulfillmentId, ?User $actor, string $timezone, ?string $ip = null, ?int $expectedPurchaseId = null): SupplierOrderHistoryReconciliation
+    private function scan(int $fulfillmentId, ?User $actor, string $timezone, ?string $ip = null, ?int $expectedPurchaseId = null, ?string $expectedPurchaseVersion = null): SupplierOrderHistoryReconciliation
     {
-        $request = DB::transaction(function () use ($fulfillmentId, $actor, $timezone, $expectedPurchaseId): array {
+        if (DB::transactionLevel() !== 0) {
+            throw new InvalidOrderTransition('History transport cannot run inside a transaction.');
+        }
+        $request = DB::transaction(function () use ($fulfillmentId, $actor, $timezone, $expectedPurchaseId, $expectedPurchaseVersion): array {
             $initial = SupplierFulfillment::query()->findOrFail($fulfillmentId);
             $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
             Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
@@ -54,13 +57,16 @@ final class SupplierOrderHistoryReconciliationService
             if ($expectedPurchaseId !== null && $purchase?->id !== $expectedPurchaseId) {
                 throw new InvalidOrderTransition('Purchase berubah sejak form dibuka. Muat ulang bukti.');
             }
+            if ($expectedPurchaseVersion !== null && $purchase?->updated_at?->format('Y-m-d H:i:s') !== $expectedPurchaseVersion) {
+                throw new InvalidOrderTransition('Purchase version berubah. Muat ulang bukti.');
+            }
             if ($purchase === null || $purchase->committed_at !== null || $purchase->supplier_order_id !== null
                 || $purchase->dispatched_at === null || $purchase->lease_expires_at?->isFuture()
                 || ! in_array($purchase->state, ['ambiguous', 'review'], true)) {
                 throw new InvalidOrderTransition('Purchase ini tidak tersedia untuk rekonsiliasi riwayat order.');
             }
             $supplier = Supplier::query()->findOrFail($purchase->supplier_id);
-            if ($supplier->provider !== 'toolorax') {
+            if (! in_array($supplier->provider, ['toolorax', 'csxstore'], true) || ($actor === null && $supplier->provider !== 'toolorax')) {
                 throw new InvalidOrderTransition('Riwayat order terstruktur belum didukung provider ini.');
             }
             $latest = $purchase->historyReconciliations()->latest('id')->first();
@@ -86,7 +92,10 @@ final class SupplierOrderHistoryReconciliationService
                 'dispatch_at' => $purchase->dispatched_at,
                 'requested_at' => $requestedAt,
                 'observed_at' => $requestedAt,
-                'history_timezone' => $timezone,
+                'history_timezone' => $supplier->provider === 'csxstore' ? 'unknown' : $timezone,
+                'purchase_version' => $purchase->updated_at->format('Y-m-d H:i:s'),
+                'purchase_claim_token' => $purchase->claim_token,
+                'coverage_kind' => $supplier->provider === 'csxstore' ? 'first_page' : 'qualified_window',
             ]);
 
             return [$purchase->id, $purchase->dispatched_at, $supplier, $reconciliation];
@@ -96,7 +105,27 @@ final class SupplierOrderHistoryReconciliationService
         try {
             $snapshot = $this->client->orderHistory($supplier, $timezone);
             $observedAt = CarbonImmutable::now();
-            [$outcome, $errorCode, $coverageStart, $coverageEnd, $candidateIds] = $this->classify($snapshot, $dispatchAt, $reconciliation->requested_at, $observedAt, $purchaseId);
+            $candidateFacts = [];
+            if ($supplier->provider === 'csxstore') {
+                $purchase = SupplierPurchase::query()->with('catalogItem')->findOrFail($purchaseId);
+                foreach ($snapshot->orders as $row) {
+                    if ((string) $row['product_id'] !== (string) $purchase->catalogItem->external_id) {
+                        continue;
+                    }
+                    $row['match_reasons'] = ['sku_matches'];
+                    $row['match_reasons'][] = $row['quantity'] === $purchase->quantity ? 'quantity_matches' : 'quantity_differs';
+                    $row['match_reasons'][] = $row['total_micros'] === $purchase->expected_cost_micros ? 'expected_cost_matches' : 'expected_cost_differs';
+                    $row['limitations'] = ['identity_not_proven', 'timezone_unknown', 'first_page_only', 'exact_get_required'];
+                    unset($row['created_at']);
+                    $candidateFacts[] = $row;
+                }
+                $candidateIds = array_column($candidateFacts, 'order_id');
+                $outcome = $candidateIds === [] ? SupplierOrderHistoryReconciliation::OUTCOME_INCONCLUSIVE : SupplierOrderHistoryReconciliation::OUTCOME_CANDIDATE_ORDERS;
+                $errorCode = $snapshot->coverageKind === 'truncated' ? 'history_limit_reached' : 'history_coverage_unverified';
+                $coverageStart = $coverageEnd = null;
+            } else {
+                [$outcome, $errorCode, $coverageStart, $coverageEnd, $candidateIds] = $this->classify($snapshot, $dispatchAt, $reconciliation->requested_at, $observedAt, $purchaseId);
+            }
             if ($actor === null && $snapshot->orders !== []) {
                 // ShopBot returns offset-free timestamps. UTC is a parsing placeholder,
                 // not provider qualification; only an operator can attest its timezone.
@@ -115,6 +144,8 @@ final class SupplierOrderHistoryReconciliationService
                 'history_timezone' => $snapshot->timezone,
                 'response_sha256' => $snapshot->responseSha256,
                 'candidate_order_ids' => $candidateIds,
+                'candidate_facts' => $candidateFacts,
+                'coverage_kind' => $snapshot->coverageKind,
                 'observed_at' => $observedAt,
             ];
         } catch (SupplierUnavailable $exception) {
@@ -132,6 +163,19 @@ final class SupplierOrderHistoryReconciliationService
             $this->fulfillments->lockForReview($order);
             $purchase = SupplierPurchase::query()->whereKey($purchaseId)->lockForUpdate()->firstOrFail();
             $locked = SupplierOrderHistoryReconciliation::query()->whereKey($reconciliation->id)->lockForUpdate()->firstOrFail();
+            $fulfillment = SupplierFulfillment::query()->findOrFail($fulfillmentId);
+            if ($fulfillment->current_purchase_id !== $purchaseId
+                || $purchase->updated_at->format('Y-m-d H:i:s') !== $locked->purchase_version
+                || $purchase->claim_token !== $locked->purchase_claim_token
+                || $purchase->committed_at !== null || $purchase->supplier_order_id !== null
+                || $purchase->lease_expires_at?->isFuture()
+                || ! in_array($purchase->state, ['ambiguous', 'review'], true)
+                || (int) $purchase->historyReconciliations()->max('id') !== (int) $locked->id) {
+                $attributes['outcome'] = SupplierOrderHistoryReconciliation::OUTCOME_INVALID;
+                $attributes['error_code'] = 'stale_purchase_scan';
+                $attributes['candidate_facts'] = [];
+                $attributes['candidate_order_ids'] = [];
+            }
             $locked->forceFill($attributes)->save();
             $fulfillment = SupplierFulfillment::query()->findOrFail($fulfillmentId);
             if ($actor === null && $fulfillment->current_purchase_id === $purchaseId && $fulfillment->state === 'review') {
@@ -149,10 +193,48 @@ final class SupplierOrderHistoryReconciliationService
                 'dispatch_at' => $locked->dispatch_at->toIso8601String(),
                 'history_timezone' => $locked->history_timezone,
                 'candidate_count' => count($locked->candidate_order_ids ?? []),
+                'coverage_kind' => $locked->coverage_kind,
             ], $actor, $ip);
 
             return $locked->fresh();
         }, attempts: 5);
+    }
+
+    /** Explicit operator selection supplies captured economics to the sole recovery writer. */
+    public function confirmCandidate(int $fulfillmentId, User $actor, int $historyId, string $orderId, string $note, ?string $ip = null, ?int $expectedPurchaseId = null, ?string $expectedPurchaseVersion = null): SupplierPurchase
+    {
+        $scan = SupplierOrderHistoryReconciliation::query()->findOrFail($historyId);
+        $candidate = collect($scan->candidate_facts ?? [])->firstWhere('order_id', $orderId);
+        if ($candidate === null || $expectedPurchaseId === null || $expectedPurchaseVersion === null) {
+            throw new InvalidOrderTransition('Kandidat atau identity purchase tidak valid.');
+        }
+
+        return $this->fulfillments->confirmDebit(
+            $fulfillmentId, $actor, $orderId, $candidate['quantity'], $candidate['total_micros'],
+            $note, $ip, $expectedPurchaseId, $historyId, $expectedPurchaseVersion,
+        );
+    }
+
+    /** Called under existing recovery locks, before the network claim or committed replay. */
+    public function assertCandidate(SupplierPurchase $purchase, int $historyId, string $orderId, int $quantity, int $costMicros, ?string $version, bool $replay = false): void
+    {
+        $scan = SupplierOrderHistoryReconciliation::query()->whereKey($historyId)->lockForUpdate()->first();
+        $candidate = collect($scan?->candidate_facts ?? [])->firstWhere('order_id', $orderId);
+        if ($scan === null || $scan->supplier_purchase_id !== $purchase->id
+            || $purchase->supplier->provider !== 'csxstore'
+            || (int) $purchase->historyReconciliations()->max('id') !== (int) $scan->id
+            || $scan->outcome !== SupplierOrderHistoryReconciliation::OUTCOME_CANDIDATE_ORDERS
+            || $scan->observed_at->lessThan(now()->subMinutes(15)) || $scan->observed_at->isFuture()
+            || $version !== $scan->purchase_version
+            || (! $replay && ($purchase->updated_at->format('Y-m-d H:i:s') !== $scan->purchase_version
+                || $purchase->claim_token !== $scan->purchase_claim_token))
+            || $candidate === null || $candidate['quantity'] !== $quantity || $candidate['total_micros'] !== $costMicros
+            || (string) $candidate['product_id'] !== (string) $purchase->catalogItem->external_id
+            || $candidate['currency'] !== $purchase->supplier->currency
+            || SupplierPurchase::query()->where('supplier_id', $purchase->supplier_id)
+                ->where('supplier_order_id', $orderId)->where('id', '!=', $purchase->id)->exists()) {
+            throw new InvalidOrderTransition('Kandidat expired, stale, conflicting, atau tidak cocok. Muat ulang bukti.');
+        }
     }
 
     /** @return array{string,?string,?CarbonImmutable,?CarbonImmutable,list<string>} */

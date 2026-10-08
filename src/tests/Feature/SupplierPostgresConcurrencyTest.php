@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -29,6 +31,8 @@ use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
+use App\Services\Telegram\TelegramOutboundEffectService;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -234,6 +238,172 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         $this->assertSame(1, SupplierPurchase::query()->count());
     }
 
+    #[Group('postgres-release')]
+    public function test_csx_history_candidate_confirmation_race_and_replay_commit_one_delivery_and_receipt_obligation(): void
+    {
+        [$product, $supplier, $sku, $order, $fulfillment, $purchase] = $this->csxReviewFixture();
+        $actors = User::factory()->count(2)->create(['role' => UserRole::Owner]);
+        $orderId = 'synthetic-csx-history-race';
+        $version = $purchase->updated_at->format('Y-m-d H:i:s');
+        Http::fake(fn () => Http::response([
+            'success' => true, 'page' => 1, 'limit' => 100, 'total_orders' => 1, 'total_pages' => 1,
+            'orders' => [[
+                'order_id' => $orderId, 'service_id' => $sku->external_id, 'quantity' => 1,
+                'total_cost' => '1.00', 'status' => 'completed', 'created_at' => now()->format('Y-m-d H:i:s'),
+            ]],
+        ]));
+        $history = app(SupplierOrderHistoryReconciliationService::class)->reconcile(
+            $fulfillment->id, $actors[0], '',
+            expectedPurchaseId: $purchase->id, expectedPurchaseVersion: $version,
+        );
+        $this->assertContains($orderId, $history->candidate_order_ids);
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(function ($request) use ($orderId, $sku) {
+            $this->assertSame('GET', $request->method());
+            $this->assertStringEndsWith('/order/'.$orderId, $request->url());
+            usleep(200000);
+
+            return Http::response([
+                'success' => true, 'status' => 'completed', 'order_id' => $orderId,
+                'service_id' => $sku->external_id, 'quantity' => 1, 'total_cost' => '1.00',
+                'products' => ['synthetic-csx-race-owned-credential'],
+            ]);
+        });
+        $confirm = function (User $actor) use ($fulfillment, $history, $orderId, $purchase, $version): array {
+            try {
+                $confirmed = app(SupplierOrderHistoryReconciliationService::class)->confirmCandidate(
+                    $fulfillment->id, $actor, $history->id, $orderId,
+                    'Synthetic provider history and exact order confirm this original purchase.',
+                    expectedPurchaseId: $purchase->id, expectedPurchaseVersion: $version,
+                );
+                $outcome = 'confirmed';
+                $this->assertSame($purchase->id, $confirmed->id);
+                $this->assertSame('delivered', $confirmed->state);
+            } catch (InvalidOrderTransition) {
+                $outcome = 'rejected';
+            }
+
+            return [
+                'outcome' => $outcome,
+                'reads' => Http::recorded()->count(),
+                'receipts' => Queue::pushed(SendTelegramReceipt::class)->count(),
+            ];
+        };
+        $results = $this->race([
+            fn (): array => $confirm($actors[0]),
+            fn (): array => $confirm($actors[1]),
+        ]);
+        $this->assertContains('confirmed', array_column($results, 'outcome'));
+        $this->assertSame(1, array_sum(array_column($results, 'reads')));
+        $this->assertSame(1, array_sum(array_column($results, 'receipts')));
+        for ($replay = 0; $replay < 2; $replay++) {
+            $this->assertSame(['outcome' => 'confirmed', 'reads' => 0, 'receipts' => 0], $confirm($actors[$replay]));
+        }
+        Http::assertNothingSent();
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame($orderId, $purchase->fresh()->supplier_order_id);
+        $this->assertSame(1_000_000, $purchase->fresh()->actual_cost_micros);
+        $this->assertNotNull($purchase->fresh()->committed_at);
+        $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(0, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(1, SupplierPurchaseEvidence::where('supplier_purchase_id', $purchase->id)->where('kind', 'debit_confirmed')->count());
+        $this->assertSame(1, AuditLog::where('action', 'supplier_purchase.debit_confirmed')->count());
+        $allocation = ProductStockItem::where('supplier_purchase_id', $purchase->id)->sole();
+        $this->assertSame($fulfillment->order_item_id, $allocation->order_item_id);
+        $this->assertSame('synthetic-csx-race-owned-credential', $allocation->secret);
+        $this->assertSame(1, ProductStockItem::count());
+        $this->assertSame('delivered', $fulfillment->fresh()->state);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+
+        // The completed Order is the durable receipt handoff; repeated materialization owns one group.
+        $receipts = app(TelegramOutboundEffectService::class);
+        $first = $receipts->recordReceipt($order->fresh());
+        $this->assertNotNull($first);
+        $this->assertSame($first->id, $receipts->recordReceipt($order->fresh())?->id);
+        $this->assertSame(1, $order->telegramOutboundEffects()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->distinct()->count('effect_group_key'));
+        Http::assertNothingSent();
+    }
+
+    #[Group('postgres-release')]
+    public function test_csx_history_candidate_claimed_by_another_purchase_after_scan_is_rejected_without_releasing_holds(): void
+    {
+        [$product, $supplier, $sku, , $fulfillment, $purchase] = $this->csxReviewFixture();
+        $actor = User::factory()->create(['role' => UserRole::Owner]);
+        $orderId = 'synthetic-csx-colliding-history-order';
+        $version = $purchase->updated_at->format('Y-m-d H:i:s');
+        Http::fake(function ($request) use ($orderId, $sku) {
+            $this->assertSame('GET', $request->method());
+            $this->assertStringEndsWith('/orders', parse_url($request->url(), PHP_URL_PATH));
+
+            return Http::response([
+                'success' => true, 'page' => 1, 'limit' => 100, 'total_orders' => 1, 'total_pages' => 1,
+                'orders' => [[
+                    'order_id' => $orderId, 'service_id' => $sku->external_id, 'quantity' => 1,
+                    'total_cost' => '1.00', 'status' => 'completed', 'created_at' => now()->format('Y-m-d H:i:s'),
+                ]],
+            ]);
+        });
+        $history = app(SupplierOrderHistoryReconciliationService::class)->reconcile(
+            $fulfillment->id, $actor, '',
+            expectedPurchaseId: $purchase->id, expectedPurchaseVersion: $version,
+        );
+        $this->assertContains($orderId, $history->candidate_order_ids);
+
+        $otherOrder = $this->checkout($this->cart($product->id, 790002));
+        app(OrderLifecycle::class)->applyManualCompletion($otherOrder);
+        $otherFulfillment = SupplierFulfillment::where('order_id', $otherOrder->id)->sole();
+        $otherPurchase = SupplierPurchase::create([
+            'supplier_fulfillment_id' => $otherFulfillment->id,
+            'supplier_id' => $supplier->id,
+            'supplier_catalog_item_id' => $sku->id,
+            'reference' => (string) Str::uuid(),
+            'quantity' => 1,
+            'expected_cost_micros' => 1_000_000,
+            'exchange_rate_idr' => 1000,
+            'state' => 'awaiting_delivery',
+            'supplier_order_id' => $orderId,
+            'dispatched_at' => now()->subMinute(),
+        ]);
+        $otherFulfillment->forceFill(['state' => 'awaiting_delivery', 'current_purchase_id' => $otherPurchase->id])->save();
+
+        try {
+            app(SupplierOrderHistoryReconciliationService::class)->confirmCandidate(
+                $fulfillment->id, $actor, $history->id, $orderId,
+                'Synthetic candidate is now owned by another purchase.',
+                expectedPurchaseId: $purchase->id, expectedPurchaseVersion: $version,
+            );
+            $this->fail('A candidate claimed by another purchase must not be confirmed.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame('ambiguous', $purchase->fresh()->state);
+        }
+
+        Http::assertSentCount(1);
+        $this->assertNull($purchase->fresh()->supplier_order_id);
+        $this->assertNull($purchase->fresh()->committed_at);
+        $this->assertNull($purchase->fresh()->actual_cost_micros);
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $this->assertSame($orderId, $otherPurchase->fresh()->supplier_order_id);
+        $this->assertSame(10_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(2_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(2, $sku->fresh()->reserved_quantity);
+        $this->assertSame(2, SupplierPurchase::count());
+        $this->assertSame(0, SupplierPurchaseEvidence::count());
+        $this->assertSame(0, AuditLog::where('action', 'supplier_purchase.debit_confirmed')->count());
+        $this->assertSame(0, ProductStockItem::count());
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+    }
+
     public function test_sync_racing_checkout_keeps_wallet_and_sku_commitments(): void
     {
         [$product, $supplier, $sku, $cart] = $this->fixture();
@@ -411,6 +581,29 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         } catch (InsufficientStock) {
             return ['outcome' => 'unavailable'];
         }
+    }
+
+    private function csxReviewFixture(): array
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $supplier->update(['provider' => 'csxstore', 'currency' => 'USD']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $purchase = SupplierPurchase::create([
+            'supplier_fulfillment_id' => $fulfillment->id,
+            'supplier_id' => $supplier->id,
+            'supplier_catalog_item_id' => $sku->id,
+            'reference' => (string) Str::uuid(),
+            'quantity' => 1,
+            'expected_cost_micros' => 1_000_000,
+            'exchange_rate_idr' => 1000,
+            'state' => 'ambiguous',
+            'dispatched_at' => now()->subMinute(),
+        ]);
+        $fulfillment->forceFill(['state' => 'review', 'current_purchase_id' => $purchase->id])->save();
+
+        return [$product, $supplier, $sku, $order, $fulfillment, $purchase];
     }
 
     private function fixture(): array

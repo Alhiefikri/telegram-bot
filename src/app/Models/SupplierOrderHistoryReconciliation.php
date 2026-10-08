@@ -11,8 +11,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'supplier_purchase_id', 'actor_user_id', 'outcome', 'error_code', 'requested_limit',
     'reported_count', 'row_count', 'dispatch_at', 'requested_at', 'observed_at',
     'coverage_start', 'coverage_end', 'history_timezone', 'response_sha256', 'candidate_order_ids',
+    'candidate_facts', 'coverage_kind', 'purchase_version', 'purchase_claim_token',
 ])]
-#[Hidden(['response_sha256', 'candidate_order_ids'])]
+#[Hidden(['response_sha256', 'candidate_order_ids', 'candidate_facts', 'purchase_claim_token'])]
 final class SupplierOrderHistoryReconciliation extends Model
 {
     public const OUTCOME_NO_ORDER = 'no_order';
@@ -41,6 +42,7 @@ final class SupplierOrderHistoryReconciliation extends Model
             'coverage_start' => 'immutable_datetime',
             'coverage_end' => 'immutable_datetime',
             'candidate_order_ids' => 'encrypted:array',
+            'candidate_facts' => 'encrypted:array',
         ];
     }
 

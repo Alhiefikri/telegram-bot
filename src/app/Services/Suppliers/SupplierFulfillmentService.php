@@ -408,6 +408,7 @@ final class SupplierFulfillmentService
                     ['supplier_purchase_id' => $purchase->id, 'kind' => SupplierPurchaseEvidence::KIND_DEBIT_CONFIRMED],
                     [
                         'actor_user_id' => $debitEvidence['actor']->id,
+                        'history_reconciliation_id' => $debitEvidence['history_reconciliation_id'] ?? null,
                         'evidence_source' => 'provider_exact_order',
                         'provider_reference' => $debitEvidence['order_id'],
                         'note' => $debitEvidence['note'],
@@ -422,6 +423,7 @@ final class SupplierFulfillmentService
                         'quantity' => $debitEvidence['quantity'],
                         'cost_micros' => $debitEvidence['cost_micros'],
                         'currency' => $suppliers->get($purchase->supplier_id)->currency,
+                        'history_reconciliation_id' => $debitEvidence['history_reconciliation_id'] ?? null,
                     ], $debitEvidence['actor'], $debitEvidence['ip']);
                 }
             } else {
@@ -921,6 +923,7 @@ final class SupplierFulfillmentService
                 if ($historyEvidence === null
                     || (int) $latestHistoryId !== (int) $historyEvidence->id
                     || $historyEvidence->outcome !== SupplierOrderHistoryReconciliation::OUTCOME_NO_ORDER
+                    || $suppliers->get($purchase->supplier_id)?->provider !== 'toolorax'
                     || $historyEvidence->requested_at->lessThan($purchase->dispatched_at)
                     || $historyEvidence->observed_at->lessThan($historyEvidence->requested_at)
                     || $historyEvidence->observed_at->lessThan($purchase->dispatched_at)
@@ -966,7 +969,7 @@ final class SupplierFulfillmentService
         $this->recoverOrderWithEvidence($id, $orderId);
     }
 
-    public function confirmDebit(int $id, User $actor, string $orderId, int $quantity, int $costMicros, string $note, ?string $ip = null, ?int $expectedPurchaseId = null): SupplierPurchase
+    public function confirmDebit(int $id, User $actor, string $orderId, int $quantity, int $costMicros, string $note, ?string $ip = null, ?int $expectedPurchaseId = null, ?int $historyReconciliationId = null, ?string $expectedPurchaseVersion = null): SupplierPurchase
     {
         if ($quantity < 1 || $costMicros < 1 || trim($note) === '') {
             throw new InvalidOrderTransition('Supplier order, jumlah, biaya, dan catatan bukti wajib valid.');
@@ -975,7 +978,7 @@ final class SupplierFulfillmentService
             throw new InvalidOrderTransition('Invalid order identity.');
         }
 
-        $existing = DB::transaction(function () use ($id, $orderId, $quantity, $costMicros, $expectedPurchaseId): ?SupplierPurchase {
+        $existing = DB::transaction(function () use ($id, $orderId, $quantity, $costMicros, $expectedPurchaseId, $historyReconciliationId, $expectedPurchaseVersion): ?SupplierPurchase {
             $initial = SupplierFulfillment::query()->findOrFail($id);
             $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
             Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
@@ -988,6 +991,14 @@ final class SupplierFulfillmentService
                 throw new InvalidOrderTransition('Purchase berubah sejak form dibuka. Muat ulang bukti.');
             }
             $evidence = $purchase?->evidence()->where('kind', SupplierPurchaseEvidence::KIND_DEBIT_CONFIRMED)->first();
+            if ($historyReconciliationId !== null) {
+                if ($purchase === null) {
+                    throw new InvalidOrderTransition('Purchase tidak ditemukan.');
+                }
+                app(SupplierOrderHistoryReconciliationService::class)->assertCandidate(
+                    $purchase, $historyReconciliationId, $orderId, $quantity, $costMicros, $expectedPurchaseVersion, $evidence !== null,
+                );
+            }
             if ($evidence === null) {
                 return null;
             }
@@ -1010,6 +1021,8 @@ final class SupplierFulfillmentService
             'note' => trim($note),
             'ip' => $ip,
             'purchase_id' => $expectedPurchaseId,
+            'history_reconciliation_id' => $historyReconciliationId,
+            'purchase_version' => $expectedPurchaseVersion,
         ];
         $this->recoverOrderWithEvidence($id, $orderId, $evidence);
 
@@ -1046,6 +1059,12 @@ final class SupplierFulfillmentService
             }
             if ($debitEvidence !== null && ($purchase->state === 'awaiting_delivery' || $purchase->supplier_order_id !== null)) {
                 throw new InvalidOrderTransition('Bukti debit hanya dapat dikonfirmasi untuk purchase ambigu tanpa order ID.');
+            }
+            if (($debitEvidence['history_reconciliation_id'] ?? null) !== null) {
+                app(SupplierOrderHistoryReconciliationService::class)->assertCandidate(
+                    $purchase, $debitEvidence['history_reconciliation_id'], $debitEvidence['order_id'],
+                    $debitEvidence['quantity'], $debitEvidence['cost_micros'], $debitEvidence['purchase_version'],
+                );
             }
             $token = (string) Str::uuid();
             $purchase->update(['claim_token' => $token, 'lease_expires_at' => now()->addMinutes(2)]);

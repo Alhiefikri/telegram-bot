@@ -221,9 +221,12 @@ final class SupplierClient
         return $this->result($supplier, $payload, null, $orderId, $productId, $reference);
     }
 
-    /** Read the documented, bounded ToolOraX order history. It never mutates provider state. */
+    /** Bounded GET-only history; CSxStore pagination/timezone are not qualified. */
     public function orderHistory(Supplier $supplier, string $timezone): SupplierOrderHistorySnapshot
     {
+        if ($supplier->provider === SupplierProvider::CSxStore->value) {
+            return $this->csxOrderHistory($supplier);
+        }
         if ($supplier->provider !== SupplierProvider::ToolOrax->value) {
             throw new SupplierUnavailable('order_history_unsupported');
         }
@@ -304,6 +307,74 @@ final class SupplierClient
             $orders,
             $timezone,
             hash('sha256', json_encode($digestRows, JSON_THROW_ON_ERROR)),
+        );
+    }
+
+    private function csxOrderHistory(Supplier $supplier): SupplierOrderHistorySnapshot
+    {
+        // The published contract documents /orders, not pagination parameters.
+        $payload = $this->read($supplier, '/orders', hrtime(true) + 12_000_000_000, allowInactive: true);
+        $this->currency($supplier, $payload);
+        if (($payload['success'] ?? null) !== true
+            || ($payload['page'] ?? null) !== 1
+            || ! is_int($payload['limit'] ?? null) || $payload['limit'] < 1
+            || ! is_int($payload['total_orders'] ?? null) || $payload['total_orders'] < 0 || $payload['total_orders'] > 2_147_483_647
+            || ! is_int($payload['total_pages'] ?? null) || $payload['total_pages'] < 0
+            || ! is_array($payload['orders'] ?? null) || ! array_is_list($payload['orders'])
+            || count($payload['orders']) > self::TOOL_ORAX_ORDER_HISTORY_LIMIT
+            || count($payload['orders']) > $payload['limit']
+            || count($payload['orders']) > $payload['total_orders']) {
+            throw new SupplierUnavailable('invalid_order_history');
+        }
+        $orders = [];
+        $seen = [];
+        foreach ($payload['orders'] as $row) {
+            if (! is_array($row)) {
+                throw new SupplierUnavailable('invalid_order_history');
+            }
+            $this->currency($supplier, $row);
+            $id = $this->identifier($row['order_id'] ?? null, 128);
+            if (isset($seen[$id])) {
+                throw new SupplierUnavailable('invalid_order_history');
+            }
+            $seen[$id] = true;
+            $rawTime = $this->text($row['created_at'] ?? null, 32);
+            // Validate calendar syntax without assigning an instant to offset-free time.
+            try {
+                $parsed = CarbonImmutable::createFromFormat('!Y-m-d H:i:s', $rawTime, 'UTC');
+            } catch (Throwable) {
+                throw new SupplierUnavailable('invalid_order_history');
+            }
+            $errors = CarbonImmutable::getLastErrors();
+            if ($parsed === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
+                || $parsed->format('Y-m-d H:i:s') !== $rawTime) {
+                throw new SupplierUnavailable('invalid_order_history');
+            }
+            try {
+                $cost = SupplierMoney::micros($row['total_cost'] ?? '');
+            } catch (Throwable) {
+                throw new SupplierUnavailable('invalid_order_history');
+            }
+            $status = $this->text($row['status'] ?? null, 40);
+            $orders[] = [
+                'order_id' => $id,
+                'product_id' => $this->identifier($row['service_id'] ?? null),
+                'quantity' => $this->integer($row['quantity'] ?? null, 1, self::MAX_QUANTITY),
+                'total_micros' => $cost,
+                'currency' => $supplier->currency,
+                'status' => in_array($status, ['completed', 'pending', 'paid', 'queued', 'undelivered', 'processing', 'failed', 'cancelled', 'refunded'], true) ? $status : 'unrecognized',
+                'created_at' => null,
+                'created_at_raw' => $rawTime,
+                'timezone_qualification' => 'unknown_offset_free',
+            ];
+        }
+        $truncated = count($orders) >= self::TOOL_ORAX_ORDER_HISTORY_LIMIT
+            || $payload['total_orders'] > count($orders) || $payload['total_pages'] > 1;
+
+        return new SupplierOrderHistorySnapshot(
+            self::TOOL_ORAX_ORDER_HISTORY_LIMIT, $payload['total_orders'], $orders, 'unknown',
+            hash('sha256', json_encode($orders, JSON_THROW_ON_ERROR)),
+            $truncated ? 'truncated' : 'first_page',
         );
     }
 
@@ -683,7 +754,7 @@ final class SupplierClient
         $productId = $row['service_id'] ?? $row['product_id'] ?? $row['product']['id'] ?? $payload['product_id'] ?? null;
         $mismatch = ($expectedOrderId !== null && $id !== $expectedOrderId)
             || ($expectedProductId !== null && $productId !== null && $this->identifier($productId) !== $expectedProductId)
-            || ($supplier->provider === SupplierProvider::ToolOrax->value && $expectedOrderId !== null && $expectedProductId !== null && $productId === null)
+            || (in_array($supplier->provider, [SupplierProvider::ToolOrax->value, SupplierProvider::CSxStore->value], true) && $expectedOrderId !== null && $expectedProductId !== null && $productId === null)
             || ($supplier->provider === SupplierProvider::ToolOrax->value && $expectedQuantity !== null && $quantity !== null && $quantity !== $expectedQuantity)
             || ($reference !== null && isset($row['external_order_id']) && $row['external_order_id'] !== $reference);
         $count = $quantity ?? $expectedQuantity;
