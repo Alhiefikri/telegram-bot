@@ -58,29 +58,43 @@ class AdminCategoryCrudTest extends TestCase
             ->assertSee('Status aktif, stok, dan reservasi produk tetap dipertahankan');
     }
 
-    public function test_read_only_roles_do_not_see_category_mutation_controls_and_cannot_mutate_categories(): void
+    public function test_roles_without_dashboard_access_cannot_access_or_mutate_categories(): void
     {
-        $user = User::factory()->create(['role' => UserRole::Support]);
-        $category = Category::factory()->create();
+        $category = Category::factory()->create(['name' => 'Retained Category']);
 
-        $this->actingAs($user)
-            ->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertDontSee('Kelola Kategori')
-            ->assertDontSee('Hapus');
+        foreach ([UserRole::Finance, UserRole::Support] as $role) {
+            $user = User::factory()->create(['role' => $role]);
 
-        $this->post(route('admin.categories.store'), [
-            'category_name' => 'Denied Create',
-        ])->assertForbidden();
+            $this->actingAs($user)
+                ->get('/admin?tab=produk')
+                ->assertForbidden();
 
-        $this->patch(route('admin.categories.update', $category), [
-            'name' => 'Denied Update',
-            'description' => null,
-            'is_active' => '1',
-            'sort_order' => '0',
-        ])->assertForbidden();
+            $this->actingAs($user)
+                ->post(route('admin.categories.store'), [
+                    'category_name' => 'Denied Create',
+                ])->assertForbidden();
 
-        $this->delete(route('admin.categories.destroy', $category))->assertForbidden();
+            $this->actingAs($user)
+                ->patch(route('admin.categories.update', $category), [
+                    'name' => 'Denied Update',
+                    'description' => null,
+                    'is_active' => '1',
+                    'sort_order' => '0',
+                ])->assertForbidden();
+
+            $this->actingAs($user)
+                ->delete(route('admin.categories.destroy', $category))
+                ->assertForbidden();
+        }
+
+        $this->assertDatabaseCount('categories', 1);
+        $this->assertDatabaseHas('categories', [
+            'id' => $category->id,
+            'name' => 'Retained Category',
+            'is_active' => true,
+        ]);
+        $this->assertDatabaseMissing('categories', ['name' => 'Denied Create']);
+        $this->assertDatabaseMissing('categories', ['name' => 'Denied Update']);
     }
 
     public function test_admin_can_create_a_trimmed_category_with_a_slug_unique_against_soft_deleted_categories(): void

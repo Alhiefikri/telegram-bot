@@ -62,7 +62,7 @@ class ManualFulfillmentReviewTest extends TestCase
         Queue::assertNotPushed(SendTelegramReceipt::class);
     }
 
-    public function test_admin_queue_and_detail_are_readable_by_authorized_read_only_roles(): void
+    public function test_admin_queue_and_detail_are_readable_by_owner_and_forbidden_to_finance_and_support(): void
     {
         $order = Order::factory()->create([
             'order_status' => OrderStatus::Cancelled,
@@ -83,22 +83,27 @@ class ManualFulfillmentReviewTest extends TestCase
             'provider_reference' => 'LATE-DETAIL-225',
         ]);
 
-        $finance = User::factory()->create(['role' => UserRole::Finance]);
-        $this->actingAs($finance)
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $this->actingAs($owner)
             ->get(route('admin.manual-fulfillment-reviews.index'))
             ->assertOk()
             ->assertSee($review->order->invoice_number)
             ->assertSee('Manual Fulfillment Review');
-        $this->actingAs($finance)
+        $this->actingAs($owner)
             ->get(route('admin.manual-fulfillment-reviews.show', $review))
             ->assertOk()
-            ->assertSee('LATE-DETAIL-225')
-            ->assertDontSee('refund');
+            ->assertSee('LATE-DETAIL-225');
 
-        $support = User::factory()->create(['role' => UserRole::Support]);
-        $this->actingAs($support)
-            ->get(route('admin.manual-fulfillment-reviews.index'))
-            ->assertOk();
+        foreach ([UserRole::Finance, UserRole::Support] as $role) {
+            $actor = User::factory()->create(['role' => $role]);
+            $this->actingAs($actor)
+                ->get(route('admin.manual-fulfillment-reviews.index'))
+                ->assertForbidden();
+            $this->actingAs($actor)
+                ->get(route('admin.manual-fulfillment-reviews.show', $review))
+                ->assertForbidden()
+                ->assertDontSee('refund');
+        }
 
         $this->actingAs(User::factory()->create(['role' => null]))
             ->get(route('admin.manual-fulfillment-reviews.index'))

@@ -36,10 +36,22 @@ final class StoreBalanceFundingPolicyTest extends TestCase
 
             $this->actingAs($user)
                 ->get(route('admin.dashboard', ['tab' => 'stats']))
-                ->assertOk()
-                ->assertSee('Kebijakan Top-up Saldo')
-                ->assertDontSee('Simpan kebijakan top-up');
+                ->assertForbidden();
+
+            $this->actingAs($user)
+                ->post(route('admin.store-balance.funding-policy.update'), [
+                    'minimum_amount' => '10000',
+                    'preset_amounts' => "10000\n25000",
+                    'version' => 0,
+                ])
+                ->assertForbidden();
         }
+
+        $this->assertDatabaseHas('store_balance_funding_policies', [
+            'singleton_key' => StoreBalanceFundingPolicy::SINGLETON_KEY,
+            'minimum_amount' => 5000,
+            'version' => 0,
+        ]);
     }
 
     public function test_owner_can_update_policy_with_one_versioned_audit_record(): void

@@ -26,10 +26,39 @@ class AdminCatalogPolicyAndStockAuditTest extends TestCase
         foreach (UserRole::cases() as $role) {
             $user = User::factory()->create(['role' => $role]);
             $this->assertSame($role, $user->fresh()->role);
-            $this->assertTrue($user->canAccessAdmin());
+            $this->assertSame($role->canAccessDashboard(), $user->canAccessAdmin());
         }
 
+        $this->assertTrue(UserRole::Owner->canAccessDashboard());
+        $this->assertTrue(UserRole::Admin->canAccessDashboard());
+        $this->assertFalse(UserRole::Finance->canAccessDashboard());
+        $this->assertFalse(UserRole::Support->canAccessDashboard());
+
         $this->assertFalse(User::factory()->create(['role' => null])->canAccessAdmin());
+
+        // ADMIN_ALLOWED_LOGINS only narrows the Owner/Admin set; it cannot widen
+        // dashboard access to Finance/Support accounts.
+        $owner = User::factory()->create([
+            'role' => UserRole::Owner,
+            'name' => 'Allowlisted Owner',
+            'email' => 'owner@example.test',
+        ]);
+
+        config()->set('auth.admin_allowed_logins', 'someone-else@example.test');
+        $this->assertTrue($owner->role->canAccessDashboard());
+        $this->assertFalse($owner->canAccessAdmin());
+
+        config()->set('auth.admin_allowed_logins', 'owner@example.test');
+        $this->assertTrue($owner->canAccessAdmin());
+
+        $support = User::factory()->create([
+            'role' => UserRole::Support,
+            'name' => 'Allowlisted Support',
+            'email' => 'support@example.test',
+        ]);
+
+        config()->set('auth.admin_allowed_logins', 'support@example.test');
+        $this->assertFalse($support->canAccessAdmin());
     }
 
     public function test_product_policy_by_role(): void

@@ -365,7 +365,7 @@ class BscOperationsTest extends TestCase
             'last_verified_at' => now(),
         ]);
 
-        $this->actingAs(User::factory()->create(['role' => UserRole::Finance]))
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]))
             ->get(route('admin.orders.show', $payment->order))
             ->assertOk()
             ->assertSee(self::CONTRACT)

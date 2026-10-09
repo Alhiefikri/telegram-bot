@@ -54,9 +54,9 @@ class SakurupiahAdminReconcileTest extends TestCase
         ManualPaymentSetting::create(['payment_mode' => PaymentProvider::MANUAL, 'is_active' => true]);
     }
 
-    public function test_finance_role_can_manually_reconcile_a_pending_sakurupiah_payment_and_audits(): void
+    public function test_owner_role_can_manually_reconcile_a_pending_sakurupiah_payment_and_audits(): void
     {
-        $finance = User::factory()->create(['role' => UserRole::Finance]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
         $payment = $this->sakurupiahPayment(['merchant_ref' => 'SAKU-ADMIN']);
         $provider = Mockery::mock(SakurupiahProviderAdapter::class);
         $provider->shouldReceive('transactionStatus')
@@ -66,14 +66,14 @@ class SakurupiahAdminReconcileTest extends TestCase
         $provider->shouldReceive('transactionHistory')->never();
         $this->app->instance(SakurupiahProviderAdapter::class, $provider);
 
-        $this->actingAs($finance)
+        $this->actingAs($owner)
             ->post(route('admin.payments.reconcile', $payment))
             ->assertRedirect(route('admin.orders.show', $payment->order_id))
             ->assertSessionHas('status');
 
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertDatabaseHas('audit_logs', [
-            'user_id' => $finance->id,
+            'user_id' => $owner->id,
             'action' => 'payment.manually_reconciled',
             'subject_id' => (string) $payment->id,
         ]);
@@ -98,7 +98,7 @@ class SakurupiahAdminReconcileTest extends TestCase
     public function test_order_detail_bounds_payment_events_and_preserves_total_count(): void
     {
         $this->withoutVite();
-        $finance = User::factory()->create(['role' => UserRole::Finance]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
         $payment = $this->sakurupiahPayment(['merchant_ref' => 'SAKU-EVENT-BOUND']);
         $receivedAt = now()->subMinutes(12);
 
@@ -117,7 +117,7 @@ class SakurupiahAdminReconcileTest extends TestCase
             ]);
         }
 
-        $this->actingAs($finance)
+        $this->actingAs($owner)
             ->get(route('admin.orders.show', $payment->order_id))
             ->assertOk()
             ->assertSee('12 total, 10 ditampilkan');
@@ -126,13 +126,13 @@ class SakurupiahAdminReconcileTest extends TestCase
     public function test_order_detail_shows_manual_reconcile_action_only_when_reconcilable(): void
     {
         $this->withoutVite();
-        $finance = User::factory()->create(['role' => UserRole::Finance]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
         $payment = $this->sakurupiahPayment(['merchant_ref' => 'SAKU-ACTION']);
         $provider = Mockery::mock(SakurupiahProviderAdapter::class);
         $provider->shouldReceive('transactionStatus')->never();
         $this->app->instance(SakurupiahProviderAdapter::class, $provider);
 
-        $html = $this->actingAs($finance)
+        $html = $this->actingAs($owner)
             ->get(route('admin.orders.show', $payment->order_id))
             ->assertOk()
             ->assertSee('Observability payment')

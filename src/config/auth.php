@@ -26,8 +26,10 @@ return [
     | Admin Dashboard Access Allow List
     |--------------------------------------------------------------------------
     |
-    | Leave empty to allow every user with an admin role. Set a comma-separated
-    | list of admin emails/usernames to lock the dashboard to specific accounts.
+    | Only Owner/Admin roles may access the dashboard; this allow list can then
+    | narrow that further. Leave empty to allow every Owner/Admin user. Set a
+    | comma-separated list of admin emails/usernames to lock the dashboard to
+    | specific accounts.
     |
     */
 

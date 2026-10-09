@@ -2,7 +2,7 @@
 
 Applies to the Store Balance (IDR) and Customer USDT Balance (micro-USDT) subsystems. Every command below runs inside the application container/scheduler host; none of them takes money authority, deletes ledger/claim history or performs an automatic refund.
 
-Roles used below: **Owner** (all operational controls, Admin Dashboard + per-action password where required), **Finance/Support** (read-only views), **Operator** (the human executing CLI commands, recorded as `--actor`).
+Roles used below: **Owner** (all operational controls, Admin Dashboard + per-action password where required), **Admin** (Admin Dashboard access; every Owner-only control still requires the per-action password), **Operator** (the human executing CLI commands, recorded as `--actor`). Since 2026-10-09 the Admin Dashboard is Owner/Admin-only: `finance` and `support` accounts receive 403 at `/admin` and cannot use the read-only views there.
 
 ## 1. Pause scopes
 

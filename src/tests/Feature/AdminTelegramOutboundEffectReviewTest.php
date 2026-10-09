@@ -53,7 +53,7 @@ class AdminTelegramOutboundEffectReviewTest extends TestCase
         $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
     }
 
-    public function test_support_can_read_safe_review_metadata_but_cannot_resolve_it(): void
+    public function test_owner_can_read_safe_review_metadata_but_support_cannot_read_or_resolve_it(): void
     {
         $effect = $this->unknownEffect([
             'effect_type' => 'receipt.credentials',
@@ -67,9 +67,10 @@ class AdminTelegramOutboundEffectReviewTest extends TestCase
                 'bot_token' => '123456:SECRET-TOKEN',
             ],
         ]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
         $support = User::factory()->create(['role' => UserRole::Support]);
 
-        $response = $this->actingAs($support)
+        $response = $this->actingAs($owner)
             ->get(route('admin.telegram-outbound-effects.show', $effect));
 
         $response
@@ -84,6 +85,10 @@ class AdminTelegramOutboundEffectReviewTest extends TestCase
             ->assertDontSee('credential@example.test|password')
             ->assertDontSee('123456:SECRET-TOKEN')
             ->assertDontSee('raw Telegram response');
+
+        $this->actingAs($support)
+            ->get(route('admin.telegram-outbound-effects.show', $effect))
+            ->assertForbidden();
 
         $this->actingAs($support)
             ->post(route('admin.telegram-outbound-effects.mark-sent', $effect), [

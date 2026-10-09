@@ -9,6 +9,16 @@ enum UserRole: string
     case Finance = 'finance';
     case Support = 'support';
 
+    /**
+     * Who may sign in to the Admin Dashboard at all. Finance and Support keep
+     * their capability predicates, but an account with those roles cannot enter
+     * `/admin`; promote the account to `admin` if it must work there.
+     */
+    public function canAccessDashboard(): bool
+    {
+        return in_array($this, [self::Owner, self::Admin], true);
+    }
+
     public function canMutateProducts(): bool
     {
         return in_array($this, [self::Owner, self::Admin], true);

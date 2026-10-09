@@ -375,8 +375,7 @@ class AdminDashboardPaymentModeTest extends TestCase
         ]);
 
         $this->get('/admin')
-            ->assertOk()
-            ->assertSee('Hanya owner/admin yang bisa mengubah mode pembayaran.');
+            ->assertForbidden();
 
         $this->post(route('admin.payment-mode.update'), ['payment_mode' => 'klikqris'])
             ->assertForbidden();

@@ -45,11 +45,17 @@ Verified: `php artisan test` → 730 tests, 714 passed, 16 skipped, 0 failed (B6
 
 ## Part B — Remaining work (prioritized)
 
-### B1 — Admin dashboard is fail-open (MEDIUM) — **operator action, not code**
+### B1 — Admin dashboard is fail-open (MEDIUM) — **closed at the role level 2026-10-09**
+
+> **UPDATE 2026-10-09:** the fail-open role gate is closed in code. `UserRole::canAccessDashboard()`
+> now admits only `owner`/`admin`, and `User::canAccessAdmin()` evaluates that predicate **before**
+> the optional allow list, so an unset `ADMIN_ALLOWED_LOGINS` no longer lets `finance`/`support`
+> accounts sign in to `/admin`. `ADMIN_ALLOWED_LOGINS` remains an optional per-account narrowing
+> for Owner/Admin accounts. Regression: `AdminDashboardAccessTest`.
 
 - **Where:** `src/config/auth.php:34` (`admin_allowed_logins` defaults to `env('ADMIN_ALLOWED_LOGINS')` → `null`); `src/app/Models/User.php:45-47` returns `true` for any role-holder when the allow list is empty.
-- **Problem:** With `ADMIN_ALLOWED_LOGINS` unset (current production state), *any* account holding any admin role can access the dashboard. Bounded by: no self-registration, per-action policies still enforced.
-- **Action:** Set `ADMIN_ALLOWED_LOGINS=<admin-email(s)>` in the production `.env` (comma-separated emails/usernames). Must be done by someone who knows the real admin accounts — a wrong value locks the admin out.
+- **Problem (before the fix):** With `ADMIN_ALLOWED_LOGINS` unset, *any* account holding any admin role could access the dashboard. Bounded by: no self-registration, per-action policies still enforced.
+- **Action (optional narrowing):** Set `ADMIN_ALLOWED_LOGINS=<admin-email(s)>` in the production `.env` (comma-separated emails/usernames). Must be done by someone who knows the real admin accounts — a wrong value locks the admin out.
 - **Optional code follow-up:** once the value is set in prod, a check can be re-added to `ProductionConfigurationValidator` — but see Part 0 (the local `.env` is `production`, so also set the var locally or the validator throws in tooling).
 
 ### B2 — Late payments capture money with nothing delivered (HIGH) — **money**

@@ -19,6 +19,87 @@ class AdminDashboardAccessTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_only_owner_and_admin_roles_may_open_the_admin_dashboard(): void
+    {
+        foreach ([UserRole::Owner, UserRole::Admin] as $role) {
+            $this->actingAs(User::factory()->create(['role' => $role]))
+                ->get('/admin')
+                ->assertOk();
+        }
+
+        foreach ([UserRole::Finance, UserRole::Support] as $role) {
+            auth()->logout();
+
+            $this->actingAs(User::factory()->create(['role' => $role]))
+                ->get('/admin')
+                ->assertForbidden();
+        }
+    }
+
+    public function test_finance_and_support_roles_cannot_mutate_admin_surfaces(): void
+    {
+        Http::fake();
+        Customer::factory()->create(['telegram_id' => 112]);
+
+        foreach ([UserRole::Finance, UserRole::Support] as $role) {
+            auth()->logout();
+            $user = User::factory()->create(['role' => $role]);
+
+            $this->actingAs($user)
+                ->post(route('admin.products.store'), [
+                    'name' => 'Blocked Product',
+                    'price_amount' => 1000,
+                    'description' => 'No access',
+                ])
+                ->assertForbidden();
+
+            auth()->logout();
+
+            $this->actingAs($user)
+                ->post(route('admin.broadcast.store'), ['message' => 'Should not broadcast'])
+                ->assertForbidden();
+        }
+
+        Http::assertNothingSent();
+        $this->assertDatabaseCount('products', 0);
+    }
+
+    public function test_finance_and_support_roles_cannot_log_in_through_admin_login(): void
+    {
+        $finance = User::factory()->create([
+            'email' => 'finance@example.test',
+            'password' => Hash::make('correct-password'),
+            'role' => UserRole::Finance,
+        ]);
+        $support = User::factory()->create([
+            'email' => 'support@example.test',
+            'password' => Hash::make('correct-password'),
+            'role' => UserRole::Support,
+        ]);
+
+        foreach ([$finance, $support] as $user) {
+            $this->post(route('admin.login.store'), [
+                'email' => $user->email,
+                'password' => 'correct-password',
+            ])->assertSessionHasErrors(['email']);
+
+            $this->assertGuest();
+        }
+
+        $admin = User::factory()->create([
+            'email' => 'admin-login@example.test',
+            'password' => Hash::make('correct-password'),
+            'role' => UserRole::Admin,
+        ]);
+
+        $this->post(route('admin.login.store'), [
+            'email' => $admin->email,
+            'password' => 'correct-password',
+        ])->assertRedirect(route('admin.dashboard'));
+
+        $this->assertAuthenticatedAs($admin);
+    }
+
     public function test_guest_is_redirected_to_admin_login(): void
     {
         $this->get('/admin')
@@ -404,20 +485,6 @@ class AdminDashboardAccessTest extends TestCase
         ])->assertSessionHasErrors(['email']);
 
         $this->assertGuest();
-    }
-
-    public function test_support_admin_cannot_send_broadcasts(): void
-    {
-        Http::fake();
-        Customer::factory()->create(['telegram_id' => 111]);
-
-        $this->actingAs(User::factory()->create(['role' => UserRole::Support]))
-            ->post(route('admin.broadcast.store'), [
-                'message' => 'Support should not broadcast',
-            ])
-            ->assertForbidden();
-
-        Http::assertNothingSent();
     }
 
     public function test_broadcast_validation_uses_broadcast_error_bag_and_broadcast_tab(): void

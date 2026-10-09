@@ -148,7 +148,7 @@ final class AdminDashboardReportingTest extends TestCase
 
     public function test_withdraw_dashboard_validates_filters_and_renders_safe_proof_state(): void
     {
-        $this->actingAs(User::factory()->create(['role' => UserRole::Finance]));
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
         Http::fake([
             'https://klikqris.com/api/sandbox/withdraw/orders*' => Http::response($this->withdrawalPayload([
                 [
@@ -207,11 +207,7 @@ final class AdminDashboardReportingTest extends TestCase
         Http::fake();
 
         $this->get(route('admin.dashboard', ['tab' => 'withdraw']))
-            ->assertOk()
-            ->assertSee('Akses terbatas')
-            ->assertSee('Support tidak memiliki akses ke data withdraw.')
-            ->assertDontSee('Withdrawal Order')
-            ->assertDontSee('withdrawal_code');
+            ->assertForbidden();
 
         Http::assertNothingSent();
     }
@@ -266,7 +262,7 @@ final class AdminDashboardReportingTest extends TestCase
 
     public function test_invalid_withdrawal_filters_fail_closed_without_provider_request(): void
     {
-        $this->actingAs(User::factory()->create(['role' => UserRole::Finance]));
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
         Http::fake();
 
         $this->get(route('admin.dashboard', [

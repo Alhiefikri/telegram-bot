@@ -782,22 +782,32 @@ class ProductFamilyCatalogTest extends TestCase
             ->assertSee('focusProductFamilyAssignment('.$family->id.')', false);
     }
 
-    public function test_read_only_roles_cannot_mutate_families_or_memberships(): void
+    public function test_roles_without_dashboard_access_cannot_mutate_families_or_memberships(): void
     {
         $support = User::factory()->create(['role' => UserRole::Support]);
-        $family = ProductFamily::factory()->create();
+        $family = ProductFamily::factory()->create(['name' => 'Retained Family']);
         $product = Product::factory()->create();
 
         $this->actingAs($support)
             ->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertDontSee('Kelola Product Family');
+            ->assertForbidden();
+
         $this->actingAs($support)
             ->post(route('admin.product-families.store'), ['name' => 'Denied', 'sort_order' => 0])
             ->assertForbidden();
         $this->actingAs($support)
             ->patch(route('admin.products.family.update', $product), ['product_family_id' => $family->id])
             ->assertForbidden();
+
+        $this->assertDatabaseHas('product_families', [
+            'id' => $family->id,
+            'name' => 'Retained Family',
+        ]);
+        $this->assertDatabaseMissing('product_families', ['name' => 'Denied']);
+        $this->assertDatabaseHas('products', [
+            'id' => $product->id,
+            'product_family_id' => null,
+        ]);
     }
 
     public function test_catalog_paginates_family_entries_without_splitting_members_and_supports_uncategorized_filter(): void

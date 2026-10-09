@@ -737,19 +737,24 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         $this->assertStringContainsString('Supplier fulfillment selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review', $text);
     }
 
-    public function test_read_only_order_roles_see_delivery_status_without_private_supplier_economics(): void
+    public function test_owner_sees_delivery_status_while_read_only_roles_cannot_read_private_supplier_economics(): void
     {
         [$order, $fulfillment] = $this->paidSupplierOrder();
         Http::fake(fn () => throw new ConnectionException('Possible debit.'));
         app(SupplierFulfillmentService::class)->process($fulfillment->id);
+
+        $this->actingAs(User::factory()->create(['role' => 'owner']))
+            ->get(route('admin.orders.show', $order))
+            ->assertOk()
+            ->assertSee('Perlu review operator');
+
         foreach (['finance', 'support'] as $role) {
             $actor = User::factory()->create(['role' => $role]);
             $this->actingAs($actor)->get(route('admin.orders.show', $order))
-                ->assertOk()->assertSee('Perlu review operator')
+                ->assertForbidden()
                 ->assertDontSee('Disposable independent review')
                 ->assertDontSee('Observasi wallet terakhir:')
-                ->assertDontSee('biaya perkiraan')
-                ->assertViewHas('canViewSupplierOperations', false);
+                ->assertDontSee('biaya perkiraan');
         }
     }
 

@@ -61,7 +61,7 @@ Owner-only (`canManageUsdtFundingPolicy`, `admin.store-balance-owner`):
 
 - `admin.store-balance.usdt-policy` — `AdminCustomerUsdtFundingPolicyController` updates activation, TTL, fee and terms with optimistic versioning and the `usdtFundingPolicy` error bag.
 - `admin.store-balance.usdt-pauses.{store,destroy}` — `AdminCustomerUsdtFundingPauseController` pauses/resumes one scope with a required reason.
-- The Stats tab renders a "Kebijakan Top-up USDT" card with the policy version, rail availability, pause state, the H0-v1 uncapped disclosure and the edit forms. Finance/Support see the card but no mutation controls.
+- The Stats tab renders a "Kebijakan Top-up USDT" card with the policy version, rail availability, pause state, the H0-v1 uncapped disclosure and the edit forms. Only Owner/Admin can open the dashboard (Finance/Support get 403 at `/admin`), so the card is rendered for Owner/Admin; the Owner-only mutation controls remain gated by `admin.store-balance-owner`.
 
 ## 6. Deliverable genealogy
 

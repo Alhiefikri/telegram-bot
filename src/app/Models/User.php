@@ -31,9 +31,14 @@ class User extends Authenticatable
         ];
     }
 
+    /**
+     * The Admin Dashboard is Owner/Admin-only; the role predicate is evaluated
+     * before the optional per-account allowlist, so a listed Finance/Support
+     * account still cannot sign in.
+     */
     public function canAccessAdmin(): bool
     {
-        if (! $this->role instanceof UserRole) {
+        if (! $this->role instanceof UserRole || ! $this->role->canAccessDashboard()) {
             return false;
         }
 

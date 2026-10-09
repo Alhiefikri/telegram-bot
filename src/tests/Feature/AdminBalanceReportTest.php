@@ -39,9 +39,9 @@ final class AdminBalanceReportTest extends TestCase
         config(['auth.admin_allowed_logins' => '']);
     }
 
-    public function test_finance_report_uses_exact_telegram_id_masks_results_and_keeps_currency_totals_separate(): void
+    public function test_balance_report_uses_exact_telegram_id_masks_results_and_keeps_currency_totals_separate(): void
     {
-        $finance = User::factory()->create(['role' => UserRole::Finance]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
         $target = Customer::factory()->create([
             'first_name' => 'Exact Customer',
             'username' => 'same-user-name',
@@ -56,7 +56,7 @@ final class AdminBalanceReportTest extends TestCase
         app(StoreBalanceLedger::class)->creditTopUp($other, 54_321, 'report-idr-other', 'report-idr-other:credit');
         $this->createUsdtAccount($target, 2_500_000);
 
-        $response = $this->actingAs($finance)
+        $response = $this->actingAs($owner)
             ->get(route('admin.store-balance.reports.index', [
                 'section' => 'accounts',
                 'currency' => 'IDR',
@@ -218,7 +218,7 @@ final class AdminBalanceReportTest extends TestCase
     public function test_admin_report_cursor_is_keyset_and_bound_to_actor_and_filters(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
-        $otherAdmin = User::factory()->create(['role' => UserRole::Finance]);
+        $otherAdmin = User::factory()->create(['role' => UserRole::Owner]);
         for ($index = 1; $index <= 2; $index++) {
             $customer = Customer::factory()->create(['telegram_id' => 910000 + $index]);
             DB::table('customer_balance_accounts')->insert([
@@ -247,22 +247,22 @@ final class AdminBalanceReportTest extends TestCase
 
     public function test_latest_reconciliation_distinguishes_missing_custody_from_zero_assets(): void
     {
-        $finance = User::factory()->create(['role' => UserRole::Finance]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
         $this->insertRun(custodyState: null, custodyAmount: null, checkedAt: now());
 
-        $this->actingAs($finance)->get(route('admin.store-balance.reports.index', ['section' => 'treasury', 'currency' => 'USDT']))
+        $this->actingAs($owner)->get(route('admin.store-balance.reports.index', ['section' => 'treasury', 'currency' => 'USDT']))
             ->assertOk()
             ->assertSee('Custody missing · nilai tidak tersedia');
 
         $this->insertRun(custodyState: 'available', custodyAmount: 0, checkedAt: now()->addSecond());
-        $this->actingAs($finance)->get(route('admin.store-balance.reports.index', ['section' => 'treasury', 'currency' => 'USDT']))
+        $this->actingAs($owner)->get(route('admin.store-balance.reports.index', ['section' => 'treasury', 'currency' => 'USDT']))
             ->assertOk()
             ->assertSee('Custody tersedia · 0 USDT');
     }
 
     public function test_balance_proof_link_is_short_lived_private_masked_and_downloads_only_valid_image_bytes(): void
     {
-        $admin = User::factory()->create(['role' => UserRole::Finance]);
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
         $customer = Customer::factory()->create(['telegram_id' => 99001122]);
         $fileId = 'AgAC-protected-telegram-file-id';
         $topUp = $this->makeTopUp($customer, $fileId);
@@ -312,7 +312,7 @@ final class AdminBalanceReportTest extends TestCase
 
     public function test_proof_fetch_rejects_arbitrary_paths_and_oversized_files_before_download(): void
     {
-        $admin = User::factory()->create(['role' => UserRole::Finance]);
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
         $customer = Customer::factory()->create(['telegram_id' => 99001123]);
         $topUp = $this->makeTopUp($customer, 'protected-file-id');
         config(['services.telegram.token' => '123456:fixture-token']);
@@ -344,7 +344,7 @@ final class AdminBalanceReportTest extends TestCase
 
     public function test_proof_fetch_rejects_mismatched_declared_image_mime(): void
     {
-        $admin = User::factory()->create(['role' => UserRole::Finance]);
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
         $customer = Customer::factory()->create(['telegram_id' => 99001124]);
         $this->makeTopUp($customer, 'protected-mime-file-id');
         config(['services.telegram.token' => '123456:fixture-token']);
@@ -371,7 +371,7 @@ final class AdminBalanceReportTest extends TestCase
 
     public function test_proof_download_never_follows_redirects_to_another_host(): void
     {
-        $admin = User::factory()->create(['role' => UserRole::Finance]);
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
         $customer = Customer::factory()->create(['telegram_id' => 99001125]);
         $this->makeTopUp($customer, 'protected-redirect-file-id');
         config(['services.telegram.token' => '123456:fixture-token']);

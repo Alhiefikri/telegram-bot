@@ -501,12 +501,8 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'order.pending_cancelled_released', 'subject_id' => (string) $order->id]);
     }
 
-    public function test_support_dashboard_does_not_receive_stock_item_secrets_or_management_urls(): void
+    public function test_dashboard_does_not_receive_stock_item_secrets_or_management_urls(): void
     {
-        $this->actingAs(User::factory()->create([
-            'role' => UserRole::Support,
-        ]));
-
         $category = Category::factory()->create(['name' => 'Akun Premium']);
         $product = Product::factory()->create([
             'category_id' => $category->id,
@@ -520,12 +516,21 @@ class AdminDashboardStockFlowsTest extends TestCase
             'secret' => 'support-must-not-see@example.test|pass',
         ]);
 
-        $response = $this->get('/admin?tab=produk')
+        // Roles without dashboard access never reach the products tab at all.
+        $this->actingAs(User::factory()->create([
+            'role' => UserRole::Support,
+        ]))
+            ->get('/admin?tab=produk')
+            ->assertForbidden();
+
+        // Owner/Admin may open the dashboard, but the products tab still must not
+        // leak raw stock item secrets or per-item management URLs.
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+        $response = $this->actingAs($admin)
+            ->get('/admin?tab=produk')
             ->assertOk()
-            ->assertSee('Spotify Premium')
-            ->assertSee('Role ini hanya bisa melihat produk')
-            ->assertDontSee('Tambah kategori')
-            ->assertDontSee('Kelola stok');
+            ->assertSee('Spotify Premium');
 
         $content = $response->getContent();
 

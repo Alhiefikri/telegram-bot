@@ -250,8 +250,7 @@ final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabase
 
         $this->actingAs($finance)
             ->get(route('admin.dashboard', ['tab' => 'stats']))
-            ->assertOk()
-            ->assertDontSee('Kelola saldo');
+            ->assertForbidden();
 
         $this->actingAs($finance)
             ->post(route('admin.store-balance.adjustments.previews.store'), [
