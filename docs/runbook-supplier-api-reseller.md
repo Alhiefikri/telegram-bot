@@ -311,7 +311,7 @@ Do not infer `no_debit` from a stale wallet balance, a local rate-limit, or a fa
 
 The private Order detail page and paid Admin Telegram notification show three separate states: **payment**, **customer delivery**, and **supplier purchase**. The paid alert says payment was received; it includes the current delivery and purchase state so `Paid` cannot stand for delivered. Public Sales Proof remains a Paid Order Proof Event. Admin Product stock management shows the supplier's safe capacity and an allowlisted reason when it is zero (freshness, mapping, wallet/hold, SKU availability, or profit guard); none of this supplier data is included in Customer messages.
 
-An allocated supplier fulfillment without `telegram_receipt_sent_at` is labelled as available fulfillment with an unconfirmed Telegram receipt. Outside-bot handoff remains a separately recorded completed customer delivery. Private supplier names, costs, holds, wallet observations and handoff notes on Order detail are restricted to Owner/Admin; Finance/Support receive the customer-delivery status without those supplier economics.
+An allocated supplier fulfillment without `telegram_receipt_sent_at` is labelled as available fulfillment with an unconfirmed Telegram receipt. Outside-bot handoff remains a separately recorded completed customer delivery. Private supplier names, costs, holds, wallet observations and handoff notes on Order detail are restricted to Owner/Admin; Finance/Support cannot open the Admin Dashboard at all (403), so they never receive order-detail supplier economics nor the customer-delivery status there.
 
 An actual fresh available-capacity transition still uses the existing `InventoryMovement → StockNotificationEvent → Telegram Outbound Effect` pipeline. Recovery discovers lost queue wakeups. A Telegram timeout stays `unknown` in the outbound ledger, and the pipeline excludes it from automatic retry; inspect Telegram and resolve the existing effect through Manual Delivery Review. Stale recovery or an identical sync creates no new transition event.
 
@@ -333,6 +333,11 @@ Candidate facts are encrypted and hidden from model serialization. The private m
 Local synthetic verification exercises lost POST response → bounded discovery → explicit exact-order confirmation, private Admin browser states (single/multiple candidates, unknown timezone, error, stale form), real receipt job acknowledgement ledger and PostgreSQL concurrent confirmations/collisions. Regression entry points: `CsxStoreHistoryRecoveryTest`, existing supplier client/Admin/fulfillment regressions and `SupplierPostgresConcurrencyTest`. This is **not live provider qualification**, idempotency proof or a diagnosis of the historical transport failure. No production incident recovery, authenticated provider request or deployment is authorized by this change.
 
 Framework patterns were checked using Context7 `/laravel/docs` branch `13.x`: [transactions/deadlock retries](https://github.com/laravel/docs/blob/13.x/database.md), [pessimistic locks](https://github.com/laravel/docs/blob/13.x/queries.md), and [HTTP timeouts/fakes/stray-request prevention](https://github.com/laravel/docs/blob/13.x/http-client.md). Retry closures contain only local DB work; network remains outside them.
+
+### CSxStore contract qualification — 2026-10-09 (#588)
+
+The [capability report](supplier-csxstore-capability.md) records the recaptured public documentation, unsuccessful Context7 provider resolution, per-capability `verified`/`unknown` findings, account/sign-off limitations and separate live-spend authorization gate. The docs still name no implementable idempotency identifier, timezone or complete-history guarantee. No provider capability is declared `unsupported` without a denial. Retain one-shot ambiguity and operator-confirmed exact-order recovery; this report enables no retry, automatic attribution, history-derived no-debit or rollout. Provider/Owner account-scoped sign-off remains absent.
+
 
 
 ### Missing Telegram receipt recovery — invoice `INV-20261005-01M4627XZT628TRQWH2SP343CW`
