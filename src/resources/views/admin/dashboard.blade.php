@@ -105,13 +105,6 @@
 
             <x-slot:content>
             @if ($navigation['activeTab'] === 'stats')
-                <section class="grid grid-cols-2 gap-3 md:grid-cols-4" aria-label="Ringkasan toko">
-                    @foreach ($summary as $metric)
-                        <x-admin-dashboard.stat-card :label="$metric['label']" :value="$metric['value']" :hint="$metric['hint']" :tone="$metric['tone']" />
-                    @endforeach
-                </section>
-            @endif
-            @if ($navigation['activeTab'] === 'stats')
                 @include('admin.dashboard.stats-tab')
             @elseif ($navigation['activeTab'] === 'produk')
                 @include('admin.dashboard.products-tab')

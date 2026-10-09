@@ -437,10 +437,15 @@ class AdminDashboardOverviewTest extends TestCase
 
         $response = $this->get('/admin?tab=stats')
             ->assertOk()
+            ->assertSee('id="admin-overview-title"', false)
+            ->assertSee('Ikhtisar toko')
+            ->assertSee('id="admin-overview-attention-title"', false)
+            ->assertSee('Perhatian operasional')
             ->assertSee('Link toko')
             ->assertSee(route('storefront.home'), false)
             ->assertSee('Bagikan')
             ->assertSee('Salin')
+            ->assertSeeInOrder(['Ikhtisar toko', 'Metrik ringkasan', 'Perhatian operasional', 'Status pesanan', 'Pendapatan 7 hari', 'admin-payment-settings'])
             ->assertSeeInOrder(['GMV', 'IDR 125.000'])
             ->assertSeeInOrder(['Saldo', 'IDR 125.000'])
             ->assertSeeInOrder(['Order', '2'])
@@ -449,10 +454,12 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertSee('Diproses')
             ->assertSee('Dibatalkan')
             ->assertSee('Expired')
+            ->assertSee('Support WhatsApp')
+            ->assertSee('Checkout Maintenance')
             ->assertDontSee('Escrow');
 
         $content = $response->getContent();
-        $statusSection = substr($content, strpos($content, 'aria-label="Status order"') ?: 0, 2000);
+        $statusSection = substr($content, strpos($content, 'aria-label="Status pesanan"') ?: 0, 2000);
         $this->assertStringNotContainsString('Draft', $statusSection);
         $this->assertStringNotContainsString('Selesai', $statusSection);
     }
