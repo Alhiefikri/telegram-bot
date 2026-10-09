@@ -503,6 +503,8 @@ and the caption never publishes a number that the sold-out post will contradict.
 | customer order access                                           | [`StorefrontOrderAccess`](../../src/app/Storefront/StorefrontOrderAccess.php)                                                                                                                                      | controller menyimpan plaintext Recovery Key                             |
 | customer-facing copy                                            | Telegram/Storefront presentation adapter                                                                                                                                                                            | domain service mengirim pesan channel                                   |
 | paid credential projection                                      | [`CredentialDeliveryPresentation`](../../src/app/Services/Credentials/CredentialDeliveryPresentation.php)                                                                                                         | Telegram/Web adapter parsing encrypted payloads                         |
+| locale kolom dan fallback Product Details / Replacement & Refund Policy | [`LocalizedProductCopy`](../../src/app/Catalog/LocalizedProductCopy.php) + [`StorefrontLocale`](../../src/app/Storefront/StorefrontLocale.php)                                                                     | presenter, controller, view, atau adapter menulis/membaca nama kolom `{field}_{locale}` sendiri |
+| premium emoji metadata Product copy                              | [`TelegramProductContent`](../../src/app/Services/Telegram/TelegramProductContent.php)                                                                                                                             | Dashboard atau adapter menyimpan offset emoji untuk teks yang berbeda   |
 
 `CheckoutPaymentPreparation` adalah seam dua fase: `preflight()` berjalan sebelum
 checkout memperoleh lock dan boleh melakukan bounded readiness I/O; `prepare()`
@@ -573,6 +575,18 @@ displays the Product name. `/start family_<id>` still opens the Plan list.
 Committed Order and OrderItem changes invalidate the cached catalog projection.
 Product Detail, quantity, payment, Cart, Order, and outbound-effect ownership
 remains unchanged.
+
+Product Detail copy is locale-aware: `TelegramCatalogIntents::renderProductDetail` and
+`TelegramProductNotificationService` resolve Product Details and Replacement / Refund
+Policy through [`LocalizedProductCopy`](../../src/app/Catalog/LocalizedProductCopy.php) for
+the recipient's `Customer.locale`, and `TelegramProductContent::html()` receives the
+resolved variant's column name, so premium-emoji metadata stays bound to the exact text
+it was captured from. The `/admin` editor ([`TelegramContentIntents`](../../src/app/Services/Telegram/TelegramContentIntents.php))
+picks a language before editing and stores one `telegram_content` entry per edited column,
+which the write-time optimistic-concurrency check and the `TelegramProductContent::MAX_PRODUCT_DETAIL_UNITS`
+UTF-16 budget both evaluate per locale; `/clear` on a variant drops that variant's metadata
+and returns the Product Detail to the base copy. The Admin Dashboard enforces the same budget
+for `ms`/`en` variants in `AdminProductFormRequest`.
 
 Routine catalog navigation from inline controls renders onto the canonical
 message (`editMessageCaption` for a photo root, `editMessageText` for a text
@@ -754,6 +768,8 @@ The #477 Storefront presentation keeps catalog data and checkout ownership uncha
 Storefront hero is an image-only 4:1 banner carousel. Up to five ordered banners, alt text, and optional store-local links are managed in Admin → Produk and stored in `StorefrontSetting.homepage_banners`. `StorefrontBanners` owns atomic edits, optimistic version checks, audit, and file cleanup; the existing after-commit settings observer invalidates the homepage cache. Empty slots are omitted, and a neutral empty banner is shown until the owner uploads images. The best-seller rail uses the same native-scroll carousel in `src/resources/js/storefront/carousels.js`. Rotation pauses on hover, focus, touch, hidden tabs, off-screen sections, and reduced motion. Images in cards, banners, and detail use `object-fit: contain`; detail pages share a native dialog preview with Escape/focus restoration. Shared presentation styles live in `storefront-enhancements.css`, imported by both public and customer bundles. Images remain DB/Admin-owned; there are no additional catalog/presentation ENV settings. Verified purchase activity uses the existing verified feed as a dismissible toast and measures the sticky purchase bar to avoid covering it.
 Storefront Product cards and detail covers read the optional Product `icon` and custom image from the database/Admin product record. Runtime presentation uses a neutral generic fallback when both are absent; it does not map product names to brand-specific cover content. The separate ChatGPT login guide remains informational content, not catalog data.
 
+Per-locale Product Details and Replacement / Refund Policy copy resolves through [`LocalizedProductCopy`](../../src/app/Catalog/LocalizedProductCopy.php), the single owner of the locale columns: `description`/`warranty_policy` hold the Indonesian variant, `description_ms`/`description_en` and `warranty_policy_ms`/`warranty_policy_en` hold the other supported locales, and an empty variant falls back to the base column. `StorefrontLocale::code()` is the one validated reader of `config('storefront.locale')` (allowlist `id`, `ms`, `en`) shared by `StorefrontPaymentTerminalCopy`, `StorefrontShopSignedStatusRefreshResult`, `StorefrontProductPresenter`, `StorefrontCatalogProductPresenter`, `StorefrontProductMerchandising`, and the `StorefrontResponseCache` key, so the storefront locale signal exists in exactly one place. `CatalogBrowse` selects the locale columns, keeps the raw values on `CatalogProductReadModel::$copy` (packed by `CatalogProjectionPayload`, with `TelegramCatalogProjectionCache::DESIGN_VERSION` bumped for the changed shape), and matches search terms against every variant, not only the base copy. Adding a locale means adding its column plus its code to `LocalizedProductCopy::LOCALES`; nothing else may read a `{field}_{locale}` column name directly.
+
 The final Storefront release matrix covers `320x568`, `390x844`, `768x900`,
 `1280x900`, `1440x900`, and `1920x1080`. Public browser evidence keeps
 `/pilihan/{slug}` canonical, treats `/produk-keluarga/{slug}` as redirect-only
@@ -793,13 +809,25 @@ the database stores its hash and session grants are time-limited.
 
 Admin request melewati `AuthorizeAdminAccess`, yang menempelkan `adminUser` ke request. Role canonical ada di [`UserRole`](../../src/app/Enums/UserRole.php): `owner`, `admin`, `finance`, `support`.
 
-- Owner/Admin: katalog dan sebagian setting.
+- Owner/Admin: boleh masuk `/admin` (satu-satunya role yang lolos `User::canAccessAdmin()`), katalog dan sebagian setting.
 - Owner: mengganti Payment Provider Switch.
-- Owner/Admin/Finance: rekonsiliasi dan complete manual order sesuai policy.
-- Owner/Admin/Finance/Support: melihat order/payment dan resend receipt sesuai policy.
+- Owner/Admin: rekonsiliasi dan complete manual order sesuai policy.
+- Owner/Admin: melihat order/payment dan resend receipt sesuai policy.
+- Finance/Support: tidak bisa masuk `/admin` sama sekali; capability predicate-nya (`canReconcilePayments`, `canResendReceipts`, …) tetap ada untuk role semantics dan dipakai bila akun dipromosikan ke `admin`. Konfirmasi manual payment/top-up manual tetap berjalan dari notifikasi admin Telegram, yang gerbangnya ID Telegram owner (`TelegramAdminAccess`), bukan role web.
 - Supplier connections, private catalog/pricing and purchase recovery: Owner/Admin only; API key/provider changes and operational recovery require password confirmation within 15 minutes. Finance/Support cannot read this surface.
 
 `AdminPaymentModeController` hanya mengorkestrasi request. Validasi readiness dan optimistic version conflict berada di `UpdatePaymentModeRequest`/`PaymentProviderSwitcher`; switch dan audit log ditulis atomik dalam transaksi. Switch provider lama tidak mengubah Payment yang sudah ada.
+
+The product create/edit modal edits each localizable Product copy section — Product
+Details and Replacement / Refund Policy — through language tabs that share one
+`productContentLocale` state. `AdminProductDashboardProductsData` exposes `descriptionMs`/
+`descriptionEn`/`warrantyPolicyMs`/`warrantyPolicyEn` on `edit_payload`,
+`AdminProductDashboardState` rebuilds them from `old()` input (and reopens the tab that owns a
+rejected variant), `AdminProductFormRequest` trims the variant columns and enforces the shared
+Telegram Product Detail unit budget for `ms`/`en`, and the create/update controllers persist and
+audit the variant columns. Locale variants render the plain Unicode text on the Web Storefront:
+the Dashboard never stores Telegram emoji offsets, so saving from the Dashboard intentionally
+leaves existing `telegram_content` bindings stale for the variant it changed.
 
 Untuk stok, `AdminProductAccountStockController` menerima JSON Account Input (1–20 kartu) dan mengembalikan hanya metadata aman. `AdminProductStockController` mempertahankan redirect/flash contract Input Cepat. `ProductStockItemManager` hanya mengedit atau menghapus Available rows; Reserved, Paid, retired, dan repair-required rows tetap read-only. Invalid `credential_format` atau encrypted structured payload diproyeksikan sebagai `REPAIR` tanpa secret.
 
@@ -823,7 +851,7 @@ Issue #477 release evidence is the focused Storefront feature suite, the respons
 
 Reporting KlikQRIS hanya tersedia sebagai tab read-only pada dashboard yang sama: `/admin?tab=riwayat` untuk histori transaksi dan `/admin?tab=withdraw` untuk status pencairan. `AdminDashboardController` meneruskan tab/filter ke `AdminDashboardData`, lalu `AdminDashboardReportingData` memanggil `KlikQrisClient` hanya ketika tab reporting tersebut aktif. Endpoint provider `/qris/history?page=N` dicocokkan ke `Payment.merchant_ref`/Order lokal untuk link detail atau warning mismatch; observasi provider, termasuk `SUCCESS`, tidak mengubah Order, Payment, inventory, fulfillment, receipt, atau Sales Proof Post.
 
-Tab Withdraw memakai `UserRole::canReconcilePayments()`, sehingga hanya Owner/Admin/Finance yang dapat melihat data payout; Support menerima state forbidden. Filter status, order ID, tanggal, limit, dan page dinormalisasi sebelum dikirim ke `/withdraw/orders`. Proof URL hanya menjadi link bila lolos validasi HTTPS dan host allowlist environment; nilai lain ditampilkan sebagai teks aman.
+Tab Withdraw memakai `UserRole::canReconcilePayments()` sebagai lapisan fail-closed kedua; karena hanya Owner/Admin yang bisa masuk dashboard (dan keduanya lolos predicate itu), state forbidden tetap ada tapi tidak terjangkau lewat HTTP selama gate role ini berlaku. Filter status, order ID, tanggal, limit, dan page dinormalisasi sebelum dikirim ke `/withdraw/orders`. Proof URL hanya menjadi link bila lolos validasi HTTPS dan host allowlist environment; nilai lain ditampilkan sebagai teks aman.
 
 Reporting memakai cache singkat yang memasukkan environment dan seluruh parameter query tanpa credential. `KlikQrisClient` mengulang connection error, HTTP 408, 429, dan 5xx dalam batas budget provider; readiness, HTTP, JSON, schema, transport, dan validation failure diterjemahkan menjadi notice aman di dashboard. API key dan merchant ID tetap server-side. Perubahan layout reporting berada di `.admin-mini-shell`/view tab dan diuji browser pada 320, 390, 768, 1280, 1440, dan 1920px; tabel lebar hanya memiliki overflow pada container-nya.
 
@@ -977,7 +1005,7 @@ computes the bounded local backlog (`pending`, `verification_pending`,
 `terminal_recent`, oldest age) without provider HTTP. The admin Order detail
 exposes the sanitized payment/event summary and a manual reconcile action
 (`POST /admin/payments/{payment}/reconcile`) through
-`AdminPaymentOperations` + `PaymentPolicy::reconcile` (Owner/Admin/Finance) and
+`AdminPaymentOperations` + `PaymentPolicy::reconcile` (policy mengizinkan Owner/Admin/Finance; karena hanya Owner/Admin yang bisa masuk dashboard, reconcile praktis dijalankan oleh keduanya) and
 writes the `payment.manually_reconciled` audit. The operational runbook is
 [`docs/runbook-sakurupiah-payment.md`](../../docs/runbook-sakurupiah-payment.md).
 
@@ -1129,6 +1157,7 @@ that directory.
 Gunakan test boundary yang sesuai:
 
 - `tests/Feature/Telegram/` — command, callback, checkout, payment instructions, privacy, onboarding, dan webhook.
+- `tests/Unit/Catalog/LocalizedProductCopyTest.php` — locale-to-column mapping, base fallback, empty-variant fallback, and column extraction for Product Details / Replacement & Refund Policy variants. `tests/Feature/Telegram/TelegramContentEditingTest.php` covers the `/admin` language picker, per-variant premium emoji metadata, clearing a variant, and the per-locale unit budget; `tests/Feature/AdminDashboardProductFormsTest.php` covers the dashboard language tabs, variant persistence, and the same budget; `tests/Feature/StorefrontProductPresentationTest.php`, `tests/Feature/StorefrontCatalogProductPresentationTest.php`, `tests/Feature/StorefrontProductFamilyDiscoveryTest.php`, dan `tests/Feature/Telegram/CatalogSearchTest.php` cover storefront/Bot resolution per locale with base fallback.
 - `tests/Feature/Storefront/` dan `Storefront*Test.php` — catalog, guest checkout, signed invoice, recovery key, payment refresh.
 - `tests/Feature/*Payment*Test.php`, `KlikQris*Test.php`, `Pakasir*Test.php`, `Binance*Test.php` — provider contract/lifecycle/reconciliation.
 - `tests/Feature/Bsc*Test.php`, `tests/Unit/Services/Bsc/` — BSC readiness/verification plus capability and exact-amount contract fixtures (`verified`/`unsupported`/`unknown`, fail closed).
