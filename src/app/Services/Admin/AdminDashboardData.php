@@ -17,6 +17,24 @@ use Illuminate\Support\Facades\Storage;
 
 final class AdminDashboardData
 {
+    /** @var array<string, string> */
+    private const NAVIGATION_ICONS = [
+        'home' => 'home',
+        'package' => 'package',
+        'receipt' => 'receipt',
+        'truck' => 'truck',
+        'megaphone' => 'megaphone',
+        'message' => 'message',
+        'history' => 'history',
+        'wallet' => 'wallet',
+        'chart' => 'chart',
+        'alert' => 'alert',
+        'report' => 'report',
+        'adjustment' => 'adjustment',
+        'shield' => 'shield',
+        'settings' => 'settings',
+    ];
+
     public function __construct(
         private readonly AdminDashboardStatsData $statsData,
         private readonly AdminDashboardProductsData $productsData,
@@ -33,7 +51,7 @@ final class AdminDashboardData
      * @return array{
      *     admin: array{name: string, role: string},
      *     metrics: array<string, int>,
-     *     navigation: array{activeTab: string, tabs: list<array{id: string, label: string}>},
+     *     navigation: array{activeTab: string, tabs: list<array{id: string, label: string}>, groups: list<array{id: string, label: string, items: list<array<string, mixed>>}>},
      *     statsTab: array<string, mixed>,
      *     productsTab: array<string, mixed>,
      *     salesTab: array<string, mixed>,
@@ -206,29 +224,192 @@ final class AdminDashboardData
 
     private function navigation(?string $requestedTab, User $user): array
     {
-        $tabs = [
-            ['id' => 'stats', 'label' => 'Stats'],
-            ['id' => 'produk', 'label' => 'Produk'],
-            ['id' => 'penjualan', 'label' => 'Penjualan'],
-            ['id' => 'broadcast', 'label' => 'Broadcast'],
-            ['id' => 'telegram-channel', 'label' => 'Telegram Channel'],
-            ['id' => 'withdraw', 'label' => 'Withdraw'],
-            ['id' => 'riwayat', 'label' => 'Riwayat'],
-            ['id' => StorefrontFunnelReport::TAB, 'label' => 'Funnel'],
+        $canReconcilePayments = (bool) $user->role?->canReconcilePayments();
+        $canViewStorefrontAnalytics = (bool) $user->role?->canViewStorefrontAnalytics();
+        $canManageStoreOperations = (bool) $user->role?->canManageStoreOperations();
+        $canCompensateStoreBalance = (bool) $user->role?->canCompensateStoreBalance();
+        $canManagePaymentSettings = (bool) $user->role?->canManagePaymentSettings();
+
+        $tabItems = [
+            'stats' => $this->navigationItem(
+                'stats',
+                'Ringkasan',
+                'home',
+                route('admin.dashboard', ['tab' => 'stats']),
+            ),
+            'produk' => $this->navigationItem(
+                'produk',
+                'Produk',
+                'package',
+                route('admin.dashboard', ['tab' => 'produk']),
+                action: [
+                    'id' => 'create-product',
+                    'label' => 'Tambah Produk',
+                    'href' => route('admin.dashboard', ['tab' => 'produk', 'product_form' => 'create']),
+                ],
+            ),
+            'penjualan' => $this->navigationItem(
+                'penjualan',
+                'Pesanan',
+                'receipt',
+                route('admin.dashboard', ['tab' => 'penjualan']),
+            ),
+            'suppliers' => $this->navigationItem(
+                'suppliers',
+                'Supplier',
+                'truck',
+                route('admin.dashboard', ['tab' => 'suppliers']),
+                visible: $canManageStoreOperations,
+            ),
+            'broadcast' => $this->navigationItem(
+                'broadcast',
+                'Siaran',
+                'megaphone',
+                route('admin.dashboard', ['tab' => 'broadcast']),
+            ),
+            'telegram-channel' => $this->navigationItem(
+                'telegram-channel',
+                'Store Channel',
+                'message',
+                route('admin.dashboard', ['tab' => 'telegram-channel']),
+            ),
+            'riwayat' => $this->navigationItem(
+                'riwayat',
+                'Riwayat KlikQRIS',
+                'history',
+                route('admin.dashboard', ['tab' => 'riwayat']),
+            ),
+            'withdraw' => $this->navigationItem(
+                'withdraw',
+                'Withdraw',
+                'wallet',
+                route('admin.dashboard', ['tab' => 'withdraw']),
+                visible: $canReconcilePayments,
+            ),
+            StorefrontFunnelReport::TAB => $this->navigationItem(
+                StorefrontFunnelReport::TAB,
+                'Funnel',
+                'chart',
+                route('admin.dashboard', ['tab' => StorefrontFunnelReport::TAB]),
+                visible: $canViewStorefrontAnalytics,
+            ),
+            StoreBalanceOwnerCompensationService::TAB => $this->navigationItem(
+                StoreBalanceOwnerCompensationService::TAB,
+                'Kompensasi Top-up',
+                'alert',
+                route('admin.dashboard', ['tab' => StoreBalanceOwnerCompensationService::TAB]),
+                visible: $canCompensateStoreBalance,
+            ),
         ];
-        if ($user->role?->canManageStoreOperations() === true) {
-            $tabs[] = ['id' => 'suppliers', 'label' => 'Supplier'];
-        }
-        if ($user->role?->canCompensateStoreBalance() === true) {
-            $tabs[] = ['id' => StoreBalanceOwnerCompensationService::TAB, 'label' => 'Kompensasi Top-up'];
-        }
+
+        $groups = [
+            [
+                'id' => 'primary',
+                'label' => 'Utama',
+                'items' => [$tabItems['stats']],
+            ],
+            [
+                'id' => 'operations',
+                'label' => 'Operasional',
+                'items' => $this->visibleNavigationItems([$tabItems['penjualan'], $tabItems['produk'], $tabItems['suppliers']]),
+            ],
+            [
+                'id' => 'finance',
+                'label' => 'Keuangan',
+                'items' => $this->visibleNavigationItems([
+                    $this->navigationItem('balance-reports', 'Laporan saldo', 'report', route('admin.store-balance.reports.index'), visible: $canReconcilePayments),
+                    $this->navigationItem('balance-adjustments', 'Kelola saldo', 'adjustment', route('admin.store-balance.adjustments.index'), visible: $canCompensateStoreBalance),
+                    $this->navigationItem('usdt-review', 'Review deposit USDT', 'shield', route('admin.store-balance.usdt-review.index'), visible: $canCompensateStoreBalance),
+                    $tabItems['balance-issues'],
+                    $tabItems['riwayat'],
+                    $tabItems['withdraw'],
+                ]),
+            ],
+            [
+                'id' => 'communications',
+                'label' => 'Komunikasi',
+                'items' => [$tabItems['broadcast'], $tabItems['telegram-channel']],
+            ],
+            [
+                'id' => 'insights-system',
+                'label' => 'Insight & sistem',
+                'items' => $this->visibleNavigationItems([
+                    $tabItems['funnel'],
+                    $this->navigationItem(
+                        'payment-settings',
+                        'Pengaturan pembayaran',
+                        'settings',
+                        route('admin.dashboard', ['tab' => 'stats']).'#admin-payment-settings',
+                        visible: $canManagePaymentSettings,
+                        active: false,
+                    ),
+                ]),
+            ],
+        ];
+
+        $visibleTabs = array_values(array_filter($tabItems, static fn (array $item): bool => $item['visible']));
+        $tabs = array_map(
+            static fn (array $item): array => ['id' => $item['id'], 'label' => $item['label']],
+            $visibleTabs,
+        );
         $tabIds = array_column($tabs, 'id');
         $requestedTab = (string) ($requestedTab ?: 'stats');
+        $activeTab = in_array($requestedTab, $tabIds, true) ? $requestedTab : 'stats';
+        $groups = array_map(
+            static function (array $group) use ($activeTab): array {
+                $group['items'] = array_map(
+                    static function (array $item) use ($activeTab): array {
+                        if ($item['tab'] !== null) {
+                            $item['active'] = $item['tab'] === $activeTab;
+                        }
+
+                        return $item;
+                    },
+                    $group['items'],
+                );
+
+                return $group;
+            },
+            $groups,
+        );
 
         return [
-            'activeTab' => in_array($requestedTab, $tabIds, true) ? $requestedTab : 'stats',
+            'activeTab' => $activeTab,
             'tabs' => $tabs,
+            'groups' => $groups,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $action
+     * @return array<string, mixed>
+     */
+    private function navigationItem(
+        string $id,
+        string $label,
+        string $icon,
+        string $href,
+        bool $visible = true,
+        ?array $action = null,
+        ?bool $active = null,
+    ): array {
+        return [
+            'id' => $id,
+            'tab' => in_array($id, ['stats', 'produk', 'penjualan', 'suppliers', 'broadcast', 'telegram-channel', 'riwayat', 'withdraw', 'funnel', 'balance-issues'], true) ? $id : null,
+            'label' => $label,
+            'shortLabel' => $label,
+            'icon' => self::NAVIGATION_ICONS[$icon] ?? self::NAVIGATION_ICONS['home'],
+            'active' => $active ?? false,
+            'visible' => $visible,
+            'href' => $href,
+            ...($action === null ? [] : ['action' => $action]),
+        ];
+    }
+
+    /** @param list<array<string, mixed>> $items */
+    private function visibleNavigationItems(array $items): array
+    {
+        return array_values(array_filter($items, static fn (array $item): bool => $item['visible']));
     }
 
     private function storeChannelTab(User $user): array
