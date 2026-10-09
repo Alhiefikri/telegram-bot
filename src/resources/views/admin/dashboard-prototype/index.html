@@ -1,0 +1,29 @@
+<!doctype html>
+<!-- THROWAWAY PROTOTYPE: tiga struktur dashboard, ?variant=A/B/C. Data fiktif, tanpa backend. Run: python -m http.server 8765 --bind 127.0.0.1 --directory src/resources/views/admin/dashboard-prototype -->
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prototype Dashboard — bukan produksi</title>
+    <link rel="stylesheet" href="prototype.css" />
+    <script src="prototype.js" defer></script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <aside class="switcher" aria-label="Pilihan prototype">
+      <button id="previous" aria-label="Desain sebelumnya">←</button>
+      <div>
+        <small>PROTOTYPE · DATA CONTOH</small
+        ><strong id="variant-label"></strong>
+      </div>
+      <button id="next" aria-label="Desain berikutnya">→</button>
+    </aside>
+    <dialog id="detail">
+      <button class="close" aria-label="Tutup detail">×</button
+      ><small>SIMULASI LOKAL · TIDAK DISIMPAN</small>
+      <h2 id="detail-title"></h2>
+      <div id="detail-body"></div>
+    </dialog>
+    <div id="toast" role="status"></div>
+  </body>
+</html>
