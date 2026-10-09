@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Catalog\CatalogIconSelection;
+use App\Catalog\LocalizedProductCopy;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\StoreChannelSetting;
@@ -401,7 +402,7 @@ class TelegramProductNotificationService
 
     private function descriptionText(Product $product, string $locale): string
     {
-        $description = (string) $product->description;
+        $description = LocalizedProductCopy::text($product->getAttributes(), 'description', $locale);
 
         return trim($description) !== ''
             ? $description

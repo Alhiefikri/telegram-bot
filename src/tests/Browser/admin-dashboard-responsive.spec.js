@@ -3919,6 +3919,87 @@ test("manages quantity price tiers from the product modal at narrow mobile width
   await expectNoDocumentOverflow(page);
 });
 
+test("saves locale copy variants from the product modal language tabs", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+
+  const productCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
+  );
+  await productCard.getByRole("button", { name: "Ubah", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Edit produk" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("#product-description-id-panel")).toBeVisible();
+  await expect(dialog.locator("#product-description-en-panel")).toBeHidden();
+
+  await dialog
+    .getByRole("tab", { name: "English", exact: true })
+    .first()
+    .click();
+  await expect(dialog.locator("#product-description-id-panel")).toBeHidden();
+  await expect(dialog.locator("#product-description-en-panel")).toBeVisible();
+  await expect(
+    dialog.locator("#product-warranty-policy-en-panel")
+  ).toBeVisible();
+  await dialog
+    .locator("#product-description-en")
+    .fill("Browser QA English details.");
+  await dialog
+    .locator("#product-warranty-policy-en")
+    .fill("Browser QA English refund policy.");
+
+  await Promise.all([
+    page.waitForURL(`${baseUrl}/admin?tab=produk`),
+    dialog.getByRole("button", { name: /Simpan/i }).click(),
+  ]);
+  await expect(
+    page.getByText(
+      /Produk Browser QA Produk A(?: Edited)? berhasil diperbarui\./
+    )
+  ).toBeVisible();
+
+  const reopenedCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
+  );
+  await reopenedCard.getByRole("button", { name: "Ubah", exact: true }).click();
+
+  const reopenedDialog = page.getByRole("dialog", { name: "Edit produk" });
+  await reopenedDialog
+    .getByRole("tab", { name: "English", exact: true })
+    .first()
+    .click();
+  await expect(reopenedDialog.locator("#product-description-en")).toHaveValue(
+    "Browser QA English details."
+  );
+  await expect(
+    reopenedDialog.locator("#product-warranty-policy-en")
+  ).toHaveValue("Browser QA English refund policy.");
+
+  await reopenedDialog
+    .getByRole("tab", { name: "Bahasa Melayu", exact: true })
+    .first()
+    .click();
+  await expect(reopenedDialog.locator("#product-description-ms")).toHaveValue(
+    ""
+  );
+  await expect(
+    reopenedDialog.locator("#product-warranty-policy-ms")
+  ).toHaveValue("");
+  await expect(
+    reopenedDialog.locator("#product-description-ms-panel")
+  ).toBeVisible();
+  await expectElementWithinViewport(page, reopenedDialog);
+  await expectNoDocumentOverflow(page);
+});
+
 async function submitProductFromMiniAppModal(page) {
   const productName = `Mini App Produk ${Date.now()}`;
 

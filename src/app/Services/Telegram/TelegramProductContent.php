@@ -8,6 +8,20 @@ use InvalidArgumentException;
 /** Plain catalog text stays canonical; Telegram metadata is bound to that exact text. */
 final class TelegramProductContent
 {
+    /**
+     * Product Details plus Replacement / Refund Policy must fit one Telegram
+     * Product Detail message next to its title, price, stock and action lines.
+     * Shared by the `/admin` editor and the Admin Dashboard so neither writer can
+     * save copy its own locale variant cannot deliver.
+     */
+    public const MAX_PRODUCT_DETAIL_UNITS = 3000;
+
+    /** UTF-16 code units: the unit Telegram uses for entity offsets and text limits. */
+    public function units(string $text): int
+    {
+        return intdiv(strlen(mb_convert_encoding($text, 'UTF-16LE', 'UTF-8')), 2);
+    }
+
     public function entities(Product $product, string $field): array
     {
         $content = $product->telegram_content[$field] ?? null;

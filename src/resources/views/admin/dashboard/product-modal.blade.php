@@ -318,42 +318,175 @@
                         </x-admin-dashboard.card>
                         </section>
 
-                        <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
-                            <x-admin-dashboard.field-label for="product-description" class="text-sm normal-case tracking-normal">📝 Deskripsi produk</x-admin-dashboard.field-label>
-                            <x-admin-dashboard.textarea
-                                id="product-description"
-                                name="description"
-                                rows="3"
-                                placeholder="Deskripsi lengkap produk; emoji boleh digunakan..."
-                                class="mt-2"
-                                x-model="productDescription"
-                                required
-                            />
-                            @error('description', 'productCreate')
-                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                            @enderror
-                            @error('description', 'productUpdate')
-                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                            @enderror
+                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
+                            <div class="flex flex-wrap items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                    <x-admin-dashboard.field-label for="product-description" class="text-sm normal-case tracking-normal">📝 Deskripsi produk</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-[10px] font-extrabold uppercase leading-4 text-neo-ink/60">Satu versi per bahasa pelanggan. Varian yang dibiarkan kosong tampil memakai teks Bahasa Indonesia.</p>
+                                </div>
+                                <x-admin-dashboard.content-locale-tabs prefix="product-description" label="Bahasa deskripsi produk" />
+                            </div>
+
+                            <div
+                                id="product-description-id-panel"
+                                role="tabpanel"
+                                aria-labelledby="product-description-id-tab"
+                                tabindex="0"
+                                x-show="productContentLocale === 'id'"
+                                x-cloak
+                                class="mt-3"
+                            >
+                                <x-admin-dashboard.textarea
+                                    id="product-description"
+                                    name="description"
+                                    rows="3"
+                                    placeholder="Deskripsi lengkap produk; emoji boleh digunakan..."
+                                    class="mt-2"
+                                    x-model="productDescription"
+                                    x-bind:required="productContentLocale === 'id'"
+                                />
+                                @error('description', 'productCreate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                                @error('description', 'productUpdate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                            </div>
+
+                            <div
+                                id="product-description-ms-panel"
+                                role="tabpanel"
+                                aria-labelledby="product-description-ms-tab"
+                                tabindex="0"
+                                x-show="productContentLocale === 'ms'"
+                                x-cloak
+                                class="mt-3"
+                            >
+                                <x-admin-dashboard.textarea
+                                    id="product-description-ms"
+                                    name="description_ms"
+                                    rows="3"
+                                    placeholder="Versi Bahasa Melayu; kosongkan untuk memakai teks Bahasa Indonesia..."
+                                    class="mt-2"
+                                    x-model="productDescriptionMs"
+                                />
+                                @error('description_ms', 'productCreate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                                @error('description_ms', 'productUpdate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                            </div>
+
+                            <div
+                                id="product-description-en-panel"
+                                role="tabpanel"
+                                aria-labelledby="product-description-en-tab"
+                                tabindex="0"
+                                x-show="productContentLocale === 'en'"
+                                x-cloak
+                                class="mt-3"
+                            >
+                                <x-admin-dashboard.textarea
+                                    id="product-description-en"
+                                    name="description_en"
+                                    rows="3"
+                                    placeholder="English version; leave empty to use the Indonesian text..."
+                                    class="mt-2"
+                                    x-model="productDescriptionEn"
+                                />
+                                @error('description_en', 'productCreate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                                @error('description_en', 'productUpdate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                            </div>
                         </x-admin-dashboard.card>
 
                         <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
-                            <x-admin-dashboard.field-label for="product-warranty-policy" class="text-sm normal-case tracking-normal">⚠️ Replacement &amp; Refund Policy</x-admin-dashboard.field-label>
-                            <p class="mt-1 text-[10px] font-extrabold uppercase leading-4 text-neo-ink/60">Tampil sebagai alert di detail produk Telegram. Judul mengikuti bahasa pelanggan; isi ini berbeda untuk setiap produk.</p>
-                            <x-admin-dashboard.textarea
-                                id="product-warranty-policy"
-                                name="warranty_policy"
-                                rows="4"
-                                placeholder="Contoh: Penggantian akun maksimal 1 kali dalam 7 hari. Refund mengikuti hasil pemeriksaan admin."
-                                class="mt-2"
-                                x-model="productWarrantyPolicy"
-                            />
-                            @error('warranty_policy', 'productCreate')
-                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                            @enderror
-                            @error('warranty_policy', 'productUpdate')
-                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
-                            @enderror
+                            <div class="flex flex-wrap items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                    <x-admin-dashboard.field-label for="product-warranty-policy" class="text-sm normal-case tracking-normal">⚠️ Replacement &amp; Refund Policy</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-[10px] font-extrabold uppercase leading-4 text-neo-ink/60">Tampil sebagai alert di detail produk Telegram. Judul mengikuti bahasa pelanggan; isi ini berbeda untuk setiap produk dan setiap bahasa.</p>
+                                </div>
+                                <x-admin-dashboard.content-locale-tabs prefix="product-warranty-policy" label="Bahasa Replacement & Refund Policy" />
+                            </div>
+
+                            <div
+                                id="product-warranty-policy-id-panel"
+                                role="tabpanel"
+                                aria-labelledby="product-warranty-policy-id-tab"
+                                tabindex="0"
+                                x-show="productContentLocale === 'id'"
+                                x-cloak
+                                class="mt-3"
+                            >
+                                <x-admin-dashboard.textarea
+                                    id="product-warranty-policy"
+                                    name="warranty_policy"
+                                    rows="4"
+                                    placeholder="Contoh: Penggantian akun maksimal 1 kali dalam 7 hari. Refund mengikuti hasil pemeriksaan admin."
+                                    class="mt-2"
+                                    x-model="productWarrantyPolicy"
+                                />
+                                @error('warranty_policy', 'productCreate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                                @error('warranty_policy', 'productUpdate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                            </div>
+
+                            <div
+                                id="product-warranty-policy-ms-panel"
+                                role="tabpanel"
+                                aria-labelledby="product-warranty-policy-ms-tab"
+                                tabindex="0"
+                                x-show="productContentLocale === 'ms'"
+                                x-cloak
+                                class="mt-3"
+                            >
+                                <x-admin-dashboard.textarea
+                                    id="product-warranty-policy-ms"
+                                    name="warranty_policy_ms"
+                                    rows="4"
+                                    placeholder="Versi Bahasa Melayu; kosongkan untuk memakai teks Bahasa Indonesia..."
+                                    class="mt-2"
+                                    x-model="productWarrantyPolicyMs"
+                                />
+                                @error('warranty_policy_ms', 'productCreate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                                @error('warranty_policy_ms', 'productUpdate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                            </div>
+
+                            <div
+                                id="product-warranty-policy-en-panel"
+                                role="tabpanel"
+                                aria-labelledby="product-warranty-policy-en-tab"
+                                tabindex="0"
+                                x-show="productContentLocale === 'en'"
+                                x-cloak
+                                class="mt-3"
+                            >
+                                <x-admin-dashboard.textarea
+                                    id="product-warranty-policy-en"
+                                    name="warranty_policy_en"
+                                    rows="4"
+                                    placeholder="English version; leave empty to use the Indonesian text..."
+                                    class="mt-2"
+                                    x-model="productWarrantyPolicyEn"
+                                />
+                                @error('warranty_policy_en', 'productCreate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                                @error('warranty_policy_en', 'productUpdate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                            </div>
                         </x-admin-dashboard.card>
 
                         <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">

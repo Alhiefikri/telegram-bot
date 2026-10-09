@@ -317,6 +317,29 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertTrue($presentation->cover->hasImage());
     }
 
+    public function test_product_detail_copy_follows_the_storefront_locale_with_base_fallback(): void
+    {
+        $product = $this->availableProduct([
+            'name' => 'Locale Product',
+            'description' => 'Deskripsi Indonesia.',
+            'description_en' => "English description.\nExtra line.",
+            'warranty_policy' => 'Garansi Indonesia.',
+            'warranty_policy_en' => 'English refund policy.',
+            'stock' => 3,
+        ]);
+
+        config()->set('storefront.locale', 'en');
+        $english = app(StorefrontProductPresenter::class)->present($product->fresh());
+        $this->assertSame("English description.\nExtra line.", $english->description);
+        $this->assertSame('English description.', $english->descriptionSnippet);
+        $this->assertSame('English refund policy.', $english->merchandising->warrantyPolicy);
+
+        config()->set('storefront.locale', 'ms');
+        $malay = app(StorefrontProductPresenter::class)->present($product->fresh());
+        $this->assertSame('Deskripsi Indonesia.', $malay->description);
+        $this->assertSame('Garansi Indonesia.', $malay->merchandising->warrantyPolicy);
+    }
+
     public function test_product_cover_follows_the_family_icon_when_the_product_has_none(): void
     {
         $family = ProductFamily::factory()->create(['name' => 'Cover Family', 'slug' => 'cover-family', 'icon' => '🎬']);

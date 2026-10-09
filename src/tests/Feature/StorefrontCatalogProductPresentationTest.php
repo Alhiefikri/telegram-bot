@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Catalog\CatalogProductReadModel;
+use App\Catalog\LocalizedProductCopy;
 use App\Models\Product;
 use App\Services\Catalog\CatalogBrowse;
 use App\Storefront\StorefrontCatalogProductPresenter;
@@ -153,6 +154,36 @@ class StorefrontCatalogProductPresentationTest extends TestCase
         );
     }
 
+    public function test_catalog_card_copy_follows_the_storefront_locale_with_base_fallback(): void
+    {
+        config()->set('storefront.locale', 'en');
+
+        $english = app(StorefrontCatalogProductPresenter::class)->present($this->readModel([
+            'description' => 'Product description.',
+            'copy' => [
+                'description_en' => 'English product description.',
+                'warranty_policy_en' => 'English refund policy.',
+            ],
+        ]));
+
+        $this->assertSame('English product description.', $english->description);
+        $this->assertSame('English product description.', $english->descriptionSnippet);
+        $this->assertSame('English refund policy.', $english->merchandising->warrantyPolicy);
+
+        config()->set('storefront.locale', 'ms');
+
+        $malay = app(StorefrontCatalogProductPresenter::class)->present($this->readModel([
+            'description' => 'Product description.',
+            'copy' => [
+                'description_en' => 'English product description.',
+                'warranty_policy_en' => 'English refund policy.',
+            ],
+        ]));
+
+        $this->assertSame('Product description.', $malay->description);
+        $this->assertSame('Garansi login 7 hari.', $malay->merchandising->warrantyPolicy);
+    }
+
     /**
      * @param  array<string, mixed>  $overrides
      */
@@ -204,6 +235,10 @@ class StorefrontCatalogProductPresentationTest extends TestCase
             name: $values['name'],
             label: $values['label'],
             description: $values['description'],
+            copy: LocalizedProductCopy::extract(array_merge([
+                'description' => $values['description'],
+                'warranty_policy' => $values['merchandising']['warranty_policy'] ?? null,
+            ], $overrides['copy'] ?? [])),
             merchandising: $values['merchandising'],
             categoryId: $values['categoryId'],
             categoryName: $values['categoryName'],

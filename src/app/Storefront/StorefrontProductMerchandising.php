@@ -3,6 +3,7 @@
 namespace App\Storefront;
 
 use App\Catalog\CatalogProductReadModel;
+use App\Catalog\LocalizedProductCopy;
 use App\Models\Product;
 
 final readonly class StorefrontProductMerchandising
@@ -35,14 +36,16 @@ final readonly class StorefrontProductMerchandising
             'included_items' => $product->included_items,
             'limitations' => $product->limitations,
             'fulfillment_expectation' => $product->fulfillment_expectation,
-            'warranty_policy' => $product->warranty_policy,
+            'warranty_policy' => LocalizedProductCopy::text($product->getAttributes(), 'warranty_policy', StorefrontLocale::code()),
             'support_policy' => $product->support_policy,
         ]);
     }
 
     public static function fromReadModel(CatalogProductReadModel $product): self
     {
-        return self::fromValues($product->merchandising);
+        return self::fromValues(array_merge($product->merchandising, [
+            'warranty_policy' => LocalizedProductCopy::text($product->copy, 'warranty_policy', StorefrontLocale::code()),
+        ]));
     }
 
     /**

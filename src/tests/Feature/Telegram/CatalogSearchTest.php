@@ -936,6 +936,7 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $created = Product::factory()->create([
             'name' => 'Notion Plus Launch',
             'description' => 'Merchant-authored launch copy.',
+            'description_en' => 'English launch copy.',
             'price_amount' => 30000,
             'stock' => 2,
             'reserved_stock' => 0,
@@ -985,6 +986,10 @@ class CatalogSearchTest extends TelegramBotTestSupport
         $this->assertStringContainsString('💰 Price: Rp30.000', (string) $createdEn['text']);
         $this->assertStringContainsString('📦 Stock: 2', (string) $createdEn['text']);
         $this->assertStringContainsString('📝 Description', (string) $createdEn['text']);
+        $this->assertStringContainsString('English launch copy.', (string) $createdEn['text']);
+        $this->assertStringNotContainsString('Merchant-authored launch copy.', (string) $createdEn['text']);
+        $this->assertStringContainsString('Merchant-authored launch copy.', (string) $createdId['text']);
+        $this->assertStringContainsString('Merchant-authored launch copy.', (string) $createdMs['text']);
         $this->assertStringContainsString('Need help? Reply with /support.', (string) $createdEn['text']);
         $this->assertSame('👀 View Product', $createdEn['reply_markup']['inline_keyboard'][0][0]['text'] ?? null);
         $this->assertStringNotContainsString('👀', (string) $createdEn['text']);

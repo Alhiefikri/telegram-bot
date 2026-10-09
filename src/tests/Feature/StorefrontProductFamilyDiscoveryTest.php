@@ -393,6 +393,36 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertStringNotContainsString('Butuh bantuan?', $familyMainHtml);
     }
 
+    public function test_family_option_panel_copy_follows_the_storefront_locale(): void
+    {
+        config()->set('storefront.locale', 'en');
+        $family = ProductFamily::factory()->create([
+            'slug' => 'locale-family',
+            'name' => 'Locale Family',
+            'description' => 'Family description.',
+        ]);
+        Product::factory()->create([
+            'name' => 'Locale Family SKU',
+            'product_family_id' => $family->id,
+            'family_sort_order' => 1,
+            'family_option_label' => 'English Plan',
+            'description' => 'Deskripsi Indonesia.',
+            'description_en' => 'English family copy.',
+            'warranty_policy' => 'Garansi Indonesia.',
+            'warranty_policy_en' => 'English family policy.',
+            'price_amount' => 99000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->get(route('storefront.product-families.show', ['productFamily' => $family->slug]))
+            ->assertOk()
+            ->assertSee('English family copy.')
+            ->assertSee('English family policy.')
+            ->assertDontSee('Deskripsi Indonesia.')
+            ->assertDontSee('Garansi Indonesia.');
+    }
+
     public function test_canonical_family_path_and_legacy_slug_aliases_redirect_safely(): void
     {
         $family = ProductFamily::factory()->create(['slug' => 'old-netflix', 'name' => 'Netflix']);

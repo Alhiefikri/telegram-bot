@@ -107,6 +107,7 @@ class StorefrontResponseCache
             'checkout_maintenance_version' => $maintenanceVersion,
             'search' => $search,
             'locale' => app()->getLocale(),
+            'storefront_locale' => StorefrontLocale::code(),
             'app_url' => config('app.url'),
             'support_whatsapp_url' => config('services.support.whatsapp_url'),
             'support_whatsapp_number' => config('services.support.whatsapp_number'),

@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Catalog\LocalizedProductCopy;
 use App\Services\Admin\AdminProductQuantityPricing;
+use App\Services\Telegram\TelegramProductContent;
 use Closure;
 use Illuminate\Contracts\Validation\Validator as ValidatorContract;
 use Illuminate\Foundation\Http\FormRequest;
@@ -26,10 +28,13 @@ abstract class AdminProductFormRequest extends FormRequest
         'featured_rank',
     ];
 
+    /** Locale variant columns; base `description`/`warranty_policy` keep their own handling. */
+    private const LOCALIZED_COPY_FIELDS = ['description_ms', 'description_en', 'warranty_policy_ms', 'warranty_policy_en'];
+
     protected function prepareForValidation(): void
     {
         $normalized = [];
-        foreach (['icon', 'usage_guide_title', 'usage_guide_url'] as $field) {
+        foreach (['icon', 'usage_guide_title', 'usage_guide_url', ...self::LOCALIZED_COPY_FIELDS] as $field) {
             if ($this->exists($field)) {
                 $normalized[$field] = $this->nullableTrimmedString($field);
             }
@@ -75,6 +80,8 @@ abstract class AdminProductFormRequest extends FormRequest
     {
         $validator->after(function (ValidatorContract $validator): void {
             if (! $this->hasQuantityPriceTiersInput() || $this->hasTierFieldErrors($validator)) {
+                $this->validateProductDetailBudget($validator);
+
                 return;
             }
 
@@ -87,7 +94,39 @@ abstract class AdminProductFormRequest extends FormRequest
             } catch (InvalidArgumentException $exception) {
                 $validator->errors()->add('quantity_price_tiers', $this->tierValidationMessage($exception));
             }
+
+            $this->validateProductDetailBudget($validator);
         });
+    }
+
+    /**
+     * One locale's Product Details plus Replacement / Refund Policy are delivered
+     * as one Telegram Product Detail message, so every locale variant pair must
+     * respect the shared unit budget. The base copy stays uncapped here: it
+     * predates this form and legacy pairs above the budget must remain saveable;
+     * the `/admin` editor already refuses over-budget base copy.
+     */
+    private function validateProductDetailBudget(ValidatorContract $validator): void
+    {
+        $content = app(TelegramProductContent::class);
+
+        foreach (LocalizedProductCopy::LOCALES as $locale) {
+            if ($locale === LocalizedProductCopy::BASE_LOCALE) {
+                continue;
+            }
+            $pairs = [];
+            foreach (LocalizedProductCopy::FIELDS as $field) {
+                $column = LocalizedProductCopy::column($field, $locale);
+                $pairs[$column] = (string) $this->input($column, '');
+            }
+            if ($content->units(implode('', $pairs)) <= TelegramProductContent::MAX_PRODUCT_DETAIL_UNITS) {
+                continue;
+            }
+            $validator->errors()->add(
+                LocalizedProductCopy::column('description', $locale),
+                'Total Product Details + Refund Policy '.LocalizedProductCopy::LOCALE_LABELS[$locale].' maksimal '.TelegramProductContent::MAX_PRODUCT_DETAIL_UNITS.' unit UTF-16 (emoji dapat dihitung dua unit) agar muat dalam satu pesan Telegram.',
+            );
+        }
     }
 
     public function hasQuantityPriceTiersInput(): bool
@@ -149,6 +188,8 @@ abstract class AdminProductFormRequest extends FormRequest
             'quantity_price_tiers.*.usdt_price_amount' => ['nullable', 'regex:/^\d+(?:\.\d{1,3})?$/', 'gt:0'],
             'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')->whereNull('deleted_at')],
             'description' => ['required', 'string'],
+            'description_ms' => ['nullable', 'string'],
+            'description_en' => ['nullable', 'string'],
             'product_type' => ['nullable', 'string', 'max:100'],
             'access_duration' => ['nullable', 'string', 'max:100'],
             'region' => ['nullable', 'string', 'max:120'],
@@ -172,6 +213,8 @@ abstract class AdminProductFormRequest extends FormRequest
             ],
             'fulfillment_expectation' => ['nullable', 'string'],
             'warranty_policy' => ['nullable', 'string'],
+            'warranty_policy_ms' => ['nullable', 'string'],
+            'warranty_policy_en' => ['nullable', 'string'],
             'support_policy' => ['nullable', 'string'],
             'featured_rank' => ['nullable', 'integer', 'min:1', 'max:999'],
             'delivery_note' => ['nullable', 'string', 'max:2000'],

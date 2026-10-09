@@ -1077,4 +1077,93 @@ class AdminDashboardProductFormsTest extends TestCase
 
         $this->assertStringNotContainsString('delete-product@example.test|pass', $dashboard->getContent());
     }
+
+    public function test_admin_can_create_and_update_product_with_locale_copy_variants(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->post(route('admin.products.store'), [
+                'name' => 'Canva Pro Multi Bahasa',
+                'price_amount' => '75000',
+                'description' => 'Deskripsi default.',
+                'description_ms' => 'Penerangan Melayu.',
+                'description_en' => 'English description.',
+                'warranty_policy' => 'Garansi default.',
+                'warranty_policy_ms' => 'Jaminan Melayu.',
+                'warranty_policy_en' => 'English refund policy.',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-1');
+
+        $product = Product::query()->where('name', 'Canva Pro Multi Bahasa')->firstOrFail();
+        $this->assertSame('Deskripsi default.', $product->description);
+        $this->assertSame('Penerangan Melayu.', $product->description_ms);
+        $this->assertSame('English description.', $product->description_en);
+        $this->assertSame('Garansi default.', $product->warranty_policy);
+        $this->assertSame('Jaminan Melayu.', $product->warranty_policy_ms);
+        $this->assertSame('English refund policy.', $product->warranty_policy_en);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'Canva Pro Multi Bahasa',
+                'price_amount' => '80000',
+                'description' => 'Deskripsi default.',
+                'description_ms' => '',
+                'description_en' => 'Updated English description.',
+                'warranty_policy' => 'Garansi default.',
+                'warranty_policy_ms' => 'Jaminan Melayu baru.',
+                'warranty_policy_en' => '',
+                'is_active' => '1',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $product->refresh();
+        $this->assertNull($product->description_ms);
+        $this->assertSame('Updated English description.', $product->description_en);
+        $this->assertSame('Jaminan Melayu baru.', $product->warranty_policy_ms);
+        $this->assertNull($product->warranty_policy_en);
+        $this->assertSame('Deskripsi default.', $product->description);
+        $this->assertSame('Garansi default.', $product->warranty_policy);
+
+        $this->get('/admin?tab=produk')
+            ->assertOk()
+            ->assertSee('product-description-ms-panel', false)
+            ->assertSee('product-description-en-panel', false)
+            ->assertSee('product-warranty-policy-ms-panel', false)
+            ->assertSee('product-warranty-policy-en-panel', false)
+            ->assertSee('Bahasa Melayu');
+    }
+
+    public function test_locale_variant_copy_over_the_product_detail_budget_is_rejected(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+
+        $this->from('/admin?tab=produk')
+            ->post(route('admin.products.store'), [
+                'name' => 'Over Budget Product',
+                'price_amount' => '25000',
+                'description' => 'Deskripsi default.',
+                'description_en' => str_repeat('x', 2100),
+                'warranty_policy_en' => str_repeat('y', 1000),
+            ])
+            ->assertRedirect('/admin?tab=produk')
+            ->assertSessionHasErrors(['description_en'], null, 'productCreate');
+
+        $this->assertDatabaseCount('products', 0);
+
+        $this->followingRedirects()
+            ->from('/admin?tab=produk')
+            ->post(route('admin.products.store'), [
+                'name' => 'Over Budget Product',
+                'price_amount' => '25000',
+                'description' => 'Deskripsi default.',
+                'description_en' => str_repeat('x', 2100),
+                'warranty_policy_en' => str_repeat('y', 1000),
+            ])
+            ->assertOk()
+            ->assertSee('Product Details + Refund Policy English maksimal 3000')
+            ->assertSee('\u0022productContentLocale\u0022:\u0022en\u0022', false);
+    }
 }

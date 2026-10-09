@@ -2,6 +2,7 @@
 
 namespace App\Storefront;
 
+use App\Catalog\LocalizedProductCopy;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\ManualPaymentSetting;
@@ -91,13 +92,14 @@ class StorefrontProductPresenter
                 : ($isBuyable ? 'Beli sekarang' : $checkoutReadiness->label));
         // A variant without its own icon shows the family icon the catalog uses.
         $icon = $this->familyIcons->forProduct($product);
+        $description = LocalizedProductCopy::text($product->getAttributes(), 'description', StorefrontLocale::code());
 
         return new StorefrontProductPresentation(
             id: (int) $product->id,
             categoryKey: (string) ($product->category_id ?? 'lainnya'),
             name: $product->name,
-            description: (string) $product->description,
-            descriptionSnippet: StorefrontProductPresentationNormalizer::descriptionSnippet((string) $product->description),
+            description: $description,
+            descriptionSnippet: StorefrontProductPresentationNormalizer::descriptionSnippet($description),
             priceAmount: (int) $product->price_amount,
             merchandising: StorefrontProductMerchandising::fromProduct($product),
             stockAvailable: $stockAvailable,

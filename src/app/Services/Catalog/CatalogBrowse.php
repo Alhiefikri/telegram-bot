@@ -10,6 +10,7 @@ use App\Catalog\CatalogCategoryReadModel;
 use App\Catalog\CatalogFamilyReadModel;
 use App\Catalog\CatalogPagination;
 use App\Catalog\CatalogProductReadModel;
+use App\Catalog\LocalizedProductCopy;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Category;
@@ -44,6 +45,8 @@ final class CatalogBrowse
         'icon',
         'custom_emoji_id',
         'description',
+        'description_ms',
+        'description_en',
         'product_type',
         'access_duration',
         'region',
@@ -53,6 +56,8 @@ final class CatalogBrowse
         'limitations',
         'fulfillment_expectation',
         'warranty_policy',
+        'warranty_policy_ms',
+        'warranty_policy_en',
         'support_policy',
         'price_amount',
         'usdt_price_amount',
@@ -370,6 +375,7 @@ final class CatalogBrowse
             name: (string) $product->name,
             label: $label,
             description: (string) $product->description,
+            copy: LocalizedProductCopy::extract($product->getAttributes()),
             merchandising: [
                 'product_type' => $product->product_type,
                 'access_duration' => $product->access_duration,
@@ -464,6 +470,7 @@ final class CatalogBrowse
         return collect([
             $product->name,
             $product->description,
+            ...array_values($product->copy),
             $product->optionLabel,
             $product->categoryName,
             $product->categorySlug,
@@ -591,6 +598,7 @@ final class CatalogBrowse
             name: $product->name,
             label: $product->label,
             description: $product->description,
+            copy: $product->copy,
             merchandising: $product->merchandising,
             categoryId: $product->categoryId,
             categoryName: $product->categoryName,

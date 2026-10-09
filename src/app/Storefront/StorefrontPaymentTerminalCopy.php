@@ -18,10 +18,7 @@ final class StorefrontPaymentTerminalCopy
 {
     public function locale(): string
     {
-        $locale = strtolower(str_replace('_', '-', trim((string) config('storefront.locale', 'id'))));
-        $locale = explode('-', $locale, 2)[0];
-
-        return in_array($locale, ['id', 'en', 'ms'], true) ? $locale : 'id';
+        return StorefrontLocale::code();
     }
 
     /** @param array<string, mixed> $replace */

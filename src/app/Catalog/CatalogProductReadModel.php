@@ -9,6 +9,8 @@ final readonly class CatalogProductReadModel
         public string $name,
         public string $label,
         public string $description,
+        /** @var array<string, ?string> Raw localizable copy columns (`description`, `description_ms`, …). */
+        public array $copy,
         /** @var array<string, ?string> */
         public array $merchandising,
         public ?int $categoryId,
@@ -45,6 +47,7 @@ final readonly class CatalogProductReadModel
             'merchandising' => $this->merchandising,
             'label' => $this->label,
             'description' => $this->description,
+            'copy' => $this->copy,
             'category_id' => $this->categoryId,
             'category_name' => $this->categoryName,
             'category_slug' => $this->categorySlug,

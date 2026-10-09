@@ -2,6 +2,7 @@
 
 namespace App\Services\Admin;
 
+use App\Catalog\LocalizedProductCopy;
 use App\Services\ProductStockIntake;
 use Illuminate\Support\ViewErrorBag;
 
@@ -75,6 +76,12 @@ class AdminProductDashboardState
 
         $productTierRows = old('quantity_price_tiers', $editingProduct['quantity_price_tiers'] ?? []);
         $productTierRows = is_array($productTierRows) ? array_values($productTierRows) : [];
+        // Reopen the language tab that owns the rejected copy.
+        $productContentLocale = match (true) {
+            $productFormErrors->has('description_en') || $productFormErrors->has('warranty_policy_en') => 'en',
+            $productFormErrors->has('description_ms') || $productFormErrors->has('warranty_policy_ms') => 'ms',
+            default => LocalizedProductCopy::BASE_LOCALE,
+        };
         $hasCategoryUpdateErrors = $categoryUpdateErrors->count() > 0;
         $hasFamilyErrors = $familyCreateErrors->count() > 0 || $familyUpdateErrors->count() > 0 || $familyDeleteErrors->count() > 0;
         $isCategoryEdit = $categoryFormMode === 'edit' || $hasCategoryUpdateErrors;
@@ -134,7 +141,12 @@ class AdminProductDashboardState
                 'productUsdtPrice' => $productUsdtPrice,
                 'productCategoryId' => old('category_id', $editingProduct['category_id'] ?? ''),
                 'productDescription' => old('description', $editingProduct['description'] ?? ''),
+                'productDescriptionMs' => old('description_ms', $editingProduct['description_ms'] ?? ''),
+                'productDescriptionEn' => old('description_en', $editingProduct['description_en'] ?? ''),
                 'productWarrantyPolicy' => old('warranty_policy', $editingProduct['warranty_policy'] ?? ''),
+                'productWarrantyPolicyMs' => old('warranty_policy_ms', $editingProduct['warranty_policy_ms'] ?? ''),
+                'productWarrantyPolicyEn' => old('warranty_policy_en', $editingProduct['warranty_policy_en'] ?? ''),
+                'productContentLocale' => $productContentLocale,
                 'productDeliveryNote' => old('delivery_note', $editingProduct['delivery_note'] ?? ''),
                 'productUsageGuideTitle' => old('usage_guide_title', $editingProduct['usage_guide_title'] ?? ''),
                 'productQuantityPriceTiers' => $productTierRows,

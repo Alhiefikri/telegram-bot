@@ -11,6 +11,7 @@ use App\Catalog\CatalogFamilyReadModel;
 use App\Catalog\CatalogIcon;
 use App\Catalog\CatalogProductReadModel;
 use App\Catalog\CatalogProjectionPayload;
+use App\Catalog\LocalizedProductCopy;
 use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\Product;
@@ -673,12 +674,15 @@ class TelegramCatalogIntents
         }
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.details');
-        $lines[] = trim((string) $product->description) === ''
-            ? $this->captions->blockquote($this->descriptionText($customer, $product))
-            : '<blockquote>'.$this->content->html($product, 'description').'</blockquote>';
-        if (trim((string) $product->warranty_policy) !== '') {
+        $copy = LocalizedProductCopy::extract($product->getAttributes());
+        $description = LocalizedProductCopy::resolve($copy, 'description', $this->locale->code($customer));
+        $lines[] = trim($description['text']) === ''
+            ? $this->captions->blockquote($this->locale->translate($customer, 'catalog.description_missing'))
+            : '<blockquote>'.$this->content->html($product, $description['column']).'</blockquote>';
+        $warrantyPolicy = LocalizedProductCopy::resolve($copy, 'warranty_policy', $this->locale->code($customer));
+        if (trim($warrantyPolicy['text']) !== '') {
             $lines[] = '';
-            $lines[] = '<blockquote>'.$this->escapeHtml($this->locale->translate($customer, 'catalog.replacement_refund_policy'))."\n".$this->content->html($product, 'warranty_policy').'</blockquote>';
+            $lines[] = '<blockquote>'.$this->escapeHtml($this->locale->translate($customer, 'catalog.replacement_refund_policy'))."\n".$this->content->html($product, $warrantyPolicy['column']).'</blockquote>';
         }
         if ($maintenance->active) {
             $lines[] = '';
@@ -1603,12 +1607,5 @@ class TelegramCatalogIntents
     private function maintenanceNotice(Customer $customer, CheckoutMaintenanceState $state): string
     {
         return $this->locale->translate($customer, 'checkout.maintenance').$this->locale->checkoutMaintenanceNote($customer, $state->publicNote);
-    }
-
-    private function descriptionText(Customer $customer, Product $product): string
-    {
-        $description = trim((string) $product->description);
-
-        return $description !== '' ? $description : $this->locale->translate($customer, 'catalog.description_missing');
     }
 }

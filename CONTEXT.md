@@ -372,3 +372,11 @@ _Avoid_: customer Order, automatic retry order
 **Ambiguous Supplier Purchase**:
 A Supplier Purchase for which purchase or debit may have occurred but the outcome cannot yet be established. It blocks automatic replacement purchasing and refund until reliable evidence resolves the uncertainty.
 _Avoid_: rejected purchase, presumed no debit
+
+**Localized Product Copy**:
+The per-locale variants of a Product's customer-facing catalog copy: Product Details and Replacement / Refund Policy, one variant per supported locale (`id`, `ms`, `en`), each edited separately in the Admin Dashboard and the Store Bot content editor. The base `description` column holds the Indonesian variant; `_ms`/`_en` columns hold the other variants. An empty variant renders the base copy, and it never changes another locale's text, price, stock, or premium-emoji metadata.
+_Avoid_: machine translation, per-locale Product, translated catalog row
+
+**Product Copy Variant**:
+One locale's stored Product Details or Replacement / Refund Policy text together with that exact text's Telegram premium-emoji metadata. Metadata is bound to the variant it was captured from, so editing one locale's copy leaves every other locale's premium emoji intact.
+_Avoid_: shared emoji offsets, copied translations

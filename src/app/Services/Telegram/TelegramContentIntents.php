@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Catalog\LocalizedProductCopy;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Services\AuditLogger;
@@ -43,7 +44,7 @@ final class TelegramContentIntents
         if ($navigation !== []) {
             $buttons[] = $navigation;
         }
-        $this->bot->sendMessage($chatId, 'Admin — pilih produk untuk mengedit Product Details atau Replacement / Refund Policy.', ['inline_keyboard' => $buttons]);
+        $this->bot->sendMessage($chatId, 'Admin — pilih produk untuk mengedit Product Details atau Replacement / Refund Policy. Setiap bagian punya tiga varian bahasa (Indonesia, Melayu, English); varian kosong memakai teks bahasa default.', ['inline_keyboard' => $buttons]);
     }
 
     public function callback(TelegramCallbackContext $context): void
@@ -73,26 +74,30 @@ final class TelegramContentIntents
             return;
         }
         $field = $parts[3] ?? '';
-        if (($parts[1] ?? '') !== 'edit' || ! isset(self::FIELDS[$field])) {
+        if (! isset(self::FIELDS[$field])) {
             return;
         }
-        $this->forget($context->customer);
-        $text = (string) $product->{$field};
-        $this->bot->sendMessage($context->chatId, self::FIELDS[$field].' — '.$product->name."\nSalin teks asli berikut ke kolom pesan, edit, lalu BALAS pesan instruksi terakhir. Emoji premium harus dipilih dari keyboard emoji Telegram. /cancel membatalkan; /clear mengosongkan bagian. Berlaku 10 menit.");
-        // No title is mixed into the editable original; offsets remain exact.
-        if ($text !== '') {
-            foreach (mb_str_split($text, 4096, 'UTF-8') as $index => $chunk) {
-                $options = $index === 0 && mb_strlen($text, 'UTF-8') <= 4096
-                    ? ['entities' => $this->content->entities($product, $field)] : [];
-                $this->bot->sendMessage($context->chatId, $chunk, [], $options);
+        if (($parts[1] ?? '') === 'edit') {
+            $this->forget($context->customer);
+            $buttons = [];
+            foreach (LocalizedProductCopy::LOCALE_LABELS as $locale => $label) {
+                $column = LocalizedProductCopy::column($field, $locale);
+                $buttons[] = [[
+                    'text' => $label.' — '.(trim((string) $product->{$column}) === '' ? 'kosong' : 'terisi'),
+                    'callback_data' => 'content:locale:'.$product->id.':'.$field.':'.$locale,
+                ]];
             }
+            $buttons[] = [['text' => 'Kembali', 'callback_data' => 'content:product:'.$product->id]];
+            $this->bot->sendMessage($context->chatId, self::FIELDS[$field].' — '.$product->name."\nPilih bahasa yang ingin diedit. Varian kosong tampil memakai teks bahasa default produk.", ['inline_keyboard' => $buttons]);
+
+            return;
         }
-        $prompt = $this->bot->sendMessage($context->chatId, 'Balas pesan ini dengan teks pengganti lengkap untuk '.self::FIELDS[$field].'.', ['force_reply' => true, 'selective' => true]);
-        Cache::put($this->key($context->customer), [
-            'product_id' => $product->id, 'field' => $field, 'text' => $text,
-            'metadata' => $product->telegram_content[$field] ?? null,
-            'chat_id' => $context->chatId, 'prompt_id' => $prompt['result']['message_id'],
-        ], now()->addMinutes(10));
+        $locale = $parts[4] ?? '';
+        if (($parts[1] ?? '') !== 'locale' || ! isset(LocalizedProductCopy::LOCALE_LABELS[$locale])) {
+            return;
+        }
+
+        $this->prompt($context, $product, $field, $locale);
     }
 
     public function receive(Customer $customer, string $chatId, array $message, string $chatType): bool
@@ -138,19 +143,25 @@ final class TelegramContentIntents
                 }
             }
             DB::transaction(function () use ($customer, $state, $text, $entities): void {
+                $column = $state['column'];
                 $product = Product::query()->lockForUpdate()->find($state['product_id']);
-                $field = $state['field'];
-                if (! $product || (string) $product->{$field} !== $state['text'] || ($product->telegram_content[$field] ?? null) !== $state['metadata']) {
+                if (! $product || (string) $product->{$column} !== $state['text'] || ($product->telegram_content[$column] ?? null) !== $state['metadata']) {
                     throw new InvalidArgumentException('Konten sudah berubah. Buka /admin lagi agar tidak menimpa perubahan terbaru.');
                 }
-                $other = $field === 'description' ? 'warranty_policy' : 'description';
-                if (strlen(mb_convert_encoding($text.(string) $product->{$other}, 'UTF-16LE', 'UTF-8')) / 2 > 3000) {
-                    throw new InvalidArgumentException('Total Product Details + Refund Policy maksimal 3000 unit UTF-16 (emoji dapat dihitung dua unit) agar muat di Telegram.');
+                $other = LocalizedProductCopy::column($state['field'] === 'description' ? 'warranty_policy' : 'description', $state['locale']);
+                if ($this->content->units($text.(string) $product->{$other}) > TelegramProductContent::MAX_PRODUCT_DETAIL_UNITS) {
+                    throw new InvalidArgumentException('Total Product Details + Refund Policy '.LocalizedProductCopy::LOCALE_LABELS[$state['locale']].' maksimal '.TelegramProductContent::MAX_PRODUCT_DETAIL_UNITS.' unit UTF-16 (emoji dapat dihitung dua unit) agar muat di Telegram.');
                 }
+                // Metadata is bound to the exact variant text, so an emptied
+                // variant drops its slot instead of keeping a stale binding.
                 $metadata = $product->telegram_content ?? [];
-                $metadata[$field] = ['text' => $text, 'entities' => $entities];
-                $product->forceFill([$field => $text, 'telegram_content' => $metadata])->save();
-                $this->audit->log('product.telegram_content_updated', $product, [$field => $state['text']], [$field => $text, 'telegram_actor_id' => (string) $customer->telegram_id]);
+                if ($text === '') {
+                    unset($metadata[$column]);
+                } else {
+                    $metadata[$column] = ['text' => $text, 'entities' => $entities];
+                }
+                $product->forceFill([$column => $text, 'telegram_content' => $metadata === [] ? null : $metadata])->save();
+                $this->audit->log('product.telegram_content_updated', $product, [$column => $state['text']], [$column => $text, 'telegram_actor_id' => (string) $customer->telegram_id]);
             });
         } catch (InvalidArgumentException $exception) {
             $this->bot->sendMessage($chatId, $exception->getMessage());
@@ -161,7 +172,7 @@ final class TelegramContentIntents
         $this->bot->sendMessage($chatId, 'Tersimpan. Konten langsung digunakan pada Product Detail berikutnya. Emoji bergerak memerlukan izin custom emoji bot dari Telegram dan animasi aktif pada aplikasi penerima.');
         $product = Product::query()->find($state['product_id']);
         if ($text !== '' && $product) {
-            $expected = $this->content->entities($product, $state['field']);
+            $expected = $this->content->entities($product, $state['column']);
             $preview = $this->bot->sendMessage($chatId, $text, [], ['entities' => $expected]);
             $returnedIds = array_column($preview['result']['entities'] ?? [], 'custom_emoji_id');
             if (array_diff(array_column($expected, 'custom_emoji_id'), $returnedIds) !== []) {
@@ -170,6 +181,30 @@ final class TelegramContentIntents
         }
 
         return true;
+    }
+
+    private function prompt(TelegramCallbackContext $context, Product $product, string $field, string $locale): void
+    {
+        $this->forget($context->customer);
+        $column = LocalizedProductCopy::column($field, $locale);
+        $text = (string) $product->{$column};
+        $label = self::FIELDS[$field].' ('.LocalizedProductCopy::LOCALE_LABELS[$locale].')';
+        $this->bot->sendMessage($context->chatId, $label.' — '.$product->name."\nSalin teks asli berikut ke kolom pesan, edit, lalu BALAS pesan instruksi terakhir. Emoji premium harus dipilih dari keyboard emoji Telegram. /cancel membatalkan; /clear mengosongkan varian ini sehingga tampil memakai teks bahasa default. Berlaku 10 menit.");
+        // No title is mixed into the editable original; offsets remain exact.
+        if ($text !== '') {
+            foreach (mb_str_split($text, 4096, 'UTF-8') as $index => $chunk) {
+                $options = $index === 0 && mb_strlen($text, 'UTF-8') <= 4096
+                    ? ['entities' => $this->content->entities($product, $column)] : [];
+                $this->bot->sendMessage($context->chatId, $chunk, [], $options);
+            }
+        }
+        $prompt = $this->bot->sendMessage($context->chatId, 'Balas pesan ini dengan teks pengganti lengkap untuk '.$label.'.', ['force_reply' => true, 'selective' => true]);
+        Cache::put($this->key($context->customer), [
+            'product_id' => $product->id, 'field' => $field, 'column' => $column, 'locale' => $locale,
+            'text' => $text,
+            'metadata' => $product->telegram_content[$column] ?? null,
+            'chat_id' => $context->chatId, 'prompt_id' => $prompt['result']['message_id'],
+        ], now()->addMinutes(10));
     }
 
     private function key(Customer $customer): string

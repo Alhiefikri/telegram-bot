@@ -46,7 +46,12 @@ const emptyProductForm = () => ({
   productUsdtPrice: "",
   productCategoryId: "",
   productDescription: "",
+  productDescriptionMs: "",
+  productDescriptionEn: "",
+  productContentLocale: "id",
   productWarrantyPolicy: "",
+  productWarrantyPolicyMs: "",
+  productWarrantyPolicyEn: "",
   productDeliveryNote: "",
   productUsageGuideTitle: "",
   productUsageGuideUrl: "",
@@ -484,6 +489,42 @@ export default function adminDashboard(initialState = {}) {
         reduceMotion ? 900 : RETURN_TARGET_HIGHLIGHT_MS
       );
     },
+    setProductContentLocale(locale) {
+      if (!["id", "ms", "en"].includes(locale)) {
+        return;
+      }
+
+      this.productContentLocale = locale;
+    },
+
+    handleProductContentTabKeydown(event) {
+      const key = event.key;
+      if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(key)) {
+        return;
+      }
+
+      const list = event.currentTarget.closest('[role="tablist"]');
+      const tabs = list
+        ? Array.from(list.querySelectorAll('[role="tab"]'))
+        : [];
+      const currentIndex = tabs.indexOf(event.currentTarget);
+      if (currentIndex < 0 || tabs.length === 0) {
+        return;
+      }
+
+      const nextIndex =
+        key === "Home"
+          ? 0
+          : key === "End"
+            ? tabs.length - 1
+            : (currentIndex + (key === "ArrowRight" ? 1 : -1) + tabs.length) %
+              tabs.length;
+      const nextTab = tabs[nextIndex];
+
+      this.setProductContentLocale(nextTab.dataset.productContentLocale);
+      this.$nextTick(() => nextTab.focus());
+    },
+
     setStockInputMode(mode) {
       if (this.accountInputSubmitting) {
         return false;
@@ -904,7 +945,12 @@ export default function adminDashboard(initialState = {}) {
         productQuantityPriceTierErrors: {},
         productCategoryId: product.categoryId ?? "",
         productDescription: product.description,
+        productDescriptionMs: product.descriptionMs ?? "",
+        productDescriptionEn: product.descriptionEn ?? "",
+        productContentLocale: "id",
         productWarrantyPolicy: product.warrantyPolicy ?? "",
+        productWarrantyPolicyMs: product.warrantyPolicyMs ?? "",
+        productWarrantyPolicyEn: product.warrantyPolicyEn ?? "",
         productDeliveryNote: product.deliveryNote ?? "",
         productUsageGuideTitle: product.usageGuideTitle ?? "",
         productUsageGuideUrl: product.usageGuideUrl ?? "",

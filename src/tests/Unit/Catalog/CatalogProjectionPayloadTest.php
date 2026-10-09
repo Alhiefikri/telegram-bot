@@ -10,6 +10,7 @@ use App\Catalog\CatalogFamilyReadModel;
 use App\Catalog\CatalogPagination;
 use App\Catalog\CatalogProductReadModel;
 use App\Catalog\CatalogProjectionPayload;
+use App\Catalog\LocalizedProductCopy;
 use InvalidArgumentException;
 use Tests\TestCase;
 
@@ -74,6 +75,11 @@ class CatalogProjectionPayloadTest extends TestCase
             name: 'ChatGPT Plus',
             label: '1 Bulan',
             description: 'Akun privat bergaransi',
+            copy: LocalizedProductCopy::extract([
+                'description' => 'Akun privat bergaransi',
+                'description_en' => 'Private account with warranty',
+                'warranty_policy' => 'Garansi 7 hari',
+            ]),
             merchandising: [
                 'product_type' => 'Akun',
                 'access_duration' => '1 Bulan',
@@ -115,6 +121,7 @@ class CatalogProjectionPayloadTest extends TestCase
             name: 'Gmail Fresh',
             label: 'Gmail Fresh',
             description: 'Email baru',
+            copy: LocalizedProductCopy::extract(['description' => 'Email baru']),
             merchandising: array_fill_keys([
                 'product_type', 'access_duration', 'region', 'account_type', 'device_limit',
                 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'support_policy',

@@ -3,6 +3,7 @@
 namespace App\Storefront;
 
 use App\Catalog\CatalogProductReadModel;
+use App\Catalog\LocalizedProductCopy;
 
 final class StorefrontCatalogProductPresenter
 {
@@ -16,13 +17,14 @@ final class StorefrontCatalogProductPresenter
         $isAvailable = $product->isAvailable;
         $familyOptionLabel = trim((string) $product->optionLabel);
         $familyOptionLabel = $familyOptionLabel === '' ? null : $familyOptionLabel;
+        $description = LocalizedProductCopy::text($product->copy, 'description', StorefrontLocale::code());
 
         return new StorefrontCatalogProductPresentation(
             id: $product->id,
             categoryKey: (string) ($product->categoryId ?? 'lainnya'),
             name: $product->name,
-            description: $product->description,
-            descriptionSnippet: StorefrontProductPresentationNormalizer::descriptionSnippet($product->description),
+            description: $description,
+            descriptionSnippet: StorefrontProductPresentationNormalizer::descriptionSnippet($description),
             merchandising: StorefrontProductMerchandising::fromReadModel($product),
             priceAmount: $product->priceAmount,
             usdtPriceAmount: $product->usdtPriceAmount,

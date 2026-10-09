@@ -162,12 +162,6 @@ class StorefrontShopSignedStatusRefreshResult
 
     private static function translate(string $key): string
     {
-        $locale = strtolower(str_replace('_', '-', trim((string) config('storefront.locale', 'id'))));
-        $locale = explode('-', $locale, 2)[0];
-        if (! in_array($locale, ['id', 'en', 'ms'], true)) {
-            $locale = 'id';
-        }
-
-        return (string) __($key, [], $locale);
+        return (string) __($key, [], StorefrontLocale::code());
     }
 }

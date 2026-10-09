@@ -168,4 +168,33 @@ final class TelegramProductContentTest extends TestCase
         $this->assertSame("A &amp; B\n🔥", $content->html($product, 'description'));
         $this->assertSame('', $content->html($product, 'warranty_policy'));
     }
+
+    public function test_locale_variant_metadata_is_bound_to_the_variant_column(): void
+    {
+        $product = (new Product)->forceFill([
+            'description' => '🔥',
+            'description_en' => 'Warranty 🔥',
+            'telegram_content' => [
+                'description' => ['text' => '🔥', 'entities' => [
+                    ['type' => 'custom_emoji', 'offset' => 0, 'length' => 2, 'custom_emoji_id' => self::FIRE_ID],
+                ]],
+                'description_en' => ['text' => 'Warranty 🔥', 'entities' => [
+                    ['type' => 'custom_emoji', 'offset' => 9, 'length' => 2, 'custom_emoji_id' => self::STAR_ID],
+                ]],
+            ],
+        ]);
+        $content = new TelegramProductContent;
+
+        $this->assertSame('<tg-emoji emoji-id="'.self::FIRE_ID.'">🔥</tg-emoji>', $content->html($product, 'description'));
+        $this->assertSame('Warranty <tg-emoji emoji-id="'.self::STAR_ID.'">🔥</tg-emoji>', $content->html($product, 'description_en'));
+    }
+
+    public function test_units_count_utf16_code_units_including_surrogate_pairs(): void
+    {
+        $content = new TelegramProductContent;
+
+        $this->assertSame(5, $content->units('abcde'));
+        $this->assertSame(4, $content->units('🔥🔥'));
+        $this->assertSame(TelegramProductContent::MAX_PRODUCT_DETAIL_UNITS, $content->units(str_repeat('x', 3000)));
+    }
 }

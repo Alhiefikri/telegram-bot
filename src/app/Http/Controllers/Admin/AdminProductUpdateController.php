@@ -39,7 +39,7 @@ class AdminProductUpdateController extends Controller
                 $categoryId = $validated['category_id'] ?? null;
 
                 $locked = $coherence->lockForCategoryChange($product, $categoryId);
-                $oldValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $oldValues = $locked->only(['category_id', 'name', 'icon', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
                 $tierAudit = [
                     'before' => $tierPricing->snapshot($locked),
                     'after' => [],
@@ -53,7 +53,11 @@ class AdminProductUpdateController extends Controller
                     'name' => $validated['name'],
                     'icon' => $request->exists('icon') ? ($validated['icon'] ?? null) : $locked->icon,
                     'description' => $validated['description'],
+                    'description_ms' => $validated['description_ms'] ?? null,
+                    'description_en' => $validated['description_en'] ?? null,
                     ...$request->merchandisingAttributes(),
+                    'warranty_policy_ms' => $validated['warranty_policy_ms'] ?? null,
+                    'warranty_policy_en' => $validated['warranty_policy_en'] ?? null,
                     'delivery_note' => $validated['delivery_note'] ?? null,
                     'usage_guide_title' => $validated['usage_guide_title'] ?? null,
                     'usage_guide_url' => $validated['usage_guide_url'] ?? null,
@@ -79,7 +83,7 @@ class AdminProductUpdateController extends Controller
                     $tierAudit['after'] = $tierPricing->snapshot($locked);
                 }
                 $oldValues['quantity_price_tiers'] = $tierAudit['before'];
-                $newValues = $locked->only(['category_id', 'name', 'icon', 'description', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
+                $newValues = $locked->only(['category_id', 'name', 'icon', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock']);
                 $newValues['quantity_price_tiers'] = $tierAudit['after'];
 
                 $auditLogger->log(
