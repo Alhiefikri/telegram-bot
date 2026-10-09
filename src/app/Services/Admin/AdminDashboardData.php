@@ -13,6 +13,7 @@ use App\Services\PaymentReceiptReport;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use App\Services\Telegram\FakeSalesProofPostPublisher;
 use App\Services\Telegram\TelegramBotApiRedactor;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 
 final class AdminDashboardData
@@ -45,6 +46,7 @@ final class AdminDashboardData
         private readonly StorefrontFunnelReport $funnelReport,
         private readonly StoreBalanceOwnerCompensationService $ownerCompensation,
         private readonly AdminSupplierDashboardData $supplierData,
+        private readonly BalanceAdjustmentDashboardReadiness $balanceAdjustmentDashboardReadiness,
     ) {}
 
     /**
@@ -318,7 +320,7 @@ final class AdminDashboardData
                 'label' => 'Keuangan',
                 'items' => $this->visibleNavigationItems([
                     $this->navigationItem('balance-reports', 'Laporan saldo', 'report', route('admin.store-balance.reports.index'), visible: $canReconcilePayments),
-                    $this->navigationItem('balance-adjustments', 'Kelola saldo', 'adjustment', route('admin.store-balance.adjustments.index'), visible: $canCompensateStoreBalance),
+                    $this->navigationItem('balance-adjustments', 'Kelola saldo', 'adjustment', route('admin.store-balance.adjustments.index'), visible: $canCompensateStoreBalance && $this->balanceAdjustmentDashboardReadiness->isReady()),
                     $this->navigationItem('usdt-review', 'Review deposit USDT', 'shield', route('admin.store-balance.usdt-review.index'), visible: $canCompensateStoreBalance),
                     $tabItems['balance-issues'],
                     $tabItems['riwayat'],
@@ -360,6 +362,10 @@ final class AdminDashboardData
                 $group['items'] = array_map(
                     static function (array $item) use ($activeTab): array {
                         if ($item['tab'] !== null) {
+                            $item['href'] = route('admin.dashboard', [
+                                ...Arr::except(request()->query(), ['product_form']),
+                                'tab' => $item['tab'],
+                            ]);
                             $item['active'] = $item['tab'] === $activeTab;
                         }
 

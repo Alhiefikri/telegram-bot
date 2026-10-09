@@ -2674,20 +2674,22 @@ test("serializes the visible admin password field before submitting bogus creden
 
 test("renders the compact admin dashboard at desktop width", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await installClipboardProbe(page);
   await login(page);
 
-  await expect(page.getByRole("heading", { name: "Test User" })).toBeVisible();
   await expect(
-    page.getByRole("navigation", { name: "Navigasi desktop" })
+    page.getByRole("banner", { name: "Konteks halaman" })
+  ).toContainText("Test User");
+  await expect(
+    page.getByRole("navigation", { name: "Navigasi admin", exact: true })
   ).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Navigasi dashboard" })
   ).toBeHidden();
   await expect(
-    page.getByRole("button", { name: "Bagikan Toko" })
+    page.getByRole("button", { name: "Bagikan", exact: true })
   ).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Mode pembayaran" })
@@ -2701,12 +2703,94 @@ test("renders the compact admin dashboard at desktop width", async ({
   ).toHaveCount(0);
   await expectStoreLinkCopyAndShare(page);
 
+  await page.screenshot({
+    path: testInfo.outputPath("desktop-stats-light.png"),
+  });
+  await page.locator("[data-theme-toggle]").click();
+  await page.screenshot({
+    path: testInfo.outputPath("desktop-stats-dark.png"),
+  });
+  await page.locator("[data-theme-toggle]").click();
   await expectNoDocumentOverflow(page);
   await expectPrimaryActionsAtLeast44px(page);
 
   await page.goto(`${baseUrl}/admin?tab=produk`);
   await exerciseProductManagementModals(page);
   await expectNoDocumentOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath("desktop-products.png") });
+});
+
+test("direct desktop tabs select one sidebar destination and preserve content anchors", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  const tabs = [
+    ["stats", "Ringkasan", "admin-section-stats"],
+    ["produk", "Produk", "admin-section-products"],
+    ["penjualan", "Pesanan", "admin-section-sales"],
+    ["suppliers", "Supplier", "supplier-title"],
+    ["broadcast", "Siaran", "admin-section-broadcast"],
+    ["telegram-channel", "Store Channel", "admin-section-store-channel"],
+    ["riwayat", "Riwayat KlikQRIS", "admin-section-history"],
+    ["withdraw", "Withdraw", "admin-section-withdraw"],
+    ["funnel", "Funnel", "admin-section-funnel"],
+    ["balance-issues", "Kompensasi Top-up", "admin-section-balance-issues"],
+  ];
+  for (const [tab, label, anchor] of tabs) {
+    await page.goto(`${baseUrl}/admin?tab=${tab}`);
+    const nav = page.getByRole("navigation", {
+      name: "Navigasi admin",
+      exact: true,
+    });
+    await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
+    await expect(
+      nav.getByRole("link", { name: label, exact: true })
+    ).toHaveAttribute("aria-current", "page");
+    await expect(page.locator(`#${anchor}`)).toBeVisible();
+    await expect(
+      page
+        .getByRole("banner", { name: "Konteks halaman" })
+        .getByRole("heading", { name: label, exact: true })
+    ).toBeVisible();
+    await expectNoDocumentOverflow(page);
+    if (tab === "penjualan") {
+      await page.screenshot({ path: testInfo.outputPath("desktop-sales.png") });
+    }
+  }
+  await page.goto(`${baseUrl}/admin?tab=produk&product_form=create`);
+  await expect(
+    page.getByRole("dialog", { name: /Tambah produk/i })
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("dialog", { name: /Tambah produk/i })
+  ).toBeHidden();
+});
+
+test("desktop sidebar links navigate without JavaScript and retain filters", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: { width: 1280, height: 900 },
+  });
+  const page = await context.newPage();
+  try {
+    await login(page);
+    await page.goto(`${baseUrl}/admin?tab=penjualan&sales_filter=waiting`);
+    const nav = page.getByRole("navigation", {
+      name: "Navigasi admin",
+      exact: true,
+    });
+    await nav.getByRole("link", { name: "Produk", exact: true }).click();
+    await expect(page).toHaveURL(/tab=produk&sales_filter=waiting/);
+    await expect(
+      nav.getByRole("link", { name: "Produk", exact: true })
+    ).toHaveAttribute("aria-current", "page");
+  } finally {
+    await context.close();
+  }
 });
 
 test("hides retired Pakasir controls from provider switch", async ({
@@ -2730,7 +2814,7 @@ test("hides retired Pakasir controls from provider switch", async ({
     paymentRegion.getByRole("button", { name: "QR Native Pakasir" })
   ).toHaveCount(0);
 });
-test("uses a compact sticky shell header on internal admin tabs", async ({
+test("keeps shared context and store actions reachable on internal admin tabs", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -2741,28 +2825,21 @@ test("uses a compact sticky shell header on internal admin tabs", async ({
     ["penjualan", "Pesanan"],
     ["broadcast", "Siaran"],
     ["telegram-channel", "Store Channel"],
-    ["funnel", "Funnel Storefront"],
+    ["funnel", "Funnel"],
   ]) {
     await page.goto(`${baseUrl}/admin?tab=${tab}`);
 
     const compactHeader = page.getByRole("banner", {
-      name: "Navigasi section admin",
+      name: "Konteks halaman",
     });
-    await expect(
-      page.locator("header").filter({ hasText: "Halo," })
-    ).toHaveCount(0);
     await expect(compactHeader).toBeVisible();
     await expect(
       compactHeader.getByRole("heading", { name: label, exact: true })
     ).toBeVisible();
     await expect(compactHeader).toContainText("Toko aktif");
-    await expect(compactHeader).toHaveCSS("position", "sticky");
     await expect(
       compactHeader.getByRole("link", { name: "Buka Toko" })
-    ).toHaveCount(0);
-    await expect(
-      compactHeader.getByRole("button", { name: "Bagikan Toko" })
-    ).toHaveCount(0);
+    ).toBeVisible();
 
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     const headerBox = await compactHeader.boundingBox();
@@ -2885,21 +2962,12 @@ test("keeps responsive navigation and utility actions usable", async ({
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${baseUrl}/admin?tab=produk`);
 
-  const desktopNav = page.getByRole("navigation", { name: "Navigasi desktop" });
-  const desktopButtons = desktopNav.getByRole("button");
-  const desktopBoxes = await desktopButtons.evaluateAll((buttons) =>
-    buttons.map((button) => {
-      const rect = button.getBoundingClientRect();
-
-      return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
-    })
-  );
-
-  await expect(desktopButtons).toHaveCount(11);
-  expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
-  expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
+  const desktopNav = page.getByRole("navigation", {
+    name: "Navigasi admin",
+    exact: true,
+  });
   await expect(
-    desktopNav.getByRole("button", { name: "Produk", exact: true })
+    desktopNav.getByRole("link", { name: "Produk", exact: true })
   ).toHaveAttribute("aria-current", "page");
 });
 
@@ -2920,34 +2988,41 @@ test("closes the mobile utility sheet from outside click and restores its trigge
   await expect(trigger).toBeFocused();
 });
 
-for (const width of [768, 1024, 1280, 1440, 1920]) {
-  test(`keeps all desktop navigation items reachable without overflow at ${width}px`, async ({
+for (const width of [768, 1023, 1024, 1280, 1440, 1920]) {
+  test(`keeps dashboard navigation reachable without overflow at ${width}px`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 900 });
     await login(page);
 
-    const desktopNav = page.getByRole("navigation", {
-      name: "Navigasi desktop",
+    const sidebar = page.getByRole("complementary", { name: "Navigasi admin" });
+    const mobileNav = page.getByRole("navigation", {
+      name: "Navigasi dashboard",
     });
-    await expect(desktopNav).toBeVisible();
-    await expect(
-      page.getByRole("navigation", { name: "Navigasi dashboard" })
-    ).toBeHidden();
-
-    const desktopButtons = desktopNav.getByRole("button");
-    const desktopBoxes = await desktopButtons.evaluateAll((buttons) =>
-      buttons.map((button) => {
-        const rect = button.getBoundingClientRect();
-
-        return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
-      })
-    );
-
-    await expect(desktopButtons).toHaveCount(11);
     if (width >= 1024) {
-      expect(new Set(desktopBoxes.map((box) => box.top)).size).toBe(1);
-      expect(new Set(desktopBoxes.map((box) => box.bottom)).size).toBe(1);
+      await expect(sidebar).toBeVisible();
+      await expect(mobileNav).toBeHidden();
+      const box = await sidebar.boundingBox();
+      expect(box.width).toBeGreaterThanOrEqual(228);
+      expect(box.width).toBeLessThanOrEqual(240);
+      for (const link of await sidebar.getByRole("link").all()) {
+        await link.scrollIntoViewIfNeeded();
+        await expect(link).toBeInViewport();
+      }
+      const content = await page
+        .locator("#admin-dashboard-content")
+        .boundingBox();
+      expect(content.x).toBeGreaterThanOrEqual(box.x + box.width);
+    } else {
+      await expect(sidebar).toBeHidden();
+      await expect(mobileNav).toBeVisible();
+      await mobileNav
+        .getByRole("button", { name: "Lainnya", exact: true })
+        .click();
+      await expect(
+        page.getByRole("dialog", { name: "Menu lainnya" })
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
     }
     await expectNoDocumentOverflow(page);
   });
@@ -3637,9 +3712,9 @@ test("focuses the relevant product field when server validation reopens the moda
 
 for (const navClickCase of [
   {
-    name: "desktop/tablet navigation",
+    name: "desktop sidebar navigation",
     viewport: { width: 1024, height: 900 },
-    navigationName: "Navigasi desktop",
+    navigationName: "Navigasi admin",
   },
   {
     name: "Telegram mini app navigation",
@@ -3665,23 +3740,38 @@ test("preserves the sales filter while visiting another dashboard tab", async ({
 }) => {
   await page.setViewportSize({ width: 1024, height: 900 });
   await login(page);
-  await page.goto(`${baseUrl}/admin?tab=penjualan&sales_filter=waiting`);
+  await page.goto(
+    `${baseUrl}/admin?tab=penjualan&sales_filter=waiting#admin-section-sales`
+  );
 
-  const nav = page.getByRole("navigation", { name: "Navigasi desktop" });
-  await nav.getByRole("button", { name: "Produk", exact: true }).click();
-  await page.waitForURL(`${baseUrl}/admin?tab=produk&sales_filter=waiting`);
-  await nav.getByRole("button", { name: "Pesanan", exact: true }).click();
+  const nav = page.getByRole("navigation", {
+    name: "Navigasi admin",
+    exact: true,
+  });
+  await nav.getByRole("link", { name: "Produk", exact: true }).click();
+  await page.waitForURL(
+    `${baseUrl}/admin?tab=produk&sales_filter=waiting#admin-section-sales`
+  );
+  await nav.getByRole("link", { name: "Pesanan", exact: true }).click();
 
   await expect(page).toHaveURL(
-    `${baseUrl}/admin?tab=penjualan&sales_filter=waiting`
+    `${baseUrl}/admin?tab=penjualan&sales_filter=waiting#admin-section-sales`
   );
+  await page.goBack();
+  await expect(
+    nav.getByRole("link", { name: "Produk", exact: true })
+  ).toHaveAttribute("aria-current", "page");
+  await page.goForward();
+  await expect(
+    nav.getByRole("link", { name: "Pesanan", exact: true })
+  ).toHaveAttribute("aria-current", "page");
 });
 
 for (const broadcastDirectCase of [
   {
     name: "desktop",
     viewport: { width: 1024, height: 900 },
-    navigationName: "Navigasi desktop",
+    navigationName: "Navigasi admin",
   },
   {
     name: "Telegram mini app",
@@ -3712,8 +3802,8 @@ for (const broadcastDirectCase of [
       ).toHaveClass(/bottom-nav-active/);
     } else {
       await expect(
-        nav.getByRole("button", { name: "Siaran", exact: true })
-      ).toHaveClass(/bottom-nav-active/);
+        nav.getByRole("link", { name: "Siaran", exact: true })
+      ).toHaveAttribute("aria-current", "page");
     }
   });
 }
@@ -3723,13 +3813,20 @@ async function expectClickedDashboardControlsToWork(page, navigationName) {
   const isMobileNav = navigationName === "Navigasi dashboard";
   await expect(nav).toBeVisible();
 
-  await nav.getByRole("button", { name: "Produk", exact: true }).click();
+  await nav
+    .getByRole(isMobileNav ? "button" : "link", { name: "Produk", exact: true })
+    .click();
   await expect(
     page.getByRole("heading", { name: /Produk Saya/ })
   ).toBeVisible();
   await getAdminProductCard(page, "Browser QA Produk A");
 
-  await nav.getByRole("button", { name: "Pesanan", exact: true }).click();
+  await nav
+    .getByRole(isMobileNav ? "button" : "link", {
+      name: "Pesanan",
+      exact: true,
+    })
+    .click();
   await expect(
     page.getByRole("heading", { name: /Penjualan Saya/ })
   ).toBeVisible();
@@ -3738,7 +3835,7 @@ async function expectClickedDashboardControlsToWork(page, navigationName) {
   if (isMobileNav) {
     await clickMobileUtility(page, nav, "Store Channel");
   } else {
-    await nav.getByRole("button", { name: "Channel", exact: true }).click();
+    await nav.getByRole("link", { name: "Store Channel", exact: true }).click();
   }
   await expect(
     page.getByRole("region", { name: "Telegram Channel" })
@@ -3753,12 +3850,12 @@ async function expectClickedDashboardControlsToWork(page, navigationName) {
       nav.getByRole("button", { name: "Lainnya", exact: true })
     ).toHaveClass(/bottom-nav-active/);
   } else {
-    const broadcastButton = nav.getByRole("button", {
+    const broadcastLink = nav.getByRole("link", {
       name: "Siaran",
       exact: true,
     });
-    await broadcastButton.click();
-    await expect(broadcastButton).toHaveClass(/bottom-nav-active/);
+    await broadcastLink.click();
+    await expect(broadcastLink).toHaveAttribute("aria-current", "page");
   }
   await expect(
     page.locator("#admin-section-broadcast h2").first()
@@ -3770,7 +3867,8 @@ async function expectClickedDashboardControlsToWork(page, navigationName) {
   if (isMobileNav) {
     await clickMobileUtility(page, nav, "Tambah Produk");
   } else {
-    await nav.getByRole("button", { name: "Tambah", exact: true }).click();
+    await nav.getByRole("link", { name: "Produk", exact: true }).click();
+    await page.getByRole("button", { name: /Tambah Produk/ }).click();
   }
   const productModal = page.getByRole("dialog", { name: /Tambah produk/i });
   await expect(productModal).toBeVisible();
@@ -4148,10 +4246,7 @@ async function expectStoreLinkCopyAndShare(page) {
     .poll(() => page.evaluate(() => window.__copiedText))
     .toBe(visibleStoreUrl);
 
-  await page.getByRole("button", { name: "Bagikan Toko" }).click();
-  await expect(
-    page.locator("header").getByRole("button", { name: "Tersalin" })
-  ).toBeVisible();
+  await storeLink.getByRole("button", { name: "Bagikan", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => window.__copiedText))
     .toBe(visibleStoreUrl);

@@ -66,7 +66,7 @@
                 x-cloak
                 x-show="moreMenuOpen"
                 x-transition.opacity
-                class="fixed inset-0 z-[60] flex items-end bg-neo-ink/60 p-3 admin-safe-bottom md:hidden"
+                class="fixed inset-0 z-[60] flex items-end bg-neo-ink/60 p-3 admin-safe-bottom lg:hidden"
                 x-on:keydown.escape.window="if (moreMenuOpen) closeMoreMenu()"
             >
                 <div class="absolute inset-0" x-on:click="closeMoreMenu()" aria-hidden="true"></div>

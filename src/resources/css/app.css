@@ -352,21 +352,6 @@
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
   }
 
-  .header-gradient {
-    background: linear-gradient(
-      135deg,
-      var(--color-neo-green) 0%,
-      var(--color-neo-yellow) 48%,
-      var(--color-neo-cyan) 100%
-    );
-  }
-  .desktop-header {
-    background: linear-gradient(
-      135deg,
-      var(--color-neo-pink-hot) 0%,
-      #ff7cc3 100%
-    );
-  }
   .store-link-section {
     background: linear-gradient(
       135deg,
@@ -374,29 +359,28 @@
       var(--color-neo-pink) 100%
     );
   }
-  .header-glow {
-    background: radial-gradient(
-      circle at center,
-      rgba(255, 255, 255, 0.85) 0,
-      rgba(255, 255, 255, 0.15) 42%,
-      transparent 70%
-    );
-  }
 
   .bottom-nav {
     background: rgba(5, 5, 5, 0.92);
     backdrop-filter: blur(14px);
   }
-  .desktop-tab-nav {
-    display: none;
-  }
   .mobile-bottom-nav {
     display: block;
   }
-  .admin-mini-shell {
+  @media (min-width: 1024px) {
+    .mobile-bottom-nav {
+      display: none;
+    }
+    .admin-dashboard-page {
+      scroll-padding-bottom: 0;
+    }
+  }
+  .admin-dashboard-shell {
     width: 100%;
-    max-width: min(430px, calc(100vw - 24px));
-    margin-inline: auto;
+    min-width: 0;
+  }
+  #admin-dashboard-content {
+    scroll-margin-top: 96px;
   }
   [data-admin-return-target] {
     scroll-margin-block: 96px;
@@ -490,44 +474,6 @@
   }
   .animate-slide-up {
     animation: admin-slide-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-
-  @media (min-width: 768px) {
-    .desktop-tab-nav {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 0.5rem;
-    }
-    .mobile-bottom-nav {
-      display: none;
-    }
-    .admin-mini-shell {
-      max-width: min(960px, calc(100vw - 48px));
-    }
-    .admin-dashboard-page {
-      scroll-padding-bottom: 0;
-    }
-  }
-
-  @media (min-width: 1024px) {
-    .desktop-tab-nav {
-      grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-    }
-    .admin-mini-shell {
-      max-width: min(1180px, calc(100vw - 48px));
-    }
-  }
-
-  @media (min-width: 1280px) {
-    .admin-mini-shell {
-      max-width: min(1280px, calc(100vw - 48px));
-    }
-  }
-
-  @media (min-width: 1536px) {
-    .admin-mini-shell {
-      max-width: min(1360px, calc(100vw - 48px));
-    }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -2190,33 +2136,6 @@
   .admin-page
   :is([class~="bg-neo-danger-soft"], [class~="bg-neo-danger-pale"]) {
   background-color: #4a202b !important;
-}
-
-/* Gradient headers keep their saturated light-mode artwork in dark mode, so
- * their dark ink labels would vanish. Pin the header to a dark gradient with
- * light ink instead, and dim the white glow decoration. */
-[data-theme="dark"] .admin-page .desktop-header {
-  background: linear-gradient(
-    135deg,
-    #3d1d47 0%,
-    #5b2551 55%,
-    #14304d 100%
-  ) !important;
-  color: var(--admin-ink);
-}
-
-[data-theme="dark"] .admin-page .header-gradient {
-  background: linear-gradient(
-    135deg,
-    #16311c 0%,
-    #383112 48%,
-    #12333f 100%
-  ) !important;
-  color: var(--admin-ink);
-}
-
-[data-theme="dark"] .admin-page .header-glow {
-  opacity: 0.12;
 }
 
 [data-theme="dark"] .admin-page .store-link-section {

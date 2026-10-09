@@ -24,11 +24,11 @@
             {{ $mobileDrawer }}
         @endif
 
-        <main id="admin-dashboard-content" tabindex="-1" class="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8">
+        <main id="admin-dashboard-content" tabindex="-1" class="min-w-0 flex-1 px-4 pb-32 pt-5 sm:px-6 lg:px-8 lg:pb-5">
             @if (isset($status) && trim((string) $status) !== '')
                 <div class="mb-5">{{ $status }}</div>
             @endif
-            {{ $slot }}
+            {{ $content ?? $slot }}
         </main>
     </div>
 </div>

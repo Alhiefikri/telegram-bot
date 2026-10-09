@@ -52,22 +52,60 @@
             $canViewBalanceIssues = ($navigation['activeTab'] ?? '') === 'balance-issues'
                 && ($balanceIssuesTab['state'] ?? null) === 'ready';
             $structuredStockInputEnabled = (bool) ($dashboardState['structuredStockInputEnabled'] ?? false);
+            $activeNavigationGroup = collect($navigation['groups'])
+                ->first(fn (array $group) => collect($group['items'])->contains('active', true));
+            $activeNavigationItem = collect($activeNavigationGroup['items'])->firstWhere('active', true);
         @endphp
 
-        <main
-            class="admin-mini-shell flex min-h-screen flex-col px-3 pb-32 pt-3 sm:px-4 md:px-0 md:pb-10 md:pt-6"
+        <x-admin-dashboard.shell
             data-return-target-highlight-class="admin-return-target-highlight"
-            x-data="adminDashboard(@js($dashboardState))"
+            :x-data="'adminDashboard('.\Illuminate\Support\Js::from($dashboardState).')'"
             x-on:admin-dashboard:close-modal.window="handleCloseModal($event)"
         >
-            @if ($navigation['activeTab'] === 'stats')
-                @include('admin.dashboard.header')
-            @else
-                @include('admin.dashboard.compact-header')
-            @endif
-            @include('admin.dashboard.desktop-navigation')
-            @include('admin.dashboard.status-flash')
+            <x-slot:sidebar>
+                <div class="flex h-full min-h-0 flex-col border-r border-admin-line bg-admin-surface">
+                    <a href="{{ route('admin.dashboard') }}" class="flex min-h-20 items-center px-6 text-base font-semibold text-admin-ink">LHIE STORE</a>
+                    <x-admin-dashboard.navigation :groups="$navigation['groups']" enhance-tabs class="min-h-0 flex-1 overflow-y-auto px-3 pb-6" />
+                    <div class="border-t border-admin-line px-6 py-4 text-xs text-admin-muted">
+                        <p class="break-words font-medium text-admin-ink">{{ $admin['name'] }}</p>
+                        <p>{{ ucfirst($admin['role']) }}</p>
+                    </div>
+                </div>
+            </x-slot:sidebar>
 
+            <x-slot:topbar>
+                <x-admin-dashboard.topbar>
+                    <x-slot:pageContext>
+                        <p class="text-xs font-medium text-admin-muted">{{ $activeNavigationGroup['label'] }}</p>
+                        <h1 class="text-lg font-semibold text-admin-ink sm:text-xl">{{ $activeNavigationItem['label'] }}</h1>
+                    </x-slot:pageContext>
+                    <x-slot:status>
+                        <x-admin-dashboard.badge :tone="$storeStatus['tone']" dot>{{ $storeStatus['label'] }}</x-admin-dashboard.badge>
+                        <x-admin-dashboard.badge :tone="$checkoutMaintenance['tone']" dot>{{ $checkoutMaintenance['status_badge']['label'] }}</x-admin-dashboard.badge>
+                    </x-slot:status>
+                    <x-slot:actions>
+                        <x-admin-dashboard.button :href="$actions['shop']" variant="neutral" size="sm">Buka Toko</x-admin-dashboard.button>
+                        <x-theme-toggle class="h-11 w-11 shrink-0 rounded-lg border border-admin-line bg-admin-surface text-admin-ink focus-visible:outline-2 focus-visible:outline-admin-focus" />
+                    </x-slot:actions>
+                    <x-slot:identity>
+                        <p class="truncate font-medium text-admin-ink">{{ $admin['name'] }}</p>
+                        <p>{{ ucfirst($admin['role']) }}</p>
+                    </x-slot:identity>
+                </x-admin-dashboard.topbar>
+            </x-slot:topbar>
+
+            <x-slot:status>
+                @include('admin.dashboard.status-flash')
+            </x-slot:status>
+
+            <x-slot:content>
+            @if ($navigation['activeTab'] === 'stats')
+                <section class="grid grid-cols-2 gap-3 md:grid-cols-4" aria-label="Ringkasan toko">
+                    @foreach ($summary as $metric)
+                        <x-admin-dashboard.stat-card :label="$metric['label']" :value="$metric['value']" :hint="$metric['hint']" :tone="$metric['tone']" />
+                    @endforeach
+                </section>
+            @endif
             @if ($navigation['activeTab'] === 'stats')
                 @include('admin.dashboard.stats-tab')
             @elseif ($navigation['activeTab'] === 'produk')
@@ -92,7 +130,10 @@
             @elseif ($navigation['activeTab'] === 'suppliers')
                 @include('admin.dashboard.suppliers-tab')
             @endif
-            @include('admin.dashboard.mobile-navigation')
-        </main>
+            </x-slot:content>
+            <x-slot:mobileDrawer>
+                @include('admin.dashboard.mobile-navigation')
+            </x-slot:mobileDrawer>
+        </x-admin-dashboard.shell>
     </body>
 </html>

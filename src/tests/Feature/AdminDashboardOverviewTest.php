@@ -24,42 +24,6 @@ class AdminDashboardOverviewTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_admin_dashboard_shell_renders_manual_blade_tabs_without_sidebar_or_escrow(): void
-    {
-        $this->actingAs(User::factory()->create([
-            'name' => 'Lhie Admin',
-            'role' => UserRole::Owner,
-        ]));
-
-        Product::factory()->count(3)->create(['is_active' => true]);
-        Product::factory()->create(['is_active' => false]);
-        Order::factory()->create(['order_status' => OrderStatus::Processing, 'total_amount' => 125000]);
-
-        $response = $this->get('/admin')
-            ->assertOk()
-            ->assertSee('LHIE STORE')
-            ->assertSee('Lhie Admin')
-            ->assertSee('Saldo')
-            ->assertSee('GMV')
-            ->assertSee('Produk')
-            ->assertSee('Pesanan')
-            ->assertSee('Buka Toko')
-            ->assertSee('Bagikan Toko')
-            ->assertSeeInOrder(['Ringkasan', 'Produk', 'Pesanan', 'Tambah'])
-            ->assertSee('desktop-tab-nav', false)
-            ->assertSee('mobile-bottom-nav', false)
-            ->assertSee('md:grid-cols-4', false)
-            ->assertSee('admin-mini-shell', false)
-            ->assertDontSee('overflow-x-auto', false)
-            ->assertSee('x-data', false)
-            ->assertDontSee('Escrow')
-            ->assertDontSee('fi-wi-widget', false)
-            ->assertDontSee('filament.widgets', false)
-            ->assertDontSee('fi-sidebar', false);
-
-        $this->assertStringNotContainsString('<aside', $response->getContent());
-    }
-
     public function test_stats_request_skips_inactive_tab_data_queries(): void
     {
         $this->actingAs(User::factory()->create([
@@ -477,12 +441,6 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertSee(route('storefront.home'), false)
             ->assertSee('Bagikan')
             ->assertSee('Salin')
-            ->assertSee('adminDashboard', false)
-            ->assertSee('copyStoreLink', false)
-            ->assertSee('shareStore', false)
-            ->assertDontSee('navigator.share', false)
-            ->assertDontSee('navigator.clipboard', false)
-            ->assertDontSee('window.prompt', false)
             ->assertSeeInOrder(['GMV', 'IDR 125.000'])
             ->assertSeeInOrder(['Saldo', 'IDR 125.000'])
             ->assertSeeInOrder(['Order', '2'])
@@ -491,9 +449,6 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertSee('Diproses')
             ->assertSee('Dibatalkan')
             ->assertSee('Expired')
-            ->assertSee('style="width:', false)
-            ->assertDontSee('chart.js', false)
-            ->assertDontSee('apexcharts', false)
             ->assertDontSee('Escrow');
 
         $content = $response->getContent();

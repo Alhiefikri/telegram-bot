@@ -58,26 +58,59 @@ final class AdminDashboardNavigationContractTest extends TestCase
         $this->assertSame('stats', $navigation['activeTab']);
     }
 
-    public function test_owner_and_admin_navigation_contract_covers_every_permitted_tab_key(): void
+    public function test_direct_tabs_render_only_the_active_content_and_authorized_sidebar_destination(): void
     {
         Http::fake();
-        $tabKeys = ['stats', 'produk', 'penjualan', 'suppliers', 'broadcast', 'telegram-channel', 'riwayat', 'withdraw', 'funnel'];
+        $anchors = [
+            'stats' => 'admin-section-stats',
+            'produk' => 'admin-section-products',
+            'penjualan' => 'admin-section-sales',
+            'suppliers' => 'supplier-title',
+            'broadcast' => 'admin-section-broadcast',
+            'telegram-channel' => 'admin-section-store-channel',
+            'riwayat' => 'admin-section-history',
+            'withdraw' => 'admin-section-withdraw',
+            'funnel' => 'admin-section-funnel',
+            'balance-issues' => 'admin-section-balance-issues',
+        ];
 
         foreach ([UserRole::Owner, UserRole::Admin] as $role) {
             $user = User::factory()->create(['role' => $role]);
-
-            foreach ($tabKeys as $tab) {
-                $navigation = app(AdminDashboardData::class)->forActiveTab($user, $tab)['navigation'];
-
-                $this->assertSame($tab, $navigation['activeTab'], "{$role->value} should retain {$tab} as active.");
-                $this->assertContains($tab, array_column($navigation['tabs'], 'id'));
-            }
-
-            if ($role === UserRole::Owner) {
-                $navigation = app(AdminDashboardData::class)->forActiveTab($user, 'balance-issues')['navigation'];
-                $this->assertSame('balance-issues', $navigation['activeTab']);
+            $this->actingAs($user);
+            foreach ($anchors as $tab => $anchor) {
+                if ($role === UserRole::Admin && $tab === 'balance-issues') {
+                    continue;
+                }
+                $response = $this->get(route('admin.dashboard', ['tab' => $tab]))->assertOk();
+                $document = new \DOMDocument;
+                @$document->loadHTML($response->getContent());
+                $xpath = new \DOMXPath($document);
+                $current = $xpath->query('//aside//nav//a[@aria-current="page"]');
+                $this->assertSame(1, $current->length);
+                $this->assertSame(route('admin.dashboard', ['tab' => $tab]), $current->item(0)->getAttribute('href'));
+                $this->assertSame(1, $xpath->query('//*[@id="admin-dashboard-content"]//*[@id="'.$anchor.'"]')->length);
+                foreach ($anchors as $otherTab => $otherAnchor) {
+                    if ($otherTab !== $tab) {
+                        $this->assertSame(0, $xpath->query('//*[@id="'.$otherAnchor.'"]')->length);
+                    }
+                }
+                $ownerLinks = $xpath->query('//aside//a[contains(@href, "/store-balance/adjustments") or contains(@href, "/store-balance/usdt-review") or contains(@href, "tab=balance-issues")]');
+                $this->assertSame($role === UserRole::Owner ? 3 : 0, $ownerLinks->length);
             }
         }
+    }
+
+    public function test_sidebar_fallback_links_preserve_filters_without_reopening_product_creation(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $response = $this->get('/admin?tab=produk&sales_filter=waiting&products_page=2&product_form=create')->assertOk();
+        $document = new \DOMDocument;
+        @$document->loadHTML($response->getContent());
+        $xpath = new \DOMXPath($document);
+        $link = $xpath->query('//aside//a[contains(@href, "tab=penjualan")]')->item(0);
+        parse_str(parse_url($link->getAttribute('href'), PHP_URL_QUERY), $query);
+        $this->assertSame(['tab' => 'penjualan', 'sales_filter' => 'waiting', 'products_page' => '2'], $query);
+        $this->assertTrue($response->viewData('dashboardState')['productModalOpen']);
     }
 
     public function test_hidden_dashboard_tabs_remain_forbidden_at_the_controller_boundary(): void

@@ -1244,8 +1244,9 @@ The reusable presentation seam is anonymous Blade components under
 `src/resources/views/components/admin-dashboard/`: `shell`, `navigation`,
 `navigation-item`, `topbar`, and `mobile-drawer`. They accept server-built,
 permission-filtered navigation groups and render escaped links with an
-allowlisted SVG path map; they do not perform authorization, tab routing, or
-business data loading. `mobile-drawer` is markup only in this ticket. Alpine
+allowlisted SVG path map. Tab anchors optionally enhance through the existing
+`adminDashboard.goToTab()` full-page navigation; authorization and data loading
+remain server-owned. `mobile-drawer` is markup only; Alpine drawer
 open/close/focus/scroll-lock ownership belongs to #595.
 
 Admin primitive defaults use neutral surfaces, muted violet accent tokens,
@@ -1255,6 +1256,34 @@ and Tailwind theme aliases; Storefront presentation remains outside that
 scope. Component contracts are covered by
 `AdminDashboardBladeComponentsTest`, while dashboard behavior remains covered
 by the existing `AdminDashboard*` feature tests.
+
+Desktop cutover (#594): `admin/dashboard.blade.php` mounts `shell` with named
+sidebar/topbar/status/content slots, one `adminDashboard` root, and one document
+content scroll. At >=1024px the grouped sidebar is persistent and 240px wide;
+below that breakpoint the existing bottom navigation and Lainnya sheet remain
+usable until #595. The shared compact topbar uses canonical group/tab context,
+existing store/maintenance status, store action, theme preference, and Admin
+identity. Summary values formerly in the hero now precede the unchanged stats
+partial; share/copy remain in Link toko. The old hero, compact-header and desktop
+tab-strip partials and their unused CSS have been removed.
+
+`AdminDashboardData::navigation()` preserves query filters on fallback tab links
+and removes `product_form` when leaving product creation. Alpine preserves the
+current hash and uses `window.location.assign()` unchanged. Owner adjustment
+navigation reuses `BalanceAdjustmentDashboardReadiness`; the controller/routes
+still enforce access. Active-tab data remains built by `forActiveTab()`, never
+the eager builder. Existing section IDs, return targets, modal IDs, refs and
+initialization remain unchanged.
+
+`AdminDashboardNavigationContractTest` exercises direct Owner/Admin URLs,
+current sidebar links, absent inactive tab subtrees, and filter/create-state
+boundaries. `admin-dashboard-responsive.spec.js` exercises desktop links,
+all ten direct tabs, browser back/forward/hash/filter state, no-JavaScript
+navigation, existing feature modals, and the 1023/1024px breakpoint. Screenshot
+attachments cover light/dark summary, Products and Sales. Desktop evidence
+does not qualify real Telegram Android/iOS clients; #599/#600 retain that
+release gate. No production deployment is authorized by this cutover.
+
 
 ## 11. Checklist perubahan untuk AI
 

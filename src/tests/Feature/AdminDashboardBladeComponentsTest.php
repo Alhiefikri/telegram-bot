@@ -80,6 +80,7 @@ class AdminDashboardBladeComponentsTest extends TestCase
         $this->assertStringContainsString('border-dashed', $rendered);
         $this->assertStringNotContainsString('fi-', $rendered);
     }
+
     public function test_shell_navigation_and_topbar_render_accessible_landmarks_and_escaped_content(): void
     {
         $rendered = Blade::render(<<<'BLADE'
@@ -91,13 +92,14 @@ class AdminDashboardBladeComponentsTest extends TestCase
                     <x-admin-dashboard.topbar title="Produk" context="Operasional" class="custom-topbar">
                         <x-slot:actions><x-admin-dashboard.button href="/admin/create">Tambah</x-admin-dashboard.button></x-slot:actions>
                     </x-admin-dashboard.topbar>
+                </x-slot:topbar>
                 <x-slot:mobileDrawer>
                     <x-admin-dashboard.mobile-drawer id="mobile-navigation">
                         <x-slot:close><button type="button" class="min-h-11 min-w-11" aria-label="Tutup navigasi">×</button></x-slot:close>
                         <x-admin-dashboard.navigation :groups="$groups" />
                     </x-admin-dashboard.mobile-drawer>
                 </x-slot:mobileDrawer>
-                <p>Konten utama</p>
+                <x-slot:content><p>Konten utama</p></x-slot:content>
             </x-admin-dashboard.shell>
         BLADE, ['groups' => [['id' => 'operations', 'label' => 'Operasional', 'items' => [
             ['id' => 'produk', 'label' => '<Produk>', 'href' => '/admin?tab=produk&filter=active', 'icon' => 'package', 'active' => true, 'badge' => '7'],
