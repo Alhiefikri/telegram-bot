@@ -231,21 +231,22 @@ final class AdminDashboardData
      *
      * @return array<string, mixed>
      */
-    public function navigationFor(?string $requestedTab, User $user): array
+    public function navigationFor(?string $requestedTab, User $user, ?string $activeNavigationId = null): array
     {
-        return $this->navigation($requestedTab, $user);
+        return $this->navigation($requestedTab, $user, $activeNavigationId);
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function navigation(?string $requestedTab, User $user): array
+    private function navigation(?string $requestedTab, User $user, ?string $activeNavigationId = null): array
     {
         $canReconcilePayments = (bool) $user->role?->canReconcilePayments();
         $canViewStorefrontAnalytics = (bool) $user->role?->canViewStorefrontAnalytics();
         $canManageStoreOperations = (bool) $user->role?->canManageStoreOperations();
         $canCompensateStoreBalance = (bool) $user->role?->canCompensateStoreBalance();
         $canManagePaymentSettings = (bool) $user->role?->canManagePaymentSettings();
+
 
         $tabItems = [
             'stats' => $this->navigationItem(
@@ -373,16 +374,19 @@ final class AdminDashboardData
         $requestedTab = (string) ($requestedTab ?: 'stats');
         $activeTab = in_array($requestedTab, $tabIds, true) ? $requestedTab : 'stats';
         $groups = array_map(
-            static function (array $group) use ($activeTab): array {
+            static function (array $group) use ($activeTab, $activeNavigationId): array {
                 $group['items'] = array_map(
-                    static function (array $item) use ($activeTab): array {
+                    static function (array $item) use ($activeTab, $activeNavigationId): array {
                         if ($item['tab'] !== null) {
                             $item['href'] = route('admin.dashboard', [
                                 ...Arr::except(request()->query(), ['product_form']),
                                 'tab' => $item['tab'],
                             ]);
-                            $item['active'] = $item['tab'] === $activeTab;
                         }
+
+                        $item['active'] = $activeNavigationId !== null
+                            ? $item['id'] === $activeNavigationId
+                            : ($item['tab'] !== null && $item['tab'] === $activeTab);
 
                         return $item;
                     },

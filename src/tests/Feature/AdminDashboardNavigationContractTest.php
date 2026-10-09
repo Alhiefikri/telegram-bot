@@ -134,4 +134,18 @@ final class AdminDashboardNavigationContractTest extends TestCase
         $this->assertSame('inactive', $data['withdrawTab']['state']);
         Http::assertNothingSent();
     }
+
+    public function test_linked_finance_pages_mark_their_canonical_sidebar_item_active(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $data = app(AdminDashboardData::class);
+
+        foreach (['balance-reports', 'balance-adjustments', 'usdt-review'] as $navigationId) {
+            $navigation = $data->navigationFor('stats', $owner, $navigationId);
+            $items = collect($navigation['groups'])->flatMap(fn (array $group): array => $group['items']);
+
+            $this->assertSame([$navigationId], $items->where('active', true)->pluck('id')->all());
+            $this->assertSame('stats', $navigation['activeTab']);
+        }
+    }
 }

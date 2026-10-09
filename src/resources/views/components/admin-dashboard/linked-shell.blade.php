@@ -1,11 +1,12 @@
 @props([
     'activeTab' => 'stats',
+    'activeNavigationId' => null,
     'title' => 'Admin Dashboard',
 ])
 
 @php
     $linkedUser = auth()->user();
-    $linkedNavigation = app(\App\Services\Admin\AdminDashboardData::class)->navigationFor($activeTab, $linkedUser);
+    $linkedNavigation = app(\App\Services\Admin\AdminDashboardData::class)->navigationFor($activeTab, $linkedUser, $activeNavigationId);
     $linkedActiveGroup = collect($linkedNavigation['groups'])->first(fn (array $group) => collect($group['items'])->contains('active', true));
 @endphp
 

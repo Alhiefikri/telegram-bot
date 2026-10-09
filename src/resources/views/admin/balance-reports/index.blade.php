@@ -9,17 +9,15 @@
     @include('partials.theme-init')
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="admin-page min-h-screen bg-brand-bg text-neo-ink">
-    <x-theme-toggle showLabel class="fixed right-4 top-4 z-30 rounded-neo-xl border-[3px] border-neo-ink bg-white px-3 text-xs font-black text-neo-ink shadow-neo-sm transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-neo-focus" />
-    <main class="mx-auto w-full max-w-7xl space-y-5 p-4 pt-20 sm:p-6">
-        <header class="flex flex-wrap items-start justify-between gap-3">
+<body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
+<x-admin-dashboard.linked-shell active-tab="stats" active-navigation-id="balance-reports" title="Laporan saldo Customer">
+    <div class="space-y-5">
             <div>
                 <p class="text-xs font-black uppercase tracking-[.18em] text-brand-muted">Store Balance · read-only</p>
                 <h1 class="mt-1 font-display text-2xl font-black text-neo-ink sm:text-3xl">Laporan saldo Customer</h1>
                 <p class="mt-2 max-w-3xl text-sm font-semibold leading-6 text-brand-muted">Saldo IDR dan USDT ditampilkan terpisah. Nilai saldo berasal dari proyeksi akun; rekonsiliasi USDT menampilkan status custody yang tercatat.</p>
             </div>
             <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="inline-flex min-h-11 items-center rounded-xl border-2 border-neo-ink bg-white px-4 py-2 text-sm font-black text-neo-ink">Kembali ke Dashboard</a>
-        </header>
 
         <section class="grid gap-3 sm:grid-cols-2" aria-label="Total proyeksi per mata uang">
             <article class="rounded-xl border-2 border-neo-ink bg-white p-4 shadow-neo-sm">
@@ -155,6 +153,7 @@
                 <a href="{{ route('admin.store-balance.reports.index', array_filter($report['filters'] + ['cursor' => $report['nextCursor']])) }}" class="min-h-11 rounded-xl border-2 border-neo-ink bg-brand-yellow px-4 py-3 text-sm font-black text-neo-ink">Laporan lebih lama</a>
             </div>
         @endif
-    </main>
+    </div>
+</x-admin-dashboard.linked-shell>
 </body>
 </html>

@@ -2774,9 +2774,24 @@ test("linked operational pages retain the shared shell and active destination", 
   await page.setViewportSize({ width: 1280, height: 900 });
   await login(page);
 
-  for (const [path, title] of [
-    ["/admin/manual-fulfillment-reviews", "Manual Fulfillment Review"],
-    ["/admin/telegram-outbound-effects", "Manual Delivery Review"],
+  for (const [path, title, activeLabel] of [
+    [
+      "/admin/manual-fulfillment-reviews",
+      "Manual Fulfillment Review",
+      "Pesanan",
+    ],
+    ["/admin/telegram-outbound-effects", "Manual Delivery Review", "Pesanan"],
+    ["/admin/store-balance/reports", "Laporan saldo Customer", "Laporan saldo"],
+    [
+      "/admin/store-balance/adjustments",
+      "Kelola saldo Customer",
+      "Kelola saldo",
+    ],
+    [
+      "/admin/store-balance/usdt-review",
+      "Review deposit USDT dan insiden",
+      "Review deposit USDT",
+    ],
   ]) {
     await page.goto(`${baseUrl}${path}`);
     await expect(
@@ -2786,7 +2801,7 @@ test("linked operational pages retain the shared shell and active destination", 
       page.getByRole("navigation", { name: "Navigasi admin", exact: true })
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Pesanan", exact: true })
+      page.getByRole("link", { name: activeLabel, exact: true })
     ).toHaveAttribute("aria-current", "page");
     await expectNoDocumentOverflow(page);
   }

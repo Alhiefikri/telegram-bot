@@ -1,26 +1,28 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" class="h-full">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
     <meta name="robots" content="noindex, nofollow, noarchive">
     <title>Review USDT · Admin LHIE STORE</title>
     @include('partials.theme-init')
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="admin-page min-h-screen bg-brand-bg text-neo-ink">
-<main class="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
-    <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="font-bold underline">← Ringkasan Admin</a>
-    <h1 class="text-2xl font-black">Review deposit USDT dan insiden</h1>
-    <x-admin-dashboard.notice tone="warning">Hash publik hanya petunjuk lookup. Customer terikat receiver permanen. Invoice asli tidak berubah; deposit sub-micro atau bukti ambigu tetap unresolved, tanpa pembulatan atau grant. Review tidak mengaktifkan pendanaan produksi.</x-admin-dashboard.notice>
-    @if(session('status'))
-        <x-admin-dashboard.notice tone="success" role="status">{{ session('status') }}</x-admin-dashboard.notice>
-    @endif
-    @if($errors->any())
-        <x-admin-dashboard.notice tone="danger" role="alert">
-            @foreach($errors->all() as $error)<p>{{ $error }}</p>@endforeach
-        </x-admin-dashboard.notice>
-    @endif
+<body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
+<x-admin-dashboard.linked-shell active-tab="stats" active-navigation-id="usdt-review" title="Review deposit USDT dan insiden">
+    <div class="space-y-5">
+        <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="font-bold underline">← Ringkasan Admin</a>
+        <h1 class="text-2xl font-black">Review deposit USDT dan insiden</h1>
+        <x-admin-dashboard.notice tone="warning">Hash publik hanya petunjuk lookup. Customer terikat receiver permanen. Invoice asli tidak berubah; deposit sub-micro atau bukti ambigu tetap unresolved, tanpa pembulatan atau grant. Review tidak mengaktifkan pendanaan produksi.</x-admin-dashboard.notice>
+        @if(session('status'))
+            <x-admin-dashboard.notice tone="success" role="status">{{ session('status') }}</x-admin-dashboard.notice>
+        @endif
+        @if($errors->any())
+            <x-admin-dashboard.notice tone="danger" role="alert">
+                @foreach($errors->all() as $error)<p>{{ $error }}</p>@endforeach
+            </x-admin-dashboard.notice>
+        @endif
 
     @if($preview)
         <x-admin-dashboard.card as="section" padding="compact" aria-label="Preview resolusi USDT">
@@ -171,6 +173,7 @@
         @endforelse
         <div class="mt-3">{{ $incidents->links() }}</div>
     </x-admin-dashboard.card>
-</main>
+    </div>
+</x-admin-dashboard.linked-shell>
 </body>
 </html>
