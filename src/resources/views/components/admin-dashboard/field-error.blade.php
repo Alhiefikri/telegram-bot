@@ -1,6 +1,6 @@
 <p
     {{ $attributes->class([
-        'mt-2 text-sm font-bold text-neo-red',
+        'mt-2 text-sm font-medium text-neo-danger-text',
     ]) }}
 >
     {{ $slot }}

@@ -12,14 +12,14 @@
         <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
-    <body class="admin-page admin-login-page flex min-h-full items-center justify-center px-4 py-10 pt-20 text-neo-ink antialiased">
-        <x-theme-toggle showLabel class="fixed right-4 top-4 z-30 rounded-neo-xl border-[3px] border-neo-ink bg-white px-3 text-xs font-black text-neo-ink shadow-neo-sm transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-neo-focus" />
+    <body class="admin-page admin-login-page flex min-h-full items-center justify-center px-4 py-10 pt-20 text-admin-ink antialiased">
+        <x-theme-toggle showLabel class="fixed right-4 top-4 z-30 rounded-lg border border-admin-line bg-admin-surface px-3 text-xs font-medium text-admin-ink shadow-admin-sm transition-colors hover:bg-admin-surface-muted focus:outline-none focus:ring-2 focus:ring-admin-focus" />
         <main class="w-full max-w-md">
-            <x-admin-dashboard.card as="section" padding="compact" shadow="md" class="rounded-neo-5xl border-4 bg-white p-6 shadow-neo-3xl">
-                <div class="mb-6 rounded-neo-3xl border-[3px] border-neo-ink bg-neo-yellow p-4 shadow-neo-md">
-                    <p class="font-display text-[11px] font-black uppercase tracking-[0.24em] text-neo-ink/70">Blade-only Admin /// Neobrutal</p>
-                    <h1 class="mt-2 font-display text-3xl font-black uppercase leading-none text-neo-ink">LHIE STORE</h1>
-                    <p class="mt-2 text-sm font-bold text-neo-ink/70">Masuk ke dashboard neobrutalisme. CRUD tetap di halaman ini.</p>
+            <x-admin-dashboard.card as="section" padding="compact" shadow="md" class="p-6">
+                <div class="mb-6 rounded-lg border border-admin-line bg-admin-accent-soft p-4">
+                    <p class="text-xs font-medium text-admin-muted">Admin workspace</p>
+                    <h1 class="mt-2 text-3xl font-semibold leading-tight text-admin-ink">LHIE STORE</h1>
+                    <p class="mt-2 text-sm text-admin-muted">Masuk untuk mengelola toko.</p>
                 </div>
 
                 @if ($errors->any())

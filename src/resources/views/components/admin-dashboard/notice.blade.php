@@ -4,12 +4,12 @@
 
 <div
     {{ $attributes->class([
-        'rounded-neo-xl border-[3px] border-neo-ink p-3 text-sm font-bold shadow-neo-sm',
-        'bg-neo-success-soft text-neo-ink' => $tone === 'success',
-        'bg-neo-warning-soft text-neo-ink' => $tone === 'warning',
+        'rounded-lg border border-admin-line p-3 text-sm font-medium',
+        'bg-neo-success-soft text-neo-success-text' => $tone === 'success',
+        'bg-neo-warning-soft text-neo-warning-text' => $tone === 'warning',
         'bg-neo-danger-pale text-neo-danger-text' => $tone === 'danger',
-        'bg-white text-neo-ink/70' => $tone === 'neutral',
-        'bg-neo-purple-soft text-neo-ink' => ! in_array($tone, ['success', 'warning', 'danger', 'neutral'], true),
+        'bg-admin-surface text-admin-muted' => $tone === 'neutral',
+        'bg-admin-accent-soft text-admin-ink' => ! in_array($tone, ['success', 'warning', 'danger', 'neutral'], true),
     ]) }}
 >
     {{ $slot }}

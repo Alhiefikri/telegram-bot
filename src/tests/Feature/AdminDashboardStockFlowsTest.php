@@ -385,8 +385,6 @@ class AdminDashboardStockFlowsTest extends TestCase
             ->assertDontSee('claimed@example.test|pass')
             ->assertSee('stockItemsUrl', false)
             ->assertSee('stock-items', false)
-            ->assertSee('bg-[#ef4444] text-white', false)
-            ->assertDontSee('background: #fecaca; color: #dc2626;', false)
             ->assertDontSee('product-action-btn', false)
             ->assertDontSee('@js(', false)
             ->assertDontSee('fi-form', false)

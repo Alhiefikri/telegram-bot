@@ -16,13 +16,13 @@
 <span
     {{ $attributes
         ->class([
-        'inline-flex items-center gap-1.5 rounded-full border-[3px] border-neo-ink px-2.5 py-0.5 text-[10px] font-black uppercase leading-5 shadow-neo-xs',
+        'inline-flex items-center gap-1.5 rounded-full border border-admin-line px-2.5 py-0.5 text-xs font-medium leading-5',
         'bg-neo-success-soft text-neo-success-text' => ! $background && $tone === 'emerald',
         'bg-neo-warning-soft text-neo-warning-text' => ! $background && $tone === 'amber',
         'bg-neo-info-soft text-neo-info-text' => ! $background && $tone === 'blue',
         'bg-neo-danger-soft text-neo-danger-strong' => ! $background && $tone === 'rose',
-        'bg-neo-purple-soft text-neo-purple' => ! $background && $tone === 'purple',
-        'bg-[#f1f5f9] text-brand-muted' => ! $background && ! in_array($tone, ['emerald', 'amber', 'blue', 'rose', 'purple'], true),
+        'bg-admin-accent-soft text-admin-accent' => ! $background && $tone === 'purple',
+        'bg-admin-surface-muted text-admin-muted' => ! $background && ! in_array($tone, ['emerald', 'amber', 'blue', 'rose', 'purple'], true),
     ])
         ->merge($style ? ['style' => $style.';'] : []) }}
 >

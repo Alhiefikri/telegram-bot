@@ -72,6 +72,17 @@
   --color-neo-status-reserved: #facc15;
   --color-neo-status-repair: #fb7185;
   --color-neo-focus: #8758de;
+  --color-admin-paper: var(--admin-paper);
+  --color-admin-surface: var(--admin-surface);
+  --color-admin-surface-muted: var(--admin-surface-muted);
+  --color-admin-ink: var(--admin-ink);
+  --color-admin-muted: var(--admin-muted);
+  --color-admin-line: var(--admin-line);
+  --color-admin-accent: var(--admin-accent);
+  --color-admin-accent-soft: var(--admin-accent-soft);
+  --color-admin-focus: var(--admin-focus);
+  --shadow-admin-sm: var(--admin-shadow-sm);
+  --shadow-admin-lg: var(--admin-shadow-lg);
 
   --shadow-neo-2xs: 1px 1px 0 #050505;
   --shadow-neo-xs: 2px 2px 0 #050505;
@@ -220,15 +231,21 @@
     --sf-trend-muted: #9aa8bd;
     --sf-trend-accent: #f4b62d;
 
-    --admin-paper: var(--color-neo-admin-paper);
-    --admin-paper-desktop: var(--color-neo-admin-paper-desktop);
+    --admin-paper: #f6f7fb;
+    --admin-paper-desktop: #f6f7fb;
     --admin-surface: #ffffff;
-    --admin-surface-muted: #f1f5f9;
-    --admin-ink: var(--color-neo-ink);
-    --admin-muted: var(--color-brand-muted);
-    --admin-border: var(--color-neo-ink);
+    --admin-surface-muted: #eef0f5;
+    --admin-ink: #202637;
+    --admin-muted: #596579;
+    --admin-border: #dce1ea;
     --admin-line: var(--color-brand-border);
     --admin-shadow: #050505;
+    --admin-accent: #6d5bd0;
+    --admin-accent-soft: #eeeaff;
+    --admin-focus: #6d5bd0;
+    --admin-radius: 0.75rem;
+    --admin-shadow-sm: 0 1px 3px rgb(15 23 42 / 0.12);
+    --admin-shadow-lg: 0 18px 40px rgb(15 23 42 / 0.16);
   }
 
   [data-theme="dark"] {
@@ -267,6 +284,11 @@
     --admin-border: #33445c;
     --admin-line: #263344;
     --admin-shadow: #050505;
+    --admin-accent: #b8a9ff;
+    --admin-accent-soft: #302a4f;
+    --admin-focus: #c4b5fd;
+    --admin-shadow-sm: 0 1px 3px rgb(0 0 0 / 0.28);
+    --admin-shadow-lg: 0 18px 40px rgb(0 0 0 / 0.36);
   }
 
   html {
@@ -317,50 +339,8 @@
   .admin-page {
     min-height: 100vh;
     background-color: var(--admin-paper);
-    background-image:
-      radial-gradient(
-        circle at top left,
-        rgba(123, 209, 10, 0.26),
-        transparent 26%
-      ),
-      radial-gradient(
-        circle at top right,
-        rgba(219, 63, 152, 0.18),
-        transparent 22%
-      ),
-      repeating-linear-gradient(
-        135deg,
-        transparent,
-        transparent 22px,
-        rgba(5, 5, 5, 0.04) 22px,
-        rgba(5, 5, 5, 0.04) 24px
-      );
-  }
-
-  .admin-dashboard-page {
-    background-image:
-      radial-gradient(
-        circle at top left,
-        rgba(123, 209, 10, 0.26),
-        transparent 26%
-      ),
-      radial-gradient(
-        circle at top right,
-        rgba(219, 63, 152, 0.18),
-        transparent 22%
-      ),
-      radial-gradient(
-        circle at bottom center,
-        rgba(22, 180, 202, 0.16),
-        transparent 24%
-      ),
-      repeating-linear-gradient(
-        135deg,
-        transparent,
-        transparent 22px,
-        rgba(5, 5, 5, 0.03) 22px,
-        rgba(5, 5, 5, 0.03) 24px
-      );
+    background-image: none;
+    color: var(--admin-ink);
   }
   .admin-dashboard-page {
     scroll-padding-bottom: calc(5rem + env(safe-area-inset-bottom));
@@ -440,49 +420,40 @@
   .admin-dashboard-input {
     min-height: 2.75rem;
     width: 100%;
-    border: 3px solid var(--color-neo-ink);
-    border-radius: var(--radius-neo-2xl);
+    border: 1px solid var(--admin-line);
+    border-radius: var(--admin-radius);
     background: var(--admin-surface);
     padding: 0.5rem 0.75rem;
     font-size: 0.875rem;
-    font-weight: 700;
+    font-weight: 400;
     color: var(--admin-ink);
-    box-shadow: var(--shadow-neo-md);
-    transition:
-      box-shadow 150ms ease,
-      transform 150ms ease;
+    transition: border-color 150ms ease;
   }
   .admin-dashboard-input:focus {
     outline: none;
-    box-shadow:
-      var(--shadow-neo-md),
-      0 0 0 4px var(--color-neo-focus);
+    box-shadow: 0 0 0 2px var(--admin-focus);
   }
 
   .filter-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    min-height: 44px;
     padding: 9px 14px;
-    border: 3px solid var(--color-neo-ink);
-    border-radius: 999px;
-    font-family: var(--font-display);
-    font-weight: 800;
-    font-size: 11px;
-    text-transform: uppercase;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+    font-weight: 500;
+    font-size: 14px;
     cursor: pointer;
     transition:
-      background-color 0.15s,
-      color 0.15s,
-      transform 0.15s;
+      background-color 150ms ease,
+      color 150ms ease;
     background: var(--admin-surface);
     color: var(--admin-ink);
-    box-shadow: var(--shadow-neo-sm);
   }
   .filter-pill-active {
-    background: var(--color-neo-yellow);
-    color: var(--color-neo-ink);
-    transform: translateY(-1px);
+    background: var(--admin-accent-soft);
+    color: var(--admin-accent);
   }
   .filter-pill-count {
     display: inline-flex;
@@ -522,26 +493,6 @@
   }
 
   @media (min-width: 768px) {
-    .admin-dashboard-page {
-      background-color: var(--admin-paper-desktop);
-      background-image:
-        radial-gradient(
-          circle at top left,
-          rgba(255, 79, 168, 0.18),
-          transparent 28%
-        ),
-        radial-gradient(
-          circle at top right,
-          rgba(123, 209, 10, 0.16),
-          transparent 22%
-        ),
-        radial-gradient(
-          circle at bottom center,
-          rgba(22, 180, 202, 0.12),
-          transparent 24%
-        );
-    }
-
     .desktop-tab-nav {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2059,52 +2010,13 @@
 
 [data-theme="dark"] .admin-page {
   background-color: var(--admin-paper) !important;
-  background-image:
-    radial-gradient(
-      circle at top left,
-      rgb(123 209 10 / 0.12),
-      transparent 26%
-    ),
-    radial-gradient(
-      circle at top right,
-      rgb(219 63 152 / 0.1),
-      transparent 22%
-    ),
-    repeating-linear-gradient(
-      135deg,
-      transparent,
-      transparent 22px,
-      rgb(255 255 255 / 0.025) 22px,
-      rgb(255 255 255 / 0.025) 24px
-    );
+  background-image: none;
   color: var(--admin-ink);
 }
 
 [data-theme="dark"] .admin-dashboard-page {
   background-color: var(--admin-paper-desktop) !important;
-  background-image:
-    radial-gradient(
-      circle at top left,
-      rgb(123 209 10 / 0.12),
-      transparent 26%
-    ),
-    radial-gradient(
-      circle at top right,
-      rgb(219 63 152 / 0.12),
-      transparent 22%
-    ),
-    radial-gradient(
-      circle at bottom center,
-      rgb(22 180 202 / 0.1),
-      transparent 24%
-    ),
-    repeating-linear-gradient(
-      135deg,
-      transparent,
-      transparent 22px,
-      rgb(255 255 255 / 0.025) 22px,
-      rgb(255 255 255 / 0.025) 24px
-    );
+  background-image: none;
 }
 
 [data-theme="dark"]

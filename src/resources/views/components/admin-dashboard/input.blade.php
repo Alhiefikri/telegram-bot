@@ -9,6 +9,6 @@
     @if ($name) name="{{ $name }}" @endif
     @if (! is_null($value)) value="{{ $value }}" @endif
     {{ $attributes->class([
-        'min-h-12 w-full rounded-neo-2xl border-[3px] border-neo-ink bg-white px-3 text-sm font-bold text-neo-ink shadow-neo-md transition placeholder:font-semibold placeholder:text-neo-ink/35 focus:outline-none focus:ring-2 focus:ring-neo-focus focus:ring-offset-2 focus:ring-offset-neo-cream',
+        'min-h-11 w-full rounded-lg border border-admin-line bg-admin-surface px-3 text-sm font-normal text-admin-ink transition-colors placeholder:text-admin-muted focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper',
     ]) }}
 >

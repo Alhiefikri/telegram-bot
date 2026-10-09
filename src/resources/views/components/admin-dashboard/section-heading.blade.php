@@ -5,15 +5,15 @@
 
 <div {{ $attributes->class(['min-w-0']) }}>
     @if ($eyebrow)
-        <p class="text-[10px] font-black uppercase tracking-[0.2em] text-neo-ink/55">{{ $eyebrow }}</p>
+        <p class="text-xs font-medium text-admin-muted">{{ $eyebrow }}</p>
     @endif
 
     <h2 @class([
-        'font-sans text-2xl font-black uppercase leading-tight text-neo-ink',
+        'text-2xl font-semibold leading-tight text-admin-ink',
         'mt-1' => $eyebrow,
     ])>{{ $title }}</h2>
 
     @if (! $slot->isEmpty())
-        <p class="mt-2 text-sm font-bold leading-6 text-neo-ink/65">{{ $slot }}</p>
+        <p class="mt-2 text-sm font-normal leading-6 text-admin-muted">{{ $slot }}</p>
     @endif
 </div>

@@ -70,20 +70,54 @@ class AdminDashboardBladeComponentsTest extends TestCase
         $this->assertStringContainsString('aria-labelledby="confirm-modal-title"', $rendered);
         $this->assertStringContainsString('x-show="modalOpen"', $rendered);
         $this->assertStringContainsString('x-on:click="closeModal()"', $rendered);
-        $this->assertStringContainsString('min-h-12', $rendered);
         $this->assertStringContainsString('min-h-11', $rendered);
-        $this->assertStringContainsString('h-9', $rendered);
         $this->assertStringContainsString('admin-dashboard-action', $rendered);
-        $this->assertStringContainsString('bg-[#7BD10A]', $rendered);
-        $this->assertStringContainsString('bg-[#16B4CA]', $rendered);
-        $this->assertStringContainsString('bg-[#f2da3d]', $rendered);
-        $this->assertStringContainsString('bg-[#ef4444]', $rendered);
-        $this->assertStringContainsString('bg-[#8758de]', $rendered);
+        $this->assertStringContainsString('bg-admin-accent', $rendered);
         $this->assertStringContainsString('background: #e8ffd4; color: #166534;', $rendered);
         $this->assertStringContainsString('background: #7BD10A', $rendered);
-        $this->assertStringContainsString('rounded-[1.25rem]', $rendered);
-        $this->assertStringContainsString('border-[3px]', $rendered);
+        $this->assertStringContainsString('rounded-[var(--admin-radius)]', $rendered);
+        $this->assertStringContainsString('border-admin-line', $rendered);
         $this->assertStringContainsString('border-dashed', $rendered);
         $this->assertStringNotContainsString('fi-', $rendered);
+    }
+    public function test_shell_navigation_and_topbar_render_accessible_landmarks_and_escaped_content(): void
+    {
+        $rendered = Blade::render(<<<'BLADE'
+            <x-admin-dashboard.shell class="custom-shell">
+                <x-slot:sidebar>
+                    <x-admin-dashboard.navigation :groups="$groups" class="custom-navigation" />
+                </x-slot:sidebar>
+                <x-slot:topbar>
+                    <x-admin-dashboard.topbar title="Produk" context="Operasional" class="custom-topbar">
+                        <x-slot:actions><x-admin-dashboard.button href="/admin/create">Tambah</x-admin-dashboard.button></x-slot:actions>
+                    </x-admin-dashboard.topbar>
+                <x-slot:mobileDrawer>
+                    <x-admin-dashboard.mobile-drawer id="mobile-navigation">
+                        <x-slot:close><button type="button" class="min-h-11 min-w-11" aria-label="Tutup navigasi">×</button></x-slot:close>
+                        <x-admin-dashboard.navigation :groups="$groups" />
+                    </x-admin-dashboard.mobile-drawer>
+                </x-slot:mobileDrawer>
+                <p>Konten utama</p>
+            </x-admin-dashboard.shell>
+        BLADE, ['groups' => [['id' => 'operations', 'label' => 'Operasional', 'items' => [
+            ['id' => 'produk', 'label' => '<Produk>', 'href' => '/admin?tab=produk&filter=active', 'icon' => 'package', 'active' => true, 'badge' => '7'],
+            ['id' => 'penjualan', 'label' => 'Pesanan', 'href' => '/admin?tab=penjualan', 'icon' => 'receipt', 'active' => false],
+        ]]]]);
+
+        $this->assertStringContainsString('custom-shell', $rendered);
+        $this->assertStringContainsString('custom-navigation', $rendered);
+        $this->assertStringContainsString('custom-topbar', $rendered);
+        $this->assertStringContainsString('aria-label="Navigasi admin"', $rendered);
+        $this->assertStringContainsString('aria-current="page"', $rendered);
+        $this->assertStringContainsString('href="/admin?tab=produk&amp;filter=active"', $rendered);
+        $this->assertStringContainsString('&lt;Produk&gt;', $rendered);
+        $this->assertStringContainsString('min-h-11', $rendered);
+        $this->assertStringContainsString('id="mobile-navigation"', $rendered);
+        $this->assertStringContainsString('role="dialog"', $rendered);
+        $this->assertStringContainsString('aria-label="Tutup navigasi"', $rendered);
+        $this->assertStringContainsString('w-[min(320px,calc(100vw-32px))]', $rendered);
+        $this->assertStringContainsString('id="admin-dashboard-content"', $rendered);
+        $this->assertStringContainsString('Konten utama', $rendered);
+        $this->assertStringContainsString('>Pesanan</span>', $rendered);
     }
 }

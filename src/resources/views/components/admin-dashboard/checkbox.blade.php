@@ -4,13 +4,13 @@
     'checked' => false,
 ])
 
-<label {{ $attributes->class(['flex items-center gap-3 rounded-neo-2xl border-[3px] border-neo-ink bg-neo-purple-soft px-4 py-3 text-sm font-bold text-neo-ink shadow-neo-sm']) }}>
+<label {{ $attributes->class(['flex min-h-11 items-center gap-3 rounded-lg border border-admin-line bg-admin-surface px-4 py-3 text-sm font-medium text-admin-ink']) }}>
     <input
         type="checkbox"
         name="{{ $name }}"
         value="{{ $value }}"
         @checked($checked)
-        class="h-5 w-5 rounded-none border-neo-ink text-neo-focus focus:ring-2 focus:ring-neo-focus focus:ring-offset-2 focus:ring-offset-neo-cream"
+        class="h-5 w-5 rounded border-admin-line accent-admin-accent focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper"
     >
     <span>{{ $slot }}</span>
 </label>
