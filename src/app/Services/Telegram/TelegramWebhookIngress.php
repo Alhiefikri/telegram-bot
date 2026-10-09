@@ -126,16 +126,18 @@ class TelegramWebhookIngress
                 ))),
             ];
         }
+        if (is_int($message['reply_to_message']['message_id'] ?? null)) {
+            $minimized['reply_to_message']['message_id'] = $message['reply_to_message']['message_id'];
+        }
 
         return $minimized;
     }
 
     /**
-     * Custom emoji are the one inbound entity the bot acts on: the Store Bot
-     * reads them to capture a catalog icon identifier. Every other entity is
-     * dropped, so the stored payload stays as small as the rest of minimize.
+     * Preserve custom emoji identity and UTF-16 boundaries for catalog content
+     * editing, without retaining unrelated entities or the replied message.
      *
-     * @return list<array{type: string, custom_emoji_id: string}>
+     * @return list<array{type: string, custom_emoji_id: string, offset?: int, length?: int}>
      */
     private function customEmojiEntities(array $message): array
     {
@@ -149,7 +151,8 @@ class TelegramWebhookIngress
 
                 $id = $entity['custom_emoji_id'] ?? null;
                 if (is_string($id) && trim($id) !== '') {
-                    $entities[] = ['type' => 'custom_emoji', 'custom_emoji_id' => trim($id)];
+                    $entities[] = ['type' => 'custom_emoji', 'custom_emoji_id' => trim($id)]
+                        + Arr::only($entity, ['offset', 'length']);
                 }
             }
         }

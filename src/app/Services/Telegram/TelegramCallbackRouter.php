@@ -12,6 +12,7 @@ class TelegramCallbackRouter
         private TelegramChatPrivacyGuard $chatPrivacy,
         private TelegramLocale $locale,
         private TelegramUsdtFundingSession $usdtFundingSession,
+        private TelegramContentIntents $content,
     ) {}
 
     public function route(Customer $customer, string $chatId, string $id, string $data, string $chatType = 'private', ?int $messageId = null): void
@@ -29,6 +30,7 @@ class TelegramCallbackRouter
 
             return;
         }
+        $this->content->forget($customer);
 
         if ($this->handlers->dispatch($context, TelegramCallbackStage::Privileged)) {
             return;

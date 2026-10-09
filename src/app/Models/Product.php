@@ -17,11 +17,11 @@ class Product extends Model
     /** @use HasFactory<ProductFactory> */
     use HasFactory, SoftDeletes;
 
-    protected $hidden = ['supplier_available_stock', 'supplier_available_until', 'supplierSources', 'supplierPricePolicy'];
+    protected $hidden = ['telegram_content', 'supplier_available_stock', 'supplier_available_until', 'supplierSources', 'supplierPricePolicy'];
 
     protected function casts(): array
     {
-        return ['category_id' => 'integer', 'product_family_id' => 'integer', 'family_sort_order' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'supplier_available_stock' => 'integer', 'supplier_available_until' => 'datetime', 'is_active' => 'boolean', 'featured_rank' => 'integer'];
+        return ['telegram_content' => 'array', 'category_id' => 'integer', 'product_family_id' => 'integer', 'family_sort_order' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'supplier_available_stock' => 'integer', 'supplier_available_until' => 'datetime', 'is_active' => 'boolean', 'featured_rank' => 'integer'];
     }
 
     /**

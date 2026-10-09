@@ -76,6 +76,16 @@ Catatan:
 - Nilai icon katalog dapat diubah langsung dari Admin Dashboard tanpa mengubah `.env`, rebuild image, atau clear config.
 - Store Bot memakai `editMessageText` dengan `callback_query.message.message_id` untuk family, category, quote, detail, dan navigasi balik satu pesan. `sendMessage` hanya dipakai bila tidak ada pesan asal atau Telegram menolak edit secara definitif; timeout/connection failure tidak memicu blind resend.
 
+### Edit Product Details dan Refund Policy melalui Telegram
+
+- Kirim `/admin` di chat pribadi Store Bot dari akun admin Telegram yang sudah diotorisasi. Pilih produk, lalu **Product Details** (`description`) atau **Replacement / Refund Policy** (`warranty_policy`).
+- Bot mengirim teks asli tanpa judul tambahan. Salin ke kolom pesan, edit, lalu balas pesan instruksi terakhir dengan **teks pengganti lengkap**. Pesan milik bot tidak dapat diedit langsung oleh akun admin. Pilih emoji premium dari keyboard Telegram, bukan ketik ID atau tag HTML.
+- Pengiriman langsung menyimpan teks dan ID custom emoji ke database, membuat audit `product.telegram_content_updated`, dan memperbarui Product Detail pada render berikutnya. Web Storefront/Dashboard tetap menggunakan teks Unicode biasa; metadata Telegram hanya berlaku untuk teks yang sama persis, sehingga perubahan teks dari Dashboard tidak memakai offset emoji lama.
+- `/cancel` atau `/batal` membatalkan; balasan `/clear` mengosongkan bagian. Prompt berakhir setelah sepuluh menit; membuka callback navigasi atau command lain membatalkan prompt. Balasan ke pesan lain, media/stiker, batas emoji invalid, dan perubahan konten sejak prompt tidak menimpa data. Total kedua bagian dibatasi 3000 unit UTF-16 (emoji dapat memakai dua unit) untuk menyisakan ruang header/detail Telegram. Session yang hilang saat Redis restart harus dibuka ulang lewat `/admin`.
+- Emoji disimpan sebagai `custom_emoji_id` dengan offset/panjang UTF-16 dari Telegram dan diverifikasi lewat `getCustomEmojiStickers`; HTML customer dibentuk dari teks yang di-escape, bukan dari HTML yang diketik admin. Formatting teks selain custom emoji tidak diimpor.
+- **Pemilik bot** perlu Telegram Premium untuk custom emoji pada pesan langsung private/group/supergroup, atau bot memiliki username tambahan yang dibeli di Fragment. Premium pada akun admin saja tidak cukup jika admin bukan pemilik bot. Preview setelah simpan memeriksa entity yang dikembalikan Telegram dan memperingatkan jika emoji premium hilang. Fallback Unicode tetap tersedia. Animasi mengikuti jenis emoji dan pengaturan aplikasi penerima; emoji statis tidak dibuat bergerak oleh bot.
+- Referensi implementasi: Context7 `/websites/core_telegram_bots_api`, [MessageEntity](https://core.telegram.org/bots/api#messageentity), [formatting options](https://core.telegram.org/bots/api#formatting-options), dan [getCustomEmojiStickers](https://core.telegram.org/bots/api#getcustomemojistickers). Regression: `php artisan test --filter=TelegramContentEditingTest`.
+
 ## 3. Payment Flow
 
 ### 3.1 Status utama

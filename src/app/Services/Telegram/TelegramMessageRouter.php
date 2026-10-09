@@ -41,6 +41,7 @@ class TelegramMessageRouter
         private TelegramBalanceFundingCallbackHandler $balanceFunding,
         private TelegramUsdtFundingCallbackHandler $usdtFunding,
         private TelegramUsdtFundingSession $usdtFundingSession,
+        private TelegramContentIntents $content,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
@@ -50,6 +51,22 @@ class TelegramMessageRouter
         if (! $isPrivateChat && $this->isPrivateOnlyCommand($text)) {
             $this->session->forgetWithLock($customer);
             $this->chatPrivacy->denyMessage($customer, $chatId);
+
+            return;
+        }
+
+        if ($this->content->receive($customer, $chatId, $message, $chatType)) {
+            return;
+        }
+        if (preg_match('/\A\/admin(?:@[A-Za-z0-9_]+)?\z/D', $text) === 1) {
+            if (! $isPrivateChat || ! $this->adminAccess->isAdmin($customer, $chatId)) {
+                $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.access_denied'));
+
+                return;
+            }
+            $this->icons->forgetPendingCapture($customer);
+            $this->session->forgetWithLock($customer);
+            $this->content->menu($customer, $chatId);
 
             return;
         }
