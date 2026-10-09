@@ -1246,8 +1246,8 @@ The reusable presentation seam is anonymous Blade components under
 permission-filtered navigation groups and render escaped links with an
 allowlisted SVG path map. Tab anchors optionally enhance through the existing
 `adminDashboard.goToTab()` full-page navigation; authorization and data loading
-remain server-owned. `mobile-drawer` is markup only; Alpine drawer
-open/close/focus/scroll-lock ownership belongs to #595.
+remain server-owned. `mobile-drawer` renders the dialog/backdrop and delegates
+focus, close and navigation events to the composed Alpine lifecycle.
 
 Admin primitive defaults use neutral surfaces, muted violet accent tokens,
 one-pixel borders, restrained shadows, readable regular-case text, and
@@ -1260,8 +1260,8 @@ by the existing `AdminDashboard*` feature tests.
 Desktop cutover (#594): `admin/dashboard.blade.php` mounts `shell` with named
 sidebar/topbar/status/content slots, one `adminDashboard` root, and one document
 content scroll. At >=1024px the grouped sidebar is persistent and 240px wide;
-below that breakpoint the existing bottom navigation and Lainnya sheet remain
-usable until #595. The shared compact topbar uses canonical group/tab context,
+below that breakpoint #595 replaces bottom navigation/Lainnya with a labeled
+topbar trigger and grouped drawer. The shared compact topbar uses canonical group/tab context,
 existing store/maintenance status, store action, theme preference, and Admin
 identity. Summary values formerly in the hero now precede the unchanged stats
 partial; share/copy remain in Link toko. The old hero, compact-header and desktop
@@ -1274,6 +1274,30 @@ navigation reuses `BalanceAdjustmentDashboardReadiness`; the controller/routes
 still enforce access. Active-tab data remains built by `forActiveTab()`, never
 the eager builder. Existing section IDs, return targets, modal IDs, refs and
 initialization remain unchanged.
+
+Mobile lifecycle (#595): `resources/js/admin-dashboard/navigation.js` owns
+`sidebarOpen`, visible opener restoration, overflow-style ownership,
+breakpoint listener and cancelable next-tick focus. The root explicitly calls
+`initNavigation()` before existing modal initialization and
+`destroyNavigation()` from `destroy()`. Modal state watchers close the drawer
+without restoring competing focus; an already-open modal prevents opening it.
+`modal-focus.js` centralizes the shared focusable-element, Tab containment and
+focus-containment helpers without replacing existing feature modal restoration.
+`app.js` also registers `dashboardNavigation` for standalone shell consumers.
+The drawer releases its own lock on close, navigation, desktop resize and root
+removal, preserving pre-existing inline overflow values/priorities. Shell
+content, topbar and skip link are inert while the drawer is modal. A nonmodal
+details menu renders the same authorized groups before Alpine initializes or
+when JavaScript is disabled; interactive overlays alone are cloaked.
+Navigation heading IDs use renderer-specific prefixes.
+
+`admin-dashboard-navigation.test.js` covers focus races, stale destruction,
+lock ownership, breakpoint cleanup, modal precedence and URL/create intent.
+The responsive browser lane exercises the 375x900 drawer, every tab,
+keyboard/backdrop/resize/root-removal cleanup, no-JavaScript links and existing
+product/stock modal behavior. Safe-area CSS consumes available Telegram inset
+variables with browser fallbacks; real Android/iOS evidence remains the
+#599/#600 human release gate, not a claim established by viewport emulation.
 
 `AdminDashboardNavigationContractTest` exercises direct Owner/Admin URLs,
 current sidebar links, absent inactive tab subtrees, and filter/create-state

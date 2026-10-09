@@ -85,17 +85,19 @@ final class AdminDashboardNavigationContractTest extends TestCase
                 $document = new \DOMDocument;
                 @$document->loadHTML($response->getContent());
                 $xpath = new \DOMXPath($document);
-                $current = $xpath->query('//aside//nav//a[@aria-current="page"]');
-                $this->assertSame(1, $current->length);
-                $this->assertSame(route('admin.dashboard', ['tab' => $tab]), $current->item(0)->getAttribute('href'));
+                foreach ($xpath->query('//nav[@aria-label="Navigasi admin" or @aria-label="Navigasi dashboard"]') as $menu) {
+                    $current = $xpath->query('.//a[@aria-current="page"]', $menu);
+                    $this->assertSame(1, $current->length);
+                    $this->assertSame(route('admin.dashboard', ['tab' => $tab]), $current->item(0)->getAttribute('href'));
+                    $ownerLinks = $xpath->query('.//a[contains(@href, "/store-balance/adjustments") or contains(@href, "/store-balance/usdt-review") or contains(@href, "tab=balance-issues")]', $menu);
+                    $this->assertSame($role === UserRole::Owner ? 3 : 0, $ownerLinks->length);
+                }
                 $this->assertSame(1, $xpath->query('//*[@id="admin-dashboard-content"]//*[@id="'.$anchor.'"]')->length);
                 foreach ($anchors as $otherTab => $otherAnchor) {
                     if ($otherTab !== $tab) {
                         $this->assertSame(0, $xpath->query('//*[@id="'.$otherAnchor.'"]')->length);
                     }
                 }
-                $ownerLinks = $xpath->query('//aside//a[contains(@href, "/store-balance/adjustments") or contains(@href, "/store-balance/usdt-review") or contains(@href, "tab=balance-issues")]');
-                $this->assertSame($role === UserRole::Owner ? 3 : 0, $ownerLinks->length);
             }
         }
     }

@@ -342,12 +342,6 @@
     background-image: none;
     color: var(--admin-ink);
   }
-  .admin-dashboard-page {
-    scroll-padding-bottom: calc(5rem + env(safe-area-inset-bottom));
-  }
-  .admin-safe-nav {
-    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
-  }
   .admin-safe-bottom {
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
   }
@@ -360,24 +354,23 @@
     );
   }
 
-  .bottom-nav {
-    background: rgba(5, 5, 5, 0.92);
-    backdrop-filter: blur(14px);
-  }
-  .mobile-bottom-nav {
-    display: block;
-  }
-  @media (min-width: 1024px) {
-    .mobile-bottom-nav {
-      display: none;
-    }
-    .admin-dashboard-page {
-      scroll-padding-bottom: 0;
-    }
-  }
   .admin-dashboard-shell {
     width: 100%;
     min-width: 0;
+  }
+  .admin-navigation-drawer {
+    height: 100vh;
+    height: 100dvh;
+    padding-top: max(
+      env(safe-area-inset-top, 0px),
+      var(--tg-safe-area-inset-top, 0px),
+      var(--tg-content-safe-area-inset-top, 0px)
+    );
+    padding-bottom: max(
+      env(safe-area-inset-bottom, 0px),
+      var(--tg-safe-area-inset-bottom, 0px),
+      var(--tg-content-safe-area-inset-bottom, 0px)
+    );
   }
   #admin-dashboard-content {
     scroll-margin-top: 96px;
@@ -393,12 +386,6 @@
     transition:
       outline-color 0.2s ease,
       box-shadow 0.2s ease;
-  }
-  .bottom-nav-active {
-    background: var(--color-neo-yellow);
-    border-radius: 999px;
-    color: var(--color-neo-ink);
-    box-shadow: var(--shadow-neo-md);
   }
 
   .admin-dashboard-input {

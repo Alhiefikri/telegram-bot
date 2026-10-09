@@ -2,6 +2,7 @@
     'groups' => [],
     'label' => 'Navigasi admin',
     'enhanceTabs' => false,
+    'idPrefix' => 'admin-navigation',
 ])
 
 <nav {{ $attributes->merge(['aria-label' => $label]) }}>
@@ -10,8 +11,8 @@
             $items = array_values(array_filter($group['items'] ?? [], static fn (array $item): bool => (bool) ($item['visible'] ?? true)));
         @endphp
         @if ($items !== [])
-            <section class="not-first:mt-6" aria-labelledby="admin-navigation-{{ $group['id'] }}">
-                <h2 id="admin-navigation-{{ $group['id'] }}" class="px-3 text-xs font-semibold text-admin-muted">
+            <section class="not-first:mt-6" aria-labelledby="{{ $idPrefix }}-{{ $group['id'] }}">
+                <h2 id="{{ $idPrefix }}-{{ $group['id'] }}" class="px-3 text-xs font-semibold text-admin-muted">
                     {{ $group['label'] }}
                 </h2>
                 <ul class="mt-2 space-y-1">

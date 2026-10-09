@@ -1,20 +1,14 @@
 import accountInputWorkflow, {
   emptyAccountInputState,
 } from "./admin-dashboard/account-input-workflow.js";
+import dashboardNavigation from "./admin-dashboard/navigation.js";
+import modalFocus from "./admin-dashboard/modal-focus.js";
 
 const COPY_RESET_DELAY_MS = 1600;
 const EMPTY_IMAGE_FILE_NAME = "Tidak ada file yang dipilih";
 const RETURN_TARGET_HIGHLIGHT_MS = 1800;
 const ACCOUNT_INPUT_SWITCH_CONFIRMATION =
   "Beralih ke Input Cepat? Draf akun yang belum disimpan tetap berada di halaman sampai modal ditutup.";
-const MODAL_FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "button:not([disabled])",
-  'input:not([disabled]):not([type="hidden"])',
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  '[tabindex]:not([tabindex="-1"])',
-].join(",");
 
 let productQuantityPriceTierSequence = 0;
 
@@ -194,6 +188,8 @@ export function salesFilter() {
 
 export default function adminDashboard(initialState = {}) {
   return {
+    ...modalFocus,
+    ...dashboardNavigation(),
     activeTab: initialState.activeTab ?? "stats",
     copied: false,
     storeLink: initialState.storeLink ?? "",
@@ -274,8 +270,6 @@ export default function adminDashboard(initialState = {}) {
     productModalOpener: null,
     stockModalOpener: null,
     manageStockModalOpener: null,
-    moreMenuOpen: false,
-    moreMenuOpener: null,
     paymentSwitchOpen: false,
     paymentSwitchForm: null,
     paymentSwitchOpener: null,
@@ -287,6 +281,7 @@ export default function adminDashboard(initialState = {}) {
     paymentSwitchTargetLabel: "",
 
     init() {
+      this.initNavigation();
       this.$nextTick(() => {
         if (this.productModalOpen) {
           this.focusProductModalField();
@@ -335,20 +330,8 @@ export default function adminDashboard(initialState = {}) {
         this.focusReturnTarget();
       });
     },
-    openMoreMenu() {
-      this.moreMenuOpener = document.activeElement;
-      this.moreMenuOpen = true;
-      this.$nextTick(() => this.$refs.moreMenuFirst?.focus());
-    },
-
-    closeMoreMenu(restoreFocus = true) {
-      const opener = this.moreMenuOpener;
-      this.moreMenuOpen = false;
-      this.moreMenuOpener = null;
-
-      if (restoreFocus) {
-        this.restoreModalFocus(opener);
-      }
+    destroy() {
+      this.destroyNavigation();
     },
 
     openPaymentProviderSwitch(event) {
@@ -436,12 +419,8 @@ export default function adminDashboard(initialState = {}) {
       HTMLFormElement.prototype.submit.call(form);
     },
 
-    goToTabFromMore(tab, openProductForm = false) {
-      this.closeMoreMenu(false);
-      this.goToTab(tab, openProductForm);
-    },
-
     goToTab(tab, openProductForm = false) {
+      this.closeSidebar(false);
       const url = new URL(window.location.href);
       url.searchParams.set("tab", tab);
 
@@ -637,50 +616,6 @@ export default function adminDashboard(initialState = {}) {
           ?.querySelector('input:not([type="hidden"]), select, textarea')
           ?.focus();
       });
-    },
-
-    modalFocusableElements(dialog) {
-      return Array.from(
-        dialog?.querySelectorAll(MODAL_FOCUSABLE_SELECTOR) ?? []
-      ).filter(
-        (element) =>
-          element.getClientRects().length > 0 &&
-          element.getAttribute("aria-hidden") !== "true"
-      );
-    },
-
-    trapModalFocus(event) {
-      const focusable = this.modalFocusableElements(event.currentTarget);
-      const first = focusable[0];
-      const last = focusable.at(-1);
-
-      if (!first || !last) {
-        event.preventDefault();
-        event.currentTarget.focus();
-        return;
-      }
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    },
-
-    keepModalFocus(event, modalId) {
-      const dialog = document.getElementById(modalId);
-
-      if (
-        !dialog ||
-        dialog.getClientRects().length === 0 ||
-        dialog.contains(event.target)
-      ) {
-        return;
-      }
-
-      (this.modalFocusableElements(dialog)[0] ?? dialog).focus();
     },
 
     restoreModalFocus(opener) {

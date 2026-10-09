@@ -2847,145 +2847,151 @@ test("keeps shared context and store actions reachable on internal admin tabs", 
   }
 });
 
-test("keeps responsive navigation and utility actions usable", async ({
+test("mobile drawer contains focus and restores its visible trigger", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 320, height: 740 });
+  await page.setViewportSize({ width: 375, height: 900 });
   await login(page);
-
-  const mobileNav = page.getByRole("navigation", {
-    name: "Navigasi dashboard",
-  });
-  await expect(mobileNav).toBeVisible();
-  await expect(
-    mobileNav.getByRole("button", { name: "Ringkasan", exact: true })
-  ).toBeVisible();
-  await expect(
-    mobileNav.getByRole("button", { name: "Pesanan", exact: true })
-  ).toBeVisible();
-  await expect(
-    mobileNav.getByRole("button", { name: "Produk", exact: true })
-  ).toBeVisible();
-  await expect(
-    mobileNav.getByRole("button", { name: "Lainnya", exact: true })
-  ).toBeVisible();
-  await expect(
-    mobileNav.getByRole("button", { name: "Ringkasan", exact: true })
-  ).toHaveAttribute("aria-current", "page");
-  await expect(
-    mobileNav.getByRole("button", { name: "Siaran", exact: true })
-  ).toHaveCount(0);
-
-  const mobileNavMetrics = await mobileNav.evaluate((element) => {
-    const buttons = [...element.querySelectorAll("button")].map((button) => {
-      const rect = button.getBoundingClientRect();
-
-      return { left: rect.left, right: rect.right };
-    });
-
-    return {
-      right: element.getBoundingClientRect().right,
-      viewportWidth: window.innerWidth,
-      buttons,
-    };
-  });
-
-  expect(mobileNavMetrics.right).toBeLessThanOrEqual(
-    mobileNavMetrics.viewportWidth + 1
-  );
-  expect(
-    Math.max(...mobileNavMetrics.buttons.map((button) => button.right))
-  ).toBeLessThanOrEqual(mobileNavMetrics.viewportWidth + 1);
-
-  await mobileNav.getByRole("button", { name: "Lainnya", exact: true }).click();
-
-  const moreSheet = page.getByRole("dialog", { name: "Menu lainnya" });
-  await expect(moreSheet).toBeVisible();
-  await expect(
-    moreSheet.getByRole("button", { name: "Siaran", exact: true })
-  ).toBeVisible();
-  await expect(
-    moreSheet.getByRole("button", { name: "Store Channel", exact: true })
-  ).toBeVisible();
-  await expect(
-    moreSheet.getByRole("button", { name: "Funnel storefront", exact: true })
-  ).toBeVisible();
-  await expect(
-    moreSheet.getByRole("button", { name: "Tambah Produk", exact: true })
-  ).toBeVisible();
-  await expect(
-    moreSheet.getByRole("button", { name: "Siaran", exact: true })
-  ).toBeFocused();
-
-  const closeMenu = moreSheet.getByRole("button", { name: "Tutup menu" });
-  const lastUtilityAction = moreSheet.getByRole("button", {
-    name: "Tambah Produk",
-    exact: true,
-  });
-  await lastUtilityAction.focus();
-  await page.keyboard.press("Tab");
-  await expect(closeMenu).toBeFocused();
-  await closeMenu.focus();
-  await page.keyboard.press("Shift+Tab");
-  await expect(lastUtilityAction).toBeFocused();
-
-  await page.keyboard.press("Escape");
-  await expect(moreSheet).toBeHidden();
-  await expect(
-    mobileNav.getByRole("button", { name: "Lainnya", exact: true })
-  ).toBeFocused();
-
-  await page.goto(`${baseUrl}/admin?tab=broadcast`);
-  const broadcastTextarea = page.locator("#broadcast-message");
-  await broadcastTextarea.scrollIntoViewIfNeeded();
-
-  const broadcastOverlap = await page.evaluate(() => {
-    const nav = document
-      .querySelector(".mobile-bottom-nav")
-      ?.getBoundingClientRect();
-    const field = document
-      .querySelector("#broadcast-message")
-      ?.getBoundingClientRect();
-
-    if (!nav || !field) {
-      return -1;
-    }
-
-    return Math.max(
-      0,
-      Math.min(nav.bottom, field.bottom) - Math.max(nav.top, field.top)
-    );
-  });
-
-  expect(broadcastOverlap).toBe(0);
-
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(`${baseUrl}/admin?tab=produk`);
-
-  const desktopNav = page.getByRole("navigation", {
+  const trigger = page.getByRole("button", { name: "Buka navigasi admin" });
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await trigger.click();
+  const drawer = page.getByRole("dialog", {
     name: "Navigasi admin",
     exact: true,
   });
-  await expect(
-    desktopNav.getByRole("link", { name: "Produk", exact: true })
-  ).toHaveAttribute("aria-current", "page");
+  await expect(drawer).toBeVisible();
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+  const close = drawer.getByRole("button", { name: "Tutup navigasi" });
+  await expect(close).toBeFocused();
+  const last = drawer.getByRole("link", { name: "Tambah Produk", exact: true });
+  await last.focus();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(last).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+  await trigger.click();
+  await page.mouse.click(365, 120);
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect(drawer).toBeHidden();
+  await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+  await page.setViewportSize({ width: 375, height: 900 });
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expectNoDocumentOverflow(page);
 });
 
-test("closes the mobile utility sheet from outside click and restores its trigger", async ({
+test("removing an open drawer root releases its scroll lock", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 375, height: 900 });
   await login(page);
+  await page.evaluate(() => {
+    document.body.style.setProperty("overflow-x", "clip", "important");
+    document.body.style.setProperty("overflow-y", "auto");
+  });
+  await page.getByRole("button", { name: "Buka navigasi admin" }).click();
+  await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+  await page
+    .locator(".admin-dashboard-shell")
+    .evaluate((root) => root.remove());
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        x: document.body.style.getPropertyValue("overflow-x"),
+        priority: document.body.style.getPropertyPriority("overflow-x"),
+        y: document.body.style.getPropertyValue("overflow-y"),
+      }))
+    )
+    .toEqual({ x: "clip", priority: "important", y: "auto" });
+});
 
-  const nav = page.getByRole("navigation", { name: "Navigasi dashboard" });
-  const trigger = nav.getByRole("button", { name: "Lainnya", exact: true });
-  await trigger.click();
+test("mobile drawer reaches every tab and preserves filters, hash and product-create", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  await login(page);
+  await page.goto(
+    `${baseUrl}/admin?tab=penjualan&sales_filter=waiting#admin-section-sales`
+  );
+  for (const [tab, label] of [
+    ["stats", "Ringkasan"],
+    ["produk", "Produk"],
+    ["penjualan", "Pesanan"],
+    ["suppliers", "Supplier"],
+    ["broadcast", "Siaran"],
+    ["telegram-channel", "Store Channel"],
+    ["riwayat", "Riwayat KlikQRIS"],
+    ["withdraw", "Withdraw"],
+    ["funnel", "Funnel"],
+    ["balance-issues", "Kompensasi Top-up"],
+  ]) {
+    await page.getByRole("button", { name: "Buka navigasi admin" }).click();
+    await page
+      .getByRole("dialog", { name: "Navigasi admin", exact: true })
+      .getByRole("link", { name: label, exact: true })
+      .click();
+    await expect(page).toHaveURL(
+      `${baseUrl}/admin?tab=${tab}&sales_filter=waiting#admin-section-sales`
+    );
+    await expect(
+      page.getByRole("dialog", { name: "Navigasi admin", exact: true })
+    ).toBeHidden();
+    await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+  }
+  await page.getByRole("button", { name: "Buka navigasi admin" }).click();
+  await page
+    .getByRole("dialog", { name: "Navigasi admin", exact: true })
+    .getByRole("link", { name: "Tambah Produk", exact: true })
+    .click();
+  await expect(page).toHaveURL(
+    /tab=produk&sales_filter=waiting&product_form=create#admin-section-sales/
+  );
+  await expect(page.locator("#product-name")).toBeFocused();
+  await expect(
+    page.getByRole("dialog", { name: "Navigasi admin", exact: true })
+  ).toBeHidden();
+});
 
-  const sheet = page.getByRole("dialog", { name: "Menu lainnya" });
-  await expect(sheet).toBeVisible();
-  await page.mouse.click(6, 120);
-  await expect(sheet).toBeHidden();
-  await expect(trigger).toBeFocused();
+test("mobile navigation remains usable without JavaScript", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: { width: 375, height: 900 },
+  });
+  const page = await context.newPage();
+  await login(page);
+  await page
+    .locator("details")
+    .filter({ has: page.locator("summary", { hasText: "Navigasi dashboard" }) })
+    .locator("summary")
+    .click();
+  const nav = page.getByRole("navigation", {
+    name: "Navigasi dashboard",
+    exact: true,
+  });
+  await nav.getByRole("link", { name: "Produk", exact: true }).click();
+  await expect(page).toHaveURL(/tab=produk/);
+  await expect(
+    page.getByRole("heading", { name: "Produk", exact: true })
+  ).toBeVisible();
+  await page.locator("summary", { hasText: "Navigasi dashboard" }).click();
+  await expect(
+    nav.getByRole("link", { name: "Produk", exact: true })
+  ).toHaveAttribute("aria-current", "page");
+  await nav.getByRole("link", { name: "Pesanan", exact: true }).click();
+  await expect(page).toHaveURL(/tab=penjualan/);
+  await expect(
+    page.getByRole("heading", { name: "Pesanan", exact: true })
+  ).toBeVisible();
+  await context.close();
 });
 
 for (const width of [768, 1023, 1024, 1280, 1440, 1920]) {
@@ -2996,8 +3002,9 @@ for (const width of [768, 1023, 1024, 1280, 1440, 1920]) {
     await login(page);
 
     const sidebar = page.getByRole("complementary", { name: "Navigasi admin" });
-    const mobileNav = page.getByRole("navigation", {
-      name: "Navigasi dashboard",
+    const mobileNav = page.getByRole("dialog", {
+      name: "Navigasi admin",
+      exact: true,
     });
     if (width >= 1024) {
       await expect(sidebar).toBeVisible();
@@ -3015,13 +3022,8 @@ for (const width of [768, 1023, 1024, 1280, 1440, 1920]) {
       expect(content.x).toBeGreaterThanOrEqual(box.x + box.width);
     } else {
       await expect(sidebar).toBeHidden();
+      await page.getByRole("button", { name: "Buka navigasi admin" }).click();
       await expect(mobileNav).toBeVisible();
-      await mobileNav
-        .getByRole("button", { name: "Lainnya", exact: true })
-        .click();
-      await expect(
-        page.getByRole("dialog", { name: "Menu lainnya" })
-      ).toBeVisible();
       await page.keyboard.press("Escape");
     }
     await expectNoDocumentOverflow(page);
@@ -3111,76 +3113,25 @@ for (const width of [320, 390, 768, 1280, 1440, 1920]) {
   });
 }
 
-test("keeps fixed navigation below channel fields and modal surfaces", async ({
+test("mobile content and product modal remain reachable with the drawer closed", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
-
-  const mobileNav = page.getByRole("navigation", {
-    name: "Navigasi dashboard",
-  });
-  await expect(
-    mobileNav.getByRole("button", { name: "Ringkasan", exact: true })
-  ).toBeVisible();
-  await expect(
-    mobileNav.getByRole("button", { name: "Pesanan", exact: true })
-  ).toBeVisible();
-  await expect(
-    mobileNav.getByRole("button", { name: "Produk", exact: true })
-  ).toBeVisible();
-  await expect(
-    mobileNav.getByRole("button", { name: "Lainnya", exact: true })
-  ).toBeVisible();
-  await expectNoDocumentOverflow(page);
-
   await page.goto(`${baseUrl}/admin?tab=telegram-channel`);
-
   const channelLink = page.getByRole("textbox", {
     name: "Link channel publik",
   });
   await channelLink.scrollIntoViewIfNeeded();
-  const channelOverlap = await page.evaluate(() => {
-    const nav = document
-      .querySelector(".mobile-bottom-nav")
-      ?.getBoundingClientRect();
-    const field = document
-      .querySelector("#store-channel-link")
-      ?.getBoundingClientRect();
-
-    if (!nav || !field) {
-      return -1;
-    }
-
-    return Math.max(
-      0,
-      Math.min(nav.bottom, field.bottom) - Math.max(nav.top, field.top)
-    );
-  });
-
-  expect(channelOverlap).toBe(0);
-
+  await expect(channelLink).toBeInViewport();
   await page.goto(`${baseUrl}/admin?tab=produk`);
   await page.getByRole("button", { name: /Tambah Produk/i }).click();
-
   const productModal = page.getByRole("dialog", { name: /Tambah produk/i });
   await expect(productModal).toBeVisible();
   await expectElementWithinViewport(page, productModal);
-  const layerMetrics = await page.evaluate(() => {
-    const nav = document.querySelector(".mobile-bottom-nav");
-    const modalBackdrop =
-      document.querySelector("#product-modal")?.parentElement;
-
-    return {
-      navZIndex: Number.parseInt(window.getComputedStyle(nav).zIndex, 10),
-      modalZIndex: Number.parseInt(
-        window.getComputedStyle(modalBackdrop).zIndex,
-        10
-      ),
-    };
-  });
-
-  expect(layerMetrics.modalZIndex).toBeGreaterThan(layerMetrics.navZIndex);
+  await expect(
+    page.getByRole("dialog", { name: "Navigasi admin", exact: true })
+  ).toBeHidden();
 });
 
 test("keeps tabs, cards, and the stock modal usable at Telegram mini app width", async ({
@@ -3190,7 +3141,9 @@ test("keeps tabs, cards, and the stock modal usable at Telegram mini app width",
   await login(page);
 
   await expectNoDocumentOverflow(page);
-  await expectBottomNavUsable(page);
+  await expect(
+    page.getByRole("button", { name: "Buka navigasi admin" })
+  ).toBeVisible();
   await page
     .getByRole("region", { name: "Mode pembayaran" })
     .scrollIntoViewIfNeeded();
@@ -3797,92 +3750,55 @@ for (const broadcastDirectCase of [
       name: broadcastDirectCase.navigationName,
     });
     if (broadcastDirectCase.navigationName === "Navigasi dashboard") {
-      await expect(
-        nav.getByRole("button", { name: "Lainnya", exact: true })
-      ).toHaveClass(/bottom-nav-active/);
-    } else {
-      await expect(
-        nav.getByRole("link", { name: "Siaran", exact: true })
-      ).toHaveAttribute("aria-current", "page");
+      await page.getByRole("button", { name: "Buka navigasi admin" }).click();
     }
+    await expect(
+      nav.getByRole("link", { name: "Siaran", exact: true })
+    ).toHaveAttribute("aria-current", "page");
   });
 }
 
 async function expectClickedDashboardControlsToWork(page, navigationName) {
-  const nav = page.getByRole("navigation", { name: navigationName });
-  const isMobileNav = navigationName === "Navigasi dashboard";
-  await expect(nav).toBeVisible();
-
-  await nav
-    .getByRole(isMobileNav ? "button" : "link", { name: "Produk", exact: true })
-    .click();
+  const mobile = navigationName === "Navigasi dashboard";
+  const navigate = async (label) => {
+    if (mobile)
+      await page.getByRole("button", { name: "Buka navigasi admin" }).click();
+    await page
+      .getByRole("navigation", { name: navigationName, exact: true })
+      .getByRole("link", { name: label, exact: true })
+      .click();
+  };
+  await navigate("Produk");
   await expect(
     page.getByRole("heading", { name: /Produk Saya/ })
   ).toBeVisible();
   await getAdminProductCard(page, "Browser QA Produk A");
-
-  await nav
-    .getByRole(isMobileNav ? "button" : "link", {
-      name: "Pesanan",
-      exact: true,
-    })
-    .click();
+  await navigate("Pesanan");
   await expect(
     page.getByRole("heading", { name: /Penjualan Saya/ })
   ).toBeVisible();
   await expect(page.getByText("INV-BROWSER-A")).toBeVisible();
-
-  if (isMobileNav) {
-    await clickMobileUtility(page, nav, "Store Channel");
-  } else {
-    await nav.getByRole("link", { name: "Store Channel", exact: true }).click();
-  }
+  await navigate("Store Channel");
   await expect(
     page.getByRole("region", { name: "Telegram Channel" })
   ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Setup Store Channel" })
-  ).toBeVisible();
-
-  if (isMobileNav) {
-    await clickMobileUtility(page, nav, "Siaran");
-    await expect(
-      nav.getByRole("button", { name: "Lainnya", exact: true })
-    ).toHaveClass(/bottom-nav-active/);
-  } else {
-    const broadcastLink = nav.getByRole("link", {
-      name: "Siaran",
-      exact: true,
-    });
-    await broadcastLink.click();
-    await expect(broadcastLink).toHaveAttribute("aria-current", "page");
-  }
-  await expect(
-    page.locator("#admin-section-broadcast h2").first()
-  ).toBeVisible();
+  await navigate("Siaran");
   await expect(
     page.getByRole("heading", { name: "Status Siaran" })
   ).toBeVisible();
-
-  if (isMobileNav) {
-    await clickMobileUtility(page, nav, "Tambah Produk");
+  if (mobile) {
+    await page.getByRole("button", { name: "Buka navigasi admin" }).click();
+    await page
+      .getByRole("dialog", { name: "Navigasi admin", exact: true })
+      .getByRole("link", { name: "Tambah Produk", exact: true })
+      .click();
   } else {
-    await nav.getByRole("link", { name: "Produk", exact: true }).click();
+    await navigate("Produk");
     await page.getByRole("button", { name: /Tambah Produk/ }).click();
   }
   const productModal = page.getByRole("dialog", { name: /Tambah produk/i });
   await expect(productModal).toBeVisible();
   await expect(productModal.locator("#product-name")).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: /Produk Saya/ })
-  ).toBeVisible();
-}
-
-async function clickMobileUtility(page, nav, actionName) {
-  await nav.getByRole("button", { name: "Lainnya", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Menu lainnya" });
-  await expect(sheet).toBeVisible();
-  await sheet.getByRole("button", { name: actionName, exact: true }).click();
 }
 
 test("saves product name and icon edits from the admin modal", async ({
@@ -4370,33 +4286,6 @@ async function expectNoDocumentOverflow(page) {
     metrics.bodyScrollWidth,
     "body should not overflow horizontally"
   ).toBeLessThanOrEqual(metrics.viewportWidth + 1);
-}
-
-async function expectBottomNavUsable(page) {
-  const nav = page.getByRole("navigation", { name: "Navigasi dashboard" });
-  await expect(nav).toBeVisible();
-  await expect(nav).toHaveCSS("position", "fixed");
-  await expect(nav.getByText("Ringkasan")).toBeVisible();
-  await expect(nav.getByText("Produk")).toBeVisible();
-  await expect(nav.getByText("Pesanan")).toBeVisible();
-  await expect(nav.getByText("Lainnya")).toBeVisible();
-
-  const metrics = await nav.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-
-    return {
-      bottomGap: Math.abs(window.innerHeight - rect.bottom),
-      left: rect.left,
-      right: rect.right,
-      width: rect.width,
-      viewportWidth: window.innerWidth,
-    };
-  });
-
-  expect(metrics.bottomGap).toBeLessThanOrEqual(2);
-  expect(metrics.left).toBeGreaterThanOrEqual(0);
-  expect(metrics.right).toBeLessThanOrEqual(metrics.viewportWidth + 1);
-  expect(metrics.width).toBeGreaterThan(300);
 }
 
 async function expectOneColumn(firstLocator, secondLocator) {

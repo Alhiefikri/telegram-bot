@@ -75,6 +75,11 @@
 
             <x-slot:topbar>
                 <x-admin-dashboard.topbar>
+                    <x-slot:menu>
+                        <button x-cloak x-ref="sidebarTrigger" type="button" aria-label="Buka navigasi admin" aria-haspopup="dialog" aria-controls="admin-dashboard-drawer" aria-expanded="false" x-bind:aria-expanded="sidebarOpen" x-on:click="openSidebar($event.currentTarget)" class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-admin-line bg-admin-surface text-admin-ink focus-visible:outline-2 focus-visible:outline-admin-focus lg:hidden">
+                            <svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+                        </button>
+                    </x-slot:menu>
                     <x-slot:pageContext>
                         <p class="text-xs font-medium text-admin-muted">{{ $activeNavigationGroup['label'] }}</p>
                         <h1 class="text-lg font-semibold text-admin-ink sm:text-xl">{{ $activeNavigationItem['label'] }}</h1>
