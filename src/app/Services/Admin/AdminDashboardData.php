@@ -224,6 +224,21 @@ final class AdminDashboardData
         ];
     }
 
+    /**
+     * Returns the canonical permission-filtered navigation for a linked
+     * operational page. Linked pages share dashboard navigation without
+     * loading the active dashboard tab payload.
+     *
+     * @return array<string, mixed>
+     */
+    public function navigationFor(?string $requestedTab, User $user): array
+    {
+        return $this->navigation($requestedTab, $user);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     private function navigation(?string $requestedTab, User $user): array
     {
         $canReconcilePayments = (bool) $user->role?->canReconcilePayments();

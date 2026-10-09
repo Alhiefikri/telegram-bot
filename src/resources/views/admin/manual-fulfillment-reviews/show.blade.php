@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" class="h-full">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,10 +9,9 @@
     @include('partials.theme-init')
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="admin-page min-h-screen bg-brand-bg text-neo-ink">
-    <x-theme-toggle showLabel class="fixed right-4 top-4 z-30 rounded-neo-xl border-[3px] border-neo-ink bg-white px-3 text-xs font-black text-neo-ink shadow-neo-sm transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-neo-focus" />
-    <main class="mx-auto max-w-3xl p-4 pt-20 sm:p-6">
-        <a href="{{ route('admin.manual-fulfillment-reviews.index') }}" class="text-sm font-bold text-brand-slate-dark underline">← Kembali ke antrean</a>
+<body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
+    <x-admin-dashboard.linked-shell active-tab="penjualan" title="Manual Fulfillment Review">
+        <a href="{{ route('admin.manual-fulfillment-reviews.index') }}" class="text-sm font-semibold text-admin-accent underline">← Kembali ke antrean</a>
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
             <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Manual Fulfillment Review</p>
             <h1 class="mt-1 text-2xl font-black">{{ $review->order->invoice_number }}</h1>
@@ -83,6 +82,6 @@
                 </x-admin-dashboard.card>
             @endif
         @endcan
-    </main>
+    </x-admin-dashboard.linked-shell>
 </body>
 </html>

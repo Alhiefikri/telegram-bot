@@ -1284,6 +1284,7 @@ without restoring competing focus; an already-open modal prevents opening it.
 `modal-focus.js` centralizes the shared focusable-element, Tab containment and
 focus-containment helpers without replacing existing feature modal restoration.
 `app.js` also registers `dashboardNavigation` for standalone shell consumers.
+`AdminDashboardData::navigationFor()` exposes the same permission-filtered model to linked operational pages. `src/resources/views/components/admin-dashboard/linked-shell.blade.php` mounts those pages (order detail, supplier workflows, and manual review queues) inside the shared desktop sidebar/mobile drawer without loading an inactive dashboard tab or duplicating authorization. The linked shell preserves the active dashboard destination and keeps response navigation free of credentials and provider secrets.
 The drawer releases its own lock on close, navigation, desktop resize and root
 removal, preserving pre-existing inline overflow values/priorities. Shell
 content, topbar and skip link are inert while the drawer is modal. A nonmodal

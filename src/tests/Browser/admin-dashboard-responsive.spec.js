@@ -2768,6 +2768,30 @@ test("direct desktop tabs select one sidebar destination and preserve content an
   ).toBeHidden();
 });
 
+test("linked operational pages retain the shared shell and active destination", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+
+  for (const [path, title] of [
+    ["/admin/manual-fulfillment-reviews", "Manual Fulfillment Review"],
+    ["/admin/telegram-outbound-effects", "Manual Delivery Review"],
+  ]) {
+    await page.goto(`${baseUrl}${path}`);
+    await expect(
+      page.getByRole("banner", { name: "Konteks halaman" })
+    ).toContainText(title);
+    await expect(
+      page.getByRole("navigation", { name: "Navigasi admin", exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Pesanan", exact: true })
+    ).toHaveAttribute("aria-current", "page");
+    await expectNoDocumentOverflow(page);
+  }
+});
+
 test("desktop sidebar links navigate without JavaScript and retain filters", async ({
   browser,
 }) => {

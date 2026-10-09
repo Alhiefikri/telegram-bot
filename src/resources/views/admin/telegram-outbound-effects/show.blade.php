@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" class="h-full">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,11 +9,10 @@
     @include('partials.theme-init')
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="admin-page min-h-screen bg-brand-bg text-neo-ink">
-    <x-theme-toggle showLabel class="fixed right-4 top-4 z-30 rounded-neo-xl border-[3px] border-neo-ink bg-white px-3 text-xs font-black text-neo-ink shadow-neo-sm transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-neo-focus" />
-    <main class="mx-auto max-w-4xl p-4 pt-20 sm:p-6">
-        <a href="{{ route('admin.telegram-outbound-effects.index') }}" class="text-sm font-bold text-brand-slate-dark underline">← Kembali ke review queue</a>
-
+<body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
+    <x-admin-dashboard.linked-shell active-tab="penjualan" title="Manual Delivery Review">
+        <a href="{{ route('admin.telegram-outbound-effects.index') }}" class="text-sm font-semibold text-admin-accent underline">← Kembali ke review queue</a>
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
         @if (session('status'))
             <x-admin-dashboard.notice tone="success" class="mt-4 rounded-xl text-sm font-bold">{{ session('status') }}</x-admin-dashboard.notice>
         @endif
@@ -93,6 +92,6 @@
                 </x-admin-dashboard.card>
             @endif
         @endcan
-    </main>
+    </x-admin-dashboard.linked-shell>
 </body>
 </html>
