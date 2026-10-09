@@ -1209,6 +1209,24 @@ npm run test:browser:customer
 
 Structured stock availability uses [`runbook-structured-account-stock-intake-rollout.md`](../../docs/runbook-structured-account-stock-intake-rollout.md). Never expose Input Akun before the bounded backfill, persisted readiness check, conflict resolution, and non-production end-to-end proof are recorded.
 
+### Admin dashboard shell primitives
+
+The reusable presentation seam is anonymous Blade components under
+`src/resources/views/components/admin-dashboard/`: `shell`, `navigation`,
+`navigation-item`, `topbar`, and `mobile-drawer`. They accept server-built,
+permission-filtered navigation groups and render escaped links with an
+allowlisted SVG path map; they do not perform authorization, tab routing, or
+business data loading. `mobile-drawer` is markup only in this ticket. Alpine
+open/close/focus/scroll-lock ownership belongs to #595.
+
+Admin primitive defaults use neutral surfaces, muted violet accent tokens,
+one-pixel borders, restrained shadows, readable regular-case text, and
+44px minimum controls. The tokens are scoped through `admin-*` CSS variables
+and Tailwind theme aliases; Storefront presentation remains outside that
+scope. Component contracts are covered by
+`AdminDashboardBladeComponentsTest`, while dashboard behavior remains covered
+by the existing `AdminDashboard*` feature tests.
+
 ## 11. Checklist perubahan untuk AI
 
 Sebelum membuka patch:
