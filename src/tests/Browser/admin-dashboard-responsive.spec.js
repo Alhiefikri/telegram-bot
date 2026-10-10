@@ -3085,20 +3085,7 @@ test("renders the compact admin dashboard at desktop width", async ({
   await expect(
     page.getByRole("navigation", { name: "Navigasi dashboard" })
   ).toBeHidden();
-  await expect(
-    page.getByRole("button", { name: "Bagikan", exact: true })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("region", { name: "Mode pembayaran" })
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "QR Manual" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Hosted Pakasir" })
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "QR Native Pakasir" })
-  ).toHaveCount(0);
-  await expectStoreLinkCopyAndShare(page);
+  await expectStoreLinkCopy(page);
 
   await page.screenshot({
     path: testInfo.outputPath("desktop-stats-light.png"),
@@ -3129,8 +3116,7 @@ test("direct desktop tabs select one sidebar destination and preserve content an
     ["suppliers", "Supplier", "supplier-title"],
     ["broadcast", "Siaran", "admin-section-broadcast"],
     ["telegram-channel", "Store Channel", "admin-section-store-channel"],
-    ["riwayat", "Riwayat KlikQRIS", "admin-section-history"],
-    ["withdraw", "Withdraw", "admin-section-withdraw"],
+    ["settings", "Pengaturan", "admin-section-settings"],
     ["funnel", "Funnel", "admin-section-funnel"],
     ["balance-issues", "Kompensasi Top-up", "admin-section-balance-issues"],
   ];
@@ -3284,8 +3270,7 @@ test("financial and communication surfaces keep the shared shell and avoid occlu
     ["ringkasan", "/admin?tab=stats"],
     ["broadcast", "/admin?tab=broadcast"],
     ["store-channel", "/admin?tab=telegram-channel"],
-    ["riwayat", "/admin?tab=riwayat"],
-    ["withdraw", "/admin?tab=withdraw"],
+    ["settings", "/admin?tab=settings"],
     ["funnel", "/admin?tab=funnel"],
     ["balance-issues", "/admin?tab=balance-issues"],
     ["balance-reports", "/admin/store-balance/reports"],
@@ -3338,8 +3323,6 @@ test("finance tables keep their overflow local and their labels readable at 200%
   await login(page);
 
   for (const [tab, section] of [
-    ["withdraw", "#admin-section-withdraw"],
-    ["riwayat", "#admin-section-history"],
     ["balance-issues", "#admin-section-balance-issues"],
   ]) {
     await page.goto(`${baseUrl}/admin?tab=${tab}`);
@@ -3533,8 +3516,7 @@ for (const role of ["owner", "admin"]) {
           ["suppliers", "[data-supplier-workspace]"],
           ["broadcast", "#admin-section-broadcast"],
           ["telegram-channel", "#admin-section-store-channel"],
-          ["riwayat", "#admin-section-history"],
-          ["withdraw", "#admin-section-withdraw"],
+          ["settings", "#admin-section-settings"],
           ["funnel", "#admin-section-funnel"],
           ...(role === "owner"
             ? [["balance-issues", "#admin-section-balance-issues"]]
@@ -3547,7 +3529,8 @@ for (const role of ["owner", "admin"]) {
           await expect(content).toBeVisible();
           await expect(content.getByRole("heading").first()).toBeVisible();
           const bodyContent = {
-            stats: content
+            stats: content.locator('[name="days"]'),
+            settings: content
               .locator('form[action$="/payment-mode"] button')
               .first(),
             produk: content.getByRole("button", {
@@ -3563,11 +3546,6 @@ for (const role of ["owner", "admin"]) {
               .filter({ hasText: "Tambah supplier" }),
             broadcast: content.getByLabel("Pesan", { exact: true }),
             "telegram-channel": content.locator('[name="channel_username"]'),
-            riwayat: content
-              .getByText("KLIK-BROWSER-MATCH", { exact: true })
-              .filter({ visible: true })
-              .first(),
-            withdraw: content.getByLabel("Order ID", { exact: true }),
             funnel: content.locator('[name="start_date"]'),
             "balance-issues": content.getByLabel("Telegram ID", {
               exact: true,
@@ -3588,7 +3566,7 @@ for (const role of ["owner", "admin"]) {
             .toBeGreaterThanOrEqual(0);
           await expectNoDocumentOverflow(page);
         }
-        await page.goto(`${baseUrl}/admin?tab=stats`);
+        await page.goto(`${baseUrl}/admin?tab=settings`);
         await page.evaluate(() => {
           document.documentElement.style.fontSize = "200%";
         });
@@ -3675,18 +3653,16 @@ test("ordinary sidebar and linked-page anchors preserve fragments and explicit s
   );
   await expect(popup.locator("#admin-section-sales")).toBeVisible();
   await popup.close();
-  await nav
-    .getByRole("link", { name: "Pengaturan pembayaran", exact: true })
-    .click();
+  await nav.getByRole("link", { name: "Pengaturan", exact: true }).click();
   await expect(page).toHaveURL(
-    `${baseUrl}/admin?tab=stats&sales_filter=waiting#admin-payment-settings`
+    `${baseUrl}/admin?tab=settings&sales_filter=waiting#admin-section-sales`
   );
   await page.goBack();
   await expect(page).toHaveURL(
     /tab=produk.*product_form=create#admin-section-sales/
   );
   await page.goForward();
-  await expect(page).toHaveURL(/tab=stats.*#admin-payment-settings/);
+  await expect(page).toHaveURL(/tab=settings.*#admin-section-sales/);
   await page.goto(
     `${baseUrl}/admin/manual-fulfillment-reviews?sales_filter=waiting#admin-section-sales`
   );
@@ -3733,7 +3709,9 @@ test("shared topbars stay reachable and leave hash, skip and focused targets unc
         ),
       });
     }
-    await page.goto(`${baseUrl}/admin?tab=stats#admin-payment-settings`);
+    await page.goto(
+      `${baseUrl}/admin?tab=settings&section=pembayaran#admin-payment-settings`
+    );
     await expectUncoveredByTopbar(
       page,
       page.locator("#admin-payment-settings")
@@ -3801,34 +3779,14 @@ test("Unknown delivery review renders reduced metadata and existing resolution a
   ).toBeVisible();
 });
 
-test("hides retired Pakasir controls from provider switch", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await login(page);
-
-  const paymentRegion = page.getByRole("region", { name: "Mode pembayaran" });
-  await expect(paymentRegion).toBeVisible();
-  await expect(
-    paymentRegion.getByRole("button", { name: "QR Manual" })
-  ).toBeVisible();
-  await expect(
-    paymentRegion.getByRole("button", { name: "KlikQRIS" })
-  ).toBeVisible();
-  await expect(
-    paymentRegion.getByRole("button", { name: "Hosted Pakasir" })
-  ).toHaveCount(0);
-  await expect(
-    paymentRegion.getByRole("button", { name: "QR Native Pakasir" })
-  ).toHaveCount(0);
-});
-
 test("payment switch and maintenance confirmations keep focus, Escape and real submission controls", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await login(page);
-  await page.goto(`${baseUrl}/admin?tab=stats#admin-payment-settings`);
+  await page.goto(
+    `${baseUrl}/admin?tab=settings&section=pembayaran#admin-payment-settings`
+  );
 
   const paymentRegion = page.getByRole("region", { name: "Mode pembayaran" });
   const switchTrigger = paymentRegion.getByRole("button", {
@@ -3991,8 +3949,7 @@ test("mobile drawer reaches every tab and preserves filters, hash and product-cr
     ["suppliers", "Supplier"],
     ["broadcast", "Siaran"],
     ["telegram-channel", "Store Channel"],
-    ["riwayat", "Riwayat KlikQRIS"],
-    ["withdraw", "Withdraw"],
+    ["settings", "Pengaturan"],
     ["funnel", "Funnel"],
     ["balance-issues", "Kompensasi Top-up"],
   ]) {
@@ -4181,68 +4138,6 @@ for (const width of [768, 1023, 1024, 1280, 1440, 1920]) {
 }
 
 for (const width of [320, 390, 768, 1280, 1440, 1920]) {
-  test(`renders KlikQRIS reporting cards and tables without overflow at ${width}px`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width, height: 900 });
-    await login(page);
-
-    await page.goto(`${baseUrl}/admin?tab=riwayat`, {
-      waitUntil: "domcontentloaded",
-    });
-
-    const history = page.locator("#admin-section-history");
-    await expect(
-      history.getByRole("heading", { name: "Riwayat KlikQRIS" })
-    ).toBeVisible();
-    await expect(history.getByText("KLIK-BROWSER-MATCH")).toHaveCount(2);
-    await expect(history.getByText("Mismatch lokal")).toHaveCount(1);
-    await expect(
-      history.getByText(
-        "Tidak ada Order lokal yang cocok dengan provider order ID ini."
-      )
-    ).toHaveCount(1);
-
-    if (width < 768) {
-      await expect(history.locator("article").first()).toBeVisible();
-      await expect(history.locator("table")).toBeHidden();
-    } else {
-      await expect(history.locator("article").first()).toBeHidden();
-      await expect(history.locator("article").last()).toBeHidden();
-      await expect(history.locator("table")).toBeVisible();
-    }
-    await expectNoDocumentOverflow(page);
-
-    await page.goto(`${baseUrl}/admin?tab=withdraw`, {
-      waitUntil: "domcontentloaded",
-    });
-
-    const withdraw = page.locator("#admin-section-withdraw");
-    await expect(
-      withdraw.getByRole("heading", { name: "Withdraw Order Status" })
-    ).toBeVisible();
-    await expect(withdraw.getByLabel("Order ID")).toBeVisible();
-    await expect(withdraw.getByText("WD-BROWSER-1")).toHaveCount(2);
-    await expect(
-      withdraw.getByRole("link", { name: "Buka bukti transfer" })
-    ).toHaveCount(1);
-    await expect(
-      withdraw.getByRole("link", { name: "Buka bukti transfer" }).first()
-    ).toHaveAttribute("href", "https://klikqris.com/proofs/WD-BROWSER-1.png");
-
-    if (width < 768) {
-      await expect(withdraw.locator("article").first()).toBeVisible();
-      await expect(withdraw.locator("table")).toBeHidden();
-    } else {
-      await expect(withdraw.locator("article").first()).toBeHidden();
-      await expect(withdraw.locator("article").last()).toBeHidden();
-      await expect(withdraw.locator("table")).toBeVisible();
-    }
-    await expectNoDocumentOverflow(page);
-  });
-}
-
-for (const width of [320, 390, 768, 1280, 1440, 1920]) {
   test(`renders storefront funnel analytics without overflow at ${width}px`, async ({
     page,
   }) => {
@@ -4293,21 +4188,6 @@ test("keeps tabs, cards, and the stock modal usable at Telegram mini app width",
   await expectNoDocumentOverflow(page);
   await expect(
     page.getByRole("button", { name: "Buka navigasi admin" })
-  ).toBeVisible();
-  await page
-    .getByRole("region", { name: "Mode pembayaran" })
-    .scrollIntoViewIfNeeded();
-  await expect(page.getByRole("button", { name: "QR Manual" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Hosted Pakasir" })
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "QR Native Pakasir" })
-  ).toHaveCount(0);
-
-  await expect(page.getByRole("region", { name: "Link toko" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Bagikan", exact: true })
   ).toBeVisible();
 
   await page.goto(`${baseUrl}/admin?tab=produk`);
@@ -5312,24 +5192,16 @@ async function installClipboardProbe(page) {
   });
 }
 
-async function expectStoreLinkCopyAndShare(page) {
-  const storeLink = page.getByRole("region", { name: "Link toko" });
-  const visibleStoreUrl = (
-    await storeLink.locator("p").nth(1).innerText()
-  ).trim();
-
-  await storeLink.getByRole("button", { name: "Salin" }).click();
+async function expectStoreLinkCopy(page) {
+  await page
+    .getByRole("button", { name: "Salin link toko", exact: true })
+    .click();
   await expect(
-    storeLink.getByRole("button", { name: "Tersalin" })
+    page.getByRole("button", { name: "Tersalin", exact: true })
   ).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => window.__copiedText))
-    .toBe(visibleStoreUrl);
-
-  await storeLink.getByRole("button", { name: "Bagikan", exact: true }).click();
-  await expect
-    .poll(() => page.evaluate(() => window.__copiedText))
-    .toBe(visibleStoreUrl);
+    .toBe(baseUrl);
 }
 async function getAdminProductCard(page, productName, groupName = null) {
   const familyGroups = page

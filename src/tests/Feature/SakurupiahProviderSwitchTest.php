@@ -33,7 +33,7 @@ final class SakurupiahProviderSwitchTest extends TestCase
                 'payment_mode' => PaymentProvider::SAKURUPIAH,
                 'confirm_provider_switch' => '1',
             ])
-            ->assertRedirect('/admin?tab=stats#admin-payment-settings')
+            ->assertRedirect('/admin?tab=settings&section=pembayaran#admin-payment-settings')
             ->assertSessionDoesntHaveErrors()
             ->assertSessionHas('status', 'Sakurupiah diaktifkan. Checkout baru memakai Sakurupiah; payment lama tetap memakai provider asal.');
 
@@ -75,7 +75,7 @@ final class SakurupiahProviderSwitchTest extends TestCase
                 'payment_mode' => PaymentProvider::MANUAL,
                 'confirm_provider_switch' => '1',
             ])
-            ->assertRedirect('/admin?tab=stats#admin-payment-settings')
+            ->assertRedirect('/admin?tab=settings&section=pembayaran#admin-payment-settings')
             ->assertSessionDoesntHaveErrors();
 
         $this->assertSame(PaymentProvider::MANUAL, $setting->fresh()->payment_mode);
@@ -105,7 +105,7 @@ final class SakurupiahProviderSwitchTest extends TestCase
                 'payment_mode' => PaymentProvider::SAKURUPIAH,
                 'confirm_provider_switch' => '1',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'stats']))
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'settings', 'section' => 'pembayaran']))
             ->assertSessionHasErrors(['payment_mode'], null, 'paymentMode');
 
         $this->assertSame(PaymentProvider::MANUAL, $setting->fresh()->payment_mode);

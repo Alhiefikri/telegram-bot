@@ -45,7 +45,7 @@ class UpdateSupportSettingsRequest extends FormRequest
     protected function validationErrorRedirect(Validator $validator): RedirectResponse
     {
         return redirect()
-            ->route('admin.dashboard', ['tab' => 'stats'])
+            ->route('admin.dashboard', ['tab' => 'settings', 'section' => 'pembayaran'])
             ->withErrors($validator, 'supportSettings')
             ->withInput();
     }

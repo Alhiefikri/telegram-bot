@@ -3,7 +3,6 @@
 namespace App\Http\Requests\Admin;
 
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
-use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Validation\Validator;
@@ -32,7 +31,7 @@ class UpdatePaymentModeRequest extends FormRequest
     {
         return [
             'update_scope' => ['sometimes', 'string', Rule::in(['provider_switch', 'binance_settings', 'binance_verification', 'bsc_settings'])],
-            'payment_mode' => ['required', 'string', Rule::in(PaymentProvider::allowed())],
+            'payment_mode' => ['required', 'string', Rule::in($this->isProviderSwitch() ? [PaymentProvider::MANUAL, PaymentProvider::SAKURUPIAH] : PaymentProvider::known())],
             'payment_provider_version' => ['sometimes', 'integer', 'min:0'],
             'confirm_provider_switch' => $this->isProviderSwitch() ? ['required', 'accepted'] : ['sometimes'],
             'binance_pay_enabled' => ['sometimes', 'boolean'],
@@ -82,16 +81,6 @@ class UpdatePaymentModeRequest extends FormRequest
                     return;
                 }
 
-                if ($this->input('payment_mode') === PaymentProvider::KLIKQRIS) {
-                    $readiness = app(KlikQrisProviderReadiness::class)->checkout();
-                    if (! $readiness->isReady()) {
-                        $validator->errors()->add(
-                            'payment_mode',
-                            'Provider KlikQRIS belum bisa diaktifkan. '.$readiness->configurationMessage(),
-                        );
-                    }
-                }
-
                 if ($this->input('payment_mode') === PaymentProvider::SAKURUPIAH) {
                     $readiness = app(SakurupiahProviderReadiness::class)->observe();
                     if (! $readiness->isReady()) {
@@ -108,7 +97,7 @@ class UpdatePaymentModeRequest extends FormRequest
     protected function validationErrorRedirect(Validator $validator): RedirectResponse
     {
         return redirect()
-            ->route('admin.dashboard', ['tab' => 'stats'])
+            ->route('admin.dashboard', ['tab' => 'settings', 'section' => 'pembayaran'])
             ->withErrors($validator, 'paymentMode')
             ->withInput();
     }

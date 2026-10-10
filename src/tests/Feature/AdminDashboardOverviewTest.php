@@ -16,6 +16,7 @@ use App\Services\Admin\AdminDashboardData;
 use App\Services\Admin\AdminDashboardSalesData;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
@@ -298,22 +299,7 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertSame(1, $data['metrics']['completed_order_count']);
         $this->assertSame(205000, $data['metrics']['gmv_amount']);
         $this->assertSame(205000, $data['metrics']['read_only_balance_amount']);
-        $this->assertSame(205000, $data['statsTab']['balance']['amount']);
-        $this->assertSame('paid_payments', $data['statsTab']['balance']['source']);
         $this->assertSame(route('storefront.home'), $data['statsTab']['storeLink']['url']);
-        $this->assertSame('manual', $data['statsTab']['paymentControl']['mode']);
-        $this->assertSame('MANUAL', $data['statsTab']['paymentControl']['status_badge']['label']);
-        $this->assertTrue($data['statsTab']['paymentControl']['can_manage']);
-        $this->assertSame(['gmv', 'saldo', 'orders', 'sales_proof_posts', 'active_products'], array_column($data['statsTab']['cards'], 'key'));
-        $this->assertSame(['blue', 'emerald', 'amber', 'emerald', 'emerald'], array_column($data['statsTab']['cards'], 'tone'));
-        $this->assertArrayNotHasKey('card_class', $data['statsTab']['cards'][0]);
-        $this->assertSame(['saldo', 'gmv', 'products', 'active_products', 'completed_orders'], array_column($data['statsTab']['summary'], 'key'));
-        $this->assertSame('Pesanan', $data['statsTab']['summary'][4]['label']);
-        $this->assertSame(1, $data['statsTab']['summary'][4]['value']);
-        $this->assertSame('Order selesai', $data['statsTab']['summary'][4]['hint']);
-        $this->assertSame(1, $data['statsTab']['statusCounts']['processing']['count']);
-        $this->assertSame(1, $data['statsTab']['statusCounts']['completed']['count']);
-        $this->assertSame(['pending_payment', 'processing', 'cancelled', 'expired'], array_keys($data['statsTab']['actionableStatusCounts']));
         $this->assertSame(['Semua', 'Selesai', 'Masalah', 'Menunggu', 'Diproses'], array_column($data['salesTab']['filters'], 'label'));
         $this->assertSame(3, $data['salesTab']['filters'][0]['count']);
         $this->assertSame(1, $data['salesTab']['filters'][1]['count']);
@@ -334,8 +320,7 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertSame('IDR 125.000', $data['salesTab']['orders'][0]['earning']);
         $this->assertSame('emerald', $data['salesTab']['orders'][0]['payment_status_tone']);
         $this->assertArrayNotHasKey('payment_status_badge', $data['salesTab']['orders'][0]);
-        $this->assertCount(7, $data['statsTab']['earnings']);
-        $this->assertSame(205000, array_sum(array_column($data['statsTab']['earnings'], 'amount')));
+        $this->assertSame(205000, array_sum(array_column($data['statsTab']['overview']['series'], 'amount')));
 
         $encoded = json_encode($data, JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsStringIgnoringCase('escrow', $encoded);
@@ -376,9 +361,7 @@ class AdminDashboardOverviewTest extends TestCase
         $data = app(AdminDashboardData::class)->forAdmin($admin);
 
         $this->assertSame(70000, $data['metrics']['read_only_balance_amount']);
-        $this->assertSame(70000, $data['statsTab']['balance']['amount']);
-        $this->assertSame('IDR 70.000', $data['statsTab']['balance']['amount_formatted']);
-        $this->assertSame(70000, array_sum(array_column($data['statsTab']['earnings'], 'amount')));
+        $this->assertSame(70000, array_sum(array_column($data['statsTab']['overview']['series'], 'amount')));
         $this->assertStringNotContainsString('IDR 5.000.000', json_encode($data, JSON_THROW_ON_ERROR));
     }
 
@@ -406,61 +389,73 @@ class AdminDashboardOverviewTest extends TestCase
         $data = app(AdminDashboardData::class)->forAdmin($admin);
 
         $this->assertSame(35000, $data['metrics']['read_only_balance_amount']);
-        $this->assertSame(35000, array_sum(array_column($data['statsTab']['earnings'], 'amount')));
+        $this->assertSame(35000, array_sum(array_column($data['statsTab']['overview']['series'], 'amount')));
         $this->assertSame('IDR 35.000', $data['salesTab']['orders'][0]['earning']);
     }
 
-    public function test_stats_tab_renders_store_link_actions_cards_statuses_and_css_earnings(): void
+    public function test_daily_chart_uses_canonical_paid_dates_and_separate_currency_windows(): void
     {
-        $this->actingAs(User::factory()->create([
-            'role' => UserRole::Owner,
-        ]));
-
-        Product::factory()->count(2)->create(['is_active' => true]);
-        Product::factory()->create(['is_active' => false]);
-        Order::factory()->create([
-            'order_status' => OrderStatus::PendingPayment,
-            'payment_status' => PaymentStatus::Pending,
-            'total_amount' => 45000,
-        ]);
-        $paidOrder = Order::factory()->create([
-            'order_status' => OrderStatus::Processing,
+        $this->travelTo(Carbon::parse('2026-10-21 12:00:00'));
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $oldOrder = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
             'payment_status' => PaymentStatus::Paid,
-            'total_amount' => 125000,
         ]);
         Payment::factory()->create([
-            'order_id' => $paidOrder->id,
+            'order_id' => $oldOrder->id,
             'status' => PaymentStatus::Paid,
-            'amount' => 125000,
-            'paid_at' => now(),
+            'amount' => 1000,
+            'currency' => 'IDR',
+            'paid_at' => '2026-10-14 12:00:00',
+        ]);
+        Payment::factory()->create([
+            'order_id' => $oldOrder->id,
+            'status' => PaymentStatus::Paid,
+            'amount' => 1000,
+            'currency' => 'IDR',
+            'paid_at' => '2026-10-20 12:00:00',
         ]);
 
-        $response = $this->get('/admin?tab=stats')
-            ->assertOk()
-            ->assertSee('id="admin-overview-title"', false)
-            ->assertSee('Ikhtisar toko')
-            ->assertSee('id="admin-overview-attention-title"', false)
-            ->assertSee('Perhatian operasional')
-            ->assertSee('Link toko')
-            ->assertSee(route('storefront.home'), false)
-            ->assertSee('Bagikan')
-            ->assertSee('Salin')
-            ->assertSeeInOrder(['Ikhtisar toko', 'Metrik ringkasan', 'Perhatian operasional', 'Status pesanan', 'Pendapatan 7 hari', 'admin-payment-settings'])
-            ->assertSeeInOrder(['GMV', 'IDR 125.000'])
-            ->assertSeeInOrder(['Saldo', 'IDR 125.000'])
-            ->assertSeeInOrder(['Order', '2'])
-            ->assertSeeInOrder(['Produk aktif', '2'])
-            ->assertSee('Menunggu bayar')
-            ->assertSee('Diproses')
-            ->assertSee('Dibatalkan')
-            ->assertSee('Expired')
-            ->assertSee('Support WhatsApp')
-            ->assertSee('Checkout Maintenance')
-            ->assertDontSee('Escrow');
+        foreach ([
+            ['2026-10-15 00:00:00', 'IDR', 10000, 1000, OrderStatus::Completed],
+            ['2026-10-20 12:00:00', 'IDR', 18000, 0, OrderStatus::Processing],
+            ['2026-10-21 10:00:00', 'USDT', 2125000, 125000, OrderStatus::Completed],
+            ['2026-10-21 11:00:00', 'IDR', 75000, 0, OrderStatus::Cancelled],
+            ['2026-10-21 13:00:00', 'IDR', 25000, 0, OrderStatus::Completed],
+        ] as [$paidAt, $currency, $amount, $fee, $status]) {
+            $order = Order::factory()->create(['order_status' => $status, 'payment_status' => PaymentStatus::Paid]);
+            Payment::factory()->create([
+                'order_id' => $order->id,
+                'status' => PaymentStatus::Paid,
+                'amount' => $amount,
+                'provider_fee' => $fee,
+                'currency' => $currency,
+                'paid_at' => $paidAt,
+            ]);
+        }
 
-        $content = $response->getContent();
-        $statusSection = substr($content, strpos($content, 'aria-label="Status pesanan"') ?: 0, 2000);
-        $this->assertStringNotContainsString('Draft', $statusSection);
-        $this->assertStringNotContainsString('Selesai', $statusSection);
+        $dashboard = app(AdminDashboardData::class);
+        $idr = $dashboard->forActiveTab($owner, 'stats')['statsTab']['overview'];
+        $series = array_column($idr['series'], null, 'date');
+        $this->assertSame([
+            '2026-10-15' => 9000,
+            '2026-10-16' => 0,
+            '2026-10-17' => 0,
+            '2026-10-18' => 0,
+            '2026-10-19' => 0,
+            '2026-10-20' => 18000,
+            '2026-10-21' => 0,
+        ], array_column($idr['series'], 'amount', 'date'));
+        $this->assertSame(50.0, $series['2026-10-15']['height']);
+        $this->assertSame(100.0, $series['2026-10-20']['height']);
+        $this->assertSame(1, $idr['today_orders']);
+
+        $usdt = $dashboard->forActiveTab($owner, 'stats', reportingFilters: ['currency' => 'USDT'])['statsTab']['overview'];
+        $this->assertSame(2000000, array_sum(array_column($usdt['series'], 'amount')));
+        $this->assertSame(1, $usdt['today_orders']);
+
+        $month = $dashboard->forActiveTab($owner, 'stats', reportingFilters: ['days' => '30'])['statsTab']['overview'];
+        $this->assertSame(28000, array_sum(array_column($month['series'], 'amount')));
+        $this->assertSame(1000, array_column($month['series'], 'amount', 'date')['2026-10-14']);
     }
 }

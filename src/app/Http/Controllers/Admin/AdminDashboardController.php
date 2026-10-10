@@ -28,6 +28,9 @@ class AdminDashboardController extends Controller
         if ($requestedTab === 'suppliers') {
             abort_unless($user?->role?->canManageStoreOperations() === true, 403);
         }
+        if ($requestedTab === 'settings') {
+            abort_unless($user?->role?->canManagePaymentSettings() === true, 403);
+        }
         $viewData = $dashboardData->forActiveTab(
             $user,
             $requestedTab,
@@ -53,6 +56,9 @@ class AdminDashboardController extends Controller
                 'balance_age' => $request->query('balance_age'),
                 'balance_provider_reference' => $request->query('balance_provider_reference'),
                 'balance_page' => $request->query('balance_page'),
+                'section' => $request->query('section'),
+                'days' => $request->query('days'),
+                'currency' => $request->query('currency'),
             ],
         );
         $dashboardErrors = $request->session()->get('errors', new ViewErrorBag);

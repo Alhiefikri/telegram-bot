@@ -56,6 +56,37 @@ class PaymentReceiptReport
     }
 
     /**
+     * One canonical receipt per successful Order; monetary units stay separated
+     * by currency. DATE uses the application's timestamp storage convention.
+     *
+     * @return list<array{date: string, currency: string, amount: int, orders: int}>
+     */
+    public function dailySalesReceipts(Carbon $start, Carbon $end): array
+    {
+        $net = $this->netAmountSql('canonical_payments');
+        $currency = "UPPER(COALESCE(NULLIF(canonical_payments.currency, ''), 'IDR'))";
+
+        return $this->canonicalPaidPaymentsQuery($start, $end, true)
+            ->whereExists(function ($query): void {
+                $query->select(DB::raw(1))
+                    ->from('orders')
+                    ->whereColumn('orders.id', 'canonical_payments.order_id')
+                    ->where('orders.payment_status', PaymentStatus::Paid->value)
+                    ->whereIn('orders.order_status', [OrderStatus::Processing->value, OrderStatus::Completed->value]);
+            })
+            ->selectRaw("DATE(canonical_payments.paid_at) AS sale_date, {$currency} AS sale_currency, SUM(CASE WHEN {$net} > 0 THEN {$net} ELSE 0 END) AS sale_amount, COUNT(*) AS sale_orders")
+            ->groupByRaw("DATE(canonical_payments.paid_at), {$currency}")
+            ->get()
+            ->map(static fn ($row): array => [
+                'date' => (string) $row->sale_date,
+                'currency' => (string) $row->sale_currency,
+                'amount' => (int) $row->sale_amount,
+                'orders' => (int) $row->sale_orders,
+            ])
+            ->all();
+    }
+
+    /**
      * Counts orders whose one canonical paid Payment currently stands and
      * whose Order is an eligible successful Order. Duplicate paid Payments,
      * quantity lines, terminal Orders, and refunded Payments add nothing.

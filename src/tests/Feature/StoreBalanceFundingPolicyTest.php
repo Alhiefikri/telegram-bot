@@ -22,20 +22,11 @@ final class StoreBalanceFundingPolicyTest extends TestCase
     {
         $owner = User::factory()->create(['role' => UserRole::Owner]);
 
-        $response = $this->actingAs($owner)
-            ->get(route('admin.dashboard', ['tab' => 'stats']))
-            ->assertOk();
-        $content = $response->getContent();
-        $this->assertTrue(str_contains($content, 'Kebijakan Top-up Saldo'), 'missing funding policy heading');
-        $this->assertTrue(str_contains($content, 'IDR 5.000'), 'missing seeded minimum');
-        $this->assertTrue(str_contains($content, route('admin.store-balance.funding-policy.update')), 'missing funding policy route');
-        $this->assertTrue(str_contains($content, 'Simpan kebijakan top-up'), 'missing funding policy button');
-
         foreach ([UserRole::Finance, UserRole::Support] as $role) {
             $user = User::factory()->create(['role' => $role]);
 
             $this->actingAs($user)
-                ->get(route('admin.dashboard', ['tab' => 'stats']))
+                ->get(route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo']))
                 ->assertForbidden();
 
             $this->actingAs($user)

@@ -31,7 +31,7 @@ class BscReceiverManualVerifyRequest extends FormRequest
     protected function validationErrorRedirect(Validator $validator): RedirectResponse
     {
         return redirect()
-            ->route('admin.dashboard', ['tab' => 'stats'])
+            ->route('admin.dashboard', ['tab' => 'settings', 'section' => 'pembayaran'])
             ->withFragment('admin-bsc-settings')
             ->withErrors($validator, 'bsc')
             ->withInput();

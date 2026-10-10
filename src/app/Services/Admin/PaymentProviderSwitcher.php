@@ -7,7 +7,6 @@ use App\Exceptions\PaymentProviderSwitchConflict;
 use App\Models\ManualPaymentSetting;
 use App\Models\User;
 use App\Services\AuditLogger;
-use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +14,6 @@ use Illuminate\Support\Facades\DB;
 final class PaymentProviderSwitcher
 {
     public function __construct(
-        private readonly KlikQrisProviderReadiness $klikQrisReadiness,
         private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
         private readonly AuditLogger $auditLogger,
     ) {}
@@ -38,7 +36,7 @@ final class PaymentProviderSwitcher
 
             if ($expectedVersion !== null && $expectedVersion !== $currentVersion) {
                 throw new PaymentProviderSwitchConflict(
-                    'Konfigurasi provider berubah sebelum permintaan ini selesai. Muat ulang Ringkasan lalu konfirmasi ulang.',
+                    'Konfigurasi provider berubah sebelum permintaan ini selesai. Muat ulang Pengaturan lalu konfirmasi ulang.',
                 );
             }
 
@@ -102,7 +100,7 @@ final class PaymentProviderSwitcher
 
     private function assertReady(string $provider): void
     {
-        if (! in_array($provider, PaymentProvider::allowed(), true)) {
+        if (! in_array($provider, [PaymentProvider::MANUAL, PaymentProvider::SAKURUPIAH], true)) {
             throw new PaymentProviderNotReady('Provider '.$provider.' sudah dipensiunkan untuk checkout baru.');
         }
 
@@ -117,15 +115,5 @@ final class PaymentProviderSwitcher
             return;
         }
 
-        if ($provider !== PaymentProvider::KLIKQRIS) {
-            return;
-        }
-
-        $readiness = $this->klikQrisReadiness->checkout();
-        if (! $readiness->isReady()) {
-            throw new PaymentProviderNotReady(
-                'Provider KlikQRIS belum bisa diaktifkan. '.$readiness->configurationMessage(),
-            );
-        }
     }
 }

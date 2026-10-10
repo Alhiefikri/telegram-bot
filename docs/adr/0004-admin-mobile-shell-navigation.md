@@ -20,5 +20,5 @@ The shell is an operational interface for admins, not a customer-facing marketin
 - Product, order, broadcast, and Store Channel tabs become task-first: the full hero is removed and replaced by a compact sticky title/status bar.
 - Store-link actions stay in Ringkasan rather than being duplicated in every internal tab.
 - Desktop does not need the mobile utility indirection; all six actions remain visible in one row.
-- Payment, Binance, deadline, and WhatsApp configuration remain in Ringkasan for this slice. Moving them into a separate Pengaturan surface is a follow-up information-architecture decision.
+- Payment, Binance, deadline, WhatsApp, BSC receivers, and IDR/USDT funding configuration now live in a separate Pengaturan destination. Its payment, balance, and diagnostics sections load independently. Ringkasan contains daily sales, a currency-separated 7/30-day chart, actionable warnings, and recent orders; it contains no configuration forms. The current sidebar/drawer shell replaces the original bottom-navigation layout described above.
 - The behavior is verified at a minimum width of 320 CSS pixels and representative 390, 768, and 1440 pixel viewports through real-browser tests.

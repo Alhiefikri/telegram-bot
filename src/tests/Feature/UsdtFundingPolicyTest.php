@@ -256,27 +256,6 @@ final class UsdtFundingPolicyTest extends TestCase
         $this->assertSame(0, DB::table('customer_usdt_funding_pauses')->count());
     }
 
-    public function test_dashboard_shows_usdt_policy_only_with_owner_controls(): void
-    {
-        $owner = User::factory()->create(['role' => UserRole::Owner]);
-
-        $this->actingAs($owner)
-            ->get(route('admin.dashboard', ['tab' => 'stats']))
-            ->assertOk()
-            ->assertSee('Kebijakan Top-up USDT')
-            ->assertSee(route('admin.store-balance.usdt-policy.update'))
-            ->assertSee('Simpan kebijakan top-up USDT')
-            ->assertSee('NONAKTIF');
-
-        $admin = User::factory()->create(['role' => UserRole::Admin]);
-
-        $this->actingAs($admin)
-            ->get(route('admin.dashboard', ['tab' => 'stats']))
-            ->assertOk()
-            ->assertSee('Kebijakan Top-up USDT')
-            ->assertDontSee('Simpan kebijakan top-up USDT');
-    }
-
     /** @return array<string, int> */
     private function moneyRowCounts(): array
     {

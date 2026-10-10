@@ -1300,20 +1300,5 @@ export default function adminDashboard(initialState = {}) {
         window.prompt("Salin link produk", url);
       }
     },
-
-    async shareStore() {
-      if (navigator.share) {
-        try {
-          await navigator.share({ title: "LHIE STORE", url: this.storeLink });
-          return;
-        } catch (error) {
-          if (error?.name === "AbortError") {
-            return;
-          }
-        }
-      }
-
-      await this.copyStoreLink();
-    },
   };
 }

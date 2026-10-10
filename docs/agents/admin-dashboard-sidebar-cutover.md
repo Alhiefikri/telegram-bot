@@ -2,6 +2,8 @@
 
 Status: presentation implemented; release acceptance is blocked. Issues #600–#605 do not authorize deployment. Current candidate-bound checks, missing scenarios, device requirements and rollback identity are recorded in [the #605 release parity audit](admin-dashboard-release-parity.md).
 
+Current scope update: Ringkasan is now sales-only; configuration lives in the separate Pengaturan destination. KlikQRIS history and Withdraw are retired dashboard surfaces, not release-parity targets. The historical #605 inventory and evidence below predate this information-architecture change and do not certify it.
+
 ## As-built ownership
 
 - `src/resources/views/admin/dashboard.blade.php` owns the authenticated dashboard composition.
@@ -16,14 +18,13 @@ The [#605 release parity inventory](admin-dashboard-release-parity.md) is the ev
 
 | Surface | Canonical destination | Test ownership |
 | --- | --- | --- |
-| Ringkasan | `/admin?tab=stats` | overview, payment, maintenance, funding/receiver policy and browser surfaces |
+| Ringkasan | `/admin?tab=stats` | daily revenue, currency/period boundaries, actionable attention and recent orders |
 | Produk | `/admin?tab=produk`, `product_form=create` | product/family/category, image/banner, stock/account input and bulk delete |
 | Pesanan | `/admin?tab=penjualan` | sales, Order/Payment operations and linked review queues |
 | Supplier | `/admin?tab=suppliers` | connections, catalog/import/mapping/pricing, purchases/recovery, warranty and BuyMail |
 | Siaran | `/admin?tab=broadcast` | broadcast forms, validation, queue and outbound behavior |
 | Store Channel | `/admin?tab=telegram-channel` | configuration, test and fake proof actions |
-| Riwayat KlikQRIS | `/admin?tab=riwayat` | reporting/filter/provider mismatch and unavailable state |
-| Withdraw | `/admin?tab=withdraw` | reporting filters/pagination and safe proof |
+| Pengaturan | `/admin?tab=settings&section=pembayaran`, `saldo`, or `diagnostik` | payment, maintenance, funding/receiver policy and balance diagnostics |
 | Funnel | `/admin?tab=funnel` | reporting aggregates and bounded date filters |
 | Kompensasi top-up | `/admin?tab=balance-issues` | Owner/password/readiness compensation |
 | Linked financial pages | Existing balance report, IDR adjustment/reversal and USDT review routes | separate financial role/readiness/password and exact-money boundaries |
@@ -434,8 +435,7 @@ pre-restyle files except for the deliberate additions listed below.
 | Ringkasan | metrics, earnings bars, payment mode, provider readiness, Binance toggle, TTL form, Support WhatsApp, BSC receiver, IDR/USDT policy, balance operations, checkout maintenance | server validation keeps `old()` and reopens the section; maintenance confirmation rejects an unconfirmed submit | provider not-ready reason, closed USDT rails, paused scopes, open restore gate, zero open alerts, `Belum ada BSC Receiving Address` |
 | Siaran | message form, queue counters | over-length message and empty message return named `broadcast` errors with retained text | empty queue state |
 | Store Channel | channel settings, test action, fake sales proof | named `storeChannel` errors; setup warning | fallback banner, `Standby` state |
-| Riwayat KlikQRIS | table + mobile cards, pagination | — | mismatch notice, stale marker, provider-unavailable notice |
-| Withdraw | filter form, table + mobile cards, proof link | invalid filter notice | empty filter state, pagination |
+| Pengaturan | payment/store, balance policy and diagnostics sections | existing named errors and confirmation dialogs; collapsed forms reopen on validation failure | unavailable rails stay visible without enabling them |
 | Funnel | ten filters, summary, product/family tables, rails/outcomes/support, source table | `state === 'error'` empty state | empty product/family/source states, 31-day bound copy |
 | Kompensasi top-up | filter form, queue, release dialog | `balanceCompensation` error, required provider reference/reason | not-eligible row, empty queue |
 | Laporan saldo | section/currency pills, filter form, rows, cursor link | — | `Tidak ada data untuk filter ini`, custody unavailable badge |

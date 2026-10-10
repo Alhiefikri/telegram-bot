@@ -21,6 +21,8 @@ class AdminDashboardRedirector
 
     public const TAB_BALANCE_ISSUES = 'balance-issues';
 
+    public const TAB_SETTINGS = 'settings';
+
     /**
      * @var array<string, string>
      */
@@ -31,6 +33,7 @@ class AdminDashboardRedirector
         self::TAB_BROADCAST => 'admin-section-broadcast',
         self::TAB_STORE_CHANNEL => 'admin-section-store-channel',
         self::TAB_BALANCE_ISSUES => 'admin-section-balance-issues',
+        self::TAB_SETTINGS => 'admin-section-settings',
     ];
 
     /**
@@ -83,32 +86,32 @@ class AdminDashboardRedirector
 
     public function paymentSettings(): RedirectResponse
     {
-        return $this->dashboard(self::TAB_STATS, 'admin-payment-settings');
+        return $this->dashboard(self::TAB_SETTINGS, 'admin-payment-settings', ['section' => 'pembayaran']);
     }
 
     public function bscSettings(): RedirectResponse
     {
-        return $this->dashboard(self::TAB_STATS, 'admin-bsc-settings');
+        return $this->dashboard(self::TAB_SETTINGS, 'admin-bsc-settings', ['section' => 'pembayaran']);
     }
 
     public function supportSettings(): RedirectResponse
     {
-        return $this->dashboard(self::TAB_STATS, 'admin-support-settings');
+        return $this->dashboard(self::TAB_SETTINGS, 'admin-support-settings', ['section' => 'pembayaran']);
     }
 
     public function checkoutMaintenance(): RedirectResponse
     {
-        return $this->dashboard(self::TAB_STATS, 'admin-checkout-maintenance');
+        return $this->dashboard(self::TAB_SETTINGS, 'admin-checkout-maintenance', ['section' => 'pembayaran']);
     }
 
     public function fundingPolicy(): RedirectResponse
     {
-        return $this->dashboard(self::TAB_STATS, 'admin-store-balance-funding-policy');
+        return $this->dashboard(self::TAB_SETTINGS, 'admin-store-balance-funding-policy', ['section' => 'saldo']);
     }
 
     public function usdtFundingPolicy(): RedirectResponse
     {
-        return $this->dashboard(self::TAB_STATS, 'admin-usdt-funding-policy');
+        return $this->dashboard(self::TAB_SETTINGS, 'admin-usdt-funding-policy', ['section' => 'saldo']);
     }
 
     public function balanceIssues(): RedirectResponse

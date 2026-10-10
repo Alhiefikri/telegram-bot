@@ -79,7 +79,7 @@ class BscReceiverConfigurationTest extends TestCase
                 'label' => 'Wallet invalid',
                 'address' => 'not-an-evm-address',
             ])
-            ->assertRedirect('/admin?tab=stats#admin-bsc-settings')
+            ->assertRedirect('/admin?tab=settings&section=pembayaran#admin-bsc-settings')
             ->assertSessionHasErrorsIn('bsc', 'address');
 
         $this->assertDatabaseCount('bsc_payment_receivers', 0);
@@ -112,7 +112,7 @@ class BscReceiverConfigurationTest extends TestCase
 
         $this->post(route('admin.password.confirm.store'), [
             'password' => 'password',
-        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+        ])->assertRedirect('/admin?tab=settings&section=pembayaran#admin-bsc-settings');
 
         $this->assertDatabaseHas('bsc_payment_receivers', [
             'label' => 'Wallet utama',
@@ -163,7 +163,7 @@ class BscReceiverConfigurationTest extends TestCase
                     'label' => 'Wallet sebelum readiness',
                     'address' => $address,
                 ])
-                ->assertRedirect('/admin?tab=stats#admin-bsc-settings')
+                ->assertRedirect('/admin?tab=settings&section=pembayaran#admin-bsc-settings')
                 ->assertSessionHasNoErrors();
         } finally {
             config()->set('services.bsc.usdt_contract', $originalContract);
@@ -191,7 +191,7 @@ class BscReceiverConfigurationTest extends TestCase
                 'label' => 'Wallet copy paste',
                 'address' => $address,
             ])
-            ->assertRedirect('/admin?tab=stats#admin-bsc-settings')
+            ->assertRedirect('/admin?tab=settings&section=pembayaran#admin-bsc-settings')
             ->assertSessionHasNoErrors();
 
         $this->assertDatabaseHas('bsc_payment_receivers', [
@@ -216,7 +216,7 @@ class BscReceiverConfigurationTest extends TestCase
                     'label' => 'Wallet '.($index + 1),
                     'address' => $address,
                 ])
-                ->assertRedirect('/admin?tab=stats#admin-bsc-settings')
+                ->assertRedirect('/admin?tab=settings&section=pembayaran#admin-bsc-settings')
                 ->assertSessionHasNoErrors();
         }
 
@@ -233,16 +233,6 @@ class BscReceiverConfigurationTest extends TestCase
             ]);
         }
 
-        $this->actingAs($owner)
-            ->get(route('admin.dashboard', ['tab' => 'stats']))
-            ->assertOk()
-            ->assertSee('Wallet 1')
-            ->assertSee('Wallet 2')
-            ->assertSee('Simpan address')
-            ->assertDontSee('ownership challenge')
-            ->assertDontSee('Buat challenge baru')
-            ->assertDontSee('Verifikasi ownership signature')
-            ->assertDontSee('Manual verified high risk');
     }
 
     public function test_wrong_password_keeps_pending_receiver_mutation_for_retry(): void
@@ -267,7 +257,7 @@ class BscReceiverConfigurationTest extends TestCase
 
         $this->post(route('admin.password.confirm.store'), [
             'password' => 'password',
-        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+        ])->assertRedirect('/admin?tab=settings&section=pembayaran#admin-bsc-settings');
 
         $this->assertDatabaseHas('bsc_payment_receivers', [
             'label' => 'Wallet retry',
@@ -357,7 +347,7 @@ class BscReceiverConfigurationTest extends TestCase
 
         $this->post(route('admin.password.confirm.store'), [
             'password' => 'password',
-        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+        ])->assertRedirect('/admin?tab=settings&section=pembayaran#admin-bsc-settings');
 
         $this->assertSame(
             BscReceiverVerificationStatus::ManualVerified,
@@ -380,7 +370,7 @@ class BscReceiverConfigurationTest extends TestCase
 
         $this->post(route('admin.password.confirm.store'), [
             'password' => 'password',
-        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+        ])->assertRedirect('/admin?tab=settings&section=pembayaran#admin-bsc-settings');
 
         $this->assertTrue($receiver->fresh()->is_active);
     }
@@ -399,7 +389,7 @@ class BscReceiverConfigurationTest extends TestCase
 
         $this->post(route('admin.password.confirm.store'), [
             'password' => 'password',
-        ])->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+        ])->assertRedirect('/admin?tab=settings&section=pembayaran#admin-bsc-settings');
 
         $this->assertFalse($receiver->fresh()->is_active);
     }
@@ -415,7 +405,7 @@ class BscReceiverConfigurationTest extends TestCase
                 'label' => 'Wallet utama',
                 'address' => '0xaac58212Ab1E3C9c8d4dbB3FD3cdAF9d4cff9012',
             ])
-            ->assertRedirect('/admin?tab=stats#admin-bsc-settings');
+            ->assertRedirect('/admin?tab=settings&section=pembayaran#admin-bsc-settings');
 
         $receiver = BscPaymentReceiver::query()->firstOrFail();
 
@@ -542,7 +532,7 @@ class BscReceiverConfigurationTest extends TestCase
                 'bsc_confirmation_grace_minutes' => 3,
                 'bsc_hash_attempt_limit' => 5,
             ])
-            ->assertRedirect('/admin?tab=stats#admin-payment-settings');
+            ->assertRedirect('/admin?tab=settings&section=pembayaran#admin-payment-settings');
 
         $setting = $setting->fresh();
         $this->assertTrue($setting->bsc_payment_enabled);

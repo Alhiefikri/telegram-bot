@@ -42,6 +42,28 @@ final class AdminDashboardSalesData
         ];
     }
 
+    /** @return list<array<string, mixed>> */
+    public function recentOrders(): array
+    {
+        return Order::query()
+            ->with('customer:id,first_name,username')
+            ->latest('created_at')
+            ->orderByDesc('id')
+            ->limit(5)
+            ->get(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
+            ->map(fn (Order $order): array => [
+                'invoice' => $order->invoice_number,
+                'customer' => $this->customerLabel($order),
+                'amount' => $order->currency === 'USDT' ? Money::usdt($order->total_amount) : Money::rupiah($order->total_amount),
+                'status' => $this->orderStatusLabel($order->order_status),
+                'tone' => $this->orderStatusTone($order->order_status),
+                'payment_status' => $this->paymentStatusLabel($order->payment_status),
+                'created_at' => $order->created_at?->format('d M, H:i'),
+                'url' => route('admin.orders.show', $order),
+            ])
+            ->all();
+    }
+
     private function latestOrders(bool $canRetrySalesProof, string $activeFilter): array
     {
         $statuses = $this->statusesForFilter($activeFilter);

@@ -42,7 +42,6 @@ final class AdminDashboardData
         private readonly AdminDashboardSalesData $salesData,
         private readonly FakeSalesProofPostPublisher $fakeSalesProof,
         private readonly PaymentReceiptReport $receiptReport,
-        private readonly AdminDashboardReportingData $reportingData,
         private readonly StorefrontFunnelReport $funnelReport,
         private readonly StoreBalanceOwnerCompensationService $ownerCompensation,
         private readonly AdminSupplierDashboardData $supplierData,
@@ -57,7 +56,7 @@ final class AdminDashboardData
      *     statsTab: array<string, mixed>,
      *     productsTab: array<string, mixed>,
      *     salesTab: array<string, mixed>,
-     *     withdrawTab: array<string, mixed>,
+     *     settingsTab: array<string, mixed>,
      *     funnelTab: array<string, mixed>,
      *     balanceIssuesTab: array<string, mixed>
      * }
@@ -75,20 +74,10 @@ final class AdminDashboardData
         $navigation = $this->navigation($requestedTab, $user);
         $canManageProducts = (bool) $user->role?->canMutateProducts();
         $funnelTab = $this->funnelReport->empty($user);
-        $historyTab = $this->reportingData->emptyHistory();
-        $withdrawTab = $this->reportingData->emptyWithdraw($user);
         $balanceIssuesTab = $this->ownerCompensation->emptyQueue($user);
 
         if ($navigation['activeTab'] === StorefrontFunnelReport::TAB) {
             $funnelTab = $this->funnelReport->forAdmin($user, $reportingFilters);
-        }
-
-        if ($navigation['activeTab'] === 'riwayat') {
-            $historyTab = $this->reportingData->forHistory($reportingFilters['page'] ?? 1);
-        }
-
-        if ($navigation['activeTab'] === 'withdraw') {
-            $withdrawTab = $this->reportingData->forWithdraw($user, $reportingFilters);
         }
 
         if ($navigation['activeTab'] === StoreBalanceOwnerCompensationService::TAB) {
@@ -99,13 +88,12 @@ final class AdminDashboardData
             'admin' => $this->adminIdentity($user),
             'metrics' => $metrics,
             'navigation' => $navigation,
-            'statsTab' => $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink),
+            'statsTab' => $this->statsData->forStats($user, $metrics, $storeLink, $reportingFilters),
+            'settingsTab' => $navigation['activeTab'] === 'settings' ? $this->statsData->forSettings($user, $reportingFilters['section'] ?? null) : [],
             'productsTab' => $this->productsData->forProducts($canManageProducts, $productsPage),
             'salesTab' => $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
             'broadcastTab' => $this->broadcastTab(),
             'storeChannelTab' => $this->storeChannelTab($user),
-            'historyTab' => $historyTab,
-            'withdrawTab' => $withdrawTab,
             'funnelTab' => $funnelTab,
             'balanceIssuesTab' => $balanceIssuesTab,
             'suppliersTab' => $navigation['activeTab'] === 'suppliers' ? $this->supplierData->forTab() : [],
@@ -128,10 +116,13 @@ final class AdminDashboardData
         $navigation = $this->navigation($requestedTab, $user);
         $activeTab = $navigation['activeTab'];
         $storeLink = $this->storeLink();
+        $statusCounts = [];
         if ($activeTab === 'stats') {
-            $metrics = $this->metrics();
-            $statusCounts = $this->statusCounts();
-            $statsTab = $this->statsData->forStats($user, $metrics, $statusCounts, $storeLink);
+            $metrics = [
+                'active_product_count' => Product::query()->where('is_active', true)->count(),
+                'orders_to_process' => Order::query()->where('order_status', OrderStatus::Processing)->count(),
+            ];
+            $statsTab = $this->statsData->forStats($user, $metrics, $storeLink, $reportingFilters);
         } else {
             $statusCounts = $activeTab === 'penjualan' ? $this->statusCounts() : [];
             $activeProductCount = Product::query()->where('is_active', true)->count();
@@ -147,6 +138,7 @@ final class AdminDashboardData
             'metrics' => $metrics,
             'navigation' => $navigation,
             'statsTab' => $statsTab,
+            'settingsTab' => $activeTab === 'settings' ? $this->statsData->forSettings($user, $reportingFilters['section'] ?? null) : [],
             'productsTab' => [
                 'canManage' => $canManageProducts,
                 'productStoreUrl' => route('admin.products.store'),
@@ -168,8 +160,6 @@ final class AdminDashboardData
             ],
             'broadcastTab' => ['recent' => []],
             'storeChannelTab' => [],
-            'historyTab' => $this->reportingData->emptyHistory(),
-            'withdrawTab' => $this->reportingData->emptyWithdraw($user),
             'funnelTab' => $this->funnelReport->empty($user),
             'balanceIssuesTab' => $this->ownerCompensation->emptyQueue($user),
             'suppliersTab' => [],
@@ -181,11 +171,10 @@ final class AdminDashboardData
             'penjualan' => $data['salesTab'] = $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
             'broadcast' => $data['broadcastTab'] = $this->broadcastTab(),
             'telegram-channel' => $data['storeChannelTab'] = $this->storeChannelTab($user),
-            'riwayat' => $data['historyTab'] = $this->reportingData->forHistory($reportingFilters['page'] ?? 1),
-            'withdraw' => $data['withdrawTab'] = $this->reportingData->forWithdraw($user, $reportingFilters),
             StorefrontFunnelReport::TAB => $data['funnelTab'] = $this->funnelReport->forAdmin($user, $reportingFilters),
             StoreBalanceOwnerCompensationService::TAB => $data['balanceIssuesTab'] = $this->ownerCompensation->queue($user, $reportingFilters),
             'suppliers' => $data['suppliersTab'] = $this->supplierData->forTab(),
+            'settings' => null,
             default => null,
         };
 
@@ -247,7 +236,6 @@ final class AdminDashboardData
         $canCompensateStoreBalance = (bool) $user->role?->canCompensateStoreBalance();
         $canManagePaymentSettings = (bool) $user->role?->canManagePaymentSettings();
 
-
         $tabItems = [
             'stats' => $this->navigationItem(
                 'stats',
@@ -291,19 +279,6 @@ final class AdminDashboardData
                 'message',
                 route('admin.dashboard', ['tab' => 'telegram-channel']),
             ),
-            'riwayat' => $this->navigationItem(
-                'riwayat',
-                'Riwayat KlikQRIS',
-                'history',
-                route('admin.dashboard', ['tab' => 'riwayat']),
-            ),
-            'withdraw' => $this->navigationItem(
-                'withdraw',
-                'Withdraw',
-                'wallet',
-                route('admin.dashboard', ['tab' => 'withdraw']),
-                visible: $canReconcilePayments,
-            ),
             StorefrontFunnelReport::TAB => $this->navigationItem(
                 StorefrontFunnelReport::TAB,
                 'Funnel',
@@ -317,6 +292,13 @@ final class AdminDashboardData
                 'alert',
                 route('admin.dashboard', ['tab' => StoreBalanceOwnerCompensationService::TAB]),
                 visible: $canCompensateStoreBalance,
+            ),
+            'settings' => $this->navigationItem(
+                'settings',
+                'Pengaturan',
+                'settings',
+                route('admin.dashboard', ['tab' => 'settings']),
+                visible: $canManagePaymentSettings,
             ),
         ];
 
@@ -339,8 +321,6 @@ final class AdminDashboardData
                     $this->navigationItem('balance-adjustments', 'Kelola saldo', 'adjustment', route('admin.store-balance.adjustments.index'), visible: $canCompensateStoreBalance && $this->balanceAdjustmentDashboardReadiness->isReady()),
                     $this->navigationItem('usdt-review', 'Review deposit USDT', 'shield', route('admin.store-balance.usdt-review.index'), visible: $canCompensateStoreBalance),
                     $tabItems['balance-issues'],
-                    $tabItems['riwayat'],
-                    $tabItems['withdraw'],
                 ]),
             ],
             [
@@ -353,14 +333,7 @@ final class AdminDashboardData
                 'label' => 'Insight & sistem',
                 'items' => $this->visibleNavigationItems([
                     $tabItems['funnel'],
-                    $this->navigationItem(
-                        'payment-settings',
-                        'Pengaturan pembayaran',
-                        'settings',
-                        route('admin.dashboard', ['tab' => 'stats']).'#admin-payment-settings',
-                        visible: $canManagePaymentSettings,
-                        active: false,
-                    ),
+                    $tabItems['settings'],
                 ]),
             ],
         ];
@@ -377,11 +350,11 @@ final class AdminDashboardData
             static function (array $group) use ($activeTab, $activeNavigationId): array {
                 $group['items'] = array_map(
                     static function (array $item) use ($activeTab, $activeNavigationId): array {
-                        if ($item['tab'] !== null || $item['id'] === 'payment-settings') {
+                        if ($item['tab'] !== null) {
                             $item['href'] = route('admin.dashboard', [
-                                ...Arr::except(request()->query(), ['product_form']),
-                                'tab' => $item['tab'] ?? 'stats',
-                            ]).($item['id'] === 'payment-settings' ? '#admin-payment-settings' : '');
+                                ...Arr::except(request()->query(), ['product_form', 'section']),
+                                'tab' => $item['tab'],
+                            ]);
                         }
 
                         if (isset($item['action'])) {
@@ -428,7 +401,7 @@ final class AdminDashboardData
     ): array {
         return [
             'id' => $id,
-            'tab' => in_array($id, ['stats', 'produk', 'penjualan', 'suppliers', 'broadcast', 'telegram-channel', 'riwayat', 'withdraw', 'funnel', 'balance-issues'], true) ? $id : null,
+            'tab' => in_array($id, ['stats', 'produk', 'penjualan', 'suppliers', 'broadcast', 'telegram-channel', 'settings', 'funnel', 'balance-issues'], true) ? $id : null,
             'label' => $label,
             'shortLabel' => $label,
             'icon' => self::NAVIGATION_ICONS[$icon] ?? self::NAVIGATION_ICONS['home'],

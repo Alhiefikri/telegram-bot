@@ -114,10 +114,11 @@ class SakurupiahOperationsTest extends TestCase
 
         $data = app(AdminDashboardData::class)->forAdmin(
             User::factory()->create(['role' => UserRole::Owner]),
+            'settings',
         );
 
-        $this->assertSame(1, $data['statsTab']['paymentControl']['sakurupiah_backlog']['pending']);
-        $this->assertSame(1, $data['statsTab']['paymentControl']['sakurupiah_backlog']['verification_pending']);
+        $this->assertSame(1, $data['settingsTab']['paymentControl']['sakurupiah_backlog']['pending']);
+        $this->assertSame(1, $data['settingsTab']['paymentControl']['sakurupiah_backlog']['verification_pending']);
         // The metrics surface is local-only and must not trigger provider HTTP.
         $this->assertSame(0, Http::recorded()->count());
     }

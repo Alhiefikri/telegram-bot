@@ -15,17 +15,16 @@
     <body class="admin-page admin-dashboard-page min-h-full font-sans antialiased">
         @php
             $storeLink = $statsTab['storeLink'];
-            $summary = $statsTab['summary'];
             $storeStatus = $statsTab['storeStatus'];
             $actions = $statsTab['actions'];
-            $statsCards = $statsTab['cards'] ?? [];
-            $actionableStatusCounts = $statsTab['actionableStatusCounts'] ?? [];
-            $earnings = $statsTab['earnings'] ?? [];
-            $paymentControl = $statsTab['paymentControl'] ?? [];
-            $fundingPolicy = $statsTab['fundingPolicy'] ?? [];
-            $usdtFundingPolicy = $statsTab['usdtFundingPolicy'] ?? [];
-            $balanceOperations = $statsTab['balanceOperations'] ?? [];
-            $checkoutMaintenance = $statsTab['checkoutMaintenance'] ?? [];
+            $overview = $statsTab['overview'] ?? [];
+            $settings = $settingsTab ?? [];
+            $settingsSection = $settings['section'] ?? 'pembayaran';
+            $paymentControl = $settings['paymentControl'] ?? [];
+            $fundingPolicy = $settings['fundingPolicy'] ?? [];
+            $usdtFundingPolicy = $settings['usdtFundingPolicy'] ?? [];
+            $balanceOperations = $settings['balanceOperations'] ?? [];
+            $checkoutMaintenance = $settings['checkoutMaintenance'] ?? $statsTab['checkoutMaintenance'] ?? [];
             $canManageProducts = $productsTab['canManage'];
             $productPlaceholder = $productsTab['placeholder'] ?? [];
             $products = $productsTab['products'];
@@ -39,13 +38,9 @@
             $orders = $salesTab['orders'];
             $salesPagination = $salesTab['pagination'];
             $storeChannel = $storeChannelTab;
-            $historyTab = $historyTab ?? [];
-            $withdrawTab = $withdrawTab ?? [];
             $funnelTab = $funnelTab ?? [];
             $balanceIssuesTab = $balanceIssuesTab ?? [];
             $canViewFunnel = (bool) ($funnelTab['can_view'] ?? false);
-            $canViewWithdraw = (bool) ($withdrawTab['can_view'] ?? false);
-            $canViewBalanceReports = (bool) ($statsTab['canViewBalanceReports'] ?? false);
             $canManageBalanceIssues = ($admin['role'] ?? '') === 'owner';
             $canManageBalanceAdjustments = $canManageBalanceIssues && (bool) ($balanceAdjustmentDashboardReady ?? false);
             $canManageSuppliers = in_array($admin['role'] ?? '', ['owner', 'admin'], true);
@@ -117,10 +112,8 @@
                 @include('admin.dashboard.broadcast-tab')
             @elseif ($navigation['activeTab'] === 'telegram-channel')
                 @include('admin.dashboard.store-channel-tab')
-            @elseif ($navigation['activeTab'] === 'riwayat')
-                @include('admin.dashboard.history-tab')
-            @elseif ($navigation['activeTab'] === 'withdraw')
-                @include('admin.dashboard.withdraw-tab')
+            @elseif ($navigation['activeTab'] === 'settings')
+                @include('admin.dashboard.settings-tab')
             @elseif ($navigation['activeTab'] === 'funnel')
                 @include('admin.dashboard.funnel-tab')
             @elseif ($navigation['activeTab'] === 'balance-issues')

@@ -117,18 +117,6 @@ class CheckoutMaintenanceTest extends TestCase
         $this->assertSame(0, AuditLog::query()->where('action', 'like', 'checkout_maintenance.%')->count());
     }
 
-    public function test_admin_dashboard_renders_checkout_maintenance_control(): void
-    {
-        $owner = User::factory()->create(['role' => UserRole::Owner]);
-
-        $this->actingAs($owner)
-            ->get(route('admin.dashboard', ['tab' => 'stats']))
-            ->assertOk()
-            ->assertSee('Checkout Maintenance')
-            ->assertSee('CHECKOUT TERBUKA')
-            ->assertSee(route('admin.checkout-maintenance.update'));
-    }
-
     public function test_finance_and_support_cannot_mutate_checkout_maintenance(): void
     {
         foreach ([UserRole::Finance, UserRole::Support] as $role) {

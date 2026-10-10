@@ -63,10 +63,7 @@ let filter = "Semua";
 const groups = [
   ["UTAMA", ["Ringkasan"]],
   ["OPERASIONAL", ["Pesanan", "Produk", "Supplier"]],
-  [
-    "KEUANGAN",
-    ["Saldo & laporan", "Kompensasi", "Riwayat KlikQRIS", "Withdraw"],
-  ],
+  ["KEUANGAN", ["Saldo & laporan", "Kompensasi"]],
   ["KOMUNIKASI", ["Siaran", "Store Channel"]],
   ["INSIGHT & SISTEM", ["Funnel", "Pengaturan"]],
 ];
@@ -77,8 +74,6 @@ const icons = {
   Supplier: "⇄",
   "Saldo & laporan": "◉",
   Kompensasi: "!",
-  "Riwayat KlikQRIS": "↺",
-  Withdraw: "↗",
   Siaran: "◁",
   "Store Channel": "⌁",
   Funnel: "▽",

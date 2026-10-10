@@ -46,7 +46,7 @@ class AdminPaymentModeController extends Controller
                 );
             } catch (PaymentProviderNotReady|PaymentProviderSwitchConflict $exception) {
                 return redirect()
-                    ->route('admin.dashboard', ['tab' => 'stats'])
+                    ->route('admin.dashboard', ['tab' => 'settings', 'section' => 'pembayaran'])
                     ->withErrors(['payment_mode' => $exception->getMessage()], 'paymentMode')
                     ->withInput();
             }
@@ -113,7 +113,7 @@ class AdminPaymentModeController extends Controller
             }, 5);
         } catch (RuntimeException $exception) {
             return redirect()
-                ->route('admin.dashboard', ['tab' => 'stats'])
+                ->route('admin.dashboard', ['tab' => 'settings', 'section' => 'pembayaran'])
                 ->withErrors(['binance_verification_mode' => $exception->getMessage()], 'paymentMode')
                 ->withInput();
         }
@@ -139,7 +139,6 @@ class AdminPaymentModeController extends Controller
         }
 
         return match ($mode) {
-            PaymentProvider::KLIKQRIS => 'KlikQRIS diaktifkan. Checkout baru memakai KlikQRIS; payment lama tetap memakai provider asal.',
             PaymentProvider::SAKURUPIAH => 'Sakurupiah diaktifkan. Checkout baru memakai Sakurupiah; payment lama tetap memakai provider asal.',
             default => 'QR manual LHIE STORE diaktifkan. Checkout baru memakai Manual; payment lama tetap memakai provider asal.',
         };

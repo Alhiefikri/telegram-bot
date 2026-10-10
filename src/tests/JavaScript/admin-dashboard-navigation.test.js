@@ -254,11 +254,12 @@ test("ordinary navigation keeps client fragments without replacing explicit targ
   assert.equal(h.style.has("overflow"), false);
   assert.deepEqual(h.assigned, []);
 
-  link.href = "https://example.test/admin?tab=stats#admin-payment-settings";
+  link.href =
+    "https://example.test/admin?tab=settings&section=pembayaran#admin-payment-settings";
   h.dashboard.handleSidebarNavigation({ target: { closest: () => link } });
   assert.equal(
     link.href,
-    "https://example.test/admin?tab=stats#admin-payment-settings"
+    "https://example.test/admin?tab=settings&section=pembayaran#admin-payment-settings"
   );
   link.href = "https://store.example.test/";
   h.dashboard.handleSidebarNavigation({ target: { closest: () => link } });

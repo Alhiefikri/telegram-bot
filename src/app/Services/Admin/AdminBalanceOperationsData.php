@@ -42,6 +42,16 @@ final class AdminBalanceOperationsData
         ];
     }
 
+    /** @return array<string, mixed> */
+    public function attention(): array
+    {
+        return [
+            'pauses' => $this->pauses(),
+            'restoreGate' => $this->restoreGate(),
+            'alertCounts' => $this->alertCounts(),
+        ];
+    }
+
     /** @return list<array{scope: string, label: string, paused: bool, reason: string|null, paused_at: string|null}> */
     private function pauses(): array
     {

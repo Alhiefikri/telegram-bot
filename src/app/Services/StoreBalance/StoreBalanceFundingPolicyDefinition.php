@@ -62,7 +62,7 @@ final readonly class StoreBalanceFundingPolicyDefinition
         $errors = [];
         $minimum = self::parseAmount($minimumAmount);
         if ($minimum === null) {
-            $errors['minimum_amount'] = 'Minimum top-up harus berupa bilangan bulat rupiah positif dalam batas KlikQRIS.';
+            $errors['minimum_amount'] = 'Minimum top-up harus berupa bilangan bulat rupiah positif dalam rentang nominal yang diizinkan.';
         }
 
         if (! is_array($presetAmounts) || ! array_is_list($presetAmounts)) {
@@ -81,7 +81,7 @@ final readonly class StoreBalanceFundingPolicyDefinition
         foreach ($presetAmounts as $index => $amount) {
             $parsed = self::parseAmount($amount);
             if ($parsed === null) {
-                $message = 'Setiap preset top-up harus berupa bilangan bulat rupiah positif dalam batas KlikQRIS.';
+                $message = 'Setiap preset top-up harus berupa bilangan bulat rupiah positif dalam rentang nominal yang diizinkan.';
                 $errors['preset_amounts.'.$index] = $message;
                 $errors['preset_amounts'] = $message;
 

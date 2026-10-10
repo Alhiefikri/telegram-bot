@@ -4,7 +4,6 @@ namespace App\Services\Admin;
 
 use App\Enums\CustomerUsdtFundingPauseScope;
 use App\Enums\CustomerUsdtFundingRail;
-use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\AuditLog;
 use App\Models\CustomerUsdtFundingPolicy;
@@ -12,12 +11,9 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Models\User;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
-use App\Services\KlikQris\KlikQrisProviderReadiness;
-use App\Services\PaymentReceiptReport;
 use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
-use App\Services\Telegram\SalesProofPostNumbering;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtFunding\CustomerUsdtFundingGate;
 use App\Services\UsdtFunding\CustomerUsdtFundingPolicyManager;
@@ -28,10 +24,7 @@ use Illuminate\Support\Carbon;
 final class AdminDashboardStatsData
 {
     public function __construct(
-        private readonly KlikQrisProviderReadiness $klikQrisReadiness,
         private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
-        private readonly SalesProofPostNumbering $salesProofNumbers,
-        private readonly PaymentReceiptReport $receiptReport,
         private readonly CheckoutMaintenance $maintenance,
         private readonly StoreBalanceFundingPolicyManager $fundingPolicies,
         private readonly BscDashboardData $bscDashboard,
@@ -39,50 +32,40 @@ final class AdminDashboardStatsData
         private readonly CustomerUsdtFundingPolicyManager $usdtFundingPolicies,
         private readonly CustomerUsdtFundingGate $usdtFundingGate,
         private readonly AdminBalanceOperationsData $balanceOperations,
+        private readonly AdminDashboardOverviewData $overview,
     ) {}
 
     /**
      * @param  array<string, int>  $metrics
-     * @param  array<string, mixed>  $statusCounts
      * @param  array<string, string>  $storeLink
+     * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */
-    public function forStats(User $user, array $metrics, array $statusCounts, array $storeLink): array
+    public function forStats(User $user, array $metrics, array $storeLink, array $filters = []): array
     {
-        $header = $this->forHeader($metrics, $storeLink);
-        $header['checkoutMaintenance'] = $this->checkoutMaintenance($user);
+        $header = $this->forCompactHeader($metrics['active_product_count'], $metrics['orders_to_process'], $storeLink);
 
         return $header + [
-            'balance' => $this->balance($metrics['read_only_balance_amount']),
-            'cards' => $this->statsCards($metrics),
-            'fundingPolicy' => $this->fundingPolicy($user),
-            'usdtFundingPolicy' => $this->usdtFundingPolicy($user),
-            'balanceOperations' => $this->balanceOperations->summary(),
-            'paymentControl' => $this->paymentControl($user),
-            'statusCounts' => $statusCounts,
-            'canViewBalanceReports' => (bool) $user->role?->canReconcilePayments(),
-            'actionableStatusCounts' => $this->actionableStatusCounts($statusCounts),
-            'earnings' => $this->earnings(),
+            'overview' => $this->overview->forAdmin($user, $metrics['orders_to_process'], $filters),
         ];
     }
 
-    /**
-     * @param  array<string, int>  $metrics
-     * @param  array<string, string>  $storeLink
-     * @return array<string, mixed>
-     */
-    public function forHeader(array $metrics, array $storeLink): array
+    /** @return array<string, mixed> */
+    public function forSettings(User $user, mixed $requestedSection = null): array
     {
-        return [
-            'storeLink' => $storeLink,
-            'summary' => $this->summaryCards($metrics),
-            'storeStatus' => $this->storeStatus($metrics),
-            'checkoutMaintenance' => $this->checkoutMaintenance(),
-            'actions' => [
-                'shop' => url('/#products'),
-                'share' => $storeLink['url'],
+        $section = in_array($requestedSection, ['pembayaran', 'saldo', 'diagnostik'], true) ? $requestedSection : 'pembayaran';
+
+        return ['section' => $section] + match ($section) {
+            'saldo' => [
+                'fundingPolicy' => $this->fundingPolicy($user),
+                'usdtFundingPolicy' => $this->usdtFundingPolicy($user),
             ],
-        ];
+            'diagnostik' => ['balanceOperations' => $this->balanceOperations->summary()],
+            default => [
+                'paymentControl' => $this->paymentControl($user),
+                'checkoutMaintenance' => $this->checkoutMaintenance($user),
+            ],
+        };
     }
 
     /**
@@ -96,7 +79,6 @@ final class AdminDashboardStatsData
     {
         return [
             'storeLink' => $storeLink,
-            'summary' => [],
             'storeStatus' => $this->storeStatus([
                 'active_product_count' => $activeProductCount,
                 'orders_to_process' => $ordersToProcess,
@@ -106,49 +88,6 @@ final class AdminDashboardStatsData
                 'shop' => url('/#products'),
                 'share' => $storeLink['url'],
             ],
-        ];
-    }
-
-    private function balance(int $readOnlyBalanceAmount): array
-    {
-        return [
-            'label' => 'Saldo estimasi',
-            'amount' => $readOnlyBalanceAmount,
-            'amount_formatted' => Money::idr($readOnlyBalanceAmount),
-            'source' => 'paid_payments',
-        ];
-    }
-
-    private function statsCards(array $metrics): array
-    {
-        return [
-            $this->metricCard('gmv', 'GMV', Money::idr($metrics['gmv_amount']), 'Order aktif + selesai', 'blue'),
-            $this->metricCard('saldo', 'Saldo', Money::idr($metrics['read_only_balance_amount']), 'Estimasi pembayaran paid', 'emerald'),
-            $this->metricCard('orders', 'Order', $metrics['order_count'], 'Total pesanan', 'amber'),
-            $this->metricCard('sales_proof_posts', 'Proof post', $this->salesProofNumbers->sentCount(), 'Terkirim ke channel', 'emerald'),
-            $this->metricCard('active_products', 'Produk aktif', $metrics['active_product_count'], 'Tampil di toko', 'emerald'),
-        ];
-    }
-
-    private function summaryCards(array $metrics): array
-    {
-        return [
-            $this->metricCard('saldo', 'Saldo', Money::idr($metrics['read_only_balance_amount']), 'Estimasi pembayaran paid', 'emerald'),
-            $this->metricCard('gmv', 'GMV', Money::idr($metrics['gmv_amount']), 'Order aktif + selesai', 'blue'),
-            $this->metricCard('products', 'Produk', $metrics['product_count'], 'Total katalog', 'slate'),
-            $this->metricCard('active_products', 'Produk aktif', $metrics['active_product_count'], 'Tampil di toko', 'emerald'),
-            $this->metricCard('completed_orders', 'Pesanan', $metrics['completed_order_count'], 'Order selesai', 'emerald'),
-        ];
-    }
-
-    private function metricCard(string $key, string $label, int|string $value, string $hint, string $tone): array
-    {
-        return [
-            'key' => $key,
-            'label' => $label,
-            'value' => $value,
-            'hint' => $hint,
-            'tone' => $tone,
         ];
     }
 
@@ -263,10 +202,6 @@ final class AdminDashboardStatsData
     {
         $settings = ManualPaymentSetting::current();
         $requestedMode = $settings?->paymentProvider() ?? PaymentProvider::MANUAL;
-        $klikQrisReadiness = $this->klikQrisReadiness->checkout();
-        $isKlikQrisConfigured = $klikQrisReadiness->isReady();
-        $isKlikQrisEnabled = $requestedMode === PaymentProvider::KLIKQRIS && $isKlikQrisConfigured;
-        $isKlikQrisRequestedButUnavailable = $requestedMode === PaymentProvider::KLIKQRIS && ! $isKlikQrisConfigured;
         $sakurupiahReadiness = $this->sakurupiahReadiness->observe();
         $isSakurupiahConfigured = $sakurupiahReadiness->isReady();
         $isSakurupiahEnabled = $requestedMode === PaymentProvider::SAKURUPIAH && $isSakurupiahConfigured;
@@ -278,24 +213,21 @@ final class AdminDashboardStatsData
             $isPakasirRequested => 'Pakasir retired — checkout blocked',
             $isSakurupiahEnabled => 'Sakurupiah aktif',
             $isSakurupiahRequestedButUnavailable => 'Sakurupiah aktif — belum siap',
-            $isKlikQrisEnabled => 'KlikQRIS aktif',
-            $isKlikQrisRequestedButUnavailable => 'KlikQRIS aktif — belum siap',
+            $requestedMode === PaymentProvider::KLIKQRIS => 'KlikQRIS ditutup',
             default => 'Manual /payment aktif',
         };
         $hint = match (true) {
             $isPakasirRequested => 'Setting lama Pakasir dipertahankan tanpa fallback. Selesaikan cutover provider sebelum membuka checkout baru.',
             $isSakurupiahEnabled => 'Provider Sakurupiah untuk checkout baru. Payment lama tetap diproses berdasarkan provider yang tersimpan.',
             $isSakurupiahRequestedButUnavailable => 'Sakurupiah tetap menjadi provider aktif dan tidak dialihkan otomatis. Perbaiki readiness sebelum checkout baru dibuka.',
-            $isKlikQrisEnabled => 'Provider KlikQRIS untuk checkout baru. Payment lama tetap diproses berdasarkan provider yang tersimpan.',
-            $isKlikQrisRequestedButUnavailable => 'KlikQRIS tetap menjadi provider aktif dan tidak dialihkan otomatis. Perbaiki readiness sebelum checkout baru dibuka.',
+            $requestedMode === PaymentProvider::KLIKQRIS => 'Layanan KlikQRIS sudah ditutup. Pilih Manual atau Sakurupiah untuk pembayaran baru. Histori pembayaran lama tetap tersimpan.',
             default => 'Provider Manual: QR manual LHIE STORE, bukti /payment, dan approval admin.',
         };
         $statusBadge = match (true) {
             $isPakasirRequested => 'PAKASIR RETIRED',
             $isSakurupiahEnabled => 'SAKURUPIAH',
             $isSakurupiahRequestedButUnavailable => 'SAKURUPIAH BELUM SIAP',
-            $isKlikQrisEnabled => 'KLIKQRIS',
-            $isKlikQrisRequestedButUnavailable => 'KLIKQRIS BELUM SIAP',
+            $requestedMode === PaymentProvider::KLIKQRIS => 'KLIKQRIS DITUTUP',
             default => 'MANUAL',
         };
         $providers = [
@@ -304,12 +236,6 @@ final class AdminDashboardStatsData
                 'ready' => true,
                 'reason' => 'Jalur darurat selalu tersedia.',
                 'can_activate' => true,
-            ],
-            PaymentProvider::KLIKQRIS => [
-                'label' => PaymentProvider::label(PaymentProvider::KLIKQRIS),
-                'ready' => $isKlikQrisConfigured,
-                'reason' => $isKlikQrisConfigured ? null : $klikQrisReadiness->configurationMessage(),
-                'can_activate' => $isKlikQrisConfigured,
             ],
             PaymentProvider::SAKURUPIAH => [
                 'label' => PaymentProvider::label(PaymentProvider::SAKURUPIAH),
@@ -333,14 +259,6 @@ final class AdminDashboardStatsData
             'effective_provider_label' => $effectiveProviderLabel,
             'active_provider_label' => $requestedProviderLabel,
             'payment_provider_version' => (int) ($settings?->payment_provider_version ?? 0),
-            'is_klikqris_enabled' => $isKlikQrisEnabled,
-            'is_klikqris_configured' => $isKlikQrisConfigured,
-            'can_enable_klikqris' => $isKlikQrisConfigured,
-            'klikqris_config_missing' => $klikQrisReadiness->missing(),
-            'klikqris_config_invalid' => array_keys($klikQrisReadiness->invalid()),
-            'klikqris_guard_message' => $isKlikQrisConfigured
-                ? null
-                : 'Provider KlikQRIS belum siap. '.$klikQrisReadiness->configurationMessage(),
             'is_sakurupiah_enabled' => $isSakurupiahEnabled,
             'is_sakurupiah_configured' => $isSakurupiahConfigured,
             'can_enable_sakurupiah' => $isSakurupiahConfigured,
@@ -356,7 +274,7 @@ final class AdminDashboardStatsData
             'switch_audit' => $this->switchAudits(),
             'label' => $label,
             'hint' => $hint,
-            'tone' => $isPakasirRequested ? 'rose' : (($isSakurupiahEnabled || $isKlikQrisEnabled) ? 'purple' : 'amber'),
+            'tone' => in_array($requestedMode, [PaymentProvider::PAKASIR, PaymentProvider::KLIKQRIS], true) ? 'rose' : ($isSakurupiahEnabled ? 'purple' : 'amber'),
             'is_pakasir_retired' => $isPakasirRequested,
             'source' => $settings ? 'dashboard_setting' : 'dashboard_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
@@ -436,44 +354,5 @@ final class AdminDashboardStatsData
         $number = ManualPaymentSetting::normalizeWhatsappNumber((string) config('services.support.whatsapp_number'));
 
         return $number !== '' ? 'https://wa.me/'.$number : null;
-    }
-
-    private function actionableStatusCounts(array $statusCounts): array
-    {
-        return collect([
-            OrderStatus::PendingPayment,
-            OrderStatus::Processing,
-            OrderStatus::Cancelled,
-            OrderStatus::Expired,
-        ])
-            ->mapWithKeys(fn (OrderStatus $status): array => [$status->value => $statusCounts[$status->value]])
-            ->all();
-    }
-
-    private function earnings(): array
-    {
-        $start = now()->startOfDay()->subDays(6);
-        $payments = $this->receiptReport->canonicalPaidPayments($start);
-
-        $amountsByDate = $payments
-            ->filter(fn (Payment $payment): bool => $this->receiptReport->currency($payment) === 'IDR')
-            ->groupBy(fn (Payment $payment): string => $payment->paid_at->toDateString())
-            ->map(fn ($payments): int => (int) $payments->sum(fn (Payment $payment): int => $this->receiptReport->netAmount($payment)));
-        $maxAmount = max(1, (int) $amountsByDate->max());
-
-        return collect(range(0, 6))
-            ->map(function (int $dayOffset) use ($start, $amountsByDate, $maxAmount): array {
-                $date = (clone $start)->addDays($dayOffset);
-                $amount = (int) ($amountsByDate[$date->toDateString()] ?? 0);
-
-                return [
-                    'date' => $date->toDateString(),
-                    'label' => Carbon::parse($date)->format('d M'),
-                    'amount' => $amount,
-                    'amount_formatted' => Money::idr($amount),
-                    'bar_percent' => $amount > 0 ? max(8, (int) round(($amount / $maxAmount) * 100)) : 0,
-                ];
-            })
-            ->all();
     }
 }

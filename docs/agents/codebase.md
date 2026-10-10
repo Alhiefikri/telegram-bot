@@ -818,6 +818,10 @@ Admin request melewati `AuthorizeAdminAccess`, yang menempelkan `adminUser` ke r
 
 `AdminPaymentModeController` hanya mengorkestrasi request. Validasi readiness dan optimistic version conflict berada di `UpdatePaymentModeRequest`/`PaymentProviderSwitcher`; switch dan audit log ditulis atomik dalam transaksi. Switch provider lama tidak mengubah Payment yang sudah ada.
 
+`AdminDashboardOverviewData` menyusun Ringkasan melalui `AdminDashboardData::forActiveTab()`: pendapatan hari ini, count pesanan lunas lintas mata uang, antrean proses, grafik 7/30 hari, perhatian yang memerlukan tindakan, dan lima pesanan terbaru. `PaymentReceiptReport::dailySalesReceipts()` mengagregasi satu pembayaran paid canonical per Order berdasarkan `paid_at`, membatasi Order ke paid + processing/completed, serta memakai perhitungan net provider yang sama dengan laporan pembayaran. Hari tanpa transaksi bernilai nol; IDR dan USDT tidak dijumlahkan. Top-up tidak masuk penjualan, sedangkan refund parsial dan modal supplier belum dikurangkan.
+
+`AdminDashboardStatsData::forSettings()` memuat hanya bagian yang aktif pada `/admin?tab=settings&section=pembayaran|saldo|diagnostik`. Form kebijakan IDR/USDT dan jeda layanan berada di disclosure; error validasi membuka form terkait. `AdminDashboardRedirector` dan request validation mengembalikan mutasi ke bagian Pengaturan yang sesuai, dengan anchor target tetap. Role, password confirmation, optimistic version, audit, dan aturan uang tetap milik service masing-masing.
+
 The product create/edit modal edits each localizable Product copy section — Product
 Details and Replacement / Refund Policy — through language tabs that share one
 `productContentLocale` state. `AdminProductDashboardProductsData` exposes `descriptionMs`/
@@ -845,21 +849,17 @@ Entry point test terfokus adalah `tests/Feature/StorefrontShopCartTest.php` (gue
 
 Issue #477 release evidence is the focused Storefront feature suite, the responsive customer browser suite, `npm run build`, the slug-repair dry run, and an HTTP 200 smoke check for `/assets/product-placeholder.svg`. Production mutation and deployment remain owned by the approved GitHub Actions release from `main`.
 
-### 4.4 Buyer history dan KlikQRIS reporting
+### 4.4 Buyer history dan transaksi KlikQRIS historis
 
 `CustomerOwnedOrderQuery` adalah pemilik query histori pada `/akun/pesanan`: query selalu dibatasi oleh `customer_id`, mendukung filter `all`, `waiting`, `processing`, `completed`, dan `issue`, lalu melakukan pagination newest-first dengan query string tetap. `CustomerAccountController` hanya meneruskan hasil query dan status filter ke view. `/akun/pesanan/{order}` tetap customer-scoped; Order non-paid hanya menampilkan status/next step, sedangkan credential dan Recovery Key mengikuti aturan akses paid yang sudah ada.
 
-Reporting KlikQRIS hanya tersedia sebagai tab read-only pada dashboard yang sama: `/admin?tab=riwayat` untuk histori transaksi dan `/admin?tab=withdraw` untuk status pencairan. `AdminDashboardController` meneruskan tab/filter ke `AdminDashboardData`, lalu `AdminDashboardReportingData` memanggil `KlikQrisClient` hanya ketika tab reporting tersebut aktif. Endpoint provider `/qris/history?page=N` dicocokkan ke `Payment.merchant_ref`/Order lokal untuk link detail atau warning mismatch; observasi provider, termasuk `SUCCESS`, tidak mengubah Order, Payment, inventory, fulfillment, receipt, atau Sales Proof Post.
-
-Tab Withdraw memakai `UserRole::canReconcilePayments()` sebagai lapisan fail-closed kedua; karena hanya Owner/Admin yang bisa masuk dashboard (dan keduanya lolos predicate itu), state forbidden tetap ada tapi tidak terjangkau lewat HTTP selama gate role ini berlaku. Filter status, order ID, tanggal, limit, dan page dinormalisasi sebelum dikirim ke `/withdraw/orders`. Proof URL hanya menjadi link bila lolos validasi HTTPS dan host allowlist environment; nilai lain ditampilkan sebagai teks aman.
-
-Reporting memakai cache singkat yang memasukkan environment dan seluruh parameter query tanpa credential. `KlikQrisClient` mengulang connection error, HTTP 408, 429, dan 5xx dalam batas budget provider; readiness, HTTP, JSON, schema, transport, dan validation failure diterjemahkan menjadi notice aman di dashboard. API key dan merchant ID tetap server-side. Perubahan layout reporting berada di `.admin-mini-shell`/view tab dan diuji browser pada 320, 390, 768, 1280, 1440, dan 1920px; tabel lebar hanya memiliki overflow pada container-nya.
+Dashboard tidak lagi memiliki tab Riwayat KlikQRIS atau Withdraw, dan tidak melakukan fetch reporting remote untuk halaman tersebut. `AdminDashboardReportingData` beserta view reporting-nya telah dihapus. Payment, Order, audit, client provider, dan jalur settlement historis tetap ada; penghapusan UI tidak mengubah status transaksi atau inventori.
 
 ## 5. Checkout dan payment rails
 
 ### 5.1 Provider selection
 
-`PaymentProvider::allowed()` untuk checkout baru adalah `manual` dan `klikqris`. `PaymentProvider::normalize()` tetap mengenali `pakasir` agar Payment historis tidak kehilangan provenance. `ManualPaymentSetting` menyimpan provider aktif, versi setting, dan TTL; expand migration memindahkan setting Pakasir aktif ke KlikQRIS, sementara kolom checkout flow dipertahankan sampai contract release gated. `PaymentProviderResolver` mengubah setting + payment method menjadi `CheckoutPaymentIntent` dan menolak Pakasir untuk checkout baru.
+Pergantian provider melalui Pengaturan hanya menerima `manual` dan `sakurupiah`. KlikQRIS dan Pakasir tidak dapat dipilih untuk pergantian baru. `PaymentProvider::normalize()` serta adapter legacy tetap mengenali provider transaksi historis agar provenance tidak hilang. Switch tidak mengubah Payment yang sudah dibuat; readiness Sakurupiah dan optimistic version tetap diperiksa oleh `PaymentProviderSwitcher`.
 
 `CheckoutPaymentPreparationResolver` memetakan pasangan provider/method yang sudah dinormalisasi ke satu adapter preparation. `OrderCheckoutService` mengonsumsi adapter dan plan tanpa mengetahui aturan rail.
 
@@ -1139,7 +1139,7 @@ Data boundary:
 | Telegram        | [`TelegramWebhookIngress`](../../src/app/Services/Telegram/TelegramWebhookIngress.php), [`TelegramUpdateProcessor`](../../src/app/Services/Telegram/TelegramUpdateProcessor.php), [`Services/Telegram/`](../../src/app/Services/Telegram/) |
 | Storefront      | [`src/app/Storefront/`](../../src/app/Storefront/), [`StorefrontShopCheckout`](../../src/app/Storefront/StorefrontShopCheckout.php)                                                                                                        |
 | customer history | [`CustomerOwnedOrderQuery`](../../src/app/Services/Customer/CustomerOwnedOrderQuery.php), [`CustomerAccountController`](../../src/app/Http/Controllers/CustomerAccountController.php)                                                        |
-| admin           | [`src/app/Http/Controllers/Admin/`](../../src/app/Http/Controllers/Admin/), [`AdminDashboardData`](../../src/app/Services/Admin/AdminDashboardData.php), [`AdminDashboardReportingData`](../../src/app/Services/Admin/AdminDashboardReportingData.php) |
+| admin           | [`src/app/Http/Controllers/Admin/`](../../src/app/Http/Controllers/Admin/), [`AdminDashboardData`](../../src/app/Services/Admin/AdminDashboardData.php), [`AdminDashboardOverviewData`](../../src/app/Services/Admin/AdminDashboardOverviewData.php) |
 | KlikQRIS        | [`KlikQrisClient`](../../src/app/Services/KlikQris/KlikQrisClient.php), [`src/app/Services/KlikQris/`](../../src/app/Services/KlikQris/)                                                                                                  |
 | Pakasir         | [`src/app/Services/Pakasir/`](../../src/app/Services/Pakasir/)                                                                                                                                                                             |
 | Binance         | [`src/app/Services/Binance/`](../../src/app/Services/Binance/)                                                                                                                                                                             |
@@ -1292,14 +1292,14 @@ and the per-item antislop gate live in
 `docs/agents/admin-dashboard-sidebar-cutover.md`. No route, form field, error
 bag, `old()`, permission gate, Alpine state key, or domain rule changed.
 
-Summary, communication, reporting and finance surfaces (#604) also render
-through the primitives: Ringkasan (`stats-tab` payment mode/provider readiness,
-Binance settings, TTL, Support WhatsApp, BSC receivers, IDR/USDT funding policy,
-balance-operations panel, checkout maintenance and both confirmation dialogs),
-Siaran, Store Channel (channel setup plus fake sales proof), Riwayat KlikQRIS,
-Withdraw, Funnel, Kompensasi top-up with its release dialog, and the linked
-pages `admin/balance-reports/index`, `admin/store-balance/adjustments`, and
-`admin/store-balance/usdt-review`. The password-confirmation page keeps its
+Summary, communication, reporting and finance surfaces render through the
+primitives. Ringkasan uses `stats-tab` for daily sales, the 7/30-day chart,
+actionable attention, and recent orders. Pengaturan uses `settings-tab` for
+payment/store controls, IDR/USDT policy, and balance diagnostics in separate
+sections. Siaran, Store Channel, Funnel, Kompensasi top-up, and linked pages
+`admin/balance-reports/index`, `admin/store-balance/adjustments`, and
+`admin/store-balance/usdt-review` retain their existing operations. The retired
+KlikQRIS reporting tabs no longer render. The password-confirmation page keeps its
 form/POST/intended-redirect contract and now uses the same primitives instead
 of raw neo-brutal classes. `x-admin-dashboard.badge` aliases the server
 `success`/`warning`/`danger`/`info` tones onto its emerald/amber/rose/blue
