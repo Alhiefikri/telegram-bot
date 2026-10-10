@@ -12,8 +12,8 @@
 <body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
 <x-admin-dashboard.linked-shell active-tab="stats" active-navigation-id="usdt-review" title="Review deposit USDT dan insiden">
     <div class="space-y-5">
-        <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="font-bold underline">← Ringkasan Admin</a>
-        <h1 class="text-2xl font-black">Review deposit USDT dan insiden</h1>
+        <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">← Ringkasan Admin</a>
+        <h1 class="text-2xl font-semibold tracking-tight text-admin-ink">Review deposit USDT dan insiden</h1>
         <x-admin-dashboard.notice tone="warning">Hash publik hanya petunjuk lookup. Customer terikat receiver permanen. Invoice asli tidak berubah; deposit sub-micro atau bukti ambigu tetap unresolved, tanpa pembulatan atau grant. Review tidak mengaktifkan pendanaan produksi.</x-admin-dashboard.notice>
         @if(session('status'))
             <x-admin-dashboard.notice tone="success" role="status">{{ session('status') }}</x-admin-dashboard.notice>
@@ -25,69 +25,69 @@
         @endif
 
     @if($preview)
-        <x-admin-dashboard.card as="section" padding="compact" aria-label="Preview resolusi USDT">
-            <h2 class="text-lg font-black">Periksa resolusi sebelum konfirmasi</h2>
-            <p class="mt-2 break-all">Target {{ $preview->top_up_id }} · {{ $preview->decision }}</p>
-            <p class="mt-2">Customer #{{ $previewOriginal->customer_id }} · Telegram {{ $previewOriginal->telegram_id }} · kredit awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($previewOriginal->amount_micro)->decimal() }} USDT · fee awal {{ $previewOriginal->fee_micro }} micro-USDT</p>
-            <p class="mt-2 font-bold">Nominal deposit terverifikasi {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($preview->amount_micro)->decimal() }} USDT</p>
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Preview resolusi USDT">
+            <h2 class="text-lg font-semibold text-admin-ink">Periksa resolusi sebelum konfirmasi</h2>
+            <p class="mt-2 break-all font-mono text-xs font-medium text-admin-muted">Target {{ $preview->top_up_id }} · {{ $preview->decision }}</p>
+            <p class="mt-2 text-sm font-medium text-admin-ink">Customer #{{ $previewOriginal->customer_id }} · Telegram {{ $previewOriginal->telegram_id }} · kredit awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($previewOriginal->amount_micro)->decimal() }} USDT · fee awal {{ $previewOriginal->fee_micro }} micro-USDT</p>
+            <p class="mt-2 font-semibold text-admin-ink">Nominal deposit terverifikasi {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($preview->amount_micro)->decimal() }} USDT</p>
             @if($preview->decision !== 'externally_refunded')
-                <p class="mt-2 font-bold">Kredit disetujui setelah fee awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($preview->amount_micro - $previewOriginal->fee_micro)->decimal() }} USDT</p>
+                <p class="mt-2 font-semibold text-admin-ink">Kredit disetujui setelah fee awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($preview->amount_micro - $previewOriginal->fee_micro)->decimal() }} USDT</p>
             @else
-                <p class="mt-2 font-bold">Seluruh nominal deposit dikembalikan secara eksternal; tidak ada kredit saldo.</p>
+                <p class="mt-2 font-semibold text-admin-ink">Seluruh nominal deposit dikembalikan secara eksternal; tidak ada kredit saldo.</p>
             @endif
-            <p class="mt-2">{{ $preview->reason }}</p>
-            <p class="mt-2 text-sm">Bukti transfer {{ substr($preview->transaction_hash, 0, 10) }}…{{ substr($preview->transaction_hash, -6) }} · berlaku sampai {{ $preview->expires_at }}</p>
-            <p class="mt-2 text-sm">Invoice asli tidak berubah. Satu resolusi menutup settlement berikutnya; uang tambahan tetap unresolved.</p>
+            <p class="mt-2 text-sm font-medium text-admin-ink">{{ $preview->reason }}</p>
+            <p class="mt-2 text-sm font-medium text-admin-muted">Bukti transfer <span class="break-all font-mono text-xs">{{ substr($preview->transaction_hash, 0, 10) }}…{{ substr($preview->transaction_hash, -6) }}</span> · berlaku sampai {{ $preview->expires_at }}</p>
+            <p class="mt-2 text-sm font-medium text-admin-muted">Invoice asli tidak berubah. Satu resolusi menutup settlement berikutnya; uang tambahan tetap unresolved.</p>
             @if(now()->lt($preview->expires_at))
                 <form method="POST" action="{{ route('admin.store-balance.usdt-review.previews.confirm', $preview->id) }}" class="mt-4 space-y-3">
                     @csrf
                     <input type="hidden" name="fingerprint" value="{{ $preview->fingerprint }}">
                     <input type="hidden" name="version" value="{{ $preview->version }}">
-                    <label class="block font-bold" for="review-password">Password Owner untuk tindakan ini</label>
+                    <x-admin-dashboard.field-label for="review-password">Password Owner untuk tindakan ini</x-admin-dashboard.field-label>
                     <x-admin-dashboard.input id="review-password" type="password" name="password" autocomplete="current-password" maxlength="1024" required />
                     <x-admin-dashboard.button type="submit" variant="primary">Konfirmasi resolusi</x-admin-dashboard.button>
                 </form>
             @else
-                <p class="mt-3 font-bold">Preview kedaluwarsa. Buat preview baru dengan bukti terkini.</p>
+                <p class="mt-3 font-semibold text-admin-ink">Preview kedaluwarsa. Buat preview baru dengan bukti terkini.</p>
             @endif
         </x-admin-dashboard.card>
     @endif
 
     @if($recoveryPreview)
-        <x-admin-dashboard.card as="section" padding="compact" aria-label="Preview recovery insiden">
-            <h2 class="text-lg font-black">Otorisasi recovery insiden #{{ $recoveryPreview->incident_id }}</h2>
-            <p class="mt-2">Customer #{{ $recoveryIncident->customer_id }} · exposure {{ $recoveryIncident->exposure_micro }} micro-USDT · terpakai {{ $recoveryIncident->spent_exposure_micro }} micro-USDT</p>
-            <p class="mt-2">{{ $recoveryPreview->reason }}</p>
-            <p class="mt-2 text-sm">Ini hanya membuka case recovery. Kerugian tetap unresolved; saldo tidak didebit dan freeze tidak dilepas.</p>
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Preview recovery insiden">
+            <h2 class="text-lg font-semibold text-admin-ink">Otorisasi recovery insiden #{{ $recoveryPreview->incident_id }}</h2>
+            <p class="mt-2 text-sm font-medium text-admin-ink">Customer #{{ $recoveryIncident->customer_id }} · exposure {{ $recoveryIncident->exposure_micro }} micro-USDT · terpakai {{ $recoveryIncident->spent_exposure_micro }} micro-USDT</p>
+            <p class="mt-2 text-sm font-medium text-admin-ink">{{ $recoveryPreview->reason }}</p>
+            <p class="mt-2 text-sm font-medium text-admin-muted">Ini hanya membuka case recovery. Kerugian tetap unresolved; saldo tidak didebit dan freeze tidak dilepas.</p>
             @if(now()->lt($recoveryPreview->expires_at))
                 <form method="POST" action="{{ route('admin.store-balance.usdt-review.recovery-previews.confirm', $recoveryPreview->id) }}" class="mt-4 space-y-3">
                     @csrf
                     <input type="hidden" name="fingerprint" value="{{ $recoveryPreview->fingerprint }}">
-                    <label class="block font-bold" for="recovery-password">Password Owner untuk recovery</label>
+                    <x-admin-dashboard.field-label for="recovery-password">Password Owner untuk recovery</x-admin-dashboard.field-label>
                     <x-admin-dashboard.input id="recovery-password" type="password" name="password" autocomplete="current-password" maxlength="1024" required />
                     <x-admin-dashboard.button type="submit" variant="warning">Otorisasi case recovery</x-admin-dashboard.button>
                 </form>
             @else
-                <p class="mt-3 font-bold">Preview recovery kedaluwarsa.</p>
+                <p class="mt-3 font-semibold text-admin-ink">Preview recovery kedaluwarsa.</p>
             @endif
         </x-admin-dashboard.card>
     @endif
 
-    <x-admin-dashboard.card as="section" padding="compact" aria-label="Target top-up USDT">
-        <h2 class="text-lg font-black">Target top-up</h2>
+    <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Target top-up USDT">
+        <h2 class="text-lg font-semibold text-admin-ink">Target top-up</h2>
         <div class="mt-3 overflow-x-auto">
-            <table class="w-full text-left text-sm">
-                <thead><tr><th class="p-2">Target / Customer</th><th class="p-2">Kredit / payable</th><th class="p-2">Status</th><th class="p-2">Review</th></tr></thead>
-                <tbody>
+            <table class="min-w-full text-left text-sm">
+                <thead class="border-b border-admin-line bg-admin-surface-muted text-xs font-medium text-admin-muted"><tr><th class="px-3 py-2 font-medium">Target / Customer</th><th class="px-3 py-2 font-medium">Kredit / payable</th><th class="px-3 py-2 font-medium">Status</th><th class="px-3 py-2 font-medium">Review</th></tr></thead>
+                <tbody class="divide-y divide-admin-line">
                 @forelse($targets as $target)
-                    <tr class="border-t border-neo-ink/15">
-                        <td class="p-2"><span class="break-all font-mono">{{ $target->id }}</span><br>Customer #{{ $target->customer_id }} · Telegram {{ $target->telegram_id }}</td>
-                        <td class="p-2">{{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($target->amount_micro)->decimal() }} / {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($target->payable_micro)->decimal() }} USDT</td>
-                        <td class="p-2">{{ $target->resolution_kind ?? $target->state }}<br>Persiapan: {{ $target->preparation_state }}<br>{{ $target->last_error }}</td>
-                        <td class="p-2"><a class="font-bold underline" href="{{ route('admin.store-balance.usdt-review.index', ['top_up' => $target->id]) }}">Tinjau</a></td>
+                    <tr>
+                        <td class="px-3 py-2 align-top"><span class="break-all font-mono text-xs font-medium text-admin-ink">{{ $target->id }}</span><br><span class="text-xs font-medium text-admin-muted">Customer #{{ $target->customer_id }} · Telegram {{ $target->telegram_id }}</span></td>
+                        <td class="px-3 py-2 align-top font-medium text-admin-ink">{{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($target->amount_micro)->decimal() }} / {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($target->payable_micro)->decimal() }} USDT</td>
+                        <td class="px-3 py-2 align-top text-xs font-medium text-admin-ink">{{ $target->resolution_kind ?? $target->state }}<br>Persiapan: {{ $target->preparation_state }}<br>{{ $target->last_error }}</td>
+                        <td class="px-3 py-2 align-top"><a class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline" href="{{ route('admin.store-balance.usdt-review.index', ['top_up' => $target->id]) }}">Tinjau</a></td>
                     </tr>
                 @empty
-                    <tr><td colspan="4" class="p-3">Belum ada target top-up.</td></tr>
+                    <tr><td colspan="4" class="px-3 py-6 text-center text-sm font-medium text-admin-muted">Belum ada target top-up.</td></tr>
                 @endforelse
                 </tbody>
             </table>
@@ -96,52 +96,52 @@
     </x-admin-dashboard.card>
 
     @if($selected)
-        <x-admin-dashboard.card as="section" padding="compact" aria-label="Bukti target">
-            <h2 class="text-lg font-black">Target {{ $selected->id }}</h2>
-            <p class="mt-2">Customer #{{ $selected->customer_id }} · kredit awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($selected->amount_micro)->decimal() }} USDT · fee {{ $selected->fee_micro }} micro-USDT</p>
-            <h3 class="mt-4 font-bold">Riwayat pemeriksaan authoritative</h3>
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Bukti target">
+            <h2 class="text-lg font-semibold text-admin-ink">Target {{ $selected->id }}</h2>
+            <p class="mt-2 text-sm font-medium text-admin-ink">Customer #{{ $selected->customer_id }} · kredit awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($selected->amount_micro)->decimal() }} USDT · fee {{ $selected->fee_micro }} micro-USDT</p>
+            <h3 class="mt-4 text-sm font-semibold text-admin-ink">Riwayat pemeriksaan authoritative</h3>
             @forelse($evidence as $item)
-                <p class="mt-2 text-sm">Versi {{ $item->version }} · {{ $item->status }} · {{ $item->reason }} · {{ $item->created_at }}</p>
+                <p class="mt-2 text-sm font-medium text-admin-muted">Versi {{ $item->version }} · {{ $item->status }} · {{ $item->reason }} · {{ $item->created_at }}</p>
             @empty
-                <p class="mt-2 text-sm">Belum ada pemeriksaan. Creation unknown bukan bukti dana diterima.</p>
+                <p class="mt-2 text-sm font-medium text-admin-muted">Belum ada pemeriksaan. Creation unknown bukan bukti dana diterima.</p>
             @endforelse
             <div class="mt-3">{{ $evidence->links() }}</div>
-            <form method="POST" action="{{ route('admin.store-balance.usdt-review.previews.store') }}" class="mt-5 grid gap-3 border-t border-neo-ink/15 pt-4" aria-label="Tinjau resolusi deposit">
+            <form method="POST" action="{{ route('admin.store-balance.usdt-review.previews.store') }}" class="mt-5 grid gap-3 border-t border-admin-line pt-4" aria-label="Tinjau resolusi deposit">
                 @csrf
                 <input type="hidden" name="top_up_id" value="{{ $selected->id }}">
-                <label class="block font-bold" for="review-decision">Keputusan</label>
+                <x-admin-dashboard.field-label for="review-decision">Keputusan</x-admin-dashboard.field-label>
                 <x-admin-dashboard.select id="review-decision" name="decision" required>
                     <option value="settled">Settlement nominal terverifikasi (termasuk revisi)</option>
                     <option value="resolved_by_compensation">Kompensasi deposit terverifikasi</option>
                     <option value="externally_refunded">Pengembalian eksternal yang sudah terbukti</option>
                 </x-admin-dashboard.select>
-                <label class="block font-bold" for="review-amount">Nominal resolusi USDT (exact, maksimal 6 desimal)</label>
+                <x-admin-dashboard.field-label for="review-amount">Nominal resolusi USDT (exact, maksimal 6 desimal)</x-admin-dashboard.field-label>
                 <x-admin-dashboard.input id="review-amount" name="amount" type="text" inputmode="decimal" autocomplete="off" maxlength="32" required />
-                <label class="block font-bold" for="review-hash">Transaction hash deposit</label>
+                <x-admin-dashboard.field-label for="review-hash">Transaction hash deposit</x-admin-dashboard.field-label>
                 <x-admin-dashboard.input id="review-hash" name="transaction_hash" type="text" autocomplete="off" maxlength="66" required />
-                <label class="block font-bold" for="review-reason">Alasan resolusi</label>
+                <x-admin-dashboard.field-label for="review-reason">Alasan resolusi</x-admin-dashboard.field-label>
                 <x-admin-dashboard.textarea id="review-reason" name="reason" :rows="3" maxlength="1000" required />
-                <label class="block font-bold" for="refund-hash">Transaction hash pengembalian (hanya external refund)</label>
+                <x-admin-dashboard.field-label for="refund-hash">Transaction hash pengembalian (hanya external refund)</x-admin-dashboard.field-label>
                 <x-admin-dashboard.input id="refund-hash" name="refund_transaction_hash" type="text" autocomplete="off" maxlength="66" />
-                <label class="block font-bold" for="refund-authorization">ID persetujuan Customer terautentikasi (hanya external refund)</label>
+                <x-admin-dashboard.field-label for="refund-authorization">ID persetujuan Customer terautentikasi (hanya external refund)</x-admin-dashboard.field-label>
                 <x-admin-dashboard.input id="refund-authorization" name="refund_authorization_id" type="text" autocomplete="off" maxlength="36" />
-                <p class="text-sm">Owner tidak dapat memilih alamat pengembalian. Hash/screenshot bukan bukti. Preview memeriksa ulang finalitas, receiver, token dan nominal melalui RPC; bukti ambigu ditahan.</p>
+                <p class="text-sm font-medium text-admin-muted">Owner tidak dapat memilih alamat pengembalian. Hash/screenshot bukan bukti. Preview memeriksa ulang finalitas, receiver, token dan nominal melalui RPC; bukti ambigu ditahan.</p>
                 <x-admin-dashboard.button type="submit" variant="ink">Buat preview resolusi</x-admin-dashboard.button>
             </form>
         </x-admin-dashboard.card>
     @endif
 
-    <x-admin-dashboard.card as="section" padding="compact" aria-label="Observasi receiver dan orphan deposit">
-        <h2 class="text-lg font-black">Observasi receiver termasuk deposit tanpa invoice</h2>
-        <p class="mt-2 text-sm">Raw token units dipertahankan exact. Observasi bukan receipt claim atau otorisasi kredit. Identitas Customer berasal dari receiver, bukan pengirim hash.</p>
+    <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Observasi receiver dan orphan deposit">
+        <h2 class="text-lg font-semibold text-admin-ink">Observasi receiver termasuk deposit tanpa invoice</h2>
+        <p class="mt-2 text-sm font-medium text-admin-muted">Raw token units dipertahankan exact. Observasi bukan receipt claim atau otorisasi kredit. Identitas Customer berasal dari receiver, bukan pengirim hash.</p>
         <div class="mt-3 overflow-x-auto">
-            <table class="w-full text-left text-sm">
-                <thead><tr><th class="p-2">Observasi / Customer</th><th class="p-2">Raw token units</th><th class="p-2">Block / review</th></tr></thead>
-                <tbody>
+            <table class="min-w-full text-left text-sm">
+                <thead class="border-b border-admin-line bg-admin-surface-muted text-xs font-medium text-admin-muted"><tr><th class="px-3 py-2 font-medium">Observasi / Customer</th><th class="px-3 py-2 font-medium">Raw token units</th><th class="px-3 py-2 font-medium">Block / review</th></tr></thead>
+                <tbody class="divide-y divide-admin-line">
                 @forelse($observations as $item)
-                    <tr class="border-t border-neo-ink/15"><td class="p-2">#{{ $item->id }} · Customer #{{ $item->customer_id }} · receiver #{{ $item->receiver_id }}</td><td class="break-all p-2 font-mono">{{ $item->amount_units }}</td><td class="p-2">{{ $item->block_number }} · {{ $item->review_reason ?? 'observed' }}</td></tr>
+                    <tr><td class="px-3 py-2 text-xs font-medium text-admin-ink">#{{ $item->id }} · Customer #{{ $item->customer_id }} · receiver #{{ $item->receiver_id }}</td><td class="break-all px-3 py-2 font-mono text-xs font-medium text-admin-ink">{{ $item->amount_units }}</td><td class="px-3 py-2 text-xs font-medium text-admin-ink">{{ $item->block_number }} · {{ $item->review_reason ?? 'observed' }}</td></tr>
                 @empty
-                    <tr><td colspan="3" class="p-3">Belum ada observasi receiver.</td></tr>
+                    <tr><td colspan="3" class="px-3 py-6 text-center text-sm font-medium text-admin-muted">Belum ada observasi receiver.</td></tr>
                 @endforelse
                 </tbody>
             </table>
@@ -149,27 +149,27 @@
         <div class="mt-3">{{ $observations->links() }}</div>
     </x-admin-dashboard.card>
 
-    <x-admin-dashboard.card as="section" padding="compact" aria-label="Insiden reorg dan exposure treasury">
-        <h2 class="text-lg font-black">Insiden reorg · kerugian belum terselesaikan</h2>
-        <p class="mt-2 text-sm">History tetap utuh. Tidak ada saldo negatif, debit otomatis Customer, atau aset treasury sintetis.</p>
+    <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Insiden reorg dan exposure treasury">
+        <h2 class="text-lg font-semibold text-admin-ink">Insiden reorg · kerugian belum terselesaikan</h2>
+        <p class="mt-2 text-sm font-medium text-admin-muted">History tetap utuh. Tidak ada saldo negatif, debit otomatis Customer, atau aset treasury sintetis.</p>
         @forelse($incidents as $incident)
-            <section class="mt-4 border-t border-neo-ink/15 pt-3">
-                <h3 class="font-bold">Insiden #{{ $incident->id }} · Customer #{{ $incident->customer_id }} · {{ $incident->reason }}</h3>
-                <p class="mt-2 text-sm">Exposure {{ $incident->exposure_micro }} micro-USDT · tersedia {{ $incident->available_exposure_micro }} · sudah terpakai {{ $incident->spent_exposure_micro }}</p>
+            <section class="mt-4 border-t border-admin-line pt-3">
+                <h3 class="text-sm font-semibold text-admin-ink">Insiden #{{ $incident->id }} · Customer #{{ $incident->customer_id }} · {{ $incident->reason }}</h3>
+                <p class="mt-2 text-sm font-medium text-admin-muted">Exposure {{ $incident->exposure_micro }} micro-USDT · tersedia {{ $incident->available_exposure_micro }} · sudah terpakai {{ $incident->spent_exposure_micro }}</p>
                 @if($incident->recovery_status)
-                    <p class="mt-2 font-bold">Recovery: {{ $incident->recovery_status }}</p>
+                    <p class="mt-2 font-semibold text-admin-ink">Recovery: {{ $incident->recovery_status }}</p>
                 @else
                     <form method="POST" action="{{ route('admin.store-balance.usdt-review.recovery-previews.store') }}" class="mt-3 space-y-3">
                         @csrf
                         <input type="hidden" name="incident_id" value="{{ $incident->id }}">
-                        <label class="block font-bold" for="recovery-reason-{{ $incident->id }}">Alasan case recovery</label>
+                        <x-admin-dashboard.field-label for="recovery-reason-{{ $incident->id }}">Alasan case recovery</x-admin-dashboard.field-label>
                         <x-admin-dashboard.textarea id="recovery-reason-{{ $incident->id }}" name="reason" :rows="2" maxlength="500" required />
                         <x-admin-dashboard.button type="submit" variant="warning">Tinjau otorisasi recovery</x-admin-dashboard.button>
                     </form>
                 @endif
             </section>
         @empty
-            <p class="mt-3">Belum ada insiden reorg.</p>
+            <p class="mt-3 text-sm font-medium text-admin-muted">Belum ada insiden reorg.</p>
         @endforelse
         <div class="mt-3">{{ $incidents->links() }}</div>
     </x-admin-dashboard.card>

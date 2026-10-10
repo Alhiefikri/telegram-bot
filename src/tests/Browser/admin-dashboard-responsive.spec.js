@@ -3270,6 +3270,157 @@ test("operational surfaces keep the shared shell and avoid occlusion at every br
   }
 });
 
+test("financial and communication surfaces keep the shared shell and avoid occlusion at every breakpoint in both themes", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(300_000);
+  await login(page);
+
+  const surfaces = [
+    ["ringkasan", "/admin?tab=stats"],
+    ["broadcast", "/admin?tab=broadcast"],
+    ["store-channel", "/admin?tab=telegram-channel"],
+    ["riwayat", "/admin?tab=riwayat"],
+    ["withdraw", "/admin?tab=withdraw"],
+    ["funnel", "/admin?tab=funnel"],
+    ["balance-issues", "/admin?tab=balance-issues"],
+    ["balance-reports", "/admin/store-balance/reports"],
+    ["balance-adjustments", "/admin/store-balance/adjustments"],
+    ["usdt-review", "/admin/store-balance/usdt-review"],
+  ];
+
+  for (const width of [375, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${baseUrl}/admin?tab=stats`);
+
+    for (const theme of ["light", "dark"]) {
+      await setAdminTheme(page, theme);
+
+      for (const [name, path] of surfaces) {
+        const response = await page.goto(`${baseUrl}${path}`, {
+          waitUntil: "domcontentloaded",
+        });
+        expect(response.status(), `${path} should render`).toBe(200);
+
+        const topbar = page.getByRole("banner", { name: "Konteks halaman" });
+        await expect(topbar, `${path} keeps the shared topbar`).toBeVisible();
+        await expectNoDocumentOverflow(page);
+
+        const heading = page.locator("main h1, main h2").first();
+        await expect(heading, `${path} renders a heading`).toBeVisible();
+        await expectStatusBadgesReadable(page.locator("main"));
+        const [topbarBox, headingBox] = await Promise.all([
+          topbar.boundingBox(),
+          heading.boundingBox(),
+        ]);
+        expect(
+          headingBox.y,
+          `first heading on ${path} stays below the shared topbar`
+        ).toBeGreaterThanOrEqual(topbarBox.y + topbarBox.height - 1);
+
+        await page.screenshot({
+          path: testInfo.outputPath(`${name}-${width}-${theme}.png`),
+          fullPage: false,
+        });
+      }
+    }
+  }
+});
+
+test("Ringkasan keeps real summary metrics, earnings boundaries and IDR/USDT separation", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=stats`);
+
+  const ringkasan = page.locator("#admin-section-stats");
+  const metrics = ringkasan.locator('section[aria-label="Metrik ringkasan"]');
+  await expect(metrics).toBeVisible();
+  await expect(metrics).toContainText("GMV");
+  await expect(metrics).toContainText("Saldo");
+  await expect(metrics).toContainText("Produk aktif");
+
+  const activity = ringkasan.locator(
+    'section[aria-label="Aktivitas ringkasan"]'
+  );
+  await expect(activity).toContainText("Order");
+
+  const earnings = ringkasan.locator('section[aria-label="Pendapatan 7 hari"]');
+  await expect(earnings).toBeVisible();
+  await expect(
+    earnings.getByRole("heading", { name: "Pendapatan 7 hari" })
+  ).toBeVisible();
+  await expect(earnings.getByText("Pembayaran lunas")).toBeVisible();
+  await expect(earnings.locator("div[style]")).toHaveCount(7);
+
+  await expect(
+    ringkasan.getByRole("heading", { name: "Kebijakan Top-up Saldo" })
+  ).toBeVisible();
+  await expect(
+    ringkasan.getByRole("heading", { name: "Kebijakan Top-up USDT" })
+  ).toBeVisible();
+  await expect(
+    ringkasan.getByRole("heading", { name: "BSC Receiving Address" })
+  ).toBeVisible();
+  await expect(
+    ringkasan.getByRole("heading", { name: "Kontrol Operasional" })
+  ).toBeVisible();
+
+  await expectNoDocumentOverflow(page);
+});
+
+test("finance tables keep their overflow local and their labels readable at 200% text", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+
+  for (const [tab, section] of [
+    ["withdraw", "#admin-section-withdraw"],
+    ["riwayat", "#admin-section-history"],
+    ["balance-issues", "#admin-section-balance-issues"],
+  ]) {
+    await page.goto(`${baseUrl}/admin?tab=${tab}`);
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+
+    const region = page.locator(section);
+    const table = region.locator("table").first();
+    await expect(
+      table,
+      `${tab} table stays rendered at 200% text`
+    ).toBeVisible();
+    await expectStatusBadgesReadable(region);
+
+    // A table wider than its wrapper must scroll inside that wrapper instead of
+    // widening the document.
+    const widths = await table.evaluate((element) => {
+      const wrapper = element.parentElement;
+
+      return {
+        table: Math.round(element.getBoundingClientRect().width),
+        wrapper: Math.round(wrapper.getBoundingClientRect().width),
+        wrapperOverflowX: window.getComputedStyle(wrapper).overflowX,
+      };
+    });
+    expect(widths.wrapperOverflowX, `${tab} table wrapper scrolls`).toBe(
+      "auto"
+    );
+    expect(
+      widths.wrapper,
+      `${tab} table reaches past its own wrapper instead of the document`
+    ).toBeLessThanOrEqual(widths.table + 1);
+
+    await expectNoDocumentOverflow(page);
+
+    await page.evaluate(() => {
+      document.documentElement.style.removeProperty("font-size");
+    });
+  }
+});
+
 test("desktop sidebar links navigate without JavaScript and retain filters", async ({
   browser,
 }) => {
@@ -3565,6 +3716,62 @@ test("hides retired Pakasir controls from provider switch", async ({
   await expect(
     paymentRegion.getByRole("button", { name: "QR Native Pakasir" })
   ).toHaveCount(0);
+});
+
+test("payment switch and maintenance confirmations keep focus, Escape and real submission controls", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=stats#admin-payment-settings`);
+
+  const paymentRegion = page.getByRole("region", { name: "Mode pembayaran" });
+  const switchTrigger = paymentRegion.getByRole("button", {
+    name: "QR Manual",
+    exact: true,
+  });
+  await switchTrigger.scrollIntoViewIfNeeded();
+  await switchTrigger.click();
+
+  const switchDialog = page.getByRole("dialog", {
+    name: "Konfirmasi ganti provider pembayaran",
+  });
+  await expect(switchDialog).toBeVisible();
+  await expect(
+    switchDialog.getByRole("button", { name: "Konfirmasi switch" })
+  ).toBeFocused();
+  await expect(switchDialog).toContainText("Hanya checkout baru yang berubah.");
+  await page.keyboard.press("Escape");
+  await expect(switchDialog).toBeHidden();
+  await expect(switchTrigger).toBeFocused();
+
+  const maintenanceCard = page.locator("#admin-checkout-maintenance");
+  const maintenanceTrigger = maintenanceCard
+    .locator("form[data-checkout-maintenance-target] button[type='submit']")
+    .first();
+  await maintenanceTrigger.scrollIntoViewIfNeeded();
+  await maintenanceTrigger.click();
+
+  const maintenanceDialog = page.getByRole("dialog", {
+    name: "Konfirmasi perubahan Checkout Maintenance",
+  });
+  await expect(maintenanceDialog).toBeVisible();
+  await expect(
+    maintenanceDialog.getByRole("button", { name: "Konfirmasi", exact: true })
+  ).toBeFocused();
+  await expect(maintenanceDialog).toContainText(
+    "Hanya pembuatan Order baru yang terpengaruh."
+  );
+  await page.keyboard.press("Escape");
+  await expect(maintenanceDialog).toBeHidden();
+  await expect(maintenanceTrigger).toBeFocused();
+
+  await expect(
+    paymentRegion.getByRole("button", { name: /Binance Pay USDT/ })
+  ).toBeVisible();
+  await expect(
+    paymentRegion.getByRole("textbox", { name: "Nomor WhatsApp" })
+  ).toBeVisible();
 });
 test("keeps shared context and store actions reachable on internal admin tabs", async ({
   page,
@@ -5107,6 +5314,48 @@ async function exerciseProductManagementModals(page) {
   await expect(reopenedStockModal).toBeVisible();
   await reopenedStockModal.getByRole("button", { name: "Batal" }).click();
   await expect(reopenedStockModal).toBeHidden();
+}
+
+// A badge narrower than its own longest word means the label wrapped per
+// character, which is unreadable. Wrapping between words stays allowed.
+async function expectStatusBadgesReadable(container) {
+  const broken = await container
+    .locator("span.rounded-full")
+    .evaluateAll((elements) =>
+      elements
+        .filter((element) => {
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+
+          return (
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            rect.width > 0 &&
+            (element.textContent || "").trim().length >= 3
+          );
+        })
+        .map((element) => {
+          const style = window.getComputedStyle(element);
+          const context = document.createElement("canvas").getContext("2d");
+          context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+          const label = (element.textContent || "").trim();
+          const longestWord = Math.max(
+            ...label.split(/\s+/).map((word) => context.measureText(word).width)
+          );
+
+          return {
+            label,
+            width: Math.round(element.getBoundingClientRect().width),
+            longestWord: Math.round(longestWord),
+          };
+        })
+        .filter((element) => element.width + 1 < element.longestWord)
+    );
+
+  expect(
+    broken,
+    `badge labels must not wrap per character: ${JSON.stringify(broken)}`
+  ).toEqual([]);
 }
 
 async function expectNoDocumentOverflow(page) {

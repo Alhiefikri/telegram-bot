@@ -50,16 +50,16 @@
                         <x-admin-dashboard.notice tone="neutral" class="mt-4 text-xs">Role ini hanya bisa melihat banner. Owner/Admin dapat menggantinya dari sini.</x-admin-dashboard.notice>
                     @endif
                 </x-admin-dashboard.card>
-                <x-admin-dashboard.card as="section" tone="purple" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Telegram Channel">
+                <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Telegram Channel">
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Telegram Channel</p>
-                            <h2 class="mt-1 font-display text-base font-bold text-neo-ink">Setup Store Channel</h2>
+                            <p class="text-xs font-medium text-admin-muted">Telegram Channel</p>
+                            <h2 class="mt-1 text-lg font-semibold text-admin-ink">Setup Store Channel</h2>
                         </div>
                         <x-admin-dashboard.badge :tone="$storeChannel['status']['tone']">{{ $storeChannel['status']['label'] }}</x-admin-dashboard.badge>
                     </div>
-                    <p class="mt-2 text-xs font-semibold text-brand-muted">{{ $storeChannel['status']['hint'] }}</p>
-                    <p class="mt-2 text-xs font-semibold text-brand-muted">Poster produk untuk posting stok bertambah diatur per produk pada tab Produk → Edit produk → Poster stok bertambah. Tidak dipakai untuk sales proof, banner /start, atau pesan pelanggan.</p>
+                    <p class="mt-2 text-sm leading-6 text-admin-muted">{{ $storeChannel['status']['hint'] }}</p>
+                    <p class="mt-2 text-xs font-medium leading-5 text-admin-muted">Poster produk untuk posting stok bertambah diatur per produk pada tab Produk → Edit produk → Poster stok bertambah. Tidak dipakai untuk sales proof, banner /start, atau pesan pelanggan.</p>
 
                     @error('channel_username', 'storeChannel')<x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>@enderror
                     @error('channel_link', 'storeChannel')<x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>@enderror
@@ -78,7 +78,7 @@
                             <x-admin-dashboard.notice tone="warning" class="text-xs">Warning: toggle aktif tetapi setup channel belum ready.</x-admin-dashboard.notice>
                         @endif
                         @if($storeChannel['can_manage'])
-                            <x-admin-dashboard.button variant="warning" class="w-full" type="submit">Simpan Pengaturan</x-admin-dashboard.button>
+                            <x-admin-dashboard.button variant="primary" class="w-full" type="submit">Simpan Pengaturan</x-admin-dashboard.button>
                         @else
                             <x-admin-dashboard.notice tone="neutral" class="text-xs">Hanya owner/admin yang bisa mengubah Telegram Channel.</x-admin-dashboard.notice>
                         @endif
@@ -86,24 +86,24 @@
                     @if($storeChannel['can_manage'])
                         <form id="admin-store-channel-test" data-admin-return-target tabindex="-1" method="POST" action="{{ $storeChannel['test_url'] }}" class="mt-3">
                             @csrf
-                            <x-admin-dashboard.button variant="purple" class="w-full" type="submit">Test Channel</x-admin-dashboard.button>
+                            <x-admin-dashboard.button variant="neutral" class="w-full" type="submit">Test Channel</x-admin-dashboard.button>
                         </form>
                     @endif
                 </x-admin-dashboard.card>
 
                 @php($fakeSalesProof = $storeChannel['fake_sales_proof'])
-                <x-admin-dashboard.card id="admin-store-channel-fake-sales-proof" data-admin-return-target tabindex="-1" as="section" tone="purple" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-label="Info pembelian fake">
+                <x-admin-dashboard.card id="admin-store-channel-fake-sales-proof" data-admin-return-target tabindex="-1" as="section" padding="compact" shadow="sm" aria-label="Info pembelian fake">
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Fake Sales Proof</p>
-                            <h2 class="mt-1 font-display text-base font-bold text-neo-ink">Info Pembelian Fake</h2>
+                            <p class="text-xs font-medium text-admin-muted">Fake Sales Proof</p>
+                            <h2 class="mt-1 text-lg font-semibold text-admin-ink">Info Pembelian Fake</h2>
                         </div>
                         <x-admin-dashboard.badge :tone="$fakeSalesProof['can_send'] ? 'emerald' : 'amber'">
                             {{ $fakeSalesProof['can_send'] ? 'Ready' : 'Standby' }}
                         </x-admin-dashboard.badge>
                     </div>
 
-                    <p class="mt-2 text-xs font-semibold text-brand-muted">
+                    <p class="mt-2 text-sm leading-6 text-admin-muted">
                         Pilih produk nyata lalu kirim manual kapan saja. Auto fake notif tetap jalan sendiri memakai interval random, tanpa membuat data Pesanan dan tanpa mengurangi stok.
                     </p>
 
@@ -134,14 +134,14 @@
                             </x-admin-dashboard.select>
                             <x-admin-dashboard.button
                                 variant="warning"
-                                class="w-full text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                                class="w-full disabled:cursor-not-allowed disabled:opacity-60"
                                 type="submit"
                                 :disabled="! $fakeSalesProof['can_send']"
                             >
-                                🎉 Kirim Info Pembelian Fake
+                                Kirim Info Pembelian Fake
                             </x-admin-dashboard.button>
                         </form>
-                        <p class="mt-2 text-[11px] font-semibold text-brand-muted">
+                        <p class="mt-2 text-xs font-medium leading-5 text-admin-muted">
                             Manual tidak kena cooldown. Auto dikirim scheduler saat interval acak {{ $fakeSalesProof['interval_options_label'] }} sudah due.
                         </p>
                     @else

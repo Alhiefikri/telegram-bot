@@ -1,6 +1,6 @@
 # Admin Dashboard Sidebar Cutover
 
-Status: implemented in the working tree; production deployment is not authorized by issues #600, #601, #602 or #603.
+Status: implemented in the working tree; production deployment is not authorized by issues #600, #601, #602, #603 or #604.
 
 ## As-built ownership
 
@@ -365,9 +365,174 @@ All pairs clear WCAG AA for normal text (4.5:1); every semantic state also carri
 
 ### Known limits recorded, not fixed here
 
-- Financial/communication tab bodies (Ringkasan controls, Siaran, Store Channel body, Riwayat, Withdraw, Funnel, balance/compensation, and the `admin/store-balance/*` views) and the `admin/balance-reports` view still carry legacy markup; they belong to the visual non-operational tickets named in the #603 brief. Exception: the Telegram welcome-banner control that lives inside the Store Channel tab was restyled here because §16.3 assigns it to Products.
 - Real Telegram Android/iOS release evidence remains the #599/#600 human gate; browser-viewport emulation does not qualify it.
-- Pre-existing, unchanged: `AdminAccountInputWorkflow.accountInputErrorClass()` returns `border-[#ef4444]`, but Tailwind emits that arbitrary border-color rule before the themed `border-*` utilities, so an invalid account row keeps the neutral border and signals the error through its `ring-2` accent plus the field message and `aria-invalid`. Fixing the border would change an existing JS error-state contract, which this presentation-only ticket excludes.
+- Pre-existing, unchanged: `AdminAccountInputWorkflow.accountInputErrorClass()` returns `border-[#ef4444]`, but Tailwind emits that arbitrary border-color rule before the themed `border-*` utilities, so an invalid account row keeps the neutral border and signals the error through its `ring-2` accent plus the field message and `aria-invalid`. Fixing the border would change an existing JS error-state contract, which these presentation-only tickets exclude.
+
+## Issue #604 summary, communications and finance restyle
+
+Follow-up to #596/#598 after the #601/#602/#603 blockers. Presentation only:
+routes, `method`/`@csrf`/`@method`, every input `name`, hidden fields, named
+error bags, `@error`/`old()`, redirects, stable return targets, permission
+gates, Alpine roots and every `x-*` binding, modal ownership, and Indonesian
+copy are unchanged. Each rewritten view was diffed with class attributes
+stripped (structural diff) plus a token inventory (`route(...)`, `name="..."`,
+`@csrf`, `@method`, `@foreach`, `@forelse`, `@error`, `@if`, `@selected`,
+`id="..."`, `aria-label`, `x-data`, `x-on:`): counts are identical to the
+pre-restyle files except for the deliberate additions listed below.
+
+### Visual decisions and the reason for each
+
+- **Summary surface owns one card language.** The payment/provider control,
+  BSC receiver panel, IDR and USDT funding policy, balance-operations panel,
+  the balance-report/adjustment shortcuts, and checkout maintenance now use
+  the shared `card`/`badge`/`button`/`input`/`select`/`textarea`/`field-error`
+  primitives with `border-admin-line` separators and `--admin-radius` corners,
+  and they lost the legacy `tone="purple|blue|rose"` fills: a card fill carried
+  no meaning once the section heading and status badge already named the state.
+- **Server tones are aliased inside `x-admin-dashboard.badge`.** The view models
+  describe state as `success`/`warning`/`danger`/`info`
+  (`StoreBalanceOwnerCompensationService::STATUS_TONES`) while the primitive
+  named its palettes emerald/amber/rose/blue, so compensation rows rendered a
+  muted default badge. The alias keeps one primitive and one palette while
+  state colors reach the screen again.
+- **`regular case`, medium weight** replaces the uppercase/tracked labels in
+  the stats controls, Riwayat/Withdraw/Funnel headings, and the compensation
+  modal. Identifier-heavy queue rows (provider references, order IDs, wallet
+  addresses) are faster to scan without wide tracking, and the semantic
+  success/warning/danger boxes keep their own tokens and text labels.
+- **Machine values use `font-mono text-xs break-all`** (KlikQRIS order IDs,
+  withdraw codes, BSC addresses, provider references, USDT raw units, balance
+  metric keys, Telegram IDs). Prose keeps the regular UI scale so monospace
+  keeps its meaning.
+- **Tables keep normal word wrapping inside their cells.** The shell sets
+  `overflow-wrap: anywhere` so a long token never widens the document, but that
+  also let auto table layout collapse a status column to badge width, which
+  broke `Success` into one character per line and inflated a withdraw row to
+  344px. `.admin-dashboard-shell :where(th, td) { overflow-wrap: normal; }`
+  (base layer, so an explicit `break-*` on a cell still wins) restores
+  content-driven columns; the same withdraw row now measures 84px and the
+  1100px table scrolls inside its own `overflow-x-auto` wrapper.
+  `x-admin-dashboard.badge` and `x-admin-dashboard.button` also declare
+  `[overflow-wrap:normal]` so their labels never break mid-word.
+- **Both confirmation dialogs now match the shell** (`bg-admin-surface`,
+  `border-admin-line`, `--admin-radius`, `shadow-admin-lg`, 44px close target).
+  The Alpine open/close/Escape/focus contract and the form they submit are
+  untouched.
+- **Emoji left headings and buttons only** (`📢 Siaran`, `📤 Kirim Siaran`,
+  `🎉 Kirim Info Pembelian Fake`). The remaining emoji in these surfaces name a
+  real action or status; heading emoji competed with the real status badges.
+- **`admin-dashboard-input` and `earnings-bar-*` CSS were deleted** after their
+  last consumers moved to `x-admin-dashboard.input` and the accent-filled
+  earnings track. `.neo-input` stays because the Storefront still uses it.
+
+### Exercised states (browser lane, disposable SQLite fixtures)
+
+| Surface | Valid | Invalid / error | Empty / stale / gated |
+| --- | --- | --- | --- |
+| Ringkasan | metrics, earnings bars, payment mode, provider readiness, Binance toggle, TTL form, Support WhatsApp, BSC receiver, IDR/USDT policy, balance operations, checkout maintenance | server validation keeps `old()` and reopens the section; maintenance confirmation rejects an unconfirmed submit | provider not-ready reason, closed USDT rails, paused scopes, open restore gate, zero open alerts, `Belum ada BSC Receiving Address` |
+| Siaran | message form, queue counters | over-length message and empty message return named `broadcast` errors with retained text | empty queue state |
+| Store Channel | channel settings, test action, fake sales proof | named `storeChannel` errors; setup warning | fallback banner, `Standby` state |
+| Riwayat KlikQRIS | table + mobile cards, pagination | — | mismatch notice, stale marker, provider-unavailable notice |
+| Withdraw | filter form, table + mobile cards, proof link | invalid filter notice | empty filter state, pagination |
+| Funnel | ten filters, summary, product/family tables, rails/outcomes/support, source table | `state === 'error'` empty state | empty product/family/source states, 31-day bound copy |
+| Kompensasi top-up | filter form, queue, release dialog | `balanceCompensation` error, required provider reference/reason | not-eligible row, empty queue |
+| Laporan saldo | section/currency pills, filter form, rows, cursor link | — | `Tidak ada data untuk filter ini`, custody unavailable badge |
+| Kelola saldo | exact Telegram-ID lookup, amount/reason form, preview, password confirm, history, positive balances | wrong password notice, reversal without eligibility | preview expired/unavailable states |
+| Review deposit USDT | target table, evidence, decision form, recovery forms, observations, incidents | required hash/amount/reason | `Belum ada target top-up`, `Belum ada insiden reorg` |
+
+### Passing-after checks (final tree)
+
+Run from `src/`:
+
+- `php artisan test --filter=AdminDashboard` — passed, 139 tests / 1,750 assertions.
+- `php artisan test --filter='AdminBalanceAdjustmentDashboardTest|AdminBalanceReportTest|AdminUsdtTopUpReviewTest|AdminStoreChannelTest|StoreBalanceOwnerCompensationTest|AdminBalanceOperationsPanelTest|CheckoutMaintenanceTest|AdminTelegramBroadcastQueueTest|AdminDashboardPaymentModeTest|UsdtFundingPolicyTest|BalanceOperationsMetricsTest|BalanceRestoreGateTest|BalanceReleaseReadinessReportTest|BalanceReceiptDeliveryPauseTest|ProductionReleaseHardeningTest|StorefrontLandingPageTest|AdminCategoryCrudTest'` — passed, 234 tests / 1,916 assertions.
+- `php artisan test --filter='KlikQrisReportingTest|StorefrontFunnelReportTest'` — passed, 23 tests / 133 assertions.
+- `npm run test:js` — passed, 57 tests.
+- `npm run build` — Vite production build passed (also rebuilt by the browser lane).
+- `npm run test:browser:admin` — passed, 106 tests (10.7m), including the new financial/communication lane, the Ringkasan metrics/earnings lane, the payment-switch/maintenance dialog workflow, the badge-readability assertion, and the 200% text table-overflow check.
+- `php artisan view:cache` — all rewritten views compile.
+
+Screenshots for the record: `src/test-results/**/{ringkasan,broadcast,store-channel,riwayat,withdraw,funnel,balance-issues,balance-reports,balance-adjustments,usdt-review}-{375,768,1280}-{light,dark}.png` written by the new lane (ignored by git).
+
+### Delivery Gate (issue #604 scope)
+
+Design Read, declared before edits: admin summary, communication, reporting and
+finance surfaces for the store Owner/Admin running real payment, balance,
+provider-report and compensation work, in the canonical Variant A language:
+dial **ENERGY 1 / RHYTHM 2 / MOTION 1**. ENERGY 1 because these are dense
+operational surfaces where one accent marks the primary action; RHYTHM 2
+because section groups repeat but a table, a form, a queue and a read-only
+report each need their own shape; MOTION 1 because nothing here should move
+beyond the existing hover/transition feedback.
+
+| Gate item | Result and evidence |
+| --- | --- |
+| R-02 punctuation | PASS: no em dash introduced; the pre-existing `'—'` placeholders in rendered server values and the pinned operator copy are untouched. |
+| R-03 mobile layout | PASS: the new lane asserts zero document overflow on all ten surfaces at 375/768/1280px in both themes; the no-JavaScript owner/admin 320/375/1280px cases (including 200% text) still pass, and the 200% text check keeps the withdraw/riwayat/kompensasi tables scrolling inside their own wrappers. |
+| R-17 sourced statistics | PASS: every rendered number comes from the fixture database (GMV, Saldo, order counts, earnings bars, funnel aggregates, balances). |
+| R-18 testimonials | PASS: none. |
+| R-23 assets/navigation authority | PASS: no assets or navigation items added; existing authorized groups retained. |
+| R-24 real destinations | PASS: every link/action keeps its `route(...)`; route-inventory diff per file is identical. |
+| R-25 text contrast | PASS: measured pairs below, all >= 4.5:1. |
+| R-26 functional controls | PASS: every control is still a real form post, link or Alpine handler; the browser lane submits the real navigation, filters, uploads and dialog workflows. |
+| R-27 states | PASS: empty, stale, provider-unavailable, gated and validation states rendered from real fixture data and exercised. |
+| R-28 FAQ relevance | PASS: no FAQ touched. |
+| R-32 keyboard/focus | PASS: the payment-switch and maintenance dialogs focus their confirm action, close with Escape and restore the opener; tables, filters and the release dialog keep 44px targets and visible focus. |
+| R-33 source implementation | PASS: Blade/CSS/spec source only; no runtime style patching. |
+| R-34 themes | PASS: every surface rendered in light and dark at three widths; tokens measured in both themes. |
+| R-35 executed surface | PASS: feature suites, JS tests, Vite build and the 105-case browser lane ran on the final tree. |
+| R-36 honest claims | PASS: no security/performance/customer claims; no production deployment; numbers are local measurements. |
+| R-37 direction | PASS: Variant A and ENERGY 1 / RHYTHM 2 / MOTION 1 declared before the first edit. |
+| R-38 real content | PASS: production labels unchanged; fixtures stay inside the disposable browser database. |
+| R-01 gradients/glow | PASS: the gradient earnings bar was replaced by a flat accent fill; the gradient `store-link-section` styling is no longer rendered on the dashboard. |
+| R-04 icon purpose | PASS: heading emoji removed; the remaining emoji name an action. |
+| R-06 typography purpose | PASS: uppercase/tracked operational labels replaced by the shared title/label scale; mono restricted to data-like values. |
+| R-07 background patterns | PASS: no grid/dot pattern added. |
+| R-08 decorative arrows | PASS: existing `←`/`→` glyphs on navigation and not-yet-available states remain; no new decorative arrows. |
+| R-09 badges | PASS: badges report real state (queue status, provider readiness, rail availability, custody, pause state) with a text label, never color alone. |
+| R-10 glass | PASS: no blur/backdrop effect added. |
+| R-12 elevation | PASS: cards use `shadow-admin-sm`, dialogs `shadow-admin-lg`; the legacy hard-offset shadows are gone. |
+| R-13 glow everywhere | PASS: no glow. |
+| R-14 card hierarchy | PASS: cards follow the content (section, queue row, metric row, report row) instead of one uniform tile. |
+| R-19 motion purpose | PASS: no animation added; only existing color transitions remain. |
+| R-22 illustration purpose | PASS: none. |
+| Liveliness: explicit dials | PASS: ENERGY 1 / RHYTHM 2 / MOTION 1 recorded in the Design Read. |
+| Liveliness: dial consistency | PASS: dense operator rhythm with per-surface shape; the lane screenshots show the same card/heading/fact-pair language across all ten surfaces. |
+| Liveliness: focal point | PASS: each surface keeps one accent-filled primary action (Terapkan filter, Kirim Siaran, Simpan kebijakan, Release saldo, Konfirmasi resolusi). |
+| Liveliness: structural whitespace | PASS: `space-y-4`/`space-y-5` groups and 16-24px section gaps separate operational blocks. |
+| Liveliness: deliberate accent | PASS: one muted violet accent; semantic colors only for real state. |
+| Liveliness: identity motif | PASS: LHIE STORE, the grouped sidebar, and the repeated eyebrow/title/fact-pair rhythm identify the product. |
+| Liveliness: prior Design Read | PASS: declared before the first edit. |
+| C-1 intentionality | PASS: every decision above carries its one-line reason. |
+| C-2 completeness | PASS: no control was left decorative; the removed emoji and card fills carried no function. |
+| C-3 content-driven composition | PASS: no section added or removed; the Ringkasan order is unchanged. |
+| C-4 resilience | PASS: light/dark, three breakpoints, 200% text, keyboard paths, and empty/error/stale/gated states exercised. |
+| C-5 evidence | PASS: contrast from the contrast tool on the rendered token pairs; rendered-surface evidence from the browser lane and screenshots. |
+| R-05 non-template layout | PASS: operational hierarchy retained; no marketing template introduced. |
+| R-11 radius variation | PASS: `--admin-radius` for cards/dialogs, smaller radii for nested wells and controls; nothing became pill-shaped except the existing status badges and filter pills. |
+| R-15 concrete actions | PASS: labels name the operation (Terapkan filter, Release saldo, Buat preview resolusi, Otorisasi case recovery). |
+| R-16 language | PASS: no buzzwords; operator copy unchanged. |
+| R-20 product identity | PASS: real catalog, order, provider and balance data with LHIE STORE identity retained. |
+| R-21 theme choice | PASS: user-controlled light/dark retained and exercised on every touched surface. |
+| R-29 palette | PASS: existing neutral surfaces plus one violet accent plus semantic state colors. |
+| R-30 originality | PASS: repo-specific Variant A retained. |
+| R-31 written reasons | PASS: recorded above. |
+
+### Measured contrast (light / dark)
+
+These are the token pairs the restyle reuses; values were verified with the
+contrast tool for this ticket.
+
+| Pair | Ratio |
+| --- | --- |
+| `--admin-muted` on `--admin-surface` | 5.9:1 light / 7.79:1 dark |
+| `--admin-muted` on `--admin-surface-muted` | 5.17:1 light / 6.78:1 dark |
+| `--admin-accent-ink` on `--admin-accent` | 5.18:1 light / 8.67:1 dark |
+| `--admin-accent-strong` on surface | 6.67:1 light / 8.67:1 dark |
+| semantic success / warning / info / danger text on their soft fills | 6.68:1 / 6.6:1 / 4.69:1 / 6.8:1 light, 9.74:1 / 8.93:1 / 9.88:1 / 9.47:1 dark |
+
+Every pair clears WCAG AA for normal text (4.5:1), and each semantic state also
+carries a text label, so no status is conveyed by color alone.
 
 ## Historical #600 verification record
 

@@ -11,12 +11,23 @@
         $background ? 'background: '.$background : null,
         $color ? 'color: '.$color : null,
     ])->filter()->implode('; ');
+
+    // The server view models describe state with success/warning/danger/info
+    // while the badge primitive names its palettes emerald/amber/rose/blue.
+    // Alias them here so a real state never falls back to the muted default.
+    $tone = match ($tone) {
+        'success' => 'emerald',
+        'warning' => 'amber',
+        'danger', 'destructive' => 'rose',
+        'info' => 'blue',
+        default => $tone,
+    };
 @endphp
 
 <span
     {{ $attributes
         ->class([
-        'inline-flex items-center gap-1.5 rounded-full border border-admin-line px-2.5 py-0.5 text-xs font-medium leading-5',
+        'inline-flex items-center gap-1.5 rounded-full border border-admin-line px-2.5 py-0.5 text-xs font-medium leading-5 [overflow-wrap:normal]',
         'bg-neo-success-soft text-neo-success-text' => ! $background && $tone === 'emerald',
         'bg-neo-warning-soft text-neo-warning-text' => ! $background && $tone === 'amber',
         'bg-neo-info-soft text-neo-info-text' => ! $background && $tone === 'blue',

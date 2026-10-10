@@ -78,7 +78,7 @@ Defined in `src/resources/css/app.css` inside `@theme`.
 
 ### Admin dashboard palette
 
-Variant A admin surfaces use neutral paper/surface pairs plus one muted violet accent. Those `admin-*` variables live in `src/resources/css/app.css` and are exposed as Tailwind theme aliases. The legacy neo-brutal accents below stay in `@theme` (`--color-neo-*`) for storefront components and the remaining raw legacy admin markup; they are no longer the dashboard baseline.
+Variant A admin surfaces use neutral paper/surface pairs plus one muted violet accent. Those `admin-*` variables live in `src/resources/css/app.css` and are exposed as Tailwind theme aliases. The legacy neo-brutal accents below stay in `@theme` (`--color-neo-*`) for storefront components; no production admin surface renders them any more.
 
 | Color | Value | Usage |
 | --- | --- | --- |
@@ -163,7 +163,9 @@ Admin patterns:
 - Long operational values (invoice hashes, provider references, wallet addresses, SKUs, secrets) use `font-mono text-xs break-all`; every other label stays in the regular UI type scale.
 - Data-dense tables and wide rows scroll inside an `overflow-x-auto` container; the page itself never overflows horizontally.
 
-Operational surfaces in scope for this contract: Produk (catalog, family, category, stock intake and management, storefront banners), Pesanan (orders, order detail, Manual Fulfillment Review, Manual Delivery Review), and Supplier (connections, private catalog/import/mapping, product pricing policy, purchases/recovery, warranty/refund/replacement, BuyMail deposit/history).
+Operational surfaces in scope for this contract: Ringkasan (`stats`, including payment mode/provider readiness, BSC receivers, IDR/USDT funding policy, balance operations, checkout maintenance and Support WhatsApp), Produk (catalog, family, category, stock intake and management, storefront banners), Pesanan (orders, order detail, Manual Fulfillment Review, Manual Delivery Review), Supplier (connections, private catalog/import/mapping, product pricing policy, purchases/recovery, warranty/refund/replacement, BuyMail deposit/history), communications (Siaran, Store Channel plus fake sales proof), reporting (Riwayat KlikQRIS, Withdraw, Funnel), and the financial linked pages (Laporan saldo, Kelola saldo, Review deposit USDT dan insiden, Kompensasi top-up).
+
+Every one of those surfaces now composes the `x-admin-dashboard.*` primitives; the raw legacy border/shadow/uppercase/palette overrides and the `admin-dashboard-input` and `earnings-bar-*` CSS they needed were removed. The password-confirmation page keeps its form and redirect behavior but uses the same primitives.
 
 Menu labels keep their established, specific action wording; emoji are not used as heading decoration. See `docs/agents/admin-dashboard-sidebar-cutover.md` for the recorded decisions and evidence, including the `supplier-*` CSS family that this contract removed.
 
@@ -214,19 +216,18 @@ Current motion is mostly transform/opacity based and should stay that way.
 
 ### Admin
 
-- Login: `src/resources/views/admin/login.blade.php`
+- Login: `src/resources/views/admin/login.blade.php`, password confirmation: `src/resources/views/auth/confirm-password.blade.php`
 - Dashboard shell: `src/resources/views/admin/dashboard.blade.php`
-- Order detail: `src/resources/views/admin/orders/show.blade.php`
-- Dashboard styles: `src/resources/views/admin/dashboard/styles.blade.php`
-- Dashboard partials: `src/resources/views/admin/dashboard/header.blade.php`, `desktop-navigation.blade.php`, `mobile-navigation.blade.php`, `status-flash.blade.php`, `stats-tab.blade.php`, `products-tab.blade.php`, `sales-tab.blade.php`, `broadcast-tab.blade.php`, `store-channel-tab.blade.php`, `product-card.blade.php`, `product-modal.blade.php`, `stock-modals.blade.php`
+- Dashboard partials: `src/resources/views/admin/dashboard/status-flash.blade.php`, `stats-tab.blade.php`, `products-tab.blade.php`, `product-card.blade.php`, `product-modal.blade.php`, `product-family-modal.blade.php`, `category-management-modal.blade.php`, `stock-modals.blade.php`, `storefront-banners.blade.php`, `sales-tab.blade.php`, `suppliers-tab.blade.php`, `broadcast-tab.blade.php`, `store-channel-tab.blade.php`, `history-tab.blade.php`, `withdraw-tab.blade.php`, `funnel-tab.blade.php`, `balance-issues-tab.blade.php`, `balance-issues-compensation-modal.blade.php`
+- Linked workflow pages: `src/resources/views/admin/orders/show.blade.php`, `manual-fulfillment-reviews/{index,show}.blade.php`, `telegram-outbound-effects/{index,show}.blade.php`, `suppliers/*.blade.php`, `balance-reports/index.blade.php`, `store-balance/adjustments.blade.php`, `store-balance/usdt-review.blade.php`
 - Admin components: `src/resources/views/components/admin-dashboard/*.blade.php`
-- JS: `src/resources/js/admin-dashboard.js`, `src/resources/js/app.js`
+- JS: `src/resources/js/admin-dashboard.js`, `src/resources/js/admin-dashboard/*.js`, `src/resources/js/app.js`
 
 ## Design guardrails
 
 - Preserve the current electric-blue storefront identity; do not reintroduce the old orange storefront direction.
 - Preserve Lhie Store naming and Telegram-first purchase/support cues; do not use Warung AI naming in new design docs or UI copy unless intentionally reintroduced by product strategy.
 - Do not assume Filament for admin UI; the current admin is custom Blade components.
-- Primary storefront actions are blue; admin primary/active actions may be green or yellow depending on context.
+- Primary storefront actions are blue; admin primary actions use the muted violet accent fill with semantic amber/red reserved for real warning and destructive states.
 - Use black offset shadows deliberately. If a component already has a 3px border and hard shadow, avoid adding soft shadows or glass effects.
 - Keep playful neo-brutal energy useful: decoration must not obscure product choice, stock, payment, support, or admin status.

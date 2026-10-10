@@ -1292,6 +1292,22 @@ and the per-item antislop gate live in
 `docs/agents/admin-dashboard-sidebar-cutover.md`. No route, form field, error
 bag, `old()`, permission gate, Alpine state key, or domain rule changed.
 
+Summary, communication, reporting and finance surfaces (#604) also render
+through the primitives: Ringkasan (`stats-tab` payment mode/provider readiness,
+Binance settings, TTL, Support WhatsApp, BSC receivers, IDR/USDT funding policy,
+balance-operations panel, checkout maintenance and both confirmation dialogs),
+Siaran, Store Channel (channel setup plus fake sales proof), Riwayat KlikQRIS,
+Withdraw, Funnel, Kompensasi top-up with its release dialog, and the linked
+pages `admin/balance-reports/index`, `admin/store-balance/adjustments`, and
+`admin/store-balance/usdt-review`. The password-confirmation page keeps its
+form/POST/intended-redirect contract and now uses the same primitives instead
+of raw neo-brutal classes. `x-admin-dashboard.badge` aliases the server
+`success`/`warning`/`danger`/`info` tones onto its emerald/amber/rose/blue
+palettes so state badges keep their semantic colors. The `admin-dashboard-input`
+and `earnings-bar-*` CSS classes were deleted once their last consumer moved to
+`x-admin-dashboard.input`/the accent-filled track; `.neo-input` remains a
+Storefront-only class.
+
 Desktop cutover (#594): `admin/dashboard.blade.php` mounts `shell` with named
 sidebar/topbar/status/content slots, one `adminDashboard` root, and one document
 content scroll. At >=1024px the grouped sidebar is persistent and 240px wide;
@@ -1349,8 +1365,11 @@ current sidebar links, absent inactive tab subtrees, and filter/create-state
 boundaries. `admin-dashboard-responsive.spec.js` exercises desktop links,
 all ten direct tabs, browser back/forward/hash/filter state, no-JavaScript
 navigation, existing feature modals, and the 1023/1024px breakpoint. Screenshot
-attachments cover light/dark summary, Products and Sales. Desktop evidence
-does not qualify real Telegram Android/iOS clients; #599/#600 retain that
+attachments cover light/dark summary, Products and Sales, and the #604 lane
+adds Ringkasan/communication/reporting/finance surfaces at 375/768/1280px in
+both themes plus the Ringkasan metrics/earnings assertions and the payment
+switch/checkout maintenance focus and Escape workflow. Desktop evidence does
+not qualify real Telegram Android/iOS clients; #599/#600 retain that
 release gate. No production deployment is authorized by this cutover.
 
 

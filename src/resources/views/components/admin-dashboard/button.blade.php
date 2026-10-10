@@ -8,7 +8,7 @@
 @php
     // `hover:*` colors live on each variant: a shared hover fill cannot serve
     // accent, neutral, semantic and ink fills with a readable foreground.
-    $baseClasses = 'admin-dashboard-action inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-admin-line px-4 py-2 text-center text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper';
+    $baseClasses = 'admin-dashboard-action inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-admin-line px-4 py-2 text-center text-sm font-semibold transition-colors [overflow-wrap:normal] focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper';
     $sizeClasses = match ($size) {
         'sm' => 'min-h-11 px-3 py-2 text-sm',
         'icon' => 'h-11 min-h-11 w-11 px-0 py-0 text-sm',

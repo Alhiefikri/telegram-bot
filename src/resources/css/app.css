@@ -345,6 +345,15 @@
   .font-display {
     font-family: "Space Grotesk", "Plus Jakarta Sans", sans-serif;
   }
+
+  /* The admin shell wraps text by character anywhere so a long machine token
+     never widens the document. Table cells keep normal word wrapping so column
+     widths come from their content and a wider table scrolls inside its own
+     `overflow-x-auto` wrapper instead of squeezing labels per character. The
+     base layer lets an explicit `break-*` utility on a cell win. */
+  .admin-dashboard-shell :where(th, td) {
+    overflow-wrap: normal;
+  }
 }
 
 @layer utilities {
@@ -495,23 +504,6 @@
       box-shadow 0.2s ease;
   }
 
-  .admin-dashboard-input {
-    min-height: 2.75rem;
-    width: 100%;
-    border: 1px solid var(--admin-line);
-    border-radius: var(--admin-radius);
-    background: var(--admin-surface);
-    padding: 0.5rem 0.75rem;
-    font-size: 0.875rem;
-    font-weight: 400;
-    color: var(--admin-ink);
-    transition: border-color 150ms ease;
-  }
-  .admin-dashboard-input:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--admin-focus);
-  }
-
   .filter-pill {
     display: inline-flex;
     align-items: center;
@@ -550,22 +542,6 @@
     background: rgba(255, 255, 255, 0.2);
   }
 
-  .earnings-bar-track {
-    height: 12px;
-    overflow: hidden;
-    border: 3px solid var(--color-neo-ink);
-    border-radius: 6px;
-    background: var(--admin-surface-muted);
-  }
-  .earnings-bar-fill {
-    height: 100%;
-    border-radius: 4px;
-    background: linear-gradient(
-      90deg,
-      var(--color-neo-purple),
-      var(--color-neo-pink)
-    );
-  }
   .animate-slide-up {
     animation: admin-slide-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
@@ -2097,8 +2073,7 @@
       [type="file"]
     ),
     select,
-    textarea,
-    .admin-dashboard-input
+    textarea
   ) {
   background-color: #0c1017 !important;
   border-color: var(--admin-border) !important;

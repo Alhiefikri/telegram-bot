@@ -22,20 +22,20 @@
                 @endforeach
             </x-admin-dashboard.notice>
         @endif
-        <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="text-sm font-bold text-brand-slate-dark underline">← Kembali ke Ringkasan Admin</a>
+        <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">← Kembali ke Ringkasan Admin</a>
 
         {{-- Status and validation errors are rendered in the shared shell above. --}}
 
-        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-2xl" aria-label="Tambah saldo Rupiah">
-            <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Store Balance · IDR</p>
-            <h1 class="mt-1 text-2xl font-black">Tambah saldo Customer</h1>
-            <p class="mt-2 max-w-3xl text-sm font-semibold leading-6 text-brand-muted">
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Tambah saldo Rupiah">
+            <p class="text-xs font-medium text-admin-muted">Store Balance · IDR</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">Tambah saldo Customer</h1>
+            <p class="mt-2 max-w-3xl text-sm leading-6 text-admin-muted">
                 Cari Customer memakai Telegram ID numerik exact. Periksa identitas dan nominal pada preview, lalu konfirmasi dengan password Owner. Form ini menambahkan nominal ke saldo; form ini tidak menetapkan saldo akhir.
             </p>
 
             <form method="GET" action="{{ route('admin.store-balance.adjustments.index') }}" class="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end" aria-label="Cari Customer berdasarkan Telegram ID">
-                <label class="block text-xs font-bold text-neo-ink" for="balance-adjustment-telegram-id">
-                    Telegram ID
+                <div class="block text-xs font-medium text-admin-ink">
+                    <x-admin-dashboard.field-label for="balance-adjustment-telegram-id">Telegram ID</x-admin-dashboard.field-label>
                     <input
                         id="balance-adjustment-telegram-id"
                         name="telegram_id"
@@ -44,12 +44,12 @@
                         pattern="[0-9]*"
                         autocomplete="off"
                         value="{{ old('telegram_id', $telegramId) }}"
-                        class="neo-input mt-1 w-full bg-white px-3 py-2.5 text-base font-semibold"
+                        class="mt-1 min-h-11 w-full rounded-lg border border-admin-line bg-admin-surface px-3 text-base font-normal text-admin-ink transition-colors placeholder:text-admin-muted focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper"
                         aria-describedby="balance-adjustment-id-help"
                         required
                     >
-                </label>
-                <p id="balance-adjustment-id-help" class="text-[11px] font-semibold leading-5 text-brand-muted sm:col-span-2 sm:row-start-2">ID dicocokkan persis dengan Customer yang sudah terdaftar. Username hanya informasi tampilan.</p>
+                </div>
+                <p id="balance-adjustment-id-help" class="text-xs font-medium leading-5 text-admin-muted sm:col-span-2 sm:row-start-2">ID dicocokkan persis dengan Customer yang sudah terdaftar. Username hanya informasi tampilan.</p>
                 <x-admin-dashboard.button type="submit" variant="ink" size="sm" class="w-full sm:col-start-2 sm:row-start-1 sm:w-auto">Cari Customer</x-admin-dashboard.button>
             </form>
 
@@ -59,20 +59,20 @@
 
             @if ($customer)
                 @php($customerId = (string) $customer->telegram_id)
-                <section class="mt-5 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-4" aria-label="Customer ditemukan">
+                <section class="mt-5 rounded-lg border border-admin-line bg-admin-surface-muted p-4" aria-label="Customer ditemukan">
                     <div class="grid gap-3 sm:grid-cols-2">
                         <div>
-                            <p class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Customer</p>
-                            <p class="mt-1 break-words text-base font-black">{{ $customer->first_name ?: 'Customer Telegram' }}</p>
-                            <p class="mt-1 text-sm font-semibold text-brand-muted">{{ $customer->username ? '@'.$customer->username : 'Username belum tersedia' }}</p>
+                            <p class="text-xs font-medium text-admin-muted">Customer</p>
+                            <p class="mt-1 break-words text-base font-semibold text-admin-ink">{{ $customer->first_name ?: 'Customer Telegram' }}</p>
+                            <p class="mt-1 text-sm font-medium text-admin-muted">{{ $customer->username ? '@'.$customer->username : 'Username belum tersedia' }}</p>
                         </div>
                         <div class="sm:text-right">
-                            <p class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Telegram ID · tidak dapat diubah</p>
-                            <p class="mt-1 break-all font-mono text-base font-black" data-customer-telegram-id="{{ $customerId }}">{{ $customerId }}</p>
+                            <p class="text-xs font-medium text-admin-muted">Telegram ID · tidak dapat diubah</p>
+                            <p class="mt-1 break-all font-mono text-base font-semibold text-admin-ink" data-customer-telegram-id="{{ $customerId }}">{{ $customerId }}</p>
                             @if ($customerBalance?->isAvailable())
-                                <p class="mt-1 text-sm font-semibold text-brand-muted">Saldo Rupiah saat ini <span class="font-black text-neo-ink">Rp {{ number_format($customerBalance->balance(), 0, ',', '.') }}</span></p>
+                                <p class="mt-1 text-sm font-medium text-admin-muted">Saldo Rupiah saat ini <span class="font-semibold text-admin-ink">Rp {{ number_format($customerBalance->balance(), 0, ',', '.') }}</span></p>
                             @else
-                                <p class="mt-1 text-sm font-black text-brand-slate-dark">Saldo Rupiah tidak dapat ditampilkan sampai ledger direkonsiliasi.</p>
+                                <p class="mt-1 text-sm font-semibold text-neo-danger-text">Saldo Rupiah tidak dapat ditampilkan sampai ledger direkonsiliasi.</p>
                             @endif
                         </div>
                     </div>
@@ -81,15 +81,15 @@
                     <form
                         method="POST"
                         action="{{ route('admin.store-balance.adjustments.previews.store') }}"
-                        class="mt-4 grid gap-3 border-t border-neo-ink/10 pt-4"
+                        class="mt-4 grid gap-3 border-t border-admin-line pt-4"
                         aria-label="Isi penambahan saldo"
                         x-data="{ submitting: false }"
                         x-on:submit.prevent="if (!submitting) { submitting = true; $nextTick(() => $el.submit()); }"
                     >
                         @csrf
                         <input type="hidden" name="telegram_id" value="{{ $customerId }}">
-                        <label class="block text-xs font-bold text-neo-ink" for="balance-adjustment-amount">
-                            Jumlah tambahan Rupiah
+                        <div class="block text-xs font-medium text-admin-ink">
+                            <x-admin-dashboard.field-label for="balance-adjustment-amount">Jumlah tambahan Rupiah</x-admin-dashboard.field-label>
                             <input
                                 id="balance-adjustment-amount"
                                 name="amount"
@@ -98,16 +98,16 @@
                                 pattern="[0-9]*"
                                 autocomplete="off"
                                 value="{{ old('amount') }}"
-                                class="neo-input mt-1 w-full bg-white px-3 py-2.5 text-base font-semibold"
+                                class="mt-1 min-h-11 w-full rounded-lg border border-admin-line bg-admin-surface px-3 text-base font-normal text-admin-ink transition-colors placeholder:text-admin-muted focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper"
                                 required
                             >
-                        </label>
-                        <p class="-mt-2 text-[11px] font-semibold leading-5 text-brand-muted">Masukkan angka Rupiah positif tanpa titik, koma, atau desimal.</p>
-                        <label class="block text-xs font-bold text-neo-ink" for="balance-adjustment-reason">
-                            Alasan penambahan
-                            <textarea id="balance-adjustment-reason" name="reason" rows="3" maxlength="500" class="neo-input mt-1 w-full bg-white px-3 py-2.5 text-sm font-semibold" required>{{ old('reason') }}</textarea>
-                        </label>
-                        <p class="text-[11px] font-semibold leading-5 text-brand-muted">Alasan tercatat pada riwayat audit. Bukti upload tidak diwajibkan untuk penambahan Owner-attested.</p>
+                        </div>
+                        <p class="-mt-2 text-xs font-medium leading-5 text-admin-muted">Masukkan angka Rupiah positif tanpa titik, koma, atau desimal.</p>
+                        <div class="block text-xs font-medium text-admin-ink">
+                            <x-admin-dashboard.field-label for="balance-adjustment-reason">Alasan penambahan</x-admin-dashboard.field-label>
+                            <textarea id="balance-adjustment-reason" name="reason" rows="3" maxlength="500" class="mt-1 min-h-28 w-full rounded-lg border border-admin-line bg-admin-surface px-3 py-3 text-sm font-normal text-admin-ink transition-colors placeholder:text-admin-muted focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper" required>{{ old('reason') }}</textarea>
+                        </div>
+                        <p class="text-xs font-medium leading-5 text-admin-muted">Alasan tercatat pada riwayat audit. Bukti upload tidak diwajibkan untuk penambahan Owner-attested.</p>
                         <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full sm:w-auto" x-bind:disabled="submitting" x-bind:aria-busy="submitting">
                             <span x-show="!submitting">Tinjau penambahan</span>
                             <span x-cloak x-show="submitting">Membuat preview…</span>
@@ -127,42 +127,42 @@
         @if ($preview)
             @php($previewExpired = $preview->state === 'pending' && now()->gte($preview->expires_at))
             @php($previewReversal = $preview->category === 'reversal')
-            <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-2xl" aria-label="{{ $previewReversal ? 'Preview reversal saldo' : 'Preview penambahan saldo' }}">
+            <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="{{ $previewReversal ? 'Preview reversal saldo' : 'Preview penambahan saldo' }}">
                 <div class="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Preview {{ $previewReversal ? 'reversal' : 'penambahan' }} IDR</p>
-                        <h2 class="mt-1 text-lg font-black">Periksa sebelum konfirmasi</h2>
+                        <p class="text-xs font-medium text-admin-muted">Preview {{ $previewReversal ? 'reversal' : 'penambahan' }} IDR</p>
+                        <h2 class="mt-1 text-lg font-semibold text-admin-ink">Periksa sebelum konfirmasi</h2>
                     </div>
                     <x-admin-dashboard.badge :tone="$preview->state === 'applied' ? 'success' : ($previewExpired || $preview->state !== 'pending' ? 'warning' : 'blue')" dot>
                         {{ match ($preview->state) { 'pending' => $previewExpired ? 'KEDALUWARSA' : 'MENUNGGU PASSWORD OWNER', 'applied' => 'DITERAPKAN', 'cancelled' => 'DIBATALKAN', 'rejected' => 'DITOLAK', 'expired' => 'KEDALUWARSA', default => strtoupper($preview->state) } }}
                     </x-admin-dashboard.badge>
                 </div>
-                <dl class="mt-4 grid gap-3 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-4 sm:grid-cols-2">
+                <dl class="mt-4 grid gap-3 rounded-lg border border-admin-line bg-admin-surface-muted p-4 sm:grid-cols-2">
                     <div>
-                        <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Penerima</dt>
-                        <dd class="mt-1 break-words font-black">{{ $preview->username ? '@'.$preview->username : 'Customer Telegram' }}</dd>
+                        <dt class="text-xs font-medium text-admin-muted">Penerima</dt>
+                        <dd class="mt-1 break-words font-semibold text-admin-ink">{{ $preview->username ? '@'.$preview->username : 'Customer Telegram' }}</dd>
                     </div>
                     <div>
-                        <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Telegram ID</dt>
-                        <dd class="mt-1 break-all font-mono font-black">{{ $preview->telegram_id }}</dd>
+                        <dt class="text-xs font-medium text-admin-muted">Telegram ID</dt>
+                        <dd class="mt-1 break-all font-mono font-semibold text-admin-ink">{{ $preview->telegram_id }}</dd>
                     </div>
                     <div>
-                        <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">{{ $previewReversal ? 'Jumlah reversal' : 'Jumlah tambahan' }}</dt>
-                        <dd class="mt-1 text-lg font-black">Rp {{ number_format($preview->amount, 0, ',', '.') }}</dd>
+                        <dt class="text-xs font-medium text-admin-muted">{{ $previewReversal ? 'Jumlah reversal' : 'Jumlah tambahan' }}</dt>
+                        <dd class="mt-1 text-lg font-semibold text-admin-ink">Rp {{ number_format($preview->amount, 0, ',', '.') }}</dd>
                     </div>
                     <div>
-                        <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Alasan</dt>
-                        <dd class="mt-1 break-words text-sm font-semibold">{{ $preview->reason }}</dd>
+                        <dt class="text-xs font-medium text-admin-muted">Alasan</dt>
+                        <dd class="mt-1 break-words text-sm font-medium text-admin-ink">{{ $preview->reason }}</dd>
                     </div>
                     @if ($previewReversal)
                         <div class="sm:col-span-2">
-                            <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Adjustment asal</dt>
-                            <dd class="mt-1 break-words text-sm font-semibold">Rp {{ number_format($previewOriginal?->amount ?? $preview->amount, 0, ',', '.') }} · {{ $previewOriginal?->reason ?? 'Adjustment asal' }}</dd>
+                            <dt class="text-xs font-medium text-admin-muted">Adjustment asal</dt>
+                            <dd class="mt-1 break-words text-sm font-medium text-admin-ink">Rp {{ number_format($previewOriginal?->amount ?? $preview->amount, 0, ',', '.') }} · {{ $previewOriginal?->reason ?? 'Adjustment asal' }}</dd>
                         </div>
                     @endif
                     <div class="sm:col-span-2">
-                        <dt class="text-[10px] font-black uppercase tracking-wider text-brand-muted">Batas konfirmasi</dt>
-                        <dd class="mt-1 text-sm font-semibold">{{ $preview->expires_at->timezone(config('app.timezone'))->format('d M Y, H:i T') }}</dd>
+                        <dt class="text-xs font-medium text-admin-muted">Batas konfirmasi</dt>
+                        <dd class="mt-1 text-sm font-medium text-admin-ink">{{ $preview->expires_at->timezone(config('app.timezone'))->format('d M Y, H:i T') }}</dd>
                     </div>
                 </dl>
 
@@ -178,11 +178,11 @@
                         @csrf
                         <input type="hidden" name="fingerprint" value="{{ $preview->fingerprint }}">
                         <input type="hidden" name="version" value="{{ $preview->version }}">
-                        <label class="block text-xs font-bold text-neo-ink" for="balance-adjustment-password">
-                            Password Owner untuk tindakan ini
-                            <input id="balance-adjustment-password" name="password" type="password" autocomplete="current-password" class="neo-input mt-1 w-full bg-white px-3 py-2.5 text-base font-semibold" required>
-                        </label>
-                        <p class="text-[11px] font-semibold leading-5 text-brand-muted">Password diminta setiap kali konfirmasi dan tidak disimpan pada preview.</p>
+                        <div class="block text-xs font-medium text-admin-ink">
+                            <x-admin-dashboard.field-label for="balance-adjustment-password">Password Owner untuk tindakan ini</x-admin-dashboard.field-label>
+                            <input id="balance-adjustment-password" name="password" type="password" autocomplete="current-password" class="mt-1 min-h-11 w-full rounded-lg border border-admin-line bg-admin-surface px-3 text-base font-normal text-admin-ink transition-colors placeholder:text-admin-muted focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper" required>
+                        </div>
+                        <p class="text-xs font-medium leading-5 text-admin-muted">Password diminta setiap kali konfirmasi dan tidak disimpan pada preview.</p>
                         <div class="grid gap-2 sm:grid-cols-2">
                             <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full" x-bind:disabled="submitting" x-bind:aria-busy="submitting">
                                 <span x-show="!submitting">Konfirmasi {{ $previewReversal ? 'reversal' : 'penambahan' }}</span>
@@ -194,7 +194,7 @@
                         @csrf
                         <input type="hidden" name="fingerprint" value="{{ $preview->fingerprint }}">
                         <input type="hidden" name="version" value="{{ $preview->version }}">
-                        <button type="submit" class="w-full rounded-xl px-3 py-2 text-sm font-bold text-brand-slate-dark underline sm:w-auto">Batalkan preview</button>
+                        <button type="submit" class="min-h-11 w-full px-3 py-2 text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline sm:w-auto">Batalkan preview</button>
                     </form>
                 @elseif ($preview->state === 'applied')
                     <x-admin-dashboard.notice tone="success" class="mt-4" role="status">{{ $previewReversal ? 'Reversal ini sudah diterapkan. Konfirmasi ulang tidak mendebit saldo kedua kali.' : 'Penambahan ini sudah diterapkan. Pengiriman ulang konfirmasi tidak membuat kredit kedua.' }}</x-admin-dashboard.notice>
@@ -207,25 +207,25 @@
         @endif
 
         @if ($customer && $history)
-            <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-2xl" aria-label="Riwayat penambahan saldo Customer">
-                <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Riwayat IDR Customer</p>
-                <h2 class="mt-1 text-lg font-black">Riwayat penambahan dan reversal IDR</h2>
+            <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Riwayat penambahan saldo Customer">
+                <p class="text-xs font-medium text-admin-muted">Riwayat IDR Customer</p>
+                <h2 class="mt-1 text-lg font-semibold text-admin-ink">Riwayat penambahan dan reversal IDR</h2>
                 <div class="mt-4 space-y-3">
                     @forelse ($history as $entry)
                         @php($entryDirection = $entry->ledgerEntry?->kind?->direction() ?? ($entry->category === 'reversal' ? -1 : 1))
-                        <article class="rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3" data-adjustment-state="{{ $entry->state }}">
+                        <article class="rounded-lg border border-admin-line bg-admin-surface-muted p-3" data-adjustment-state="{{ $entry->state }}">
                             <div class="flex flex-wrap items-start justify-between gap-2">
                                 <div>
-                                    <p class="font-black">{{ $entryDirection < 0 ? '−' : '+' }}Rp {{ number_format($entry->amount, 0, ',', '.') }}</p>
-                                    <p class="mt-1 text-[11px] font-semibold text-brand-muted">{{ $entry->created_at?->timezone(config('app.timezone'))->format('d M Y, H:i T') }} · {{ strtoupper(str_replace('_', ' ', $entry->category)) }}</p>
+                                    <p class="font-semibold text-admin-ink">{{ $entryDirection < 0 ? '−' : '+' }}Rp {{ number_format($entry->amount, 0, ',', '.') }}</p>
+                                    <p class="mt-1 text-xs font-medium text-admin-muted">{{ $entry->created_at?->timezone(config('app.timezone'))->format('d M Y, H:i T') }} · {{ strtoupper(str_replace('_', ' ', $entry->category)) }}</p>
                                 </div>
                                 <x-admin-dashboard.badge :tone="$entry->state === 'applied' ? 'success' : ($entry->state === 'pending' ? 'warning' : 'slate')">
                                     {{ match ($entry->state) { 'pending' => 'Menunggu konfirmasi', 'applied' => 'Diterapkan', 'cancelled' => 'Dibatalkan', 'rejected' => 'Ditolak', 'expired' => 'Kedaluwarsa', default => ucfirst($entry->state) } }}
                                 </x-admin-dashboard.badge>
                             </div>
-                            <p class="mt-2 break-words text-sm font-semibold">{{ $entry->reason }}</p>
+                            <p class="mt-2 break-words text-sm font-medium text-admin-ink">{{ $entry->reason }}</p>
                             @if ($entry->ledger_entry_id)
-                                <p class="mt-2 text-[11px] font-semibold text-brand-muted">Ledger entry #{{ $entry->ledger_entry_id }}</p>
+                                <p class="mt-2 text-xs font-medium text-admin-muted">Ledger entry #{{ $entry->ledger_entry_id }}</p>
                             @endif
                             @if (in_array($entry->id, $reversibleAdjustmentIds, true))
                                 <form
@@ -239,10 +239,10 @@
                                     @csrf
                                     <input type="hidden" name="source_id" value="{{ $entry->id }}">
                                     <input type="hidden" name="telegram_id" value="{{ (string) $customer->telegram_id }}">
-                                    <button type="submit" class="rounded-xl border-2 border-neo-ink/15 bg-white px-3 py-1.5 text-xs font-black text-brand-slate-dark transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-neo-focus" x-bind:disabled="submitting" x-bind:aria-busy="submitting">
+                                    <x-admin-dashboard.button type="submit" variant="neutral" size="sm" x-bind:disabled="submitting" x-bind:aria-busy="submitting">
                                         <span x-show="!submitting">Reversal penuh</span>
                                         <span x-cloak x-show="submitting">Membuat preview…</span>
-                                    </button>
+                                    </x-admin-dashboard.button>
                                 </form>
                             @endif
                         </article>
@@ -256,34 +256,34 @@
             </x-admin-dashboard.card>
         @endif
 
-        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="rounded-2xl" aria-label="Customer dengan saldo Rupiah positif">
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Customer dengan saldo Rupiah positif">
             <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Pemantauan Store Balance</p>
-                    <h2 class="mt-1 text-lg font-black">Customer dengan saldo Rupiah positif</h2>
+                    <p class="text-xs font-medium text-admin-muted">Pemantauan Store Balance</p>
+                    <h2 class="mt-1 text-lg font-semibold text-admin-ink">Customer dengan saldo Rupiah positif</h2>
                 </div>
-                <x-admin-dashboard.badge tone="green" dot>IDR</x-admin-dashboard.badge>
+                <x-admin-dashboard.badge tone="emerald" dot>IDR</x-admin-dashboard.badge>
             </div>
-            <p class="mt-2 text-[11px] font-semibold leading-5 text-brand-muted">Daftar menampilkan account yang memiliki saldo tersedia di atas nol. Account bernilai nol tetap tersimpan untuk menjaga riwayat ledger.</p>
+            <p class="mt-2 text-xs font-medium leading-5 text-admin-muted">Daftar menampilkan account yang memiliki saldo tersedia di atas nol. Account bernilai nol tetap tersimpan untuk menjaga riwayat ledger.</p>
             <div class="mt-4 space-y-2">
                 @forelse ($positiveBalances as $balanceItem)
                     @php($accountCustomer = $balanceItem['customer'])
                     @php($balanceSnapshot = $balanceItem['snapshot'])
                     @if ($accountCustomer && $accountCustomer->telegram_id !== null)
-                        <a href="{{ route('admin.store-balance.adjustments.index', ['telegram_id' => (string) $accountCustomer->telegram_id]) }}" class="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3 transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-neo-focus" aria-label="Lihat saldo {{ $accountCustomer->first_name ?: 'Customer' }}">
+                        <a href="{{ route('admin.store-balance.adjustments.index', ['telegram_id' => (string) $accountCustomer->telegram_id]) }}" class="flex min-h-11 flex-wrap items-center justify-between gap-2 rounded-lg border border-admin-line bg-admin-surface-muted p-3 transition-colors hover:border-admin-accent focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper" aria-label="Lihat saldo {{ $accountCustomer->first_name ?: 'Customer' }}">
                             <span class="min-w-0">
-                                <span class="block break-words font-black">{{ $accountCustomer->first_name ?: 'Customer Telegram' }} {{ $accountCustomer->username ? '· @'.$accountCustomer->username : '' }}</span>
-                                <span class="mt-1 block break-all font-mono text-[11px] font-semibold text-brand-muted">{{ (string) $accountCustomer->telegram_id }}</span>
+                                <span class="block break-words font-semibold text-admin-ink">{{ $accountCustomer->first_name ?: 'Customer Telegram' }} {{ $accountCustomer->username ? '· @'.$accountCustomer->username : '' }}</span>
+                                <span class="mt-1 block break-all font-mono text-xs font-medium text-admin-muted">{{ (string) $accountCustomer->telegram_id }}</span>
                             </span>
-                            <span class="font-display text-sm font-black">{{ $balanceSnapshot->isAvailable() ? 'Rp '.number_format($balanceSnapshot->balance(), 0, ',', '.') : 'Perlu rekonsiliasi' }}</span>
+                            <span class="text-sm font-semibold text-admin-ink">{{ $balanceSnapshot->isAvailable() ? 'Rp '.number_format($balanceSnapshot->balance(), 0, ',', '.') : 'Perlu rekonsiliasi' }}</span>
                         </a>
                     @elseif ($accountCustomer)
-                        <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-neo-ink/15 bg-white/80 p-3">
+                        <div class="flex min-h-11 flex-wrap items-center justify-between gap-2 rounded-lg border border-admin-line bg-admin-surface-muted p-3">
                             <span class="min-w-0">
-                                <span class="block break-words font-black">{{ $accountCustomer->first_name ?: 'Customer Web Storefront' }}</span>
-                                <span class="mt-1 block text-[11px] font-semibold text-brand-muted">Customer ini belum memiliki Telegram ID.</span>
+                                <span class="block break-words font-semibold text-admin-ink">{{ $accountCustomer->first_name ?: 'Customer Web Storefront' }}</span>
+                                <span class="mt-1 block text-xs font-medium text-admin-muted">Customer ini belum memiliki Telegram ID.</span>
                             </span>
-                            <span class="font-display text-sm font-black">{{ $balanceSnapshot->isAvailable() ? 'Rp '.number_format($balanceSnapshot->balance(), 0, ',', '.') : 'Perlu rekonsiliasi' }}</span>
+                            <span class="text-sm font-semibold text-admin-ink">{{ $balanceSnapshot->isAvailable() ? 'Rp '.number_format($balanceSnapshot->balance(), 0, ',', '.') : 'Perlu rekonsiliasi' }}</span>
                         </div>
                     @endif
                 @empty
