@@ -135,6 +135,8 @@ class AdminDashboardBladeComponentsTest extends TestCase
         $this->assertStringContainsString('tab=suppliers', $rendered);
         $this->assertStringContainsString('aria-label="Navigasi admin"', $rendered);
         $this->assertStringContainsString('aria-label="Navigasi dashboard"', $rendered);
+        $this->assertStringContainsString('admin-linked-fallback-navigation', $rendered);
+        $this->assertStringContainsString('<details', $rendered);
         $this->assertStringContainsString('Katalog privat', $rendered);
         $this->assertStringContainsString('Konten supplier', $rendered);
         $this->assertStringNotContainsString('api_key', $rendered);

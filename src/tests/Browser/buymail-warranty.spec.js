@@ -144,7 +144,14 @@ test("owner can inspect private warranty and deposit panels without exposing the
     .getByRole("link", { name: "Klaim Gmail / refund / penggantian" })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Klaim Gmail · Refund & penggantian" })
+    page
+      .getByRole("banner", { name: "Konteks halaman" })
+      .getByRole("heading", { name: "Supplier", exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByText("Klaim harus sampai ke supplier sebelum deadline.", {
+      exact: false,
+    })
   ).toBeVisible();
   expect(
     await page.evaluate(

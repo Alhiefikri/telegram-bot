@@ -50,6 +50,11 @@
         <x-slot:content>{{ $slot }}</x-slot:content>
 
         <x-slot:mobileDrawer>
+            <details x-show="!navigationReady" class="border-b border-admin-line bg-admin-surface px-4 py-3 lg:hidden">
+                <summary class="min-h-11 cursor-pointer py-3 text-sm font-medium text-admin-ink">Navigasi dashboard</summary>
+                <x-admin-dashboard.navigation :groups="$linkedNavigation['groups']" id-prefix="admin-linked-fallback-navigation" label="Navigasi dashboard" />
+            </details>
+
             <x-admin-dashboard.mobile-drawer>
                 <x-slot:close>
                     <button type="button" x-on:click="closeSidebar()" aria-label="Tutup navigasi" class="flex h-11 w-11 items-center justify-center rounded-lg text-xl text-admin-ink focus-visible:outline-2 focus-visible:outline-admin-focus">×</button>

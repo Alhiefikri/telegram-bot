@@ -1264,8 +1264,13 @@ below that breakpoint #595 replaces bottom navigation/Lainnya with a labeled
 topbar trigger and grouped drawer. The shared compact topbar uses canonical group/tab context,
 existing store/maintenance status, store action, theme preference, and Admin
 identity. Summary values formerly in the hero now precede the unchanged stats
-partial; share/copy remain in Link toko. The old hero, compact-header and desktop
-tab-strip partials and their unused CSS have been removed.
+partial; share/copy remain in Link toko. The old hero, compact-header,
+desktop-tab-strip, and mobile-navigation partials and their unused CSS have been removed.
+
+The dashboard and linked operational shell render the same navigation model in
+three progressively enhanced forms: persistent desktop sidebar, Alpine drawer,
+and a no-JavaScript `<details>` fallback. The fallback is links-only and cannot
+change server authorization.
 
 `AdminDashboardData::navigation()` preserves query filters on fallback tab links
 and removes `product_form` when leaving product creation. Alpine preserves the
