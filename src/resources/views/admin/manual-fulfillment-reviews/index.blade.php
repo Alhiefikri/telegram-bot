@@ -11,21 +11,21 @@
 </head>
 <body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
     <x-admin-dashboard.linked-shell active-tab="penjualan" title="Manual Fulfillment Review">
-        <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-semibold text-admin-accent-strong underline">← Kembali ke Pesanan</a>
-        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
-            <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Antrean operasional</p>
-            <h1 class="mt-1 text-2xl font-black">Manual Fulfillment Review</h1>
-            <p class="mt-2 text-sm font-semibold text-brand-muted">BSC evidence yang ambigu atau Late Payment tidak diselesaikan otomatis. Tidak ada stok atau kredensial yang dikirim dari antrean ini sampai ada keputusan Owner.</p>
+        <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">← Kembali ke Pesanan</a>
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4">
+            <p class="text-xs font-medium text-admin-muted">Antrean operasional</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">Manual Fulfillment Review</h1>
+            <p class="mt-2 text-sm leading-6 text-admin-muted">BSC evidence yang ambigu atau Late Payment tidak diselesaikan otomatis. Tidak ada stok atau kredensial yang dikirim dari antrean ini sampai ada keputusan Owner.</p>
 
             <div class="mt-5 space-y-3">
                 @forelse ($reviews as $review)
-                    <a href="{{ route('admin.manual-fulfillment-reviews.show', $review) }}" class="block rounded-xl border-2 border-brand-border bg-white p-4 hover:bg-brand-bg">
+                    <a href="{{ route('admin.manual-fulfillment-reviews.show', $review) }}" class="block rounded-lg border border-admin-line bg-admin-surface p-4 transition-colors hover:bg-admin-surface-muted">
                         <div class="flex flex-wrap items-start justify-between gap-2">
                             <div>
-                                <p class="font-black">{{ $review->order->invoice_number }}</p>
-                                <p class="mt-1 text-sm font-semibold text-brand-muted">{{ strtoupper($review->payment->provider) }} · {{ $review->payment->method }} · {{ $review->currency }} {{ number_format($review->amount, 0, ',', '.') }}</p>
+                                <p class="font-semibold text-admin-ink">{{ $review->order->invoice_number }}</p>
+                                <p class="mt-1 text-sm font-medium text-admin-muted">{{ strtoupper($review->payment->provider) }} · {{ $review->payment->method }} · {{ $review->currency }} {{ number_format($review->amount, 0, ',', '.') }}</p>
                             </div>
-                            <x-admin-dashboard.badge tone="{{ $review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING ? 'warning' : 'success' }}">{{ $review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING ? 'Menunggu review' : $review->state }}</x-admin-dashboard.badge>
+                            <x-admin-dashboard.badge tone="{{ $review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING ? 'amber' : 'emerald' }}">{{ $review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING ? 'Menunggu review' : $review->state }}</x-admin-dashboard.badge>
                         </div>
                     </a>
                 @empty

@@ -10,7 +10,6 @@
                     title-expression="productModalMode === 'edit' ? 'Edit produk' : 'Tambah produk'"
                     description="Atur ikon katalog, gambar Storefront, detail bot, dan poster stok Store Channel secara terpisah."
                     class="max-h-[92vh] w-full max-w-2xl overflow-y-auto"
-                    x-bind:class="productModalMode === 'edit' ? '!bg-[#fee648]' : '!bg-[#7BD10A]'"
                 >
                     @if ($errors->productCreate->any() || $errors->productUpdate->any())
                         <x-admin-dashboard.notice tone="danger" class="mb-3 animate-slide-up">
@@ -55,7 +54,7 @@
                                 class="mt-1.5"
                                 x-model="productIcon"
                             />
-                            <p class="mt-1 text-[10px] font-bold text-neo-ink/60">Bukan upload gambar. Tampil di katalog bot Telegram dan Web Storefront; kosongkan untuk memakai ikon family (jika ada) atau ikon default. Emoji Telegram (Premium) diambil per produk lewat menu 🎨 Ikon Produk di bot.</p>
+                            <p class="mt-1 text-xs leading-5 text-admin-muted">Bukan upload gambar. Tampil di katalog bot Telegram dan Web Storefront; kosongkan untuk memakai ikon family (jika ada) atau ikon default. Emoji Telegram (Premium) diambil per produk lewat menu 🎨 Ikon Produk di bot.</p>
                             @error('icon', 'productCreate')
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
@@ -109,17 +108,17 @@
                                 @enderror
                             </div>
                         </div>
-                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]" aria-labelledby="product-quantity-price-tiers-title">
+                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" aria-labelledby="product-quantity-price-tiers-title">
                             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div class="min-w-0">
-                                    <p id="product-quantity-price-tiers-title" class="font-display text-sm font-extrabold text-neo-ink">Harga bertingkat berdasarkan jumlah</p>
-                                    <p class="mt-1 text-[10px] font-extrabold uppercase leading-4 text-neo-ink/60">Opsional, maksimal 5 tingkat. Harga setiap tingkat harus lebih rendah daripada tingkat sebelumnya dan harga dasar.</p>
+                                    <p id="product-quantity-price-tiers-title" class="text-sm font-semibold text-admin-ink">Harga bertingkat berdasarkan jumlah</p>
+                                    <p class="mt-1 text-xs leading-5 text-admin-muted">Opsional, maksimal 5 tingkat. Harga setiap tingkat harus lebih rendah daripada tingkat sebelumnya dan harga dasar.</p>
                                 </div>
                                 <x-admin-dashboard.button
                                     type="button"
                                     variant="primary"
                                     size="sm"
-                                    class="min-h-11 shrink-0 px-3 text-[10px]"
+                                    class="shrink-0"
                                     x-on:click="addProductQuantityPriceTier()"
                                     x-bind:disabled="productQuantityPriceTiers.length >= 5"
                                 >+ Tambah tingkat harga</x-admin-dashboard.button>
@@ -131,7 +130,7 @@
                                 id="product-quantity-price-tiers-error"
                                 role="alert"
                                 aria-live="polite"
-                                class="mt-3 rounded-lg border-2 border-neo-red bg-red-50 px-2.5 py-2 text-xs font-black text-neo-red"
+                                class="mt-3 rounded-lg border border-admin-line bg-neo-danger-pale px-2.5 py-2 text-xs font-medium text-neo-danger-text"
                             ></p>
                             @error('quantity_price_tiers', 'productCreate')
                                 <x-admin-dashboard.field-error role="alert" aria-live="polite">{{ $message }}</x-admin-dashboard.field-error>
@@ -140,98 +139,100 @@
                                 <x-admin-dashboard.field-error role="alert" aria-live="polite">{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
 
-                            <p x-show="productQuantityPriceTiers.length === 0" class="mt-3 rounded-lg border-2 border-dashed border-neo-ink/40 bg-white/70 px-3 py-2 text-xs font-bold text-neo-ink/65">
+                            <p x-show="productQuantityPriceTiers.length === 0" class="mt-3 rounded-lg border border-dashed border-admin-line bg-admin-surface-muted px-3 py-2 text-xs text-admin-muted">
                                 Tidak ada tingkat harga. Harga dasar tetap digunakan.
                             </p>
 
                             <div id="product-quantity-price-tiers" class="mt-3 space-y-3" x-show="productQuantityPriceTiers.length > 0">
                                 <template x-for="(tier, index) in productQuantityPriceTiers" :key="tier._key">
-                                    <article data-tier-row class="rounded-[0.55rem] border-[3px] border-neo-ink bg-white p-3 shadow-[3px_3px_0_0_#050505]">
+                                    <article data-tier-row class="rounded-lg border border-admin-line bg-admin-surface p-3">
                                         <div class="flex items-start justify-between gap-3">
-                                            <p class="font-display text-xs font-black uppercase text-neo-ink" x-text="`Tingkat #${index + 1}`">Tingkat #1</p>
-                                            <button
+                                            <p class="text-sm font-semibold text-admin-ink" x-text="`Tingkat #${index + 1}`">Tingkat #1</p>
+                                            <x-admin-dashboard.button
                                                 type="button"
-                                                class="min-h-11 shrink-0 rounded-lg border-2 border-neo-ink bg-[#fee648] px-3 py-2 text-[10px] font-black text-neo-ink shadow-[2px_2px_0_0_#050505] transition hover:-translate-y-0.5"
+                                                variant="destructive"
+                                                size="sm"
+                                                class="shrink-0"
                                                 x-on:click="removeProductQuantityPriceTier(index)"
                                                 x-bind:aria-label="`Hapus tingkat harga #${index + 1}`"
-                                            >Hapus</button>
+                                            >Hapus</x-admin-dashboard.button>
                                         </div>
 
                                         <div class="mt-3 grid gap-3 sm:grid-cols-3">
                                             <div>
-                                                <label class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink" x-bind:for="'product-quantity-tier-' + index + '-minimum'">Mulai quantity</label>
-                                                <input
+                                                <label class="text-sm font-medium text-admin-ink" x-bind:for="'product-quantity-tier-' + index + '-minimum'">Mulai quantity</label>
+                                                <x-admin-dashboard.input
                                                     type="number"
                                                     min="2"
                                                     max="20"
                                                     step="1"
                                                     inputmode="numeric"
-                                                    class="mt-1.5 min-h-11 w-full rounded-lg border-[3px] border-neo-ink bg-white px-3 text-sm font-bold text-neo-ink shadow-[2px_2px_0_0_#050505] focus:outline-none focus:ring-2 focus:ring-neo-focus"
+                                                    class="mt-1.5"
                                                     x-bind:id="'product-quantity-tier-' + index + '-minimum'"
                                                     x-bind:name="'quantity_price_tiers[' + index + '][minimum_quantity]'"
                                                     x-model="tier.minimumQuantity"
                                                     x-bind:aria-invalid="productQuantityPriceTierError(index, 'minimum_quantity') ? 'true' : 'false'"
                                                     x-bind:aria-describedby="productQuantityPriceTierError(index, 'minimum_quantity') ? 'product-quantity-tier-' + index + '-minimum-error' : null"
                                                     required
-                                                >
+                                                />
                                                 <p
                                                     x-show="productQuantityPriceTierError(index, 'minimum_quantity')"
                                                     x-text="productQuantityPriceTierError(index, 'minimum_quantity')"
                                                     x-bind:id="'product-quantity-tier-' + index + '-minimum-error'"
                                                     role="alert"
                                                     aria-live="polite"
-                                                    class="mt-1 text-xs font-black text-neo-red"
+                                                    class="mt-1 text-xs font-medium text-neo-danger-text"
                                                 ></p>
                                             </div>
 
                                             <div>
-                                                <label class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink" x-bind:for="'product-quantity-tier-' + index + '-idr'">Harga IDR / unit</label>
-                                                <input
+                                                <label class="text-sm font-medium text-admin-ink" x-bind:for="'product-quantity-tier-' + index + '-idr'">Harga IDR / unit</label>
+                                                <x-admin-dashboard.input
                                                     type="number"
                                                     min="1"
                                                     step="1"
                                                     inputmode="numeric"
-                                                    class="mt-1.5 min-h-11 w-full rounded-lg border-[3px] border-neo-ink bg-white px-3 text-sm font-bold text-neo-ink shadow-[2px_2px_0_0_#050505] focus:outline-none focus:ring-2 focus:ring-neo-focus"
+                                                    class="mt-1.5"
                                                     x-bind:id="'product-quantity-tier-' + index + '-idr'"
                                                     x-bind:name="'quantity_price_tiers[' + index + '][price_amount]'"
                                                     x-model="tier.priceAmount"
                                                     x-bind:aria-invalid="productQuantityPriceTierError(index, 'price_amount') ? 'true' : 'false'"
                                                     x-bind:aria-describedby="productQuantityPriceTierError(index, 'price_amount') ? 'product-quantity-tier-' + index + '-idr-error' : null"
                                                     required
-                                                >
+                                                />
                                                 <p
                                                     x-show="productQuantityPriceTierError(index, 'price_amount')"
                                                     x-text="productQuantityPriceTierError(index, 'price_amount')"
                                                     x-bind:id="'product-quantity-tier-' + index + '-idr-error'"
                                                     role="alert"
                                                     aria-live="polite"
-                                                    class="mt-1 text-xs font-black text-neo-red"
+                                                    class="mt-1 text-xs font-medium text-neo-danger-text"
                                                 ></p>
                                             </div>
 
                                             <div>
-                                                <label class="font-display text-[11px] font-extrabold uppercase tracking-wider text-neo-ink" x-bind:for="'product-quantity-tier-' + index + '-usdt'">Harga USDT / unit</label>
-                                                <input
+                                                <label class="text-sm font-medium text-admin-ink" x-bind:for="'product-quantity-tier-' + index + '-usdt'">Harga USDT / unit</label>
+                                                <x-admin-dashboard.input
                                                     type="number"
                                                     min="0.001"
                                                     step="0.001"
                                                     inputmode="decimal"
                                                     placeholder="Opsional"
-                                                    class="mt-1.5 min-h-11 w-full rounded-lg border-[3px] border-neo-ink bg-white px-3 text-sm font-bold text-neo-ink shadow-[2px_2px_0_0_#050505] focus:outline-none focus:ring-2 focus:ring-neo-focus"
+                                                    class="mt-1.5"
                                                     x-bind:id="'product-quantity-tier-' + index + '-usdt'"
                                                     x-bind:name="'quantity_price_tiers[' + index + '][usdt_price_amount]'"
                                                     x-model="tier.usdtPriceAmount"
                                                     x-bind:required="productUsdtPrice !== ''"
                                                     x-bind:aria-invalid="productQuantityPriceTierError(index, 'usdt_price_amount') ? 'true' : 'false'"
                                                     x-bind:aria-describedby="productQuantityPriceTierError(index, 'usdt_price_amount') ? 'product-quantity-tier-' + index + '-usdt-error' : null"
-                                                >
+                                                />
                                                 <p
                                                     x-show="productQuantityPriceTierError(index, 'usdt_price_amount')"
                                                     x-text="productQuantityPriceTierError(index, 'usdt_price_amount')"
                                                     x-bind:id="'product-quantity-tier-' + index + '-usdt-error'"
                                                     role="alert"
                                                     aria-live="polite"
-                                                    class="mt-1 text-xs font-black text-neo-red"
+                                                    class="mt-1 text-xs font-medium text-neo-danger-text"
                                                 ></p>
                                             </div>
                                         </div>
@@ -242,16 +243,16 @@
 
                         <section class="space-y-3" aria-labelledby="product-media-title">
                             <div>
-                                <h3 id="product-media-title" class="font-display text-sm font-black uppercase text-neo-ink">Upload gambar produk</h3>
-                                <p class="mt-1 text-[11px] font-semibold text-neo-ink/70">JPG, PNG, atau WebP; maksimal 5 MB. Gambar toko menjadi WebP maks. 800px, poster Telegram maks. 1600px.</p>
+                                <h3 id="product-media-title" class="text-sm font-semibold text-admin-ink">Upload gambar produk</h3>
+                                <p class="mt-1 text-xs leading-5 text-admin-muted">JPG, PNG, atau WebP; maksimal 5 MB. Gambar toko menjadi WebP maks. 800px, poster Telegram maks. 1600px.</p>
                             </div>
-                        <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
+                        <x-admin-dashboard.card padding="sm" shadow="none">
                             <div class="flex items-start justify-between gap-3">
                                 <div>
-                                    <x-admin-dashboard.field-label for="product-image" class="text-sm normal-case tracking-normal">Kartu produk · Web Storefront</x-admin-dashboard.field-label>
-                                    <p class="mt-1 text-[11px] font-semibold text-neo-ink/65">Gambar kartu produk di toko web. Jika kosong, tampil ikon katalog atau gambar default toko; bukan poster detail bot.</p>
+                                    <x-admin-dashboard.field-label for="product-image">Kartu produk · Web Storefront</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-xs leading-5 text-admin-muted">Gambar kartu produk di toko web. Jika kosong, tampil ikon katalog atau gambar default toko; bukan poster detail bot.</p>
                                 </div>
-                                <div x-show="productImageUrl" x-cloak class="h-14 w-14 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]">
+                                <div x-show="productImageUrl" x-cloak class="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-admin-line bg-admin-surface">
                                     <img x-bind:src="productImageUrl" alt="Gambar kartu Storefront tersimpan" class="h-full w-full object-cover">
                                 </div>
                             </div>
@@ -263,7 +264,7 @@
                                 x-ref="productImage"
                                 x-on:change="productImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'"
                             />
-                            <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Tanpa upload baru, gambar toko tersimpan tetap dipakai.</p>
+                            <p class="mt-2 text-xs text-admin-muted" x-show="productModalMode === 'edit'">Tanpa upload baru, gambar toko tersimpan tetap dipakai.</p>
                             @error('image', 'productCreate')
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
@@ -271,13 +272,13 @@
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
                         </x-admin-dashboard.card>
-                        <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
+                        <x-admin-dashboard.card padding="sm" shadow="none">
                             <div class="flex items-start justify-between gap-3">
                                 <div>
-                                    <x-admin-dashboard.field-label for="telegram-product-image" class="text-sm normal-case tracking-normal">Detail produk · Bot Telegram</x-admin-dashboard.field-label>
-                                    <p class="mt-1 text-[11px] font-semibold text-neo-ink/65">Untuk detail saat produk diklik di bot. Disarankan poster landscape 16:9. Jika kosong, gunakan gambar detail family; jika tidak ada, detail tetap berupa teks.</p>
+                                    <x-admin-dashboard.field-label for="telegram-product-image">Detail produk · Bot Telegram</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-xs leading-5 text-admin-muted">Untuk detail saat produk diklik di bot. Disarankan poster landscape 16:9. Jika kosong, gunakan gambar detail family; jika tidak ada, detail tetap berupa teks.</p>
                                 </div>
-                                <div x-show="telegramProductImageUrl" x-cloak class="h-14 w-20 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]">
+                                <div x-show="telegramProductImageUrl" x-cloak class="h-14 w-20 shrink-0 overflow-hidden rounded-lg border border-admin-line bg-admin-surface">
                                     <img x-bind:src="telegramProductImageUrl" alt="Gambar detail bot Telegram tersimpan" class="h-full w-full object-contain">
                                 </div>
                             </div>
@@ -289,17 +290,17 @@
                                 x-ref="telegramProductImage"
                                 x-on:change="updateTelegramProductImageFileName($event)"
                             />
-                            <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Tanpa upload baru, gambar detail bot tersimpan tetap dipakai.</p>
+                            <p class="mt-2 text-xs text-admin-muted" x-show="productModalMode === 'edit'">Tanpa upload baru, gambar detail bot tersimpan tetap dipakai.</p>
                             @error('telegram_image', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                             @error('telegram_image', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                         </x-admin-dashboard.card>
-                        <x-admin-dashboard.card padding="sm" shadow="none" class="rounded-[0.6rem]">
+                        <x-admin-dashboard.card padding="sm" shadow="none">
                             <div class="flex items-start justify-between gap-3">
                                 <div>
-                                    <x-admin-dashboard.field-label for="telegram-channel-product-image" class="text-sm normal-case tracking-normal">Poster stok bertambah · Store Channel</x-admin-dashboard.field-label>
-                                    <p class="mt-1 text-[11px] font-semibold text-neo-ink/65">Hanya untuk posting stok bertambah di Store Channel; bukan sales proof, banner /start, detail bot, pesan pelanggan, atau broadcast. Jika kosong: gambar detail produk, detail family, kartu produk, lalu kartu family.</p>
+                                    <x-admin-dashboard.field-label for="telegram-channel-product-image">Poster stok bertambah · Store Channel</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-xs leading-5 text-admin-muted">Hanya untuk posting stok bertambah di Store Channel; bukan sales proof, banner /start, detail bot, pesan pelanggan, atau broadcast. Jika kosong: gambar detail produk, detail family, kartu produk, lalu kartu family.</p>
                                 </div>
-                                <div x-show="telegramChannelImageUrl" x-cloak class="h-14 w-20 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_0_#050505]">
+                                <div x-show="telegramChannelImageUrl" x-cloak class="h-14 w-20 shrink-0 overflow-hidden rounded-lg border border-admin-line bg-admin-surface">
                                     <img x-bind:src="telegramChannelImageUrl" alt="Poster stok Store Channel tersimpan" class="h-full w-full object-contain">
                                 </div>
                             </div>
@@ -311,17 +312,17 @@
                                 x-ref="telegramChannelImage"
                                 x-on:change="telegramChannelImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'"
                             />
-                            <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Tanpa upload baru, poster tersimpan tetap dipakai.</p>
+                            <p class="mt-2 text-xs text-admin-muted" x-show="productModalMode === 'edit'">Tanpa upload baru, poster tersimpan tetap dipakai.</p>
                             @error('telegram_channel_image', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                             @error('telegram_channel_image', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                         </x-admin-dashboard.card>
                         </section>
 
-                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
+                        <x-admin-dashboard.card as="section" padding="sm" shadow="none">
                             <div class="flex flex-wrap items-start justify-between gap-3">
                                 <div class="min-w-0">
-                                    <x-admin-dashboard.field-label for="product-description" class="text-sm normal-case tracking-normal">📝 Deskripsi produk</x-admin-dashboard.field-label>
-                                    <p class="mt-1 text-[10px] font-extrabold uppercase leading-4 text-neo-ink/60">Satu versi per bahasa pelanggan. Varian yang dibiarkan kosong tampil memakai teks Bahasa Indonesia.</p>
+                                    <x-admin-dashboard.field-label for="product-description">Deskripsi produk</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-xs leading-5 text-admin-muted">Satu versi per bahasa pelanggan. Varian yang dibiarkan kosong tampil memakai teks Bahasa Indonesia.</p>
                                 </div>
                                 <x-admin-dashboard.content-locale-tabs prefix="product-description" label="Bahasa deskripsi produk" />
                             </div>
@@ -403,11 +404,11 @@
                             </div>
                         </x-admin-dashboard.card>
 
-                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
+                        <x-admin-dashboard.card as="section" padding="sm" shadow="none">
                             <div class="flex flex-wrap items-start justify-between gap-3">
                                 <div class="min-w-0">
-                                    <x-admin-dashboard.field-label for="product-warranty-policy" class="text-sm normal-case tracking-normal">⚠️ Replacement &amp; Refund Policy</x-admin-dashboard.field-label>
-                                    <p class="mt-1 text-[10px] font-extrabold uppercase leading-4 text-neo-ink/60">Tampil sebagai alert di detail produk Telegram. Judul mengikuti bahasa pelanggan; isi ini berbeda untuk setiap produk dan setiap bahasa.</p>
+                                    <x-admin-dashboard.field-label for="product-warranty-policy">Replacement &amp; Refund Policy</x-admin-dashboard.field-label>
+                                    <p class="mt-1 text-xs leading-5 text-admin-muted">Tampil sebagai alert di detail produk Telegram. Judul mengikuti bahasa pelanggan; isi ini berbeda untuk setiap produk dan setiap bahasa.</p>
                                 </div>
                                 <x-admin-dashboard.content-locale-tabs prefix="product-warranty-policy" label="Bahasa Replacement & Refund Policy" />
                             </div>
@@ -488,17 +489,17 @@
                             </div>
                         </x-admin-dashboard.card>
 
-                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
+                        <x-admin-dashboard.card as="section" padding="sm" shadow="none">
                             <div class="flex items-center justify-between gap-3">
                                 <div>
-                                    <p class="font-display text-sm font-extrabold text-neo-ink">🔐 Catatan pengiriman rahasia</p>
-                                    <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60" x-show="! productDeliveryNoteOpen">Hanya dikirim ke pembeli setelah pembayaran dan data akun tersedia.</p>
+                                    <p class="text-sm font-semibold text-admin-ink">Catatan pengiriman rahasia</p>
+                                    <p class="mt-1 text-xs leading-5 text-admin-muted" x-show="! productDeliveryNoteOpen">Hanya dikirim ke pembeli setelah pembayaran dan data akun tersedia.</p>
                                 </div>
                                 <x-admin-dashboard.button
                                     type="button"
                                     variant="primary"
                                     size="sm"
-                                    class="min-h-9 px-2 py-1 text-[10px]"
+                                    class="shrink-0"
                                     x-on:click="productDeliveryNoteOpen = ! productDeliveryNoteOpen"
                                     x-text="productDeliveryNoteOpen ? 'Tutup' : '+ Tambah'"
                                 >+ Tambah</x-admin-dashboard.button>
@@ -520,10 +521,10 @@
                             </div>
                         </x-admin-dashboard.card>
 
-                        <x-admin-dashboard.card as="section" padding="sm" shadow="none" class="rounded-[0.6rem]">
+                        <x-admin-dashboard.card as="section" padding="sm" shadow="none">
                             <div>
-                                <p class="font-display text-sm font-extrabold text-neo-ink">📘 Panduan pemakaian produk</p>
-                                <p class="mt-1 text-[10px] font-extrabold uppercase text-neo-ink/60">Opsional dan berbeda untuk setiap produk/provider. Hanya tampil ke pembeli jika kedua field diisi.</p>
+                                <p class="text-sm font-semibold text-admin-ink">Panduan pemakaian produk</p>
+                                <p class="mt-1 text-xs leading-5 text-admin-muted">Opsional dan berbeda untuk setiap produk/provider. Hanya tampil ke pembeli jika kedua field diisi.</p>
                             </div>
 
                             <div class="mt-3 grid gap-3">
@@ -569,8 +570,8 @@
                             <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeProductModal()" x-bind:disabled="productFormSubmitting">
                                 Batal
                             </x-admin-dashboard.button>
-                            <x-admin-dashboard.button type="submit" variant="pink" x-bind:disabled="productFormSubmitting" x-bind:class="{ 'cursor-wait opacity-70': productFormSubmitting }">
-                                <span x-text="productFormSubmitting ? 'Menyimpan...' : (productModalMode === 'edit' ? '⚡ Simpan' : '⚡ Submit produk')">⚡ Submit produk</span>
+                            <x-admin-dashboard.button type="submit" variant="primary" x-bind:disabled="productFormSubmitting" x-bind:class="{ 'cursor-wait opacity-70': productFormSubmitting }">
+                                <span x-text="productFormSubmitting ? 'Menyimpan...' : (productModalMode === 'edit' ? 'Simpan' : 'Submit produk')">Submit produk</span>
                             </x-admin-dashboard.button>
                         </div>
                     </form>

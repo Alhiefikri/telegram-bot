@@ -11,30 +11,30 @@
 </head>
 <body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
     <x-admin-dashboard.linked-shell active-tab="penjualan" title="Manual Delivery Review">
-        <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-semibold text-admin-accent-strong underline">← Kembali ke Pesanan</a>
-        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
-            <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Operational queue</p>
-            <h1 class="mt-1 text-2xl font-black">Manual Delivery Review</h1>
-            <p class="mt-2 text-sm font-semibold text-brand-muted">Unknown dan Manual Delivery Review tidak dikirim ulang otomatis. Target Telegram dan metadata sensitif ditampilkan dalam bentuk tereduksi.</p>
+        <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">← Kembali ke Pesanan</a>
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4">
+            <p class="text-xs font-medium text-admin-muted">Operational queue</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">Manual Delivery Review</h1>
+            <p class="mt-2 text-sm leading-6 text-admin-muted">Unknown dan Manual Delivery Review tidak dikirim ulang otomatis. Target Telegram dan metadata sensitif ditampilkan dalam bentuk tereduksi.</p>
 
             <div class="mt-5 space-y-3">
                 @forelse ($reviews as $review)
-                    <a href="{{ route('admin.telegram-outbound-effects.show', $review['effect']) }}" class="block rounded-xl border-2 border-brand-border bg-white p-4 hover:bg-brand-bg">
+                    <a href="{{ route('admin.telegram-outbound-effects.show', $review['effect']) }}" class="block rounded-lg border border-admin-line bg-admin-surface p-4 transition-colors hover:bg-admin-surface-muted">
                         <div class="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                                <p class="font-black">{{ $review['source_reference'] }}</p>
-                                <p class="mt-1 text-sm font-semibold text-brand-muted">{{ $review['effect_type'] }} · {{ $review['target'] }}</p>
+                                <p class="font-semibold text-admin-ink">{{ $review['source_reference'] }}</p>
+                                <p class="mt-1 text-sm font-medium text-admin-muted">{{ $review['effect_type'] }} · {{ $review['target'] }}</p>
                             </div>
                             <x-admin-dashboard.badge tone="{{ $review['state'] === 'manual_review' ? 'amber' : 'rose' }}">{{ $review['state'] }}</x-admin-dashboard.badge>
                         </div>
-                        <dl class="mt-3 grid gap-2 text-xs font-semibold text-brand-muted sm:grid-cols-4">
-                            <div><dt>Attempts</dt><dd class="font-black text-neo-ink">{{ $review['attempts'] }}</dd></div>
-                            <div><dt>Sequence</dt><dd class="font-black text-neo-ink">{{ $review['sequence'] }}</dd></div>
-                            <div><dt>Error code</dt><dd class="font-black text-neo-ink">{{ $review['error_code'] ?? '—' }}</dd></div>
-                            <div><dt>Updated</dt><dd class="font-black text-neo-ink">{{ $review['updated_at'] }}</dd></div>
+                        <dl class="mt-3 grid gap-3 sm:grid-cols-4">
+                            <div><dt class="text-xs font-medium text-admin-muted">Attempts</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review['attempts'] }}</dd></div>
+                            <div><dt class="text-xs font-medium text-admin-muted">Sequence</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review['sequence'] }}</dd></div>
+                            <div><dt class="text-xs font-medium text-admin-muted">Error code</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review['error_code'] ?? '—' }}</dd></div>
+                            <div><dt class="text-xs font-medium text-admin-muted">Updated</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review['updated_at'] }}</dd></div>
                         </dl>
                         @if ($review['duplicate_risk_acknowledged'])
-                            <p class="mt-3 text-xs font-black text-amber-800">Duplicate-risk acknowledged for this explicit resend version.</p>
+                            <p class="mt-3 text-xs font-medium text-neo-warning-text">Duplicate-risk acknowledged for this explicit resend version.</p>
                         @endif
                     </a>
                 @empty

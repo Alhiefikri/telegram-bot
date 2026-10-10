@@ -8,7 +8,7 @@
             description="Atur nama, deskripsi, visibilitas, urutan, dan hubungan produk dari satu tempat."
             data-admin-return-target
             tabindex="-1"
-            class="max-h-[92vh] w-full max-w-3xl overflow-y-auto !bg-[#fff3a3]"
+            class="max-h-[92vh] w-full max-w-3xl overflow-y-auto"
         >
             @if ($errors->categoryCreate->any() || $errors->categoryUpdate->any() || $errors->categoryDelete->any())
                 <x-admin-dashboard.notice tone="danger" class="mb-3 animate-slide-up">
@@ -21,25 +21,26 @@
             @endif
 
             <div id="admin-category-management-content" data-admin-return-target tabindex="-1" class="space-y-4">
-                <form method="POST" x-bind:action="categoryFormAction" x-on:submit="submitCategoryForm($event)" class="rounded-[1rem] border-[3px] border-neo-ink bg-white/80 p-3 shadow-[3px_3px_0_#111827] sm:p-4">
+                <form method="POST" x-bind:action="categoryFormAction" x-on:submit="submitCategoryForm($event)" class="rounded-lg border border-admin-line bg-admin-surface p-3 sm:p-4">
                     @csrf
                     <input type="hidden" x-bind:name="categoryFormMethod ? '_method' : ''" x-bind:value="categoryFormMethod">
                     <input type="hidden" name="category_id" x-bind:value="categoryId">
 
                     <div class="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                            <p class="font-display text-sm font-black uppercase text-neo-ink" x-text="categoryFormMode === 'edit' ? 'Edit kategori' : 'Tambah kategori'"></p>
-                            <p class="mt-1 text-[11px] font-bold text-neo-ink/60">Slug dibuat dan dijaga sistem. Kosongkan deskripsi jika tidak diperlukan.</p>
+                            <p class="text-sm font-semibold text-admin-ink" x-text="categoryFormMode === 'edit' ? 'Edit kategori' : 'Tambah kategori'"></p>
+                            <p class="mt-1 text-xs text-admin-muted">Slug dibuat dan dijaga sistem. Kosongkan deskripsi jika tidak diperlukan.</p>
                         </div>
-                        <button
+                        <x-admin-dashboard.button
                             x-cloak
                             x-show="categoryFormMode === 'edit'"
                             type="button"
-                            class="rounded-lg border-2 border-neo-ink bg-white px-2.5 py-1.5 text-[10px] font-black uppercase text-neo-ink shadow-[2px_2px_0_#111827]"
+                            variant="neutral"
+                            size="sm"
                             x-on:click="resetCategoryForm()"
                         >
                             Batal edit
-                        </button>
+                        </x-admin-dashboard.button>
                     </div>
 
                     <div class="mt-3 grid gap-3 sm:grid-cols-2">
@@ -82,7 +83,7 @@
                     <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
                         <div>
                             <x-admin-dashboard.field-label for="category-management-visibility">Visibilitas pelanggan</x-admin-dashboard.field-label>
-                            <select id="category-management-visibility" x-bind:value="categoryIsActive ? 'true' : 'false'" x-on:change="categoryIsActive = $event.target.value === 'true'" class="mt-1.5 block w-full rounded-lg border-[3px] border-neo-ink bg-white px-3 py-2.5 text-sm font-bold text-neo-ink shadow-[2px_2px_0_#111827] focus:outline-none focus:ring-2 focus:ring-neo-ink">
+                            <select id="category-management-visibility" x-bind:value="categoryIsActive ? 'true' : 'false'" x-on:change="categoryIsActive = $event.target.value === 'true'" class="mt-1.5 block w-full min-h-11 rounded-lg border border-admin-line bg-admin-surface px-3 text-sm text-admin-ink focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper">
                                 <option value="true">Tampil</option>
                                 <option value="false">Disembunyikan</option>
                             </select>
@@ -98,48 +99,48 @@
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                             @enderror
                         </div>
-                        <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="self-end text-[11px]" x-bind:disabled="categoryFormSubmitting">
+                        <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="self-end" x-bind:disabled="categoryFormSubmitting">
                             <span x-text="categoryFormMode === 'edit' ? 'Simpan perubahan' : '+ Kategori'"></span>
                         </x-admin-dashboard.button>
                     </div>
                 </form>
 
-                <div class="rounded-[1rem] border-[3px] border-neo-ink bg-white/80 p-3 shadow-[3px_3px_0_#111827] sm:p-4">
-                    <div class="flex items-end justify-between gap-3">
-                        <div>
-                            <p class="font-display text-sm font-black uppercase text-neo-ink">Daftar kategori</p>
-                            <p class="mt-1 text-[11px] font-bold text-neo-ink/60">Kategori tersembunyi tetap bisa dipilih saat mengelola produk.</p>
+                <x-admin-dashboard.card padding="compact" shadow="none">
+                    <div class="flex flex-wrap items-end justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="text-lg font-semibold text-admin-ink">Daftar kategori</p>
+                            <p class="mt-1 text-sm leading-6 text-admin-muted">Kategori tersembunyi tetap bisa dipilih saat mengelola produk.</p>
                         </div>
-                        <span class="rounded-full border-2 border-neo-ink bg-[#7BD10A] px-2 py-1 text-[10px] font-black uppercase">{{ count($categoryManagement['categories']) }} total</span>
+                        <x-admin-dashboard.badge tone="emerald">{{ count($categoryManagement['categories']) }} total</x-admin-dashboard.badge>
                     </div>
 
                     <div class="mt-3 space-y-2">
                         @forelse ($categoryManagement['categories'] as $category)
-                            <article id="admin-category-{{ $category['id'] }}" x-data="{ categoryEditPayload: @js($category['edit_payload']) }" class="rounded-[0.85rem] border-2 border-neo-ink bg-white p-3 shadow-[2px_2px_0_#111827]">
+                            <article id="admin-category-{{ $category['id'] }}" x-data="{ categoryEditPayload: @js($category['edit_payload']) }" class="rounded-lg border border-admin-line bg-admin-surface p-3">
                                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                     <div class="min-w-0">
                                         <div class="flex flex-wrap items-center gap-2">
-                                            <h3 class="break-words font-display text-base font-black text-neo-ink">{{ $category['name'] }}</h3>
-                                            <span class="rounded-full border-2 border-neo-ink px-2 py-0.5 text-[10px] font-black uppercase" style="color: {{ $category['status_color'] }}">{{ $category['status_label'] }}</span>
+                                            <h3 class="break-words text-base font-semibold text-admin-ink">{{ $category['name'] }}</h3>
+                                            <span class="text-xs font-medium" style="color: {{ $category['status_color'] }}">{{ $category['status_label'] }}</span>
                                         </div>
-                                        <p class="mt-1 break-words text-xs font-semibold text-neo-ink/65">{{ $category['description'] ?: 'Tanpa deskripsi' }}</p>
-                                        <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-black uppercase text-neo-ink/70">
+                                        <p class="mt-1 break-words text-xs text-admin-muted">{{ $category['description'] ?: 'Tanpa deskripsi' }}</p>
+                                        <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-admin-muted">
                                             <span>{{ $category['product_count'] }} produk</span>
                                             <span>Urutan {{ $category['sort_order'] }}</span>
                                         </div>
-                                        <p class="mt-1 text-[10px] font-bold text-neo-ink/55">Status aktif, stok, dan reservasi produk tetap dipertahankan saat produk menjadi Tanpa kategori.</p>
+                                        <p class="mt-1 text-xs text-admin-muted">Status aktif, stok, dan reservasi produk tetap dipertahankan saat produk menjadi Tanpa kategori.</p>
                                     </div>
 
                                     <div class="flex shrink-0 gap-2 sm:w-44 sm:flex-col">
-                                        <x-admin-dashboard.button type="button" variant="secondary" size="sm" class="flex-1 text-[10px]" x-on:click="openCategoryEditModal(categoryEditPayload)">
-                                            ✏️ Edit
+                                        <x-admin-dashboard.button type="button" variant="secondary" size="sm" class="flex-1" x-on:click="openCategoryEditModal(categoryEditPayload)">
+                                            Edit
                                         </x-admin-dashboard.button>
                                         <form method="POST" action="{{ $category['delete_url'] }}" class="flex-1" data-category-delete-confirmation="{{ $category['delete_confirmation'] }}" x-on:submit="if (! confirm($el.dataset.categoryDeleteConfirmation)) $event.preventDefault()">
                                             @csrf
                                             @method('DELETE')
                                             <input type="hidden" name="confirm_delete" value="1">
-                                            <x-admin-dashboard.button type="submit" variant="destructive" size="sm" class="w-full text-[10px]">
-                                                🗑️ Hapus
+                                            <x-admin-dashboard.button type="submit" variant="destructive" size="sm" class="w-full">
+                                                Hapus
                                             </x-admin-dashboard.button>
                                         </form>
                                     </div>
@@ -149,7 +150,7 @@
                             <x-admin-dashboard.empty-state title="Belum ada kategori." />
                         @endforelse
                     </div>
-                </div>
+                </x-admin-dashboard.card>
             </div>
         </x-admin-dashboard.modal-shell>
     </x-admin-dashboard.modal-backdrop>

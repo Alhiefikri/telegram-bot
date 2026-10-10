@@ -153,14 +153,19 @@ Admin is custom Blade + Alpine, not Filament. Reusable components live under `sr
 
 Admin patterns:
 
-- Mobile-first narrow shell: `.admin-mini-shell` maxes around `430px` on mobile and expands around `820px` on desktop.
-- Background uses warm yellow paper plus radial neon washes; desktop simplifies the repeating stripe texture.
-- Bottom mobile nav uses a near-black blurred pill bar; active items use yellow fill and hard black shadow.
-- Desktop tab nav switches to a six-column grid when the shell has desktop width.
-- Filters use full-pill, 3px black borders, heavy `Space Grotesk`, uppercase labels, and compact count bubbles.
-- Header/store-link sections use strong gradients instead of quiet neutral cards.
-- Modals, notices, cards, form controls, and stat blocks should preserve hard borders, high contrast, and compact spacing.
-- Image uploads (`x-admin-dashboard.file-upload`) keep the native `<input type="file">` as the control so Tab, Space and Enter open the native picker with unchanged `name`/`accept`/validation. It is visually replaced by a label of at least 44×44px that carries the hover and focus ring, while the chosen filename (or empty state) stays visible beside it. The raw storefront-banner inputs keep the same minimum target and admin focus outline.
+- Variant A shell: grouped sidebar at >=1024px, compact topbar, and an accessible drawer below that breakpoint. There is no tab strip and no bottom navigation.
+- Neutral paper/surface pairs plus one muted violet accent; semantic success/warning/danger colors keep a text label. No warm-yellow paper background or neon washes on operational surfaces.
+- One-pixel `border-admin-line` separators, `--admin-radius` (12px) corners, restrained `shadow-admin-sm` elevation, regular-case labels, and medium-weight metadata.
+- Filters use the shared `filter-pill` idiom: one-pixel border, `--admin-radius` corners, regular-case labels, and compact count bubbles.
+- Section headers state context and hierarchy; keep the primary action per surface on the accent fill and everything else neutral.
+- Modals, notices, cards, form controls, and stat blocks compose the `x-admin-dashboard.*` primitives instead of carrying local border/shadow/palette/typography overrides.
+- Image uploads (`x-admin-dashboard.file-upload`) keep the native `<input type="file">` as the control so Tab, Space and Enter open the native picker with unchanged `name`/`accept`/`validation`. It is visually replaced by a label of at least 44×44px that carries the hover and focus ring, while the chosen filename (or empty state) stays visible beside it. The raw storefront-banner inputs keep the same minimum target and admin focus outline.
+- Long operational values (invoice hashes, provider references, wallet addresses, SKUs, secrets) use `font-mono text-xs break-all`; every other label stays in the regular UI type scale.
+- Data-dense tables and wide rows scroll inside an `overflow-x-auto` container; the page itself never overflows horizontally.
+
+Operational surfaces in scope for this contract: Produk (catalog, family, category, stock intake and management, storefront banners), Pesanan (orders, order detail, Manual Fulfillment Review, Manual Delivery Review), and Supplier (connections, private catalog/import/mapping, product pricing policy, purchases/recovery, warranty/refund/replacement, BuyMail deposit/history).
+
+Menu labels keep their established, specific action wording; emoji are not used as heading decoration. See `docs/agents/admin-dashboard-sidebar-cutover.md` for the recorded decisions and evidence, including the `supplier-*` CSS family that this contract removed.
 
 Admin must prioritize scannability over flourish: order status, stock state, payment data, product names, totals, and destructive actions must remain unambiguous.
 

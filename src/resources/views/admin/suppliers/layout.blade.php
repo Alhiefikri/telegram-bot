@@ -8,8 +8,9 @@
     @include('partials.theme-init')
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
+@php($supplierPageTitle = trim(preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($__env->yieldContent('title'), ENT_QUOTES | ENT_HTML5)))) ?: 'Supplier')
 <body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
-    <x-admin-dashboard.linked-shell active-tab="suppliers" title="Supplier">
+    <x-admin-dashboard.linked-shell active-tab="suppliers" :title="$supplierPageTitle">
         @if(session('status'))
             <x-admin-dashboard.notice tone="success" class="mb-5 text-sm font-semibold">{{ session('status') }}</x-admin-dashboard.notice>
         @endif

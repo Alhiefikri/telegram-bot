@@ -3176,6 +3176,17 @@ test("linked operational pages retain the shared shell and active destination", 
       "Pesanan",
     ],
     ["/admin/telegram-outbound-effects", "Manual Delivery Review", "Pesanan"],
+    [invoiceFixtures.adminOrderPath, "Detail order", "Pesanan"],
+    [
+      "/admin/suppliers/monitor/purchases",
+      "Monitor pembelian supplier",
+      "Supplier",
+    ],
+    [
+      "/admin/suppliers/warranty",
+      "Klaim Gmail · Refund & penggantian",
+      "Supplier",
+    ],
     ["/admin/store-balance/reports", "Laporan saldo Customer", "Laporan saldo"],
     [
       "/admin/store-balance/adjustments",
@@ -3199,6 +3210,63 @@ test("linked operational pages retain the shared shell and active destination", 
       page.getByRole("link", { name: activeLabel, exact: true })
     ).toHaveAttribute("aria-current", "page");
     await expectNoDocumentOverflow(page);
+  }
+});
+
+test("operational surfaces keep the shared shell and avoid occlusion at every breakpoint in both themes", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(240_000);
+  await login(page);
+
+  const surfaces = [
+    ["produk", "/admin?tab=produk"],
+    ["pesanan", "/admin?tab=penjualan"],
+    ["supplier", "/admin?tab=suppliers"],
+    ["supplier-purchases", "/admin/suppliers/monitor/purchases"],
+    ["supplier-warranty", "/admin/suppliers/warranty"],
+    ["order-detail", invoiceFixtures.adminOrderPath],
+    ["manual-fulfillment-review", "/admin/manual-fulfillment-reviews"],
+    ["manual-delivery-review", "/admin/telegram-outbound-effects"],
+  ];
+
+  for (const width of [375, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+
+    for (const theme of ["light", "dark"]) {
+      if ((await page.locator("html").getAttribute("data-theme")) !== theme) {
+        await page.locator("[data-theme-toggle]").first().click();
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      }
+
+      for (const [name, path] of surfaces) {
+        const response = await page.goto(`${baseUrl}${path}`, {
+          waitUntil: "domcontentloaded",
+        });
+        expect(response.status(), `${path} should render`).toBe(200);
+
+        const topbar = page.getByRole("banner", { name: "Konteks halaman" });
+        await expect(topbar, `${path} keeps the shared topbar`).toBeVisible();
+        await expectNoDocumentOverflow(page);
+
+        const heading = page.locator("main h1, main h2").first();
+        await expect(heading, `${path} renders a heading`).toBeVisible();
+        const [topbarBox, headingBox] = await Promise.all([
+          topbar.boundingBox(),
+          heading.boundingBox(),
+        ]);
+        expect(
+          headingBox.y,
+          `first heading on ${path} stays below the shared topbar`
+        ).toBeGreaterThanOrEqual(topbarBox.y + topbarBox.height - 1);
+
+        await page.screenshot({
+          path: testInfo.outputPath(`${name}-${width}-${theme}.png`),
+          fullPage: false,
+        });
+      }
+    }
   }
 });
 
@@ -3246,7 +3314,7 @@ for (const role of ["owner", "admin"]) {
           ["stats", "#admin-section-stats"],
           ["produk", "#admin-section-products"],
           ["penjualan", "#admin-section-sales"],
-          ["suppliers", ".supplier-workspace"],
+          ["suppliers", "[data-supplier-workspace]"],
           ["broadcast", "#admin-section-broadcast"],
           ["telegram-channel", "#admin-section-store-channel"],
           ["riwayat", "#admin-section-history"],
@@ -6738,6 +6806,7 @@ $unknownEffect = \App\Models\TelegramOutboundEffect::factory()->create([
 
 echo json_encode([
     'unknownEffectPath' => route('admin.telegram-outbound-effects.show', $unknownEffect, false),
+    'adminOrderPath' => route('admin.orders.show', $paidInvoiceOrder, false),
     'longProductCheckoutPath' => route('storefront.shop.checkout.product', ['product' => $longCheckoutProduct], false),
     'tierProductCheckoutPath' => route('storefront.shop.checkout.product', ['product' => $tierProduct], false),
     'pendingWithNativeQris' => [

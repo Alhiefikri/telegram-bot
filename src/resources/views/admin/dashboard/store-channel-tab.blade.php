@@ -1,32 +1,32 @@
             <div id="admin-section-store-channel" data-admin-return-target tabindex="-1" class="mt-4 space-y-4">
                 @php($welcomeBanner = $storeChannel['welcome_banner'])
-                <x-admin-dashboard.card id="admin-section-telegram-welcome-banner" data-admin-return-target tabindex="-1" as="section" tone="green" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-labelledby="admin-telegram-welcome-banner-title">
+                <x-admin-dashboard.card id="admin-section-telegram-welcome-banner" data-admin-return-target tabindex="-1" as="section" padding="compact" shadow="sm" aria-labelledby="admin-telegram-welcome-banner-title">
                     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0">
-                            <p class="font-display text-[10px] font-bold uppercase tracking-wider text-brand-muted">Banner sambutan bot Telegram</p>
-                            <h2 id="admin-telegram-welcome-banner-title" class="mt-1 font-display text-base font-bold text-neo-ink">Satu banner aktif untuk /start</h2>
-                            <p class="mt-2 max-w-2xl text-xs font-semibold leading-5 text-brand-muted">Hanya untuk sambutan /start di bot, bukan detail produk atau poster stok Store Channel. Upload tanpa rebuild Docker; file di persistent storage dan file_id di-cache Telegram.</p>
+                            <p class="text-xs font-medium text-admin-muted">Banner sambutan bot Telegram</p>
+                            <h2 id="admin-telegram-welcome-banner-title" class="mt-1 text-lg font-semibold text-admin-ink">Satu banner aktif untuk /start</h2>
+                            <p class="mt-2 max-w-2xl text-sm leading-6 text-admin-muted">Hanya untuk sambutan /start di bot, bukan detail produk atau poster stok Store Channel. Upload tanpa rebuild Docker; file di persistent storage dan file_id di-cache Telegram.</p>
                         </div>
-                        <div class="flex h-28 w-44 shrink-0 items-center justify-center overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_#050505]">
+                        <div class="flex h-28 w-44 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-admin-line bg-admin-surface">
                             @if ($welcomeBanner['is_custom'])
                                 <img src="{{ $welcomeBanner['image_url'] }}" alt="Preview Telegram Welcome Banner aktif" class="h-full w-full object-contain" loading="lazy" decoding="async">
                             @else
-                                <span class="px-3 text-center text-[10px] font-black uppercase leading-4 text-neo-ink/60">Fallback bawaan atau teks aktif</span>
+                                <span class="px-3 text-center text-xs leading-5 text-admin-muted">Fallback bawaan atau teks aktif</span>
                             @endif
                         </div>
                     </div>
 
-                    <div class="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-wide">
+                    <div class="mt-3 flex flex-wrap items-center gap-2">
                         <x-admin-dashboard.badge :tone="$welcomeBanner['is_custom'] ? 'emerald' : 'amber'">
                             {{ $welcomeBanner['is_custom'] ? 'Custom aktif · v'.$welcomeBanner['version'] : 'Fallback aktif' }}
                         </x-admin-dashboard.badge>
-                        <span class="rounded-full border-2 border-neo-ink bg-white px-2 py-1">
+                        <x-admin-dashboard.badge>
                             {{ $welcomeBanner['file_id_cached'] ? 'file_id Telegram siap' : 'file_id di-cache saat pengiriman pertama' }}
-                        </span>
+                        </x-admin-dashboard.badge>
                     </div>
 
                     @if ($welcomeBanner['can_manage'])
-                        <form method="POST" action="{{ $welcomeBanner['update_url'] }}" enctype="multipart/form-data" x-data="{ fileName: 'Belum ada file yang dipilih' }" class="mt-4 flex flex-col gap-3 rounded-xl border-2 border-dashed border-neo-ink/40 bg-white/60 p-3 sm:flex-row sm:items-end">
+                        <form method="POST" action="{{ $welcomeBanner['update_url'] }}" enctype="multipart/form-data" x-data="{ fileName: 'Belum ada file yang dipilih' }" class="mt-4 flex flex-col gap-3 rounded-lg border border-dashed border-admin-line bg-admin-surface-muted p-3 sm:flex-row sm:items-end">
                             @csrf
                             <div class="min-w-0 flex-1">
                                 <x-admin-dashboard.field-label for="telegram-welcome-banner-image">Gambar banner /start</x-admin-dashboard.field-label>
@@ -39,9 +39,9 @@
                                     empty-feedback="Belum ada file yang dipilih"
                                     x-on:change="fileName = $event.target.files[0]?.name ?? 'Belum ada file yang dipilih'"
                                 />
-                                <p class="mt-2 text-[10px] font-bold text-neo-ink/60">JPG, PNG, atau WebP. Maksimal 5 MB; otomatis dikompresi menjadi WebP maksimal 1600px.</p>
+                                <p class="mt-2 text-xs text-admin-muted">JPG, PNG, atau WebP. Maksimal 5 MB; otomatis dikompresi menjadi WebP maksimal 1600px.</p>
                             </div>
-                            <x-admin-dashboard.button type="submit" variant="purple" size="sm" class="w-full shrink-0 sm:w-auto">Simpan banner</x-admin-dashboard.button>
+                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full shrink-0 sm:w-auto">Simpan banner</x-admin-dashboard.button>
                         </form>
                         @error('image', 'welcomeBanner')
                             <x-admin-dashboard.field-error class="mt-2">{{ $message }}</x-admin-dashboard.field-error>

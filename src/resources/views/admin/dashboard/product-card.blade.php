@@ -1,4 +1,4 @@
-                        <x-admin-dashboard.card id="product-{{ $product['id'] }}" data-admin-return-target tabindex="-1" as="article" padding="compact" shadow="sm" class="min-w-0 rounded-[1.125rem]">
+                        <x-admin-dashboard.card id="product-{{ $product['id'] }}" data-admin-return-target tabindex="-1" as="article" padding="compact" shadow="sm" class="min-w-0">
                             <div
                                 class="contents"
                                 x-data="{
@@ -9,7 +9,7 @@
                                 }"
                             >
                             @if ($product['image_url'])
-                                <div class="-mx-1 -mt-1 mb-3 flex aspect-square items-center justify-center overflow-hidden rounded-[0.9rem] border-[3px] border-neo-ink bg-white shadow-[4px_4px_0_0_#050505]">
+                                <div class="-mx-1 -mt-1 mb-3 flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-admin-line bg-admin-surface">
                                     <img
                                         src="{{ $product['image_url'] }}"
                                         alt="{{ $product['name'] }}"
@@ -22,7 +22,7 @@
                             {{-- Variant label + status badge --}}
                             <div class="flex min-w-0 items-start justify-between gap-3">
                                 <div class="min-w-0">
-                                    <p class="truncate font-display text-base font-bold text-neo-ink">{{ trim((string) ($product['family_option_label'] ?? '')) ?: $product['name'] }}</p>
+                                    <p class="truncate text-sm font-semibold text-admin-ink">{{ trim((string) ($product['family_option_label'] ?? '')) ?: $product['name'] }}</p>
                                     <x-admin-dashboard.badge
                                         :tone="$product['is_active'] ? 'emerald' : 'slate'"
                                         class="mt-1"
@@ -42,10 +42,10 @@
                             </div>
 
                             {{-- Price --}}
-                            <p class="mt-4 font-display text-2xl font-bold text-neo-ink">{{ $product['price'] }}</p>
+                            <p class="mt-4 text-xl font-semibold text-admin-ink">{{ $product['price'] }}</p>
 
                             {{-- Short description --}}
-                            <p class="mt-2 break-words text-xs font-bold leading-5 text-brand-muted">{{ $product['description'] }}</p>
+                            <p class="mt-2 break-words text-xs leading-5 text-admin-muted">{{ $product['description'] }}</p>
 
                             {{-- Stock info --}}
                             <div class="mt-3 grid grid-cols-3 gap-2">
@@ -56,19 +56,19 @@
 
                             {{-- Visibility status --}}
                             <p @class([
-                                'mt-2 text-[11px] font-semibold',
-                                'text-neo-green' => $product['is_active'],
-                                'text-neo-red' => ! $product['is_active'],
+                                'mt-2 text-xs font-medium',
+                                'text-neo-success-text' => $product['is_active'],
+                                'text-neo-danger-text' => ! $product['is_active'],
                             ])>
                                 {{ $product['visibility_label'] }}
                             </p>
 
 
-                            <section class="mt-3 rounded-lg border-2 border-neo-ink/30 bg-white/70 p-2.5" aria-label="Grouping Product">
+                            <section class="mt-3 rounded-lg border border-admin-line bg-admin-surface-muted p-3" aria-label="Grouping Product">
                                 <div class="flex items-center justify-between gap-2">
-                                    <p class="text-[10px] font-black uppercase tracking-wide text-neo-ink/60">Grouping katalog</p>
+                                    <p class="text-xs font-medium text-admin-muted">Grouping katalog</p>
                                     @if ($product['family_name'])
-                                        <span class="truncate text-[10px] font-black text-neo-purple">{{ $product['family_name'] }}</span>
+                                        <span class="truncate text-xs font-medium text-admin-accent-strong">{{ $product['family_name'] }}</span>
                                     @endif
                                 </div>
                                 @if ($canManageProducts)
@@ -76,25 +76,25 @@
                                         @csrf
                                         @method('PATCH')
                                         <label class="sr-only" for="product-family-select-{{ $product['id'] }}">Product Family</label>
-                                        <select id="product-family-select-{{ $product['id'] }}" data-family-assignment-select name="product_family_id" class="block min-h-10 w-full rounded-lg border-2 border-neo-ink bg-white px-2 py-1.5 text-xs font-bold text-neo-ink">
+                                        <x-admin-dashboard.select id="product-family-select-{{ $product['id'] }}" data-family-assignment-select name="product_family_id">
                                             <option value="">Tanpa family</option>
                                             @foreach ($familyOptions as $familyOption)
                                                 <option value="{{ $familyOption['id'] }}" @selected((int) ($product['family_id'] ?? 0) === (int) $familyOption['id'])>{{ $familyOption['name'] }}</option>
                                             @endforeach
-                                        </select>
+                                        </x-admin-dashboard.select>
                                         <div class="grid grid-cols-2 gap-2">
                                             <label class="sr-only" for="product-family-order-{{ $product['id'] }}">Urutan option</label>
-                                            <input id="product-family-order-{{ $product['id'] }}" type="number" name="family_sort_order" min="0" max="999999" step="1" value="{{ $product['family_sort_order'] }}" placeholder="Urutan" class="min-h-10 w-full rounded-lg border-2 border-neo-ink bg-white px-2 py-1.5 text-xs font-bold text-neo-ink">
+                                            <x-admin-dashboard.input id="product-family-order-{{ $product['id'] }}" type="number" name="family_sort_order" min="0" max="999999" step="1" value="{{ $product['family_sort_order'] }}" placeholder="Urutan" />
                                             <label class="sr-only" for="product-family-label-{{ $product['id'] }}">Label option</label>
-                                            <input id="product-family-label-{{ $product['id'] }}" type="text" name="family_option_label" maxlength="160" value="{{ $product['family_option_label'] }}" placeholder="Label option (opsional)" class="min-h-10 w-full rounded-lg border-2 border-neo-ink bg-white px-2 py-1.5 text-xs font-bold text-neo-ink">
+                                            <x-admin-dashboard.input id="product-family-label-{{ $product['id'] }}" type="text" name="family_option_label" maxlength="160" value="{{ $product['family_option_label'] }}" placeholder="Label option (opsional)" />
                                         </div>
-                                        <x-admin-dashboard.button type="submit" variant="secondary" size="sm" class="w-full text-[10px]">Simpan grouping</x-admin-dashboard.button>
+                                        <x-admin-dashboard.button type="submit" variant="secondary" size="sm" class="w-full">Simpan grouping</x-admin-dashboard.button>
                                     </form>
                                     @if (($dashboardState['familyMembershipProductId'] ?? null) == $product['id'] && ! empty($dashboardState['familyMembershipErrors']))
                                         <x-admin-dashboard.field-error class="mt-2">{{ collect($dashboardState['familyMembershipErrors'])->flatten()->first() }}</x-admin-dashboard.field-error>
                                     @endif
                                 @else
-                                    <p class="mt-1 text-[10px] font-bold text-neo-ink/60">{{ $product['family_name'] ?: 'Belum memiliki Product Family.' }}</p>
+                                    <p class="mt-1 text-xs text-admin-muted">{{ $product['family_name'] ?: 'Belum memiliki Product Family.' }}</p>
                                 @endif
                             </section>
                             @if ($canManageProducts)
@@ -109,30 +109,30 @@
                                         aria-label="Stok"
                                         x-on:click="openStockModal(stockPayload)"
                                     >
-                                        <span aria-hidden="true">➕</span> Stok
+                                        Stok
                                     </x-admin-dashboard.button>
                                 </div>
 
                                 <div class="grid grid-cols-2 gap-2" data-product-secondary-actions>
                                     <x-admin-dashboard.button
                                         type="button"
-                                        variant="secondary"
+                                        variant="neutral"
                                         size="sm"
                                         class="w-full"
                                         aria-label="Ubah"
                                         x-on:click="openProductEditModal(editPayload)"
                                     >
-                                        <span aria-hidden="true">✏️</span> Ubah
+                                        Ubah
                                     </x-admin-dashboard.button>
                                     <x-admin-dashboard.button
                                         type="button"
-                                        variant="warning"
+                                        variant="neutral"
                                         size="sm"
                                         class="w-full"
                                         aria-label="Kelola"
                                         x-on:click="openManageStockModal(editPayload)"
                                     >
-                                        <span aria-hidden="true">📦</span> Kelola
+                                        Kelola
                                     </x-admin-dashboard.button>
                                 </div>
 
@@ -165,13 +165,13 @@
                                 >
                                     <x-admin-dashboard.button
                                         type="button"
-                                        variant="purple"
+                                        variant="neutral"
                                         size="sm"
                                         class="w-full"
                                         aria-label="Bagikan"
                                         x-on:click="copyProductShareLink(shareUrl)"
                                     >
-                                        <span aria-hidden="true">🔗</span> Bagikan
+                                        Bagikan
                                     </x-admin-dashboard.button>
                                     <form method="POST" action="{{ $product['visibility_url'] }}" class="min-w-0">
                                         @csrf
@@ -179,7 +179,7 @@
                                         <input type="hidden" name="is_active" value="{{ $product['is_active'] ? 0 : 1 }}">
                                         <x-admin-dashboard.button
                                             type="submit"
-                                            variant="warning"
+                                            variant="neutral"
                                             size="sm"
                                             class="w-full"
                                         >
@@ -196,7 +196,7 @@
                                             class="w-full"
                                             aria-label="Arsipkan"
                                         >
-                                            <span aria-hidden="true">🗃️</span> Arsipkan
+                                            Arsipkan
                                         </x-admin-dashboard.button>
                                     </form>
                                 </div>

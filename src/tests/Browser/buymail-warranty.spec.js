@@ -144,9 +144,10 @@ test("owner can inspect private warranty and deposit panels without exposing the
     .getByRole("link", { name: "Klaim Gmail / refund / penggantian" })
     .click();
   await expect(
-    page
-      .getByRole("banner", { name: "Konteks halaman" })
-      .getByRole("heading", { name: "Supplier", exact: true })
+    page.getByRole("banner", { name: "Konteks halaman" }).getByRole("heading", {
+      name: "Klaim Gmail · Refund & penggantian",
+      exact: true,
+    })
   ).toBeVisible();
   await expect(
     page.getByText("Klaim harus sampai ke supplier sebelum deadline.", {
@@ -327,6 +328,32 @@ test("supplier creation confirms password without losing the unsaved API key", a
   ).toEqual(initial.suppliers);
   await expectNoSecretLeak(page, keys, responses);
   await expect(page.locator("body")).not.toContainText(replacement);
+
+  // The linked supplier workflow pages stay reachable from the connection card.
+  await page
+    .locator("article")
+    .filter({
+      has: page.locator(`form[action$="/admin/suppliers/${created[0].id}"]`),
+    })
+    .getByRole("link", { name: /Katalog privat/ })
+    .click();
+  await expect(page).toHaveURL(
+    new RegExp(`/admin/suppliers/${created[0].id}/catalog$`)
+  );
+  await expect(
+    page
+      .getByRole("banner", { name: "Konteks halaman" })
+      .getByRole("heading", { name: /^Katalog privat/ })
+  ).toBeVisible();
+  await expect(
+    page.getByText("Provider", { exact: true }).first()
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth
+    )
+  ).toBe(true);
+  expect(await page.locator("body").innerText()).not.toContain(replacement);
 });
 
 function supplierState(keys) {

@@ -1277,6 +1277,21 @@ is covered in the browser lane, not by markup assertions. Category management
 has no upload control, and the raw storefront-banner inputs use the same
 minimum target plus the admin focus outline.
 
+Operational surfaces (#603) now render entirely through those primitives:
+Produk (catalog tab, product card, product/family/category modals, stock intake
+and management modals, storefront banners), Pesanan (`admin.dashboard` sales
+tab, `admin.orders.show`, Manual Fulfillment Review index/detail, Manual
+Delivery Review index/detail), and Supplier (connections, private catalog,
+connection form, product pricing policy, purchases/recovery, warranty,
+BuyMail deposit/history, `admin/suppliers/layout.blade.php`). The custom
+`supplier-*` CSS family and its `[data-theme="dark"] .supplier-alert` override
+were deleted; the supplier workspace is now identified by
+`data-supplier-workspace` (used by the browser lane) instead of
+`.supplier-workspace`. Per-file detail, the light/dark contrast measurements,
+and the per-item antislop gate live in
+`docs/agents/admin-dashboard-sidebar-cutover.md`. No route, form field, error
+bag, `old()`, permission gate, Alpine state key, or domain rule changed.
+
 Desktop cutover (#594): `admin/dashboard.blade.php` mounts `shell` with named
 sidebar/topbar/status/content slots, one `adminDashboard` root, and one document
 content scroll. At >=1024px the grouped sidebar is persistent and 240px wide;

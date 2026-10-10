@@ -1,6 +1,6 @@
 # Admin Dashboard Sidebar Cutover
 
-Status: implemented in the working tree; production deployment is not authorized by issues #600, #601 or #602.
+Status: implemented in the working tree; production deployment is not authorized by issues #600, #601, #602 or #603.
 
 ## As-built ownership
 
@@ -237,6 +237,137 @@ Gate scope is this contrast/upload repair, not dashboard-wide accessibility sign
 | R-11 radius variation | PASS: existing radii retained; no pill-shaped replacement. |
 | R-15 concrete actions | PASS: labels unchanged. |
 | R-16 language | PASS: no marketing buzzwords added. |
+
+## Issue #603 operational restyle
+
+Follow-up to #597, after the #601/#602 blocker repairs. Presentation only: routes, `method`/`@csrf`/`@method`, every input `name`, hidden fields, named error bags, `@error`/`old()`, redirects and return targets, permission gates/`@can`, Alpine roots and every `x-*` binding, modal ownership and Indonesian copy are byte-identical to the pre-restyle views. Every touched view was diff-verified (`route(...)` calls, `@csrf` counts, `name="..."` sets and `@if/@foreach/@can/@error` inventories are unchanged).
+
+### Visual decisions and the reason for each
+
+- **Neutral surfaces and 1px line separators** replace the legacy `border-2`/`border-[3px] border-neo-ink` + `shadow-[Npx_Npx_0_…]` hard-offset treatment, because the operational tabs mixed two visual languages: the shell/primitives from #593 already used `--admin-line` separators and `--admin-radius`. Raw tab/modal markup now composes the same primitives instead of overriding them, so the dashboard has one surface language.
+- **Regular case, medium weight** replaces `uppercase`/`tracking-wide`/`font-black` operational labels. Uppercase + wide tracking made identifier-heavy rows (SKUs, provider refs, wallet addresses) harder to scan in the tables operators actually read.
+- **The legacy per-modal palette overrides were deleted** (`!bg-[#7BD10A]`, `!bg-[#fee648]`, `!bg-[#d9c8ff]`, `!bg-[#fff3a3]`). A modal's fill carried no meaning, and it defeated the shared `card` tone contract inside the modal. Modal title/description and the semantic `notice` tones still separate danger/warning/success states by color *and* text.
+- **Data-like values use `font-mono text-xs break-all`** only where the value is machine-readable (order/provider references, hashes, receiver addresses, SKUs, credential payloads). Everything else stays in the regular UI type scale so the mono style keeps its meaning.
+- **One accent, role-split** (`--admin-accent` fill, `--admin-accent-ink` on fill, `--admin-accent-strong` for accent text, `--admin-accent-hover` fill hover) is reused unchanged from #602. Nothing in this restyle introduces a second palette; semantic success/warning/danger boxes keep their tokens and their text labels.
+- **Emoji removed from headings only** (`📦 Produk Saya`, `🧩 Kelola Product Family`, `⚠️ Replacement & Refund Policy`, …). The emoji carried no state and competed with the real status badges; action-button emoji that name an action (`✏️`, `🗑️`) were kept or replaced by the plain label so the accessible name stays stable.
+- **The custom `supplier-*` CSS family was deleted** (~165 CSS lines) after all four consumer views moved onto the shared primitives. It duplicated the button/badge/card primitives with different borders, hard shadows, uppercase eyebrows and a form-control reset, which is exactly the second visual language the ticket forbids.
+- **Linked supplier pages gained their own page context in the shared topbar** (`admin/suppliers/layout.blade.php` now passes the child's `@section('title')` to `linked-shell`) and a content-level heading, because the topbar previously said only "Supplier" for five different pages and the warranty/purchases/BuyMail pages had no heading at all. This follows spec §5.2 (context label + current page title) and adds no route or tab.
+
+### Browser-lane and test changes
+
+- `admin-dashboard-responsive.spec.js`: the linked-pages lane now also walks `admin.orders.show`, the purchases queue and the warranty page; the seed exposes `adminOrderPath`; the supplier workspace is located by `data-supplier-workspace` instead of the deleted `.supplier-workspace` rule; a new lane walks every touched operational surface at 375/768/1280px in light and dark, asserting the shared topbar, a content heading below it, and zero document overflow, with screenshots per surface/width/theme.
+- `buymail-warranty.spec.js`: the warranty panel assertion now expects the page's own topbar title.
+
+### Exercised states (browser lanes, disposable SQLite fixtures)
+
+| Surface | Valid | Invalid / error | Empty / long content |
+| --- | --- | --- | --- |
+| Produk catalog, product card | create/edit product, name/icon edits, locale copy tabs | server validation reopens the modal and focuses the field; catalog-default upload rejects a non-image | long description, no-tier state |
+| Product quantity tiers | add/remove up to five tiers, save and reopen | per-tier schedule/price errors | "Tidak ada tingkat harga" |
+| Product Family / Kategori | open, create, edit, delete, focus return | family/category error notices | empty family list |
+| Stock intake | quick legacy lines, structured account cards, server review then commit | duplicate-identity review, identity-readiness gate | 1–20 account cards, multiline secrets |
+| Stock management | single edit, bulk selection, delete, reload | stale/allocated selection rejected; load error retry | >25 accounts truncation notice |
+| Pesanan | filter pills, pagination, order cards, detail link | payment-attention notice | no orders |
+| Order detail | payment/delivery/purchase blocks, manual approve/reject, reconcile | order error notice, Binance/BSC review blocks | orders without supplier purchase |
+| Manual Fulfillment Review | resolve fulfill/hand-off/refund/reject | `review` error, refund reference required | empty queue |
+| Manual Delivery Review | reduced metadata, mark sent, explicit resend | `effect` error, duplicate-risk acknowledgement, Unknown state | empty queue |
+| Supplier connections | create/edit with password confirmation, sync, catalog/deposit links | wrong password keeps the unsaved API key, lossy edit rejected | no connections |
+| Supplier catalog/import/mapping | import draft, map to existing product, move, detach | disabled mapping when no product is available, manual-input alert | empty catalog |
+| Supplier product pricing | mode/rounding/thresholds, preview, save | preview without a price | no sources |
+| Purchases/recovery | history reconciliation, confirm debit, no-debit evidence, handoff | ambiguous/unknown purchase actions, expired candidate | empty fulfillment and purchase history |
+| Warranty/deposit | claim panel EN/ID, refund/replacement, deposit create/refresh/cancel | recovery code, expired/uncertain transfer states | no claims, no deposits |
+
+Nothing in the lanes asserts CSS class names, exact markup or copy wording beyond the operator-facing sentences under test.
+
+### Passing-after checks (final tree)
+
+Run from `src/`:
+
+- `php artisan test --filter='AdminDashboard|AdminCategoryCrudTest|AdminTelegramWelcomeBannerTest|AdminStockBulkDeletionTest|AdminOrderPaymentOperationsTest|ManualFulfillmentReviewTest|AdminTelegramOutboundEffectReviewTest|AdminStoreChannelTest|AdminCatalogPolicyAndStockAuditTest|ProductStockIntakeTest|ProductStockDeletionFakeSalesProofTest|StructuredStockSecurityAndRolloutTest'` — passed, 278 tests / 2,912 assertions.
+- `php artisan test --filter='SupplierAdminTest|SupplierDepositTest|SupplierPricingClarityTest|WarrantyAdminTest|WarrantyWebTest|BuyMailFulfillmentTest|SupplierIndependentRegressionTest|AdminDashboardAccessTest|ProductionReleaseHardeningTest|StorefrontLandingPageTest|AdminBalanceAdjustmentDashboardTest|AdminUsdtTopUpReviewTest|AdminTelegramWelcomeBannerTest|AdminStoreChannelTest'` — passed, 257 tests / 2,287 assertions.
+- `npm run test:js` — passed, 57 tests.
+- `npm run build` — Vite production build passed (run by both browser lanes).
+- `npm run test:browser:admin` — passed, 102 tests (12.8m), including the new multi-breakpoint operational lane and the extended linked-pages lane.
+- `npm run test:browser:buymail` — passed, 3 tests, including the new supplier-catalog click-through.
+- `php artisan view:cache` plus `php -l` over every compiled view — all views compile; this caught two real defects during the work (a bare `{{ }}` in attribute position left the component tag uncompiled, and an escaped `@section('title')` string reaching the topbar double-escaped).
+- Token-inventory diff of every changed view (`route(...)`, `name="..."`, `@csrf`, `@method`, `@can`, `@error`, `@if/@foreach/@forelse/@empty/@endif`) — identical before and after.
+
+Screenshots for the record: `src/test-results/**/{produk,pesanan,supplier,supplier-purchases,supplier-warranty,order-detail,manual-fulfillment-review,manual-delivery-review}-{375,768,1280}-{light,dark}.png` written by the operational lane (ignored by git).
+
+### Delivery Gate (issue #603 scope)
+
+Design Read, declared before edits: admin operational surfaces (Produk, Pesanan, Supplier and their linked pages) for store operators running real catalog, stock, order-review and supplier work, in the canonical Variant A language: dial **ENERGY 1 / RHYTHM 1 / MOTION 1**. ENERGY 1 because these are dense operator surfaces where a single accent marks the primary action; RHYTHM 1 because the same card/heading/fact-pair rhythm must repeat across tabs so operators recognize structure at a glance; MOTION 1 because nothing here should move (only existing hover/transition feedback remains).
+
+| Gate item | Result and evidence |
+| --- | --- |
+| R-02 punctuation | PASS: no new prose; the pre-existing em dashes in pinned operator copy were restored (`Belum ada harga — sinkronkan katalog supplier.`, coverage placeholder, error-code placeholder). |
+| R-03 mobile layout | PASS: the new multi-breakpoint lane asserts zero document overflow on every touched surface at 375/768/1280px in both themes; the linked-pages lane asserts it for order detail, purchases and warranty. |
+| R-17 sourced statistics | PASS: no statistics added; all rendered values come from the fixture database. |
+| R-18 testimonials | PASS: none. |
+| R-23 assets/navigation authority | PASS: no assets; existing authorized navigation and product identity retained; no new navigation item. |
+| R-24 real destinations | PASS: every rendered link/action keeps its `route(...)`; verified by route-inventory diff per file. |
+| R-25 text contrast | PASS: measured pairs below. |
+| R-26 functional controls | PASS: every action is still a real form/post, link or Alpine handler; the browser lanes submit them. |
+| R-27 states | PASS: empty states (warranty/purchases/monitor queues, product family, stock), validation errors (product form, import form, account input review, catalog upload) and long content (product description, long provider references) are rendered from real fixture data and exercised. |
+| R-28 FAQ relevance | PASS: no FAQ touched. |
+| R-32 keyboard/focus | PASS: the shared primitives keep 44px targets and visible focus; modal focus traps and opener restoration are unchanged and covered by the existing browser cases. |
+| R-33 source implementation | PASS: Blade/CSS source only; no runtime style patching. |
+| R-34 themes | PASS: every touched surface rendered in light and dark in the new lane; contrast measured for both. |
+| R-35 executed surface | PASS: feature suites, JS tests, Vite build and the browser lanes ran on the final tree. |
+| R-36 honest claims | PASS: no security/performance/customer claims; no production deployment. |
+| R-37 direction | PASS: Variant A and ENERGY 1 / RHYTHM 1 / MOTION 1 declared before the first edit. |
+| R-38 real content | PASS: production labels unchanged; fixtures confined to the disposable SQLite browser database. |
+| R-01 gradients/glow | PASS: the legacy `bg-[#…]` modal fills and gradient hero band were removed; no gradient or glow added. |
+| R-04 icon purpose | PASS: heading emoji removed; remaining icons name their action. |
+| R-06 typography purpose | PASS: `font-display`/uppercase/wide-tracking operational labels removed in favour of the shared title/label scale; mono restricted to data-like values. |
+| R-07 background patterns | PASS: no grid/dot pattern added. |
+| R-08 decorative arrows | PASS: existing `→`/`↗` action glyphs retained on buttons that leave the page; no new decorative arrows. |
+| R-09 badges | PASS: badges report real state (order status, stock status, connection active, review state) with a text label, never color alone. |
+| R-10 glass | PASS: no blur/backdrop effect added. |
+| R-12 elevation | PASS: the legacy per-element hard-offset shadows are gone; only `shadow-admin-sm` on cards and `shadow-admin-lg` on modals remain, as elevation markers. |
+| R-13 glow everywhere | PASS: no glow. |
+| R-14 card hierarchy | PASS: cards follow the content (list row, group header, detail section) instead of one uniform tile; nested wells use a muted surface rather than a second border style. |
+| R-19 motion purpose | PASS: no animation added; only existing color transitions on hover remain. |
+| R-22 illustration purpose | PASS: none. |
+| Liveliness: explicit dials | PASS: ENERGY 1 / RHYTHM 1 / MOTION 1 in the Design Read. |
+| Liveliness: dial consistency | PASS: uniform, repeatable structure across tabs is the deliberate choice for operator scanning. |
+| Liveliness: focal point | PASS: each surface keeps one accent-filled primary action (Tambah Produk, Simpan default, Buat supplier, Catat bukti transfer) with everything else neutral. |
+| Liveliness: structural whitespace | PASS: section gaps (`space-y-4`/`space-y-5`, 24-32px desktop inset) separate operational groups instead of decorative separators. |
+| Liveliness: deliberate accent | PASS: one muted violet accent, semantic colors only for real status. |
+| Liveliness: identity motif | PASS: LHIE STORE, the grouped sidebar, and the repeated eyebrow/title/fact-pair rhythm identify the product. |
+| Liveliness: prior Design Read | PASS: declared before the first edit. |
+| C-1 intentionality | PASS: each decision above carries its one-line reason. |
+| C-2 completeness | PASS: no control was left decorative; the removed palette overrides and emoji carried no function. |
+| C-3 content-driven composition | PASS: no section added or removed except the newly added page-context headings, which state the page's own purpose. |
+| C-4 resilience | PASS: light/dark, three breakpoints, empty/error/long-content states and keyboard paths exercised. |
+| C-5 evidence | PASS: contrast from the contrast tool on the token pairs; rendered-surface evidence from the browser lanes. |
+| R-05 non-template layout | PASS: existing operational hierarchy retained; no marketing template introduced. |
+| R-11 radius variation | PASS: `--admin-radius` (12px) for cards/modals, smaller radii for nested wells and controls; nothing became pill-shaped. |
+| R-15 concrete actions | PASS: labels name the operation (Kelola Product Family, Kelola Kategori, Arsipkan, Catat bukti transfer). |
+| R-16 language | PASS: no buzzwords; operator copy unchanged. |
+| R-20 product identity | PASS: real catalog/order/supplier data and LHIE STORE identity retained. |
+| R-21 theme choice | PASS: user-controlled light/dark retained and exercised on every touched surface. |
+| R-29 palette | PASS: existing neutral surfaces + one violet accent; no new color. |
+| R-30 originality | PASS: repo-specific Variant A retained. |
+| R-31 written reasons | PASS: recorded above. |
+
+### Measured contrast (light / dark)
+
+| Pair | Ratio |
+| --- | --- |
+| `--admin-muted` on `--admin-surface` | 5.9:1 light / 7.79:1 dark |
+| `--admin-muted` on `--admin-surface-muted` | 5.17:1 light / 6.78:1 dark |
+| `--admin-accent-strong` on surface | 6.67:1 light / 8.67:1 dark |
+| `--admin-accent-ink` on `--admin-accent` | 5.18:1 light / 8.67:1 dark |
+| semantic success/warning/info/danger text on their soft fills | 6.68:1 / 6.6:1 / 4.69:1 / 6.8:1 light, 9.74:1 / 8.93:1 / 9.88:1 / 9.47:1 dark |
+
+All pairs clear WCAG AA for normal text (4.5:1); every semantic state also carries a text label, so no status is conveyed by color alone.
+
+### Known limits recorded, not fixed here
+
+- Financial/communication tab bodies (Ringkasan controls, Siaran, Store Channel body, Riwayat, Withdraw, Funnel, balance/compensation, and the `admin/store-balance/*` views) and the `admin/balance-reports` view still carry legacy markup; they belong to the visual non-operational tickets named in the #603 brief. Exception: the Telegram welcome-banner control that lives inside the Store Channel tab was restyled here because §16.3 assigns it to Products.
+- Real Telegram Android/iOS release evidence remains the #599/#600 human gate; browser-viewport emulation does not qualify it.
+- Pre-existing, unchanged: `AdminAccountInputWorkflow.accountInputErrorClass()` returns `border-[#ef4444]`, but Tailwind emits that arbitrary border-color rule before the themed `border-*` utilities, so an invalid account row keeps the neutral border and signals the error through its `ring-2` accent plus the field message and `aria-invalid`. Fixing the border would change an existing JS error-state contract, which this presentation-only ticket excludes.
 
 ## Historical #600 verification record
 
