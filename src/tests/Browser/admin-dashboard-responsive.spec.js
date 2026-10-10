@@ -22,6 +22,7 @@ let invoiceFixtures;
 let serverProcess;
 
 test.describe.configure({ mode: "serial" });
+test.setTimeout(120_000);
 
 const customerCheckoutViewports = [
   { width: 320, height: 568 },
@@ -36,6 +37,7 @@ const customerCheckoutTestPrefix = "customer checkout:";
 const customerBalanceLoginToken = "a".repeat(64);
 
 test.beforeAll(async () => {
+  test.setTimeout(120_000);
   const tempDir = mkdtempSync(
     path.join(tmpdir(), "telegram-bot-admin-responsive-")
   );
@@ -3216,7 +3218,7 @@ test("linked operational pages retain the shared shell and active destination", 
 test("operational surfaces keep the shared shell and avoid occlusion at every breakpoint in both themes", async ({
   page,
 }, testInfo) => {
-  test.setTimeout(240_000);
+  test.setTimeout(600_000);
   await login(page);
 
   const surfaces = [
@@ -3225,12 +3227,14 @@ test("operational surfaces keep the shared shell and avoid occlusion at every br
     ["supplier", "/admin?tab=suppliers"],
     ["supplier-purchases", "/admin/suppliers/monitor/purchases"],
     ["supplier-warranty", "/admin/suppliers/warranty"],
+    ["supplier-catalog", invoiceFixtures.supplierCatalogPath],
+    ["supplier-pricing", invoiceFixtures.supplierProductPath],
     ["order-detail", invoiceFixtures.adminOrderPath],
     ["manual-fulfillment-review", "/admin/manual-fulfillment-reviews"],
     ["manual-delivery-review", "/admin/telegram-outbound-effects"],
   ];
 
-  for (const width of [375, 768, 1280]) {
+  for (const width of [320, 390, 768, 1023, 1024, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`${baseUrl}/admin?tab=produk`);
 
@@ -3273,7 +3277,7 @@ test("operational surfaces keep the shared shell and avoid occlusion at every br
 test("financial and communication surfaces keep the shared shell and avoid occlusion at every breakpoint in both themes", async ({
   page,
 }, testInfo) => {
-  test.setTimeout(300_000);
+  test.setTimeout(600_000);
   await login(page);
 
   const surfaces = [
@@ -3289,7 +3293,7 @@ test("financial and communication surfaces keep the shared shell and avoid occlu
     ["usdt-review", "/admin/store-balance/usdt-review"],
   ];
 
-  for (const width of [375, 768, 1280]) {
+  for (const width of [320, 390, 768, 1023, 1024, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`${baseUrl}/admin?tab=stats`);
 
@@ -3325,49 +3329,6 @@ test("financial and communication surfaces keep the shared shell and avoid occlu
       }
     }
   }
-});
-
-test("Ringkasan keeps real summary metrics, earnings boundaries and IDR/USDT separation", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await login(page);
-  await page.goto(`${baseUrl}/admin?tab=stats`);
-
-  const ringkasan = page.locator("#admin-section-stats");
-  const metrics = ringkasan.locator('section[aria-label="Metrik ringkasan"]');
-  await expect(metrics).toBeVisible();
-  await expect(metrics).toContainText("GMV");
-  await expect(metrics).toContainText("Saldo");
-  await expect(metrics).toContainText("Produk aktif");
-
-  const activity = ringkasan.locator(
-    'section[aria-label="Aktivitas ringkasan"]'
-  );
-  await expect(activity).toContainText("Order");
-
-  const earnings = ringkasan.locator('section[aria-label="Pendapatan 7 hari"]');
-  await expect(earnings).toBeVisible();
-  await expect(
-    earnings.getByRole("heading", { name: "Pendapatan 7 hari" })
-  ).toBeVisible();
-  await expect(earnings.getByText("Pembayaran lunas")).toBeVisible();
-  await expect(earnings.locator("div[style]")).toHaveCount(7);
-
-  await expect(
-    ringkasan.getByRole("heading", { name: "Kebijakan Top-up Saldo" })
-  ).toBeVisible();
-  await expect(
-    ringkasan.getByRole("heading", { name: "Kebijakan Top-up USDT" })
-  ).toBeVisible();
-  await expect(
-    ringkasan.getByRole("heading", { name: "BSC Receiving Address" })
-  ).toBeVisible();
-  await expect(
-    ringkasan.getByRole("heading", { name: "Kontrol Operasional" })
-  ).toBeVisible();
-
-  await expectNoDocumentOverflow(page);
 });
 
 test("finance tables keep their overflow local and their labels readable at 200% text", async ({
@@ -3419,6 +3380,110 @@ test("finance tables keep their overflow local and their labels readable at 200%
       document.documentElement.style.removeProperty("font-size");
     });
   }
+});
+
+test("supplier catalog forms preserve draft import, mapping and pricing without exposing secrets", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.goto(`${baseUrl}${invoiceFixtures.supplierCatalogPath}`);
+  await page.getByText("Impor sebagai draft", { exact: true }).click();
+  const importForm = page.locator(
+    `form[action$="/catalog/${invoiceFixtures.supplierCatalogItemId}/import"]`
+  );
+  await importForm.locator('[name="name"]').fill("Browser imported draft");
+  await importForm
+    .locator('[name="description"]')
+    .fill("Store-owned draft description");
+  await importForm.locator('[name="price_amount"]').fill("0");
+  await importForm.evaluate((form) => {
+    form.noValidate = true;
+  });
+  const invalidImport = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/import")
+  );
+  await importForm
+    .getByRole("button", { name: "Impor draft nonaktif" })
+    .click();
+  expect((await invalidImport).status()).toBe(422);
+  await expect(page.locator("body")).not.toContainText(
+    "BROWSER-PRIVATE-SUPPLIER-KEY"
+  );
+  await page.goBack();
+  await page.getByText("Impor sebagai draft", { exact: true }).click();
+  await importForm.locator('[name="name"]').fill("Browser imported draft");
+  await importForm
+    .locator('[name="description"]')
+    .fill("Store-owned draft description");
+  await importForm.locator('[name="price_amount"]').fill("25000");
+  await importForm
+    .getByRole("button", { name: "Impor draft nonaktif" })
+    .click();
+  await expect(page).toHaveURL(`${baseUrl}/admin?tab=suppliers`);
+  const draft = JSON.parse(
+    runArtisan([
+      "tinker",
+      "--execute",
+      `
+    $product = \\App\\Models\\Product::query()->where('name', 'Browser imported draft')->sole();
+    echo json_encode(['active' => $product->is_active, 'stock' => $product->stock, 'price' => $product->price_amount, 'description' => $product->description]);
+  `,
+    ])
+  );
+  expect(draft).toEqual({
+    active: false,
+    stock: 0,
+    price: 25000,
+    description: "Store-owned draft description",
+  });
+
+  await page.goto(`${baseUrl}${invoiceFixtures.supplierCatalogPath}`);
+  await page
+    .getByText("Hubungkan ke produk toko yang sudah ada", { exact: true })
+    .click();
+  const mapForm = page.locator(
+    `form[action$="/catalog/${invoiceFixtures.supplierCatalogItemId}/map"]`
+  );
+  await mapForm
+    .locator('[name="product_id"]')
+    .selectOption(String(invoiceFixtures.supplierProductId));
+  await mapForm.locator('[name="equivalent_confirmed"]').check();
+  await mapForm.getByRole("button", { name: "Simpan hubungan produk" }).click();
+  await expect(page).toHaveURL(`${baseUrl}/admin?tab=suppliers`);
+  await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
+  await expect(
+    page.getByRole("button", { name: "Simpan pilihan supplier" })
+  ).toBeVisible();
+  const priceForm = page.locator('form[action$="/supplier-pricing"]');
+  await priceForm.locator('[name="buffer_idr"]').fill("500");
+  await priceForm
+    .getByRole("button", { name: "Simpan pengaturan harga" })
+    .click();
+  await expect(page).toHaveURL(`${baseUrl}/admin?tab=suppliers`);
+  await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
+  await expect(priceForm.locator('[name="buffer_idr"]')).toHaveValue("500");
+  const saved = JSON.parse(
+    runArtisan([
+      "tinker",
+      "--execute",
+      `
+    $product = \\App\\Models\\Product::query()->findOrFail(${invoiceFixtures.supplierProductId});
+    echo json_encode(['retail' => $product->price_amount, 'purchases' => \\App\\Models\\SupplierPurchase::query()->count()]);
+  `,
+    ])
+  );
+  expect(saved).toEqual({ retail: 45000, purchases: 0 });
+  await expect(page.locator("body")).not.toContainText(
+    "BROWSER-PRIVATE-SUPPLIER-KEY"
+  );
+  await expectNoDocumentOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath("supplier-native-post-return.png"),
+    fullPage: true,
+  });
 });
 
 test("desktop sidebar links navigate without JavaScript and retain filters", async ({
@@ -3481,6 +3546,46 @@ for (const role of ["owner", "admin"]) {
           const content = page.locator(selector);
           await expect(content).toBeVisible();
           await expect(content.getByRole("heading").first()).toBeVisible();
+          const bodyContent = {
+            stats: content
+              .locator('form[action$="/payment-mode"] button')
+              .first(),
+            produk: content.getByRole("button", {
+              name: "Simpan default",
+              exact: true,
+            }),
+            penjualan: content
+              .locator('a[href*="/admin/orders/"]')
+              .filter({ visible: true })
+              .first(),
+            suppliers: content
+              .locator("summary")
+              .filter({ hasText: "Tambah supplier" }),
+            broadcast: content.getByLabel("Pesan", { exact: true }),
+            "telegram-channel": content.locator('[name="channel_username"]'),
+            riwayat: content
+              .getByText("KLIK-BROWSER-MATCH", { exact: true })
+              .filter({ visible: true })
+              .first(),
+            withdraw: content.getByLabel("Order ID", { exact: true }),
+            funnel: content.locator('[name="start_date"]'),
+            "balance-issues": content.getByLabel("Telegram ID", {
+              exact: true,
+            }),
+          }[tab];
+          await bodyContent.evaluate((element) =>
+            element.scrollIntoView({ block: "center", behavior: "instant" })
+          );
+          await expect(bodyContent).toBeInViewport();
+          await expect
+            .poll(async () => {
+              const topbar = await page
+                .getByRole("banner", { name: "Konteks halaman" })
+                .boundingBox();
+              const box = await bodyContent.boundingBox();
+              return box.y - (topbar.y + topbar.height);
+            })
+            .toBeGreaterThanOrEqual(0);
           await expectNoDocumentOverflow(page);
         }
         await page.goto(`${baseUrl}/admin?tab=stats`);
@@ -5360,23 +5465,74 @@ async function expectStatusBadgesReadable(container) {
 
 async function expectNoDocumentOverflow(page) {
   const metrics = await page.evaluate(() => {
-    const roots = [
-      document.documentElement,
-      document.body,
-      ...document.querySelectorAll(
-        ".admin-page, .admin-dashboard-page, .admin-mini-shell"
-      ),
-    ];
-
-    roots.forEach((root) => {
-      root.style.setProperty("overflow-x", "visible", "important");
-    });
-
     return {
       bodyScrollWidth: document.body.scrollWidth,
       documentScrollWidth: document.documentElement.scrollWidth,
       viewportWidth: window.innerWidth,
     };
+  });
+
+  const clippedAdminText = await page.evaluate(() => {
+    const content = document.querySelector(
+      ".admin-page main, .admin-dashboard-page main"
+    );
+    if (!content) return [];
+
+    const clipped = [];
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const label = node.textContent.trim();
+      if (!label || !node.parentElement.checkVisibility()) continue;
+      const textStyle = getComputedStyle(node.parentElement);
+      if (
+        textStyle.clip === "rect(0px, 0px, 0px, 0px)" ||
+        textStyle.clipPath === "inset(50%)"
+      ) {
+        continue;
+      }
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) {
+        if (!rect.width || !rect.height) continue;
+        let left = 0;
+        let right = window.innerWidth;
+        let scrollable = false;
+        let ellipsis = false;
+        for (
+          let ancestor = node.parentElement;
+          ancestor;
+          ancestor = ancestor.parentElement
+        ) {
+          const style = getComputedStyle(ancestor);
+          if (style.textOverflow === "ellipsis") ellipsis = true;
+          if (["auto", "scroll"].includes(style.overflowX)) {
+            scrollable = true;
+            break;
+          }
+          if (["hidden", "clip"].includes(style.overflowX)) {
+            const box = ancestor.getBoundingClientRect();
+            left = Math.max(left, box.left);
+            right = Math.min(right, box.right);
+          }
+        }
+        if (
+          !scrollable &&
+          !ellipsis &&
+          (rect.left < left - 1 || rect.right > right + 1)
+        ) {
+          clipped.push({
+            label: label.slice(0, 100),
+            left: rect.left,
+            right: rect.right,
+            clipLeft: left,
+            clipRight: right,
+          });
+          break;
+        }
+      }
+    }
+    return clipped;
   });
 
   expect(
@@ -5387,6 +5543,10 @@ async function expectNoDocumentOverflow(page) {
     metrics.bodyScrollWidth,
     "body should not overflow horizontally"
   ).toBeLessThanOrEqual(metrics.viewportWidth + 1);
+  expect(
+    clippedAdminText,
+    "admin body text must not be hidden by horizontal clipping"
+  ).toEqual([]);
 }
 
 async function expectOneColumn(firstLocator, secondLocator) {
@@ -6737,6 +6897,32 @@ $productA = Product::factory()->create([
     'reserved_stock' => 0,
     'is_active' => true,
 ]);
+
+$supplier = \App\Models\Supplier::query()->create([
+    'name' => 'Browser private supplier',
+    'provider' => 'prodseller',
+    'api_key' => 'BROWSER-PRIVATE-SUPPLIER-KEY',
+    'currency' => 'USDT',
+    'currency_confirmed' => true,
+    'exchange_rate_idr' => 16000,
+    'is_active' => false,
+    'version' => 1,
+    'reserved_balance_micros' => 0,
+]);
+$catalogItem = \App\Models\SupplierCatalogItem::query()->create([
+    'supplier_id' => $supplier->id,
+    'external_id' => 'browser-private-sku',
+    'name' => 'Browser private catalog option',
+    'description' => 'Private provider copy must not become store copy.',
+    'unit_price_micros' => 1000000,
+    'stock' => 10,
+    'reserved_quantity' => 0,
+    'orderable' => true,
+    'requires_input' => false,
+    'price_tiers' => [],
+    'bulk_discounts' => [],
+]);
+
 ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-stock-a@example.test|pass']);
 ProductStockItem::create(['product_id' => $productA->id, 'secret' => 'browser-stock-b@example.test|pass']);
 foreach (range(3, 9) as $stockIndex) {
@@ -7054,6 +7240,10 @@ $unknownEffect = \App\Models\TelegramOutboundEffect::factory()->create([
 ]);
 
 echo json_encode([
+    'supplierCatalogPath' => route('admin.suppliers.catalog', $supplier, false),
+    'supplierProductPath' => route('admin.products.suppliers', $productA, false),
+    'supplierCatalogItemId' => $catalogItem->id,
+    'supplierProductId' => $productA->id,
     'unknownEffectPath' => route('admin.telegram-outbound-effects.show', $unknownEffect, false),
     'adminOrderPath' => route('admin.orders.show', $paidInvoiceOrder, false),
     'longProductCheckoutPath' => route('storefront.shop.checkout.product', ['product' => $longCheckoutProduct], false),

@@ -1358,19 +1358,31 @@ The responsive browser lane exercises the 375x900 drawer, every tab,
 keyboard/backdrop/resize/root-removal cleanup, no-JavaScript links and existing
 product/stock modal behavior. Safe-area CSS consumes available Telegram inset
 variables with browser fallbacks; real Android/iOS evidence remains the
-#599/#600 human release gate, not a claim established by viewport emulation.
+[#605 human release gate](admin-dashboard-release-parity.md), not a claim established by viewport emulation.
 
 `AdminDashboardNavigationContractTest` exercises direct Owner/Admin URLs,
 current sidebar links, absent inactive tab subtrees, and filter/create-state
 boundaries. `admin-dashboard-responsive.spec.js` exercises desktop links,
 all ten direct tabs, browser back/forward/hash/filter state, no-JavaScript
-navigation, existing feature modals, and the 1023/1024px breakpoint. Screenshot
-attachments cover light/dark summary, Products and Sales, and the #604 lane
-adds Ringkasan/communication/reporting/finance surfaces at 375/768/1280px in
-both themes plus the Ringkasan metrics/earnings assertions and the payment
-switch/checkout maintenance focus and Escape workflow. Desktop evidence does
-not qualify real Telegram Android/iOS clients; #599/#600 retain that
-release gate. No production deployment is authorized by this cutover.
+navigation, existing feature modals, and the 1023/1024px breakpoint. The #605
+operational/financial browser cases cover 320/390/768/1023/1024/1280px in
+both themes, including private supplier catalog and product pricing pages.
+The overflow helper observes original widths and unscrollable clipped body
+text, excluding deliberately zero-area CSS clips for screen-reader labels;
+it never writes `overflow-x: visible` before measuring. No-JavaScript
+Owner/Admin cases also scroll to a substantive native control or data row in
+every authorized tab and verify that the topbar does not cover it. Native supplier
+import/mapping/manual-pricing browser coverage checks invalid POST, browser
+back, inactive draft/copy, unchanged retail and zero purchases. The removed
+Ringkasan heading/styled-node snapshot was not monetary evidence; overview
+PHP tests retain real metrics/earnings ownership.
+
+The [release parity evidence ledger](admin-dashboard-release-parity.md)
+records exact commands, base revision plus tested source hashes, failures,
+skips/not-run cases, screenshot locations and historical immutable rollback
+identity. Root text enlargement is not native 200% browser zoom, and browser
+CSS/inset emulation is not Telegram Android/iOS acceptance. No production
+deployment or human sign-off is implied by these checks.
 
 
 ## 11. Checklist perubahan untuk AI

@@ -1,6 +1,6 @@
 # Admin Dashboard Sidebar Cutover
 
-Status: implemented in the working tree; production deployment is not authorized by issues #600, #601, #602, #603 or #604.
+Status: presentation implemented; release acceptance is blocked. Issues #600–#605 do not authorize deployment. Current candidate-bound checks, missing scenarios, device requirements and rollback identity are recorded in [the #605 release parity audit](admin-dashboard-release-parity.md).
 
 ## As-built ownership
 
@@ -12,19 +12,21 @@ Status: implemented in the working tree; production deployment is not authorized
 
 ## Feature parity matrix
 
-| Surface | Canonical destination | Evidence owner |
+The [#605 release parity inventory](admin-dashboard-release-parity.md) is the evidence ledger for all ten tabs, linked operational/financial routes and cross-cutting contracts. It distinguishes server-feature coverage from browser click-through and explicitly blocks closure on untested mandatory rows. The implementation map below does not imply release PASS.
+
+| Surface | Canonical destination | Test ownership |
 | --- | --- | --- |
-| Ringkasan | `/admin?tab=stats` | dashboard navigation contract and responsive admin browser lane |
-| Produk and product create | `/admin?tab=produk` plus `product_form=create` | product forms/stock flows and responsive admin browser lane |
-| Pesanan | `/admin?tab=penjualan` | dashboard navigation contract and sales tests |
-| Supplier | `/admin?tab=suppliers` | supplier feature/concurrency tests and linked-shell browser coverage |
-| Siaran | `/admin?tab=broadcast` | dashboard direct-tab browser coverage |
-| Store Channel | `/admin?tab=telegram-channel` | channel feature coverage and direct-tab browser coverage |
-| Riwayat KlikQRIS | `/admin?tab=riwayat` | reporting feature coverage and direct-tab browser coverage |
-| Withdraw | `/admin?tab=withdraw` | reporting feature coverage and direct-tab browser coverage |
-| Funnel | `/admin?tab=funnel` | funnel feature coverage and direct-tab browser coverage |
-| Kompensasi top-up | `/admin?tab=balance-issues` | balance adjustment/compensation feature coverage and direct-tab browser coverage |
-| Linked operational and finance pages | Existing named routes | linked-shell component and responsive admin browser coverage |
+| Ringkasan | `/admin?tab=stats` | overview, payment, maintenance, funding/receiver policy and browser surfaces |
+| Produk | `/admin?tab=produk`, `product_form=create` | product/family/category, image/banner, stock/account input and bulk delete |
+| Pesanan | `/admin?tab=penjualan` | sales, Order/Payment operations and linked review queues |
+| Supplier | `/admin?tab=suppliers` | connections, catalog/import/mapping/pricing, purchases/recovery, warranty and BuyMail |
+| Siaran | `/admin?tab=broadcast` | broadcast forms, validation, queue and outbound behavior |
+| Store Channel | `/admin?tab=telegram-channel` | configuration, test and fake proof actions |
+| Riwayat KlikQRIS | `/admin?tab=riwayat` | reporting/filter/provider mismatch and unavailable state |
+| Withdraw | `/admin?tab=withdraw` | reporting filters/pagination and safe proof |
+| Funnel | `/admin?tab=funnel` | reporting aggregates and bounded date filters |
+| Kompensasi top-up | `/admin?tab=balance-issues` | Owner/password/readiness compensation |
+| Linked financial pages | Existing balance report, IDR adjustment/reversal and USDT review routes | separate financial role/readiness/password and exact-money boundaries |
 
 Navigation is presentation-only. Existing controller authorization, route gates, form validation, CSRF, password confirmation, return targets, query filters, and business/domain/API/database/ENV behavior are unchanged.
 
@@ -536,14 +538,8 @@ carries a text label, so no status is conveyed by color alone.
 
 ## Historical #600 verification record
 
-These historical counts do not establish #601 regression coverage or authorize deployment. Commands were run from `src/`:
-
-- `php artisan test --filter=AdminDashboard` — passed, 139 tests / 1,747 assertions.
-- `npm run test:js` — passed, 56 tests.
-- `npm run build` — passed with Vite production assets.
-- `npm run test:browser:admin` — passed, 87 Playwright tests.
-- `npm run test:browser:buymail` — passed, 3 Playwright tests.
+The earlier #600 note listed 139 PHP tests / 1,747 assertions, 56 JS tests, a Vite build, 87 admin browser tests and 3 BuyMail browser tests as passing. It did not retain a commit-bound command report here. Those historical claims are not current verification, do not supersede the later review failures, and do not authorize release. Use the [#605 command/outcome record](admin-dashboard-release-parity.md#commands-and-outcomes), including failed and not-run cases, instead of carrying these counts forward.
 
 ## Rollback
 
-No database reset or data rollback is required. If the presentation release is rejected, deploy the prior known-good application image/commit through `.github/workflows/deploy-production.yml` from `main`. Record both the released commit and prior image/commit in the GitHub Actions release evidence before deployment. Do not deploy this cutover until the named verification commands and the real-client checklist are complete.
+No database reset or data rollback is required for this presentation change. The [#605 rollback record](admin-dashboard-release-parity.md#release-note-and-rollback-evidence) identifies the historical known-good commit and immutable image from successful Actions run 37860180743. Before an eventual approved release, `.github/workflows/deploy-production.yml` must capture the then-running previous commit/image again. Use its existing gated release/rollback mechanism, never a mutable image tag or database reset. No deployment is authorized until current verification, real Telegram client evidence and human sign-off are complete.

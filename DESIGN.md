@@ -10,20 +10,20 @@ Primary UI surfaces:
 - Storefront pages: product detail, Telegram admin checkout handoff, login guide
 - Storefront modal and components: product modal, product cards, product cover, QRIS card, brand mark
 - Admin login page
-- Admin dashboard: stats, products, sales, broadcasts, store channels, product/stock modals
+- Admin dashboard: ten canonical tabs, grouped sidebar/topbar, mobile drawer, and product/stock modals
 - Admin order detail page
 
 ## Visual direction
 
-The current system is playful neo-brutal commerce: pale paper backgrounds, electric blue customer CTAs, black ink outlines, hard offset shadows, yellow/green/lilac accent chips, bold rounded panels, visible grid texture, and geometric floating decor.
+The public storefront keeps a playful commerce identity: pale paper backgrounds, electric blue customer CTAs, black ink outlines, offset shadows and yellow accents. Its scoped marketplace overrides take precedence over the legacy neo-brutal primitives.
 
-Storefront surfaces can be expressive and memorable, but transaction clarity wins over decoration. Admin surfaces are louder and denser, with neon paper backgrounds and compact controls, but should stay fast to scan and operationally precise.
+The Admin Dashboard and linked operator pages use canonical Variant A: neutral light/dark surfaces, a muted violet action accent, one-pixel separators, 12px corners and restrained elevation. Admin density serves products, orders and financial operations, not storefront decoration. Design dials: ENERGY 1 / RHYTHM 2 / MOTION 1; repeated form/card hierarchy varies only for real tables, queues and reporting.
 
 Avoid drifting back to older directions that no longer match the site: orange Warung AI storefront styling, Filament admin assumptions, generic SaaS dark gradients, or sterile premium minimalism.
 
 ### Marketplace storefront refinement
 
-The marketplace storefront uses a softer blue-and-yellow treatment than the legacy neo-brutal reference below. Its current tokens and scoped overrides in `src/resources/css/app.css` take precedence over the older storefront token and primitive tables; admin styling is unchanged.
+The marketplace storefront uses a softer blue-and-yellow treatment than the legacy neo-brutal reference below. Its current tokens and scoped overrides in `src/resources/css/app.css` take precedence over the older storefront token and primitive tables. Admin has its own Variant A tokens; do not apply storefront decoration to it.
 
 - The homepage hero pairs a blue promise panel and yellow primary CTA with a light, live catalog preview. Never invent sales or availability claims for decoration.
 - Product and family artwork is square. Fallback covers retain the configured product icon/theme; family covers use a monogram when no image exists.
@@ -78,19 +78,18 @@ Defined in `src/resources/css/app.css` inside `@theme`.
 
 ### Admin dashboard palette
 
-Variant A admin surfaces use neutral paper/surface pairs plus one muted violet accent. Those `admin-*` variables live in `src/resources/css/app.css` and are exposed as Tailwind theme aliases. The legacy neo-brutal accents below stay in `@theme` (`--color-neo-*`) for storefront components; no production admin surface renders them any more.
+Variant A admin surfaces use the current `admin-*` variables in `src/resources/css/app.css`. Legacy `--color-neo-*` aliases are not the Admin palette contract.
 
-| Color | Value | Usage |
-| --- | --- | --- |
-| Neo ink | `#050505` | Main admin text, borders, bottom nav, offset shadows |
-| Admin paper | `#fff6cf` / `#fff4bd` | Mobile and desktop admin background |
-| Green | `#7BD10A` | Header gradient, primary admin actions, positive emphasis |
-| Yellow | `#f2da3d` / `#fee648` | Active nav, filter pills, key highlights |
-| Cyan | `#16B4CA` | Header gradient, informational accents |
-| Pink | `#db3f98` / `#ff4fa8` | Desktop header/store accents and emphasis |
-| Purple | `#8758de` | Store link section, earnings bar, focus/secondary accents |
-| Blue | `#2d9cff` | Secondary accent where needed |
-| Red | `#ef4444` | Destructive/error states |
+| Token | Light | Dark | Usage |
+| --- | --- | --- | --- |
+| `--admin-paper` | `#f6f7fb` | `#121722` | Page background |
+| `--admin-paper-desktop` | `#f6f7fb` | `#0e131d` | Desktop frame |
+| `--admin-surface` | `#ffffff` | `#1a222f` | Cards, header and modal surfaces |
+| `--admin-surface-muted` | `#eef0f5` | `#232d3b` | Secondary fields and factual panels |
+| `--admin-ink` | `#202637` | `#f5f7fb` | Main text |
+| `--admin-muted` | `#596579` | `#aab6c8` | Supporting text |
+| `--admin-line` | `#e2e8f0` | `#263344` | One-pixel separators |
+| `--admin-radius` | `0.75rem` | `0.75rem` | Shared corners |
 
 #### Admin accent roles
 
@@ -165,7 +164,7 @@ Admin patterns:
 
 Operational surfaces in scope for this contract: Ringkasan (`stats`, including payment mode/provider readiness, BSC receivers, IDR/USDT funding policy, balance operations, checkout maintenance and Support WhatsApp), Produk (catalog, family, category, stock intake and management, storefront banners), Pesanan (orders, order detail, Manual Fulfillment Review, Manual Delivery Review), Supplier (connections, private catalog/import/mapping, product pricing policy, purchases/recovery, warranty/refund/replacement, BuyMail deposit/history), communications (Siaran, Store Channel plus fake sales proof), reporting (Riwayat KlikQRIS, Withdraw, Funnel), and the financial linked pages (Laporan saldo, Kelola saldo, Review deposit USDT dan insiden, Kompensasi top-up).
 
-Every one of those surfaces now composes the `x-admin-dashboard.*` primitives; the raw legacy border/shadow/uppercase/palette overrides and the `admin-dashboard-input` and `earnings-bar-*` CSS they needed were removed. The password-confirmation page keeps its form and redirect behavior but uses the same primitives.
+These surfaces compose the `x-admin-dashboard.*` primitives. The password-confirmation page keeps its form and redirect behavior but uses the same primitives. Implementation is not release acceptance: [the #605 parity and evidence record](docs/agents/admin-dashboard-release-parity.md) distinguishes executed checks from missing browser/device scenarios and human sign-off.
 
 Menu labels keep their established, specific action wording; emoji are not used as heading decoration. See `docs/agents/admin-dashboard-sidebar-cutover.md` for the recorded decisions and evidence, including the `supplier-*` CSS family that this contract removed.
 
@@ -175,8 +174,8 @@ Admin must prioritize scannability over flourish: order status, stock state, pay
 
 - Storefront sections use centered max-width containers (`max-w-6xl` style structure) over a full-page paper/grid shell.
 - Use grids for catalog/product arrangements and flex for button rows, chips, and nav groups.
-- Neo-brutal panels rely on fewer, stronger containers; avoid cards-inside-cards unless the inner element is clearly an input, code block, QR frame, or status callout.
-- Buttons and cards should have enough spacing for their offset shadows to breathe; do not place hard-shadow components flush against viewport edges.
+- Storefront neo-brutal panels leave space for their offset shadows. Admin uses neutral separators and shared restrained elevation instead.
+- Both surfaces avoid cards-inside-cards unless the inner element is a real input, data block, QR frame or status callout.
 - On mobile, keep CTAs stacked or full-width when needed; payment and Telegram next-step actions must stay obvious.
 
 ## Motion and interaction
@@ -229,5 +228,5 @@ Current motion is mostly transform/opacity based and should stay that way.
 - Preserve Lhie Store naming and Telegram-first purchase/support cues; do not use Warung AI naming in new design docs or UI copy unless intentionally reintroduced by product strategy.
 - Do not assume Filament for admin UI; the current admin is custom Blade components.
 - Primary storefront actions are blue; admin primary actions use the muted violet accent fill with semantic amber/red reserved for real warning and destructive states.
-- Use black offset shadows deliberately. If a component already has a 3px border and hard shadow, avoid adding soft shadows or glass effects.
-- Keep playful neo-brutal energy useful: decoration must not obscure product choice, stock, payment, support, or admin status.
+- Black offset shadows belong to storefront primitives, not the Variant A Admin shell.
+- Keep storefront decoration clear of product choice, stock, payment and support. Keep Admin hierarchy factual and operational.

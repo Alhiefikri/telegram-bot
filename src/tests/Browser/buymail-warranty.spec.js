@@ -10,6 +10,7 @@ const directory = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(directory, "../..");
 let tempDir, environment, server, fixture;
 test.describe.configure({ mode: "serial" });
+test.setTimeout(120_000);
 
 test.beforeAll(async () => {
   // Fresh migrations and fixture preparation need their own CI setup budget.
