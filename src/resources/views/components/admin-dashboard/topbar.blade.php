@@ -25,7 +25,7 @@
             <div class="flex flex-wrap items-center gap-2">{{ $status }}</div>
         @endif
         @if (isset($actions) && trim((string) $actions) !== '')
-            <div class="flex items-center gap-2">{{ $actions }}</div>
+            <div class="flex min-w-0 max-w-full flex-wrap items-center gap-2">{{ $actions }}</div>
         @endif
         @if (isset($identity))
             <div class="hidden min-w-0 max-w-40 text-right text-xs text-admin-muted sm:block">{{ $identity }}</div>

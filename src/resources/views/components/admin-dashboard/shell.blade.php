@@ -13,9 +13,9 @@
         </aside>
     @endif
 
-    <div class="flex min-h-screen min-w-0 flex-col lg:pl-60">
+    <div class="admin-dashboard-frame flex min-w-0 flex-col lg:pl-60">
         @if (isset($topbar) && trim((string) $topbar) !== '')
-            <header class="admin-dashboard-topbar sticky top-0 z-20 border-b border-admin-line bg-admin-paper/95 backdrop-blur" aria-label="Konteks halaman" @if(isset($mobileDrawer)) x-bind:inert="sidebarOpen" @endif>
+            <header class="admin-dashboard-topbar relative z-20 border-b border-admin-line bg-admin-paper" aria-label="Konteks halaman" @if(isset($mobileDrawer)) x-bind:inert="sidebarOpen" @endif>
                 {{ $topbar }}
             </header>
         @endif
@@ -24,7 +24,7 @@
             {{ $mobileDrawer }}
         @endif
 
-        <main id="admin-dashboard-content" tabindex="-1" class="min-w-0 flex-1 px-4 pb-5 pt-5 sm:px-6 lg:px-8" @if(isset($mobileDrawer)) x-bind:inert="sidebarOpen" @endif>
+        <main id="admin-dashboard-content" tabindex="-1" class="admin-dashboard-content min-w-0 flex-1 pt-5" @if(isset($mobileDrawer)) x-bind:inert="sidebarOpen" @endif>
             @if (isset($status) && trim((string) $status) !== '')
                 <div class="mb-5">{{ $status }}</div>
             @endif

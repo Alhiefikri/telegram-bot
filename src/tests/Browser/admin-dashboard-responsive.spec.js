@@ -3033,6 +3033,92 @@ test("mobile navigation remains usable without JavaScript", async ({
   await context.close();
 });
 
+test("Mini App shell keeps edge controls and modal content inside layout insets", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  await login(page);
+  await page.evaluate(() => {
+    const root = document.documentElement;
+    // Device and Telegram content insets overlap; the larger inset wins.
+    for (const [edge, device, content] of [
+      ["top", 24, 48],
+      ["right", 12, 20],
+      ["bottom", 20, 34],
+      ["left", 16, 28],
+    ]) {
+      root.style.setProperty(`--tg-safe-area-inset-${edge}`, `${device}px`);
+      root.style.setProperty(
+        `--tg-content-safe-area-inset-${edge}`,
+        `${content}px`
+      );
+    }
+  });
+  const trigger = page.getByRole("button", { name: "Buka navigasi admin" });
+  const triggerBox = await trigger.boundingBox();
+  expect(triggerBox.x).toBeGreaterThanOrEqual(28);
+  expect(triggerBox.y).toBeGreaterThanOrEqual(48);
+  await trigger.click();
+  const drawer = page.getByRole("dialog", {
+    name: "Navigasi admin",
+    exact: true,
+  });
+  const close = drawer.getByRole("button", { name: "Tutup navigasi" });
+  expect((await close.boundingBox()).y).toBeGreaterThanOrEqual(48);
+  for (const height of [420, 600, 900]) {
+    await page.setViewportSize({ width: 375, height });
+    const last = drawer.getByRole("link", {
+      name: "Tambah Produk",
+      exact: true,
+    });
+    await last.scrollIntoViewIfNeeded();
+    const box = await last.boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(28);
+    expect(box.y + box.height).toBeLessThanOrEqual(height - 34);
+    await expectNoDocumentOverflow(page);
+  }
+  await page.screenshot({
+    path: testInfo.outputPath("mini-app-drawer-insets.png"),
+  });
+  await page.keyboard.press("Escape");
+  await page.goto(`${baseUrl}/admin?tab=produk&product_form=create`);
+  // Reapply layout-only emulation after full-page navigation.
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty(
+      "--tg-content-safe-area-inset-top",
+      "48px"
+    );
+    document.documentElement.style.setProperty(
+      "--tg-content-safe-area-inset-bottom",
+      "34px"
+    );
+    document.documentElement.style.setProperty(
+      "--tg-content-safe-area-inset-left",
+      "28px"
+    );
+    document.documentElement.style.setProperty(
+      "--tg-content-safe-area-inset-right",
+      "20px"
+    );
+  });
+  await page.setViewportSize({ width: 375, height: 420 });
+  const modal = page.getByRole("dialog", { name: /Tambah produk/i });
+  const bounds = await modal.boundingBox();
+  expect(bounds.y).toBeGreaterThanOrEqual(48);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(420 - 34);
+  expect(bounds.x).toBeGreaterThanOrEqual(28);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(375 - 20);
+  const save = modal.getByRole("button", { name: /Submit produk/i });
+  await save.scrollIntoViewIfNeeded();
+  await expect(save).toBeInViewport();
+  await page.screenshot({
+    path: testInfo.outputPath("mini-app-keyboard-modal.png"),
+  });
+  await page.keyboard.press("Escape");
+  await expect(modal).toBeHidden();
+  await expectNoDocumentOverflow(page);
+});
+
 for (const width of [768, 1023, 1024, 1280, 1440, 1920]) {
   test(`keeps dashboard navigation reachable without overflow at ${width}px`, async ({
     page,

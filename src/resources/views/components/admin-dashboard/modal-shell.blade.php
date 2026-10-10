@@ -19,7 +19,7 @@
     x-on:keydown.tab="trapModalFocus($event)"
     x-on:focusin.window="if ({{ $show }}) keepModalFocus($event, '{{ $id }}')"
     {{ $attributes->class([
-        'relative rounded-xl border border-admin-line bg-admin-surface p-4 text-admin-ink shadow-admin-lg sm:p-5',
+        'admin-modal-shell relative rounded-xl border border-admin-line bg-admin-surface p-4 text-admin-ink shadow-admin-lg sm:p-5',
     ]) }}
 >
     <div class="flex items-start justify-between gap-4 pr-10">

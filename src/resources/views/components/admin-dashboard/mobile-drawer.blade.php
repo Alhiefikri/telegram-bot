@@ -10,13 +10,13 @@
         x-on:keydown.tab="trapModalFocus($event)"
         x-on:focusin.window="if (sidebarOpen) keepModalFocus($event, @js($id))"
         x-on:click="handleSidebarNavigation($event)">
-        <div class="flex min-h-16 items-center justify-between border-b border-admin-line px-4">
+        <div class="flex min-h-16 shrink-0 items-center justify-between gap-2 border-b border-admin-line px-4">
             <p class="font-semibold text-admin-ink">{{ $label }}</p>
             @if (isset($close) && trim((string) $close) !== '')
                 {{ $close }}
             @endif
         </div>
-        <div class="min-h-0 flex-1 overflow-y-auto p-4">
+        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
             {{ $slot }}
         </div>
     </aside>

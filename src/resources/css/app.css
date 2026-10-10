@@ -338,12 +338,36 @@
 @layer utilities {
   .admin-page {
     min-height: 100vh;
+    min-height: 100dvh;
+    --admin-inset-top: max(
+      env(safe-area-inset-top, 0px),
+      var(--tg-safe-area-inset-top, 0px),
+      var(--tg-content-safe-area-inset-top, 0px)
+    );
+    --admin-inset-right: max(
+      env(safe-area-inset-right, 0px),
+      var(--tg-safe-area-inset-right, 0px),
+      var(--tg-content-safe-area-inset-right, 0px)
+    );
+    --admin-inset-bottom: max(
+      env(safe-area-inset-bottom, 0px),
+      var(--tg-safe-area-inset-bottom, 0px),
+      var(--tg-content-safe-area-inset-bottom, 0px)
+    );
+    --admin-inset-left: max(
+      env(safe-area-inset-left, 0px),
+      var(--tg-safe-area-inset-left, 0px),
+      var(--tg-content-safe-area-inset-left, 0px)
+    );
     background-color: var(--admin-paper);
     background-image: none;
     color: var(--admin-ink);
   }
   .admin-safe-bottom {
-    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    padding-bottom: max(
+      0.75rem,
+      var(--admin-inset-bottom, env(safe-area-inset-bottom, 0px))
+    );
   }
 
   .store-link-section {
@@ -357,26 +381,80 @@
   .admin-dashboard-shell {
     width: 100%;
     min-width: 0;
+    overflow-wrap: anywhere;
+    min-height: 100vh;
+    min-height: 100dvh;
   }
+  .admin-dashboard-frame {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  .admin-dashboard-topbar {
+    padding: 0;
+  }
+  .admin-dashboard-sidebar {
+    padding-right: var(--admin-inset-right);
+  }
+  .admin-dashboard-topbar > div,
+  .admin-dashboard-content {
+    padding-left: max(
+      var(--admin-content-padding, 1rem),
+      var(--admin-inset-left)
+    );
+    padding-right: max(
+      var(--admin-content-padding, 1rem),
+      var(--admin-inset-right)
+    );
+  }
+  .admin-dashboard-topbar > div {
+    padding-top: max(0.75rem, var(--admin-inset-top));
+  }
+  .admin-dashboard-content {
+    padding-bottom: max(1.25rem, var(--admin-inset-bottom));
+  }
+  .admin-dashboard-sidebar,
   .admin-navigation-drawer {
     height: 100vh;
-    height: 100dvh;
-    padding-top: max(
-      env(safe-area-inset-top, 0px),
-      var(--tg-safe-area-inset-top, 0px),
-      var(--tg-content-safe-area-inset-top, 0px)
-    );
-    padding-bottom: max(
-      env(safe-area-inset-bottom, 0px),
-      var(--tg-safe-area-inset-bottom, 0px),
-      var(--tg-content-safe-area-inset-bottom, 0px)
-    );
+    height: var(--tg-viewport-height, 100dvh);
+    padding-top: var(--admin-inset-top);
+    padding-bottom: var(--admin-inset-bottom);
+    padding-left: var(--admin-inset-left);
   }
-  #admin-dashboard-content {
-    scroll-margin-top: 96px;
+  .admin-navigation-drawer {
+    max-width: calc(100% - var(--admin-inset-right) - 1rem);
   }
+  .admin-modal-backdrop {
+    height: 100vh;
+    height: var(--tg-viewport-height, 100dvh);
+    padding: calc(1rem + var(--admin-inset-top))
+      calc(1rem + var(--admin-inset-right))
+      calc(1rem + var(--admin-inset-bottom))
+      calc(1rem + var(--admin-inset-left));
+  }
+  .admin-modal-shell {
+    max-height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    overflow-wrap: anywhere;
+  }
+  .admin-dashboard-content :is([id], input, select, textarea, button, a),
   [data-admin-return-target] {
-    scroll-margin-block: 96px;
+    scroll-margin-block: 1rem;
+  }
+  @media (min-width: 640px) {
+    .admin-dashboard-content {
+      --admin-content-padding: 1.5rem;
+    }
+  }
+  @media (min-width: 1024px) {
+    .admin-dashboard-content {
+      --admin-content-padding: 2rem;
+      padding-left: var(--admin-content-padding);
+    }
+    .admin-dashboard-topbar {
+      padding-left: 0;
+    }
   }
   .admin-return-target-highlight {
     outline: 4px solid var(--color-neo-yellow);
