@@ -1,4 +1,4 @@
-<div id="admin-section-funnel" data-admin-return-target tabindex="-1" x-cloak x-show="activeTab === 'funnel'" class="mt-4 space-y-4">
+<div id="admin-section-funnel" data-admin-return-target tabindex="-1" class="mt-4 space-y-4">
     <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
             <h2 class="font-display text-lg font-bold uppercase tracking-wider text-neo-ink">Storefront Funnel</h2>

@@ -6,6 +6,10 @@ export default function dashboardNavigation() {
   let breakpointChanged;
   let lockedBody;
   let previousOverflow = [];
+  let topbarObserver;
+  let topbarStyle;
+  let previousTopbarHeight;
+  let measuredTopbarHeight;
   const unwatch = [];
   const modalStates = [
     "productModalOpen",
@@ -49,6 +53,25 @@ export default function dashboardNavigation() {
         if (desktop.matches) this.closeSidebar(false);
       };
       desktop.addEventListener("change", breakpointChanged);
+      const topbar = this.$refs?.dashboardTopbar;
+      if (topbar && typeof ResizeObserver !== "undefined") {
+        topbarStyle = document.documentElement.style;
+        previousTopbarHeight = [
+          topbarStyle.getPropertyValue("--admin-topbar-height"),
+          topbarStyle.getPropertyPriority("--admin-topbar-height"),
+        ];
+        const measureTopbar = () => {
+          if (destroyed) return;
+          measuredTopbarHeight = `${topbar.getBoundingClientRect().height}px`;
+          topbarStyle.setProperty(
+            "--admin-topbar-height",
+            measuredTopbarHeight
+          );
+        };
+        measureTopbar();
+        topbarObserver = new ResizeObserver(measureTopbar);
+        topbarObserver.observe(topbar);
+      }
       for (const state of modalStates) {
         if (state in this && this.$watch) {
           unwatch.push(
@@ -65,6 +88,20 @@ export default function dashboardNavigation() {
       destroyed = true;
       this.closeSidebar(false);
       desktop?.removeEventListener("change", breakpointChanged);
+      topbarObserver?.disconnect();
+      if (
+        topbarStyle &&
+        topbarStyle.getPropertyValue("--admin-topbar-height") ===
+          measuredTopbarHeight
+      ) {
+        topbarStyle.removeProperty("--admin-topbar-height");
+        if (previousTopbarHeight[0]) {
+          topbarStyle.setProperty(
+            "--admin-topbar-height",
+            ...previousTopbarHeight
+          );
+        }
+      }
       for (const stop of unwatch.splice(0)) stop?.();
       this.navigationReady = false;
     },
@@ -116,7 +153,15 @@ export default function dashboardNavigation() {
     },
 
     handleSidebarNavigation(event) {
-      if (event.target.closest("a[href]")) this.closeSidebar(false);
+      const link = event.target.closest("a[href]");
+      if (!link) return;
+      const current = new URL(window.location.href);
+      const destination = new URL(link.href, current);
+      if (destination.origin === current.origin && !destination.hash) {
+        destination.hash = current.hash;
+        link.href = destination.href;
+      }
+      this.closeSidebar(false);
     },
   };
 }

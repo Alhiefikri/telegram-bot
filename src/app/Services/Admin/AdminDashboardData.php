@@ -377,10 +377,18 @@ final class AdminDashboardData
             static function (array $group) use ($activeTab, $activeNavigationId): array {
                 $group['items'] = array_map(
                     static function (array $item) use ($activeTab, $activeNavigationId): array {
-                        if ($item['tab'] !== null) {
+                        if ($item['tab'] !== null || $item['id'] === 'payment-settings') {
                             $item['href'] = route('admin.dashboard', [
                                 ...Arr::except(request()->query(), ['product_form']),
+                                'tab' => $item['tab'] ?? 'stats',
+                            ]).($item['id'] === 'payment-settings' ? '#admin-payment-settings' : '');
+                        }
+
+                        if (isset($item['action'])) {
+                            $item['action']['href'] = route('admin.dashboard', [
+                                ...request()->query(),
                                 'tab' => $item['tab'],
+                                'product_form' => 'create',
                             ]);
                         }
 

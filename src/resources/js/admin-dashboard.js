@@ -459,7 +459,7 @@ export default function adminDashboard(initialState = {}) {
       const reduceMotion = window.matchMedia(
         "(prefers-reduced-motion: reduce)"
       ).matches;
-      target.scrollIntoView({ block: "center", behavior: "auto" });
+      target.scrollIntoView({ block: "start", behavior: "auto" });
       target.focus({ preventScroll: true });
       target.classList.add("admin-return-target-highlight");
 

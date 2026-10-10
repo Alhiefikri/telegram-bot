@@ -2,7 +2,7 @@
                  ║  STATS TAB (Ringkasan)                              ║
                  ╚═════════════════════════════════════════════════════╝ --}}
             @php($bsc = $paymentControl['bsc'] ?? [])
-            <div id="admin-section-stats" data-admin-return-target tabindex="-1" x-show="activeTab === 'stats'" class="mt-4 space-y-4">
+            <div id="admin-section-stats" data-admin-return-target tabindex="-1" class="mt-4 space-y-4">
                 
                 <section class="flex flex-col gap-4 rounded-xl border border-admin-line bg-admin-surface p-4 shadow-admin-sm sm:flex-row sm:items-end sm:justify-between sm:p-5" aria-labelledby="admin-overview-title">
                     <div class="min-w-0">
@@ -92,12 +92,12 @@
                         <p class="mt-1 text-sm text-admin-muted">Pembayaran lunas</p>
                         <div class="mt-3 space-y-3">
                             @foreach ($earnings as $earning)
-                                <div class="flex min-w-0 items-center gap-3 text-sm">
+                                <div class="flex min-w-0 flex-wrap items-center gap-3 text-sm">
                                     <span class="w-12 shrink-0 text-xs font-medium text-admin-muted">{{ $earning['label'] }}</span>
                                     <div class="earnings-bar-track min-w-0 flex-1">
                                         <div class="earnings-bar-fill" style="width: {{ $earning['bar_percent'] }}%"></div>
                                     </div>
-                                    <span class="w-24 shrink-0 text-right text-xs font-medium text-admin-ink">{{ $earning['amount_formatted'] }}</span>
+                                    <span class="ml-auto w-24 shrink-0 text-right text-xs font-medium text-admin-ink">{{ $earning['amount_formatted'] }}</span>
                                 </div>
                             @endforeach
                         </div>

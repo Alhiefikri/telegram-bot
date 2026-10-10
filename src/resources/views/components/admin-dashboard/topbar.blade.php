@@ -20,7 +20,7 @@
         @endif
     </div>
 
-    <div class="flex max-w-full flex-wrap items-center gap-2">
+    <div class="flex w-full max-w-full flex-wrap items-center gap-2 sm:w-auto">
         @if (isset($status) && trim((string) $status) !== '')
             <div class="flex flex-wrap items-center gap-2">{{ $status }}</div>
         @endif

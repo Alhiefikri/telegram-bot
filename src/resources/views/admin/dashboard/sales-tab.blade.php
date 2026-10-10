@@ -1,7 +1,7 @@
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  PENJUALAN TAB (Pesanan)                            ║
                  ╚═════════════════════════════════════════════════════╝ --}}
-            <div id="admin-section-sales" data-admin-return-target tabindex="-1" x-cloak x-show="activeTab === 'penjualan'" class="mt-4 space-y-4">
+            <div id="admin-section-sales" data-admin-return-target tabindex="-1" class="mt-4 space-y-4">
 
                 <div>
                     <h2 class="font-display text-lg font-bold uppercase tracking-wider text-neo-ink">🛒 Penjualan Saya</h2>

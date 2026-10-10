@@ -1,7 +1,7 @@
             {{-- ╔═════════════════════════════════════════════════════╗
                  ║  PRODUK TAB (Katalog)                               ║
                  ╚═════════════════════════════════════════════════════╝ --}}
-            <div id="admin-section-products" data-admin-return-target tabindex="-1" x-cloak x-show="activeTab === 'produk'" class="mt-4 space-y-4">
+            <div id="admin-section-products" data-admin-return-target tabindex="-1" class="mt-4 space-y-4">
 
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                     <div class="min-w-0">

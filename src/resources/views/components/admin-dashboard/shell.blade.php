@@ -3,7 +3,7 @@
 ])
 
 <div {{ $attributes->class(['admin-dashboard-shell min-h-screen bg-admin-paper text-admin-ink']) }}>
-    <a href="#admin-dashboard-content" @if(isset($mobileDrawer)) x-bind:inert="sidebarOpen" @endif class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-admin-surface focus:px-4 focus:py-3 focus:text-sm focus:font-semibold focus:text-admin-ink focus:shadow-admin-sm">
+    <a href="#admin-dashboard-content" @if(isset($mobileDrawer)) x-bind:inert="sidebarOpen" @endif class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-admin-surface focus:px-4 focus:py-3 focus:text-sm focus:font-semibold focus:text-admin-ink focus:shadow-admin-sm">
         Lewati ke konten utama
     </a>
 
@@ -15,7 +15,7 @@
 
     <div class="admin-dashboard-frame flex min-w-0 flex-col lg:pl-60">
         @if (isset($topbar) && trim((string) $topbar) !== '')
-            <header class="admin-dashboard-topbar relative z-20 border-b border-admin-line bg-admin-paper" aria-label="Konteks halaman" @if(isset($mobileDrawer)) x-bind:inert="sidebarOpen" @endif>
+            <header x-ref="dashboardTopbar" class="admin-dashboard-topbar sticky top-0 z-20 border-b border-admin-line bg-admin-paper" aria-label="Konteks halaman" @if(isset($mobileDrawer)) x-bind:inert="sidebarOpen" @endif>
                 {{ $topbar }}
             </header>
         @endif

@@ -65,7 +65,7 @@
             <x-slot:sidebar>
                 <div class="flex h-full min-h-0 flex-col border-r border-admin-line bg-admin-surface">
                     <a href="{{ route('admin.dashboard') }}" class="flex min-h-20 items-center px-6 text-base font-semibold text-admin-ink">LHIE STORE</a>
-                    <x-admin-dashboard.navigation :groups="$navigation['groups']" enhance-tabs class="min-h-0 flex-1 overflow-y-auto px-3 pb-6" />
+                    <x-admin-dashboard.navigation :groups="$navigation['groups']" class="min-h-0 flex-1 overflow-y-auto px-3 pb-6" />
                     <div class="border-t border-admin-line px-6 py-4 text-xs text-admin-muted">
                         <p class="break-words font-medium text-admin-ink">{{ $admin['name'] }}</p>
                         <p>{{ ucfirst($admin['role']) }}</p>
@@ -134,7 +134,7 @@
                     <summary class="min-h-11 cursor-pointer py-3 text-sm font-medium text-admin-ink">Navigasi dashboard</summary>
                     <x-admin-dashboard.navigation :groups="$navigation['groups']" id-prefix="admin-fallback-navigation" label="Navigasi dashboard" />
                     @if ($canManageProducts)
-                        <a href="{{ route('admin.dashboard', [...request()->query(), 'tab' => 'produk', 'product_form' => 'create']) }}" class="flex min-h-11 items-center px-3 text-sm font-medium text-admin-accent">Tambah Produk</a>
+                        <a href="{{ route('admin.dashboard', [...request()->query(), 'tab' => 'produk', 'product_form' => 'create']) }}" x-on:click="handleSidebarNavigation($event)" class="flex min-h-11 items-center px-3 text-sm font-medium text-admin-accent">Tambah Produk</a>
                     @endif
                 </details>
 
@@ -142,7 +142,7 @@
                     <x-slot:close>
                         <button type="button" x-on:click="closeSidebar()" aria-label="Tutup navigasi" class="flex h-11 w-11 items-center justify-center rounded-lg text-xl text-admin-ink focus-visible:outline-2 focus-visible:outline-admin-focus">×</button>
                     </x-slot:close>
-                    <x-admin-dashboard.navigation :groups="$navigation['groups']" enhance-tabs id-prefix="admin-drawer-navigation" label="Navigasi dashboard" />
+                    <x-admin-dashboard.navigation :groups="$navigation['groups']" id-prefix="admin-drawer-navigation" label="Navigasi dashboard" />
                     @if ($canManageProducts)
                         <a href="{{ route('admin.dashboard', [...request()->query(), 'tab' => 'produk', 'product_form' => 'create']) }}" x-on:click.prevent="goToTab('produk', true)" class="mt-6 flex min-h-11 items-center rounded-lg bg-admin-accent px-3 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-admin-focus">Tambah Produk</a>
                     @endif

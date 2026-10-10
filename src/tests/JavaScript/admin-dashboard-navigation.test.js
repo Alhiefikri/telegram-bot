@@ -238,3 +238,29 @@ test("navigation releases lock and preserves full-page query/hash and create int
   });
   assert.equal(h.dashboard.sidebarOpen, false);
 });
+
+test("ordinary navigation keeps client fragments without replacing explicit targets", (t) => {
+  const h = setup(t);
+  const link = {
+    href: "https://example.test/admin?tab=produk&sales_filter=waiting",
+  };
+  h.dashboard.openSidebar(h.trigger);
+  h.dashboard.handleSidebarNavigation({ target: { closest: () => link } });
+  assert.equal(
+    link.href,
+    "https://example.test/admin?tab=produk&sales_filter=waiting#admin-section-sales"
+  );
+  assert.equal(h.dashboard.sidebarOpen, false);
+  assert.equal(h.style.has("overflow"), false);
+  assert.deepEqual(h.assigned, []);
+
+  link.href = "https://example.test/admin?tab=stats#admin-payment-settings";
+  h.dashboard.handleSidebarNavigation({ target: { closest: () => link } });
+  assert.equal(
+    link.href,
+    "https://example.test/admin?tab=stats#admin-payment-settings"
+  );
+  link.href = "https://store.example.test/";
+  h.dashboard.handleSidebarNavigation({ target: { closest: () => link } });
+  assert.equal(link.href, "https://store.example.test/");
+});

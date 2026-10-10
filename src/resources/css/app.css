@@ -363,6 +363,19 @@
     background-image: none;
     color: var(--admin-ink);
   }
+  html:has(.admin-dashboard-shell) {
+    --admin-topbar-fallback-height: calc(
+      var(--admin-topbar-fallback-base, 18rem) +
+        max(
+          env(safe-area-inset-top, 0px),
+          var(--tg-safe-area-inset-top, 0px),
+          var(--tg-content-safe-area-inset-top, 0px)
+        )
+    );
+    scroll-padding-block-start: calc(
+      var(--admin-topbar-height, var(--admin-topbar-fallback-height)) + 1rem
+    );
+  }
   .admin-safe-bottom {
     padding-bottom: max(
       0.75rem,
@@ -438,11 +451,15 @@
     overscroll-behavior: contain;
     overflow-wrap: anywhere;
   }
+  .admin-dashboard-content,
   .admin-dashboard-content :is([id], input, select, textarea, button, a),
   [data-admin-return-target] {
     scroll-margin-block: 1rem;
   }
   @media (min-width: 640px) {
+    html:has(.admin-dashboard-shell) {
+      --admin-topbar-fallback-base: 10rem;
+    }
     .admin-dashboard-content {
       --admin-content-padding: 1.5rem;
     }

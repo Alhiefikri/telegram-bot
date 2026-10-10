@@ -1244,9 +1244,11 @@ The reusable presentation seam is anonymous Blade components under
 `src/resources/views/components/admin-dashboard/`: `shell`, `navigation`,
 `navigation-item`, `topbar`, and `mobile-drawer`. They accept server-built,
 permission-filtered navigation groups and render escaped links with an
-allowlisted SVG path map. Tab anchors optionally enhance through the existing
-`adminDashboard.goToTab()` full-page navigation; authorization and data loading
-remain server-owned. `mobile-drawer` renders the dialog/backdrop and delegates
+allowlisted SVG path map. Navigation renderers enhance real server-built anchors
+through `handleSidebarNavigation()` to retain client fragments without replacing
+explicit destination hashes. `adminDashboard.goToTab()` retains full-page
+navigation and product-create intent; authorization and data loading remain
+server-owned. `mobile-drawer` renders the dialog/backdrop and delegates
 focus, close and navigation events to the composed Alpine lifecycle.
 
 Admin primitive defaults use neutral surfaces, muted violet accent tokens,
@@ -1279,6 +1281,10 @@ navigation reuses `BalanceAdjustmentDashboardReadiness`; the controller/routes
 still enforce access. Active-tab data remains built by `forActiveTab()`, never
 the eager builder. Existing section IDs, return targets, modal IDs, refs and
 initialization remain unchanged.
+
+Render/navigation repairs (#601): the authorized active tab body is server-rendered without `x-cloak`/`x-show`; only interactive overlays need Alpine to become visible. The shared topbar is sticky on dashboard and linked pages. Its lifecycle-owned height observer supplies native hash/focus scroll padding and restores the prior inline height on destruction, with a conservative CSS fallback for no-JavaScript pages. `focusReturnTarget()` aligns section starts below the header rather than centering oversized sections; focus/highlight and stable return targets remain intact. Ordinary and modified navigation clicks preserve the current client fragment only when the server destination has no explicit hash. Passing-after smoke and the per-item antislop gate are recorded in [the sidebar cutover notes](admin-dashboard-sidebar-cutover.md).
+
+The no-JavaScript topbar fallback uses font-relative budgets of 18rem below 640px and 10rem at wider widths, plus the safe-area inset. Native payment-settings headings remained visible at 200% text size from 320 to 1280px. Stats revenue rows wrap at the narrow boundary instead of widening the document.
 
 Mobile lifecycle (#595): `resources/js/admin-dashboard/navigation.js` owns
 `sidebarOpen`, visible opener restoration, overflow-style ownership,

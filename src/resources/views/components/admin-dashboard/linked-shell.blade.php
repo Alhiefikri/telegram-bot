@@ -37,7 +37,7 @@
                     <h1 class="text-lg font-semibold text-admin-ink sm:text-xl">{{ $title }}</h1>
                 </x-slot:pageContext>
                 <x-slot:actions>
-                    <x-admin-dashboard.button :href="route('admin.dashboard', ['tab' => $activeTab])" variant="neutral" size="sm">Kembali ke dashboard</x-admin-dashboard.button>
+                    <x-admin-dashboard.button :href="route('admin.dashboard', [...\Illuminate\Support\Arr::except(request()->query(), ['product_form']), 'tab' => $activeTab])" x-on:click="handleSidebarNavigation($event)" variant="neutral" size="sm">Kembali ke dashboard</x-admin-dashboard.button>
                     <x-theme-toggle class="h-11 w-11 shrink-0 rounded-lg border border-admin-line bg-admin-surface text-admin-ink focus-visible:outline-2 focus-visible:outline-admin-focus" />
                 </x-slot:actions>
                 <x-slot:identity>

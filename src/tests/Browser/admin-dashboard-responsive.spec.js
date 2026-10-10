@@ -2832,6 +2832,256 @@ test("desktop sidebar links navigate without JavaScript and retain filters", asy
   }
 });
 
+for (const role of ["owner", "admin"]) {
+  for (const width of [320, 375, 1280]) {
+    test(`no-JavaScript ${role} tabs expose server content and validation at ${width}px`, async ({
+      browser,
+    }) => {
+      const context = await browser.newContext({
+        javaScriptEnabled: false,
+        viewport: { width, height: 900 },
+      });
+      const page = await context.newPage();
+      try {
+        await login(
+          page,
+          role === "owner" ? "test@example.com" : "admin-browser@example.test"
+        );
+        const tabs = [
+          ["stats", "#admin-section-stats"],
+          ["produk", "#admin-section-products"],
+          ["penjualan", "#admin-section-sales"],
+          ["suppliers", ".supplier-workspace"],
+          ["broadcast", "#admin-section-broadcast"],
+          ["telegram-channel", "#admin-section-store-channel"],
+          ["riwayat", "#admin-section-history"],
+          ["withdraw", "#admin-section-withdraw"],
+          ["funnel", "#admin-section-funnel"],
+          ...(role === "owner"
+            ? [["balance-issues", "#admin-section-balance-issues"]]
+            : []),
+        ];
+        for (const [tab, selector] of tabs) {
+          const response = await page.goto(`${baseUrl}/admin?tab=${tab}`);
+          expect(response.status()).toBe(200);
+          const content = page.locator(selector);
+          await expect(content).toBeVisible();
+          await expect(content.getByRole("heading").first()).toBeVisible();
+          await expectNoDocumentOverflow(page);
+        }
+        await page.goto(`${baseUrl}/admin?tab=stats`);
+        await page.evaluate(() => {
+          document.documentElement.style.fontSize = "200%";
+        });
+        const settings = page.locator("#admin-payment-settings");
+        await settings.evaluate((element) =>
+          element.scrollIntoView({ block: "start", behavior: "instant" })
+        );
+        const topbarBox = await page
+          .getByRole("banner", { name: "Konteks halaman" })
+          .boundingBox();
+        const settingsBox = await settings.boundingBox();
+        expect(settingsBox.y).toBeGreaterThanOrEqual(
+          topbarBox.y + topbarBox.height
+        );
+        expect(settingsBox.y).toBeLessThan(page.viewportSize().height);
+        await expectNoDocumentOverflow(page);
+        await page.evaluate(() =>
+          document.documentElement.style.removeProperty("font-size")
+        );
+        await page.goto(`${baseUrl}/admin?tab=produk`);
+        await expect(
+          page.getByRole("heading", {
+            name: "Browser QA Product Family",
+            exact: true,
+          })
+        ).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "Simpan default", exact: true })
+        ).toBeVisible();
+        await page.goto(`${baseUrl}/admin?tab=broadcast`);
+        const rejectedMessage = "x".repeat(3501);
+        await page.getByLabel("Pesan", { exact: true }).fill(rejectedMessage);
+        await page.getByRole("button", { name: /Kirim Siaran/ }).click();
+        await expect(page).toHaveURL(`${baseUrl}/admin?tab=broadcast`);
+        await expect(
+          page.getByText("Pesan broadcast maksimal 3500 karakter.", {
+            exact: true,
+          })
+        ).toBeVisible();
+        await expect(page.getByLabel("Pesan", { exact: true })).toHaveValue(
+          rejectedMessage
+        );
+        await page.goto(`${baseUrl}/admin?tab=funnel`);
+        await page.locator('input[name="start_date"]').fill("2026-10-01");
+        await page.locator('input[name="end_date"]').fill("2026-10-09");
+        await page
+          .locator('form[method="get"]')
+          .getByRole("button", { name: /Terapkan/ })
+          .click();
+        expect(new URL(page.url()).searchParams.get("start_date")).toBe(
+          "2026-10-01"
+        );
+        expect(new URL(page.url()).searchParams.get("end_date")).toBe(
+          "2026-10-09"
+        );
+      } finally {
+        await context.close();
+      }
+    });
+  }
+}
+
+test("ordinary sidebar and linked-page anchors preserve fragments and explicit settings targets", async ({
+  page,
+  context,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page.goto(
+    `${baseUrl}/admin?tab=produk&sales_filter=waiting&product_form=create#admin-section-sales`
+  );
+  await page.keyboard.press("Escape");
+  const nav = page.getByRole("navigation", {
+    name: "Navigasi admin",
+    exact: true,
+  });
+  const popupPromise = context.waitForEvent("page");
+  await nav
+    .getByRole("link", { name: "Pesanan", exact: true })
+    .click({ modifiers: ["Control"] });
+  const popup = await popupPromise;
+  await expect(popup).toHaveURL(
+    `${baseUrl}/admin?tab=penjualan&sales_filter=waiting#admin-section-sales`
+  );
+  await expect(popup.locator("#admin-section-sales")).toBeVisible();
+  await popup.close();
+  await nav
+    .getByRole("link", { name: "Pengaturan pembayaran", exact: true })
+    .click();
+  await expect(page).toHaveURL(
+    `${baseUrl}/admin?tab=stats&sales_filter=waiting#admin-payment-settings`
+  );
+  await page.goBack();
+  await expect(page).toHaveURL(
+    /tab=produk.*product_form=create#admin-section-sales/
+  );
+  await page.goForward();
+  await expect(page).toHaveURL(/tab=stats.*#admin-payment-settings/);
+  await page.goto(
+    `${baseUrl}/admin/manual-fulfillment-reviews?sales_filter=waiting#admin-section-sales`
+  );
+  await nav.getByRole("link", { name: "Produk", exact: true }).click();
+  await expect(page).toHaveURL(
+    `${baseUrl}/admin?sales_filter=waiting&tab=produk#admin-section-sales`
+  );
+});
+
+test("shared topbars stay reachable and leave hash, skip and focused targets uncovered", async ({
+  page,
+}, testInfo) => {
+  await login(page);
+  for (const width of [375, 768, 1280]) {
+    await page.setViewportSize({ width, height: 600 });
+    for (const destination of [
+      "/admin?tab=stats",
+      invoiceFixtures.unknownEffectPath,
+    ]) {
+      await page.goto(`${baseUrl}${destination}`);
+      const topbar = page.getByRole("banner", { name: "Konteks halaman" });
+      await page.evaluate(() =>
+        window.scrollTo({
+          top: document.body.scrollHeight,
+          behavior: "instant",
+        })
+      );
+      expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(60);
+      expect((await topbar.boundingBox()).y).toBeGreaterThanOrEqual(0);
+      const toggle = topbar.locator("[data-theme-toggle]");
+      await toggle.click();
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+      await expectNoDocumentOverflow(page);
+      await page.screenshot({
+        path: testInfo.outputPath(
+          `topbar-${width}-${destination.startsWith("/admin?") ? "dashboard" : "review"}-dark.png`
+        ),
+      });
+      await toggle.click();
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+      await page.screenshot({
+        path: testInfo.outputPath(
+          `topbar-${width}-${destination.startsWith("/admin?") ? "dashboard" : "review"}-light.png`
+        ),
+      });
+    }
+    await page.goto(`${baseUrl}/admin?tab=stats#admin-payment-settings`);
+    await expectUncoveredByTopbar(
+      page,
+      page.locator("#admin-payment-settings")
+    );
+    const skip = page.getByRole("link", { name: "Lewati ke konten utama" });
+    await skip.focus();
+    await expect(skip).toBeInViewport();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#admin-dashboard-content")).toBeFocused();
+    await expectUncoveredByTopbar(
+      page,
+      page.locator("#admin-dashboard-content")
+    );
+    await page.goto(`${baseUrl}/admin?tab=broadcast`);
+    await page.getByRole("button", { name: /Kirim Siaran/ }).click();
+    const error = page.getByText("Isi pesan broadcast terlebih dahulu.", {
+      exact: true,
+    });
+    await expect(error).toBeVisible();
+    await error.evaluate((element) =>
+      element.scrollIntoView({ block: "start", behavior: "instant" })
+    );
+    await expectUncoveredByTopbar(page, error);
+    const message = page.getByLabel("Pesan", { exact: true });
+    await message.evaluate((element) =>
+      element.scrollIntoView({ block: "start", behavior: "instant" })
+    );
+    await message.focus();
+    await expectUncoveredByTopbar(page, message);
+  }
+});
+
+test("Unknown delivery review renders reduced metadata and existing resolution actions", async ({
+  page,
+}) => {
+  await login(page);
+  const response = await page.goto(
+    `${baseUrl}${invoiceFixtures.unknownEffectPath}`
+  );
+  expect(response.status()).toBe(200);
+  const content = page.locator("#admin-dashboard-content");
+  await expect(
+    content.getByRole("heading", { name: /INV-BROWSER-DELIVERY-REVIEW/ })
+  ).toBeVisible();
+  await expect(content.getByText("unknown", { exact: true })).toBeVisible();
+  await expect(
+    content.getByText("ConnectionException", { exact: true })
+  ).toBeVisible();
+  await expect(content).not.toContainText("BROWSER-PRIVATE-OUTCOME");
+  await expect(page.getByLabel("Telegram message identifier")).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Mark as sent, no Telegram request",
+      exact: true,
+    })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: /duplicate-risk/ })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Create explicit resend version",
+      exact: true,
+    })
+  ).toBeVisible();
+});
+
 test("hides retired Pakasir controls from provider switch", async ({
   page,
 }) => {
@@ -4245,12 +4495,26 @@ test("bulk stock deletion keeps mobile modal open and refreshes remaining accoun
   await expectNoDocumentOverflow(page);
 });
 
-async function login(page) {
+async function login(page, email = "test@example.com") {
   await page.goto(`${baseUrl}/admin/login`);
-  await page.getByLabel("Username / email admin").fill("test@example.com");
+  await page.getByLabel("Username / email admin").fill(email);
   await page.locator('input[type="password"]').fill("password");
   await page.getByRole("button", { name: /sign in|login|masuk/i }).click();
   await page.waitForURL(`${baseUrl}/admin`);
+}
+
+async function expectUncoveredByTopbar(page, target) {
+  await expect(target).toBeInViewport();
+  await settleSmoothScroll(page);
+  await expect
+    .poll(async () => {
+      const topbar = await page
+        .getByRole("banner", { name: "Konteks halaman" })
+        .boundingBox();
+      const box = await target.boundingBox();
+      return box.y - (topbar.y + topbar.height);
+    })
+    .toBeGreaterThanOrEqual(0);
 }
 
 async function installClipboardProbe(page) {
@@ -5362,6 +5626,13 @@ User::query()->updateOrCreate(
     ],
 );
 
+User::factory()->create([
+    'email' => 'admin-browser@example.test',
+    'name' => 'Browser QA Admin',
+    'password' => Hash::make('password'),
+    'role' => UserRole::Admin,
+]);
+
 Customer::query()->updateOrCreate(
     ['telegram_id' => 9007199254740993],
     [
@@ -5752,7 +6023,26 @@ Payment::factory()->create([
     'status' => PaymentStatus::Failed,
 ]);
 
+$reviewOrder = Order::factory()->create([
+    'invoice_number' => 'INV-BROWSER-DELIVERY-REVIEW',
+    'order_status' => OrderStatus::Processing,
+    'payment_status' => PaymentStatus::Paid,
+]);
+$unknownEffect = \App\Models\TelegramOutboundEffect::factory()->create([
+    'source_type' => Order::class,
+    'source_id' => $reviewOrder->id,
+    'effect_type' => \App\Services\Telegram\TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
+    'state' => \App\Enums\TelegramOutboundEffectState::Unknown,
+    'unknown_at' => now()->subMinutes(5),
+    'last_error_code' => 'telegram_transport_ambiguous',
+    'outcome_metadata' => [
+        'exception' => 'ConnectionException',
+        'raw_payload' => 'BROWSER-PRIVATE-OUTCOME',
+    ],
+]);
+
 echo json_encode([
+    'unknownEffectPath' => route('admin.telegram-outbound-effects.show', $unknownEffect, false),
     'longProductCheckoutPath' => route('storefront.shop.checkout.product', ['product' => $longCheckoutProduct], false),
     'tierProductCheckoutPath' => route('storefront.shop.checkout.product', ['product' => $tierProduct], false),
     'pendingWithNativeQris' => [

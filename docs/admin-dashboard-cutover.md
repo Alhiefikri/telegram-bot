@@ -4,7 +4,7 @@ The admin surface is Blade-only. `/admin` is handled by `App\Http\Controllers\Ad
 
 ## Current Routing
 
-- `/admin` renders the neobrutalist Blade/Alpine dashboard.
+- `/admin` renders the server-selected Blade dashboard tab inside the shared Variant A sidebar/topbar shell.
 - `/admin/login` renders the Blade login form.
 - `/admin/products`, `/admin/products/{product}`, and `/admin/products/{product}/stock` are Blade dashboard mutation endpoints for create, update, soft-delete, and stock add flows.
 - Payment mode and broadcast mutations stay on the same Blade dashboard.
@@ -16,7 +16,7 @@ The admin surface is Blade-only. `/admin` is handled by `App\Http\Controllers\Ad
 - No Filament panel provider is registered in `bootstrap/providers.php`.
 - Filament resources, pages, widgets, published views, and published assets were removed.
 - Product create/edit/stock/delete actions stay in dashboard modals or inline Blade forms and return to the `produk` tab.
-- Product cards use compact neobrutalist action buttons with icon labels; desktop can show product cards in two columns while Telegram Mini App width stays one column with fixed bottom navigation.
+- Product cards retain their existing tab styling. Navigation uses the shared persistent desktop sidebar, mobile drawer and native no-JavaScript fallback; the shared topbar remains reachable after scrolling.
 
 ## Production Build
 
@@ -37,7 +37,7 @@ npm run test:browser:admin
 Coverage baseline for the split:
 
 - Admin access: `AdminDashboardTest` covers guest redirects, non-admin forbiddance, and the manual Blade `/admin` route.
-- Dashboard render and tabs: `AdminDashboardTest` covers the Blade shell, stats/products/sales tab content, desktop/mobile nav markers, and absence of Filament/sidebar runtime surface.
+- Dashboard render and tabs: `AdminDashboardTest` covers the Blade shell, stats/products/sales tab content, desktop/mobile nav markers, and absence of Filament runtime surface. Active tab content is server-selected and readable without Alpine; the current shell and regression evidence are recorded in [the sidebar cutover notes](agents/admin-dashboard-sidebar-cutover.md).
 - Product modal: `AdminDashboardTest` covers create/edit validation and mutations; `admin-dashboard-responsive.spec.js` opens and closes the visible modal in a browser.
 - Stock modal: `AdminDashboardTest` covers add/manage/delete stock behavior and secret visibility rules; `admin-dashboard-responsive.spec.js` exercises add/manage stock modals at desktop and Telegram Mini App widths.
 - Payment mode: `AdminDashboardTest` covers owner/admin toggles and non-manager denial; `admin-dashboard-responsive.spec.js` checks the visible mode controls.

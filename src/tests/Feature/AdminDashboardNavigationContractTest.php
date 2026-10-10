@@ -112,6 +112,15 @@ final class AdminDashboardNavigationContractTest extends TestCase
         $link = $xpath->query('//aside//a[contains(@href, "tab=penjualan")]')->item(0);
         parse_str(parse_url($link->getAttribute('href'), PHP_URL_QUERY), $query);
         $this->assertSame(['tab' => 'penjualan', 'sales_filter' => 'waiting', 'products_page' => '2'], $query);
+        $settings = $xpath->query('//aside//a[contains(@href, "#admin-payment-settings")]')->item(0);
+        parse_str(parse_url($settings->getAttribute('href'), PHP_URL_QUERY), $settingsQuery);
+        $this->assertSame(['tab' => 'stats', 'sales_filter' => 'waiting', 'products_page' => '2'], $settingsQuery);
+        $this->assertSame('admin-payment-settings', parse_url($settings->getAttribute('href'), PHP_URL_FRAGMENT));
+        $productAction = collect($response->viewData('navigation')['groups'])
+            ->flatMap(fn (array $group): array => $group['items'])
+            ->firstWhere('id', 'produk')['action'];
+        parse_str(parse_url($productAction['href'], PHP_URL_QUERY), $createQuery);
+        $this->assertSame(['tab' => 'produk', 'sales_filter' => 'waiting', 'products_page' => '2', 'product_form' => 'create'], $createQuery);
         $this->assertTrue($response->viewData('dashboardState')['productModalOpen']);
     }
 

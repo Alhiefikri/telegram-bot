@@ -12,7 +12,6 @@
 <body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
     <x-admin-dashboard.linked-shell active-tab="penjualan" title="Manual Delivery Review">
         <a href="{{ route('admin.telegram-outbound-effects.index') }}" class="text-sm font-semibold text-admin-accent underline">← Kembali ke review queue</a>
-        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
         @if (session('status'))
             <x-admin-dashboard.notice tone="success" class="mt-4 rounded-xl text-sm font-bold">{{ session('status') }}</x-admin-dashboard.notice>
         @endif

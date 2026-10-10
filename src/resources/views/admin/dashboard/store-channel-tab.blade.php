@@ -1,4 +1,4 @@
-            <div id="admin-section-store-channel" data-admin-return-target tabindex="-1" x-show="activeTab === 'telegram-channel'" class="mt-4 space-y-4">
+            <div id="admin-section-store-channel" data-admin-return-target tabindex="-1" class="mt-4 space-y-4">
                 @php($welcomeBanner = $storeChannel['welcome_banner'])
                 <x-admin-dashboard.card id="admin-section-telegram-welcome-banner" data-admin-return-target tabindex="-1" as="section" tone="green" padding="compact" shadow="sm" class="rounded-[1.125rem]" aria-labelledby="admin-telegram-welcome-banner-title">
                     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

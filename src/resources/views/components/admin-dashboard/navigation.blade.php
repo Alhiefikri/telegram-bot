@@ -1,11 +1,10 @@
 @props([
     'groups' => [],
     'label' => 'Navigasi admin',
-    'enhanceTabs' => false,
     'idPrefix' => 'admin-navigation',
 ])
 
-<nav {{ $attributes->merge(['aria-label' => $label]) }}>
+<nav {{ $attributes->merge(['aria-label' => $label, 'x-on:click' => 'handleSidebarNavigation($event)', 'x-on:auxclick' => 'handleSidebarNavigation($event)']) }}>
     @foreach ($groups as $group)
         @php
             $items = array_values(array_filter($group['items'] ?? [], static fn (array $item): bool => (bool) ($item['visible'] ?? true)));
@@ -18,19 +17,12 @@
                 <ul class="mt-2 space-y-1">
                     @foreach ($items as $item)
                         <li>
-                            @php
-                                $linkAttributes = [];
-                                if ($enhanceTabs && ($item['tab'] ?? null) !== null) {
-                                    $linkAttributes['x-on:click.prevent'] = 'goToTab('.\Illuminate\Support\Js::from($item['tab']).')';
-                                }
-                            @endphp
                             <x-admin-dashboard.navigation-item
                                 :href="$item['href']"
                                 :label="$item['label']"
                                 :icon="$item['icon']"
                                 :active="$item['active'] ?? false"
                                 :badge="$item['badge'] ?? null"
-                                :attributes="new \Illuminate\View\ComponentAttributeBag($linkAttributes)"
                             />
                         </li>
                     @endforeach
