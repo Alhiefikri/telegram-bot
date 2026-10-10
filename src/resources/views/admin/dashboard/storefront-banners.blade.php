@@ -31,7 +31,7 @@
                         </div>
                         <div class="sm:col-span-2">
                             <label for="storefront-banner-image-{{ $slot }}" class="mb-2 block text-xs font-bold">{{ $banner ? 'Ganti gambar (kosongkan untuk mempertahankan)' : 'Upload gambar' }}</label>
-                            <input id="storefront-banner-image-{{ $slot }}" type="file" name="banners[{{ $slot }}][image]" accept="image/jpeg,image/png,image/webp" class="w-full min-w-0 text-xs file:mr-3 file:rounded-lg file:border-0 file:bg-brand-bg file:p-3 file:font-bold">
+                            <input id="storefront-banner-image-{{ $slot }}" type="file" name="banners[{{ $slot }}][image]" accept="image/jpeg,image/png,image/webp" class="min-h-11 w-full min-w-0 text-xs file:mr-3 file:min-h-11 file:rounded-lg file:border-0 file:bg-brand-bg file:p-3 file:font-bold file:text-brand-slate-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus">
                         </div>
                         <label class="inline-flex min-h-11 items-center gap-2 text-xs font-bold">
                             <input type="checkbox" name="banners[{{ $slot }}][remove]" value="1"> Kosongkan slot ini

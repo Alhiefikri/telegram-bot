@@ -71,11 +71,15 @@
                             @csrf
                             <div class="min-w-0 flex-1">
                                 <label for="product-placeholder-image" class="text-[11px] font-black uppercase tracking-wide text-neo-ink">Ganti gambar default</label>
-                                <div class="mt-2 flex min-w-0 items-center gap-3 rounded-lg border-2 border-neo-ink bg-white p-2 shadow-[2px_2px_0_#050505]">
-                                    <label for="product-placeholder-image" class="shrink-0 cursor-pointer rounded-md bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih gambar</label>
-                                    <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="fileName">Belum ada file yang dipilih</span>
-                                </div>
-                                <input type="file" id="product-placeholder-image" name="image" accept="image/jpeg,image/png,image/webp" required class="sr-only" x-on:change="fileName = $event.target.files[0]?.name ?? 'Belum ada file yang dipilih'">
+                                <x-admin-dashboard.file-upload
+                                    id="product-placeholder-image"
+                                    name="image"
+                                    label="Pilih gambar"
+                                    required
+                                    feedback-expression="fileName"
+                                    empty-feedback="Belum ada file yang dipilih"
+                                    x-on:change="fileName = $event.target.files[0]?.name ?? 'Belum ada file yang dipilih'"
+                                />
                                 <p class="mt-2 text-[10px] font-bold text-neo-ink/60">JPG, PNG, atau WebP. Maksimal 5 MB; otomatis dikompresi menjadi WebP maksimal 1600px.</p>
                             </div>
                             <x-admin-dashboard.button type="submit" variant="purple" size="sm" class="w-full shrink-0 sm:w-auto">Simpan default</x-admin-dashboard.button>

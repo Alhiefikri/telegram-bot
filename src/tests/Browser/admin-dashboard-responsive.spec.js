@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, openSync, closeSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  openSync,
+  closeSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2518,6 +2525,394 @@ test("shows the catalog placeholder controls in the admin product tab", async ({
   await expectNoDocumentOverflow(page);
 });
 
+test("admin accent controls meet AA text contrast in both themes", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  const productSection = page.locator("#admin-section-products");
+  const samples = [
+    {
+      name: "produk primary action",
+      target: productSection
+        .getByRole("button", { name: /Tambah Produk/ })
+        .first(),
+    },
+    {
+      name: "produk secondary action",
+      target: productSection
+        .getByRole("button", { name: /Kelola Product Family/ })
+        .first(),
+    },
+    {
+      name: "active sidebar item",
+      target: page.locator(
+        'aside.admin-dashboard-sidebar a[aria-current="page"]'
+      ),
+    },
+  ];
+  const report = { theme: { light: [], dark: [] }, mobileDrawer: {} };
+
+  for (const theme of ["light", "dark"]) {
+    await setAdminTheme(page, theme);
+
+    for (const sample of samples) {
+      await expect(sample.target).toBeVisible();
+
+      const resting = expectAdminContrastAtLeast(
+        await readSettledAdminContrastSample(sample.target),
+        `${theme} ${sample.name}`
+      );
+
+      await sample.target.hover();
+
+      const hover = expectAdminContrastAtLeast(
+        await readSettledAdminContrastSample(sample.target),
+        `${theme} ${sample.name} hover`
+      );
+
+      report.theme[theme].push({ name: sample.name, resting, hover });
+    }
+
+    await page.mouse.move(2, 2);
+    await page.screenshot({
+      path: testInfo.outputPath(`accent-${theme}.png`),
+    });
+  }
+
+  await page.setViewportSize({ width: 375, height: 900 });
+  await page.goto(`${baseUrl}/admin?tab=produk`, {
+    waitUntil: "domcontentloaded",
+  });
+  await page.getByRole("button", { name: "Buka navigasi admin" }).click();
+
+  const drawer = page.locator("#admin-dashboard-drawer");
+  await expect(drawer).toBeVisible();
+  report.mobileDrawer.activeItem = expectAdminContrastAtLeast(
+    await readSettledAdminContrastSample(
+      drawer.locator('a[aria-current="page"]').first()
+    ),
+    "dark mobile drawer active item"
+  );
+  report.mobileDrawer.createAction = expectAdminContrastAtLeast(
+    await readSettledAdminContrastSample(
+      drawer.getByRole("link", { name: "Tambah Produk" })
+    ),
+    "dark mobile drawer create action"
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("accent-dark-drawer.png"),
+  });
+
+  report.filterPill = { dark: null, light: null };
+
+  for (const theme of ["dark", "light"]) {
+    await page.goto(`${baseUrl}/admin?tab=penjualan&sales_filter=waiting`, {
+      waitUntil: "domcontentloaded",
+    });
+    await setAdminTheme(page, theme);
+
+    const activePill = page.locator("a.filter-pill-active").first();
+
+    await expect(activePill).toBeVisible();
+    report.filterPill[theme] = expectAdminContrastAtLeast(
+      await readSettledAdminContrastSample(activePill),
+      `${theme} active sales filter pill`
+    );
+  }
+
+  await page.screenshot({
+    path: testInfo.outputPath("accent-light-filter-pill.png"),
+  });
+
+  writeAdminContrastEvidence("accent-contrast.json", report);
+});
+
+test("admin auth surfaces keep AA text contrast in both themes", async ({
+  page,
+  browser,
+}, testInfo) => {
+  await login(page);
+  await page.goto(`${baseUrl}/admin/confirm-password`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  const confirmButton = page.getByRole("button", { name: "Konfirmasi" });
+  const confirmation = {
+    light: expectAdminContrastAtLeast(
+      await readSettledAdminContrastSample(confirmButton),
+      "light owner password confirmation"
+    ),
+  };
+
+  await page.locator("[data-theme-toggle]").first().click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  confirmation.dark = expectAdminContrastAtLeast(
+    await readSettledAdminContrastSample(confirmButton),
+    "dark owner password confirmation"
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("confirm-password-dark.png"),
+  });
+
+  const linkedShellLink = page.getByRole("link", {
+    name: "← Kembali ke Pesanan",
+  });
+  const linkedShell = {};
+
+  for (const theme of ["light", "dark"]) {
+    await page.goto(`${baseUrl}/admin/telegram-outbound-effects`, {
+      waitUntil: "domcontentloaded",
+    });
+    await setAdminTheme(page, theme);
+
+    await expect(linkedShellLink).toBeVisible();
+    linkedShell[theme] = expectAdminContrastAtLeast(
+      await readSettledAdminContrastSample(linkedShellLink),
+      `${theme} linked-shell back link`
+    );
+  }
+
+  const anonymousContext = await browser.newContext();
+  const loginPage = await anonymousContext.newPage();
+
+  await loginPage.goto(`${baseUrl}/admin/login`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  const loginButton = loginPage.getByRole("button", {
+    name: "Masuk Dashboard",
+  });
+  const loginSamples = {
+    light: expectAdminContrastAtLeast(
+      await readSettledAdminContrastSample(loginButton),
+      "light admin login"
+    ),
+  };
+
+  await loginPage.locator("[data-theme-toggle]").first().click();
+  await expect(loginPage.locator("html")).toHaveAttribute("data-theme", "dark");
+  loginSamples.dark = expectAdminContrastAtLeast(
+    await readSettledAdminContrastSample(loginButton),
+    "dark admin login"
+  );
+  await loginPage.screenshot({
+    path: testInfo.outputPath("admin-login-dark.png"),
+  });
+  await anonymousContext.close();
+
+  writeAdminContrastEvidence("auth-contrast.json", {
+    confirmation,
+    login: loginSamples,
+    linkedShell,
+  });
+});
+
+test("admin upload controls keep native keyboard pickers, visible focus and 44px triggers", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  await expectUploadControlContract(
+    page,
+    "product-placeholder-image",
+    "#admin-section-products"
+  );
+  const placeholderFeedback = page.locator(
+    'label[for="product-placeholder-image"] + span'
+  );
+
+  // Clearing the native selection returns the visible state to "no file chosen".
+  await page.locator("#product-placeholder-image").setInputFiles([]);
+  await expect(placeholderFeedback).toHaveText("Belum ada file yang dipilih");
+
+  await selectUploadFile(
+    page,
+    "product-placeholder-image",
+    "katalog-pengganti.png"
+  );
+  await expectNoDocumentOverflow(page);
+
+  await page.getByRole("button", { name: /Kelola Product Family/ }).click();
+  const familyModal = page.getByRole("dialog", {
+    name: "Kelola Product Family",
+  });
+  await expect(familyModal).toBeVisible();
+  await expectUploadControlContract(
+    page,
+    "product-family-image",
+    "#admin-product-family-management"
+  );
+  await expectUploadControlContract(
+    page,
+    "telegram-product-family-image",
+    "#admin-product-family-management"
+  );
+  await expectNoDocumentOverflow(page);
+
+  const familyFeedback = page.locator(
+    'label[for="product-family-image"] + span'
+  );
+
+  await expect(familyFeedback).toHaveText("product-family-image-terpilih.png");
+  await page.keyboard.press("Escape");
+  await expect(familyModal).toBeHidden();
+
+  await page.getByRole("button", { name: /Kelola Product Family/ }).click();
+  await expect(familyModal).toBeVisible();
+  await expect(familyFeedback).toHaveText("Tidak ada file yang dipilih");
+  await page.keyboard.press("Escape");
+  await expect(familyModal).toBeHidden();
+
+  await page
+    .locator("#admin-section-products")
+    .getByRole("button", { name: /Tambah Produk/ })
+    .first()
+    .click();
+  const productModal = page.getByRole("dialog", { name: /Tambah produk/i });
+  await expect(productModal).toBeVisible();
+
+  for (const inputId of [
+    "product-image",
+    "telegram-product-image",
+    "telegram-channel-product-image",
+  ]) {
+    await expectUploadControlContract(page, inputId, "#product-modal");
+  }
+
+  await expectNoDocumentOverflow(page);
+});
+
+test("admin upload rows keep their label inside narrow viewports at 200% text size", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`, {
+    waitUntil: "domcontentloaded",
+  });
+  await page.addStyleTag({ content: "html { font-size: 200%; }" });
+  await expect
+    .poll(() =>
+      page.evaluate(() => getComputedStyle(document.documentElement).fontSize)
+    )
+    .toBe("32px");
+
+  await page.getByRole("button", { name: /Kelola Product Family/ }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Kelola Product Family" })
+  ).toBeVisible();
+
+  for (const inputId of [
+    "product-family-image",
+    "telegram-product-family-image",
+  ]) {
+    const trigger = page.locator(`label[for="${inputId}"]`).last();
+
+    await trigger.scrollIntoViewIfNeeded();
+
+    const box = await trigger.boundingBox();
+
+    expect(box, `${inputId} trigger box`).not.toBeNull();
+    expect(
+      Math.round(box.width),
+      `${inputId} trigger width at 200% text`
+    ).toBeGreaterThanOrEqual(44);
+    expect(
+      Math.round(box.height),
+      `${inputId} trigger height at 200% text`
+    ).toBeGreaterThanOrEqual(44);
+    await expectElementWithinViewport(page, trigger);
+
+    const geometry = await trigger.evaluate((element) => {
+      const row = element.parentElement;
+      const rowStyle = getComputedStyle(row);
+      const box = element.getBoundingClientRect();
+      const rowBox = row.getBoundingClientRect();
+
+      return {
+        fitsRowContent:
+          box.right <=
+          rowBox.right - Number.parseFloat(rowStyle.paddingRight) + 0.5,
+        rowHeight: Math.round(rowBox.height),
+      };
+    });
+
+    expect(
+      geometry.fitsRowContent,
+      `${inputId} trigger stays inside its upload row at 200% text`
+    ).toBe(true);
+  }
+
+  await expectNoDocumentOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath("upload-200-percent-text.png"),
+  });
+});
+
+test("catalog placeholder upload stores a real image and rejects an invalid file", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  await selectUploadFile(page, "product-placeholder-image", "default-baru.png");
+
+  // Cancelling the native picker fires no change event, so the previously
+  // chosen file must survive and still be the one the form submits.
+  const cancelledChooser = page.waitForEvent("filechooser");
+
+  await page.locator("#product-placeholder-image").press("Enter");
+
+  expect((await cancelledChooser).isMultiple()).toBe(false);
+  await expect(
+    page.locator('label[for="product-placeholder-image"] + span')
+  ).toHaveText("default-baru.png");
+
+  await Promise.all([
+    page.waitForURL(`${baseUrl}/admin?tab=produk#admin-section-products`),
+    page.getByRole("button", { name: "Simpan default" }).click(),
+  ]);
+
+  await expect(
+    page.getByText("Gambar default katalog berhasil diperbarui.")
+  ).toBeVisible();
+  await expect(page.getByText("Default custom aktif")).toBeVisible();
+
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.locator("#product-placeholder-image").press("Enter"),
+  ]);
+
+  await chooser.setFiles({
+    name: "bukan-gambar.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("this is not an image"),
+  });
+
+  await Promise.all([
+    page.waitForURL(`${baseUrl}/admin?tab=produk#admin-section-products`),
+    page.getByRole("button", { name: "Simpan default" }).click(),
+  ]);
+
+  await expect(
+    page.getByText("File harus berupa gambar yang valid.")
+  ).toBeVisible();
+  await expect(page.getByText("Default custom aktif")).toBeVisible();
+  await expectNoDocumentOverflow(page);
+});
+
 test("keeps grouped Product Family controls usable at mobile width", async ({
   page,
 }) => {
@@ -4797,6 +5192,306 @@ async function expectElementWithinViewport(page, locator) {
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+}
+
+// 1x1 transparent PNG: a real decodable image for isolated upload fixtures.
+const adminUploadFixturePng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64"
+);
+
+function readAdminColor(value) {
+  const match =
+    /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?\s*\)/.exec(
+      value ?? ""
+    );
+
+  if (!match) {
+    throw new Error(`Unsupported CSS color value: ${value}`);
+  }
+
+  return {
+    red: Number(match[1]),
+    green: Number(match[2]),
+    blue: Number(match[3]),
+    alpha: match[4] === undefined ? 1 : Number(match[4]),
+  };
+}
+
+function adminColorTriplet(value) {
+  const color = readAdminColor(value);
+
+  return [color.red, color.green, color.blue];
+}
+
+function adminRelativeLuminance([red, green, blue]) {
+  const channel = (value) => {
+    const normalized = value / 255;
+
+    return normalized <= 0.04045
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+
+  return (
+    0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
+  );
+}
+
+function adminContrastRatio(foreground, background) {
+  const [lighter, darker] = [
+    adminRelativeLuminance(foreground),
+    adminRelativeLuminance(background),
+  ].sort((left, right) => right - left);
+
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+// Runs in the page: the AA verdict must use rendered pixels, so the text color
+// is composited over the first opaque ancestor background.
+const readAdminContrastSampleInBrowser = (element) => {
+  const parse = (value) => {
+    const match =
+      /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?\s*\)/.exec(
+        value ?? ""
+      );
+
+    if (!match) {
+      throw new Error(`Unsupported CSS color value: ${value}`);
+    }
+
+    return {
+      red: Number(match[1]),
+      green: Number(match[2]),
+      blue: Number(match[3]),
+      alpha: match[4] === undefined ? 1 : Number(match[4]),
+    };
+  };
+  const composite = (top, bottom) => ({
+    red: top.red * top.alpha + bottom.red * (1 - top.alpha),
+    green: top.green * top.alpha + bottom.green * (1 - top.alpha),
+    blue: top.blue * top.alpha + bottom.blue * (1 - top.alpha),
+  });
+
+  let background = null;
+
+  for (let node = element; node instanceof Element; node = node.parentElement) {
+    const layer = parse(getComputedStyle(node).backgroundColor);
+
+    if (layer.alpha === 0) {
+      continue;
+    }
+
+    background = background === null ? layer : composite(layer, background);
+
+    if (layer.alpha === 1) {
+      break;
+    }
+  }
+
+  background ??= { red: 255, green: 255, blue: 255 };
+
+  const style = getComputedStyle(element);
+  const foreground = parse(style.color);
+
+  return {
+    text: (element.textContent ?? "").trim().slice(0, 48),
+    foreground: [foreground.red, foreground.green, foreground.blue].map(
+      Math.round
+    ),
+    background: [background.red, background.green, background.blue].map(
+      Math.round
+    ),
+    fontSize: Number.parseFloat(style.fontSize),
+    fontWeight: Number.parseInt(style.fontWeight, 10) || 400,
+  };
+};
+
+async function readAdminContrastSample(target) {
+  return target.evaluate(readAdminContrastSampleInBrowser);
+}
+
+// Rendered ratios are kept outside Playwright's transient output directory so
+// the issue evidence survives a green run.
+function writeAdminContrastEvidence(fileName, payload) {
+  const directory = path.resolve(__dirname, "../../artifacts/issue-602");
+
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    path.join(directory, fileName),
+    `${JSON.stringify(payload, null, 2)}\n`
+  );
+}
+
+// Theme and hover changes animate colors, so evidence and verdicts must read a
+// value that stopped changing instead of a mid-transition frame.
+// Theme choice persists in local storage, so tests must converge on the wanted
+// theme instead of assuming which one the previous step left behind.
+async function setAdminTheme(page, theme) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if ((await page.locator("html").getAttribute("data-theme")) === theme) {
+      return;
+    }
+
+    await page.locator("[data-theme-toggle]").first().click();
+  }
+
+  await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+}
+
+async function readSettledAdminContrastSample(target) {
+  let previous = null;
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const sample = await readAdminContrastSample(target);
+
+    if (
+      previous !== null &&
+      previous.foreground.join() === sample.foreground.join() &&
+      previous.background.join() === sample.background.join()
+    ) {
+      return sample;
+    }
+
+    previous = sample;
+    await target.page().waitForTimeout(50);
+  }
+
+  return previous;
+}
+
+function expectAdminContrastAtLeast(sample, label) {
+  const ratio = adminContrastRatio(sample.foreground, sample.background);
+  const largeText =
+    sample.fontSize >= 24 ||
+    (sample.fontSize >= 18.66 && sample.fontWeight >= 700);
+  const threshold = largeText ? 3 : 4.5;
+
+  expect(
+    ratio,
+    `${label} "${sample.text}" ${sample.fontSize}px/${sample.fontWeight} measured ${ratio.toFixed(2)}:1`
+  ).toBeGreaterThanOrEqual(threshold);
+
+  return {
+    label,
+    text: sample.text,
+    rendered: `${sample.fontSize}px/${sample.fontWeight}`,
+    foreground: `rgb(${sample.foreground.join(", ")})`,
+    background: `rgb(${sample.background.join(", ")})`,
+    ratio: Number(ratio.toFixed(2)),
+    threshold,
+  };
+}
+
+async function tabUntilUploadFocused(
+  page,
+  inputId,
+  fromSelector,
+  maxSteps = 160
+) {
+  await page.locator(fromSelector).focus();
+
+  const input = page.locator(`#${inputId}`);
+
+  for (let step = 0; step <= maxSteps; step += 1) {
+    if (await input.evaluate((element) => element === document.activeElement)) {
+      return;
+    }
+
+    if (step < maxSteps) {
+      await page.keyboard.press("Tab");
+    }
+  }
+
+  await expect(input).toBeFocused();
+}
+
+async function selectUploadFile(page, inputId, fileName) {
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.locator(`#${inputId}`).press("Enter"),
+  ]);
+
+  await chooser.setFiles({
+    name: fileName,
+    mimeType: "image/png",
+    buffer: adminUploadFixturePng,
+  });
+
+  await expect(page.locator(`label[for="${inputId}"] + span`)).toHaveText(
+    fileName
+  );
+}
+
+// One contract for every admin upload slot: Tab reaches the native control,
+// focus is visible on the label the operator sees, the target is >=44px, the
+// native picker opens from the keyboard, and the chosen filename is fed back.
+async function expectUploadControlContract(page, inputId, focusOrigin) {
+  const input = page.locator(`#${inputId}`);
+  const trigger = page.locator(`label[for="${inputId}"]`).last();
+
+  await expect(input).toHaveAttribute("type", "file");
+  await expect(trigger).toBeVisible();
+
+  const box = await trigger.boundingBox();
+
+  expect(box, `${inputId} trigger box`).not.toBeNull();
+  expect(
+    Math.round(box.width),
+    `${inputId} trigger width`
+  ).toBeGreaterThanOrEqual(44);
+  expect(
+    Math.round(box.height),
+    `${inputId} trigger height`
+  ).toBeGreaterThanOrEqual(44);
+
+  await tabUntilUploadFocused(page, inputId, focusOrigin);
+  await expect(input).toBeFocused();
+
+  const indicator = await trigger.evaluate((element) => {
+    const style = getComputedStyle(element);
+
+    return {
+      outlineStyle: style.outlineStyle,
+      outlineWidth: Number.parseFloat(style.outlineWidth) || 0,
+      outlineColor: style.outlineColor,
+      surrounding: getComputedStyle(element.parentElement).backgroundColor,
+    };
+  });
+
+  expect(indicator.outlineStyle, `${inputId} focus outline style`).not.toBe(
+    "none"
+  );
+  expect(
+    indicator.outlineWidth,
+    `${inputId} focus outline width`
+  ).toBeGreaterThanOrEqual(2);
+
+  await expect
+    .poll(
+      async () => {
+        const ring = await trigger.evaluate((element) => ({
+          outlineColor: getComputedStyle(element).outlineColor,
+          surrounding: getComputedStyle(element.parentElement).backgroundColor,
+        }));
+
+        return adminContrastRatio(
+          adminColorTriplet(ring.outlineColor),
+          adminColorTriplet(ring.surrounding)
+        );
+      },
+      { message: `${inputId} focus ring contrast against its surface` }
+    )
+    .toBeGreaterThanOrEqual(3);
+
+  // Shift+Tab must leave the control and Tab must return to it, so the native
+  // input is reachable in both directions rather than only forward.
+  await page.keyboard.press("Shift+Tab");
+  await expect(input).not.toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(input).toBeFocused();
+
+  await selectUploadFile(page, inputId, `${inputId}-terpilih.png`);
 }
 
 function observeRetiredCheckoutRequests(page) {

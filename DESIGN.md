@@ -78,7 +78,7 @@ Defined in `src/resources/css/app.css` inside `@theme`.
 
 ### Admin dashboard palette
 
-The admin dashboard currently uses hardcoded colors in `src/resources/views/admin/dashboard/styles.blade.php` and component classes.
+Variant A admin surfaces use neutral paper/surface pairs plus one muted violet accent. Those `admin-*` variables live in `src/resources/css/app.css` and are exposed as Tailwind theme aliases. The legacy neo-brutal accents below stay in `@theme` (`--color-neo-*`) for storefront components and the remaining raw legacy admin markup; they are no longer the dashboard baseline.
 
 | Color | Value | Usage |
 | --- | --- | --- |
@@ -91,6 +91,21 @@ The admin dashboard currently uses hardcoded colors in `src/resources/views/admi
 | Purple | `#8758de` | Store link section, earnings bar, focus/secondary accents |
 | Blue | `#2d9cff` | Secondary accent where needed |
 | Red | `#ef4444` | Destructive/error states |
+
+#### Admin accent roles
+
+Each accent role has its own light/dark pair, because one violet value cannot serve as both a fill and accent-colored text. Measured pairs below are computed browser colors from issue #602.
+
+| Token | Light | Dark | Usage |
+| --- | --- | --- | --- |
+| `--admin-accent` | `#6d5bd0` | `#b8a9ff` | Accent fills (product primary actions, drawer create action) and accent borders |
+| `--admin-accent-ink` | `#ffffff` | `#121722` | Foreground on accent fills |
+| `--admin-accent-strong` | `#5b48c2` | `#b8a9ff` | Accent-colored text and icons on paper, surface and accent-soft backgrounds (active navigation, active tabs, purple badges, accent links, active filter pills) |
+| `--admin-accent-hover` | `#5b48c2` | `#9d86f8` | Hover fill for accent-filled controls |
+| `--admin-accent-soft` | `#eeeaff` | `#302a4f` | Soft selection/notice background; pair with `--admin-ink` or `--admin-accent-strong`, never with white text |
+| `--admin-focus` | `#6d5bd0` | `#c4b5fd` | Focus rings and outlines |
+
+Measured text contrast: light product primary/secondary actions `5.18:1`, light active nav item `5.66:1`, dark product primary/secondary actions `8.67:1`, dark active nav item `6.47:1`, admin login and Owner password confirmation `5.18:1` light / `8.67:1` dark, linked-shell back links `6.23:1` light / `8.67:1` dark. Hover fills measure `6.67:1` light and `6.15:1` dark, so no accent state drops below AA.
 
 ## Typography
 
@@ -145,6 +160,7 @@ Admin patterns:
 - Filters use full-pill, 3px black borders, heavy `Space Grotesk`, uppercase labels, and compact count bubbles.
 - Header/store-link sections use strong gradients instead of quiet neutral cards.
 - Modals, notices, cards, form controls, and stat blocks should preserve hard borders, high contrast, and compact spacing.
+- Image uploads (`x-admin-dashboard.file-upload`) keep the native `<input type="file">` as the control so Tab, Space and Enter open the native picker with unchanged `name`/`accept`/validation. It is visually replaced by a label of at least 44×44px that carries the hover and focus ring, while the chosen filename (or empty state) stays visible beside it. The raw storefront-banner inputs keep the same minimum target and admin focus outline.
 
 Admin must prioritize scannability over flourish: order status, stock state, payment data, product names, totals, and destructive actions must remain unambiguous.
 

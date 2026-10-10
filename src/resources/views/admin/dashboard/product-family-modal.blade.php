@@ -75,11 +75,14 @@
                         </div>
                         <div x-show="familyImageUrl" x-cloak class="h-14 w-14 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_#050505]"><img x-bind:src="familyImageUrl" alt="Gambar kartu family Storefront tersimpan" class="h-full w-full object-cover"></div>
                     </div>
-                    <div class="mt-2 flex min-w-0 items-center gap-3 rounded-lg border-2 border-neo-ink bg-white p-2">
-                        <label for="product-family-image" class="shrink-0 cursor-pointer rounded-md bg-neo-ink px-3 py-2 text-xs font-black text-white">Pilih gambar toko</label>
-                        <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="familyImageFileName">Tidak ada file yang dipilih</span>
-                    </div>
-                    <input type="file" id="product-family-image" name="image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-ref="familyImage" x-on:change="familyImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
+                    <x-admin-dashboard.file-upload
+                        id="product-family-image"
+                        name="image"
+                        label="Pilih gambar toko"
+                        feedback-expression="familyImageFileName"
+                        x-ref="familyImage"
+                        x-on:change="familyImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'"
+                    />
                     <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="familyFormMode === 'edit'">Tanpa upload baru, gambar toko family tersimpan tetap dipakai.</p>
                     @error('image', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     @error('image', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
@@ -92,11 +95,14 @@
                         </div>
                         <div x-show="telegramFamilyImageUrl" x-cloak class="h-14 w-20 shrink-0 overflow-hidden rounded-xl border-[3px] border-neo-ink bg-white shadow-[3px_3px_0_#050505]"><img x-bind:src="telegramFamilyImageUrl" alt="Gambar detail family Telegram tersimpan" class="h-full w-full object-contain"></div>
                     </div>
-                    <div class="mt-2 flex min-w-0 items-center gap-3 rounded-lg border-2 border-neo-ink bg-white p-2">
-                        <label for="telegram-product-family-image" class="shrink-0 cursor-pointer rounded-md bg-neo-ink px-3 py-2 text-xs font-black text-white">Pilih gambar bot</label>
-                        <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="telegramFamilyImageFileName">Tidak ada file yang dipilih</span>
-                    </div>
-                    <input type="file" id="telegram-product-family-image" name="telegram_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-ref="telegramFamilyImage" x-on:change="telegramFamilyImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
+                    <x-admin-dashboard.file-upload
+                        id="telegram-product-family-image"
+                        name="telegram_image"
+                        label="Pilih gambar bot"
+                        feedback-expression="telegramFamilyImageFileName"
+                        x-ref="telegramFamilyImage"
+                        x-on:change="telegramFamilyImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'"
+                    />
                     <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="familyFormMode === 'edit'">Tanpa upload baru, gambar detail family tersimpan tetap dipakai.</p>
                     @error('telegram_image', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     @error('telegram_image', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror

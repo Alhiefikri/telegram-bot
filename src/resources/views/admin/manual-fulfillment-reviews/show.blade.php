@@ -11,7 +11,7 @@
 </head>
 <body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
     <x-admin-dashboard.linked-shell active-tab="penjualan" title="Manual Fulfillment Review">
-        <a href="{{ route('admin.manual-fulfillment-reviews.index') }}" class="text-sm font-semibold text-admin-accent underline">← Kembali ke antrean</a>
+        <a href="{{ route('admin.manual-fulfillment-reviews.index') }}" class="text-sm font-semibold text-admin-accent-strong underline">← Kembali ke antrean</a>
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
             <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Manual Fulfillment Review</p>
             <h1 class="mt-1 text-2xl font-black">{{ $review->order->invoice_number }}</h1>

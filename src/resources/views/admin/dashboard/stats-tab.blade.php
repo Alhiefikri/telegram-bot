@@ -46,7 +46,7 @@
                             <h2 id="admin-overview-attention-title" class="text-lg font-semibold text-admin-ink">Perhatian operasional</h2>
                             <p class="mt-1 text-sm text-admin-muted">Status yang perlu dipantau sebelum mengelola konfigurasi.</p>
                         </div>
-                        <a href="#admin-payment-settings" class="text-sm font-medium text-admin-accent underline-offset-4 hover:underline">Lihat pengaturan</a>
+                        <a href="#admin-payment-settings" class="text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">Lihat pengaturan</a>
                     </div>
                     <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         <x-admin-dashboard.card padding="compact" shadow="sm" class="min-w-0" aria-label="Status toko">

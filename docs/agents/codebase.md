@@ -1259,6 +1259,24 @@ scope. Component contracts are covered by
 `AdminDashboardBladeComponentsTest`, while dashboard behavior remains covered
 by the existing `AdminDashboard*` feature tests.
 
+The violet accent is split by role so both themes keep AA text contrast:
+`--admin-accent` fills controls, `--admin-accent-ink` is the foreground on
+those fills, `--admin-accent-strong` is accent-colored text/icons on neutral
+and `--admin-accent-soft` backgrounds, and `--admin-accent-hover` is the fill
+hover. `x-admin-dashboard.button` therefore declares `hover:*` per variant
+instead of one shared hover fill, and `--admin-focus` stays the ring/outline
+color. Rendered ratios and consumer coverage are recorded in `DESIGN.md` and
+`docs/agents/admin-dashboard-sidebar-cutover.md`.
+
+`x-admin-dashboard.file-upload` is the shared image-upload control for the
+catalog default, product, product family and store-channel surfaces. It keeps
+the native `<input type="file">` (Tab/Space/Enter activation, unchanged
+`name`/`accept`/`required`) visually replaced by a ≥44px label that owns the
+hover and focus ring, with the filename feedback slot beside it. Its contract
+is covered in the browser lane, not by markup assertions. Category management
+has no upload control, and the raw storefront-banner inputs use the same
+minimum target plus the admin focus outline.
+
 Desktop cutover (#594): `admin/dashboard.blade.php` mounts `shell` with named
 sidebar/topbar/status/content slots, one `adminDashboard` root, and one document
 content scroll. At >=1024px the grouped sidebar is persistent and 240px wide;

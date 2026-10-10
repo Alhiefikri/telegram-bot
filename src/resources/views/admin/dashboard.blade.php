@@ -134,7 +134,7 @@
                     <summary class="min-h-11 cursor-pointer py-3 text-sm font-medium text-admin-ink">Navigasi dashboard</summary>
                     <x-admin-dashboard.navigation :groups="$navigation['groups']" id-prefix="admin-fallback-navigation" label="Navigasi dashboard" />
                     @if ($canManageProducts)
-                        <a href="{{ route('admin.dashboard', [...request()->query(), 'tab' => 'produk', 'product_form' => 'create']) }}" x-on:click="handleSidebarNavigation($event)" class="flex min-h-11 items-center px-3 text-sm font-medium text-admin-accent">Tambah Produk</a>
+                        <a href="{{ route('admin.dashboard', [...request()->query(), 'tab' => 'produk', 'product_form' => 'create']) }}" x-on:click="handleSidebarNavigation($event)" class="flex min-h-11 items-center px-3 text-sm font-medium text-admin-accent-strong">Tambah Produk</a>
                     @endif
                 </details>
 
@@ -144,7 +144,7 @@
                     </x-slot:close>
                     <x-admin-dashboard.navigation :groups="$navigation['groups']" id-prefix="admin-drawer-navigation" label="Navigasi dashboard" />
                     @if ($canManageProducts)
-                        <a href="{{ route('admin.dashboard', [...request()->query(), 'tab' => 'produk', 'product_form' => 'create']) }}" x-on:click.prevent="goToTab('produk', true)" class="mt-6 flex min-h-11 items-center rounded-lg bg-admin-accent px-3 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-admin-focus">Tambah Produk</a>
+                        <a href="{{ route('admin.dashboard', [...request()->query(), 'tab' => 'produk', 'product_form' => 'create']) }}" x-on:click.prevent="goToTab('produk', true)" class="mt-6 flex min-h-11 items-center rounded-lg bg-admin-accent px-3 text-sm font-medium text-admin-accent-ink focus-visible:outline-2 focus-visible:outline-admin-focus">Tambah Produk</a>
                     @endif
                 </x-admin-dashboard.mobile-drawer>
             </x-slot:mobileDrawer>

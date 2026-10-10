@@ -255,21 +255,14 @@
                                     <img x-bind:src="productImageUrl" alt="Gambar kartu Storefront tersimpan" class="h-full w-full object-cover">
                                 </div>
                             </div>
-                            <div class="mt-2 flex min-w-0 items-center gap-3 rounded-[1rem] border-[3px] border-neo-ink bg-white p-2 shadow-[4px_4px_0_0_#050505]">
-                                <label for="product-image" class="shrink-0 cursor-pointer rounded-lg bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">
-                                    Pilih gambar toko
-                                </label>
-                                <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="productImageFileName">Tidak ada file yang dipilih</span>
-                            </div>
-                            <input
-                                type="file"
+                            <x-admin-dashboard.file-upload
                                 id="product-image"
                                 name="image"
-                                accept="image/jpeg,image/png,image/webp"
-                                class="sr-only"
+                                label="Pilih gambar toko"
+                                feedback-expression="productImageFileName"
                                 x-ref="productImage"
                                 x-on:change="productImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'"
-                            >
+                            />
                             <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Tanpa upload baru, gambar toko tersimpan tetap dipakai.</p>
                             @error('image', 'productCreate')
                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
@@ -288,11 +281,14 @@
                                     <img x-bind:src="telegramProductImageUrl" alt="Gambar detail bot Telegram tersimpan" class="h-full w-full object-contain">
                                 </div>
                             </div>
-                            <div class="mt-2 flex min-w-0 items-center gap-3 rounded-[1rem] border-[3px] border-neo-ink bg-white p-2 shadow-[4px_4px_0_0_#050505]">
-                                <label for="telegram-product-image" class="shrink-0 cursor-pointer rounded-lg bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih gambar bot</label>
-                                <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="telegramProductImageFileName">Tidak ada file yang dipilih</span>
-                            </div>
-                            <input type="file" id="telegram-product-image" name="telegram_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-ref="telegramProductImage" x-on:change="updateTelegramProductImageFileName($event)">
+                            <x-admin-dashboard.file-upload
+                                id="telegram-product-image"
+                                name="telegram_image"
+                                label="Pilih gambar bot"
+                                feedback-expression="telegramProductImageFileName"
+                                x-ref="telegramProductImage"
+                                x-on:change="updateTelegramProductImageFileName($event)"
+                            />
                             <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Tanpa upload baru, gambar detail bot tersimpan tetap dipakai.</p>
                             @error('telegram_image', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                             @error('telegram_image', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
@@ -307,11 +303,14 @@
                                     <img x-bind:src="telegramChannelImageUrl" alt="Poster stok Store Channel tersimpan" class="h-full w-full object-contain">
                                 </div>
                             </div>
-                            <div class="mt-2 flex min-w-0 items-center gap-3 rounded-[1rem] border-[3px] border-neo-ink bg-white p-2 shadow-[4px_4px_0_0_#050505]">
-                                <label for="telegram-channel-product-image" class="shrink-0 cursor-pointer rounded-lg bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih poster stok</label>
-                                <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="telegramChannelImageFileName">Tidak ada file yang dipilih</span>
-                            </div>
-                            <input type="file" id="telegram-channel-product-image" name="telegram_channel_image" accept="image/jpeg,image/png,image/webp" class="sr-only" x-ref="telegramChannelImage" x-on:change="telegramChannelImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'">
+                            <x-admin-dashboard.file-upload
+                                id="telegram-channel-product-image"
+                                name="telegram_channel_image"
+                                label="Pilih poster stok"
+                                feedback-expression="telegramChannelImageFileName"
+                                x-ref="telegramChannelImage"
+                                x-on:change="telegramChannelImageFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'"
+                            />
                             <p class="mt-2 text-[10px] font-bold text-neo-ink/60" x-show="productModalMode === 'edit'">Tanpa upload baru, poster tersimpan tetap dipakai.</p>
                             @error('telegram_channel_image', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                             @error('telegram_channel_image', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror

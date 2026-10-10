@@ -30,11 +30,15 @@
                             @csrf
                             <div class="min-w-0 flex-1">
                                 <x-admin-dashboard.field-label for="telegram-welcome-banner-image">Gambar banner /start</x-admin-dashboard.field-label>
-                                <div class="mt-2 flex min-w-0 items-center gap-3 rounded-lg border-2 border-neo-ink bg-white p-2 shadow-[2px_2px_0_#050505]">
-                                    <label for="telegram-welcome-banner-image" class="shrink-0 cursor-pointer rounded-md bg-neo-ink px-3 py-2 text-xs font-black text-white transition hover:bg-[#8758de]">Pilih banner /start</label>
-                                    <span class="min-w-0 flex-1 truncate text-xs font-black text-neo-ink" x-text="fileName">Belum ada file yang dipilih</span>
-                                </div>
-                                <input type="file" id="telegram-welcome-banner-image" name="image" accept="image/jpeg,image/png,image/webp" required class="sr-only" x-on:change="fileName = $event.target.files[0]?.name ?? 'Belum ada file yang dipilih'">
+                                <x-admin-dashboard.file-upload
+                                    id="telegram-welcome-banner-image"
+                                    name="image"
+                                    label="Pilih banner /start"
+                                    required
+                                    feedback-expression="fileName"
+                                    empty-feedback="Belum ada file yang dipilih"
+                                    x-on:change="fileName = $event.target.files[0]?.name ?? 'Belum ada file yang dipilih'"
+                                />
                                 <p class="mt-2 text-[10px] font-bold text-neo-ink/60">JPG, PNG, atau WebP. Maksimal 5 MB; otomatis dikompresi menjadi WebP maksimal 1600px.</p>
                             </div>
                             <x-admin-dashboard.button type="submit" variant="purple" size="sm" class="w-full shrink-0 sm:w-auto">Simpan banner</x-admin-dashboard.button>

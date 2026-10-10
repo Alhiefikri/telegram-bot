@@ -11,7 +11,7 @@
 </head>
 <body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
     <x-admin-dashboard.linked-shell active-tab="penjualan" title="Detail order">
-        <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-semibold text-admin-accent underline">← Kembali ke Pesanan</a>
+        <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-semibold text-admin-accent-strong underline">← Kembali ke Pesanan</a>
 
         @if (session('status'))
             <x-admin-dashboard.notice tone="success" class="mt-4 rounded-xl text-sm font-bold">{{ session('status') }}</x-admin-dashboard.notice>

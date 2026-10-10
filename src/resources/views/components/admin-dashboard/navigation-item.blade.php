@@ -29,7 +29,7 @@
 
 <a href="{{ $href }}" {{ $attributes->class([
     'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus',
-    'bg-admin-accent-soft text-admin-accent' => $active,
+    'bg-admin-accent-soft text-admin-accent-strong' => $active,
     'text-admin-muted hover:bg-admin-surface-muted hover:text-admin-ink' => ! $active,
 ])->merge($active ? ['aria-current' => $current] : []) }}>
     <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5 shrink-0">

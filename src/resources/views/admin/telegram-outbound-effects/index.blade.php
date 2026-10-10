@@ -11,7 +11,7 @@
 </head>
 <body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
     <x-admin-dashboard.linked-shell active-tab="penjualan" title="Manual Delivery Review">
-        <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-semibold text-admin-accent underline">← Kembali ke Pesanan</a>
+        <a href="{{ route('admin.dashboard', ['tab' => 'penjualan']) }}" class="text-sm font-semibold text-admin-accent-strong underline">← Kembali ke Pesanan</a>
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4 rounded-2xl">
             <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">Operational queue</p>
             <h1 class="mt-1 text-2xl font-black">Manual Delivery Review</h1>

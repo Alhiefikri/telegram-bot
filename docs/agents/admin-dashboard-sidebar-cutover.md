@@ -1,6 +1,6 @@
 # Admin Dashboard Sidebar Cutover
 
-Status: implemented in the working tree; production deployment is not authorized by issues #600 or #601.
+Status: implemented in the working tree; production deployment is not authorized by issues #600, #601 or #602.
 
 ## As-built ownership
 
@@ -123,6 +123,120 @@ Each row records a passing answer to the mandatory gate for this scope:
 | R-29 palette | PASS: existing neutral/violet Admin tokens retained; no new palette introduced. |
 | R-30 originality | PASS: canonical repo-specific Variant A retained, not replaced by another product's layout. |
 | R-31 written reasons | PASS: visual changes and their operational reasons are documented in the Design Read above. |
+
+## Issue #602 repairs and smoke evidence
+
+Follow-up to #593/#599: shared Admin controls and uploads still failed accessibility in browser-light/dark measurements. Presentation-only. Routes, POST/CSRF contracts, validation, named error bags, `old()` input, redirects, return targets, modal ownership, business rules, Storefront surfaces and ENV are unchanged.
+
+### Accent role tokens
+
+`--admin-accent` (`#6d5bd0` light / `#b8a9ff` dark) still fills accent controls. Three role tokens replace reusing that one value as fill, text and hover:
+
+| Token | Light | Dark | Role |
+| --- | --- | --- | --- |
+| `--admin-accent-ink` | `#ffffff` | `#121722` | Foreground on accent fills; replaces the hardcoded `text-white` |
+| `--admin-accent-strong` | `#5b48c2` | `#b8a9ff` | Accent text/icons on paper, surface and `accent-soft` (active navigation, active tabs and filter pills, purple badges, accent links, fallback drawer create link) |
+| `--admin-accent-hover` | `#5b48c2` | `#9d86f8` | Hover fill for accent-filled controls |
+
+Reason: the old light pair `#6d5bd0` on `#eeeaff` measured 4.40:1 (AA needs 4.5:1 for 14px/500 navigation text), and white on the dark accent `#b8a9ff` measured 2.07:1.
+
+`x-admin-dashboard.button` now declares `hover:*` on each variant. Before, one shared `hover:bg-admin-accent-soft` outranked the variant's `hover:bg-admin-accent` in the compiled stylesheet, so hovering any accent-filled product/purple/pink button painted `#eeeaff` under unchanged white text (1.05:1 in light). Semantic `warning`/`destructive` variants keep their own colors and only gained an explicit `hover` fill.
+
+### Upload controls
+
+`x-admin-dashboard.file-upload` replaces seven duplicated `sr-only` upload rows: the default catalog image, the three product-modal images (storefront card, Telegram detail, Store Channel poster), the two product-family images, and the Telegram `/start` banner. The native `<input type="file">` stays the control, so Tab/Space/Enter still open the native picker and `name`, `accept`, `required`, `x-ref` and `x-on:change` handlers are unchanged. It is visually replaced by a visible label of at least 44x44 CSS px (measured 119x44 for the family storefront label at 100% text) that now carries hover and a 2px `#8758de` focus outline, with the filename feedback and the existing error bags, previews and hints beside it.
+
+### Audit results on the remaining upload patterns
+
+- Category management modal: no upload control exists in the form, so nothing required repair.
+- Storefront banner inputs (`storefront-banner-image-{0..4}`): measured height was 40px with only the 1px UA focus ring, and the dark theme rendered their `file:` button as white text on the light `brand-bg` fill. All three were fixed in place (`min-h-11`, `file:min-h-11`, admin focus outline, `file:text-brand-slate-dark`) without changing the native input, its other fields, or the `remove` checkbox.
+- Login and Owner password confirmation consume the same accent and button primitives; both were measured in browser light/dark and pass.
+
+### Recorded measurements (computed browser colors)
+
+Evidence JSON: `artifacts/issue-602/accent-contrast.json` and `artifacts/issue-602/auth-contrast.json` (written by the browser tests; ignored by git). Screenshots of the focused upload in light and dark, the dark banner upload, the dark family modal, the light product modal, the 320px/200% text state, the dark drawer and admin login sit in the same ignored directory.
+
+| Control | Light | Dark |
+| --- | --- | --- |
+| Produk primary/secondary action (11px/600) | `#fff` on `#6d5bd0` = 5.18:1 | `#121722` on `#b8a9ff` = 8.67:1 |
+| ... same control hovered | `#fff` on `#5b48c2` = 6.67:1 | `#121722` on `#9d86f8` = 6.15:1 |
+| Active navigation item (14px/500) | `#5b48c2` on `#eeeaff` = 5.66:1 | `#b8a9ff` on `#302a4f` = 6.47:1 |
+| Active sales filter pill (14px/500) | `#5b48c2` on `#eeeaff` = 5.66:1 | `#b8a9ff` on `#302a4f` = 6.47:1 |
+| Mobile drawer create action (14px/500) | - | `#121722` on `#b8a9ff` = 8.67:1 |
+| Admin login and Owner password confirm (14px/600) | `#fff` on `#6d5bd0` = 5.18:1 | `#121722` on `#b8a9ff` = 8.67:1 |
+| Linked-shell back link (`/admin/telegram-outbound-effects`, 14px/600) | `#5b48c2` on `#f6f7fb` = 6.23:1 | `#b8a9ff` on `#121722` = 8.67:1 |
+| Upload focus ring on its white row | `#8758de` on `#fff` = 4.69:1 (non-text, needs 3:1) | same row colors, 4.69:1 |
+
+Upload smoke in the real browser (390px and 320px, disposable SQLite fixtures): Tab reaches every upload input, Shift+Tab leaves it and Tab returns, the visible label shows the focus outline while the input holds focus, Enter opens the native picker (`filechooser`), the chosen filename replaces the empty-state text, re-selecting reports the replacement name, clearing the selection restores the empty-state text, cancelling the picker keeps the previous selection (and that file is what the form still submits), closing and reopening the family modal resets the chosen filename, and the catalog-default form round-trips a real PNG (`Gambar default katalog berhasil diperbarui.`, badge flips to "Default custom aktif") before rejecting a non-image with `File harus berupa gambar yang valid.`. At 200% root text size and 320px width the family-modal upload label stays >=44x44, keeps its text inside the row, and the page keeps zero horizontal overflow.
+
+Known limitation in that same extreme state: the legacy family/product modals nest rem-scaled paddings (`p-4` shell, `p-3` cards, `p-3` upload wrapper, `p-2` row), which at 320px plus 200% text leave roughly 48px for the visible label, so its two-word caption wraps one or two characters per line and the row grows tall. Content stays complete, the target stays >=44px and nothing is clipped, and the pre-existing `Batal`/`Tambah family` buttons wrap the same way in that state. Fixing it means restyling the raw legacy modal spacing, which the ticket explicitly excludes.
+
+### Passing-after checks
+
+Run from `src/`:
+
+- `php artisan test --filter='AdminDashboard|AdminCategoryCrudTest|AdminTelegramWelcomeBannerTest|AdminStockBulkDeletionTest|AdminDashboardProductFormsTest'`: 164 passed, 1,936 assertions.
+- `php artisan test --filter='AdminBalanceAdjustmentDashboardTest|WarrantyAdminTest|SupplierAdminTest|ProductionReleaseHardeningTest|AdminDashboardAccessTest|StorefrontLandingPageTest'`: 147 passed, 1,348 assertions.
+- `npm run test:js`: 57 passed.
+- `npm run build`: Vite production build passed.
+- `npx playwright test tests/Browser/admin-dashboard-responsive.spec.js -g 'accent controls|auth surfaces|upload controls|catalog placeholder'`: passed; adds the accent-contrast (theme, hover, drawer, filter-pill), auth-contrast (login, password confirmation, linked shell), upload-contract, 200%-text and real-upload tests.
+- `npx playwright test tests/Browser/admin-dashboard-responsive.spec.js`: all 101 tests passed (12.2m) on the final tree, including the five new light/dark contrast, auth-surface, upload-contract, 200%-text and real-upload cases. No temporary case remains in the file.
+
+### Visual decision and antislop Delivery Gate
+
+Design Read, declared before edits: operational Admin Dashboard surfaces (Produk tab, product/family/category modal controls, shared navigation shell), for store operators, in the restrained Variant A language - dial ENERGY 1 / RHYTHM 2 / MOTION 1.
+
+Reasons for the main decisions: the accent is split by role because one violet value cannot hold AA as both a fill and accent text; uploads keep the native input so keyboard activation and validation stay native, while the visible label carries the 44px target and the focus ring, because focus that lands on a hidden 1x1 control is invisible; the legacy banner input was only raised to the same target and focus outline instead of being restyled into the new primitive.
+
+Gate scope is this contrast/upload repair, not dashboard-wide accessibility sign-off or release approval.
+
+| Gate item | Result and evidence |
+| --- | --- |
+| R-02 punctuation | PASS: no new UI copy; new notes use plain punctuation. |
+| R-03 mobile layout | PASS: 320px at 200% text and 390px upload rows measured zero horizontal overflow and no clipped labels. |
+| R-17 sourced statistics | PASS: no statistics added. |
+| R-18 testimonials | PASS: none introduced. |
+| R-23 assets/navigation authority | PASS: no assets or navigation structure added; existing labels untouched. |
+| R-24 real destinations | PASS: existing forms, routes and return targets unchanged; exercised by feature and browser runs. |
+| R-25 changed text contrast | PASS: measured 5.18:1/6.67:1 light and 8.67:1/6.15:1 dark for accent actions, 5.66:1/6.47:1 for active navigation and filter pills, 5.18:1/8.67:1 for auth surfaces; hover states included. |
+| R-26 functional controls | PASS: every upload input is the native control and submits; valid and invalid catalog uploads were exercised end to end. |
+| R-27 states | PASS: empty filename state, chosen filename, replacement filename, stored preview, server validation error and retained previous image were observed. |
+| R-28 FAQ relevance | PASS: no FAQ changed. |
+| R-32 keyboard/focus | PASS: Tab reaches each upload input, Shift+Tab leaves and Tab returns, the visible label shows a 2px outline at >=3:1, and Enter opens the native picker. |
+| R-33 source implementation | PASS: Blade component, tokens and view edits only; no external patching script. |
+| R-34 themes | PASS: light and dark measured for products actions, active navigation, drawer, filter pills, login and password confirmation. |
+| R-35 executed surface | PASS: Vite build, feature suites, JS tests and browser runs executed; screenshots captured for the focused upload, both themes, the drawer and the 200% text state. |
+| R-36 honest claims | PASS: no security/performance/customer claims; ratios are local computed measurements. |
+| R-37 direction | PASS: Variant A and ENERGY 1 / RHYTHM 2 / MOTION 1 declared before edits. |
+| R-38 real content | PASS: existing Indonesian labels unchanged; fixtures stay inside the disposable browser database. |
+| R-01 gradients/glow | PASS: none added. |
+| R-04 icon purpose | PASS: existing emoji/action labels unchanged. |
+| R-06 typography purpose | PASS: no new type treatment. |
+| R-07 background patterns | PASS: none added. |
+| R-08 decorative arrows | PASS: none added. |
+| R-09 badges | PASS: purple badge keeps its accent-soft pairing with the new readable accent text; no promotional badge added. |
+| R-10 glass | PASS: none added. |
+| R-12 elevation | PASS: the unified upload row keeps the existing 2px hard shadow; no new floating surfaces. |
+| R-13 glow everywhere | PASS: none added. |
+| R-14 card hierarchy | PASS: upload rows were consolidated onto one primitive rather than re-decorated. |
+| R-19 motion purpose | PASS: no animation added; the upload trigger's transition is limited to its background so the focus ring appears immediately. |
+| R-22 illustration purpose | PASS: none added. |
+| Liveliness: explicit dials | PASS: ENERGY 1 / RHYTHM 2 / MOTION 1 recorded in the Design Read. |
+| Liveliness: dial consistency | PASS: the repair changes control pairs and focus feedback, not the operational density. |
+| Liveliness: focal point | PASS: primary create actions keep the single accent fill on each surface. |
+| Liveliness: structural whitespace | PASS: upload rows keep their spacing; wrapping replaces clipping at 200% text. |
+| Liveliness: deliberate accent | PASS: one violet accent with role-specific values; no second palette. |
+| Liveliness: identity motif | PASS: neo-brutal upload rows, LHIE STORE navigation and user-visible Indonesian labels retained. |
+| Liveliness: prior Design Read | PASS: declared before the first edit and recorded with the #601 direction. |
+| C-1 intentionality | PASS: role tokens, per-variant hovers, the native-input upload and the banner target fix each have a one-line reason above. |
+| C-2 completeness | PASS: real submissions, validation errors, picker activation and filename feedback observed; no dead control. |
+| C-3 content-driven composition | PASS: no section added or removed. |
+| C-4 resilience | PASS: both themes, hover/focus/selected states, empty/error states, 320-390px and 200% text were exercised. |
+| C-5 evidence | PASS: ratios come from rendered colors recorded in `artifacts/issue-602`, not from planned tokens. |
+| R-05 non-template layout | PASS: existing operational layout retained. |
+| R-11 radius variation | PASS: existing radii retained; no pill-shaped replacement. |
+| R-15 concrete actions | PASS: labels unchanged. |
+| R-16 language | PASS: no marketing buzzwords added. |
 
 ## Historical #600 verification record
 

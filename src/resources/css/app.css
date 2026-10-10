@@ -80,6 +80,12 @@
   --color-admin-line: var(--admin-line);
   --color-admin-accent: var(--admin-accent);
   --color-admin-accent-soft: var(--admin-accent-soft);
+  /* Foreground for accent fills, accent-colored text on neutral surfaces, and
+     the accent fill hover. Kept separate from `--admin-accent` so each role
+     meets WCAG AA in both themes. */
+  --color-admin-accent-ink: var(--admin-accent-ink);
+  --color-admin-accent-strong: var(--admin-accent-strong);
+  --color-admin-accent-hover: var(--admin-accent-hover);
   --color-admin-focus: var(--admin-focus);
   --shadow-admin-sm: var(--admin-shadow-sm);
   --shadow-admin-lg: var(--admin-shadow-lg);
@@ -242,6 +248,9 @@
     --admin-shadow: #050505;
     --admin-accent: #6d5bd0;
     --admin-accent-soft: #eeeaff;
+    --admin-accent-ink: #ffffff;
+    --admin-accent-strong: #5b48c2;
+    --admin-accent-hover: #5b48c2;
     --admin-focus: #6d5bd0;
     --admin-radius: 0.75rem;
     --admin-shadow-sm: 0 1px 3px rgb(15 23 42 / 0.12);
@@ -286,6 +295,9 @@
     --admin-shadow: #050505;
     --admin-accent: #b8a9ff;
     --admin-accent-soft: #302a4f;
+    --admin-accent-ink: #121722;
+    --admin-accent-strong: #b8a9ff;
+    --admin-accent-hover: #9d86f8;
     --admin-focus: #c4b5fd;
     --admin-shadow-sm: 0 1px 3px rgb(0 0 0 / 0.28);
     --admin-shadow-lg: 0 18px 40px rgb(0 0 0 / 0.36);
@@ -519,7 +531,7 @@
   }
   .filter-pill-active {
     background: var(--admin-accent-soft);
-    color: var(--admin-accent);
+    color: var(--admin-accent-strong);
   }
   .filter-pill-count {
     display: inline-flex;
