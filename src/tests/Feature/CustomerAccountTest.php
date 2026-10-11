@@ -7,6 +7,7 @@ use App\Enums\CredentialFormat;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Customer;
+use App\Models\CustomerAuthMailWork;
 use App\Models\CustomerLoginLink;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -15,6 +16,7 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Notifications\CustomerLoginLinkNotification;
 use App\Services\Credentials\StructuredCredentialPayload;
+use App\Services\Customer\CustomerAuthMailDeliveryService;
 use App\Services\Customer\CustomerOrderClaimService;
 use App\Storefront\StorefrontOrderAccess;
 use App\Storefront\StorefrontShopPaymentStatusRefresh;
@@ -22,6 +24,7 @@ use App\Storefront\StorefrontShopSignedStatusRefreshResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class CustomerAccountTest extends TestCase
@@ -31,6 +34,7 @@ class CustomerAccountTest extends TestCase
     public function test_login_request_is_generic_stores_only_a_token_hash_and_emails_fragment_link(): void
     {
         Notification::fake();
+        Queue::fake();
 
         $response = $this->post(route('customer.login-link.request'), ['email' => ' Customer@Example.TEST ']);
 
@@ -38,6 +42,7 @@ class CustomerAccountTest extends TestCase
         $link = CustomerLoginLink::query()->firstOrFail();
         $this->assertSame('customer@example.test', $link->email);
         $this->assertSame(64, strlen($link->token_hash));
+        app(CustomerAuthMailDeliveryService::class)->deliver(CustomerAuthMailWork::query()->sole()->id);
         Notification::assertSentOnDemand(CustomerLoginLinkNotification::class, function (CustomerLoginLinkNotification $notification): bool {
             $url = (string) $notification->toMail((object) [])->actionUrl;
 

@@ -8,7 +8,7 @@ final class CustomerAuthMailWork extends Model
 {
     protected $guarded = ['*'];
 
-    protected $hidden = ['payload', 'auth_token'];
+    protected $hidden = ['payload', 'auth_token', 'login_link'];
 
     protected function casts(): array
     {
@@ -24,5 +24,10 @@ final class CustomerAuthMailWork extends Model
     public function authToken()
     {
         return $this->belongsTo(CustomerAuthToken::class, 'auth_token_id');
+    }
+
+    public function loginLink()
+    {
+        return $this->belongsTo(CustomerLoginLink::class, 'login_link_id');
     }
 }

@@ -57,7 +57,7 @@ return Application::configure(basePath: dirname(__DIR__))
         }
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        $exceptions->dontFlash(['api_key', 'credentials', 'token']);
+        $exceptions->dontFlash(['api_key', 'credentials', 'token', 'code', 'challenge']);
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );

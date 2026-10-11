@@ -12,7 +12,10 @@ class CustomerLoginLinkNotification extends Notification implements ShouldBeEncr
 {
     use Queueable;
 
-    public function __construct(private readonly string $url) {}
+    public function __construct(#[\SensitiveParameter] private readonly string $url)
+    {
+        $this->onQueue('notifications');
+    }
 
     public function via(object $notifiable): array
     {

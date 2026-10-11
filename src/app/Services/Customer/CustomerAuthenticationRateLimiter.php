@@ -16,6 +16,11 @@ final class CustomerAuthenticationRateLimiter
         ]) !== false;
     }
 
+    public function allowOtpConsume(string $ip): bool
+    {
+        return $this->reserve([['otp-consume-ip', $ip, 30, 900]]) !== false;
+    }
+
     public function reserveLogin(string $email, string $ip): array|false
     {
         return $this->reserve([

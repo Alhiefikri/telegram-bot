@@ -3,10 +3,11 @@
 namespace App\Jobs;
 
 use App\Services\Customer\CustomerAuthMailDeliveryService;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 
-final class SendCustomerAuthMail implements ShouldQueue
+final class SendCustomerAuthMail implements ShouldBeEncrypted, ShouldQueue
 {
     use Queueable;
 

@@ -50,6 +50,7 @@ use App\Http\Controllers\Admin\AdminTelegramWelcomeBannerController;
 use App\Http\Controllers\Admin\AdminUsdtTopUpReviewController;
 use App\Http\Controllers\Admin\AdminWarrantyController;
 use App\Http\Controllers\CustomerAccountController;
+use App\Http\Controllers\CustomerEmailOtpController;
 use App\Http\Controllers\CustomerPasswordAuthenticationController;
 use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontFunnelEventController;
@@ -74,6 +75,7 @@ use App\Http\Controllers\StorefrontSitemapController;
 use App\Http\Controllers\StorefrontVerifiedPurchaseActivityController;
 use App\Http\Controllers\StorefrontWaitlistController;
 use App\Http\Controllers\WarrantyController;
+use App\Http\Middleware\ValidateCustomerSession;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
@@ -139,10 +141,12 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
 });
 Route::redirect('/cara-loginoutlook', '/gpt/panduan-login-akun');
 
-Route::prefix('akun')->name('customer.')->middleware(\App\Http\Middleware\ValidateCustomerSession::class)->group(function (): void {
+Route::prefix('akun')->name('customer.')->middleware(ValidateCustomerSession::class)->group(function (): void {
     Route::get('/', [CustomerAccountController::class, 'landing'])->name('account');
     Route::post('register', [CustomerPasswordAuthenticationController::class, 'register'])->name('register');
     Route::post('login', [CustomerPasswordAuthenticationController::class, 'login'])->name('login');
+    Route::post('login-code', [CustomerEmailOtpController::class, 'requestCode'])->name('login-code.request');
+    Route::post('login-code/consume', [CustomerEmailOtpController::class, 'consume'])->name('login-code.consume');
     Route::get('verifikasi-email', [CustomerPasswordAuthenticationController::class, 'verification'])->name('verification.show');
     Route::post('verifikasi-email', [CustomerPasswordAuthenticationController::class, 'verify'])->middleware('throttle:customer-login-consume')->name('verification.consume');
     Route::post('password-reset', [CustomerPasswordAuthenticationController::class, 'requestReset'])->name('password-reset.request');

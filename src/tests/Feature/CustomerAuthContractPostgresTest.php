@@ -118,6 +118,8 @@ class CustomerAuthContractPostgresTest extends TestCase
     {
         $migration = require database_path('migrations/2026_10_11_100000_add_customer_authentication_contract.php');
         $mailMigration = require database_path('migrations/2026_10_11_110000_create_customer_auth_mail_works.php');
+        $legacyMailMigration = require database_path('migrations/2026_10_11_120000_add_legacy_customer_auth_mail_binding.php');
+        $legacyMailMigration->down();
         $mailMigration->down();
         $migration->down();
         try {
@@ -135,6 +137,7 @@ class CustomerAuthContractPostgresTest extends TestCase
                 $migration->up();
             }
             $mailMigration->up();
+            $legacyMailMigration->up();
         }
     }
 

@@ -90,7 +90,7 @@ Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverl
 Schedule::command('suppliers:notify-health --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('ops:payment-lifecycle-rollout-report')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping();
-Schedule::command('customers:cleanup-login-links --chunk=500')->hourly()->withoutOverlapping();
+Schedule::command('customer-auth:cleanup --limit=500')->hourly()->withoutOverlapping(10);
 Schedule::command('customer-auth:recover-mail --limit=100')->everyMinute()->withoutOverlapping(2);
 Schedule::command('ops:cleanup-retained-data --chunk=500')->daily()->withoutOverlapping();
 Schedule::job(new SendDailyAdminStatsNotification, 'notifications')->dailyAt('00:00')->withoutOverlapping()->onOneServer();

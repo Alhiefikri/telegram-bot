@@ -2,15 +2,13 @@
 
 namespace App\Services\Customer;
 
-use App\Models\AuditLog;
 use App\Enums\CustomerAuthTokenPurpose;
-use App\Models\CustomerAuthToken;
+use App\Models\AuditLog;
 use App\Models\Customer;
+use App\Models\CustomerAuthToken;
 use App\Models\CustomerLoginLink;
-use App\Notifications\CustomerLoginLinkNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 
 class CustomerAuthenticationService
@@ -18,28 +16,26 @@ class CustomerAuthenticationService
     public function requestLink(string $email, Request $request): void
     {
         $email = $this->normalizeEmail($email);
-        $token = bin2hex(random_bytes(32));
-
-        $link = CustomerLoginLink::create([
-            'email' => $email,
-            'token_hash' => hash('sha256', $token),
-            'expires_at' => now()->addMinutes(15),
-            'requested_ip' => $request->ip(),
-        ]);
-
-        AuditLog::create([
-            'action' => 'customer.login_link_requested',
-            'new_values' => ['login_link_id' => $link->getKey()],
-            'ip_address' => $request->ip(),
-            'created_at' => now(),
-        ]);
-
-        Notification::route('mail', $email)->notify(new CustomerLoginLinkNotification(
-            route('customer.login-link.show').'#token='.$token,
-        ));
+        DB::transaction(function () use ($email, $request): void {
+            Customer::query()->where('email', $email)->lockForUpdate()->first();
+            $token = bin2hex(random_bytes(32));
+            $link = CustomerLoginLink::create([
+                'email' => $email,
+                'token_hash' => hash('sha256', $token),
+                'expires_at' => now()->addMinutes(15),
+                'requested_ip' => $request->ip(),
+            ]);
+            AuditLog::create([
+                'action' => 'customer.login_link_requested',
+                'new_values' => ['login_link_id' => $link->getKey()],
+                'ip_address' => $request->ip(),
+                'created_at' => now(),
+            ]);
+            app(CustomerAuthMailDeliveryService::class)->persistLoginLink($link, $token);
+        });
     }
 
-    public function consume(string $token, Request $request): ?Customer
+    public function consume(#[\SensitiveParameter] string $token, Request $request): ?Customer
     {
         $hash = hash('sha256', $token);
 

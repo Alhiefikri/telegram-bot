@@ -3,16 +3,23 @@
 namespace App\Notifications;
 
 use App\Enums\CustomerAuthTokenPurpose;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 use LogicException;
 
-final class CustomerAuthMailNotification extends Notification
+final class CustomerAuthMailNotification extends Notification implements ShouldBeEncrypted, ShouldQueue
 {
+    use Queueable;
+
     public function __construct(
         private readonly CustomerAuthTokenPurpose $purpose,
         #[\SensitiveParameter] private readonly string $token,
-    ) {}
+    ) {
+        $this->onQueue('notifications');
+    }
 
     public function via(object $notifiable): array
     {
@@ -21,6 +28,16 @@ final class CustomerAuthMailNotification extends Notification
 
     public function toMail(object $notifiable): MailMessage
     {
+        if ($this->purpose === CustomerAuthTokenPurpose::EmailOtp) {
+            return (new MailMessage)
+                ->subject('Kode login '.config('app.name'))
+                ->greeting('Login ke '.config('app.name'))
+                ->line('Masukkan kode berikut pada halaman akun di browser tempat Anda meminta kode:')
+                ->line($this->token)
+                ->line('Kode ini berlaku selama 10 menit dan hanya dapat digunakan sekali.')
+                ->line('Jika Anda tidak meminta kode ini, abaikan email ini.');
+        }
+
         [$route, $subject, $action, $description] = match ($this->purpose) {
             CustomerAuthTokenPurpose::EmailVerification => [
                 'customer.verification.show', 'Verifikasi email', 'Verifikasi email saya',

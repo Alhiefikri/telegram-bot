@@ -262,18 +262,20 @@ Do not assert plaintext tokens, Recovery Keys, or credentials in logs or snapsho
 
 Use an external SMTP transactional-email provider. Production Compose already uses the Redis queue and existing Supervisor pools; enqueue email work onto an existing supervised queue rather than adding a feature-specific Redis service or restoring the database queue default. Add a separate worker only if measured contention requires it.
 
-Required production configuration, with provider-specific values kept in `.env` and GitHub secrets only:
+Current SMTP configuration follows the installed Laravel transport and the [account operations runbook](customer-web-account-operations.md). Application secrets remain in the VPS-local `.env` used by the GitHub Actions deployment:
 
 ```env
 MAIL_MAILER=smtp
-MAIL_HOST=
+MAIL_SCHEME=smtp
+MAIL_HOST=smtp.resend.com
 MAIL_PORT=587
-MAIL_USERNAME=
+MAIL_USERNAME=resend
 MAIL_PASSWORD=
-MAIL_ENCRYPTION=tls
-MAIL_FROM_ADDRESS=
+MAIL_FROM_ADDRESS=no-reply@notify.lhiestore.web.id
 MAIL_FROM_NAME="LHIE STORE"
 ```
+
+The API key must be sending-only and restricted to `notify.lhiestore.web.id`; disable open/click tracking in Resend. `smtp` on port 587 negotiates STARTTLS, with TLS required by current configuration. `MAIL_ENCRYPTION=tls` is not read by the installed Laravel configuration and `MAIL_SCHEME=tls` is invalid. Verified DNS is not inbox-delivery evidence; the real-inbox gate remains open until operator prerequisites and receipt confirmation exist.
 
 Set `APP_URL` to the canonical HTTPS storefront URL before testing magic links. The link host must be covered by `TRUSTED_HOSTS` when that setting is enabled.
 
