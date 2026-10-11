@@ -113,3 +113,57 @@ Provision `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` privately through the ex
 Local verification: 21 Google feature tests passed (463 assertions), 151 existing authentication/account/balance/guest/Recovery Key/admin compatibility tests passed (2,018 assertions), and three PostgreSQL 16 process races passed (31 assertions): competing Customers for one subject, competing subjects for one Customer slot, and three callbacks consuming one state. The production asset build and four retained browser scenarios passed. A disposable interactive application exercised Google registration, unknown-subject login refusal, explicit link/unlink, unavailable controls and bounded cleanup; mobile/tablet/desktop, light/dark, 200% text and visible focus checks passed. New control text contrast ratios range from 6.36:1 to 15.70:1, with 44px targets. Provider responses were fixtures, not live Google evidence.
 
 Live OAuth remains unverified until the operator provisions credentials, consent-screen/domain configuration and exact staging/production redirects, then approves the live browser smoke. Implementation does not authorize production deployment, GitHub Actions operations or closing the #607 release gate.
+
+## Legacy rollout and ownership compatibility (#614)
+
+This slice requires no backfill or destructive migration. Retain the additive authentication schema and all existing Customer IDs. Deploying the code does not authorize production rollout or qualify live providers.
+
+| Existing Customer shape | Supported transition | Ownership retained |
+| --- | --- | --- |
+| Verified email, no password (magic link) | Continue using the magic link or email code. Fresh login permits first-password enrollment at `/akun/keamanan`. Duplicate registration cannot enroll this Customer. | Same Customer, Orders, IDR/USDT accounts and Recovery Keys. |
+| Telegram-only, nullable email | Private Store Bot confirmation followed by browser consumption signs in the exact canonical Telegram Customer. Fresh Telegram proof can start unused-email verification on that row. | No second Customer, identity reassignment, Order or balance transfer. |
+| Telegram with unverified email | Telegram proof remains usable. Verify an unused email through the same-Customer enrollment flow before using email methods. | The email attribute alone supplies no account proof. |
+| Anonymous web Customer, no account identity | Continue guest checkout and invoice/Recovery Key access. Sign in separately and claim an eligible paid guest Order with both proofs. | Claim moves only that Order; it does not merge Customers or transfer their balances. |
+| Nullable-email Customer with a persisted Google identity | Sign in through that exact provider subject. Provider email may differ from the canonical email and is not linking authority. | Existing Orders remain account-owned and cannot be claimed by someone else holding their Recovery Key. |
+| Historical nullable-email row with a password or email verification timestamp | Preserve the row and its Orders. Null email is not sufficient to classify the owner as a guest. | No speculative email backfill or automatic merge. Escalate unusable account access without rewriting ownership. |
+
+`CustomerOrderClaimService` requires invoice plus Recovery Key and paid status, even for a repeated claim by the same Customer. An account-owned Order cannot be transferred. A guest owner has no email, canonical Telegram ID, password, email verification timestamp or persisted provider identity. Both Customer rows lock in ascending ID order before the Order; enrollment and linking use the same Customer-first boundary. A changed owner is rechecked under the Order lock. Concurrent competing claims produce one owner and one audit event; repeated same-owner claims are idempotent. The original Recovery Key hash and session access remain valid after claim.
+
+Order history/detail/status and both balance projections/activity cursors use the canonical `customer` session. Submitted Customer IDs, provider subjects, Telegram IDs, emails and support contacts cannot select another account. `AuditLogger` resolves implicit admin actors through `web`, never the active Customer guard; Customer login must not break signed invoice/status or checkout audit writes.
+
+### Support handling and account security copy
+
+Use these responses without requesting private proof material:
+
+- Account methods: “Metode masuk membuka akun pelanggan yang sama. Email Google, nama, Telegram, atau WhatsApp tidak otomatis menggabungkan akun, pesanan, atau saldo.”
+- Guest claim: “Untuk menghubungkan pesanan guest yang sudah dibayar, masuk ke akun tujuan lalu masukkan invoice dan Recovery Key di halaman Klaim pesanan. Invoice atau kontak saja tidak cukup.”
+- Secret handling: “Jangan kirim Recovery Key, password, kode email, link masuk, atau data akun produk ke support. Support tidak dapat menampilkan ulang Recovery Key atau memindahkan pesanan ke akun lain.”
+- Identity conflict: “Identitas tersebut tidak dapat dihubungkan ke akun ini. Gunakan metode masuk akun yang sebelumnya Anda gunakan. Kami tidak menggabungkan akun atau memindahkan saldo.”
+- Lost key: “Recovery Key hanya ditampilkan sekali. Periksa penyimpanan pribadi Anda. Kami tidak dapat mengirim ulang atau membuat penggantinya.”
+
+For an account or claim report:
+
+1. Ask only for the invoice, affected route, approximate time and generic outcome. Do not ask for codes, keys, provider subjects, callback/deep-link URLs or credential screenshots.
+2. Direct account recovery to the existing email methods or private Telegram proof. Direct guest recovery to `/akses-pesanan`; a Customer who wants account ownership uses `/akun/klaim-pesanan` themselves.
+3. A signed invoice/status URL, matching email, OAuth email, name, Telegram profile or Optional Support Contact does not authorize attachment. Do not change `orders.customer_id`, Customer identity bindings, receivers or balance rows manually.
+4. Review sanitized outcome categories and safe internal row IDs only. A conflict or invalid proof must not disclose the other Customer or their Order/balance.
+5. Escalate a missing key or conflicting identity as an unresolved access case. There is no support override, Recovery Key regeneration or account merge in this release.
+
+### Rollout and rollback checks
+
+Before exposing a newly configured provider, exercise an existing magic-link Customer without enrolling a password, first-password enrollment on the same Customer, Telegram-only and nullable-email Customers, anonymous guest purchase, signed invoice/status, invoice/Recovery Key access before and after claim, foreign Order denial and both balance reads. Compare Customer/Order/balance ownership, not provider payload IDs. Use disposable fixtures; never submit a real Customer's secrets to diagnostics.
+
+Rollback restores the retained magic-link surface while keeping additive tables and authentication versions. Do not drop provider identities, token/mail history or Recovery Key hashes. No existing Customer must enroll a password to retain guest or magic-link access. Resend inbox delivery, live Google OAuth and private Store Bot/browser qualification remain operator-gated under #615; local fixtures are not release evidence for those providers.
+
+Focused commands:
+
+```bash
+cd src
+php artisan test --compact tests/Feature/CustomerAccountTest.php tests/Feature/CustomerAuthenticationCompatibilityTest.php tests/Feature/CustomerOrderClaimCompatibilityTest.php tests/Feature/CustomerBalanceWebTest.php tests/Feature/StorefrontOrderAccessTest.php tests/Feature/StorefrontShopCheckoutTest.php tests/Feature/StorefrontShopOrderInvoiceTest.php tests/Feature/StorefrontShopSignedInvoiceModuleTest.php
+RUN_CONCURRENCY_TESTS=1 php vendor/bin/phpunit -c phpunit.postgres.xml tests/Feature/CustomerOrderClaimPostgresTest.php
+```
+
+The PostgreSQL command requires `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` supplied privately for an isolated testing database with an empty `DB_URL`. The harness refuses production/non-test database names. The claim suite is included in the existing PostgreSQL release integration list; running it locally is not authorization to inspect or dispatch GitHub Actions.
+
+Local verification: 341 focused authentication, Customer account/balance, guest checkout, signed invoice, Recovery Key, ledger, warranty, inventory audit and admin tests passed with 4,460 assertions. Fifteen PostgreSQL 16 authentication/claim races passed with 147 assertions, including mixed email/Telegram/nullable-Google competing claims, same-owner replay and enrollment committing before claim. A disposable HTTP application and Chromium session proved password login, canonical IDR balance despite a foreign Customer-ID query, nullable-Google Order claim refusal, valid paid guest claim, credential display, logout and retained Recovery Key access with HTTP 200, `no-store` and `no-referrer`. Existing account layout and security copy remain unchanged.
+

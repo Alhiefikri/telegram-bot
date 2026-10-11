@@ -13,7 +13,7 @@ class AuditLogger
 {
     public function log(string $action, ?Model $subject = null, ?array $old = null, ?array $new = null, ?User $user = null, ?string $ip = null): AuditLog
     {
-        $userId = $user?->getKey() ?? Auth::id();
+        $userId = $user?->getKey() ?? Auth::guard('web')->id();
 
         return $this->write($action, $subject, $old, $new, $userId === null ? null : (int) $userId, $ip ?? request()?->ip());
     }
