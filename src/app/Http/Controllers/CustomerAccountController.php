@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Services\Customer\CustomerAuthenticationService;
 use App\Services\Customer\CustomerBalanceActivityCursorToken;
 use App\Services\Customer\CustomerBalanceOverviewReader;
+use App\Services\Customer\CustomerGoogleAuthenticationService;
 use App\Services\Customer\CustomerOrderClaimService;
 use App\Services\Customer\CustomerOwnedOrderQuery;
 use App\Services\Customer\CustomerSessionAuthentication;
@@ -49,6 +50,7 @@ class CustomerAccountController extends Controller
             'authView' => in_array($request->query('view', session('customer_auth_view')), ['register', 'code', 'reset', 'magic', 'verification'], true)
                 ? $request->query('view', session('customer_auth_view')) : 'login',
             'telegramReady' => app(CustomerTelegramAuthenticationService::class)->ready(),
+            'googleReady' => app(CustomerGoogleAuthenticationService::class)->ready(),
         ]);
     }
 

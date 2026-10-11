@@ -39,6 +39,11 @@ $sakurupiahProductionEnabled = is_string($sakurupiahProductionApiId)
     && trim($sakurupiahProductionApiKey) !== '';
 
 return [
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+    ],
+
     'credentials' => [
         // Optional override. When omitted, CredentialIdentityFingerprint
         // creates a stable key in persistent application storage.

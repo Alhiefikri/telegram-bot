@@ -26,6 +26,31 @@
                 @else
                     <p class="mt-4 text-sm leading-6">Password akun sudah tersedia. Untuk menggantinya, keluar lalu gunakan instruksi pemulihan password melalui email.</p>
                 @endif
+                <section class="mt-6 border-t border-[var(--sf-border)] pt-4" aria-labelledby="google-security-title">
+                    <h2 id="google-security-title" class="text-lg font-black">Google</h2>
+                    <p class="auth-help mt-2">Hubungkan atau lepas Google dalam lima menit setelah masuk. Akun, pesanan, dan saldo tidak digabungkan.</p>
+                    @if($googleLinked)
+                        <p class="mt-3 text-sm font-bold">Google terhubung ke akun ini.</p>
+                        @if($googleReady)
+                            <form method="POST" action="{{ route('customer.google.unlink') }}" class="mt-3" data-auth-form>
+                                @csrf
+                                <button type="submit" class="auth-link">Lepas Google</button>
+                                <p data-auth-progress role="status" hidden>Melepas Google...</p>
+                            </form>
+                        @else
+                            <p class="auth-help mt-3">Konfigurasi Google belum tersedia. Pelepasan belum dapat dilakukan; gunakan metode masuk lain.</p>
+                        @endif
+                        <p class="auth-help mt-2">Pelepasan memerlukan metode masuk lain yang terverifikasi.</p>
+                    @elseif($googleReady)
+                        <form method="POST" action="{{ route('customer.google.link') }}" class="mt-3" data-auth-form>
+                            @csrf
+                            <button type="submit" class="auth-link">Hubungkan Google</button>
+                            <p data-auth-progress role="status" hidden>Membuka Google...</p>
+                        </form>
+                    @else
+                        <p class="auth-help mt-3">Google belum tersedia. Metode masuk lain tetap dapat digunakan.</p>
+                    @endif
+                </section>
                 <a href="{{ route('customer.orders.index') }}" class="mt-5 block py-3 text-center text-sm font-black underline underline-offset-4">Kembali ke pesanan</a>
                 <form method="POST" action="{{ route('customer.logout') }}" class="mt-4">
                     @csrf

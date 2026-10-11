@@ -100,7 +100,14 @@
                     @else
                         <p class="auth-help">Login Telegram belum tersedia. Gunakan metode email.</p>
                     @endif
-                    <p class="auth-help mt-2">Login Google belum tersedia. Gunakan metode email.</p>
+                    @if($googleReady)
+                        <a class="auth-link mt-2" href="{{ route('customer.google.redirect', ['operation' => $authView === 'register' ? 'register' : 'login']) }}">{{ $authView === 'register' ? 'Daftar dengan Google' : 'Masuk dengan Google' }}</a>
+                        @if($authView === 'register')
+                            <p class="auth-help mt-2">Pendaftaran Google membuat akun hanya jika email terverifikasi belum digunakan. Akun yang sudah ada harus dihubungkan dari Keamanan akun setelah masuk.</p>
+                        @endif
+                    @else
+                        <p class="auth-help mt-2">Login Google belum tersedia. Gunakan metode email.</p>
+                    @endif
                 </section>
                 <a href="{{ route('storefront.order-access.create') }}" class="auth-link mt-5">Akses dengan invoice + Recovery Key</a>
             </div>

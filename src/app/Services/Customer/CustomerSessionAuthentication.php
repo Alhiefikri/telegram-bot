@@ -9,7 +9,7 @@ final class CustomerSessionAuthentication
 {
     public function authenticate(Customer $customer, Request $request): void
     {
-        $request->session()->forget('customer_telegram_authenticated');
+        $request->session()->forget(['customer_telegram_authenticated', 'customer_google_identity_id']);
         auth('customer')->login($customer);
         $request->session()->regenerate(true);
         $request->session()->put('customer_auth_version', $customer->auth_version);
@@ -19,7 +19,7 @@ final class CustomerSessionAuthentication
     public function logout(Request $request): void
     {
         auth('customer')->logout();
-        $request->session()->forget(['customer_auth_version', 'customer_authenticated_at', 'customer_telegram_authenticated']);
+        $request->session()->forget(['customer_auth_version', 'customer_authenticated_at', 'customer_telegram_authenticated', 'customer_google_identity_id']);
         $request->session()->regenerate(true);
     }
 }

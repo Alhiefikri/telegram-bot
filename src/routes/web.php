@@ -51,6 +51,7 @@ use App\Http\Controllers\Admin\AdminUsdtTopUpReviewController;
 use App\Http\Controllers\Admin\AdminWarrantyController;
 use App\Http\Controllers\CustomerAccountController;
 use App\Http\Controllers\CustomerEmailOtpController;
+use App\Http\Controllers\CustomerGoogleAuthenticationController;
 use App\Http\Controllers\CustomerPasswordAuthenticationController;
 use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontFunnelEventController;
@@ -141,6 +142,11 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
 });
 Route::redirect('/cara-loginoutlook', '/gpt/panduan-login-akun');
 
+Route::prefix('auth/google')->name('customer.google.')->middleware(ValidateCustomerSession::class)->group(function (): void {
+    Route::get('redirect', [CustomerGoogleAuthenticationController::class, 'redirect'])->name('redirect');
+    Route::get('callback', [CustomerGoogleAuthenticationController::class, 'callback'])->name('callback');
+});
+
 Route::prefix('akun')->name('customer.')->middleware(ValidateCustomerSession::class)->group(function (): void {
     Route::get('/', [CustomerAccountController::class, 'landing'])->name('account');
     Route::post('register', [CustomerPasswordAuthenticationController::class, 'register'])->name('register');
@@ -161,6 +167,8 @@ Route::prefix('akun')->name('customer.')->middleware(ValidateCustomerSession::cl
     Route::middleware('auth:customer')->group(function (): void {
         Route::post('logout', [CustomerAccountController::class, 'logout'])->name('logout');
         Route::post('telegram/link', [CustomerAccountController::class, 'startTelegramLink'])->name('telegram.link');
+        Route::post('google/link', [CustomerGoogleAuthenticationController::class, 'link'])->name('google.link');
+        Route::post('google/unlink', [CustomerGoogleAuthenticationController::class, 'unlink'])->name('google.unlink');
         Route::post('telegram/email', [CustomerPasswordAuthenticationController::class, 'enrollTelegramEmail'])->name('telegram.email');
         Route::get('keamanan', [CustomerPasswordAuthenticationController::class, 'security'])->name('security');
         Route::post('keamanan/password', [CustomerPasswordAuthenticationController::class, 'setPassword'])->middleware('throttle:customer-login-consume')->name('password.enroll');

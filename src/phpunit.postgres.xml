@@ -61,6 +61,7 @@
             <file>tests/Feature/WarrantyNotificationTest.php</file>
             <file>tests/Feature/WarrantyWebTest.php</file>
             <file>tests/Feature/CustomerTelegramAuthenticationPostgresTest.php</file>
+            <file>tests/Feature/CustomerGoogleAuthenticationPostgresTest.php</file>
         </testsuite>
     </testsuites>
     <source>

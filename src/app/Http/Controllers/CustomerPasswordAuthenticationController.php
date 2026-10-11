@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\CustomerIdentityProvider;
 use App\Http\Requests\CustomerLoginLinkRequest;
 use App\Http\Requests\CustomerPasswordEnrollmentRequest;
 use App\Http\Requests\CustomerPasswordLoginRequest;
 use App\Http\Requests\CustomerPasswordResetRequest;
 use App\Http\Requests\CustomerRegistrationRequest;
+use App\Services\Customer\CustomerGoogleAuthenticationService;
 use App\Services\Customer\CustomerPasswordAuthenticationService;
 use App\Storefront\StorefrontPresenter;
 use App\Storefront\StorefrontSeo;
@@ -83,6 +85,8 @@ class CustomerPasswordAuthenticationController extends Controller
             'homeUrl' => route('storefront.home'),
             'metadata' => $metadata,
             'customer' => $request->user('customer'),
+            'googleReady' => app(CustomerGoogleAuthenticationService::class)->ready(),
+            'googleLinked' => $request->user('customer')->identities()->where('provider', CustomerIdentityProvider::Google->value)->exists(),
         ])->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
     }
 

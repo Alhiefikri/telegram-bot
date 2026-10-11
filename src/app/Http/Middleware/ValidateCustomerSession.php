@@ -19,7 +19,11 @@ class ValidateCustomerSession
                 && $customer->telegram_id !== null
                 && $customer->identities()->where('provider', CustomerIdentityProvider::Telegram->value)
                     ->where('provider_subject', (string) $customer->telegram_id)->exists();
-            if (($customer->email_verified_at === null && ! $telegramProof) || $version !== (int) $customer->auth_version) {
+            $googleIdentityId = $request->session()->get('customer_google_identity_id');
+            $googleProof = is_int($googleIdentityId) && $googleIdentityId > 0
+                && $customer->identities()->whereKey($googleIdentityId)
+                    ->where('provider', CustomerIdentityProvider::Google->value)->exists();
+            if (($customer->email_verified_at === null && ! $telegramProof && ! $googleProof) || $version !== (int) $customer->auth_version) {
                 app(CustomerSessionAuthentication::class)->logout($request);
                 if (in_array('auth:customer', $request->route()->gatherMiddleware(), true)) {
                     return redirect()->route('customer.account')
