@@ -11,7 +11,7 @@
 
         <main class="flex-1 px-5 pb-20 pt-12 sm:pt-16">
             <div class="mx-auto max-w-xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] p-6 shadow-[0_12px_30px_rgb(18_35_63_/_0.1)] sm:p-8">
-                <a href="{{ route('customer.orders.index') }}" class="text-sm font-black underline underline-offset-4">&larr; Pesanan saya</a>
+                @include('customer.partials.navigation')
                 <h1 class="mt-5 font-display text-4xl font-black tracking-tight">Klaim pesanan guest</h1>
                 <p class="mt-3 text-sm font-semibold leading-6 text-[var(--sf-muted)]">Gunakan invoice dan Recovery Key yang Anda terima saat checkout. Jangan bagikan Recovery Key. Support tidak dapat mengklaimkan order atau membuka kredensial tanpa Recovery Key yang valid.</p>
 

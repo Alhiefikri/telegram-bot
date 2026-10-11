@@ -34,7 +34,7 @@ class CustomerAccountController extends Controller
 
         $metadata = $seo->privatePage(
             'Akun Pelanggan | '.$storefront->brand(),
-            'Masuk ke akun pelanggan menggunakan magic link email.',
+            'Masuk atau daftar dengan email untuk melihat pesanan dan saldo akun pelanggan.',
         );
 
         return $this->view($request, 'customer.account', [
@@ -46,6 +46,9 @@ class CustomerAccountController extends Controller
             'pageDescription' => $metadata->description,
             'canonicalUrl' => $metadata->canonicalUrl,
             'metadata' => $metadata,
+            'authView' => in_array($request->query('view', session('customer_auth_view')), ['register', 'code', 'reset', 'magic', 'verification'], true)
+                ? $request->query('view', session('customer_auth_view')) : 'login',
+            'telegramReady' => app(CustomerTelegramAuthenticationService::class)->ready(),
         ]);
     }
 
@@ -57,11 +60,18 @@ class CustomerAccountController extends Controller
             ->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
     }
 
-    public function loginLink(Request $request): Response
+    public function loginLink(Request $request, StorefrontPresenter $storefront, StorefrontSeo $seo): Response
     {
+        $metadata = $seo->privatePage('Konfirmasi link login | '.$storefront->brand(), 'Konfirmasi akses akun pelanggan melalui link email.');
+
         return $this->view($request, 'customer.login-link', [
             'consumeUrl' => route('customer.login-link.consume'),
             'accountUrl' => route('customer.account'),
+            'storefront' => $storefront,
+            'brand' => $storefront->brand(),
+            'copy' => config('storefront'),
+            'homeUrl' => route('storefront.home'),
+            'metadata' => $metadata,
         ]);
     }
 

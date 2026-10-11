@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./storefront-enhancements.css";
+@import "./customer-account.css";
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 

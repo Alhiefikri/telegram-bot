@@ -5,6 +5,7 @@
 <div class="storefront-shell flex min-h-screen flex-col">
     <div class="pt-4">@include('storefront.partials.header')</div>
     <main class="mx-auto w-full max-w-4xl flex-1 px-5 pb-24 pt-12">
+        @include('customer.partials.navigation')
         <div class="flex flex-wrap items-end justify-between gap-4">
             <div>
                 <p class="text-xs font-black uppercase tracking-[.18em] text-[var(--sf-accent)]">Akun pelanggan</p>
@@ -12,7 +13,6 @@
                 <p class="mt-2 text-sm font-bold text-[var(--sf-muted)]">{{ $customer->email }}</p>
             </div>
             <div class="flex flex-wrap gap-2">
-                <a href="{{ $ordersUrl }}" class="neo-button bg-white px-4 py-3 text-sm font-black">Pesanan saya</a>
                 <form method="POST" action="{{ route('customer.logout') }}">
                     @csrf
                     <button class="rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 py-3 text-sm font-black">Keluar</button>

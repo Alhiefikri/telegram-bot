@@ -31,6 +31,52 @@ class CustomerAccountTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_email_code_requests_keep_the_same_usable_state_for_known_and_unknown_accounts(): void
+    {
+        Queue::fake();
+        Customer::factory()->create(['email' => 'known-ui@example.test', 'email_verified_at' => now()]);
+
+        foreach (['known-ui@example.test', 'unknown-ui@example.test'] as $email) {
+            $this->post(route('customer.login-code.request'), ['email' => $email])
+                ->assertRedirect(route('customer.account'))->assertSessionHas('customer_auth_view', 'code');
+            $this->get(route('customer.account'))->assertOk()
+                ->assertViewHas('authView', 'code')
+                ->assertHeader('Cache-Control', 'no-store, private')->assertHeader('Referrer-Policy', 'no-referrer');
+            $this->post(route('customer.login-code.consume'), [
+                'email' => $email, 'challenge' => session('customer_otp_challenge'), 'code' => 'invalid',
+            ])->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_error');
+            $this->get(route('customer.account'))->assertViewHas('authView', 'code');
+            $this->assertGuest('customer');
+        }
+
+        $this->assertFalse(Customer::query()->where('email', 'unknown-ui@example.test')->exists());
+    }
+
+    public function test_registration_validation_returns_to_registration_without_exposing_passwords(): void
+    {
+        $url = route('customer.account', ['view' => 'register']);
+        $this->from($url)->post(route('customer.register'), [
+            'email' => 'registration-ui@example.test', 'name' => 'Customer Name',
+            'password' => 'A valid registration password', 'password_confirmation' => 'A different password',
+        ])->assertRedirect($url)->assertSessionHasErrors('password');
+        $this->get($url)->assertOk()->assertViewHas('authView', 'register')
+            ->assertDontSee('A valid registration password');
+        $this->assertGuest('customer');
+        $this->assertFalse(Customer::query()->where('email', 'registration-ui@example.test')->exists());
+    }
+
+    public function test_account_throttle_response_preserves_retry_and_privacy_headers(): void
+    {
+        Queue::fake();
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $this->post(route('customer.login-link.request'), ['email' => 'limited-ui@example.test']);
+        }
+        $this->post(route('customer.login-link.request'), ['email' => 'limited-ui@example.test'])
+            ->assertStatus(429)->assertViewIs('customer.rate-limited')
+            ->assertHeader('Retry-After')
+            ->assertHeader('Cache-Control', 'no-store, private')->assertHeader('Referrer-Policy', 'no-referrer');
+    }
+
     public function test_login_request_is_generic_stores_only_a_token_hash_and_emails_fragment_link(): void
     {
         Notification::fake();
@@ -60,6 +106,11 @@ class CustomerAccountTest extends TestCase
             'token_hash' => hash('sha256', $token),
             'expires_at' => now()->addMinutes(15),
         ]);
+
+        $this->get(route('customer.login-link.show'))->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')->assertHeader('Referrer-Policy', 'no-referrer');
+        $this->assertGuest('customer');
+        $this->assertNull(CustomerLoginLink::query()->sole()->used_at);
 
         $this->post(route('customer.login-link.consume'), ['token' => $token])
             ->assertRedirect(route('customer.orders.index'))

@@ -10,6 +10,7 @@
         ? 'Buka keranjang'
         : 'Buka keranjang dengan '.$cartCount.' item';
     $accountUrl = route('customer.account');
+    $accountLabel = auth('customer')->check() ? 'Akun saya' : 'Daftar / Masuk';
     $searchMaxLength = \App\Storefront\StorefrontCatalogSearch::MAX_LENGTH;
 @endphp
 
@@ -96,11 +97,11 @@
                 </svg>
                 <span>Akses Pesanan</span>
             </a>
-            <a href="{{ $accountUrl }}" class="neo-button hidden min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap bg-[var(--sf-accent)] px-2 text-[10px] font-black text-white lg:inline-flex xl:px-3 xl:text-[11px]" aria-label="Daftar atau masuk ke akun pelanggan">
+            <a href="{{ $accountUrl }}" class="neo-button hidden min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap bg-[var(--sf-accent)] px-2 text-[10px] font-black text-white lg:inline-flex xl:px-3 xl:text-[11px]" aria-label="{{ $accountLabel }}">
                 <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8-7v6m3-3h-6" />
                 </svg>
-                <span>Daftar / Masuk</span>
+                <span>{{ $accountLabel }}</span>
             </a>
             <a href="{{ $cartUrl }}" class="relative inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:hidden" aria-label="{{ $cartLabel }}">
                 <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
@@ -214,7 +215,7 @@
                 <a href="{{ route('storefront.order-access.create') }}" class="neo-button mt-2 inline-flex min-h-12 items-center justify-center bg-[var(--sf-accent)] px-4 text-center text-xs font-black text-white">
                     <span>Akses Pesanan</span>
                 </a>
-                <a href="{{ $accountUrl }}" class="flex items-center justify-center rounded-lg border border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white">Daftar / Masuk</a>
+                <a href="{{ $accountUrl }}" class="flex items-center justify-center rounded-lg border border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white">{{ $accountLabel }}</a>
                 <div class="mt-2 flex items-center justify-between gap-3 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-4 py-2">
                     <span class="text-xs font-black uppercase tracking-wide">Tampilan</span>
                     <x-theme-toggle showLabel class="min-h-10 rounded-md border border-[var(--sf-border)] bg-[var(--sf-surface)] px-3 text-xs font-black text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" />
@@ -235,7 +236,7 @@
                 <a href="{{ $homeUrl }}#trending" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Trending</a>
                 <a href="{{ $cartUrl }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Keranjang @if ($cartCount !== null)({{ $cartCount }})@endif</a>
                 <a href="{{ route('storefront.order-access.create') }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Akses Pesanan</a>
-                <a href="{{ $accountUrl }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-accent)] px-3 py-2 text-white">Daftar / Masuk</a>
+                <a href="{{ $accountUrl }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-accent)] px-3 py-2 text-white">{{ $accountLabel }}</a>
                 <a href="{{ route('storefront.guides.index') }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Panduan</a>
                 <a href="{{ $homeUrl }}#faq" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">FAQ</a>
             </div>

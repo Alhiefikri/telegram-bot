@@ -21,7 +21,7 @@ final class CustomerEmailOtpController extends Controller
             $request->session()->put('customer_otp_email', Str::lower(trim($request->validated('email'))));
         }
 
-        return $this->redirect('customer.account')->with('customer_login_sent', 'Jika email dapat digunakan, kode telah dikirim. Periksa inbox Anda atau coba lagi nanti.');
+        return $this->redirect('customer.account')->with('customer_auth_view', 'code')->with('customer_login_sent', 'Jika email dapat digunakan, kode telah dikirim. Periksa inbox Anda atau coba lagi nanti.');
     }
 
     public function consume(CustomerEmailOtpConsumeRequest $request, CustomerEmailOtpService $authentication): RedirectResponse
@@ -31,7 +31,7 @@ final class CustomerEmailOtpController extends Controller
             return $this->redirect('customer.orders.index');
         }
 
-        return $this->redirect('customer.account')->with('customer_login_error', 'Kode tidak dapat dikonfirmasi. Coba lagi atau minta kode baru.');
+        return $this->redirect('customer.account')->with('customer_auth_view', 'code')->with('customer_login_error', 'Kode tidak valid, kedaluwarsa, atau tidak dapat dikonfirmasi. Coba lagi atau minta kode baru setelah 60 detik.');
     }
 
     private function redirect(string $route): RedirectResponse

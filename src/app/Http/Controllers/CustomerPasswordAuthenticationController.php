@@ -20,7 +20,7 @@ class CustomerPasswordAuthenticationController extends Controller
     {
         $authentication->register($request->validated('email'), $request->validated('password'), $request->validated('name'));
 
-        return $this->sent();
+        return $this->sent()->with('customer_auth_view', 'verification');
     }
 
     public function enrollTelegramEmail(CustomerLoginLinkRequest $request, CustomerPasswordAuthenticationService $authentication): RedirectResponse
@@ -48,14 +48,14 @@ class CustomerPasswordAuthenticationController extends Controller
 
         return is_string($token) && $authentication->verify($token, $request)
             ? $this->redirect('customer.orders.index')
-            : $this->failed();
+            : $this->failed()->with('customer_login_error', 'Link verifikasi tidak valid atau kedaluwarsa. Minta instruksi baru, atau masuk jika akun sudah tersedia.');
     }
 
     public function requestReset(CustomerLoginLinkRequest $request, CustomerPasswordAuthenticationService $authentication): RedirectResponse
     {
         $authentication->requestReset($request->validated('email'));
 
-        return $this->sent();
+        return $this->sent()->with('customer_auth_view', 'reset');
     }
 
     public function resetForm(Request $request, StorefrontPresenter $storefront, StorefrontSeo $seo): Response
@@ -66,7 +66,7 @@ class CustomerPasswordAuthenticationController extends Controller
     public function reset(CustomerPasswordResetRequest $request, CustomerPasswordAuthenticationService $authentication): RedirectResponse
     {
         if (! $authentication->reset((string) $request->validated('token'), $request->validated('password'), $request)) {
-            return $this->failed();
+            return $this->failed()->with('customer_auth_view', 'reset')->with('customer_login_error', 'Link pemulihan tidak valid atau kedaluwarsa. Minta instruksi baru.');
         }
 
         return $this->redirect('customer.account')->with('customer_login_sent', 'Password diperbarui. Silakan masuk kembali.');

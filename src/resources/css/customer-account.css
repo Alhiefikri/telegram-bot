@@ -1,0 +1,105 @@
+.customer-auth .auth-panel {
+  --sf-muted: #526078;
+  overflow-wrap: anywhere;
+}
+[data-theme="dark"] .customer-auth .auth-panel {
+  --sf-muted: #bac8dc;
+}
+.customer-auth .auth-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+.customer-auth .auth-input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--sf-muted);
+  border-radius: 0.5rem;
+  background: var(--sf-surface);
+  color: var(--sf-ink);
+  font-size: 1rem;
+}
+.customer-auth .auth-help {
+  color: var(--sf-muted);
+  font-size: 0.875rem;
+  line-height: 1.75;
+}
+.customer-auth .auth-submit {
+  width: 100%;
+  min-height: 48px;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: #1d4ed8;
+  color: #fff;
+  font-weight: 800;
+}
+.customer-auth .auth-submit:hover {
+  background: #1e40af;
+}
+.customer-auth button:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+.customer-auth .auth-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.5rem 0.25rem;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--sf-ink);
+}
+.customer-auth .auth-tabs {
+  display: flex;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--sf-border);
+}
+.customer-auth .auth-tabs a {
+  min-height: 44px;
+  padding: 0.5rem 1rem;
+  font-weight: 800;
+}
+.customer-auth .auth-tabs [aria-current="page"] {
+  border-bottom: 3px solid var(--sf-ink);
+}
+.customer-auth :is(a, button, input, summary):focus-visible {
+  outline: 3px solid var(--sf-ink);
+  outline-offset: 3px;
+}
+.customer-account-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+.customer-account-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  color: var(--sf-ink);
+  background: var(--sf-surface-warm);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+.customer-account-nav [aria-current="page"] {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.customer-account-nav a:focus-visible {
+  outline: 3px solid var(--sf-ink);
+  outline-offset: 3px;
+}
+.customer-auth .auth-panel input:not([type="hidden"]) {
+  background: var(--sf-surface);
+  color: var(--sf-ink);
+  border-color: var(--sf-muted);
+  font-size: 1rem;
+}

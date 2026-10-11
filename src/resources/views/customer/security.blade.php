@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <html lang="{{ $metadata->htmlLocale() }}" class="bg-[var(--sf-paper)]">
 <head>@include('storefront.partials.head', ['metadata' => $metadata])</head>
-<body class="text-[var(--sf-ink)]">
+<body class="customer-auth text-[var(--sf-ink)]">
     <div class="storefront-shell flex min-h-screen flex-col">
         <div class="pt-4">@include('storefront.partials.header')</div>
         <main class="flex-1 px-5 pb-20 pt-8 sm:pt-12">
-            <div class="mx-auto max-w-xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] p-5 sm:p-8">
+            <div class="auth-panel mx-auto max-w-xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] p-5 sm:p-8">
+                @include('customer.partials.navigation')
                 <h1 class="font-display text-3xl font-black tracking-tight">Keamanan akun</h1>
                 @include('customer.partials.auth-feedback')
                 @if($customer->password === null)
