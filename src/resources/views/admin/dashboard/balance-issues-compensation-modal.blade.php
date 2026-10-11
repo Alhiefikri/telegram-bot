@@ -2,14 +2,14 @@
     x-cloak
     x-show="releaseOpen"
     x-transition.opacity
-    class="fixed inset-0 z-[70] flex items-center justify-center bg-neo-ink/60 p-3"
+    class="admin-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-neo-ink/60"
     role="dialog"
     aria-modal="true"
     aria-labelledby="compensation-modal-title-{{ $item['top_up_id'] }}"
     x-on:keydown.escape.window="releaseOpen = false"
     x-on:click.self="releaseOpen = false"
 >
-    <div class="max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-[var(--admin-radius)] border border-admin-line bg-admin-surface p-4 text-admin-ink shadow-admin-lg md:p-6">
+    <div class="admin-modal-shell w-full max-w-xl rounded-[var(--admin-radius)] border border-admin-line bg-admin-surface p-4 text-admin-ink shadow-admin-lg md:p-6">
         <div class="flex items-start justify-between gap-3">
             <div>
                 <p class="text-xs font-medium text-admin-muted">Owner confirmation</p>

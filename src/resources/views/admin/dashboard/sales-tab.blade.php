@@ -12,6 +12,46 @@
                     </div>
                 </div>
 
+                {{-- Invoice search --}}
+                <section class="rounded-xl border border-admin-line bg-admin-surface p-3 sm:p-4" aria-labelledby="sales-invoice-search-title">
+                    <h3 id="sales-invoice-search-title" class="text-sm font-semibold text-admin-ink">Cari pesanan lewat invoice</h3>
+                    <p class="mt-1 text-xs leading-5 text-admin-muted">Tempel nomor invoice (mis. INV-20261010-…). Hasilnya menampilkan status pengiriman kredensial ke pelanggan.</p>
+                    <form method="GET" action="{{ route('admin.dashboard') }}" class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+                        <input type="hidden" name="tab" value="penjualan">
+                        @if ($salesActiveFilter !== 'all')
+                            <input type="hidden" name="sales_filter" value="{{ $salesActiveFilter }}">
+                        @endif
+                        <div class="min-w-0 flex-1">
+                            <x-admin-dashboard.field-label for="sales-invoice-search">Nomor invoice</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.input
+                                id="sales-invoice-search"
+                                name="invoice"
+                                :value="$salesInvoice"
+                                maxlength="80"
+                                autocomplete="off"
+                                placeholder="INV-20261010-01JX8Y2M9"
+                                class="mt-1.5"
+                                aria-describedby="sales-invoice-search-hint"
+                            />
+                        </div>
+                        <div class="flex gap-2">
+                            <x-admin-dashboard.button type="submit" variant="primary" class="flex-1 sm:flex-none">Cari invoice</x-admin-dashboard.button>
+                            @if ($salesInvoice !== '')
+                                <x-admin-dashboard.button :href="route('admin.dashboard', ['tab' => 'penjualan', 'sales_filter' => $salesActiveFilter])" variant="neutral">Reset</x-admin-dashboard.button>
+                            @endif
+                        </div>
+                    </form>
+                    <p id="sales-invoice-search-hint" class="mt-2 text-xs leading-5 text-admin-muted">
+                        @if ($salesInvoiceTooShort)
+                            Minimal 3 karakter. Pencarian diabaikan dan seluruh pesanan ditampilkan.
+                        @elseif ($salesInvoice !== '')
+                            Menampilkan {{ $salesPagination['total'] ?? 0 }} pesanan yang cocok dengan {{ $salesInvoice }}.
+                        @else
+                            Pencarian tidak aktif. Semua pesanan ditampilkan sesuai filter status di bawah.
+                        @endif
+                    </p>
+                </section>
+
                 {{-- Filter pills --}}
                 <div class="overflow-x-auto pb-1" aria-label="Filter penjualan">
                     <div class="flex min-w-max items-center gap-2">
@@ -72,6 +112,26 @@
                                 <span class="text-xs font-medium text-admin-muted">{{ $order['item_count'] }} item</span>
                                 <a href="{{ $order['detail_url'] }}" class="text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">Detail order</a>
                             </div>
+                            @if ($order['credential_delivery'] !== null)
+                                <div class="mt-3 rounded-lg border border-admin-line bg-admin-surface-muted p-3" data-credential-delivery>
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <p class="text-xs font-medium text-admin-muted">Pengiriman kredensial</p>
+                                        <x-admin-dashboard.badge :tone="$order['credential_delivery']['tone']">{{ $order['credential_delivery']['verdict'] }}</x-admin-dashboard.badge>
+                                    </div>
+                                    <ul class="mt-2 space-y-1 text-xs leading-5 text-admin-muted">
+                                        <li>{{ $order['credential_delivery']['telegram'] }}</li>
+                                        @if ($order['credential_delivery']['web'] !== null)
+                                            <li>{{ $order['credential_delivery']['web'] }}</li>
+                                        @endif
+                                        @if ($order['credential_delivery']['activity'] !== null)
+                                            <li>{{ $order['credential_delivery']['activity'] }}</li>
+                                        @endif
+                                    </ul>
+                                    @if ($order['credential_delivery']['review_url'] !== null)
+                                        <a href="{{ $order['credential_delivery']['review_url'] }}" class="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">Buka Manual Delivery Review</a>
+                                    @endif
+                                </div>
+                            @endif
                             @if ($order['supplier_delivery_status'] !== null)
                                 <div class="mt-2 grid gap-1 rounded-lg border border-admin-line bg-admin-surface-muted p-3 text-xs">
                                     <p class="text-admin-muted">Pengiriman pelanggan: <span class="font-semibold text-admin-ink">{{ $order['supplier_delivery_status'] }}</span></p>

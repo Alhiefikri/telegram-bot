@@ -472,6 +472,37 @@
     overscroll-behavior: contain;
     overflow-wrap: anywhere;
   }
+
+  /* A grid or flex box inside a modal refuses to shrink below the intrinsic
+     width of the widest thing it contains, and a control's intrinsic width
+     follows its font size. At phone widths with enlarged text that pushed the
+     dialog sideways by ~150px. Structural children, controls, and text
+     containers may shrink (the shell breaks words anywhere); explicit
+     `min-w-*` floors stay on the elements that still declare them (upload
+     labels). */
+  .admin-modal-shell
+    :where(
+      div,
+      section,
+      article,
+      form,
+      fieldset,
+      li,
+      button,
+      a,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      p,
+      span,
+      dd,
+      dt
+    ) {
+    min-width: 0;
+  }
   .admin-dashboard-content,
   .admin-dashboard-content :is([id], input, select, textarea, button, a),
   [data-admin-return-target] {

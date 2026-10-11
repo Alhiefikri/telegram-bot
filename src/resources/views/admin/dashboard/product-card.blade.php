@@ -76,7 +76,7 @@
                                         @csrf
                                         @method('PATCH')
                                         <label class="sr-only" for="product-family-select-{{ $product['id'] }}">Product Family</label>
-                                        <x-admin-dashboard.select id="product-family-select-{{ $product['id'] }}" data-family-assignment-select name="product_family_id">
+                                        <x-admin-dashboard.select id="product-family-select-{{ $product['id'] }}" name="product_family_id">
                                             <option value="">Tanpa family</option>
                                             @foreach ($familyOptions as $familyOption)
                                                 <option value="{{ $familyOption['id'] }}" @selected((int) ($product['family_id'] ?? 0) === (int) $familyOption['id'])>{{ $familyOption['name'] }}</option>

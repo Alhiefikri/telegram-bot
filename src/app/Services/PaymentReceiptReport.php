@@ -63,6 +63,46 @@ class PaymentReceiptReport
      */
     public function dailySalesReceipts(Carbon $start, Carbon $end): array
     {
+        return $this->successfulSalesReceiptBuckets($start, $end, 'DATE(canonical_payments.paid_at)')
+            ->map(static fn ($row): array => [
+                'date' => (string) $row->sale_bucket,
+                'currency' => (string) $row->sale_currency,
+                'amount' => (int) $row->sale_amount,
+                'orders' => (int) $row->sale_orders,
+            ])
+            ->all();
+    }
+
+    /**
+     * Same receipts as dailySalesReceipts(), bucketed by payment month so a
+     * bounded month window never hydrates individual payments. The month
+     * expression stays portable: DATE() already normalizes the stored
+     * timestamp on both lanes, and the text cast yields the shared
+     * 'YYYY-MM-DD' prefix.
+     *
+     * @return list<array{month: string, currency: string, amount: int, orders: int}>
+     */
+    public function monthlySalesReceipts(Carbon $start, Carbon $end): array
+    {
+        return $this->successfulSalesReceiptBuckets(
+            $start,
+            $end,
+            'SUBSTR(CAST(DATE(canonical_payments.paid_at) AS TEXT), 1, 7)',
+        )
+            ->map(static fn ($row): array => [
+                'month' => (string) $row->sale_bucket,
+                'currency' => (string) $row->sale_currency,
+                'amount' => (int) $row->sale_amount,
+                'orders' => (int) $row->sale_orders,
+            ])
+            ->all();
+    }
+
+    /**
+     * @return Collection<int, object>
+     */
+    private function successfulSalesReceiptBuckets(Carbon $start, Carbon $end, string $bucketExpression): Collection
+    {
         $net = $this->netAmountSql('canonical_payments');
         $currency = "UPPER(COALESCE(NULLIF(canonical_payments.currency, ''), 'IDR'))";
 
@@ -74,16 +114,9 @@ class PaymentReceiptReport
                     ->where('orders.payment_status', PaymentStatus::Paid->value)
                     ->whereIn('orders.order_status', [OrderStatus::Processing->value, OrderStatus::Completed->value]);
             })
-            ->selectRaw("DATE(canonical_payments.paid_at) AS sale_date, {$currency} AS sale_currency, SUM(CASE WHEN {$net} > 0 THEN {$net} ELSE 0 END) AS sale_amount, COUNT(*) AS sale_orders")
-            ->groupByRaw("DATE(canonical_payments.paid_at), {$currency}")
-            ->get()
-            ->map(static fn ($row): array => [
-                'date' => (string) $row->sale_date,
-                'currency' => (string) $row->sale_currency,
-                'amount' => (int) $row->sale_amount,
-                'orders' => (int) $row->sale_orders,
-            ])
-            ->all();
+            ->selectRaw("{$bucketExpression} AS sale_bucket, {$currency} AS sale_currency, SUM(CASE WHEN {$net} > 0 THEN {$net} ELSE 0 END) AS sale_amount, COUNT(*) AS sale_orders")
+            ->groupByRaw("{$bucketExpression}, {$currency}")
+            ->get();
     }
 
     /**

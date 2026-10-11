@@ -39,6 +39,7 @@ const emptyProductForm = () => ({
   productPrice: "",
   productUsdtPrice: "",
   productCategoryId: "",
+  productFamilyId: "",
   productDescription: "",
   productDescriptionMs: "",
   productDescriptionEn: "",
@@ -182,6 +183,60 @@ export function salesFilter() {
         this.salesFilter === "all" ||
         element.dataset.orderFilterGroups.split(" ").includes(this.salesFilter)
       );
+    },
+  };
+}
+
+// Half of the unmeasured tooltip width: the widest (`w-52`) variant. It only
+// applies to the first reveal, before the element can be measured.
+const SALES_CHART_TOOLTIP_HALF_PX = 104;
+
+export function salesChart(points = []) {
+  return {
+    points: Array.isArray(points) ? points : [],
+    activeIndex: null,
+    tooltipLeft: "0px",
+    show(index) {
+      this.activeIndex = Number.isInteger(index) ? index : null;
+      // The tooltip is hidden until now, so position it once it has a width.
+      const apply = () => {
+        this.tooltipLeft = this.positionFor(index);
+      };
+      if (typeof this.$nextTick === "function") {
+        this.$nextTick(apply);
+
+        return;
+      }
+      apply();
+    },
+    hide() {
+      this.activeIndex = null;
+    },
+    activePoint() {
+      return this.activeIndex === null
+        ? null
+        : (this.points[this.activeIndex] ?? null);
+    },
+    /**
+     * Center the tooltip on its bucket while keeping it inside the plot so the
+     * first and last buckets stay readable at every viewport width, including
+     * the narrower tooltip the phone layout renders.
+     */
+    positionFor(index) {
+      const plot = this.$refs?.plot;
+      const width = plot?.clientWidth ?? 0;
+      if (!width || !this.points.length) {
+        return "0px";
+      }
+
+      const measured = this.$refs?.tooltip?.offsetWidth ?? 0;
+      const half = Math.min(
+        measured > 0 ? measured / 2 : SALES_CHART_TOOLTIP_HALF_PX,
+        width / 2
+      );
+      const center = ((index + 0.5) / this.points.length) * width;
+
+      return `${Math.round(Math.min(Math.max(center, half), Math.max(width - half, half)))}px`;
     },
   };
 }
@@ -677,7 +732,7 @@ export default function adminDashboard(initialState = {}) {
         event?.target?.files?.[0]?.name ?? EMPTY_IMAGE_FILE_NAME;
     },
 
-    openProductForm() {
+    openProductForm(familyId = null) {
       this.productModalOpener = document.activeElement;
       Object.assign(this, {
         activeTab: "produk",
@@ -686,6 +741,9 @@ export default function adminDashboard(initialState = {}) {
         ...emptyProductForm(),
         productModalOpen: true,
       });
+      if (familyId !== null && familyId !== undefined) {
+        this.productFamilyId = String(familyId);
+      }
       this.resetImageInput("productImage", "productImageFileName");
       this.resetImageInput(
         "telegramProductImage",
@@ -697,37 +755,10 @@ export default function adminDashboard(initialState = {}) {
       );
       this.$nextTick(() => this.$refs.productName?.focus());
     },
-    focusProductFamilyAssignment(familyId) {
-      const familyValue = String(familyId);
-      const select = Array.from(
-        document.querySelectorAll("[data-family-assignment-select]")
-      ).find(
-        (candidate) =>
-          candidate.value === "" &&
-          Array.from(candidate.options).some(
-            (option) => option.value === familyValue
-          )
-      );
-      if (!select) {
-        return;
-      }
-
-      const group = select.closest('[id^="admin-product-family-group-"]');
-      const toggle = group?.querySelector(
-        'button[aria-controls^="admin-product-family-members-"]'
-      );
-      const focusSelect = () => {
-        group?.scrollIntoView({ block: "start" });
-        select.value = familyValue;
-        select.focus({ preventScroll: true });
-      };
-      if (toggle?.getAttribute("aria-expanded") !== "true") {
-        toggle?.click();
-        this.$nextTick(focusSelect);
-
-        return;
-      }
-      focusSelect();
+    addProductToFamily(familyId) {
+      // The family group shortcut opens the create form with that family
+      // preselected; membership is written by the product create request.
+      this.openProductForm(familyId);
     },
 
     openCategoryManagement() {

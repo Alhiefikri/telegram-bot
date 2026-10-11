@@ -140,6 +140,7 @@ class AdminProductDashboardState
                 'productPrice' => old('price_amount', $editingProduct['price_amount'] ?? ''),
                 'productUsdtPrice' => $productUsdtPrice,
                 'productCategoryId' => old('category_id', $editingProduct['category_id'] ?? ''),
+                'productFamilyId' => old('product_family_id', $editingProduct['family_id'] ?? ''),
                 'productDescription' => old('description', $editingProduct['description'] ?? ''),
                 'productDescriptionMs' => old('description_ms', $editingProduct['description_ms'] ?? ''),
                 'productDescriptionEn' => old('description_en', $editingProduct['description_en'] ?? ''),

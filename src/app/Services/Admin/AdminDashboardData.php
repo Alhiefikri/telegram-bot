@@ -91,7 +91,7 @@ final class AdminDashboardData
             'statsTab' => $this->statsData->forStats($user, $metrics, $storeLink, $reportingFilters),
             'settingsTab' => $navigation['activeTab'] === 'settings' ? $this->statsData->forSettings($user, $reportingFilters['section'] ?? null) : [],
             'productsTab' => $this->productsData->forProducts($canManageProducts, $productsPage),
-            'salesTab' => $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
+            'salesTab' => $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter, $this->invoiceSearch($reportingFilters)),
             'broadcastTab' => $this->broadcastTab(),
             'storeChannelTab' => $this->storeChannelTab($user),
             'funnelTab' => $funnelTab,
@@ -156,6 +156,8 @@ final class AdminDashboardData
                 'filters' => [],
                 'statusCounts' => $statusCounts,
                 'active_filter' => 'all',
+                'invoice' => '',
+                'invoice_too_short' => false,
                 'pagination' => [],
             ],
             'broadcastTab' => ['recent' => []],
@@ -168,7 +170,7 @@ final class AdminDashboardData
         match ($activeTab) {
             'stats' => null,
             'produk' => $data['productsTab'] = $this->productsData->forProducts($canManageProducts, $productsPage, includeStockItems: false),
-            'penjualan' => $data['salesTab'] = $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter),
+            'penjualan' => $data['salesTab'] = $this->salesData->forSales($statusCounts, (bool) $user->role?->canManagePaymentSettings(), $salesFilter, $this->invoiceSearch($reportingFilters)),
             'broadcast' => $data['broadcastTab'] = $this->broadcastTab(),
             'telegram-channel' => $data['storeChannelTab'] = $this->storeChannelTab($user),
             StorefrontFunnelReport::TAB => $data['funnelTab'] = $this->funnelReport->forAdmin($user, $reportingFilters),
@@ -179,6 +181,14 @@ final class AdminDashboardData
         };
 
         return $data;
+    }
+
+    /** @param array<string, mixed> $reportingFilters */
+    private function invoiceSearch(array $reportingFilters): ?string
+    {
+        $invoice = $reportingFilters['invoice'] ?? null;
+
+        return is_string($invoice) && trim($invoice) !== '' ? $invoice : null;
     }
 
     private function adminIdentity(User $user): array

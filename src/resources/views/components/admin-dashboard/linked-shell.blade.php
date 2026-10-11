@@ -33,8 +33,8 @@
                     </button>
                 </x-slot:menu>
                 <x-slot:pageContext>
-                    <p class="text-xs font-medium text-admin-muted">{{ $linkedActiveGroup['label'] ?? 'Admin' }}</p>
-                    <h1 class="text-lg font-semibold text-admin-ink sm:text-xl">{{ $title }}</h1>
+                    <p class="truncate text-xs font-medium text-admin-muted">{{ $linkedActiveGroup['label'] ?? 'Admin' }}</p>
+                    <h1 class="truncate text-lg font-semibold text-admin-ink sm:text-xl">{{ $title }}</h1>
                 </x-slot:pageContext>
                 <x-slot:actions>
                     <x-admin-dashboard.button :href="route('admin.dashboard', [...\Illuminate\Support\Arr::except(request()->query(), ['product_form']), 'tab' => $activeTab])" x-on:click="handleSidebarNavigation($event)" variant="neutral" size="sm">Kembali ke dashboard</x-admin-dashboard.button>

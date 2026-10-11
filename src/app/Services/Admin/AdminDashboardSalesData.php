@@ -5,6 +5,7 @@ namespace App\Services\Admin;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
+use App\Models\AuditLog;
 use App\Models\Order;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
@@ -14,11 +15,16 @@ use App\Services\PaymentReceiptReport;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\Money;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 final class AdminDashboardSalesData
 {
     private const ORDERS_PER_PAGE = 10;
+
+    private const INVOICE_SEARCH_MINIMUM = 3;
+
+    private const INVOICE_SEARCH_MAXIMUM = 80;
 
     private ?StoreChannelSetting $storeChannelSetting = null;
 
@@ -28,18 +34,46 @@ final class AdminDashboardSalesData
      * @param  array<string, mixed>  $statusCounts
      * @return array<string, mixed>
      */
-    public function forSales(array $statusCounts, bool $canRetrySalesProof = false, ?string $activeFilter = null): array
+    public function forSales(array $statusCounts, bool $canRetrySalesProof = false, ?string $activeFilter = null, ?string $invoice = null): array
     {
         $activeFilter = $this->normalizeFilter($activeFilter);
-        [$orders, $pagination] = $this->latestOrders($canRetrySalesProof, $activeFilter);
+        $search = $this->invoiceSearch($invoice);
+        [$orders, $pagination] = $this->latestOrders($canRetrySalesProof, $activeFilter, $search['value']);
 
         return [
             'orders' => $orders,
-            'filters' => $this->salesFilters($statusCounts, $activeFilter),
+            'filters' => $this->salesFilters($statusCounts, $activeFilter, $search['value']),
             'statusCounts' => $statusCounts,
             'active_filter' => $activeFilter,
+            'invoice' => $search['value'],
+            'invoice_too_short' => $search['too_short'],
             'pagination' => $pagination,
         ];
+    }
+
+    /**
+     * Invoice numbers are `INV-<date>-<ULID>`, so the search keeps only the
+     * characters that can actually appear. That removes LIKE wildcards from
+     * customer-pasted text without needing an ESCAPE clause on either lane.
+     * A value that already looks like an invoice number is matched as a
+     * prefix so the unique index can serve the common paste-a-full-invoice
+     * case; shorter fragments stay a bounded contains match.
+     *
+     * @return array{value: string, too_short: bool}
+     */
+    private function invoiceSearch(?string $invoice): array
+    {
+        $needle = strtoupper(trim((string) $invoice));
+        $needle = mb_substr($needle, 0, self::INVOICE_SEARCH_MAXIMUM);
+        $needle = (string) preg_replace('/[^A-Z0-9-]/', '', $needle);
+        if ($needle === '') {
+            return ['value' => '', 'too_short' => false];
+        }
+        if (mb_strlen($needle) < self::INVOICE_SEARCH_MINIMUM) {
+            return ['value' => '', 'too_short' => true];
+        }
+
+        return ['value' => $needle, 'too_short' => false];
     }
 
     /** @return list<array<string, mixed>> */
@@ -64,7 +98,7 @@ final class AdminDashboardSalesData
             ->all();
     }
 
-    private function latestOrders(bool $canRetrySalesProof, string $activeFilter): array
+    private function latestOrders(bool $canRetrySalesProof, string $activeFilter, string $invoice = ''): array
     {
         $statuses = $this->statusesForFilter($activeFilter);
         $paginator = Order::query()
@@ -88,7 +122,11 @@ final class AdminDashboardSalesData
                     ]),
                 'salesProofPost:id,order_id,status,telegram_message_id,last_error,attempts',
                 'telegramOutboundEffects' => fn ($query) => $query
-                    ->where('effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)
+                    ->whereIn('effect_type', [
+                        TelegramOutboundEffectService::TYPE_SALES_PROOF,
+                        TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+                        TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD,
+                    ])
                     ->select([
                         'id',
                         'effect_group_key',
@@ -112,12 +150,18 @@ final class AdminDashboardSalesData
             ])
             ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at', 'telegram_receipt_sent_at'])
             ->when($statuses !== null, fn ($query) => $query->whereIn('order_status', array_map(fn (OrderStatus $status): string => $status->value, $statuses)))
+            ->when($invoice !== '', fn ($query) => $query->where(
+                'invoice_number',
+                'like',
+                str_starts_with($invoice, 'INV-') ? $invoice.'%' : '%'.$invoice.'%',
+            ))
             ->withCount('orderItems')
             ->latest()
             ->paginate(self::ORDERS_PER_PAGE, ['*'], 'sales_page')
             ->withQueryString();
 
         $orderIds = $paginator->getCollection()->modelKeys();
+        $credentialsOpened = $this->credentialOpenTimestamps($orderIds);
         $supplierFulfillments = SupplierFulfillment::query()
             ->select(['id', 'order_id', 'state'])
             ->with(['purchases:id,supplier_fulfillment_id,state'])
@@ -127,7 +171,7 @@ final class AdminDashboardSalesData
             ->get()
             ->groupBy('order_id');
         $orders = $paginator->getCollection()
-            ->map(function (Order $order) use ($canRetrySalesProof, $supplierFulfillments): array {
+            ->map(function (Order $order) use ($canRetrySalesProof, $supplierFulfillments, $credentialsOpened): array {
                 $earning = $this->paidReceiptLabel($order);
                 $orderStatusTone = $this->orderStatusTone($order->order_status);
                 $paymentStatusTone = $this->paymentStatusTone($order->payment_status);
@@ -154,6 +198,11 @@ final class AdminDashboardSalesData
                     'earning_amount' => $earning['amount'],
                     'item_count' => $order->order_items_count,
                     'sales_proof' => $this->salesProofState($order, $canRetrySalesProof),
+                    'credential_delivery' => $this->credentialDelivery(
+                        $order,
+                        $credentialsOpened[$order->id] ?? null,
+                        $supplierProgress !== null,
+                    ),
                     'created_at' => $order->created_at?->toDateTimeString(),
                     'created_at_label' => $order->created_at?->format('d M Y') ?? '-',
                 ];
@@ -216,6 +265,135 @@ final class AdminDashboardSalesData
         return ['label' => Money::idr($amount), 'amount' => $amount];
     }
 
+    /**
+     * The sales tab answers "were the customer credentials delivered?" from the
+     * three persisted facts that can actually answer it: the order-level
+     * Telegram receipt projection, the receipt effect group, and the storefront
+     * credential-open audit. Each line states what was observed, so a missing
+     * projection is never reported as "not delivered": orders fulfilled
+     * through a supplier or outside the bot never materialize a Telegram
+     * receipt and are labelled as such.
+     *
+     * @return array{verdict: string, tone: string, telegram: string, web: string|null, activity: string|null, review_url: string|null}
+     */
+    private function credentialDelivery(Order $order, ?string $openedAt = null, bool $hasSupplierFulfillment = false): array
+    {
+        $effect = $order->relationLoaded('telegramOutboundEffects')
+            ? $order->telegramOutboundEffects
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+                ->sortByDesc(fn (TelegramOutboundEffect $candidate): int => (int) $candidate->sequence)
+                ->first()
+            : null;
+        $state = $effect?->state instanceof TelegramOutboundEffectState
+            ? $effect->state->value
+            : (string) $effect?->getRawOriginal('state');
+        $web = $openedAt === null
+            ? 'Belum dibuka pelanggan di web.'
+            : 'Dibuka pelanggan di web '.Carbon::parse($openedAt)->timezone((string) config('app.timezone'))->format('d M Y H:i').'.';
+        $activity = $order->relationLoaded('telegramOutboundEffects')
+            && $order->telegramOutboundEffects
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD)
+                ->isNotEmpty()
+            ? 'Pelanggan menekan TXT pada pesan receipt.'
+            : null;
+        $reviewUrl = $effect !== null && in_array($state, [
+            TelegramOutboundEffectState::Unknown->value,
+            TelegramOutboundEffectState::ManualReview->value,
+        ], true) ? route('admin.telegram-outbound-effects.show', $effect) : null;
+
+        if ($order->payment_status !== PaymentStatus::Paid) {
+            return [
+                'verdict' => 'Belum dibayar',
+                'tone' => 'slate',
+                'telegram' => 'Kredensial dikirim setelah pembayaran lunas.',
+                'web' => null,
+                'activity' => null,
+                'review_url' => null,
+            ];
+        }
+
+        $sentAt = $order->telegram_receipt_sent_at ?? $effect?->sent_at;
+        if ($state === TelegramOutboundEffectState::Sent->value || $sentAt !== null) {
+            $messageId = $effect?->telegram_message_id;
+            $sentLabel = $sentAt === null
+                ? 'Telegram: receipt kredensial terkirim'
+                : 'Telegram: receipt kredensial terkirim '.Carbon::parse($sentAt)->timezone((string) config('app.timezone'))->format('d M Y H:i');
+
+            return [
+                'verdict' => 'Terkirim',
+                'tone' => 'emerald',
+                'telegram' => $sentLabel.($messageId === null ? '' : ' · pesan #'.$messageId).'.',
+                'web' => $web,
+                'activity' => $activity,
+                'review_url' => null,
+            ];
+        }
+
+        return match ($state) {
+            TelegramOutboundEffectState::Failed->value => [
+                'verdict' => 'Gagal dikirim',
+                'tone' => 'rose',
+                'telegram' => 'Telegram: pengiriman kredensial gagal'.($effect?->last_error ? ': '.mb_substr((string) $effect->last_error, 0, 120) : '').'.',
+                'web' => $web,
+                'activity' => $activity,
+                'review_url' => null,
+            ],
+            TelegramOutboundEffectState::Unknown->value, TelegramOutboundEffectState::ManualReview->value => [
+                'verdict' => 'Perlu review pengiriman',
+                'tone' => 'amber',
+                'telegram' => 'Telegram: hasil pengiriman kredensial belum pasti; putuskan di Manual Delivery Review.',
+                'web' => $web,
+                'activity' => $activity,
+                'review_url' => $reviewUrl,
+            ],
+            TelegramOutboundEffectState::Pending->value, TelegramOutboundEffectState::Sending->value => [
+                'verdict' => 'Sedang dikirim',
+                'tone' => 'amber',
+                'telegram' => 'Telegram: pengiriman kredensial sedang berjalan.',
+                'web' => $web,
+                'activity' => $activity,
+                'review_url' => null,
+            ],
+            default => $hasSupplierFulfillment ? [
+                'verdict' => 'Lewat supplier',
+                'tone' => 'blue',
+                'telegram' => 'Telegram: receipt kredensial tidak dibuat untuk order yang dikirim supplier atau di luar bot.',
+                'web' => $web,
+                'activity' => $activity,
+                'review_url' => null,
+            ] : [
+                'verdict' => 'Belum dikirim',
+                'tone' => 'slate',
+                'telegram' => 'Telegram: belum ada pengiriman kredensial tercatat.',
+                'web' => $web,
+                'activity' => $activity,
+                'review_url' => null,
+            ],
+        };
+    }
+
+    /**
+     * One bounded aggregate answers "did the customer open the credentials on
+     * the web storefront?" for a whole page of orders.
+     *
+     * @param  list<mixed>  $orderIds
+     * @return Collection<string, string>
+     */
+    private function credentialOpenTimestamps(array $orderIds): Collection
+    {
+        if ($orderIds === []) {
+            return collect();
+        }
+
+        return AuditLog::query()
+            ->selectRaw('subject_id, MAX(created_at) AS opened_at')
+            ->where('subject_type', Order::class)
+            ->where('action', 'storefront.credentials_opened')
+            ->whereIn('subject_id', array_map(static fn ($id): string => (string) $id, $orderIds))
+            ->groupBy('subject_id')
+            ->pluck('opened_at', 'subject_id');
+    }
+
     public function paymentAttention(Order $order): ?array
     {
         if (! $this->isLatePaidReleasedOrder($order)) {
@@ -229,7 +407,7 @@ final class AdminDashboardSalesData
         ];
     }
 
-    private function salesFilters(array $statusCounts, string $activeFilter): array
+    private function salesFilters(array $statusCounts, string $activeFilter, string $invoice = ''): array
     {
         $countFor = fn (OrderStatus ...$statuses): int => collect($statuses)
             ->sum(fn (OrderStatus $status): int => $statusCounts[$status->value]['count'] ?? 0);
@@ -263,7 +441,11 @@ final class AdminDashboardSalesData
         ])
             ->map(fn (array $filter): array => $filter + [
                 'active' => $filter['key'] === $activeFilter,
-                'url' => route('admin.dashboard', ['tab' => 'penjualan', 'sales_filter' => $filter['key']]),
+                'url' => route('admin.dashboard', array_filter([
+                    'tab' => 'penjualan',
+                    'sales_filter' => $filter['key'],
+                    'invoice' => $invoice,
+                ])),
             ])
             ->all();
     }

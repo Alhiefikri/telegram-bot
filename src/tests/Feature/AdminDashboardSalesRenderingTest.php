@@ -17,6 +17,8 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Models\SupplierFulfillment;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\CartService;
@@ -438,5 +440,168 @@ class AdminDashboardSalesRenderingTest extends TestCase
             ->assertSee('Failed')
             ->assertSee('Error: Store Channel chat is not configured')
             ->assertDontSee('>Pending<', false);
+    }
+
+    public function test_penjualan_invoice_search_matches_case_insensitively_and_reports_credential_delivery(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $customer = Customer::factory()->create(['first_name' => 'Budi']);
+
+        $delivered = Order::factory()->for($customer)->create([
+            'invoice_number' => 'INV-20261010-01JX8Y2M9AB',
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 75000,
+            'telegram_receipt_sent_at' => Carbon::parse('2026-10-10 21:30:00'),
+        ]);
+        OrderItem::factory()->for($delivered)->create(['product_name' => 'Netflix Premium', 'subtotal' => 75000]);
+        Payment::factory()->for($delivered)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 75000,
+            'paid_at' => Carbon::parse('2026-10-10 21:20:00'),
+        ]);
+        TelegramOutboundEffect::factory()->create([
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            'source_id' => (string) $delivered->id,
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_message_id' => '777001',
+        ]);
+        AuditLog::create([
+            'action' => 'storefront.credentials_opened',
+            'subject_type' => Order::class,
+            'subject_id' => (string) $delivered->id,
+            'new_values' => ['invoice_number' => $delivered->invoice_number],
+            'created_at' => Carbon::parse('2026-10-10 21:35:00'),
+            'updated_at' => Carbon::parse('2026-10-10 21:35:00'),
+        ]);
+
+        $waiting = Order::factory()->create([
+            'invoice_number' => 'INV-20261009-01JX7Y1M9AA',
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 25000,
+        ]);
+        TelegramOutboundEffect::factory()->create([
+            'effect_type' => TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+            'source_id' => (string) $waiting->id,
+            'state' => TelegramOutboundEffectState::ManualReview,
+            'manual_review_at' => Carbon::parse('2026-10-09 10:00:00'),
+        ]);
+        $unpaid = Order::factory()->create([
+            'invoice_number' => 'INV-20261008-01JX6Y0M9ZZ',
+            'order_status' => OrderStatus::PendingPayment,
+            'payment_status' => PaymentStatus::Pending,
+            'total_amount' => 15000,
+        ]);
+
+        $this->get('/admin?tab=penjualan&invoice=inv-20261010-01jx8y2m9ab')
+            ->assertOk()
+            ->assertSee('INV-20261010-01JX8Y2M9AB')
+            ->assertSee('Terkirim')
+            ->assertSee('Telegram: receipt kredensial terkirim 10 Oct 2026 21:30')
+            ->assertSee('Dibuka pelanggan di web 10 Oct 2026 21:35')
+            ->assertSee('Menampilkan 1 pesanan yang cocok dengan INV-20261010-01JX8Y2M9AB')
+            ->assertDontSee('INV-20261009-01JX7Y1M9AA')
+            ->assertDontSee('INV-20261008-01JX6Y0M9ZZ');
+
+        $this->get('/admin?tab=penjualan&invoice=01JX7Y1M9AA')
+            ->assertOk()
+            ->assertSee('INV-20261009-01JX7Y1M9AA')
+            ->assertSee('Perlu review pengiriman')
+            ->assertSee('Buka Manual Delivery Review')
+            ->assertSee(route('admin.telegram-outbound-effects.show', TelegramOutboundEffect::query()
+                ->where('source_id', (string) $waiting->id)
+                ->firstOrFail()), false)
+            ->assertDontSee('INV-20261010-01JX8Y2M9AB');
+
+        $this->get('/admin?tab=penjualan')
+            ->assertOk()
+            ->assertSee($unpaid->invoice_number)
+            ->assertSee('Belum dibayar')
+            ->assertSee('Kredensial dikirim setelah pembayaran lunas.')
+            ->assertSee('Telegram: hasil pengiriman kredensial belum pasti; putuskan di Manual Delivery Review.');
+    }
+
+    public function test_penjualan_reports_supplier_fulfilled_orders_without_a_fake_delivery_verdict(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $order = Order::factory()->create([
+            'invoice_number' => 'INV-20261010-SUPPLIER01',
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+            'total_amount' => 35000,
+        ]);
+        Payment::factory()->for($order)->create([
+            'status' => PaymentStatus::Paid,
+            'amount' => 35000,
+            'paid_at' => Carbon::parse('2026-10-10 20:00:00'),
+        ]);
+        $item = OrderItem::factory()->for($order)->create(['product_name' => 'Supplier Product', 'subtotal' => 35000]);
+        SupplierFulfillment::create([
+            'order_id' => $order->id,
+            'order_item_id' => $item->id,
+            'quantity' => 1,
+            'state' => 'delivered',
+            'maximum_cost_idr' => 20000,
+            'sources_snapshot' => [],
+        ]);
+
+        $this->get('/admin?tab=penjualan&invoice=INV-20261010-SUPPLIER01')
+            ->assertOk()
+            ->assertSee('Lewat supplier')
+            ->assertSee('Telegram: receipt kredensial tidak dibuat untuk order yang dikirim supplier atau di luar bot.')
+            ->assertDontSee('Belum dikirim');
+    }
+
+    public function test_penjualan_invoice_search_ignores_short_and_wildcard_input(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        Order::factory()->create(['invoice_number' => 'INV-20261010-AAAAAA']);
+        Order::factory()->create(['invoice_number' => 'INV-20261010-BBBBBB']);
+
+        $this->get('/admin?tab=penjualan&invoice=IN')
+            ->assertOk()
+            ->assertSee('Minimal 3 karakter. Pencarian diabaikan dan seluruh pesanan ditampilkan.')
+            ->assertSee('INV-20261010-AAAAAA')
+            ->assertSee('INV-20261010-BBBBBB');
+
+        $this->get('/admin?tab=penjualan&invoice=%25')
+            ->assertOk()
+            ->assertSee('INV-20261010-AAAAAA')
+            ->assertSee('INV-20261010-BBBBBB')
+            ->assertSee('Pencarian tidak aktif. Semua pesanan ditampilkan sesuai filter status di bawah.');
+
+        $this->get('/admin?tab=penjualan&invoice=BBBB')
+            ->assertOk()
+            ->assertSee('INV-20261010-BBBBBB')
+            ->assertDontSee('INV-20261010-AAAAAA');
+    }
+
+    public function test_penjualan_invoice_search_survives_status_filters_and_pagination(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        foreach (range(1, 12) as $index) {
+            Order::factory()->create([
+                'invoice_number' => 'INV-20261010-CARIAN'.str_pad((string) $index, 2, '0', STR_PAD_LEFT),
+                'order_status' => OrderStatus::Completed,
+                'payment_status' => PaymentStatus::Paid,
+                'created_at' => Carbon::parse('2026-10-10 10:00:00')->addMinutes($index),
+            ]);
+        }
+        Order::factory()->create(['invoice_number' => 'INV-20261010-LAIN']);
+
+        $this->get('/admin?tab=penjualan&invoice=CARIAN')
+            ->assertOk()
+            ->assertSee('Halaman 1 dari 2')
+            ->assertSee('invoice=CARIAN', false)
+            ->assertSee('sales_filter=completed', false)
+            ->assertSee('sales_filter=issue', false)
+            ->assertSee('sales_page=2', false)
+            ->assertDontSee('INV-20261010-LAIN');
+
+        $this->get('/admin?tab=penjualan&invoice=CARIAN&sales_page=2')
+            ->assertOk()
+            ->assertSee('Halaman 2 dari 2')
+            ->assertSee('INV-20261010-CARIAN01');
     }
 }

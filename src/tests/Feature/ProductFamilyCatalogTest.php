@@ -779,7 +779,79 @@ class ProductFamilyCatalogTest extends TestCase
         $this->actingAs($admin)
             ->get('/admin?tab=produk')
             ->assertOk()
-            ->assertSee('focusProductFamilyAssignment('.$family->id.')', false);
+            ->assertSee('addProductToFamily('.$family->id.')', false)
+            ->assertSee('name="product_family_id"', false);
+    }
+
+    public function test_creating_a_product_from_a_family_shortcut_assigns_that_family(): void
+    {
+        Storage::fake('public');
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
+        $category = Category::factory()->create(['name' => 'Streaming']);
+        $family = ProductFamily::factory()->create(['name' => 'Netflix']);
+        Product::factory()->create(['category_id' => $category->id, 'product_family_id' => $family->id]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.store'), [
+                'name' => 'Netflix Family 1 Bulan',
+                'price_amount' => '85000',
+                'category_id' => (string) $category->id,
+                'product_family_id' => (string) $family->id,
+                'description' => 'Akses Netflix satu bulan.',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-2')
+            ->assertSessionHasNoErrors();
+
+        $created = Product::query()->where('name', 'Netflix Family 1 Bulan')->firstOrFail();
+        $this->assertSame($family->id, $created->product_family_id);
+        $this->assertSame(0, $created->family_sort_order);
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'product.family_assigned',
+            'subject_type' => Product::class,
+            'subject_id' => (string) $created->id,
+        ]);
+    }
+
+    public function test_creating_a_product_in_an_incompatible_family_keeps_no_product_and_reports_the_field(): void
+    {
+        Storage::fake('public');
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
+        $streaming = Category::factory()->create(['name' => 'Streaming']);
+        $design = Category::factory()->create(['name' => 'Design']);
+        $family = ProductFamily::factory()->create(['name' => 'Netflix']);
+        Product::factory()->create(['category_id' => $streaming->id, 'product_family_id' => $family->id]);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk&product_form=create')
+            ->post(route('admin.products.store'), [
+                'name' => 'Canva Di Family Netflix',
+                'price_amount' => '45000',
+                'category_id' => (string) $design->id,
+                'product_family_id' => (string) $family->id,
+                'description' => 'Kategori tidak cocok dengan family.',
+            ])
+            ->assertRedirect('/admin?tab=produk')
+            ->assertSessionHasErrors('product_family_id', null, 'productCreate');
+
+        $this->assertDatabaseMissing('products', ['name' => 'Canva Di Family Netflix']);
+    }
+
+    public function test_product_create_rejects_a_soft_deleted_family(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Owner]);
+        $family = ProductFamily::factory()->create(['name' => 'Dihapus']);
+        $family->delete();
+
+        $this->actingAs($admin)
+            ->post(route('admin.products.store'), [
+                'name' => 'Produk Family Dihapus',
+                'price_amount' => '25000',
+                'product_family_id' => (string) $family->id,
+                'description' => 'Family sudah dihapus.',
+            ])
+            ->assertSessionHasErrors('product_family_id', null, 'productCreate');
+
+        $this->assertDatabaseMissing('products', ['name' => 'Produk Family Dihapus']);
     }
 
     public function test_roles_without_dashboard_access_cannot_mutate_families_or_memberships(): void

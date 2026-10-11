@@ -120,7 +120,7 @@
                             x-cloak
                             x-show="paymentSwitchOpen"
                             x-transition.opacity
-                            class="fixed inset-0 z-[70] flex items-center justify-center bg-neo-ink/60 p-3 sm:p-4"
+                            class="admin-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-neo-ink/60"
                             x-on:keydown.escape.window="if (paymentSwitchOpen) closePaymentProviderSwitch()"
                         >
                             <div class="absolute inset-0" x-on:click="closePaymentProviderSwitch()" aria-hidden="true"></div>
@@ -133,7 +133,7 @@
                                 tabindex="-1"
                                 x-on:keydown.tab="trapModalFocus($event)"
                                 x-on:focusin.window="if (paymentSwitchOpen) keepModalFocus($event, 'admin-payment-provider-switch-dialog')"
-                                class="relative max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-[var(--admin-radius)] border border-admin-line bg-admin-surface p-4 text-admin-ink shadow-admin-lg sm:p-5"
+                                class="admin-modal-shell relative w-full max-w-lg rounded-[var(--admin-radius)] border border-admin-line bg-admin-surface p-4 text-admin-ink shadow-admin-lg sm:p-5"
                             >
                                 <div class="flex items-start justify-between gap-3">
                                     <div class="min-w-0 pr-8">
@@ -160,7 +160,7 @@
                                     </p>
                                 </div>
 
-                                <div class="mt-4 grid grid-cols-2 gap-2">
+                                <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
                                     <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closePaymentProviderSwitch()">
                                         Batal
                                     </x-admin-dashboard.button>
@@ -850,7 +850,7 @@
                         x-cloak
                         x-show="checkoutMaintenanceOpen"
                         x-transition.opacity
-                        class="fixed inset-0 z-[70] flex items-center justify-center bg-neo-ink/60 p-3 sm:p-4"
+                        class="admin-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-neo-ink/60"
                         x-on:keydown.escape.window="if (checkoutMaintenanceOpen) closeCheckoutMaintenanceConfirmation()"
                     >
                         <div class="absolute inset-0" x-on:click="closeCheckoutMaintenanceConfirmation()" aria-hidden="true"></div>
@@ -863,7 +863,7 @@
                             tabindex="-1"
                             x-on:keydown.tab="trapModalFocus($event)"
                             x-on:focusin.window="if (checkoutMaintenanceOpen) keepModalFocus($event, 'admin-checkout-maintenance-dialog')"
-                            class="relative max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-[var(--admin-radius)] border border-admin-line bg-admin-surface p-4 text-admin-ink shadow-admin-lg sm:p-5"
+                            class="admin-modal-shell relative w-full max-w-lg rounded-[var(--admin-radius)] border border-admin-line bg-admin-surface p-4 text-admin-ink shadow-admin-lg sm:p-5"
                         >
                             <div class="flex items-start justify-between gap-3">
                                 <div class="min-w-0 pr-8">
@@ -878,7 +878,7 @@
                                     Katalog, stok, keranjang, dan Order yang sudah ada tetap tersedia. Hanya pembuatan Order baru yang terpengaruh.
                                 </p>
                             </div>
-                            <div class="mt-4 grid grid-cols-2 gap-2">
+                            <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
                                 <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeCheckoutMaintenanceConfirmation()">
                                     Batal
                                 </x-admin-dashboard.button>

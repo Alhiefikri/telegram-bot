@@ -59,6 +59,9 @@ class AdminDashboardController extends Controller
                 'section' => $request->query('section'),
                 'days' => $request->query('days'),
                 'currency' => $request->query('currency'),
+                'period' => $request->query('period'),
+                'month' => $request->query('month'),
+                'invoice' => $request->query('invoice'),
             ],
         );
         $dashboardErrors = $request->session()->get('errors', new ViewErrorBag);

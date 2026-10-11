@@ -1277,6 +1277,37 @@ is covered in the browser lane, not by markup assertions. Category management
 has no upload control, and the raw storefront-banner inputs use the same
 minimum target plus the admin focus outline.
 
+`x-admin-dashboard.modal-shell` owns the dialog width through one `size` prop
+(`sm|md|lg|xl|2xl|3xl`, default `lg`); consumers no longer pass their own
+`max-w-*`. The scroll box comes from the shared CSS hooks instead of per-modal
+math: `.admin-modal-backdrop` is `--tg-viewport-height`/`100dvh` tall with
+safe-area padding and `.admin-modal-shell` is `max-height: 100%` with
+`overflow-y: auto` and `overscroll-behavior: contain`, so the height never
+outgrows a phone viewport or the Telegram Mini App window. The raw settings
+confirmation dialogs (`admin-payment-provider-switch-dialog`,
+`admin-checkout-maintenance-dialog`) and the Owner release modal reuse those two
+hooks rather than re-declaring `vh` limits. A `min-width: 0` rule on the shell's
+structural, control and text children stops a grid or flex box from refusing to
+shrink below an input's or button label's intrinsic width, which is what pushed
+dialogs sideways at phone widths with enlarged text; modal action rows sit in
+`grid-cols-1 … sm:grid-cols-2` so their buttons stack instead of squeezing
+below 640px. Produk's product
+modal is `2xl` and splits its body into `data-product-modal-grid`
+(`grid lg:grid-cols-2`) with a sticky action footer, so the product form fits a
+desktop viewport instead of one long scroll; the product-family, stock intake
+and category modals were widened the same way and the family form lays its
+fields out in a two-column grid with the image cards side by side.
+
+`AdminProductCreateController` accepts an optional `product_family_id` and
+assigns the new Product through `ProductFamilyManagementService::updateMembership()`
+inside the same transaction, so the family-group shortcut
+(`addProductToFamily(<id>)` → `openProductForm(familyId)`) writes grouping at
+create time and no longer focuses an unrelated Product's assignment select. A
+`ProductFamilyCategoryMismatch` rolls the create back and returns the
+`productCreate` bag error on `product_family_id` (uploads discarded);
+`product_family_id` use is create-only because membership edits keep their own
+Product-card form.
+
 Operational surfaces (#603) now render entirely through those primitives:
 Produk (catalog tab, product card, product/family/category modals, stock intake
 and management modals, storefront banners), Pesanan (`admin.dashboard` sales
@@ -1294,7 +1325,34 @@ bag, `old()`, permission gate, Alpine state key, or domain rule changed.
 
 Summary, communication, reporting and finance surfaces render through the
 primitives. Ringkasan uses `stats-tab` for daily sales, the 7/30-day chart,
-actionable attention, and recent orders. Pengaturan uses `settings-tab` for
+actionable attention, and recent orders.
+
+### Ringkasan reporting periods and Pesanan invoice search
+
+`AdminDashboardOverviewData` owns every Ringkasan aggregate. `period` accepts
+`harian` (7/30-day window), `mingguan` (8 Monday–Sunday buckets), `bulanan` (12
+month buckets) and `bulan` (one selected month, day buckets); `month` accepts a
+bounded `YYYY-MM` inside `months.bounds` so the picker can only request the
+recent past. The response carries `period` (points, total, average, peak, axis,
+`has_sales`, `partial_label`) plus `months` (current, previous, optional
+selected tile with a comparison delta) and `period_options`. Weekly and monthly
+buckets come from `PaymentReceiptReport::monthlySalesReceipts()`, which shares
+`successfulSalesReceiptBuckets()` with `dailySalesReceipts()`; each Ringkasan
+request issues at most four aggregated receipts queries. `salesChart` (Alpine,
+`resources/js/admin-dashboard.js`) owns chart hover/focus tooltips and keyboard
+focus on `[data-chart-bar]`; `tests/JavaScript/admin-sales-chart.test.js` covers
+the tooltip clamp, and the browser lane covers period switching, hover/keyboard
+tooltip parity and month selection.
+
+Pesanan accepts `invoice` (`AdminDashboardSalesData::forSales()` normalizes it to
+upper-case `[A-Z0-9-]`, ignores fewer than 3 characters and never passes LIKE
+wildcards). Each sales row now carries `credential_delivery`, derived from
+persisted facts only: the latest `receipt.credentials` effect state/`sent_at`,
+`orders.telegram_receipt_sent_at`, the `receipt.txt_download` interaction trace
+and the `storefront.credentials_opened` audit aggregate (one bounded query per
+page). A streamed order whose receipt was never materialized reports "Belum
+dikirim" instead of failing; unknown/manual-review states link to Manual
+Delivery Review. Pengaturan uses `settings-tab` for
 payment/store controls, IDR/USDT policy, and balance diagnostics in separate
 sections. Siaran, Store Channel, Funnel, Kompensasi top-up, and linked pages
 `admin/balance-reports/index`, `admin/store-balance/adjustments`, and
@@ -1334,6 +1392,8 @@ initialization remain unchanged.
 Render/navigation repairs (#601): the authorized active tab body is server-rendered without `x-cloak`/`x-show`; only interactive overlays need Alpine to become visible. The shared topbar is sticky on dashboard and linked pages. Its lifecycle-owned height observer supplies native hash/focus scroll padding and restores the prior inline height on destruction, with a conservative CSS fallback for no-JavaScript pages. `focusReturnTarget()` aligns section starts below the header rather than centering oversized sections; focus/highlight and stable return targets remain intact. Ordinary and modified navigation clicks preserve the current client fragment only when the server destination has no explicit hash. Passing-after smoke and the per-item antislop gate are recorded in [the sidebar cutover notes](admin-dashboard-sidebar-cutover.md).
 
 The no-JavaScript topbar fallback uses font-relative budgets of 18rem below 640px and 10rem at wider widths, plus the safe-area inset. Native payment-settings headings remained visible at 200% text size from 320 to 1280px. Stats revenue rows wrap at the narrow boundary instead of widening the document.
+
+`x-admin-dashboard.topbar` bounds its own height on phones: the group label and page title render as single truncated lines, the status badges sit in one horizontally scrollable strip, and the actions stay on one non-wrapping line whose store link may shrink. Without that, 200% text at 320px inflated the sticky bar to 613px (taller than the viewport) and covered the page content underneath.
 
 Mobile lifecycle (#595): `resources/js/admin-dashboard/navigation.js` owns
 `sidebarOpen`, visible opener restoration, overflow-style ownership,

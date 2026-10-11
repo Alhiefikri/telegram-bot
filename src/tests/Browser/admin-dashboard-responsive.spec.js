@@ -2958,9 +2958,14 @@ test("keeps grouped Product Family controls usable at mobile width", async ({
     ""
   );
   await group.getByRole("button", { name: "+ Tambah Product" }).click();
-  await expect(
-    page.locator("[data-family-assignment-select]:focus")
-  ).toHaveValue(familyId);
+  const createModal = page.locator("#product-modal");
+  await expect(createModal).toBeVisible();
+  await expect(createModal).toContainText("Tambah produk");
+  await expect(createModal.locator("#product-family")).toHaveValue(familyId);
+  await expect(createModal.locator("#product-name")).toBeFocused();
+  await expectNoDocumentOverflow(page);
+  await createModal.getByRole("button", { name: "Tutup modal" }).click();
+  await expect(createModal).toBeHidden();
   const editButton = group.getByRole("button", { name: /Edit family/i });
   await editButton.click();
   const modal = page.locator("#admin-product-family-management");
@@ -2975,6 +2980,531 @@ test("keeps grouped Product Family controls usable at mobile width", async ({
   await modal.getByRole("button", { name: "Tutup modal" }).click();
   await expect(modal).toBeHidden();
   await expect(editButton).toBeFocused();
+});
+
+test("shows hoverable revenue buckets for every reporting period", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin`, { waitUntil: "domcontentloaded" });
+
+  const stats = page.locator("#admin-section-stats");
+  const periodOptions = stats.locator("[data-period-option]");
+  await expect(periodOptions).toHaveCount(4);
+  await expect(
+    stats.locator('[data-period-option="harian"]')
+  ).toHaveAttribute("aria-current", "page");
+  await expect(stats).toContainText("7 hari terakhir");
+
+  const bars = stats.locator("[data-chart-bar]");
+  await expect(bars).toHaveCount(7);
+  const tooltip = stats.locator("[data-chart-tooltip]");
+  await expect(tooltip).toBeHidden();
+
+  const todayLabel = await bars.last().getAttribute("aria-label");
+  expect(todayLabel).toMatch(/\d{2} \w{3} \d{4}: Rp[\d.]+,\s*\d+ pesanan lunas/);
+
+  const plotGeometry = await stats.locator('[aria-label^="Grafik pendapatan"]').evaluate((node) => {
+    const plot = node.querySelector("[x-ref='plot'], .relative.h-52");
+    const axis = node.firstElementChild;
+    const bars = Array.from(node.querySelectorAll("[data-chart-bar]"));
+    const plotBox = plot.getBoundingClientRect();
+    return {
+      axisRight: axis.getBoundingClientRect().right,
+      plotLeft: plotBox.left,
+      plotRight: plotBox.right,
+      overflow: bars.filter((bar) => {
+        const box = bar.getBoundingClientRect();
+        return box.width <= 0 || box.left < plotBox.left - 1 || box.right > plotBox.right + 1;
+      }).length,
+    };
+  });
+  expect(plotGeometry.axisRight).toBeLessThanOrEqual(plotGeometry.plotLeft);
+  expect(plotGeometry.overflow).toBe(0);
+
+  await bars.last().hover();
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText(todayLabel.split(": ")[0]);
+  const hoveredAmount = await tooltip.locator("p").nth(1).innerText();
+  expect(hoveredAmount).toMatch(/^Rp[\d.]+$/);
+
+  const tooltipPlacement = await tooltip.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    const plot = node.parentElement.getBoundingClientRect();
+    return { left: box.left, right: box.right, plotLeft: plot.left, plotRight: plot.right };
+  });
+  expect(tooltipPlacement.left).toBeGreaterThanOrEqual(tooltipPlacement.plotLeft - 1);
+  expect(tooltipPlacement.right).toBeLessThanOrEqual(tooltipPlacement.plotRight + 1);
+
+  // The accessible per-bucket list must agree with the hovered bucket.
+  const detailsRows = stats.locator("details dl > div");
+  const lastRow = detailsRows.last();
+  await expect(lastRow.locator("dd")).toContainText(hoveredAmount);
+
+  await page.mouse.move(0, 0);
+  await expect(tooltip).toBeHidden();
+
+  await bars.nth(0).focus();
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText("pesanan lunas");
+  await expectNoDocumentOverflow(page);
+
+  await stats.locator('[data-period-option="mingguan"]').click();
+  await expect(page).toHaveURL(/period=mingguan/);
+  await expect(stats.locator('[data-period-option="mingguan"]')).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
+  await expect(stats).toContainText("8 minggu terakhir");
+  await expect(stats.locator("[data-chart-bar]")).toHaveCount(8);
+
+  await stats.locator('[data-period-option="bulanan"]').click();
+  await expect(stats).toContainText("12 bulan terakhir");
+  await expect(stats.locator("[data-chart-bar]")).toHaveCount(12);
+  await expect(stats).toContainText("Bulan ini");
+  await expect(stats).toContainText("Bulan kemarin");
+  const monthBarKeys = await stats
+    .locator("[data-chart-bar]")
+    .evaluateAll((nodes) => nodes.map((node) => node.dataset.chartBar));
+  expect(monthBarKeys).toHaveLength(12);
+  expect(new Set(monthBarKeys).size).toBe(12);
+  for (const key of monthBarKeys) {
+    expect(key).toMatch(/^\d{4}-\d{2}$/);
+  }
+
+  await stats.locator('[data-period-option="bulan"]').click();
+  const monthInput = stats.locator('input[name="month"]');
+  await expect(monthInput).toBeVisible();
+  const selectedMonth = await monthInput.inputValue();
+  expect(selectedMonth).toMatch(/^\d{4}-\d{2}$/);
+  await expect(stats).toContainText("Bulan tertentu");
+  await expect(stats.locator("[data-admin-target-month]")).toBeHidden();
+
+  const previousMonth = await page.evaluate((value) => {
+    const [year, month] = value.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 2, 1));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  }, selectedMonth);
+  await monthInput.fill(previousMonth);
+  await stats.getByRole("button", { name: "Tampilkan" }).click();
+  await expect(page).toHaveURL(new RegExp(`month=${previousMonth}`));
+  await expect(stats).toContainText("Bulan dituju");
+  await expect(stats.locator("[data-admin-target-month]")).toBeVisible();
+  await expect(stats.locator("[data-admin-target-month]")).toContainText("pesanan lunas");
+  await expectNoDocumentOverflow(page);
+
+  // The same surface must stay inside a phone viewport, including the month
+  // picker and the per-bucket chart for a month that has sales.
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(`${baseUrl}/admin?tab=stats&period=bulan&month=${selectedMonth}`, {
+    waitUntil: "domcontentloaded",
+  });
+  await expect(stats.locator("[data-admin-target-month]")).toBeHidden();
+  await expect(stats.locator("[data-chart-bar]")).not.toHaveCount(0);
+  await expect(stats).toContainText("Bulan tertentu");
+  const monthSubmit = stats.getByRole("button", { name: "Tampilkan" });
+  await expect(monthSubmit).toBeVisible();
+  await monthSubmit.scrollIntoViewIfNeeded();
+  await expectUncoveredByTopbar(page, monthSubmit);
+  await expectUncoveredByTopbar(page, stats.locator('input[name="month"]'));
+  await expectNoDocumentOverflow(page);
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(stats.locator("[data-chart-bar]")).not.toHaveCount(0);
+  const narrowBar = stats.locator("[data-chart-bar]").last();
+  await narrowBar.focus();
+  await expect(stats.locator("[data-chart-tooltip]")).toBeVisible();
+  await expect(stats.locator("[data-chart-tooltip]")).toBeInViewport();
+  await expectNoDocumentOverflow(page);
+
+  const measureNarrowBars = () =>
+    stats.locator('[aria-label^="Grafik pendapatan"]').evaluate((node) => {
+      const plot = node.querySelector('.h-52.relative, .relative');
+      const plotBox = plot.getBoundingClientRect();
+      const bars = Array.from(node.querySelectorAll("[data-chart-bar]"));
+      return {
+        count: bars.length,
+        overflow: bars.filter((bar) => {
+          const box = bar.getBoundingClientRect();
+          return (
+            box.width <= 0 ||
+            box.left < plotBox.left - 1 ||
+            box.right > plotBox.right + 1
+          );
+        }).length,
+      };
+    });
+
+  const narrowMonth = await measureNarrowBars();
+  expect(narrowMonth.count).toBeGreaterThan(0);
+  expect(narrowMonth.overflow).toBe(0);
+
+  // A twelve-bucket window is the densest layout the daily-style chart shows
+  // on a phone; every bar must still fit inside the plot.
+  await page.goto(`${baseUrl}/admin?tab=stats&period=bulanan`, {
+    waitUntil: "domcontentloaded",
+  });
+  const narrowYear = await measureNarrowBars();
+  expect(narrowYear.count).toBe(12);
+  expect(narrowYear.overflow).toBe(0);
+  await expectNoDocumentOverflow(page);
+});
+
+const adminModalPhoneViewports = [
+  { width: 320, height: 568 },
+  { width: 360, height: 740 },
+  { width: 375, height: 812 },
+  { width: 390, height: 844 },
+  { width: 412, height: 915 },
+];
+
+async function expectDialogFitsViewport(page, dialog, label) {
+  const viewport = page.viewportSize();
+  const box = await dialog.boundingBox();
+  expect(box, label).not.toBeNull();
+  expect(Math.round(box.x), label).toBeGreaterThanOrEqual(-1);
+  expect(Math.round(box.y), label).toBeGreaterThanOrEqual(-1);
+  expect(Math.round(box.x + box.width), label).toBeLessThanOrEqual(viewport.width + 1);
+  expect(
+    Math.round(box.y + box.height),
+    label
+  ).toBeLessThanOrEqual(viewport.height + 1);
+
+  const geometry = await dialog.evaluate((node) => {
+    const own = node.getBoundingClientRect();
+    const overflowing = Array.from(node.querySelectorAll("*")).filter((child) => {
+      if (!child.checkVisibility()) return false;
+      if (getComputedStyle(child).clipPath !== "none") return false;
+      const rect = child.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      return rect.right > own.right + 1 || rect.left < own.left - 1;
+    });
+    return {
+      overflow: node.scrollWidth - node.clientWidth,
+      overscroll: getComputedStyle(node).overscrollBehaviorY,
+      overflowing: overflowing.map(
+        (child) => `${child.tagName}.${child.className}`.slice(0, 120)
+      ),
+    };
+  });
+
+  expect(geometry.overflow, label).toBeLessThanOrEqual(1);
+  expect(geometry.overscroll, label).toBe("contain");
+  expect(geometry.overflowing, label).toEqual([]);
+
+  await expectStrictTouchTargetsAtLeast44px(dialog);
+
+  // A dialog taller than the phone window must scroll inside itself all the
+  // way to its last control instead of clipping it.
+  const scrollable = await dialog.evaluate(
+    (node) => node.scrollHeight > node.clientHeight + 1
+  );
+  if (scrollable) {
+    const controls = dialog.locator("button, a[href]");
+    const total = await controls.count();
+    let tail = null;
+    for (let index = total - 1; index >= 0; index -= 1) {
+      const candidate = controls.nth(index);
+      if (await candidate.isVisible()) {
+        tail = candidate;
+
+        break;
+      }
+    }
+
+    expect(tail, `${label} exposes a visible tail control`).not.toBeNull();
+    await dialog.evaluate((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
+    await expect(tail, label).toBeInViewport();
+    await dialog.evaluate((node) => {
+      node.scrollTop = 0;
+    });
+  }
+}
+
+async function adminProductModalCases(page) {
+  const section = page.locator("#admin-section-products");
+  const productCard = await getAdminProductCard(
+    page,
+    "Browser QA Produk A",
+    "Browser QA Product Family"
+  );
+
+  return [
+    {
+      name: "Tambah produk",
+      open: () =>
+        section
+          .getByRole("button", { name: /Tambah Produk/ })
+          .first()
+          .click(),
+    },
+    {
+      name: "Edit produk",
+      open: () =>
+        productCard.getByRole("button", { name: "Ubah", exact: true }).click(),
+    },
+    {
+      name: "Kelola Product Family",
+      open: () =>
+        section.getByRole("button", { name: /Kelola Product Family/ }).click(),
+    },
+    {
+      name: "Kelola Kategori",
+      open: () =>
+        section.getByRole("button", { name: /Kelola Kategori/ }).click(),
+    },
+    {
+      name: "Tambah stok",
+      open: () =>
+        productCard.getByRole("button", { name: "Stok", exact: true }).click(),
+    },
+    {
+      name: "Kelola stok",
+      open: () =>
+        productCard
+          .getByRole("button", { name: "Kelola", exact: true })
+          .click(),
+    },
+  ];
+}
+
+async function expectEveryProductModalFits(page, suffix) {
+  for (const modal of await adminProductModalCases(page)) {
+    await modal.open();
+    const dialog = page.getByRole("dialog", { name: modal.name }).first();
+    await expect(dialog, `${modal.name}${suffix}`).toBeVisible();
+    await expectDialogFitsViewport(page, dialog, `${modal.name}${suffix}`);
+    await expectNoDocumentOverflow(page);
+    await dialog.getByRole("button", { name: "Tutup modal" }).click();
+    await expect(dialog, `${modal.name}${suffix}`).toBeHidden();
+  }
+}
+
+test("keeps every product admin modal inside phone viewports", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await page.setViewportSize(adminModalPhoneViewports[0]);
+  await login(page);
+
+  for (const viewport of adminModalPhoneViewports) {
+    await page.setViewportSize(viewport);
+    await page.goto(`${baseUrl}/admin?tab=produk`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await expectEveryProductModalFits(
+      page,
+      ` at ${viewport.width}x${viewport.height}`
+    );
+  }
+});
+
+test("keeps product admin modals inside a phone viewport at 200% text", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`, {
+    waitUntil: "domcontentloaded",
+  });
+  await page.addStyleTag({ content: "html { font-size: 200%; }" });
+  await expect
+    .poll(() =>
+      page.evaluate(() => getComputedStyle(document.documentElement).fontSize)
+    )
+    .toBe("32px");
+
+  await expectEveryProductModalFits(page, " at 320x568 with 200% text");
+});
+
+test("keeps the settings confirmation dialogs inside phone viewports", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const viewports = [
+    { width: 320, height: 568, text: "100%" },
+    { width: 390, height: 844, text: "100%" },
+    { width: 320, height: 568, text: "200%" },
+  ];
+  await page.setViewportSize(viewports[0]);
+  await login(page);
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.goto(
+      `${baseUrl}/admin?tab=settings&section=pembayaran#admin-checkout-maintenance`,
+      { waitUntil: "domcontentloaded" }
+    );
+    if (viewport.text !== "100%") {
+      await page.addStyleTag({
+        content: `html { font-size: ${viewport.text}; }`,
+      });
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => getComputedStyle(document.documentElement).fontSize
+          )
+        )
+        .toBe("32px");
+    }
+
+    const maintenanceForm = page
+      .locator("form[data-checkout-maintenance-target]")
+      .first();
+    await expect(maintenanceForm).toBeVisible();
+    await maintenanceForm.locator('button[type="submit"]').first().click();
+    const maintenanceDialog = page.locator("#admin-checkout-maintenance-dialog");
+    await expect(maintenanceDialog).toBeVisible();
+    await expectDialogFitsViewport(
+      page,
+      maintenanceDialog,
+      `Checkout Maintenance at ${viewport.width}px ${viewport.text} text`
+    );
+    await expectNoDocumentOverflow(page);
+    await maintenanceDialog
+      .getByRole("button", { name: "Tutup dialog Checkout Maintenance" })
+      .click();
+    await expect(maintenanceDialog).toBeHidden();
+
+    const providerSwitchForm = page
+      .locator("form[data-provider-switch-target]")
+      .first();
+    await expect(providerSwitchForm).toBeVisible();
+    await providerSwitchForm.locator('button[type="submit"]').first().click();
+    const providerDialog = page.locator("#admin-payment-provider-switch-dialog");
+    await expect(providerDialog).toBeVisible();
+    await expectDialogFitsViewport(
+      page,
+      providerDialog,
+      `Payment provider switch at ${viewport.width}px ${viewport.text} text`
+    );
+    await expectNoDocumentOverflow(page);
+    await providerDialog
+      .getByRole("button", { name: "Tutup dialog provider" })
+      .click();
+    await expect(providerDialog).toBeHidden();
+  }
+});
+
+test("searches orders by invoice and reports credential delivery", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=penjualan`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  const search = page.locator("#sales-invoice-search");
+  await expect(search).toBeVisible();
+  await search.fill("inv-browser-delivery-review");
+  await page.getByRole("button", { name: "Cari invoice" }).click();
+
+  const section = page.locator("#admin-section-sales");
+  await expect(section).toContainText(
+    "Menampilkan 1 pesanan yang cocok dengan INV-BROWSER-DELIVERY-REVIEW"
+  );
+  await expect(section).toContainText("INV-BROWSER-DELIVERY-REVIEW");
+  await expect(section).toContainText("Pengiriman kredensial");
+  await expect(section).toContainText("Telegram: belum ada pengiriman kredensial tercatat.");
+  await expect(section).not.toContainText("INV-BROWSER-A");
+
+  await page.getByRole("link", { name: "Reset" }).click();
+  await expect(page).toHaveURL(/tab=penjualan/);
+  expect(page.url()).not.toContain("invoice=");
+  await expect(section).toContainText("Pencarian tidak aktif.");
+  await expect(section).toContainText("INV-BROWSER-A");
+
+  await search.fill("INV-BROWSER-A");
+  await page.getByRole("button", { name: "Cari invoice" }).click();
+  await expect(section).toContainText("INV-BROWSER-A");
+  await expect(section).toContainText("Browser QA Produk A");
+  await expect(section).not.toContainText("INV-BROWSER-B");
+  await expect(page.getByLabel("Filter penjualan")).toBeVisible();
+  await expect(page.locator(".filter-pill-active")).toBeVisible();
+  await expectNoDocumentOverflow(page);
+
+  // The same search must stay usable on a phone: stacked form, reachable
+  // controls, and the delivery block inside the card.
+  for (const viewport of [
+    { width: 360, height: 740 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto(
+      `${baseUrl}/admin?tab=penjualan&invoice=INV-BROWSER-DELIVERY-REVIEW`,
+      { waitUntil: "domcontentloaded" }
+    );
+    await expect(search).toBeVisible();
+    await expect(section).toContainText("INV-BROWSER-DELIVERY-REVIEW");
+    await expect(section).toContainText("Pengiriman kredensial");
+    const submit = page.getByRole("button", { name: "Cari invoice" });
+    await submit.scrollIntoViewIfNeeded();
+    await expectUncoveredByTopbar(page, submit);
+    await expectUncoveredByTopbar(page, search);
+    const searchBox = await page
+      .locator("#sales-invoice-search-title")
+      .locator("xpath=..")
+      .evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return { left: rect.left, right: rect.right };
+      });
+    expect(Math.round(searchBox.left)).toBeGreaterThanOrEqual(-1);
+    expect(Math.round(searchBox.right)).toBeLessThanOrEqual(viewport.width + 1);
+    await expectNoDocumentOverflow(page);
+  }
+});
+
+test("keeps the wide product modal in two columns with a visible action footer", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`, {
+    waitUntil: "domcontentloaded",
+  });
+
+  await page
+    .locator("#admin-section-products")
+    .getByRole("button", { name: /Tambah Produk/ })
+    .first()
+    .click();
+  const modal = page.locator("#product-modal");
+  await expect(modal).toBeVisible();
+
+  const geometry = await modal.evaluate((node) => {
+    const grid = node.querySelector("[data-product-modal-grid]");
+    const columns = getComputedStyle(grid);
+    return {
+      width: node.getBoundingClientRect().width,
+      viewportWidth: window.innerWidth,
+      columnCount: columns.gridTemplateColumns.split(" ").filter(Boolean).length,
+      scrollRange: node.scrollHeight - node.clientHeight,
+    };
+  });
+
+  expect(geometry.width).toBeGreaterThan(900);
+  expect(geometry.width).toBeLessThan(geometry.viewportWidth);
+  expect(geometry.columnCount).toBe(2);
+  // The sticky footer plus the two-column body keep the whole form inside a
+  // single desktop viewport, so submitting never needs a long scroll.
+  expect(geometry.scrollRange).toBeLessThan(900);
+
+  const submit = modal.getByRole("button", { name: /Submit produk|Simpan/ });
+  const footer = submit.locator("xpath=ancestor::div[1]");
+  await expect(footer).toBeInViewport();
+  await expect(submit).toBeInViewport();
+
+  await modal.locator("#product-description-id-panel textarea").first().fill("Deskripsi uji tata letak.");
+  await modal.locator("#product-name").scrollIntoViewIfNeeded();
+  await expect(submit).toBeInViewport();
+  await expectNoDocumentOverflow(page);
 });
 
 test("keeps the mobile navigation focus contained and restores its trigger", async ({

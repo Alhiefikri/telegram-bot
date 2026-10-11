@@ -113,6 +113,13 @@ class AdminProductDashboardFormProtocol
             ->withInput($request->except(['_token', '_method', 'image']));
     }
 
+    public function productCreateBusinessValidationError(Request $request, string $field, string $message): RedirectResponse
+    {
+        return $this->productTabRedirect()
+            ->withErrors([$field => $message], self::PRODUCT_CREATE_BAG)
+            ->withInput($request->except(['_token', '_method', 'image', 'telegram_image', 'telegram_channel_image']));
+    }
+
     public function productFamilyCreateValidationErrors(Request $request, Validator $validator): RedirectResponse
     {
         return $this->productFamilyManagementRedirect('create')

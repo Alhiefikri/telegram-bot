@@ -37,6 +37,9 @@
             $salesFilters = $salesTab['filters'];
             $orders = $salesTab['orders'];
             $salesPagination = $salesTab['pagination'];
+            $salesInvoice = $salesTab['invoice'] ?? '';
+            $salesInvoiceTooShort = (bool) ($salesTab['invoice_too_short'] ?? false);
+            $salesActiveFilter = $salesTab['active_filter'] ?? 'all';
             $storeChannel = $storeChannelTab;
             $funnelTab = $funnelTab ?? [];
             $balanceIssuesTab = $balanceIssuesTab ?? [];
@@ -76,15 +79,15 @@
                         </button>
                     </x-slot:menu>
                     <x-slot:pageContext>
-                        <p class="text-xs font-medium text-admin-muted">{{ $activeNavigationGroup['label'] }}</p>
-                        <h1 class="text-lg font-semibold text-admin-ink sm:text-xl">{{ $activeNavigationItem['label'] }}</h1>
+                        <p class="truncate text-xs font-medium text-admin-muted">{{ $activeNavigationGroup['label'] }}</p>
+                        <h1 class="truncate text-lg font-semibold text-admin-ink sm:text-xl">{{ $activeNavigationItem['label'] }}</h1>
                     </x-slot:pageContext>
                     <x-slot:status>
                         <x-admin-dashboard.badge :tone="$storeStatus['tone']" dot>{{ $storeStatus['label'] }}</x-admin-dashboard.badge>
                         <x-admin-dashboard.badge :tone="$checkoutMaintenance['tone']" dot>{{ $checkoutMaintenance['status_badge']['label'] }}</x-admin-dashboard.badge>
                     </x-slot:status>
                     <x-slot:actions>
-                        <x-admin-dashboard.button :href="$actions['shop']" variant="neutral" size="sm">Buka Toko</x-admin-dashboard.button>
+                        <x-admin-dashboard.button :href="$actions['shop']" variant="neutral" size="sm" class="min-w-0 truncate">Buka Toko</x-admin-dashboard.button>
                         <x-theme-toggle class="h-11 w-11 shrink-0 rounded-lg border border-admin-line bg-admin-surface text-admin-ink focus-visible:outline-2 focus-visible:outline-admin-focus" />
                     </x-slot:actions>
                     <x-slot:identity>

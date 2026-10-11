@@ -8,7 +8,7 @@
             description="Atur nama, deskripsi, visibilitas, urutan, dan hubungan produk dari satu tempat."
             data-admin-return-target
             tabindex="-1"
-            class="max-h-[92vh] w-full max-w-3xl overflow-y-auto"
+            size="xl"
         >
             @if ($errors->categoryCreate->any() || $errors->categoryUpdate->any() || $errors->categoryDelete->any())
                 <x-admin-dashboard.notice tone="danger" class="mb-3 animate-slide-up">

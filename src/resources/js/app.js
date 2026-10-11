@@ -1,5 +1,5 @@
 import Alpine from "alpinejs";
-import adminDashboard, { salesFilter } from "./admin-dashboard";
+import adminDashboard, { salesFilter, salesChart } from "./admin-dashboard";
 import initTheme from "./theme";
 import supplierConnectionForm from "./supplier-connection-form";
 import dashboardNavigation from "./admin-dashboard/navigation";
@@ -19,6 +19,7 @@ Alpine.data("dashboardNavigation", () => ({
   },
 }));
 Alpine.data("salesFilter", salesFilter);
+Alpine.data("salesChart", salesChart);
 Alpine.data("supplierConnectionForm", supplierConnectionForm);
 Alpine.data("passwordReveal", () => ({
   showPassword: false,

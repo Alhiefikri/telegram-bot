@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Exceptions\ProductFamilyCategoryMismatch;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreProductRequest;
 use App\Models\Category;
 use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\AdminProductQuantityPricing;
+use App\Services\Admin\ProductFamilyManagementService;
 use App\Services\Admin\ProductImageOptimizer;
 use App\Services\AuditLogger;
 use App\Services\Telegram\TelegramProductNotificationService;
@@ -19,7 +21,7 @@ use Throwable;
 
 class AdminProductCreateController extends Controller
 {
-    public function __invoke(StoreProductRequest $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms, AdminProductQuantityPricing $tierPricing): RedirectResponse
+    public function __invoke(StoreProductRequest $request, AuditLogger $auditLogger, TelegramProductNotificationService $notifications, ProductImageOptimizer $images, AdminProductDashboardFormProtocol $forms, AdminProductQuantityPricing $tierPricing, ProductFamilyManagementService $families): RedirectResponse
     {
         $startedAt = DogfoodTiming::now();
         $user = $request->attributes->get('adminUser');
@@ -34,7 +36,7 @@ class AdminProductCreateController extends Controller
             $imagePath = $request->hasFile('image') ? $images->store($request->file('image')) : null;
             $telegramImagePath = $request->hasFile('telegram_image') ? $images->storeTelegram($request->file('telegram_image')) : null;
             $telegramChannelImagePath = $request->hasFile('telegram_channel_image') ? $images->storeTelegramChannel($request->file('telegram_channel_image')) : null;
-            $product = DB::transaction(function () use ($validated, $imagePath, $telegramImagePath, $telegramChannelImagePath, $auditLogger, $user, $request, $tierPricing): Product {
+            $product = DB::transaction(function () use ($validated, $imagePath, $telegramImagePath, $telegramChannelImagePath, $auditLogger, $user, $request, $tierPricing, $families): Product {
                 $categoryId = $validated['category_id'] ?? null;
 
                 if ($categoryId !== null) {
@@ -80,18 +82,19 @@ class AdminProductCreateController extends Controller
                     $request->ip(),
                 );
 
+                $familyId = $validated['product_family_id'] ?? null;
+                if ($familyId !== null) {
+                    $families->updateMembership($product, (int) $familyId, 0, null, $user, $request->ip());
+                }
+
                 return $product;
             }, 5);
+        } catch (ProductFamilyCategoryMismatch $exception) {
+            $this->discardUploads($images, $imagePath, $telegramImagePath, $telegramChannelImagePath);
+
+            return $forms->productCreateBusinessValidationError($request, 'product_family_id', $exception->getMessage());
         } catch (Throwable $exception) {
-            if ($imagePath !== null) {
-                $images->deleteManagedImage($imagePath);
-            }
-            if ($telegramImagePath !== null) {
-                $images->deleteManagedImage($telegramImagePath);
-            }
-            if ($telegramChannelImagePath !== null) {
-                $images->deleteManagedImage($telegramChannelImagePath);
-            }
+            $this->discardUploads($images, $imagePath, $telegramImagePath, $telegramChannelImagePath);
 
             throw $exception;
         }
@@ -100,5 +103,18 @@ class AdminProductCreateController extends Controller
         AdminTelegramDogfoodTiming::logRequestFinished('admin.product_create', $startedAt, $result);
 
         return $forms->productCreated($product);
+    }
+
+    /**
+     * A rejected create rolls back the database work, so the already stored
+     * uploads must never survive the request.
+     */
+    private function discardUploads(ProductImageOptimizer $images, ?string ...$paths): void
+    {
+        foreach ($paths as $path) {
+            if ($path !== null) {
+                $images->deleteManagedImage($path);
+            }
+        }
     }
 }

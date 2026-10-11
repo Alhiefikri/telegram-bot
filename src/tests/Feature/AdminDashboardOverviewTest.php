@@ -320,7 +320,7 @@ class AdminDashboardOverviewTest extends TestCase
         $this->assertSame('IDR 125.000', $data['salesTab']['orders'][0]['earning']);
         $this->assertSame('emerald', $data['salesTab']['orders'][0]['payment_status_tone']);
         $this->assertArrayNotHasKey('payment_status_badge', $data['salesTab']['orders'][0]);
-        $this->assertSame(205000, array_sum(array_column($data['statsTab']['overview']['series'], 'amount')));
+        $this->assertSame(205000, array_sum(array_column($data['statsTab']['overview']['period']['points'], 'amount')));
 
         $encoded = json_encode($data, JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsStringIgnoringCase('escrow', $encoded);
@@ -361,7 +361,7 @@ class AdminDashboardOverviewTest extends TestCase
         $data = app(AdminDashboardData::class)->forAdmin($admin);
 
         $this->assertSame(70000, $data['metrics']['read_only_balance_amount']);
-        $this->assertSame(70000, array_sum(array_column($data['statsTab']['overview']['series'], 'amount')));
+        $this->assertSame(70000, array_sum(array_column($data['statsTab']['overview']['period']['points'], 'amount')));
         $this->assertStringNotContainsString('IDR 5.000.000', json_encode($data, JSON_THROW_ON_ERROR));
     }
 
@@ -389,11 +389,11 @@ class AdminDashboardOverviewTest extends TestCase
         $data = app(AdminDashboardData::class)->forAdmin($admin);
 
         $this->assertSame(35000, $data['metrics']['read_only_balance_amount']);
-        $this->assertSame(35000, array_sum(array_column($data['statsTab']['overview']['series'], 'amount')));
+        $this->assertSame(35000, array_sum(array_column($data['statsTab']['overview']['period']['points'], 'amount')));
         $this->assertSame('IDR 35.000', $data['salesTab']['orders'][0]['earning']);
     }
 
-    public function test_daily_chart_uses_canonical_paid_dates_and_separate_currency_windows(): void
+    public function test_daily_period_uses_canonical_paid_dates_and_separate_currency_windows(): void
     {
         $this->travelTo(Carbon::parse('2026-10-21 12:00:00'));
         $owner = User::factory()->create(['role' => UserRole::Owner]);
@@ -436,7 +436,13 @@ class AdminDashboardOverviewTest extends TestCase
 
         $dashboard = app(AdminDashboardData::class);
         $idr = $dashboard->forActiveTab($owner, 'stats')['statsTab']['overview'];
-        $series = array_column($idr['series'], null, 'date');
+        $period = $idr['period'];
+        $this->assertSame('harian', $period['mode']);
+        $this->assertSame(7, $period['days']);
+        $this->assertSame('day', $period['granularity']);
+        $this->assertSame('7 hari terakhir', $period['window_label']);
+        $this->assertSame('15 Oct 2026 – 21 Oct 2026', $period['range_label']);
+        $this->assertCount(7, $period['points']);
         $this->assertSame([
             '2026-10-15' => 9000,
             '2026-10-16' => 0,
@@ -445,17 +451,255 @@ class AdminDashboardOverviewTest extends TestCase
             '2026-10-19' => 0,
             '2026-10-20' => 18000,
             '2026-10-21' => 0,
-        ], array_column($idr['series'], 'amount', 'date'));
-        $this->assertSame(50.0, $series['2026-10-15']['height']);
-        $this->assertSame(100.0, $series['2026-10-20']['height']);
+        ], array_column($period['points'], 'amount', 'key'));
+        $points = array_column($period['points'], null, 'key');
+        $this->assertSame(50.0, $points['2026-10-15']['height']);
+        $this->assertSame(100.0, $points['2026-10-20']['height']);
+        $this->assertTrue($points['2026-10-20']['is_peak']);
+        $this->assertFalse($points['2026-10-15']['is_peak']);
+        $this->assertTrue($points['2026-10-21']['is_current']);
+        $this->assertSame('Rp27.000', $period['total']);
+        $this->assertSame(2, $period['orders']);
+        $this->assertSame('20 Oct 2026', $period['peak']['label']);
+        $this->assertSame('Rp18.000', $period['peak']['formatted']);
+        $this->assertSame(66.7, $points['2026-10-20']['share']);
         $this->assertSame(1, $idr['today_orders']);
+        $this->assertSame('Rp0', $idr['today_amount']);
 
         $usdt = $dashboard->forActiveTab($owner, 'stats', reportingFilters: ['currency' => 'USDT'])['statsTab']['overview'];
-        $this->assertSame(2000000, array_sum(array_column($usdt['series'], 'amount')));
+        $this->assertSame(2000000, $usdt['period']['total_amount']);
         $this->assertSame(1, $usdt['today_orders']);
 
         $month = $dashboard->forActiveTab($owner, 'stats', reportingFilters: ['days' => '30'])['statsTab']['overview'];
-        $this->assertSame(28000, array_sum(array_column($month['series'], 'amount')));
-        $this->assertSame(1000, array_column($month['series'], 'amount', 'date')['2026-10-14']);
+        $this->assertSame(30, $month['period']['days']);
+        $this->assertSame(28000, $month['period']['total_amount']);
+        $this->assertSame(1000, array_column($month['period']['points'], 'amount', 'key')['2026-10-14']);
+    }
+
+    public function test_weekly_period_buckets_canonical_receipts_into_monday_weeks(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-21 12:00:00'));
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        foreach ([
+            ['2026-08-05 09:00:00', 5000],
+            ['2026-09-30 09:00:00', 4000],
+            ['2026-10-13 09:00:00', 1000],
+            ['2026-10-19 09:00:00', 2000],
+            ['2026-10-21 09:00:00', 3000],
+        ] as [$paidAt, $amount]) {
+            $order = Order::factory()->create([
+                'order_status' => OrderStatus::Completed,
+                'payment_status' => PaymentStatus::Paid,
+            ]);
+            Payment::factory()->create([
+                'order_id' => $order->id,
+                'status' => PaymentStatus::Paid,
+                'amount' => $amount,
+                'currency' => 'IDR',
+                'paid_at' => $paidAt,
+            ]);
+        }
+
+        $period = app(AdminDashboardData::class)
+            ->forActiveTab($owner, 'stats', reportingFilters: ['period' => 'mingguan'])['statsTab']['overview']['period'];
+
+        $this->assertSame('mingguan', $period['mode']);
+        $this->assertSame('week', $period['granularity']);
+        $this->assertSame('8 minggu terakhir', $period['window_label']);
+        $this->assertSame('31 Aug 2026 – 21 Oct 2026', $period['range_label']);
+        $this->assertSame([
+            '2026-08-31' => 0,
+            '2026-09-07' => 0,
+            '2026-09-14' => 0,
+            '2026-09-21' => 0,
+            '2026-09-28' => 4000,
+            '2026-10-05' => 0,
+            '2026-10-12' => 1000,
+            '2026-10-19' => 5000,
+        ], array_column($period['points'], 'amount', 'key'));
+        $this->assertSame(10000, $period['total_amount']);
+        $this->assertSame(4, $period['orders']);
+        $this->assertSame('Minggu berjalan masih berlangsung', $period['partial_label']);
+        $this->assertTrue(array_column($period['points'], 'is_current', 'key')['2026-10-19']);
+        $this->assertFalse(array_column($period['points'], 'is_current', 'key')['2026-10-12']);
+        $this->assertSame('12 Oct – 18 Oct 2026', array_column($period['points'], 'range_label', 'key')['2026-10-12']);
+    }
+
+    public function test_monthly_period_aggregates_months_and_compares_current_previous_and_selected_month(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-21 12:00:00'));
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        foreach ([
+            ['2026-02-03 09:00:00', 1000],
+            ['2026-08-05 09:00:00', 2000],
+            ['2026-08-19 09:00:00', 3000],
+            ['2026-09-15 09:00:00', 4000],
+            ['2026-10-02 09:00:00', 5000],
+            ['2026-10-21 09:00:00', 6000],
+        ] as [$paidAt, $amount]) {
+            $order = Order::factory()->create([
+                'order_status' => OrderStatus::Completed,
+                'payment_status' => PaymentStatus::Paid,
+            ]);
+            Payment::factory()->create([
+                'order_id' => $order->id,
+                'status' => PaymentStatus::Paid,
+                'amount' => $amount,
+                'currency' => 'IDR',
+                'paid_at' => $paidAt,
+            ]);
+        }
+
+        $overview = app(AdminDashboardData::class)
+            ->forActiveTab($owner, 'stats', reportingFilters: ['period' => 'bulanan'])['statsTab']['overview'];
+        $period = $overview['period'];
+
+        $this->assertSame('bulanan', $period['mode']);
+        $this->assertSame('month', $period['granularity']);
+        $this->assertSame('12 bulan terakhir', $period['window_label']);
+        $this->assertCount(12, $period['points']);
+        $this->assertSame([], array_diff(array_keys(array_column($period['points'], 'amount', 'key')), [
+            '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04',
+            '2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10',
+        ]));
+        $this->assertSame([
+            '2025-11' => 0, '2025-12' => 0, '2026-01' => 0, '2026-02' => 1000,
+            '2026-03' => 0, '2026-04' => 0, '2026-05' => 0, '2026-06' => 0,
+            '2026-07' => 0, '2026-08' => 5000, '2026-09' => 4000, '2026-10' => 11000,
+        ], array_column($period['points'], 'amount', 'key'));
+        $this->assertSame(21000, $period['total_amount']);
+        $this->assertSame('Aug 2026', array_column($period['points'], 'label', 'key')['2026-08']);
+
+        $months = $overview['months'];
+        $this->assertSame('2026-10', $months['current']['key']);
+        $this->assertSame('October 2026', $months['current']['label']);
+        $this->assertSame(11000, $months['current']['amount']);
+        $this->assertSame(2, $months['current']['orders']);
+        $this->assertTrue($months['current']['is_current']);
+        $this->assertSame('+175,0%', $months['current']['delta']['label']);
+        $this->assertSame('up', $months['current']['delta']['tone']);
+        $this->assertSame('vs September 2026', $months['current']['delta']['compare_label']);
+        $this->assertSame(4000, $months['previous']['amount']);
+        $this->assertNull($months['previous']['delta']);
+        $this->assertNull($months['selected']);
+        $this->assertSame(['min' => '2023-11', 'max' => '2026-10'], $months['bounds']);
+
+        $selected = app(AdminDashboardData::class)
+            ->forActiveTab($owner, 'stats', reportingFilters: ['period' => 'bulan', 'month' => '2026-08'])['statsTab']['overview'];
+        $this->assertSame('bulan', $selected['period']['mode']);
+        $this->assertSame('2026-08', $selected['period']['month']);
+        $this->assertSame('August 2026', $selected['period']['window_label']);
+        $this->assertCount(31, $selected['period']['points']);
+        $this->assertSame(5000, $selected['period']['total_amount']);
+        $this->assertSame(null, $selected['period']['partial_label']);
+        $this->assertSame('2026-08', $selected['months']['selected']['key']);
+        $this->assertSame(5000, $selected['months']['selected']['amount']);
+        $this->assertSame('belum ada pembanding', $selected['months']['selected']['delta']['label']);
+        $this->assertNull($selected['months']['selected']['delta']['percent']);
+
+        $currentMonth = app(AdminDashboardData::class)
+            ->forActiveTab($owner, 'stats', reportingFilters: ['period' => 'bulan', 'month' => '2026-10'])['statsTab']['overview'];
+        $this->assertSame(21, count($currentMonth['period']['points']));
+        $this->assertSame(11000, $currentMonth['period']['total_amount']);
+        $this->assertNull($currentMonth['months']['selected']);
+        $this->assertSame(11000, $currentMonth['months']['current']['amount']);
+    }
+
+    public function test_overview_period_input_is_bounded_to_supported_values(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-21 12:00:00'));
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $data = app(AdminDashboardData::class);
+        $defaults = $data->forActiveTab($owner, 'stats')['statsTab']['overview']['period'];
+
+        foreach ([
+            ['period' => 'harian-tambahan', 'days' => '999', 'month' => '1999-01'],
+            ['period' => '', 'days' => '0'],
+            ['period' => null, 'month' => '2030-13'],
+        ] as $filters) {
+            $period = $data->forActiveTab($owner, 'stats', reportingFilters: $filters)['statsTab']['overview']['period'];
+
+            $this->assertSame($defaults['mode'], $period['mode']);
+            $this->assertSame($defaults['days'], $period['days']);
+            $this->assertSame($defaults['range_label'], $period['range_label']);
+            $this->assertCount(7, $period['points']);
+        }
+
+        $futureMonth = $data->forActiveTab($owner, 'stats', reportingFilters: ['period' => 'bulan', 'month' => '2030-01'])['statsTab']['overview'];
+        $pastMonth = $data->forActiveTab($owner, 'stats', reportingFilters: ['period' => 'bulan', 'month' => '2019-05'])['statsTab']['overview'];
+
+        $this->assertSame('2026-10', $futureMonth['period']['month']);
+        $this->assertSame('2026-10', $pastMonth['period']['month']);
+    }
+
+    public function test_stats_tab_renders_the_requested_period_from_the_query_string(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-21 12:00:00'));
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'status' => PaymentStatus::Paid,
+            'amount' => 4000,
+            'currency' => 'IDR',
+            'paid_at' => '2026-09-15 09:00:00',
+        ]);
+
+        $this->get('/admin?tab=stats&period=bulan&month=2026-09&currency=IDR')
+            ->assertOk()
+            ->assertSee('Bulan tertentu')
+            ->assertSee('September 2026')
+            ->assertSee('Bulan dituju · September 2026')
+            ->assertSee('value="2026-09"', false)
+            ->assertSee('data-period-option="bulan"', false)
+            ->assertSee('aria-current="page"', false)
+            ->assertSee('Rp4.000')
+            ->assertDontSee('7 hari terakhir');
+
+        $this->get('/admin?tab=stats&period=mingguan')
+            ->assertOk()
+            ->assertSee('8 minggu terakhir')
+            ->assertDontSee('Bulan dituju');
+
+        $this->get('/admin?tab=stats&period=bulan&month=2020-01')
+            ->assertOk()
+            ->assertSee('Bulan tertentu')
+            ->assertSee('October 2026');
+    }
+
+    public function test_period_aggregates_stay_within_three_payment_scans(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-21 12:00:00'));
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'status' => PaymentStatus::Paid,
+            'amount' => 5000,
+            'currency' => 'IDR',
+            'paid_at' => '2026-10-20 09:00:00',
+        ]);
+
+        $aggregates = [];
+        DB::listen(function (QueryExecuted $query) use (&$aggregates): void {
+            $sql = strtolower($query->sql);
+            if (str_contains($sql, 'payments as canonical_payments') && str_contains($sql, 'group by')) {
+                $aggregates[] = $sql;
+            }
+        });
+
+        foreach (['harian', 'mingguan', 'bulanan', 'bulan'] as $period) {
+            $before = count($aggregates);
+            app(AdminDashboardData::class)->forActiveTab($owner, 'stats', reportingFilters: ['period' => $period]);
+            $scans = count($aggregates) - $before;
+
+            $this->assertLessThanOrEqual(4, $scans, $period.' ran '.$scans.' receipt aggregates');
+        }
     }
 }

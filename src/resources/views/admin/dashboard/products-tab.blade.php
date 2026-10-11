@@ -115,7 +115,7 @@
                                         <span x-text="familyExpanded ? 'Tutup daftar product' : 'Lihat product'">Lihat product</span>
                                     </x-admin-dashboard.button>
                                     @if ($canManageProducts && ! ($group['is_single_product_group'] ?? false))
-                                        <x-admin-dashboard.button type="button" variant="warning" size="sm" x-on:click="focusProductFamilyAssignment({{ $group['id'] }})">+ Tambah Product</x-admin-dashboard.button>
+                                        <x-admin-dashboard.button type="button" variant="warning" size="sm" x-on:click="addProductToFamily({{ $group['id'] }})">+ Tambah Product</x-admin-dashboard.button>
                                         <x-admin-dashboard.button type="button" variant="secondary" size="sm" x-on:click="openProductFamilyEditModal(familyEditPayload)">Edit family</x-admin-dashboard.button>
                                     @endif
                                 </div>

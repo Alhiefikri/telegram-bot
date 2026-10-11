@@ -109,6 +109,23 @@ test("open/close restores the owned scroll style and visible trigger", (t) => {
   assert.equal(h.document.activeElement, h.fallback);
 });
 
+test("family shortcut opens the create form with that family preselected", (t) => {
+  const h = setup(t, {
+    activeTab: "stats",
+    productStoreUrl: "/admin/products",
+  });
+
+  h.dashboard.openProductForm();
+  assert.equal(h.dashboard.productFamilyId, "");
+
+  h.dashboard.addProductToFamily(42);
+  assert.equal(h.dashboard.productModalOpen, true);
+  assert.equal(h.dashboard.activeTab, "produk");
+  assert.equal(h.dashboard.productFamilyId, "42");
+  assert.equal(h.dashboard.productFormAction, "/admin/products");
+  assert.equal(h.dashboard.productModalMode, "create");
+});
+
 test("CSS-hidden or detached openers cannot receive restored focus", (t) => {
   const h = setup(t);
   h.dashboard.openSidebar(h.trigger);

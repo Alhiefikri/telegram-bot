@@ -8,10 +8,10 @@
                         show="stockModalOpen"
                         title="Tambah stok"
                         description="Input Cepat tetap untuk stok legacy. Input Akun membuat satu akun = satu stok."
-                        class="max-h-[calc(100vh-1.5rem)] w-full max-w-5xl overflow-y-auto"
+                        size="2xl"
                     >
                         @if ($structuredStockInputEnabled)
-                        <div class="mb-4 grid grid-cols-2 gap-2" role="tablist" aria-label="Mode input stok">
+                        <div class="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2" role="tablist" aria-label="Mode input stok">
                             <button
                                 id="stock-input-quick-tab"
                                 type="button"
@@ -104,7 +104,7 @@
                                     @enderror
                                 </div>
 
-                                <div class="grid grid-cols-2 gap-2 pt-1">
+                                <div class="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2">
                                     <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeStockModal()" x-bind:disabled="stockFormSubmitting">
                                         Batal
                                     </x-admin-dashboard.button>
@@ -321,7 +321,7 @@
                                         </template>
                                     </div>
 
-                                    <div class="grid grid-cols-2 gap-2 pt-1">
+                                    <div class="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2">
                                         <x-admin-dashboard.button type="button" variant="neutral" x-on:click="editAccountInput()" x-bind:disabled="accountInputSubmitting">
                                             ← Kembali edit
                                         </x-admin-dashboard.button>
@@ -346,7 +346,7 @@
                         show="manageStockModalOpen"
                         title="Kelola stok"
                         description="Ready dikelompokkan paling atas, paid, retired, dan repair bersifat read-only."
-                        class="max-h-[92vh] w-full max-w-3xl overflow-y-auto"
+                        size="2xl"
                     >
                         <div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-admin-ink">
                             <span class="max-w-[15rem] truncate font-medium" x-text="manageStockProductName">Produk</span>

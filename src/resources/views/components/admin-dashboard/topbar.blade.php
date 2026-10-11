@@ -20,12 +20,12 @@
         @endif
     </div>
 
-    <div class="flex w-full max-w-full flex-wrap items-center gap-2 sm:w-auto">
+    <div class="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 sm:w-auto">
         @if (isset($status) && trim((string) $status) !== '')
-            <div class="flex flex-wrap items-center gap-2">{{ $status }}</div>
+            <div class="flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain sm:flex-wrap sm:overflow-x-visible">{{ $status }}</div>
         @endif
         @if (isset($actions) && trim((string) $actions) !== '')
-            <div class="flex min-w-0 max-w-full flex-wrap items-center gap-2">{{ $actions }}</div>
+            <div class="flex min-w-0 max-w-full flex-nowrap items-center gap-2">{{ $actions }}</div>
         @endif
         @if (isset($identity))
             <div class="hidden min-w-0 max-w-40 text-right text-xs text-admin-muted sm:block">{{ $identity }}</div>

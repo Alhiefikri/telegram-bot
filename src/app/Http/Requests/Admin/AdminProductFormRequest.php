@@ -187,6 +187,7 @@ abstract class AdminProductFormRequest extends FormRequest
             'quantity_price_tiers.*.price_amount' => ['required', 'integer', 'min:1'],
             'quantity_price_tiers.*.usdt_price_amount' => ['nullable', 'regex:/^\d+(?:\.\d{1,3})?$/', 'gt:0'],
             'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')->whereNull('deleted_at')],
+            'product_family_id' => ['nullable', 'integer', Rule::exists('product_families', 'id')->whereNull('deleted_at')],
             'description' => ['required', 'string'],
             'description_ms' => ['nullable', 'string'],
             'description_en' => ['nullable', 'string'],

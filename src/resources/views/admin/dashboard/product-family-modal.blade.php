@@ -8,7 +8,7 @@
             description="Atur identitas grouping tanpa mengubah harga, stok, credentials, atau checkout Product."
             data-admin-return-target
             tabindex="-1"
-            class="max-h-[92vh] w-full max-w-3xl overflow-y-auto"
+            size="2xl"
         >
             @if ($errors->productFamilyCreate->any() || $errors->productFamilyUpdate->any() || $errors->productFamilyDelete->any())
                 <x-admin-dashboard.notice tone="danger" class="mb-3 animate-slide-up">
@@ -33,12 +33,19 @@
                     <x-admin-dashboard.button x-cloak x-show="familyFormMode === 'edit'" type="button" variant="neutral" size="sm" x-on:click="resetProductFamilyForm()">Batal edit</x-admin-dashboard.button>
                 </div>
 
-                <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                <div class="mt-4 grid gap-3 sm:grid-cols-2">
                     <div>
                         <x-admin-dashboard.field-label for="product-family-name">Nama family</x-admin-dashboard.field-label>
                         <x-admin-dashboard.input id="product-family-name" name="name" maxlength="160" placeholder="NETFLIX" class="mt-1.5" x-model="familyName" x-ref="familyName" required />
                         @error('name', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                         @error('name', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                    </div>
+                    <div>
+                        <x-admin-dashboard.field-label for="product-family-sort-order">Urutan</x-admin-dashboard.field-label>
+                        <x-admin-dashboard.input id="product-family-sort-order" type="number" name="sort_order" min="0" max="999999" step="1" inputmode="numeric" class="mt-1.5" x-model="familySortOrder" required />
+                        <p class="mt-1 text-xs leading-5 text-admin-muted">Menentukan urutan family di katalog bot dan toko web.</p>
+                        @error('sort_order', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                        @error('sort_order', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     </div>
                     <div>
                         <x-admin-dashboard.field-label for="product-family-icon">Ikon katalog · emoji/karakter (opsional)</x-admin-dashboard.field-label>
@@ -47,27 +54,22 @@
                         @error('icon', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                         @error('icon', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     </div>
-                    <div>
+                    <div x-cloak x-show="familyFormMode === 'edit'">
+                        <x-admin-dashboard.field-label for="product-family-slug">Alamat publik (slug)</x-admin-dashboard.field-label>
+                        <x-admin-dashboard.input id="product-family-slug" name="slug" maxlength="160" placeholder="netflix" class="mt-1.5" x-model="familySlug" x-bind:required="familyFormMode === 'edit'" />
+                        <p class="mt-1 text-xs leading-5 text-admin-muted">Huruf, angka, dan tanda hubung. Alamat lama tetap bekerja lewat redirect.</p>
+                        @error('slug', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                    </div>
+                    <div class="sm:col-span-2">
                         <x-admin-dashboard.field-label for="product-family-description">Deskripsi opsional</x-admin-dashboard.field-label>
                         <x-admin-dashboard.textarea id="product-family-description" name="description" rows="3" placeholder="Pilihan paket Netflix" class="mt-1.5" x-model="familyDescription" />
                         @error('description', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                         @error('description', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     </div>
-                    <div>
-                        <x-admin-dashboard.field-label for="product-family-sort-order">Urutan</x-admin-dashboard.field-label>
-                        <x-admin-dashboard.input id="product-family-sort-order" type="number" name="sort_order" min="0" max="999999" step="1" inputmode="numeric" class="mt-1.5" x-model="familySortOrder" required />
-                        @error('sort_order', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                        @error('sort_order', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
-                    </div>
-                </div>
-                <div x-cloak x-show="familyFormMode === 'edit'" class="mt-3">
-                    <x-admin-dashboard.field-label for="product-family-slug">Alamat publik (slug)</x-admin-dashboard.field-label>
-                    <x-admin-dashboard.input id="product-family-slug" name="slug" maxlength="160" placeholder="netflix" class="mt-1.5" x-model="familySlug" x-bind:required="familyFormMode === 'edit'" />
-                    <p class="mt-1 text-xs text-admin-muted">Gunakan huruf, angka, dan tanda hubung. Perubahan membuat alamat lama tetap bekerja lewat redirect.</p>
-                    @error('slug', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                 </div>
 
-                <div class="mt-3 rounded-lg border border-admin-line bg-admin-surface-muted p-3">
+                <div class="mt-3 grid gap-3 lg:grid-cols-2">
+                <div class="rounded-lg border border-admin-line bg-admin-surface-muted p-3">
                     <div class="flex items-start justify-between gap-3">
                         <div>
                             <x-admin-dashboard.field-label for="product-family-image">Kartu family · Web Storefront</x-admin-dashboard.field-label>
@@ -87,7 +89,7 @@
                     @error('image', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     @error('image', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                 </div>
-                <div class="mt-3 rounded-lg border border-admin-line bg-admin-surface-muted p-3">
+                <div class="rounded-lg border border-admin-line bg-admin-surface-muted p-3">
                     <div class="flex items-start justify-between gap-3">
                         <div>
                             <x-admin-dashboard.field-label for="telegram-product-family-image">Default detail family · Bot Telegram</x-admin-dashboard.field-label>
@@ -107,8 +109,9 @@
                     @error('telegram_image', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     @error('telegram_image', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                 </div>
+                </div>
 
-                <div class="mt-3 grid grid-cols-2 gap-2">
+                <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeProductFamilyModal()" x-bind:disabled="familyFormSubmitting">Batal</x-admin-dashboard.button>
                     <x-admin-dashboard.button type="submit" variant="primary" x-bind:disabled="familyFormSubmitting"><span x-text="familyFormSubmitting ? 'Menyimpan...' : (familyFormMode === 'edit' ? 'Simpan' : 'Tambah family')">Tambah family</span></x-admin-dashboard.button>
                 </div>
