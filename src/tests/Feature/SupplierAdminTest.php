@@ -16,8 +16,9 @@ use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
 use App\Models\User;
-use App\Services\AuditLogger;
+use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\Suppliers\ProductSupplierManager;
+use App\Services\AuditLogger;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\DB;
@@ -45,6 +46,28 @@ final class SupplierAdminTest extends TestCase
             ->assertSee('API key ditolak oleh supplier.')->assertDontSee(self::KEY);
         $this->assertStringNotContainsString(self::KEY, json_encode(session()->all()));
         Http::assertSentCount(1);
+    }
+
+    public function test_supplier_dashboard_product_read_filters_before_bounded_pagination_and_keeps_mapping_facts(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['name' => 'Mapped Supplier']);
+        $item = $this->item($supplier, ['name' => 'Mapped private SKU']);
+        $mapped = Product::factory()->create(['name' => 'Alpha mapped product', 'is_active' => true, 'price_amount' => 27500]);
+        $this->source($mapped, $item, ['is_active' => true, 'priority' => 10]);
+        Product::factory()->create(['name' => 'Beta draft product', 'is_active' => false]);
+        Product::factory()->count(12)->create();
+
+        $filtered = app(AdminSupplierDashboardData::class)->forTab([
+            'supplier_search' => 'Alpha',
+            'supplier_status' => 'active',
+            'supplier_source' => (string) $supplier->id,
+        ]);
+
+        $this->assertSame(1, $filtered['products']->total());
+        $this->assertSame('Alpha mapped product', $filtered['products']->sole()->name);
+        $this->assertSame('Mapped Supplier', $filtered['products']->sole()->supplierSources->sole()->catalogItem->supplier->name);
+        $this->assertSame(12, app(AdminSupplierDashboardData::class)->forTab()['products']->perPage());
     }
 
     public function test_inline_password_confirmation_allows_supplier_save_without_flashing_secrets(): void

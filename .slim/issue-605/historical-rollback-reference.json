@@ -1,0 +1,12 @@
+{
+  "actions_run": 37860180743,
+  "artifact_id": 11586181074,
+  "recorded_at": "2026-10-08T23:36:58Z",
+  "observed_deployed_commit": "ff97b28709f5b9d5fbc0d9f31a58269b55804b3d",
+  "observed_immutable_image": "ghcr.io/alhiefikri/telegram-bot@sha256:de64446050f55d2dd94801abc77a5455d22e1e8b07ad15856f4bc8750892ebf0",
+  "result": "deploy-succeeded-compatible-contract-pending",
+  "state": "compatible-candidate-running",
+  "source_previous_commit": null,
+  "source_previous_image": null,
+  "requires_recapture_before_release": true
+}

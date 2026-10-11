@@ -423,6 +423,37 @@
     min-height: 100vh;
     min-height: 100dvh;
   }
+  @media (min-width: 1024px) {
+    .admin-dashboard-shell.admin-sidebar-collapsed .admin-dashboard-sidebar {
+      width: 4.75rem;
+    }
+    .admin-dashboard-shell.admin-sidebar-collapsed .admin-dashboard-frame {
+      padding-left: 4.75rem;
+    }
+    .admin-dashboard-shell.admin-sidebar-collapsed
+      .admin-navigation-group-label,
+    .admin-dashboard-shell.admin-sidebar-collapsed .admin-navigation-label,
+    .admin-dashboard-shell.admin-sidebar-collapsed .admin-navigation-badge,
+    .admin-dashboard-shell.admin-sidebar-collapsed .admin-sidebar-brand,
+    .admin-dashboard-shell.admin-sidebar-collapsed .admin-sidebar-identity {
+      display: none;
+    }
+    .admin-dashboard-shell.admin-sidebar-collapsed .admin-navigation-item {
+      justify-content: center;
+      padding-inline: 0.75rem;
+    }
+    .admin-dashboard-shell.admin-sidebar-collapsed .admin-navigation-item svg {
+      margin-inline: auto;
+    }
+    .admin-dashboard-shell.admin-sidebar-collapsed .admin-sidebar-toggle svg {
+      transform: rotate(180deg);
+    }
+    .admin-dashboard-shell.admin-sidebar-collapsed
+      .admin-dashboard-sidebar
+      > div:first-child {
+      justify-content: center;
+    }
+  }
   .admin-dashboard-topbar {
     padding: 0;
   }

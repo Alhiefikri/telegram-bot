@@ -128,6 +128,8 @@ test("carousel supports navigation, pause, reduced motion and mobile layout", as
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
   const carousel = page.locator(".storefront-banner-carousel");
+  const heroBox = await carousel.boundingBox();
+  expect(heroBox?.width ?? 0).toBeGreaterThanOrEqual(350);
   const dots = carousel.locator("[data-carousel-dot]");
   await expect(dots).toHaveCount(3);
   await expect(dots.first()).toHaveAttribute("aria-current", "true");
@@ -153,6 +155,13 @@ test("carousel supports navigation, pause, reduced motion and mobile layout", as
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+  const desktopHeroBox = await carousel.boundingBox();
+  const desktopSlideBox = await carousel
+    .locator("[data-carousel-slide]")
+    .first()
+    .boundingBox();
+  expect(desktopHeroBox?.width ?? 0).toBeGreaterThan(1200);
+  expect(desktopSlideBox?.height ?? 0).toBeLessThan(320);
   await page.screenshot({
     path: testInfo.outputPath("storefront-desktop.png"),
     fullPage: true,

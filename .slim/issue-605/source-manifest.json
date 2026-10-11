@@ -1,0 +1,80 @@
+{
+  "base_commit": "51bbe6acaf41a9819fd1d1944f1054fb03a25ca5",
+  "verification_date": "2026-10-10",
+  "sources": {
+    "admin-qualified.source.js": "b9fac2cd0740f61b709306dcae4afbfcc2fb47428e80a1aeb1b7205a9e385735",
+    "src/tests/Browser/admin-dashboard-responsive.spec.js": "7f4c73c492b49b53987a3db1736358a891bf1478ca771131ea85e89a4fbf62bc",
+    "src/tests/Browser/buymail-warranty.spec.js": "3cbe4bf2a4153cc30f27ed17546ce333395d570e06a3e4a06f09436ff24d9026",
+    "src/tests/Feature/KlikQrisAdminObservabilityTest.php": "7ca3cdd215646b7ff82dc41e422d4c78255374001a4fc96630baa1bf02da96b3",
+    "src/public/build/manifest.json": "cf9e6260bcca0587c41028188444381388a84596f56ac0da568ff5ebbb7d86e0",
+    "admin-complete.source.js": "7f4c73c492b49b53987a3db1736358a891bf1478ca771131ea85e89a4fbf62bc",
+    "admin-nojs-qualified.source.js": "ccea84be771cd3fffbc7df4e2d2eaa6bc13ab990eebbc3ef4a3142ceb6b7a398",
+    "manual-supplier-light.png": "49159cd4cd542212c4d1a0a0159eff608137214fc08010e7a177f517a2654185",
+    "manual-supplier-dark.png": "d6103aef1c54dd0450740715786d4dfea8dc6317b14529429f0419b47ec33d80"
+  },
+  "checks": {
+    "P1": {
+      "exit_code": 0,
+      "tests": 396,
+      "passed": 384,
+      "skipped": 12,
+      "assertions": 3740
+    },
+    "J1": {
+      "exit_code": 0,
+      "tests": 57,
+      "passed": 57,
+      "skipped": 0
+    },
+    "B0": {
+      "exit_code": 0,
+      "tests": 5,
+      "passed": 5,
+      "build": "passed"
+    },
+    "P2": {
+      "exit_code": 0,
+      "tests": 188,
+      "passed": 188,
+      "skipped": 0,
+      "assertions": 2033,
+      "junit": "linked-php-qualified.xml"
+    },
+    "B2": {
+      "expected": 3,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "report": "buymail-final-report.json"
+    },
+    "B3": {
+      "expected": 6,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "report": "nojs-body-qualified-report.json",
+      "source_sha256": "ccea84be771cd3fffbc7df4e2d2eaa6bc13ab990eebbc3ef4a3142ceb6b7a398"
+    },
+    "B1": {
+      "exit_code": 0,
+      "startTime": "2026-10-10T12:13:14.471Z",
+      "duration": 736837.458,
+      "expected": 106,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0,
+      "source_sha256": "7f4c73c492b49b53987a3db1736358a891bf1478ca771131ea85e89a4fbf62bc",
+      "source_snapshot": "admin-complete.source.js",
+      "report": "admin-complete-report.json"
+    }
+  },
+  "smoke": {
+    "clipping_boundary": "clipping-boundary-proof.json",
+    "supplier_light": "manual-supplier-light.png",
+    "supplier_dark": "manual-supplier-dark.png",
+    "drawer_escape": {
+      "focus": "Buka navigasi admin",
+      "body_overflow": ""
+    }
+  }
+}

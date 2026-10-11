@@ -98,8 +98,16 @@ yang didukung; mutex tetap bukan otoritas dedupe.
   berarti waktu event + effect durable dibuat, **bukan** bukti Telegram menerima.
   Migration hanya mereset timestamp legacy sebelum writer baru aktif; delivery
   history tidak dihapus.
-- Authentication, invalid key, credential unreadable, rate limit, dan transport
-  masing-masing memberi satu alert per kode dalam episode error aktif.
+- Authentication, invalid key, credential unreadable, currency mismatch,
+  account identity mismatch, dan duplicate account adalah fault kredensial/
+  konfigurasi yang memberi alert segera. Transport dan rate limit adalah
+  gangguan baca sementara: tidak ada alert pada satu atau dua kegagalan.
+  Alert koneksi baru dibuat setelah **3 kegagalan baca berurutan** (ambang
+  bounded; dengan backoff awal biasanya sekitar 6 menit), lalu satu episode
+  koneksi dipakai bersama walaupun kode berubah transport↔rate limit.
+  `suppliers:sync` tetap menjadi pemulihan baca otomatis yang durable melalui
+  backoff DB 2–30 menit; semua operasi ini GET-only dan tidak membeli ulang,
+  fallback, atau mengubah saldo.
   A→B→A tidak mengulang A. Episode baru hanya di-rearm setelah **15 menit
   observasi koneksi sehat**, bukan satu sync sukses di antara error. Error baru
   atau gap freshness mereset waktu recovery; wallet yang ditahan tidak menghalangi

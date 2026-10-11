@@ -71,22 +71,95 @@
     </div>
     {{ $suppliersTab['connections']->links() }}
 
-    <x-admin-dashboard.card as="section" padding="none" shadow="sm" class="overflow-hidden" aria-labelledby="supplier-products-title">
+    <x-admin-dashboard.card as="section" id="admin-supplier-products" padding="none" shadow="sm" class="scroll-mt-6 overflow-hidden" aria-labelledby="supplier-products-title">
         <header class="flex flex-wrap items-start justify-between gap-3 border-b border-admin-line p-5 sm:p-6">
             <div class="max-w-2xl"><p class="text-xs font-medium text-admin-muted">Katalog toko</p><h2 id="supplier-products-title" class="mt-1 text-lg font-semibold text-admin-ink">Sumber supplier &amp; kebijakan harga produk</h2><p class="mt-1 text-sm leading-6 text-admin-muted">Atur sumber stok dan harga jual per produk. Nama, deskripsi, dan status publik diedit melalui tab Produk. Impor selalu menghasilkan draft nonaktif tanpa menyalin deskripsi supplier.</p></div>
             <x-admin-dashboard.badge>{{ $suppliersTab['products']->total() }} produk</x-admin-dashboard.badge>
         </header>
-        <ul class="divide-y divide-admin-line">
-            @forelse($suppliersTab['products'] as $supplierProduct)
-                <li class="grid min-w-0 items-center gap-4 p-5 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:px-6">
-                    <div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs text-admin-muted">#{{ $supplierProduct->id }}</span><x-admin-dashboard.badge :tone="$supplierProduct->is_active ? 'emerald' : 'slate'">{{ $supplierProduct->is_active ? 'Aktif' : 'Draft / nonaktif' }}</x-admin-dashboard.badge></div><h3 class="mt-2 break-words text-sm font-semibold text-admin-ink">{{ $supplierProduct->name }}</h3></div>
-                    <div><p class="text-xs font-medium text-admin-muted">Harga jual</p><p class="mt-0.5 whitespace-nowrap text-sm font-semibold text-admin-ink">Rp{{ number_format($supplierProduct->price_amount, 0, ',', '.') }}</p></div>
-                    <x-admin-dashboard.button :href="route('admin.products.suppliers', $supplierProduct)" variant="neutral" size="sm" aria-label="Atur supplier dan harga {{ $supplierProduct->name }}">Atur supplier &amp; harga <span aria-hidden="true">→</span></x-admin-dashboard.button>
-                </li>
-            @empty
-                <li class="p-8 text-center"><h3 class="font-semibold text-admin-ink">Belum ada produk toko</h3><p class="mt-1 text-sm leading-6 text-admin-muted">Impor draft dari katalog privat supplier atau tambahkan produk melalui tab Produk.</p></li>
-            @endforelse
-        </ul>
+        @php($productFilters = $suppliersTab['productFilters'] ?? ['search' => '', 'status' => 'all', 'source' => 'all', 'sourceOptions' => collect()])
+        <form method="GET" action="{{ route('admin.dashboard') }}#admin-supplier-products" class="grid gap-3 border-b border-admin-line bg-admin-surface-muted p-5 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-end sm:px-6" aria-label="Filter produk supplier">
+            <input type="hidden" name="tab" value="suppliers">
+            <label class="grid gap-1.5 text-sm font-medium text-admin-ink">
+                <span>Cari produk</span>
+                <x-admin-dashboard.input name="supplier_search" type="search" value="{{ $productFilters['search'] }}" placeholder="Nama atau ID produk" aria-label="Cari nama atau ID produk" />
+            </label>
+            <label class="grid gap-1.5 text-sm font-medium text-admin-ink">
+                <span>Status produk</span>
+                <x-admin-dashboard.select name="supplier_status" aria-label="Filter status produk">
+                    <option value="all" @selected($productFilters['status'] === 'all')>Semua status</option>
+                    <option value="active" @selected($productFilters['status'] === 'active')>Aktif</option>
+                    <option value="inactive" @selected($productFilters['status'] === 'inactive')>Draft / nonaktif</option>
+                </x-admin-dashboard.select>
+            </label>
+            <label class="grid gap-1.5 text-sm font-medium text-admin-ink">
+                <span>Sumber supplier</span>
+                <x-admin-dashboard.select name="supplier_source" aria-label="Filter sumber supplier">
+                    <option value="all" @selected($productFilters['source'] === 'all')>Semua sumber</option>
+                    <option value="mapped" @selected($productFilters['source'] === 'mapped')>Sudah dipetakan</option>
+                    <option value="unmapped" @selected($productFilters['source'] === 'unmapped')>Belum dipetakan</option>
+                    @foreach($productFilters['sourceOptions'] as $sourceOption)
+                        <option value="{{ $sourceOption->id }}" @selected((string) $productFilters['source'] === (string) $sourceOption->id)>{{ $sourceOption->name }}</option>
+                    @endforeach
+                </x-admin-dashboard.select>
+            </label>
+            <x-admin-dashboard.button type="submit" variant="primary" size="sm">Terapkan filter</x-admin-dashboard.button>
+        </form>
+        @if($suppliersTab['products']->total() === 0 && ($productFilters['search'] !== '' || $productFilters['status'] !== 'all' || $productFilters['source'] !== 'all'))
+            <div class="border-b border-admin-line p-6 text-center" role="status">
+                <h3 class="font-semibold text-admin-ink">Tidak ada produk yang cocok</h3>
+                <p class="mt-1 text-sm leading-6 text-admin-muted">Coba ubah kata kunci atau sumber supplier, lalu terapkan filter lagi.</p>
+                <a href="{{ route('admin.dashboard', ['tab' => 'suppliers']) }}#admin-supplier-products" class="mt-3 inline-flex min-h-11 items-center justify-center rounded-lg border border-admin-line px-3 text-sm font-medium text-admin-ink underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus">Hapus filter</a>
+            </div>
+        @else
+            <div class="grid gap-3 p-5 sm:grid-cols-2 sm:px-6">
+                @forelse($suppliersTab['products'] as $supplierProduct)
+                    @php($mappedSources = $supplierProduct->supplierSources)
+                    @php($policy = $supplierProduct->supplierPricePolicy)
+                    <article class="grid min-w-0 gap-4 rounded-lg border border-admin-line bg-admin-surface p-4">
+                        <header class="flex min-w-0 items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="font-mono text-xs text-admin-muted">#{{ $supplierProduct->id }}</span>
+                                    <x-admin-dashboard.badge :tone="$supplierProduct->is_active ? 'emerald' : 'slate'">{{ $supplierProduct->is_active ? 'Aktif' : 'Draft / nonaktif' }}</x-admin-dashboard.badge>
+                                </div>
+                                <h3 class="mt-2 break-words text-sm font-semibold text-admin-ink">{{ $supplierProduct->name }}</h3>
+                            </div>
+                            <div class="shrink-0 text-right">
+                                <p class="text-xs font-medium text-admin-muted">Harga jual</p>
+                                <p class="mt-0.5 whitespace-nowrap text-sm font-semibold text-admin-ink">Rp{{ number_format($supplierProduct->price_amount, 0, ',', '.') }}</p>
+                            </div>
+                        </header>
+                        <dl class="grid gap-2 text-sm">
+                            <div>
+                                <dt class="text-xs font-medium text-admin-muted">Mapping supplier</dt>
+                                <dd class="mt-1 text-admin-ink">
+                                    @forelse($mappedSources as $mappedSource)
+                                        <span class="block break-words">{{ $mappedSource->catalogItem?->supplier?->name ?? 'Supplier dihapus' }} · {{ $mappedSource->catalogItem?->name ?? 'Item katalog dihapus' }} <span class="text-admin-muted">(urutan {{ $mappedSource->priority }}, {{ $mappedSource->is_active ? 'aktif' : 'nonaktif' }})</span></span>
+                                    @empty
+                                        <span class="text-admin-muted">Belum dipetakan ke supplier.</span>
+                                    @endforelse
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs font-medium text-admin-muted">Kebijakan harga</dt>
+                                <dd class="mt-1 break-words text-admin-ink">
+                                    {{ match($policy?->mode) { 'percent' => 'Otomatis · persentase', 'fixed' => 'Otomatis · keuntungan tetap', 'hybrid' => 'Otomatis · persentase + minimum', default => 'Manual' } }}
+                                    @if($policy && $policy->mode !== 'manual')
+                                        <span class="text-admin-muted"> · pembulatan Rp{{ number_format($policy->rounding_idr, 0, ',', '.') }}</span>
+                                    @endif
+                                </dd>
+                            </div>
+                        </dl>
+                        <x-admin-dashboard.button :href="route('admin.products.suppliers', $supplierProduct)" variant="neutral" size="sm" aria-label="Atur supplier dan harga {{ $supplierProduct->name }}">Atur supplier &amp; harga <span aria-hidden="true">→</span></x-admin-dashboard.button>
+                    </article>
+                @empty
+                    <div class="p-3 text-center sm:col-span-2" role="status">
+                        <h3 class="font-semibold text-admin-ink">Belum ada produk toko</h3>
+                        <p class="mt-1 text-sm leading-6 text-admin-muted">Impor draft dari katalog privat supplier atau tambahkan produk melalui tab Produk.</p>
+                    </div>
+                @endforelse
+            </div>
+        @endif
         @if($suppliersTab['products']->hasPages())<div class="border-t border-admin-line p-5">{{ $suppliersTab['products']->links() }}</div>@endif
     </x-admin-dashboard.card>
 </section>

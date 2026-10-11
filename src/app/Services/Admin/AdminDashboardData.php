@@ -96,7 +96,7 @@ final class AdminDashboardData
             'storeChannelTab' => $this->storeChannelTab($user),
             'funnelTab' => $funnelTab,
             'balanceIssuesTab' => $balanceIssuesTab,
-            'suppliersTab' => $navigation['activeTab'] === 'suppliers' ? $this->supplierData->forTab() : [],
+            'suppliersTab' => $navigation['activeTab'] === 'suppliers' ? $this->supplierData->forTab($reportingFilters) : [],
         ];
     }
 
@@ -175,7 +175,7 @@ final class AdminDashboardData
             'telegram-channel' => $data['storeChannelTab'] = $this->storeChannelTab($user),
             StorefrontFunnelReport::TAB => $data['funnelTab'] = $this->funnelReport->forAdmin($user, $reportingFilters),
             StoreBalanceOwnerCompensationService::TAB => $data['balanceIssuesTab'] = $this->ownerCompensation->queue($user, $reportingFilters),
-            'suppliers' => $data['suppliersTab'] = $this->supplierData->forTab(),
+            'suppliers' => $data['suppliersTab'] = $this->supplierData->forTab($reportingFilters),
             'settings' => null,
             default => null,
         };

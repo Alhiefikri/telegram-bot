@@ -16,9 +16,14 @@
     >
         <x-slot:sidebar>
             <div class="flex h-full min-h-0 flex-col border-r border-admin-line bg-admin-surface">
-                <a href="{{ route('admin.dashboard') }}" class="flex min-h-20 items-center px-6 text-base font-semibold text-admin-ink">LHIE STORE</a>
+                <div class="flex min-h-20 items-center justify-between gap-2 border-b border-admin-line px-4">
+                    <a href="{{ route('admin.dashboard') }}" class="admin-sidebar-brand min-w-0 truncate px-2 text-base font-semibold text-admin-ink">LHIE STORE</a>
+                    <button type="button" x-on:click="toggleSidebarCollapsed()" x-bind:aria-expanded="String(!sidebarCollapsed)" aria-controls="admin-desktop-sidebar" aria-label="Ciutkan navigasi admin" class="admin-sidebar-toggle hidden h-11 w-11 shrink-0 items-center justify-center rounded-lg text-admin-muted hover:bg-admin-surface-muted hover:text-admin-ink focus-visible:outline-2 focus-visible:outline-admin-focus lg:flex">
+                        <svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 6 9 12l6 6" /><path d="M4 4v16" /></svg>
+                    </button>
+                </div>
                 <x-admin-dashboard.navigation :groups="$linkedNavigation['groups']" class="min-h-0 flex-1 overflow-y-auto px-3 pb-6" />
-                <div class="border-t border-admin-line px-6 py-4 text-xs text-admin-muted">
+                <div class="admin-sidebar-identity border-t border-admin-line px-6 py-4 text-xs text-admin-muted">
                     <p class="break-words font-medium text-admin-ink">{{ $linkedUser->name }}</p>
                     <p>{{ ucfirst($linkedUser->role?->value ?? '') }}</p>
                 </div>

@@ -42,6 +42,7 @@ export default function dashboardNavigation() {
 
   return {
     sidebarOpen: false,
+    sidebarCollapsed: false,
     navigationReady: false,
     sidebarOpener: null,
 
@@ -49,6 +50,12 @@ export default function dashboardNavigation() {
       if (this.navigationReady) return;
       destroyed = false;
       desktop = window.matchMedia("(min-width: 1024px)");
+      try {
+        this.sidebarCollapsed =
+          window.localStorage.getItem("admin-sidebar-collapsed") === "true";
+      } catch {
+        this.sidebarCollapsed = false;
+      }
       breakpointChanged = () => {
         if (desktop.matches) this.closeSidebar(false);
       };
@@ -82,6 +89,18 @@ export default function dashboardNavigation() {
         }
       }
       this.navigationReady = true;
+    },
+
+    toggleSidebarCollapsed() {
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+      try {
+        window.localStorage.setItem(
+          "admin-sidebar-collapsed",
+          String(this.sidebarCollapsed)
+        );
+      } catch {
+        // Navigation remains usable when browser storage is unavailable.
+      }
     },
 
     destroyNavigation() {

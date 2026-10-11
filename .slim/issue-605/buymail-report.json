@@ -1,0 +1,220 @@
+{
+  "config": {
+    "argv": [
+      "/usr/bin/node",
+      "/home/alhiefikri/telegram-bot/src/node_modules/.bin/playwright",
+      "test",
+      "tests/Browser/buymail-warranty.spec.js",
+      "--output=../.slim/issue-605/buymail-browser",
+      "--reporter=line,json"
+    ],
+    "rootDir": "/home/alhiefikri/telegram-bot/src",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/alhiefikri/telegram-bot/.slim/issue-605/buymail-browser",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/home/alhiefikri/telegram-bot/src",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "line"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 4,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "tests/Browser/buymail-warranty.spec.js",
+      "file": "tests/Browser/buymail-warranty.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "verified claim offers English and Indonesian refund/replacement without overflow",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1870,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T11:47:55.067Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "527c9c5dbb5c4aa55536-a2ed485f9c80b9b71348",
+          "file": "tests/Browser/buymail-warranty.spec.js",
+          "line": 84,
+          "column": 1
+        },
+        {
+          "title": "owner can inspect private warranty and deposit panels without exposing the saved key",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4274,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T11:48:04.325Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "527c9c5dbb5c4aa55536-22a442cff5c756c465d6",
+          "file": "tests/Browser/buymail-warranty.spec.js",
+          "line": 128,
+          "column": 1
+        },
+        {
+          "title": "supplier creation confirms password without losing the unsaved API key",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "timedOut",
+                  "duration": 32550,
+                  "error": {
+                    "message": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m",
+                    "stack": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m"
+                  },
+                  "errors": [
+                    {
+                      "message": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m"
+                    },
+                    {
+                      "location": {
+                        "file": "/home/alhiefikri/telegram-bot/src/tests/Browser/buymail-warranty.spec.js",
+                        "column": 24,
+                        "line": 226
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator:  getByRole('dialog', { name: 'Konfirmasi password', exact: true })\nExpected: visible\nReceived: undefined\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('dialog', { name: 'Konfirmasi password', exact: true })\u001b[22m\n\n\n  224 |     exact: true,\n  225 |   });\n> 226 |   await expect(dialog).toBeVisible();\n      |                        ^\n  227 |   await expect(form.locator('[name=\"api_key\"]')).toHaveValue(apiKey);\n  228 |   await dialog\n  229 |     .getByLabel(\"Password admin\", { exact: true })\n    at /home/alhiefikri/telegram-bot/src/tests/Browser/buymail-warranty.spec.js:226:24"
+                    },
+                    {
+                      "location": {
+                        "file": "/home/alhiefikri/telegram-bot/src/tests/Browser/buymail-warranty.spec.js",
+                        "column": 34,
+                        "line": 199
+                      },
+                      "message": "Error: \"route.fetch: Test timeout of 30000ms exceeded.\nCall log:\n\u001b[2m  - → POST http://127.0.0.1:41751/admin/suppliers\u001b[22m\n\u001b[2m    - user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.7827.55 Safari/537.36\u001b[22m\n\u001b[2m    - accept: application/json\u001b[22m\n\u001b[2m    - accept-encoding: gzip,deflate,br\u001b[22m\n\u001b[2m    - accept-language: en-US\u001b[22m\n\u001b[2m    - content-type: multipart/form-data; boundary=----WebKitFormBoundaryZmuKIFzJX0peZdCk\u001b[22m\n\u001b[2m    - cookie: XSRF-TOKEN=eyJpdiI6IloxQnN4clBXNkdWZzVidG9KQi92L2c9PSIsInZhbHVlIjoiZTFMOUUyRnppUXRGYzVjRXR5U2I4UkFKMmZHOTkzSU1mL0dZVW5nT0xQaWtuN2c5eWVzZUdxV0pldDMzYWtDQk5oVWpyM1ZnekhndXVwdHJDemdrNVp3ZDZBM2FZZUNwUjFTUGVDbnFtODFUUEp4QzEyekp3M3ZHVkFGVnFuUHYiLCJtYWMiOiIyNjMyYzBiMzRiNzliNTU3M2Y3OGJiNzc1ZTE0ZmQ0ZTEzNzE5N2RmYTc4MmVlZmFlMTU3ZDZjNzIzOTdmMjU0IiwidGFnIjoiIn0%3D; laravel-session=eyJpdiI6IlIxcXo2YVJPaTVVTDJ3YlZDenYxTEE9PSIsInZhbHVlIjoieHVjeEVuM2x0NHZCZjdzVjVsU3o2NGsxTjhxenZwZWMycFlpZ2xTRFBoUU95WFlnaVQ1K1NGU3RXSjBWZ2xISmhFV1BPc1ZKc3p6U2dBR1NmVVN5ODRhNlFkZnNJUnR6UnQ2RkdaaldsY2xrTFJCMERsaTdsazZhcGkvNEhOR2IiLCJtYWMiOiI1NDkyNTdiYzc3ZDM0ZDU5NDhhZjc4NDg1YjIyNDQ0M2JjYWRlZTFmZWIyZTNkM2Y1YmJkNmM0MzUzNmQ4N2E1IiwidGFnIjoiIn0%3D\u001b[22m\n\u001b[2m    - origin: http://127.0.0.1:41751\u001b[22m\n\u001b[2m    - referer: http://127.0.0.1:41751/admin?tab=suppliers\u001b[22m\n\u001b[2m    - sec-ch-ua: \"HeadlessChrome\";v=\"149\", \"Chromium\";v=\"149\", \"Not)A;Brand\";v=\"24\"\u001b[22m\n\u001b[2m    - sec-ch-ua-mobile: ?0\u001b[22m\n\u001b[2m    - sec-ch-ua-platform: \"Linux\"\u001b[22m\n\u001b[2m    - content-length: 731\u001b[22m\n\" while running route callback.\nConsider awaiting `await page.unrouteAll({ behavior: 'ignoreErrors' })`\nbefore the end of the test to ignore remaining routes in flight.\n\n  197 |       return;\n  198 |     }\n> 199 |     const response = await route.fetch({ maxRedirects: 0 });\n      |                                  ^\n  200 |     responses.push({\n  201 |       text: JSON.stringify(response.headers()) + \"\\n\" + (await response.text()),\n  202 |     });\n    at /home/alhiefikri/telegram-bot/src/tests/Browser/buymail-warranty.spec.js:199:34"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T11:48:08.653Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/home/alhiefikri/telegram-bot/.slim/issue-605/buymail-browser/tests-Browser-buymail-warr-84355--losing-the-unsaved-API-key/error-context.md"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/home/alhiefikri/telegram-bot/.slim/issue-605/buymail-browser/tests-Browser-buymail-warr-84355--losing-the-unsaved-API-key/error-context.md"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "527c9c5dbb5c4aa55536-924db1ef1024b1d4ed50",
+          "file": "tests/Browser/buymail-warranty.spec.js",
+          "line": 183,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-10T11:47:51.657Z",
+    "duration": 60160.458999999995,
+    "expected": 2,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}

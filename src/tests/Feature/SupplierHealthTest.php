@@ -157,7 +157,7 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
     {
         $supplier = $this->supplier(['last_error' => 'authentication']);
         $this->assertSame(1, $this->health()->materialize());
-        $supplier->forceFill(['last_error' => 'rate_limited', 'version' => 2])->save();
+        $supplier->forceFill(['last_error' => 'rate_limited', 'sync_failures' => SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD, 'version' => 2])->save();
         $this->assertSame(1, $this->health()->materialize());
         $supplier->forceFill(['last_error' => 'authentication', 'version' => 3])->save();
         $this->assertSame(0, $this->health()->materialize());
@@ -179,20 +179,51 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
 
     public function test_brief_success_between_transient_failures_does_not_spam_health_alerts(): void
     {
-        $supplier = $this->supplier(['last_error' => 'transport']);
+        $supplier = $this->supplier(['last_error' => 'transport', 'sync_failures' => SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD]);
         $this->assertSame(1, $this->health()->materialize());
         Http::fake(fn ($request) => Http::response(str_ends_with($request->url(), '/balance') ? ['balance' => '10'] : ['products' => []]));
         $this->assertTrue(app(SupplierCatalogSync::class)->sync($supplier));
+        $this->assertSame(0, $supplier->fresh()->sync_failures);
+        $this->assertNull($supplier->fresh()->last_error);
         $supplier->refresh();
         $this->travel(1)->minutes();
-        $supplier->forceFill(['last_error' => 'transport'])->save();
+        $supplier->forceFill(['last_error' => 'transport', 'sync_failures' => SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD])->save();
         $this->assertSame(0, $this->health()->materialize());
         $this->assertSame(1, $this->effects()->count());
     }
 
+    public function test_nystore_transport_without_reviews_waits_for_sustained_failure_and_dedupes_connection_codes(): void
+    {
+        $supplier = $this->supplier([
+            'name' => 'NyStore Health',
+            'provider' => 'nystore',
+            'currency' => 'USD',
+            'last_error' => 'transport',
+            'sync_failures' => 1,
+        ]);
+
+        $this->assertSame(0, $this->health()->materialize());
+        $supplier->forceFill(['sync_failures' => 2])->save();
+        $this->assertSame(0, $this->health()->materialize());
+        $supplier->forceFill(['sync_failures' => SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD])->save();
+        $this->assertSame(1, $this->health()->materialize());
+        $supplier->forceFill(['last_error' => 'rate_limited', 'sync_failures' => 4])->save();
+        $this->assertSame(0, $this->health()->materialize());
+        $this->assertSame(1, $this->effects()->count());
+        $this->assertStringContainsString('Koneksi supplier terganggu', SupplierHealthEvent::sole()->message);
+    }
+
+    public function test_configuration_fault_remains_immediate_without_sustained_failure(): void
+    {
+        $supplier = $this->supplier(['last_error' => 'currency_mismatch', 'sync_failures' => 1]);
+
+        $this->assertSame(1, $this->health()->materialize());
+        $this->assertStringContainsString('konfigurasi', mb_strtolower(SupplierHealthEvent::sole()->message));
+    }
+
     public function test_freshness_gap_does_not_count_as_sustained_error_recovery(): void
     {
-        $supplier = $this->supplier(['last_error' => 'transport']);
+        $supplier = $this->supplier(['last_error' => 'transport', 'sync_failures' => SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD]);
         $this->assertSame(1, $this->health()->materialize());
         Http::fake(fn ($request) => Http::response(str_ends_with($request->url(), '/balance') ? ['balance' => '10'] : ['products' => []]));
         $sync = app(SupplierCatalogSync::class);
@@ -341,7 +372,7 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
 
     public function test_unsettled_purchase_is_included_after_customer_delivery_and_same_obligation_is_not_counted_twice(): void
     {
-        $supplier = $this->supplier(['balance_micros' => 1_000_000, 'last_error' => 'transport']);
+        $supplier = $this->supplier(['balance_micros' => 1_000_000, 'last_error' => 'transport', 'sync_failures' => SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD]);
         $delivered = $this->fulfillment($supplier, 'delivered');
         $purchase = $this->purchase($delivered, $supplier, 'ambiguous');
         $review = $this->fulfillment($supplier, 'review');
@@ -492,6 +523,7 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
     {
         $supplier = $this->supplier([
             'name' => '<b>Private & "quoted"</b>', 'last_error' => $error,
+            'sync_failures' => in_array($error, ['rate_limited', 'transport'], true) ? SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD : 0,
             'balance_micros' => null, 'balance_observed_at' => null,
             'api_key' => 'SECRET-API-KEY', 'webhook_secret' => 'SECRET-WEBHOOK',
             'account_metadata' => ['raw_body' => 'SECRET-PROVIDER-BODY', 'Authorization' => 'SECRET-HEADER'],
@@ -522,7 +554,7 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
 
     public function test_arbitrary_provider_error_payload_is_not_an_alert_reason_or_a_recovery(): void
     {
-        $supplier = $this->supplier(['last_error' => 'transport']);
+        $supplier = $this->supplier(['last_error' => 'transport', 'sync_failures' => SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD]);
         $this->health()->materialize();
         $supplier->forceFill(['last_error' => 'provider SECRET-RAW-BODY Authorization: SECRET-HEADER'])->save();
         $this->assertSame(0, $this->health()->materialize());

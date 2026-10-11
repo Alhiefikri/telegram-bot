@@ -24,10 +24,18 @@ final class SupplierHealthService
 
     public const ERROR_RECOVERY_SECONDS = 900;
 
+    /** Three consecutive durable read failures ~= 6 minutes with 2-minute backoff. */
+    public const TRANSIENT_FAILURE_THRESHOLD = 3;
+
+    private const TRANSIENT_ERRORS = ['rate_limited', 'transport'];
+
     private const ERRORS = [
         'authentication' => 'Autentikasi gagal. Verifikasi akses akun supplier.',
         'invalid_key' => 'API key tidak valid. Verifikasi atau rotasi key melalui Admin.',
         'credential_unreadable' => 'Credential tidak dapat dibaca. Pulihkan pasangan APP_KEY/backup atau lakukan re-entry terkontrol.',
+        'currency_mismatch' => 'Konfigurasi currency supplier tidak sesuai. Nonaktifkan koneksi dan verifikasi akun/currency sebelum sinkronisasi.',
+        'account_identity_mismatch' => 'Identitas akun supplier berubah. Hentikan pembelian dan verifikasi koneksi yang dipilih.',
+        'duplicate_account' => 'Akun supplier terhubung ke lebih dari satu koneksi. Hentikan pembelian dan rapikan konfigurasi.',
         'rate_limited' => 'Batas request tercapai. Tunggu lalu sinkronkan kembali.',
         'transport' => 'Koneksi supplier terganggu. Tunggu lalu sinkronkan kembali.',
     ];
@@ -162,9 +170,18 @@ final class SupplierHealthService
                 }
                 $error = $supplier->last_error;
                 $recoveredAt = $state?->error_recovered_at;
-                if (isset(self::ERRORS[$error]) && ! in_array($error, $codes, true)) {
+                $transient = is_string($error) && in_array($error, self::TRANSIENT_ERRORS, true);
+                $dedupeCode = $transient ? 'connection' : $error;
+                // Transport/rate-limit noise is one connection episode, not
+                // one alert per changing provider error code.
+                $alreadyNotified = $dedupeCode !== null && in_array($dedupeCode, $codes, true);
+                if ($transient && ! $alreadyNotified) {
+                    $alreadyNotified = array_intersect($codes, self::TRANSIENT_ERRORS) !== [];
+                }
+                $sustained = ! $transient || $supplier->sync_failures >= self::TRANSIENT_FAILURE_THRESHOLD;
+                if (isset(self::ERRORS[$error]) && $sustained && ! $alreadyNotified) {
                     $groups[$id]['errors'][] = $error;
-                    $codes[] = $error;
+                    $codes[] = $dedupeCode;
                 }
                 if ($error !== null || ! $fresh) {
                     $recoveredAt = null;

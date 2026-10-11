@@ -11,7 +11,7 @@
         @endphp
         @if ($items !== [])
             <section class="not-first:mt-6" aria-labelledby="{{ $idPrefix }}-{{ $group['id'] }}">
-                <h2 id="{{ $idPrefix }}-{{ $group['id'] }}" class="px-3 text-xs font-semibold text-admin-muted">
+                <h2 id="{{ $idPrefix }}-{{ $group['id'] }}" class="admin-navigation-group-label px-3 text-xs font-semibold text-admin-muted">
                     {{ $group['label'] }}
                 </h2>
                 <ul class="mt-2 space-y-1">

@@ -9,7 +9,7 @@ use App\Services\Suppliers\SupplierMoney;
 
 final class AdminSupplierDashboardData
 {
-    public function forTab(): array
+    public function forTab(array $filters = []): array
     {
         $connections = Supplier::query()->orderBy('id')->paginate(15, ['*'], 'suppliers_page');
         $connections->setCollection($connections->getCollection()->map(function (Supplier $supplier): array {
@@ -35,7 +35,59 @@ final class AdminSupplierDashboardData
             ];
         }));
 
-        return ['connections' => $connections->appends(['tab' => 'suppliers']), 'products' => Product::query()->orderBy('id')->paginate(25, ['id', 'name', 'price_amount', 'is_active'], 'supplier_products_page')->appends(['tab' => 'suppliers'])];
+        $search = trim((string) ($filters['supplier_search'] ?? ''));
+        $status = (string) ($filters['supplier_status'] ?? 'all');
+        $source = (string) ($filters['supplier_source'] ?? 'all');
+        $productsQuery = Product::query()
+            ->select(['id', 'name', 'price_amount', 'is_active'])
+            ->with([
+                'supplierPricePolicy',
+                'supplierSources' => fn ($sources) => $sources
+                    ->select(['id', 'product_id', 'supplier_catalog_item_id', 'priority', 'is_active'])
+                    ->with([
+                        'catalogItem' => fn ($items) => $items
+                            ->select(['id', 'supplier_id', 'name', 'external_id', 'currency', 'unit_price_micros', 'orderable'])
+                            ->with('supplier:id,name,provider'),
+                    ]),
+            ])
+            ->when($search !== '', function ($query) use ($search): void {
+                $query->where(function ($match) use ($search): void {
+                    $match->where('name', 'like', '%'.$search.'%');
+                    if (ctype_digit($search)) {
+                        $match->orWhere('id', (int) $search);
+                    }
+                });
+            })
+            ->when(in_array($status, ['active', 'inactive'], true), fn ($query) => $query->where('is_active', $status === 'active'))
+            ->when($source === 'mapped', fn ($query) => $query->whereHas('supplierSources'))
+            ->when($source === 'unmapped', fn ($query) => $query->whereDoesntHave('supplierSources'))
+            ->when(ctype_digit($source), fn ($query) => $query->whereHas('supplierSources.catalogItem', fn ($items) => $items->where('supplier_id', (int) $source)))
+            ->orderBy('id');
+
+        $productFilters = array_filter([
+            'tab' => 'suppliers',
+            'supplier_search' => $search !== '' ? $search : null,
+            'supplier_status' => in_array($status, ['active', 'inactive'], true) ? $status : null,
+            'supplier_source' => in_array($source, ['mapped', 'unmapped'], true) || ctype_digit($source) ? $source : null,
+        ], static fn ($value): bool => $value !== null);
+        $products = $productsQuery->paginate(12, ['id', 'name', 'price_amount', 'is_active'], 'supplier_products_page')
+            ->appends($productFilters)
+            ->fragment('admin-supplier-products');
+        $sourceOptions = Supplier::query()
+            ->whereHas('catalogItems.sources')
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        return [
+            'connections' => $connections->appends(['tab' => 'suppliers']),
+            'products' => $products,
+            'productFilters' => [
+                'search' => $search,
+                'status' => in_array($status, ['active', 'inactive'], true) ? $status : 'all',
+                'source' => in_array($source, ['mapped', 'unmapped'], true) || ctype_digit($source) ? $source : 'all',
+                'sourceOptions' => $sourceOptions,
+            ],
+        ];
     }
 
     public function syncFailureMessage(Supplier $supplier): string

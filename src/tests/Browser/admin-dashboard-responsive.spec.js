@@ -2992,9 +2992,10 @@ test("shows hoverable revenue buckets for every reporting period", async ({
   const stats = page.locator("#admin-section-stats");
   const periodOptions = stats.locator("[data-period-option]");
   await expect(periodOptions).toHaveCount(4);
-  await expect(
-    stats.locator('[data-period-option="harian"]')
-  ).toHaveAttribute("aria-current", "page");
+  await expect(stats.locator('[data-period-option="harian"]')).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
   await expect(stats).toContainText("7 hari terakhir");
 
   const bars = stats.locator("[data-chart-bar]");
@@ -3003,23 +3004,31 @@ test("shows hoverable revenue buckets for every reporting period", async ({
   await expect(tooltip).toBeHidden();
 
   const todayLabel = await bars.last().getAttribute("aria-label");
-  expect(todayLabel).toMatch(/\d{2} \w{3} \d{4}: Rp[\d.]+,\s*\d+ pesanan lunas/);
+  expect(todayLabel).toMatch(
+    /\d{2} \w{3} \d{4}: Rp[\d.]+,\s*\d+ pesanan lunas/
+  );
 
-  const plotGeometry = await stats.locator('[aria-label^="Grafik pendapatan"]').evaluate((node) => {
-    const plot = node.querySelector("[x-ref='plot'], .relative.h-52");
-    const axis = node.firstElementChild;
-    const bars = Array.from(node.querySelectorAll("[data-chart-bar]"));
-    const plotBox = plot.getBoundingClientRect();
-    return {
-      axisRight: axis.getBoundingClientRect().right,
-      plotLeft: plotBox.left,
-      plotRight: plotBox.right,
-      overflow: bars.filter((bar) => {
-        const box = bar.getBoundingClientRect();
-        return box.width <= 0 || box.left < plotBox.left - 1 || box.right > plotBox.right + 1;
-      }).length,
-    };
-  });
+  const plotGeometry = await stats
+    .locator('[aria-label^="Grafik pendapatan"]')
+    .evaluate((node) => {
+      const plot = node.querySelector("[x-ref='plot'], .relative.h-52");
+      const axis = node.firstElementChild;
+      const bars = Array.from(node.querySelectorAll("[data-chart-bar]"));
+      const plotBox = plot.getBoundingClientRect();
+      return {
+        axisRight: axis.getBoundingClientRect().right,
+        plotLeft: plotBox.left,
+        plotRight: plotBox.right,
+        overflow: bars.filter((bar) => {
+          const box = bar.getBoundingClientRect();
+          return (
+            box.width <= 0 ||
+            box.left < plotBox.left - 1 ||
+            box.right > plotBox.right + 1
+          );
+        }).length,
+      };
+    });
   expect(plotGeometry.axisRight).toBeLessThanOrEqual(plotGeometry.plotLeft);
   expect(plotGeometry.overflow).toBe(0);
 
@@ -3032,10 +3041,19 @@ test("shows hoverable revenue buckets for every reporting period", async ({
   const tooltipPlacement = await tooltip.evaluate((node) => {
     const box = node.getBoundingClientRect();
     const plot = node.parentElement.getBoundingClientRect();
-    return { left: box.left, right: box.right, plotLeft: plot.left, plotRight: plot.right };
+    return {
+      left: box.left,
+      right: box.right,
+      plotLeft: plot.left,
+      plotRight: plot.right,
+    };
   });
-  expect(tooltipPlacement.left).toBeGreaterThanOrEqual(tooltipPlacement.plotLeft - 1);
-  expect(tooltipPlacement.right).toBeLessThanOrEqual(tooltipPlacement.plotRight + 1);
+  expect(tooltipPlacement.left).toBeGreaterThanOrEqual(
+    tooltipPlacement.plotLeft - 1
+  );
+  expect(tooltipPlacement.right).toBeLessThanOrEqual(
+    tooltipPlacement.plotRight + 1
+  );
 
   // The accessible per-bucket list must agree with the hovered bucket.
   const detailsRows = stats.locator("details dl > div");
@@ -3052,10 +3070,9 @@ test("shows hoverable revenue buckets for every reporting period", async ({
 
   await stats.locator('[data-period-option="mingguan"]').click();
   await expect(page).toHaveURL(/period=mingguan/);
-  await expect(stats.locator('[data-period-option="mingguan"]')).toHaveAttribute(
-    "aria-current",
-    "page"
-  );
+  await expect(
+    stats.locator('[data-period-option="mingguan"]')
+  ).toHaveAttribute("aria-current", "page");
   await expect(stats).toContainText("8 minggu terakhir");
   await expect(stats.locator("[data-chart-bar]")).toHaveCount(8);
 
@@ -3091,15 +3108,20 @@ test("shows hoverable revenue buckets for every reporting period", async ({
   await expect(page).toHaveURL(new RegExp(`month=${previousMonth}`));
   await expect(stats).toContainText("Bulan dituju");
   await expect(stats.locator("[data-admin-target-month]")).toBeVisible();
-  await expect(stats.locator("[data-admin-target-month]")).toContainText("pesanan lunas");
+  await expect(stats.locator("[data-admin-target-month]")).toContainText(
+    "pesanan lunas"
+  );
   await expectNoDocumentOverflow(page);
 
   // The same surface must stay inside a phone viewport, including the month
   // picker and the per-bucket chart for a month that has sales.
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto(`${baseUrl}/admin?tab=stats&period=bulan&month=${selectedMonth}`, {
-    waitUntil: "domcontentloaded",
-  });
+  await page.goto(
+    `${baseUrl}/admin?tab=stats&period=bulan&month=${selectedMonth}`,
+    {
+      waitUntil: "domcontentloaded",
+    }
+  );
   await expect(stats.locator("[data-admin-target-month]")).toBeHidden();
   await expect(stats.locator("[data-chart-bar]")).not.toHaveCount(0);
   await expect(stats).toContainText("Bulan tertentu");
@@ -3121,7 +3143,7 @@ test("shows hoverable revenue buckets for every reporting period", async ({
 
   const measureNarrowBars = () =>
     stats.locator('[aria-label^="Grafik pendapatan"]').evaluate((node) => {
-      const plot = node.querySelector('.h-52.relative, .relative');
+      const plot = node.querySelector(".h-52.relative, .relative");
       const plotBox = plot.getBoundingClientRect();
       const bars = Array.from(node.querySelectorAll("[data-chart-bar]"));
       return {
@@ -3166,26 +3188,29 @@ async function expectDialogFitsViewport(page, dialog, label) {
   expect(box, label).not.toBeNull();
   expect(Math.round(box.x), label).toBeGreaterThanOrEqual(-1);
   expect(Math.round(box.y), label).toBeGreaterThanOrEqual(-1);
-  expect(Math.round(box.x + box.width), label).toBeLessThanOrEqual(viewport.width + 1);
-  expect(
-    Math.round(box.y + box.height),
-    label
-  ).toBeLessThanOrEqual(viewport.height + 1);
+  expect(Math.round(box.x + box.width), label).toBeLessThanOrEqual(
+    viewport.width + 1
+  );
+  expect(Math.round(box.y + box.height), label).toBeLessThanOrEqual(
+    viewport.height + 1
+  );
 
   const geometry = await dialog.evaluate((node) => {
     const own = node.getBoundingClientRect();
-    const overflowing = Array.from(node.querySelectorAll("*")).filter((child) => {
-      if (!child.checkVisibility()) return false;
-      if (getComputedStyle(child).clipPath !== "none") return false;
-      const rect = child.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return false;
-      return rect.right > own.right + 1 || rect.left < own.left - 1;
-    });
+    const overflowing = Array.from(node.querySelectorAll("*")).filter(
+      (child) => {
+        if (!child.checkVisibility()) return false;
+        if (getComputedStyle(child).clipPath !== "none") return false;
+        const rect = child.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        return rect.right > own.right + 1 || rect.left < own.left - 1;
+      }
+    );
     return {
       overflow: node.scrollWidth - node.clientWidth,
       overscroll: getComputedStyle(node).overscrollBehaviorY,
-      overflowing: overflowing.map(
-        (child) => `${child.tagName}.${child.className}`.slice(0, 120)
+      overflowing: overflowing.map((child) =>
+        `${child.tagName}.${child.className}`.slice(0, 120)
       ),
     };
   });
@@ -3359,7 +3384,9 @@ test("keeps the settings confirmation dialogs inside phone viewports", async ({
       .first();
     await expect(maintenanceForm).toBeVisible();
     await maintenanceForm.locator('button[type="submit"]').first().click();
-    const maintenanceDialog = page.locator("#admin-checkout-maintenance-dialog");
+    const maintenanceDialog = page.locator(
+      "#admin-checkout-maintenance-dialog"
+    );
     await expect(maintenanceDialog).toBeVisible();
     await expectDialogFitsViewport(
       page,
@@ -3377,7 +3404,9 @@ test("keeps the settings confirmation dialogs inside phone viewports", async ({
       .first();
     await expect(providerSwitchForm).toBeVisible();
     await providerSwitchForm.locator('button[type="submit"]').first().click();
-    const providerDialog = page.locator("#admin-payment-provider-switch-dialog");
+    const providerDialog = page.locator(
+      "#admin-payment-provider-switch-dialog"
+    );
     await expect(providerDialog).toBeVisible();
     await expectDialogFitsViewport(
       page,
@@ -3412,7 +3441,9 @@ test("searches orders by invoice and reports credential delivery", async ({
   );
   await expect(section).toContainText("INV-BROWSER-DELIVERY-REVIEW");
   await expect(section).toContainText("Pengiriman kredensial");
-  await expect(section).toContainText("Telegram: belum ada pengiriman kredensial tercatat.");
+  await expect(section).toContainText(
+    "Telegram: belum ada pengiriman kredensial tercatat."
+  );
   await expect(section).not.toContainText("INV-BROWSER-A");
 
   await page.getByRole("link", { name: "Reset" }).click();
@@ -3484,7 +3515,8 @@ test("keeps the wide product modal in two columns with a visible action footer",
     return {
       width: node.getBoundingClientRect().width,
       viewportWidth: window.innerWidth,
-      columnCount: columns.gridTemplateColumns.split(" ").filter(Boolean).length,
+      columnCount: columns.gridTemplateColumns.split(" ").filter(Boolean)
+        .length,
       scrollRange: node.scrollHeight - node.clientHeight,
     };
   });
@@ -3501,7 +3533,10 @@ test("keeps the wide product modal in two columns with a visible action footer",
   await expect(footer).toBeInViewport();
   await expect(submit).toBeInViewport();
 
-  await modal.locator("#product-description-id-panel textarea").first().fill("Deskripsi uji tata letak.");
+  await modal
+    .locator("#product-description-id-panel textarea")
+    .first()
+    .fill("Deskripsi uji tata letak.");
   await modal.locator("#product-name").scrollIntoViewIfNeeded();
   await expect(submit).toBeInViewport();
   await expectNoDocumentOverflow(page);
@@ -3632,6 +3667,32 @@ test("renders the compact admin dashboard at desktop width", async ({
   await exerciseProductManagementModals(page);
   await expectNoDocumentOverflow(page);
   await page.screenshot({ path: testInfo.outputPath("desktop-products.png") });
+});
+
+test("desktop sidebar can collapse to icon-only navigation and persist", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  const shell = page.locator(".admin-dashboard-shell");
+  const sidebar = page.locator("#admin-desktop-sidebar");
+  const toggle = sidebar.locator("button.admin-sidebar-toggle");
+
+  await expect(toggle).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Ringkasan", exact: true })
+  ).toBeVisible();
+  await toggle.click();
+  await expect(shell).toHaveClass(/admin-sidebar-collapsed/);
+  await expect(sidebar).toHaveCSS("width", "76px");
+  await expect(sidebar.locator('a[title="Ringkasan"]')).toHaveCount(1);
+  await expect(sidebar.locator(".admin-navigation-label").first()).toBeHidden();
+  await toggle.click();
+  await expect(shell).not.toHaveClass(/admin-sidebar-collapsed/);
+  await toggle.click();
+  await expect(shell).toHaveClass(/admin-sidebar-collapsed/);
+  await page.reload();
+  await expect(shell).toHaveClass(/admin-sidebar-collapsed/);
 });
 
 test("direct desktop tabs select one sidebar destination and preserve content anchors", async ({

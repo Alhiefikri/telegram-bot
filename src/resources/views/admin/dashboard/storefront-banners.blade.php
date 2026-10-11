@@ -1,7 +1,7 @@
 @if (isset($productsTab['banners']))
 <x-admin-dashboard.card as="section" id="admin-storefront-banners" padding="compact" shadow="sm" aria-labelledby="admin-storefront-banners-title">
     <h3 id="admin-storefront-banners-title" class="text-lg font-semibold text-admin-ink">Banner beranda storefront</h3>
-    <p class="mt-1 max-w-3xl text-sm leading-6 text-admin-muted">Maksimal 5 banner, tampil berurutan dari slot 1–5. Rekomendasi 1600 × 400 piksel (4:1), JPG/PNG/WebP maksimal 5 MB. Gambar tampil utuh. Banner ini khusus beranda web.</p>
+    <p class="mt-1 max-w-3xl text-sm leading-6 text-admin-muted">Maksimal 5 banner, tampil berurutan dari slot 1–5. Rekomendasi 1600 × 500 piksel (16:5), JPG/PNG/WebP maksimal 5 MB. Gambar memenuhi area banner dengan crop ringan yang terpusat. Banner ini khusus beranda web.</p>
     @if ($canManageProducts)
         @if ($errors->getBag('storefrontBanners')->any())
             <div role="alert" class="mt-3 rounded-lg border border-admin-line bg-neo-danger-pale p-3 text-sm font-medium text-neo-danger-text">

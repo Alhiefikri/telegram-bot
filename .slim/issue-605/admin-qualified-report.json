@@ -1,0 +1,3722 @@
+{
+  "config": {
+    "argv": [
+      "/usr/bin/node",
+      "/home/alhiefikri/telegram-bot/src/node_modules/.bin/playwright",
+      "test",
+      "tests/Browser/admin-dashboard-responsive.spec.js",
+      "--output=../.slim/issue-605/admin-qualified",
+      "--reporter=line,json"
+    ],
+    "rootDir": "/home/alhiefikri/telegram-bot/src",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/alhiefikri/telegram-bot/.slim/issue-605/admin-qualified",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/home/alhiefikri/telegram-bot/src",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "line"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 4,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "tests/Browser/admin-dashboard-responsive.spec.js",
+      "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "storefront navigation: header remains reachable after scrolling",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1182,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:00.707Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-a3bbcf916d57ede52bed",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 78,
+          "column": 1
+        },
+        {
+          "title": "theme defaults to light on a dark system and preserves explicit choices",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1033,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:10.284Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-06e01a8c28845a300276",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 94,
+          "column": 1
+        },
+        {
+          "title": "admin dashboard exposes the shared theme preference control",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2192,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:11.372Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-14dce6e536722d73fb01",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 136,
+          "column": 1
+        },
+        {
+          "title": "admin balance adjustment previews the exact Customer and disables duplicate confirmation",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6000,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:13.604Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-8afae9e25aff2756a704",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 177,
+          "column": 1
+        },
+        {
+          "title": "asset isolation: Storefront 404 retains its Storefront entry and theme",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 438,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:19.629Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-7f8f48cbe83470c735b3",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 242,
+          "column": 1
+        },
+        {
+          "title": "storefront navigation: desktop resize releases mobile scroll lock",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1494,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:20.087Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-b274f0fbec99e04ea371",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 270,
+          "column": 1
+        },
+        {
+          "title": "storefront navigation: reopening during close keeps the drawer visible",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 871,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:21.599Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-b33acb52d03ee19a5d03",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 290,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: opens canonical page checkout from the landing catalog",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11770,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:22.502Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-7ed1d9feccd243da3a9c",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 308,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: opens the authenticated balance overview across mobile viewports",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7293,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:34.301Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-f04d052d441304351ee6",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 341,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: keeps canonical checkout usable without JavaScript",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9950,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:41.628Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-5f76969b2d08ef646a11",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 384,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: updates direct tier estimates from bounded safe data",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7412,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:51.617Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-90c2f636515c66d87626",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 446,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: keeps the mobile sticky action aligned with the canonical checkout",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 14098,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:05:59.064Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-d105a3fa6078b22b26bd",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 470,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: switches payment copy and CTA without JavaScript",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8370,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:06:13.190Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-0d6bda278b5d5bf1932b",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 598,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: keeps storefront card actions separate and keyboard reachable",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7218,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:06:21.582Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-6b81d71f645409d6351c",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 663,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: keeps Product detail purchase actions reachable on mobile",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9737,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:06:28.826Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-e33b2df169221e62599b",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 711,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: asserts deterministic catalog checkout invoice navigation without duplicates",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 24098,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:06:38.588Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-9f2319c73b6ec8969353",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 810,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: completes direct purchases from home, shop, Family, and Product detail",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 22516,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:07:02.708Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-202c0531a45b2c05a564",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 933,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: completes a multi-item Cart purchase through shared review",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 14897,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:07:25.258Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-782f661a15abb5f74655",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 997,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: restores direct and Cart validation failures on canonical pages",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 16277,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:07:40.182Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-1de6b78577054629e5c7",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1031,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: restores provider and stock failures on canonical pages",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 14660,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:07:56.491Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-74c8e61eafc6e61415e4",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1087,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: restores Product and Family context through browser back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 16546,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:08:11.181Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-014870b28e5167797978",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1168,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: proves direct and Family review geometry across required viewports",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 23174,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:08:27.752Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-b699810fdcb306e98154",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1219,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: proves Cart review geometry across required viewports",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 32416,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:08:50.943Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-f7d280cb2e2f3de4baf4",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1282,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: keeps checkout back links source-aware at mobile widths",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 33133,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:09:23.380Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-26bfdd8678c2ea9c575e",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1306,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: keeps Family options and sticky purchase reachable at mobile widths",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 12398,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:09:56.536Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-f15b973cb3395160a856",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1398,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: supports keyboard activation, disclosures, reduced motion, and mobile navigation",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11490,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:10:08.949Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-a69e1fea67c431446585",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1528,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: proves final public URL, SEO, and fallback asset contracts",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5889,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:10:20.457Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-be66a549b4e79372085e",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1685,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: proves the Storefront release matrix at required viewports",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11116,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:10:26.366Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-611e5908fe4eebaaf26b",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1843,
+          "column": 1
+        },
+        {
+          "title": "customer checkout: proves unavailable waitlist and no-JavaScript form fallback",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 46760,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:10:37.501Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-dd095f564f8ae49ec58b",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 1994,
+          "column": 1
+        },
+        {
+          "title": "announces terminal QRIS status and exposes buyer next steps",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1093,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:24.283Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-55e382c4bc8e6faca871",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2050,
+          "column": 1
+        },
+        {
+          "title": "keeps QRIS retry states clear for incomplete provider payloads",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 305,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:25.388Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-cad763c18bd18c334640",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2105,
+          "column": 1
+        },
+        {
+          "title": "reloads invoice when QRIS retry obtains final provider total",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 374,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:25.708Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-ace3c505badd244c1dff",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2148,
+          "column": 1
+        },
+        {
+          "title": "polls active invoices within the budget and stops on hidden or terminal state",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 570,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:26.104Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-b740d1f87aa22b02620c",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2185,
+          "column": 1
+        },
+        {
+          "title": "prioritizes invoice content by state without mobile overflow",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3304,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:26.690Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-896ec83a834306322674",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2329,
+          "column": 1
+        },
+        {
+          "title": "uses a compact single-column shop grid at narrow mobile width and keeps filter focus",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1197,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:30.008Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-b17eea7a701445edf586",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2441,
+          "column": 1
+        },
+        {
+          "title": "balances product columns across storefront breakpoints",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1082,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:31.224Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-c58cfa74057ad3abe4e7",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2478,
+          "column": 1
+        },
+        {
+          "title": "shows the catalog placeholder controls in the admin product tab",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1669,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:32.320Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-4e1205faedc36bf2017c",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2508,
+          "column": 1
+        },
+        {
+          "title": "admin accent controls meet AA text contrast in both themes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5550,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:34.013Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-83619aa3ccbf9af3a7a3",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2530,
+          "column": 1
+        },
+        {
+          "title": "admin auth surfaces keep AA text contrast in both themes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3607,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:39.580Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-47d5119220ec542bbaff",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2637,
+          "column": 1
+        },
+        {
+          "title": "admin upload controls keep native keyboard pickers, visible focus and 44px triggers",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6326,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:43.213Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-081d057afc653707188c",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2717,
+          "column": 1
+        },
+        {
+          "title": "admin upload rows keep their label inside narrow viewports at 200% text size",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2385,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:49.563Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-71b028929b52bbf1a206",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2796,
+          "column": 1
+        },
+        {
+          "title": "catalog placeholder upload stores a real image and rejects an invalid file",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4625,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:51.971Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-d81d2fabc4c62e7f5787",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2863,
+          "column": 1
+        },
+        {
+          "title": "keeps grouped Product Family controls usable at mobile width",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 4512,
+                  "error": {
+                    "message": "Error: admin body text must not be hidden by horizontal clipping\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  -  1\u001b[39m\n\u001b[31m+ Received  + 65\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Product Family\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 176,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Urutan option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 164,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Label option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 158,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Product Family\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 176,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Urutan option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 164,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Label option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 158,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Product Family\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 176,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Urutan option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 164,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Label option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 158,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+ ]\u001b[39m",
+                    "stack": "Error: admin body text must not be hidden by horizontal clipping\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  -  1\u001b[39m\n\u001b[31m+ Received  + 65\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Product Family\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 176,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Urutan option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 164,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Label option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 158,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Product Family\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 176,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Urutan option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 164,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Label option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 158,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Product Family\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 176,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Urutan option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 164,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Label option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 158,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+ ]\u001b[39m\n    at expectNoDocumentOverflow (/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js:5502:5)\n    at /home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js:2973:3",
+                    "location": {
+                      "file": "/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js",
+                      "column": 5,
+                      "line": 5502
+                    },
+                    "snippet": "  5500 |           const style = getComputedStyle(ancestor);\n  5501 |           if (style.textOverflow === \"ellipsis\") ellipsis = true;\n> 5502 |           if ([\"auto\", \"scroll\"].includes(style.overflowX)) {\n       |     ^\n  5503 |             scrollable = true;\n  5504 |             break;\n  5505 |           }"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js",
+                        "column": 5,
+                        "line": 5502
+                      },
+                      "message": "Error: admin body text must not be hidden by horizontal clipping\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  -  1\u001b[39m\n\u001b[31m+ Received  + 65\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Product Family\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 176,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Urutan option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 164,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Label option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 158,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Product Family\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 176,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Urutan option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 164,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Label option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 158,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Product Family\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 176,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Urutan option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 164,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+   Object {\u001b[39m\n\u001b[31m+     \"clipLeft\": 62,\u001b[39m\n\u001b[31m+     \"clipRight\": 63,\u001b[39m\n\u001b[31m+     \"label\": \"Label option\",\u001b[39m\n\u001b[31m+     \"left\": 62,\u001b[39m\n\u001b[31m+     \"right\": 158,\u001b[39m\n\u001b[31m+   },\u001b[39m\n\u001b[31m+ ]\u001b[39m\n\n  5500 |           const style = getComputedStyle(ancestor);\n  5501 |           if (style.textOverflow === \"ellipsis\") ellipsis = true;\n> 5502 |           if ([\"auto\", \"scroll\"].includes(style.overflowX)) {\n       |     ^\n  5503 |             scrollable = true;\n  5504 |             break;\n  5505 |           }\n    at expectNoDocumentOverflow (/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js:5502:5)\n    at /home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js:2973:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:11:56.617Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/home/alhiefikri/telegram-bot/.slim/issue-605/admin-qualified/tests-Browser-admin-dashbo-d76f5-rols-usable-at-mobile-width/error-context.md"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/home/alhiefikri/telegram-bot/.slim/issue-605/admin-qualified/tests-Browser-admin-dashbo-d76f5-rols-usable-at-mobile-width/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js",
+                    "column": 5,
+                    "line": 5502
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-a0a72c939e4fa89d7dcc",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2918,
+          "column": 1
+        },
+        {
+          "title": "keeps the mobile navigation focus contained and restores its trigger",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.241Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-5936346d4f57828a62c8",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 2980,
+          "column": 1
+        },
+        {
+          "title": "lets admins reveal and hide the password field from an accessible control",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.241Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-49446bd94445d2395f5d",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3015,
+          "column": 1
+        },
+        {
+          "title": "serializes the visible admin password field before submitting bogus credentials",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.241Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-e01fdc646fefd4551d3e",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3043,
+          "column": 1
+        },
+        {
+          "title": "renders the compact admin dashboard at desktop width",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.241Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-50fd1118a5ceb84ff92c",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3072,
+          "column": 1
+        },
+        {
+          "title": "direct desktop tabs select one sidebar destination and preserve content anchors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.241Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-ee79bb70dd756b9f940d",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3120,
+          "column": 1
+        },
+        {
+          "title": "linked operational pages retain the shared shell and active destination",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.241Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-b448ab39c5699db065dd",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3168,
+          "column": 1
+        },
+        {
+          "title": "operational surfaces keep the shared shell and avoid occlusion at every breakpoint in both themes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-cf0749ddc6b32cd9bad5",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3218,
+          "column": 1
+        },
+        {
+          "title": "financial and communication surfaces keep the shared shell and avoid occlusion at every breakpoint in both themes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-318345d66663fc71dadf",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3277,
+          "column": 1
+        },
+        {
+          "title": "finance tables keep their overflow local and their labels readable at 200% text",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-3eb5b4fce96e7274e0a1",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3334,
+          "column": 1
+        },
+        {
+          "title": "supplier catalog forms preserve draft import, mapping and pricing without exposing secrets",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-3752b272ef2216a7fcb4",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3385,
+          "column": 1
+        },
+        {
+          "title": "desktop sidebar links navigate without JavaScript and retain filters",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-d166dba14fab437d04be",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3489,
+          "column": 1
+        },
+        {
+          "title": "no-JavaScript owner tabs expose server content and validation at 320px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-02f6d1d87f612928a789",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "no-JavaScript owner tabs expose server content and validation at 375px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-65ad01197b7e06f6abfb",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "no-JavaScript owner tabs expose server content and validation at 1280px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-73322e4df850194a01b4",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "no-JavaScript admin tabs expose server content and validation at 320px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-80efe95fafed67a52df1",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "no-JavaScript admin tabs expose server content and validation at 375px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-de5f353ed2a069f38aba",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "no-JavaScript admin tabs expose server content and validation at 1280px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-316708cde3353527bb3a",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "ordinary sidebar and linked-page anchors preserve fragments and explicit settings targets",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-4b9d0fba27052787bb41",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3614,
+          "column": 1
+        },
+        {
+          "title": "shared topbars stay reachable and leave hash, skip and focused targets uncovered",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-51e55f7f86157a9ec3f4",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3659,
+          "column": 1
+        },
+        {
+          "title": "Unknown delivery review renders reduced metadata and existing resolution actions",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-49f0cfa9a4520f42fbb1",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3729,
+          "column": 1
+        },
+        {
+          "title": "hides retired Pakasir controls from provider switch",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-6dc089ca26afc98606c3",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3764,
+          "column": 1
+        },
+        {
+          "title": "payment switch and maintenance confirmations keep focus, Escape and real submission controls",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-4c78d9feff8fe7d25c90",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3786,
+          "column": 1
+        },
+        {
+          "title": "keeps shared context and store actions reachable on internal admin tabs",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-8808188d30c8f8776db5",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3841,
+          "column": 1
+        },
+        {
+          "title": "mobile drawer contains focus and restores its visible trigger",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-d0a54533692261add493",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3874,
+          "column": 1
+        },
+        {
+          "title": "removing an open drawer root releases its scroll lock",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-e59e0e46348762d3c3e2",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3914,
+          "column": 1
+        },
+        {
+          "title": "mobile drawer reaches every tab and preserves filters, hash and product-create",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-f59d6f939eaf0ab476ae",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3939,
+          "column": 1
+        },
+        {
+          "title": "mobile navigation remains usable without JavaScript",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-2646b0d25c8aa82eb6c0",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3986,
+          "column": 1
+        },
+        {
+          "title": "Mini App shell keeps edge controls and modal content inside layout insets",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-30e27b02d272df1740df",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4021,
+          "column": 1
+        },
+        {
+          "title": "keeps dashboard navigation reachable without overflow at 768px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-ead4578f9100f37703c5",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4108,
+          "column": 3
+        },
+        {
+          "title": "keeps dashboard navigation reachable without overflow at 1023px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-552843596bb5bb43d175",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4108,
+          "column": 3
+        },
+        {
+          "title": "keeps dashboard navigation reachable without overflow at 1024px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-f4e025ebd76d92fae0ca",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4108,
+          "column": 3
+        },
+        {
+          "title": "keeps dashboard navigation reachable without overflow at 1280px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-baa2b6d87e6d67bf9a83",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4108,
+          "column": 3
+        },
+        {
+          "title": "keeps dashboard navigation reachable without overflow at 1440px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-872964c1fa478cd1529d",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4108,
+          "column": 3
+        },
+        {
+          "title": "keeps dashboard navigation reachable without overflow at 1920px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-c76220e6c45b0cc8095c",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4108,
+          "column": 3
+        },
+        {
+          "title": "renders KlikQRIS reporting cards and tables without overflow at 320px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-7396f401106b26ce99a3",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4144,
+          "column": 3
+        },
+        {
+          "title": "renders KlikQRIS reporting cards and tables without overflow at 390px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-e54edba52f39ffb24df2",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4144,
+          "column": 3
+        },
+        {
+          "title": "renders KlikQRIS reporting cards and tables without overflow at 768px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-d8126d9aa38e676dd066",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4144,
+          "column": 3
+        },
+        {
+          "title": "renders KlikQRIS reporting cards and tables without overflow at 1280px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-469832aeef824e68cbcd",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4144,
+          "column": 3
+        },
+        {
+          "title": "renders KlikQRIS reporting cards and tables without overflow at 1440px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-141365cbad8aa159b5e6",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4144,
+          "column": 3
+        },
+        {
+          "title": "renders KlikQRIS reporting cards and tables without overflow at 1920px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-8408691097df45d7ef8e",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4144,
+          "column": 3
+        },
+        {
+          "title": "renders storefront funnel analytics without overflow at 320px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-fa39bbceeebd2fa15437",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4206,
+          "column": 3
+        },
+        {
+          "title": "renders storefront funnel analytics without overflow at 390px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-cff3c5f08abba31253ed",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4206,
+          "column": 3
+        },
+        {
+          "title": "renders storefront funnel analytics without overflow at 768px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-0581768a4fffc672330e",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4206,
+          "column": 3
+        },
+        {
+          "title": "renders storefront funnel analytics without overflow at 1280px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-4b69de2b46b7fa330af3",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4206,
+          "column": 3
+        },
+        {
+          "title": "renders storefront funnel analytics without overflow at 1440px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-982742d839b3c93fd55d",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4206,
+          "column": 3
+        },
+        {
+          "title": "renders storefront funnel analytics without overflow at 1920px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-78243b16fbd74d72fe4b",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4206,
+          "column": 3
+        },
+        {
+          "title": "mobile content and product modal remain reachable with the drawer closed",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-069eaa767b81c6f5db38",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4226,
+          "column": 1
+        },
+        {
+          "title": "keeps tabs, cards, and the stock modal usable at Telegram mini app width",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-1b6c4d6848bfc09d1bf5",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4247,
+          "column": 1
+        },
+        {
+          "title": "keeps category management create, edit, and delete confirmation usable on mobile",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-cefdcf9dcbbfbb780cac",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4394,
+          "column": 1
+        },
+        {
+          "title": "opens and closes category management from the desktop Products tab",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-cd6ed4d6262bbb0bb470",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4499,
+          "column": 1
+        },
+        {
+          "title": "traps keyboard focus in the product modal and restores its opener",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-3be7942fcd1847fedb24",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4527,
+          "column": 1
+        },
+        {
+          "title": "traps keyboard focus in the stock modal and restores its opener",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-3a1479b62ab59c9346ce",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4557,
+          "column": 1
+        },
+        {
+          "title": "keeps structured Account Input reviewed, bounded, and private in page memory",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-f1612af89b7270ca7164",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4601,
+          "column": 1
+        },
+        {
+          "title": "focuses the relevant product field when server validation reopens the modal",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-c08a2efb9d1835a90e9e",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4757,
+          "column": 1
+        },
+        {
+          "title": "switches admin dashboard tabs and opens product creation from desktop sidebar navigation clicks",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-df413bdae48737412ff3",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4788,
+          "column": 3
+        },
+        {
+          "title": "switches admin dashboard tabs and opens product creation from Telegram mini app navigation clicks",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-6f9e06a8445e812f417d",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4788,
+          "column": 3
+        },
+        {
+          "title": "preserves the sales filter while visiting another dashboard tab",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-4f819da7b6c610d5d823",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4801,
+          "column": 1
+        },
+        {
+          "title": "opens Siaran directly with matching active navigation on desktop",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-c0ea53823611f46bdcb6",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4845,
+          "column": 3
+        },
+        {
+          "title": "opens Siaran directly with matching active navigation on Telegram mini app",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.243Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-600bdc5b5e62d23ea063",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4845,
+          "column": 3
+        },
+        {
+          "title": "saves product name and icon edits from the admin modal",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.244Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-6e06e4326977bb38a562",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4914,
+          "column": 1
+        },
+        {
+          "title": "manages quantity price tiers from the product modal at narrow mobile width",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.244Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-84d033ea7a0ff30e2f2f",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 4953,
+          "column": 1
+        },
+        {
+          "title": "saves locale copy variants from the product modal language tabs",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.244Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-c1319e8526194856d9a5",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 5046,
+          "column": 1
+        },
+        {
+          "title": "bulk stock deletion keeps mobile modal open and refreshes remaining accounts",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:12:01.244Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-fcd2b27424875a888339",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 5157,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-10T12:04:57.845Z",
+    "duration": 423455.554,
+    "expected": 42,
+    "skipped": 63,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}

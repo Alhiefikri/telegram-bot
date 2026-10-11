@@ -1,0 +1,324 @@
+{
+  "config": {
+    "argv": [
+      "/usr/bin/node",
+      "/home/alhiefikri/telegram-bot/src/node_modules/.bin/playwright",
+      "test",
+      "tests/Browser/admin-dashboard-responsive.spec.js",
+      "--grep",
+      "no-JavaScript (owner|admin) tabs",
+      "--output=../.slim/issue-605/nojs-body",
+      "--reporter=line,json"
+    ],
+    "rootDir": "/home/alhiefikri/telegram-bot/src",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/alhiefikri/telegram-bot/.slim/issue-605/nojs-body",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/home/alhiefikri/telegram-bot/src",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "line"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 4,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "tests/Browser/admin-dashboard-responsive.spec.js",
+      "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "no-JavaScript owner tabs expose server content and validation at 320px",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 30475,
+                  "error": {
+                    "message": "Error: page.evaluate: Execution context was destroyed, most likely because of a navigation.",
+                    "stack": "Error: page.evaluate: Execution context was destroyed, most likely because of a navigation.\n    at settleSmoothScroll (/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js:6592:14)\n    at expectUncoveredByTopbar (/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js:5272:9)\n    at /home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js:3577:11",
+                    "location": {
+                      "file": "/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js",
+                      "column": 14,
+                      "line": 6592
+                    },
+                    "snippet": "  6590 |\n  6591 | async function settleSmoothScroll(page) {\n> 6592 |   await page.evaluate(\n       |              ^\n  6593 |     () =>\n  6594 |       new Promise((resolve) => {\n  6595 |         let previous = window.scrollY;"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js",
+                        "column": 14,
+                        "line": 6592
+                      },
+                      "message": "Error: page.evaluate: Execution context was destroyed, most likely because of a navigation.\n\n  6590 |\n  6591 | async function settleSmoothScroll(page) {\n> 6592 |   await page.evaluate(\n       |              ^\n  6593 |     () =>\n  6594 |       new Promise((resolve) => {\n  6595 |         let previous = window.scrollY;\n    at settleSmoothScroll (/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js:6592:14)\n    at expectUncoveredByTopbar (/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js:5272:9)\n    at /home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js:3577:11"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:09:09.942Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/home/alhiefikri/telegram-bot/.slim/issue-605/nojs-body/tests-Browser-admin-dashbo-af815-ent-and-validation-at-320px/error-context.md"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/home/alhiefikri/telegram-bot/.slim/issue-605/nojs-body/tests-Browser-admin-dashbo-af815-ent-and-validation-at-320px/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/home/alhiefikri/telegram-bot/src/tests/Browser/admin-dashboard-responsive.spec.js",
+                    "column": 14,
+                    "line": 6592
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-02f6d1d87f612928a789",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "no-JavaScript owner tabs expose server content and validation at 375px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:09:51.425Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-65ad01197b7e06f6abfb",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "no-JavaScript owner tabs expose server content and validation at 1280px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:09:51.426Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-73322e4df850194a01b4",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "no-JavaScript admin tabs expose server content and validation at 320px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:09:51.426Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-80efe95fafed67a52df1",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "no-JavaScript admin tabs expose server content and validation at 375px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:09:51.426Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-de5f353ed2a069f38aba",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        },
+        {
+          "title": "no-JavaScript admin tabs expose server content and validation at 1280px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": -1,
+                  "parallelIndex": -1,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T12:09:51.426Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "eb2ec7ac136bc52d24d6-316708cde3353527bb3a",
+          "file": "tests/Browser/admin-dashboard-responsive.spec.js",
+          "line": 3516,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-10T12:09:06.601Z",
+    "duration": 44851.405,
+    "expected": 0,
+    "skipped": 5,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}
