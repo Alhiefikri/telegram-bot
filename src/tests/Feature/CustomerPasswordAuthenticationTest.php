@@ -23,6 +23,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 class CustomerPasswordAuthenticationTest extends TestCase
@@ -772,7 +773,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $this->assertAuthenticatedAs($customer, 'customer');
     }
 
-    private function consumeReset(string $token, string $password = 'Replacement customer password'): \Illuminate\Testing\TestResponse
+    private function consumeReset(string $token, string $password = 'Replacement customer password'): TestResponse
     {
         return $this->post(route('customer.password-reset.consume'), [
             'token' => $token, 'password' => $password, 'password_confirmation' => $password,

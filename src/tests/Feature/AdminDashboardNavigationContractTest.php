@@ -67,11 +67,11 @@ final class AdminDashboardNavigationContractTest extends TestCase
                     }
                 }
             }
-                if ($tab === 'stats') {
-                    $this->assertSame(1, $xpath->query('//button[@aria-label="Ciutkan navigasi admin" and @aria-controls="admin-desktop-sidebar"]')->length);
-                    $this->assertSame(1, $xpath->query('//*[@id="admin-desktop-sidebar"]')->length);
-                    $this->assertSame(1, $xpath->query('//*[contains(@class, "admin-dashboard-frame")]')->length);
-                }
+            if ($tab === 'stats') {
+                $this->assertSame(1, $xpath->query('//button[@aria-label="Ciutkan navigasi admin" and @aria-controls="admin-desktop-sidebar"]')->length);
+                $this->assertSame(1, $xpath->query('//*[@id="admin-desktop-sidebar"]')->length);
+                $this->assertSame(1, $xpath->query('//*[contains(@class, "admin-dashboard-frame")]')->length);
+            }
         }
     }
 

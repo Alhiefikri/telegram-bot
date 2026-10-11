@@ -21,8 +21,8 @@ use App\Services\OrderCredentialMailService;
 use App\Services\OrderStateMachine;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
+use App\Storefront\StorefrontShopCheckoutResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
@@ -478,7 +478,7 @@ class OrderCredentialMailTest extends TestCase
     }
 
     /**
-     * @return array{0: \App\Storefront\StorefrontShopCheckoutResult, 1: Order}
+     * @return array{0: StorefrontShopCheckoutResult, 1: Order}
      */
     private function checkoutWithEmail(Product $product, ?string $email, ?string $sessionId = null): array
     {
@@ -493,7 +493,6 @@ class OrderCredentialMailTest extends TestCase
         return [$result, Order::query()->latest('id')->firstOrFail()];
     }
 
-    /** @return OrderNotificationEvent */
     private function paidOrderCredentialEvent(string $email): OrderNotificationEvent
     {
         $this->manualPaymentModeIsActive();
