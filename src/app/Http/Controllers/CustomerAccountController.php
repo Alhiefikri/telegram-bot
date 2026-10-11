@@ -10,6 +10,7 @@ use App\Services\Customer\CustomerBalanceActivityCursorToken;
 use App\Services\Customer\CustomerBalanceOverviewReader;
 use App\Services\Customer\CustomerOrderClaimService;
 use App\Services\Customer\CustomerOwnedOrderQuery;
+use App\Services\Customer\CustomerSessionAuthentication;
 use App\Services\StoreBalance\StoreBalanceActivityService;
 use App\Services\UsdtBalance\CustomerUsdtActivityService;
 use App\Services\UsdtBalance\UsdtMicroAmount;
@@ -78,9 +79,7 @@ class CustomerAccountController extends Controller
 
     public function logout(Request $request): RedirectResponse
     {
-        auth('customer')->logout();
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
+        app(CustomerSessionAuthentication::class)->logout($request);
 
         return redirect()->route('customer.account');
     }

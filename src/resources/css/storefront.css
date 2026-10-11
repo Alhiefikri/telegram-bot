@@ -5,6 +5,7 @@
 
 @source "../views/storefront.blade.php";
 @source "../views/storefront";
+@source "../views/customer";
 @source "../views/components";
 @source "../js/storefront.js";
 @source "../js/theme.js";
@@ -492,7 +493,8 @@
     background: var(--sf-surface-warm);
     box-shadow: 0 10px 24px rgb(18 35 63 / 0.08);
   }
-  .storefront-shell :where(a, button, input, select, textarea):focus-visible {
+  .storefront-shell
+    :where(a, button, input, select, textarea, summary):focus-visible {
     outline: 3px solid var(--sf-accent);
     outline-offset: 3px;
   }

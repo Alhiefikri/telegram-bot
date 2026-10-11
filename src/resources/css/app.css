@@ -1344,7 +1344,8 @@
     transform: none;
   }
 
-  .storefront-shell :where(a, button, input, select, textarea):focus-visible {
+  .storefront-shell
+    :where(a, button, input, select, textarea, summary):focus-visible {
     outline: 3px solid var(--sf-accent);
     outline-offset: 3px;
   }

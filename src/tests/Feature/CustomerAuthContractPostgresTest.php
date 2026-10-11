@@ -117,6 +117,8 @@ class CustomerAuthContractPostgresTest extends TestCase
     public function test_additive_migration_preserves_existing_customer_and_active_magic_link(): void
     {
         $migration = require database_path('migrations/2026_10_11_100000_add_customer_authentication_contract.php');
+        $mailMigration = require database_path('migrations/2026_10_11_110000_create_customer_auth_mail_works.php');
+        $mailMigration->down();
         $migration->down();
         try {
             $id = DB::table('customers')->insertGetId(['first_name' => 'Legacy', 'telegram_id' => null, 'email' => null, 'created_at' => now(), 'updated_at' => now()]);
@@ -132,6 +134,7 @@ class CustomerAuthContractPostgresTest extends TestCase
             if (! Schema::hasTable('customer_auth_tokens')) {
                 $migration->up();
             }
+            $mailMigration->up();
         }
     }
 

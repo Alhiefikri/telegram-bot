@@ -11,9 +11,10 @@
                 <h1 class="mt-2 font-display text-4xl font-black">Pesanan saya</h1>
                 <p class="mt-2 text-sm font-bold text-[var(--sf-muted)]">{{ $customer->email }}</p>
             </div>
-            <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2">
                 <a href="{{ route('customer.claim.create') }}" class="neo-button bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white">Klaim pesanan</a>
                 <a href="{{ route('customer.balance.show') }}" class="neo-button bg-white px-4 py-3 text-sm font-black">Saldo saya</a>
+                <a href="{{ route('customer.security') }}" class="neo-button bg-white px-4 py-3 text-sm font-black">Keamanan akun</a>
                 <form method="POST" action="{{ route('customer.logout') }}">
                     @csrf
                     <button class="rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 py-3 text-sm font-black">Keluar</button>

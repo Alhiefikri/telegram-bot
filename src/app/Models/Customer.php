@@ -16,7 +16,7 @@ class Customer extends Model implements Authenticatable
     /** @use HasFactory<CustomerFactory> */
     use AuthenticatableTrait, HasFactory, Notifiable;
 
-    protected $hidden = ['telegram_id', 'username', 'phone_number', 'email', 'email_verified_at', 'password', 'remember_token', 'auth_version', 'enrollment_version', 'identities', 'authTokens', 'auth_tokens'];
+    protected $hidden = ['telegram_id', 'username', 'phone_number', 'email', 'email_verified_at', 'password', 'password_scheme', 'remember_token', 'auth_version', 'enrollment_version', 'identities', 'authTokens', 'auth_tokens'];
 
     protected function casts(): array
     {

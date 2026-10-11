@@ -50,6 +50,7 @@ use App\Http\Controllers\Admin\AdminTelegramWelcomeBannerController;
 use App\Http\Controllers\Admin\AdminUsdtTopUpReviewController;
 use App\Http\Controllers\Admin\AdminWarrantyController;
 use App\Http\Controllers\CustomerAccountController;
+use App\Http\Controllers\CustomerPasswordAuthenticationController;
 use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontFunnelEventController;
 use App\Http\Controllers\StorefrontLegacyProductFamilyRedirectController;
@@ -138,13 +139,22 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
 });
 Route::redirect('/cara-loginoutlook', '/gpt/panduan-login-akun');
 
-Route::prefix('akun')->name('customer.')->group(function (): void {
+Route::prefix('akun')->name('customer.')->middleware(\App\Http\Middleware\ValidateCustomerSession::class)->group(function (): void {
     Route::get('/', [CustomerAccountController::class, 'landing'])->name('account');
+    Route::post('register', [CustomerPasswordAuthenticationController::class, 'register'])->name('register');
+    Route::post('login', [CustomerPasswordAuthenticationController::class, 'login'])->name('login');
+    Route::get('verifikasi-email', [CustomerPasswordAuthenticationController::class, 'verification'])->name('verification.show');
+    Route::post('verifikasi-email', [CustomerPasswordAuthenticationController::class, 'verify'])->middleware('throttle:customer-login-consume')->name('verification.consume');
+    Route::post('password-reset', [CustomerPasswordAuthenticationController::class, 'requestReset'])->name('password-reset.request');
+    Route::get('password-reset/confirm', [CustomerPasswordAuthenticationController::class, 'resetForm'])->name('password-reset.show');
+    Route::post('password-reset/confirm', [CustomerPasswordAuthenticationController::class, 'reset'])->middleware('throttle:customer-login-consume')->name('password-reset.consume');
     Route::post('login-link', [CustomerAccountController::class, 'requestLink'])->middleware('throttle:customer-login-link')->name('login-link.request');
     Route::get('login-link', [CustomerAccountController::class, 'loginLink'])->name('login-link.show');
     Route::post('login-link/consume', [CustomerAccountController::class, 'consume'])->middleware('throttle:customer-login-consume')->name('login-link.consume');
     Route::middleware('auth:customer')->group(function (): void {
         Route::post('logout', [CustomerAccountController::class, 'logout'])->name('logout');
+        Route::get('keamanan', [CustomerPasswordAuthenticationController::class, 'security'])->name('security');
+        Route::post('keamanan/password', [CustomerPasswordAuthenticationController::class, 'setPassword'])->middleware('throttle:customer-login-consume')->name('password.enroll');
         Route::get('pesanan', [CustomerAccountController::class, 'orders'])->name('orders.index');
         Route::get('saldo', [CustomerAccountController::class, 'balance'])->name('balance.show');
         Route::post('pesanan/{order}/status', [CustomerAccountController::class, 'status'])->middleware('throttle:automatic-payment-status-refresh')->name('orders.status');
