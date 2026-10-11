@@ -11,7 +11,7 @@
         <main class="flex-grow pb-16">
             @include('storefront.partials.checkout-maintenance')
             @include('storefront.partials.shop.checkout-error')
-            @include('storefront.partials.shop.hero')
+            @include('storefront.partials.hero')
             @include('storefront.partials.shop.catalog')
             @include('storefront.partials.verified-purchase-activity')
             @include('storefront.partials.support')

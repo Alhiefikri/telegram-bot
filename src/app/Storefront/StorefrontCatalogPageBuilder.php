@@ -46,7 +46,7 @@ class StorefrontCatalogPageBuilder
      */
     public function shopViewData(StorefrontCatalogQuery|string|null $query): array
     {
-        return $this->shop($query)->viewData();
+        return $this->shop($query)->viewData() + ['homepageBanners' => $this->banners->published()];
     }
 
     private function build(string $context, StorefrontCatalogQuery $query): StorefrontCatalogPage

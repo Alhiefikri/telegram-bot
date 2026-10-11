@@ -40,7 +40,7 @@ class StorefrontShopCatalogTest extends TestCase
 
         $this->get(route('storefront.shop.index'))
             ->assertOk()
-            ->assertSee('Katalog produk digital siap pakai')
+            ->assertSee('storefront-banner-carousel')
             ->assertSee('<link rel="canonical" href="'.route('storefront.shop.index').'">', false);
 
         $this->get(route('storefront.shop.index', ['q' => '  SHOP   SEARCH  ']))
@@ -54,7 +54,7 @@ class StorefrontShopCatalogTest extends TestCase
         Product::factory()->create(['name' => 'Shop Shell Product', 'stock' => 2, 'reserved_stock' => 0]);
 
         $html = $this->get(route('storefront.shop.index'))->assertOk()->getContent();
-        $heroStart = strpos($html, '<section class="relative px-5 pb-6 pt-6');
+        $heroStart = strpos($html, '<section class="storefront-hero-card storefront-banner-carousel"');
         $catalogStart = strpos($html, '<section id="products"');
         $supportStart = strpos($html, '<section id="support"');
 

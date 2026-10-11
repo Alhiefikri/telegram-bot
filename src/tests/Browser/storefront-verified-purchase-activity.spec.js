@@ -121,6 +121,29 @@ test("does not rotate verified activity for reduced-motion users", async ({
   await expect(message).toHaveText(initialMessage ?? "");
 });
 
+test("shop catalog uses the same Admin-managed banner images as home", async ({
+  page,
+}) => {
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  const homeImages = await page
+    .locator(".storefront-banner-slide img")
+    .evaluateAll((images) => images.map((image) => image.getAttribute("src")));
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".storefront-banner-carousel")).toBeVisible();
+  const shopImages = await page
+    .locator(".storefront-banner-slide img")
+    .evaluateAll((images) => images.map((image) => image.getAttribute("src")));
+  expect(shopImages).toEqual(homeImages);
+  expect(shopImages).toHaveLength(3);
+  await page
+    .locator(".storefront-banner-carousel")
+    .getByRole("button", { name: "Banner berikutnya" })
+    .click();
+  await expect(
+    page.locator(".storefront-banner-carousel [data-carousel-dot]").nth(1)
+  ).toHaveAttribute("aria-current", "true");
+});
+
 test("carousel supports navigation, pause, reduced motion and mobile layout", async ({
   page,
 }, testInfo) => {
