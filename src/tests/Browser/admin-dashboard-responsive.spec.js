@@ -346,6 +346,10 @@ test("customer checkout: opens the authenticated balance overview across mobile 
     `${baseUrl}/akun/login-link#token=${customerBalanceLoginToken}`,
     { waitUntil: "domcontentloaded" }
   );
+  await expect(page.locator("#challenge-token")).toHaveValue(
+    customerBalanceLoginToken
+  );
+  await page.getByRole("button", { name: "Konfirmasi link dan masuk" }).click();
   await page.waitForURL(`${baseUrl}/akun/pesanan`);
   await page.getByRole("link", { name: "Saldo saya" }).click();
 
