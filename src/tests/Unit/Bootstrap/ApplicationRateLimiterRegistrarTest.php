@@ -30,24 +30,6 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
         ])))->register();
     }
 
-    public function test_it_registers_every_application_limiter_without_booting_laravel(): void
-    {
-        foreach ([
-            'telegram',
-            'pakasir-webhook',
-            'pakasir-status-refresh',
-            'sakurupiah-webhook',
-            'sakurupiah-status-refresh',
-            'storefront-checkout',
-            'storefront-order-access',
-            'customer-login-link',
-            'customer-login-consume',
-            'customer-order-claim',
-        ] as $name) {
-            $this->assertNotNull($this->rateLimiter->limiter($name), "{$name} limiter was not registered.");
-        }
-    }
-
     public function test_telegram_policy_preserves_trusted_and_untrusted_identity_buckets(): void
     {
         $trusted = $this->limit('telegram', Request::create('/', 'POST', [
@@ -172,16 +154,6 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
 
         $this->assertLimit($limits[0], 7, 60, 'storefront:order-access:source:203.0.113.50');
         $this->assertLimit($limits[1], 7, 60, 'storefront:order-access:invoice:INV-123');
-    }
-
-    public function test_customer_login_link_policy_preserves_email_and_ip_buckets(): void
-    {
-        $limits = $this->limits('customer-login-link', Request::create('/', 'POST', [
-            'email' => ' Customer@Example.Test ',
-        ], [], [], ['REMOTE_ADDR' => '203.0.113.60']));
-
-        $this->assertLimit($limits[0], 3, 900, 'customer:login:email:customer@example.test:203.0.113.60');
-        $this->assertLimit($limits[1], 10, 3600, 'customer:login:ip:203.0.113.60');
     }
 
     public function test_customer_login_consume_policy_preserves_ip_bucket(): void

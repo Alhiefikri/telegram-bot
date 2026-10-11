@@ -152,6 +152,22 @@ class CustomerAuthMaintenanceTest extends TestCase
         }
     }
 
+    public function test_health_flags_retrying_delivery_failure_before_work_or_job_becomes_terminal(): void
+    {
+        $id = $this->work('auth_token_id', $this->token()->id);
+        DB::table('customer_auth_mail_works')->where('id', $id)->update([
+            'last_error_code' => 'mail_delivery_failed',
+            'next_attempt_at' => now()->addMinute(),
+        ]);
+        $this->assertSame(1, Artisan::call('customer-auth:mail-health', ['--limit' => 10]));
+        $report = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame(['count' => 1, 'capped' => false], $report['counts']['retrying_failed']);
+        $this->assertSame(['count' => 0, 'capped' => false], $report['counts']['failed']);
+        $this->assertSame(['count' => 0, 'capped' => false], $report['counts']['notifications_failed_jobs']);
+        DB::table('customer_auth_mail_works')->where('id', $id)->update(['last_error_code' => null]);
+        $this->assertSame(0, Artisan::call('customer-auth:mail-health', ['--limit' => 10]));
+    }
+
     private function token(array $overrides = []): CustomerAuthToken
     {
         $customer = Customer::factory()->create(['email' => null]);

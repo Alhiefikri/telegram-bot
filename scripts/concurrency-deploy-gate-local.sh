@@ -89,7 +89,7 @@ docker run --detach \
 container_started=1
 
 deadline=$((SECONDS + WAIT_SECONDS))
-until docker exec "$CONTAINER_NAME" pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; do
+until docker exec "$CONTAINER_NAME" pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; do
     running="$(docker inspect --format '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || printf 'false')"
     [[ "$running" == 'true' ]] || {
         docker logs --tail 40 "$CONTAINER_NAME" >&2 || true

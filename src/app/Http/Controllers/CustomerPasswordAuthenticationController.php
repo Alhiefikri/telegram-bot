@@ -8,8 +8,10 @@ use App\Http\Requests\CustomerPasswordEnrollmentRequest;
 use App\Http\Requests\CustomerPasswordLoginRequest;
 use App\Http\Requests\CustomerPasswordResetRequest;
 use App\Http\Requests\CustomerRegistrationRequest;
+use App\Services\Customer\CustomerAuthAvailability;
 use App\Services\Customer\CustomerGoogleAuthenticationService;
 use App\Services\Customer\CustomerPasswordAuthenticationService;
+use App\Services\Customer\CustomerTelegramAuthenticationService;
 use App\Storefront\StorefrontPresenter;
 use App\Storefront\StorefrontSeo;
 use Illuminate\Http\RedirectResponse;
@@ -77,6 +79,7 @@ class CustomerPasswordAuthenticationController extends Controller
     public function security(Request $request, StorefrontPresenter $storefront, StorefrontSeo $seo): Response
     {
         $metadata = $seo->privatePage('Keamanan akun | '.$storefront->brand(), 'Lengkapi password akun pelanggan.');
+        $authEnabled = app(CustomerAuthAvailability::class)->enabled();
 
         return response()->view('customer.security', [
             'storefront' => $storefront,
@@ -84,9 +87,12 @@ class CustomerPasswordAuthenticationController extends Controller
             'copy' => config('storefront'),
             'homeUrl' => route('storefront.home'),
             'metadata' => $metadata,
+            'authEnabled' => $authEnabled,
             'customer' => $request->user('customer'),
-            'googleReady' => app(CustomerGoogleAuthenticationService::class)->ready(),
+            'googleReady' => $authEnabled && app(CustomerGoogleAuthenticationService::class)->ready(),
             'googleLinked' => $request->user('customer')->identities()->where('provider', CustomerIdentityProvider::Google->value)->exists(),
+            'telegramReady' => $authEnabled && app(CustomerTelegramAuthenticationService::class)->ready(),
+            'telegramAuthenticated' => $request->session()->get('customer_telegram_authenticated') === true,
         ])->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
     }
 

@@ -28,6 +28,7 @@ final class ReportCustomerAuthMailHealth extends Command
                 'due' => $this->boundedCount((clone $pending)->where('expires_at', '>', $now)->where('next_attempt_at', '<=', $now), $limit),
                 'deferred' => $this->boundedCount((clone $pending)->where('expires_at', '>', $now)->where('next_attempt_at', '>', $now), $limit),
                 'expired_pending' => $this->boundedCount((clone $pending)->where('expires_at', '<=', $now), $limit),
+                'retrying_failed' => $this->boundedCount((clone $pending)->whereNotNull('last_error_code'), $limit),
             ];
             foreach (['sent', 'cancelled', 'failed'] as $status) {
                 $counts[$status] = $this->boundedCount(DB::table('customer_auth_mail_works')->where('status', $status), $limit);
@@ -45,7 +46,7 @@ final class ReportCustomerAuthMailHealth extends Command
             ];
             $this->line(json_encode($report, JSON_THROW_ON_ERROR));
 
-            return $counts['failed']['count'] > 0 || $counts['expired_pending']['count'] > 0 || $counts['notifications_failed_jobs']['count'] > 0
+            return $counts['failed']['count'] > 0 || $counts['retrying_failed']['count'] > 0 || $counts['expired_pending']['count'] > 0 || $counts['notifications_failed_jobs']['count'] > 0
                 ? self::FAILURE : self::SUCCESS;
         } catch (Throwable) {
             $this->error('Customer authentication mail health temporarily unavailable.');

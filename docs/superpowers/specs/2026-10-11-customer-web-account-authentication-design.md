@@ -8,6 +8,8 @@ Issue canonical: [#607](https://github.com/Alhiefikri/telegram-bot/issues/607).
 
 Implementation plan and ticket map: [plan](../plans/2026-10-11-customer-web-account-authentication-plan.md).
 
+T8 implementation and sanitized local evidence: [release controls](../../customer-web-account-operations.md#authentication-release-controls-615). Local checks do not close the live Resend/Google/Store Bot release gates or authorize deployment.
+
 Related decisions:
 
 - [ADR-0001: Web storefront order access](../../adr/0001-web-storefront-order-access.md)

@@ -76,6 +76,7 @@ use App\Http\Controllers\StorefrontSitemapController;
 use App\Http\Controllers\StorefrontVerifiedPurchaseActivityController;
 use App\Http\Controllers\StorefrontWaitlistController;
 use App\Http\Controllers\WarrantyController;
+use App\Http\Middleware\EnsureCustomerAuthAvailable;
 use App\Http\Middleware\ValidateCustomerSession;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Session\Middleware\StartSession;
@@ -142,12 +143,12 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
 });
 Route::redirect('/cara-loginoutlook', '/gpt/panduan-login-akun');
 
-Route::prefix('auth/google')->name('customer.google.')->middleware(ValidateCustomerSession::class)->group(function (): void {
+Route::prefix('auth/google')->name('customer.google.')->middleware([ValidateCustomerSession::class, EnsureCustomerAuthAvailable::class])->group(function (): void {
     Route::get('redirect', [CustomerGoogleAuthenticationController::class, 'redirect'])->name('redirect');
     Route::get('callback', [CustomerGoogleAuthenticationController::class, 'callback'])->name('callback');
 });
 
-Route::prefix('akun')->name('customer.')->middleware(ValidateCustomerSession::class)->group(function (): void {
+Route::prefix('akun')->name('customer.')->middleware([ValidateCustomerSession::class, EnsureCustomerAuthAvailable::class])->group(function (): void {
     Route::get('/', [CustomerAccountController::class, 'landing'])->name('account');
     Route::post('register', [CustomerPasswordAuthenticationController::class, 'register'])->name('register');
     Route::post('login', [CustomerPasswordAuthenticationController::class, 'login'])->name('login');
@@ -165,7 +166,7 @@ Route::prefix('akun')->name('customer.')->middleware(ValidateCustomerSession::cl
     Route::get('telegram/status', [CustomerAccountController::class, 'telegramStatus'])->name('telegram.status');
     Route::post('telegram/consume', [CustomerAccountController::class, 'consumeTelegram'])->name('telegram.consume');
     Route::middleware('auth:customer')->group(function (): void {
-        Route::post('logout', [CustomerAccountController::class, 'logout'])->name('logout');
+        Route::post('logout', [CustomerAccountController::class, 'logout'])->middleware('throttle:customer-logout')->name('logout');
         Route::post('telegram/link', [CustomerAccountController::class, 'startTelegramLink'])->name('telegram.link');
         Route::post('google/link', [CustomerGoogleAuthenticationController::class, 'link'])->name('google.link');
         Route::post('google/unlink', [CustomerGoogleAuthenticationController::class, 'unlink'])->name('google.unlink');

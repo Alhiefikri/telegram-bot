@@ -58,7 +58,7 @@ return Application::configure(basePath: dirname(__DIR__))
         }
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        $exceptions->dontFlash(['api_key', 'credentials', 'token', 'code', 'challenge', 'state']);
+        $exceptions->dontFlash(['api_key', 'credentials', 'token', 'code', 'challenge', 'state', 'access_key']);
         $exceptions->render(function (HttpExceptionInterface $exception, Request $request) {
             if ($exception->getStatusCode() !== 429 || ! $request->is('akun', 'akun/*') || $request->expectsJson()) {
                 return null;

@@ -10,6 +10,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Exceptions\BscReceiverChallengeException;
 use App\Exceptions\InsufficientStock;
+use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\AuditLog;
 use App\Models\BscPaymentReceiver;
@@ -412,7 +413,35 @@ class ProductionConcurrencyTest extends TestCase
     public function test_concurrent_provider_switch_and_checkout_serialize_on_the_shared_setting_lock(): void
     {
         $this->requireConcurrencyLane();
-        KlikQrisSandboxScenarios::configureReadySandbox();
+        config()->set('queue.default', 'database');
+        config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
+            'sandbox_api_id' => 'sandbox-id',
+            'sandbox_api_key' => 'sandbox-key',
+            'qris_contract' => [
+                'currency' => 'IDR',
+                'currency_confirmed' => true,
+                'fee_payer' => 'merchant',
+                'merchant_fee' => 1,
+                'fee_confirmed' => true,
+                'expiry_hours' => 24,
+                'expiry_confirmed' => true,
+            ],
+        ]));
+        Http::preventStrayRequests();
+        Http::fake(['sakurupiah.id/*' => Http::response([
+            'status' => '200',
+            'data' => [[
+                'kode' => 'QRISC',
+                'nama' => 'QRISC Custom Merchant',
+                'minimal' => 200,
+                'maksimal' => 20_000_000,
+                'tipe' => 'DIRECT',
+                'status' => 'Aktif',
+                'addition' => ['default_expired' => 24],
+            ]],
+        ])]);
 
         $owner = User::factory()->create(['role' => UserRole::Owner]);
         ManualPaymentSetting::create([
@@ -430,7 +459,7 @@ class ProductionConcurrencyTest extends TestCase
 
         $results = $this->runConcurrently([
             fn () => app(PaymentProviderSwitcher::class)->change(
-                provider: PaymentProvider::KLIKQRIS,
+                provider: PaymentProvider::SAKURUPIAH,
                 expectedVersion: 0,
                 actor: User::findOrFail($owner->id),
                 ip: null,
@@ -443,15 +472,22 @@ class ProductionConcurrencyTest extends TestCase
                 ->provider,
         ]);
 
-        $this->assertSame(2, $this->successfulResultCount($results));
-        $this->assertSame([], $this->failedResultClasses($results));
-        $this->assertContains(PaymentProvider::KLIKQRIS, array_map(
-            fn (array $result): mixed => $result['value'] ?? null,
-            $results,
-        ));
-        $this->assertSame(1, Order::query()->count());
-        $this->assertSame(1, Payment::query()->count());
-        $this->assertSame(PaymentProvider::KLIKQRIS, ManualPaymentSetting::current()?->paymentProvider());
+        $this->assertTrue($results[0]['ok']);
+        $this->assertSame(0, $results[0]['exit_code']);
+        $this->assertSame(PaymentProvider::SAKURUPIAH, $results[0]['value']);
+        if ($results[1]['ok']) {
+            $this->assertSame(0, $results[1]['exit_code']);
+            $this->assertSame(PaymentProvider::MANUAL, $results[1]['value']);
+            $this->assertSame(1, Order::query()->count());
+            $this->assertSame(PaymentProvider::MANUAL, Payment::query()->sole()->provider);
+        } else {
+            $this->assertSame(InvalidCheckout::class, $results[1]['class']);
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, Payment::query()->count());
+            $this->assertSame(0, $product->fresh()->reserved_stock);
+            $this->assertSame(1, $cart->fresh()->cartItems()->sole()->quantity);
+        }
+        $this->assertSame(PaymentProvider::SAKURUPIAH, ManualPaymentSetting::current()?->paymentProvider());
         $this->assertSame(1, ManualPaymentSetting::current()?->payment_provider_version);
         $this->assertSame(1, AuditLog::query()->where('action', 'payment_provider.switched')->count());
     }

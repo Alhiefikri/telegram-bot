@@ -8,7 +8,7 @@
             <div class="auth-panel mx-auto max-w-xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] p-5 sm:p-8">
                 <nav class="auth-tabs" aria-label="Akses akun">
                     <a href="{{ route('customer.account') }}" @if($authView === 'login') aria-current="page" @endif>Masuk</a>
-                    <a href="{{ route('customer.account', ['view' => 'register']) }}" @if($authView === 'register') aria-current="page" @endif>Daftar</a>
+                    @if($authEnabled)<a href="{{ route('customer.account', ['view' => 'register']) }}" @if($authView === 'register') aria-current="page" @endif>Daftar</a>@endif
                 </nav>
                 <h1 class="mt-5 font-display text-3xl font-black tracking-tight sm:text-4xl">{{ match($authView) {
                     'register' => 'Daftar akun pelanggan', 'code' => 'Masuk dengan kode email',
@@ -85,10 +85,11 @@
                     </form>
                 @endif
                 <div class="mt-5 border-t border-[var(--sf-border)] pt-3">
-                    @if($authView !== 'code')<a class="auth-link" href="{{ route('customer.account', ['view' => 'code']) }}">Masuk dengan kode email</a>@endif
-                    @if($authView !== 'reset')<a class="auth-link" href="{{ route('customer.account', ['view' => 'reset']) }}">Lupa password?</a>@endif
+                    @if($authEnabled && $authView !== 'code')<a class="auth-link" href="{{ route('customer.account', ['view' => 'code']) }}">Masuk dengan kode email</a>@endif
+                    @if($authEnabled && $authView !== 'reset')<a class="auth-link" href="{{ route('customer.account', ['view' => 'reset']) }}">Lupa password?</a>@endif
                     @if($authView !== 'magic')<a class="auth-link" href="{{ route('customer.account', ['view' => 'magic']) }}">Masuk tanpa password melalui link email</a>@endif
                 </div>
+                @if($authEnabled)
                 <section class="mt-4 border-t border-[var(--sf-border)] pt-4" aria-label="Metode lain">
                     @if($telegramReady)
                         <form method="POST" action="{{ route('customer.telegram.login') }}" data-telegram-form data-status-url="{{ route('customer.telegram.status') }}" data-consume-url="{{ route('customer.telegram.consume') }}" data-orders-url="{{ route('customer.orders.index') }}" hidden>
@@ -109,6 +110,7 @@
                         <p class="auth-help mt-2">Login Google belum tersedia. Gunakan metode email.</p>
                     @endif
                 </section>
+                @endif
                 <a href="{{ route('storefront.order-access.create') }}" class="auth-link mt-5">Akses dengan invoice + Recovery Key</a>
             </div>
         </main>

@@ -37,7 +37,7 @@ ALTER TABLE customer_google_auth_claims ADD CONSTRAINT customer_google_claim_con
 )
 SQL);
         DB::unprepared(<<<'SQL'
-CREATE FUNCTION preserve_customer_google_claim() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION preserve_customer_google_claim() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF (NEW.operation, NEW.customer_id, NEW.auth_version, NEW.authenticated_at, NEW.state_hash,
         NEW.session_binding_hash, NEW.configuration_fingerprint, NEW.expires_at, NEW.created_at) IS DISTINCT FROM

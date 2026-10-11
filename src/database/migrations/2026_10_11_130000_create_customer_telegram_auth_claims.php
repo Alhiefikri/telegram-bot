@@ -49,7 +49,7 @@ ALTER TABLE customer_telegram_auth_claims ADD CONSTRAINT customer_telegram_claim
 )
 SQL);
         DB::unprepared(<<<'SQL'
-CREATE FUNCTION preserve_customer_telegram_claim() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION preserve_customer_telegram_claim() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF (NEW.operation, NEW.customer_id, NEW.auth_version, NEW.authenticated_at, NEW.session_binding_hash,
         NEW.capability_hash, NEW.expires_at, NEW.created_at) IS DISTINCT FROM

@@ -30,7 +30,7 @@ The existing `customer_login_links` schema, issuance, 15-minute expiry and POST 
 
 Guest checkout still requires no authentication provider. Account access remains Customer-scoped; identity/email equality never grants Order, credentials, Store Balance, or Customer USDT Balance ownership. Claiming an eligible guest Order still requires authenticated Customer plus invoice and Recovery Key. No balances, receivers or Orders move as a result of authentication linking.
 
-Rollback restores the magic-link surface with additive schema retained; production rollback must not drop identity/token history. Resend real delivery, Google credentials, Telegram browser/Bot proof and release evidence remain downstream gates. This decision authorizes neither production deployment nor GitHub Actions operations.
+Rollback restores the magic-link surface with additive schema retained; production rollback must not drop identity/token history. #615 implements a database-backed new-method availability gate and scoped version/challenge revocation; [release controls and sanitized evidence](../customer-web-account-operations.md#authentication-release-controls-615) describe their distinct semantics. Guest/Recovery Key access and existing account reads are outside the availability gate. Resend real delivery, Google credentials and live Telegram browser/Bot proof remain operator-owned release gates. This decision authorizes neither production deployment nor GitHub Actions operations.
 
 
 ## Transition

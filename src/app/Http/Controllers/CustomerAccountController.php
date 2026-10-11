@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\CustomerLoginLinkRequest;
 use App\Http\Requests\CustomerOrderClaimRequest;
 use App\Models\Order;
+use App\Services\Customer\CustomerAuthAvailability;
 use App\Services\Customer\CustomerAuthenticationService;
 use App\Services\Customer\CustomerBalanceActivityCursorToken;
 use App\Services\Customer\CustomerBalanceOverviewReader;
@@ -33,6 +34,7 @@ class CustomerAccountController extends Controller
             return redirect()->route('customer.orders.index');
         }
 
+        $authEnabled = app(CustomerAuthAvailability::class)->enabled();
         $metadata = $seo->privatePage(
             'Akun Pelanggan | '.$storefront->brand(),
             'Masuk atau daftar dengan email untuk melihat pesanan dan saldo akun pelanggan.',
@@ -47,10 +49,11 @@ class CustomerAccountController extends Controller
             'pageDescription' => $metadata->description,
             'canonicalUrl' => $metadata->canonicalUrl,
             'metadata' => $metadata,
-            'authView' => in_array($request->query('view', session('customer_auth_view')), ['register', 'code', 'reset', 'magic', 'verification'], true)
-                ? $request->query('view', session('customer_auth_view')) : 'login',
-            'telegramReady' => app(CustomerTelegramAuthenticationService::class)->ready(),
-            'googleReady' => app(CustomerGoogleAuthenticationService::class)->ready(),
+            'authEnabled' => $authEnabled,
+            'authView' => ! $authEnabled ? 'magic' : (in_array($request->query('view', session('customer_auth_view')), ['register', 'code', 'reset', 'magic', 'verification'], true)
+                ? $request->query('view', session('customer_auth_view')) : 'login'),
+            'telegramReady' => $authEnabled && app(CustomerTelegramAuthenticationService::class)->ready(),
+            'googleReady' => $authEnabled && app(CustomerGoogleAuthenticationService::class)->ready(),
         ]);
     }
 

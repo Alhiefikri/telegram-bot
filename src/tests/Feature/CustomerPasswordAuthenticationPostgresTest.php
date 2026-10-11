@@ -6,6 +6,7 @@ use App\Enums\CustomerAuthTokenPurpose;
 use App\Models\Customer;
 use App\Models\CustomerAuthMailWork;
 use App\Models\CustomerAuthToken;
+use App\Services\Customer\CustomerAuthRevocation;
 use App\Services\Customer\CustomerPasswordAuthenticationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -86,6 +87,27 @@ class CustomerPasswordAuthenticationPostgresTest extends TestCase
         $this->assertNotNull($challenge->fresh()->consumed_at);
         $this->assertFalse(app(CustomerPasswordAuthenticationService::class)->login($customer->email, 'Original race password', $this->browserRequest()));
         $this->assertTrue(app(CustomerPasswordAuthenticationService::class)->login($customer->email, 'Replacement race password', $this->browserRequest()));
+    }
+
+    public function test_operator_revocation_serializes_with_reset_and_erases_the_same_mail_grant(): void
+    {
+        $customer = Customer::factory()->create(['email' => bin2hex(random_bytes(12)).'@example.test', 'email_verified_at' => now()]);
+        $customer->forceFill(['password' => 'Original revocation race password'])->save();
+        app(CustomerPasswordAuthenticationService::class)->requestReset($customer->email);
+        $challenge = CustomerAuthToken::query()->where('customer_id', $customer->id)->where('purpose', CustomerAuthTokenPurpose::PasswordReset->value)->sole();
+        $work = CustomerAuthMailWork::query()->where('auth_token_id', $challenge->id)->sole();
+        $token = $work->payload['token'];
+        $results = $this->race([
+            fn () => app(CustomerAuthRevocation::class)->revoke($customer->id) ? 'revoked' : 'failed',
+            fn () => app(CustomerPasswordAuthenticationService::class)->reset($token, 'Replacement revocation race password', $this->browserRequest()) ? 'reset' : 'rejected',
+        ]);
+        $this->assertSame('revoked', $results[0]);
+        $this->assertContains($results[1], ['reset', 'rejected']);
+        $this->assertSame($results[1] === 'reset' ? 2 : 1, $customer->fresh()->auth_version);
+        $this->assertNotNull($challenge->fresh()->consumed_at);
+        $this->assertNull($work->fresh()->payload);
+        $this->assertSame('cancelled', $work->fresh()->status);
+        $this->assertFalse(app(CustomerPasswordAuthenticationService::class)->reset($token, 'Replay revocation race password', $this->browserRequest()));
     }
 
     private function browserRequest(): Request

@@ -60,6 +60,9 @@
             <file>tests/Feature/WarrantyDeadlineReminderTest.php</file>
             <file>tests/Feature/WarrantyNotificationTest.php</file>
             <file>tests/Feature/WarrantyWebTest.php</file>
+            <file>tests/Feature/CustomerAuthContractPostgresTest.php</file>
+            <file>tests/Feature/CustomerPasswordAuthenticationPostgresTest.php</file>
+            <file>tests/Feature/CustomerEmailOtpPostgresTest.php</file>
             <file>tests/Feature/CustomerTelegramAuthenticationPostgresTest.php</file>
             <file>tests/Feature/CustomerGoogleAuthenticationPostgresTest.php</file>
             <file>tests/Feature/CustomerOrderClaimPostgresTest.php</file>

@@ -9,30 +9,39 @@ use App\Models\CustomerAuthToken;
 use App\Models\CustomerLoginLink;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class CustomerAuthenticationService
 {
     public function requestLink(string $email, Request $request): void
     {
         $email = $this->normalizeEmail($email);
-        DB::transaction(function () use ($email, $request): void {
-            Customer::query()->where('email', $email)->lockForUpdate()->first();
-            $token = bin2hex(random_bytes(32));
-            $link = CustomerLoginLink::create([
-                'email' => $email,
-                'token_hash' => hash('sha256', $token),
-                'expires_at' => now()->addMinutes(15),
-                'requested_ip' => $request->ip(),
-            ]);
-            AuditLog::create([
-                'action' => 'customer.login_link_requested',
-                'new_values' => ['login_link_id' => $link->getKey()],
-                'ip_address' => $request->ip(),
-                'created_at' => now(),
-            ]);
-            app(CustomerAuthMailDeliveryService::class)->persistLoginLink($link, $token);
-        });
+        if (! app(CustomerAuthenticationRateLimiter::class)->allowMail($email, (string) $request->ip())) {
+            return;
+        }
+        try {
+            DB::transaction(function () use ($email, $request): void {
+                Customer::query()->where('email', $email)->lockForUpdate()->first();
+                $token = bin2hex(random_bytes(32));
+                $link = CustomerLoginLink::create([
+                    'email' => $email,
+                    'token_hash' => hash('sha256', $token),
+                    'expires_at' => now()->addMinutes(15),
+                    'requested_ip' => $request->ip(),
+                ]);
+                AuditLog::create([
+                    'action' => 'customer.login_link_requested',
+                    'new_values' => ['login_link_id' => $link->getKey()],
+                    'ip_address' => $request->ip(),
+                    'created_at' => now(),
+                ]);
+                app(CustomerAuthMailDeliveryService::class)->persistLoginLink($link, $token);
+            });
+        } catch (Throwable) {
+            Log::warning('Customer authentication temporarily unavailable.', ['operation' => 'magic_link_request']);
+        }
     }
 
     public function consume(#[\SensitiveParameter] string $token, Request $request): ?Customer
