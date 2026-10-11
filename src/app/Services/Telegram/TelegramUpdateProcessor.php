@@ -15,6 +15,7 @@ class TelegramUpdateProcessor
         private TelegramCallbackRouter $callbacks,
         private TelegramCallbackAckState $callbackAckState,
         private TelegramChatInteractionLock $interactionLock,
+        private TelegramWebAuthenticationAdapter $webAuthentication,
     ) {}
 
     public function process(TelegramUpdate $update): void
@@ -25,10 +26,13 @@ class TelegramUpdateProcessor
 
     private function route(TelegramUpdate $update): void
     {
-        $payload = $update->payload;
+        $payload = TelegramWebAuthenticationPayload::forProcessing($update->payload);
         $type = $this->updateShapes->supportedType($payload);
         if ($type === TelegramUpdateShapeValidator::TYPE_MESSAGE) {
             $message = $payload['message'];
+            if ($this->webAuthentication->message($message)) {
+                return;
+            }
             $customer = $this->customers->resolve(Arr::get($message, 'from', []));
             $chatId = (string) Arr::get($message, 'chat.id');
             $update->update(['customer_id' => $customer->id]);
@@ -40,6 +44,9 @@ class TelegramUpdateProcessor
             $callback = $payload['callback_query'];
             if ((bool) Arr::get($callback, '_acknowledged_via_webhook', false)) {
                 $this->callbackAckState->acknowledge((string) Arr::get($callback, 'id'));
+            }
+            if ($this->webAuthentication->callback($callback)) {
+                return;
             }
             $customer = $this->customers->resolve(Arr::get($callback, 'from', []));
             $chatId = (string) Arr::get($callback, 'message.chat.id');

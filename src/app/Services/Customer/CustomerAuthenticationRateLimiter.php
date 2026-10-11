@@ -21,6 +21,21 @@ final class CustomerAuthenticationRateLimiter
         return $this->reserve([['otp-consume-ip', $ip, 30, 900]]) !== false;
     }
 
+    public function allowTelegramStart(string $sessionId, string $ip): bool
+    {
+        return $this->reserve([['telegram-start', $sessionId."\0".$ip, 10, 900]]) !== false;
+    }
+
+    public function allowTelegramBrowser(string $sessionId, string $ip, bool $consume): bool
+    {
+        return $this->reserve([[$consume ? 'telegram-consume' : 'telegram-status', $sessionId."\0".$ip, $consume ? 30 : 120, 900]]) !== false;
+    }
+
+    public function allowTelegramProof(string $actorId): bool
+    {
+        return $this->reserve([['telegram-proof', $actorId, 30, 900]]) !== false;
+    }
+
     public function reserveLogin(string $email, string $ip): array|false
     {
         return $this->reserve([

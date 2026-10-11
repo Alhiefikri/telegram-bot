@@ -21,6 +21,11 @@ final class TelegramBotApiRedactor
 
         $redacted = self::redactBotApiUrls($text);
         $redacted = self::redactBotApiPaths($redacted);
+        $redacted = preg_replace(
+            '~(?<![A-Za-z0-9_-])(?:wa_confirm(?::|%3A)|wa_)[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])~i',
+            self::REDACTED_SECRET,
+            $redacted,
+        ) ?? $redacted;
 
         return self::redactSecretValues($redacted, array_merge([
             (string) config('services.telegram.token', ''),

@@ -3,6 +3,7 @@
 namespace App\Services\Customer;
 
 use App\Enums\CustomerAuthTokenPurpose;
+use App\Enums\CustomerIdentityProvider;
 use App\Models\Customer;
 use App\Models\CustomerAuthToken;
 use App\Models\CustomerLoginLink;
@@ -46,6 +47,50 @@ final class CustomerPasswordAuthenticationService
         }
     }
 
+    public function enrollTelegramEmail(string $email, Request $request): void
+    {
+        $customer = $request->user('customer');
+        $freshAt = $request->session()->get('customer_authenticated_at');
+        $email = $this->normalizeEmail($email);
+        if (! $customer || $request->session()->get('customer_telegram_authenticated') !== true
+            || ! is_int($freshAt) || $freshAt > now()->timestamp || $freshAt < now()->subMinutes(5)->timestamp
+            || ! $this->limits->allowMail($email, (string) $request->ip())) {
+            return;
+        }
+        try {
+            DB::transaction(function () use ($customer, $email, $request): void {
+                $locked = Customer::query()->whereKey($customer->id)->lockForUpdate()->first();
+                if (! $locked || $locked->email_verified_at !== null || $locked->password !== null
+                    || ($locked->email !== null && $locked->email !== $email)
+                    || $request->session()->get('customer_auth_version') !== $locked->auth_version
+                    || ! $locked->identities()->where('provider', CustomerIdentityProvider::Telegram->value)
+                        ->where('provider_subject', (string) $locked->telegram_id)->exists()
+                    || Customer::query()->where('email', $email)->where('id', '<>', $locked->id)->exists()) {
+                    return;
+                }
+                $locked->forceFill(['email' => $email, 'enrollment_version' => $locked->enrollment_version + 1])->save();
+                $plainToken = bin2hex(random_bytes(32));
+                $createdAt = now();
+                $token = new CustomerAuthToken;
+                $token->forceFill([
+                    'customer_id' => $locked->id,
+                    'email' => $email,
+                    'purpose' => CustomerAuthTokenPurpose::EmailVerification,
+                    'token_hash' => hash('sha256', $plainToken),
+                    'session_binding_hash' => hash('sha256', $request->session()->getId()),
+                    'auth_version' => $locked->auth_version,
+                    'enrollment_version' => $locked->enrollment_version,
+                    'expires_at' => $createdAt->copy()->addMinutes(30),
+                    'created_at' => $createdAt,
+                    'updated_at' => $createdAt,
+                ])->save();
+                $this->mail->persist($token, $plainToken);
+            });
+        } catch (Throwable) {
+            $this->unavailable('telegram_email_enrollment');
+        }
+    }
+
     public function verify(#[\SensitiveParameter] string $token, Request $request): bool
     {
         if (! $this->validToken($token)) {
@@ -54,16 +99,27 @@ final class CustomerPasswordAuthenticationService
         try {
             return DB::transaction(function () use ($token, $request): bool {
                 [$customer, $challenge] = $this->lockChallenge($token, CustomerAuthTokenPurpose::EmailVerification);
-                if (! $customer || ! $challenge || $customer->email_verified_at !== null || $customer->password !== null
-                    || ! is_string($challenge->proposed_password_hash) || $challenge->proposed_password_hash === '') {
+                if (! $customer || ! $challenge || $customer->email_verified_at !== null || $customer->password !== null) {
                     return false;
                 }
-                $customer->forceFill([
-                    'password' => $challenge->proposed_password_hash,
-                    'password_scheme' => CustomerPasswordHasher::SCHEME,
+                $telegramEnrollment = $challenge->proposed_password_hash === null
+                    && is_string($challenge->session_binding_hash)
+                    && hash_equals($challenge->session_binding_hash, hash('sha256', $request->session()->getId()))
+                    && $customer->telegram_id !== null
+                    && $customer->identities()->where('provider', CustomerIdentityProvider::Telegram->value)
+                        ->where('provider_subject', (string) $customer->telegram_id)->exists();
+                if (! $telegramEnrollment && (! is_string($challenge->proposed_password_hash) || $challenge->proposed_password_hash === '')) {
+                    return false;
+                }
+                $attributes = [
                     'email_verified_at' => now(),
                     'enrollment_version' => $customer->enrollment_version + 1,
-                ])->save();
+                ];
+                if (! $telegramEnrollment) {
+                    $attributes['password'] = $challenge->proposed_password_hash;
+                    $attributes['password_scheme'] = CustomerPasswordHasher::SCHEME;
+                }
+                $customer->forceFill($attributes)->save();
                 $this->invalidateChallenges($customer);
                 $this->sessions->authenticate($customer, $request);
 

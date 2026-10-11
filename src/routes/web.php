@@ -155,8 +155,13 @@ Route::prefix('akun')->name('customer.')->middleware(ValidateCustomerSession::cl
     Route::post('login-link', [CustomerAccountController::class, 'requestLink'])->middleware('throttle:customer-login-link')->name('login-link.request');
     Route::get('login-link', [CustomerAccountController::class, 'loginLink'])->name('login-link.show');
     Route::post('login-link/consume', [CustomerAccountController::class, 'consume'])->middleware('throttle:customer-login-consume')->name('login-link.consume');
+    Route::post('telegram/login', [CustomerAccountController::class, 'startTelegramLogin'])->name('telegram.login');
+    Route::get('telegram/status', [CustomerAccountController::class, 'telegramStatus'])->name('telegram.status');
+    Route::post('telegram/consume', [CustomerAccountController::class, 'consumeTelegram'])->name('telegram.consume');
     Route::middleware('auth:customer')->group(function (): void {
         Route::post('logout', [CustomerAccountController::class, 'logout'])->name('logout');
+        Route::post('telegram/link', [CustomerAccountController::class, 'startTelegramLink'])->name('telegram.link');
+        Route::post('telegram/email', [CustomerPasswordAuthenticationController::class, 'enrollTelegramEmail'])->name('telegram.email');
         Route::get('keamanan', [CustomerPasswordAuthenticationController::class, 'security'])->name('security');
         Route::post('keamanan/password', [CustomerPasswordAuthenticationController::class, 'setPassword'])->middleware('throttle:customer-login-consume')->name('password.enroll');
         Route::get('pesanan', [CustomerAccountController::class, 'orders'])->name('orders.index');

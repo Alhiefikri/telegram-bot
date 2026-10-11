@@ -60,6 +60,7 @@
             <file>tests/Feature/WarrantyDeadlineReminderTest.php</file>
             <file>tests/Feature/WarrantyNotificationTest.php</file>
             <file>tests/Feature/WarrantyWebTest.php</file>
+            <file>tests/Feature/CustomerTelegramAuthenticationPostgresTest.php</file>
         </testsuite>
     </testsuites>
     <source>

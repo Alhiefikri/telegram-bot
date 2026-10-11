@@ -2,6 +2,7 @@
 
 namespace App\Exceptions;
 
+use App\Services\Telegram\TelegramBotApiRedactor;
 use Illuminate\Http\Client\RequestException;
 use RuntimeException;
 
@@ -83,6 +84,6 @@ final class TelegramApiException extends RuntimeException
     {
         $description = is_array($response) ? ($response['description'] ?? null) : null;
 
-        return is_string($description) ? $description : null;
+        return is_string($description) ? TelegramBotApiRedactor::redactText($description) : null;
     }
 }

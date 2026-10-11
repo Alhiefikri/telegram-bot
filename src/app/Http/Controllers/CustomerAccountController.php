@@ -11,6 +11,7 @@ use App\Services\Customer\CustomerBalanceOverviewReader;
 use App\Services\Customer\CustomerOrderClaimService;
 use App\Services\Customer\CustomerOwnedOrderQuery;
 use App\Services\Customer\CustomerSessionAuthentication;
+use App\Services\Customer\CustomerTelegramAuthenticationService;
 use App\Services\StoreBalance\StoreBalanceActivityService;
 use App\Services\UsdtBalance\CustomerUsdtActivityService;
 use App\Services\UsdtBalance\UsdtMicroAmount;
@@ -74,6 +75,38 @@ class CustomerAccountController extends Controller
         }
 
         return redirect()->route('customer.orders.index')
+            ->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
+    }
+
+    public function startTelegramLogin(Request $request, CustomerTelegramAuthenticationService $authentication): JsonResponse
+    {
+        return $this->telegramStart($request, $authentication, false);
+    }
+
+    public function startTelegramLink(Request $request, CustomerTelegramAuthenticationService $authentication): JsonResponse
+    {
+        return $this->telegramStart($request, $authentication, true);
+    }
+
+    public function telegramStatus(Request $request, CustomerTelegramAuthenticationService $authentication): JsonResponse
+    {
+        return response()->json(['status' => $authentication->status($request)])
+            ->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
+    }
+
+    public function consumeTelegram(Request $request, CustomerTelegramAuthenticationService $authentication): JsonResponse
+    {
+        $consumed = $authentication->consume($request);
+
+        return response()->json(['status' => $consumed ? 'complete' : 'invalid'], $consumed ? 200 : 422)
+            ->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
+    }
+
+    private function telegramStart(Request $request, CustomerTelegramAuthenticationService $authentication, bool $link): JsonResponse
+    {
+        $claim = $authentication->start($request, $link);
+
+        return response()->json($claim ?? ['status' => 'unavailable'], $claim === null ? 422 : 201)
             ->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
     }
 

@@ -387,7 +387,7 @@ class TelegramBotClient
             Log::warning('telegram.answer_callback_query_failed', [
                 'callback_query_correlation_id' => DogfoodTiming::correlation($callbackQueryId),
                 'status' => $e->response?->status(),
-                'description' => data_get($e->response?->json(), 'description'),
+                'description' => TelegramBotApiRedactor::redactText((string) data_get($e->response?->json(), 'description')),
             ]);
         }
     }

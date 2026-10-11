@@ -23,6 +23,13 @@ class CustomerPasswordAuthenticationController extends Controller
         return $this->sent();
     }
 
+    public function enrollTelegramEmail(CustomerLoginLinkRequest $request, CustomerPasswordAuthenticationService $authentication): RedirectResponse
+    {
+        $authentication->enrollTelegramEmail($request->validated('email'), $request);
+
+        return $this->sent();
+    }
+
     public function login(CustomerPasswordLoginRequest $request, CustomerPasswordAuthenticationService $authentication): RedirectResponse
     {
         return $authentication->login($request->validated('email'), $request->validated('password'), $request)

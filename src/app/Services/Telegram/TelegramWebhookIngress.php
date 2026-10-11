@@ -44,7 +44,7 @@ class TelegramWebhookIngress
 
         $inserted = DB::table('telegram_updates')->insertOrIgnore([
             'update_id' => (int) $validated['update_id'],
-            'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
+            'payload' => json_encode(TelegramWebAuthenticationPayload::forStorage($payload), JSON_THROW_ON_ERROR),
             'created_at' => now(),
         ]);
 
@@ -81,7 +81,7 @@ class TelegramWebhookIngress
             'callback_query' => [
                 'id' => $callback['id'],
                 '_acknowledged_via_webhook' => (bool) config('services.telegram.webhook_fast_callback_ack', false),
-                'from' => Arr::only((array) $callback['from'], ['id', 'first_name', 'username']),
+                'from' => Arr::only((array) $callback['from'], ['id', 'is_bot', 'first_name', 'username']),
                 'message' => [
                     'message_id' => Arr::get($callback, 'message.message_id'),
                     'chat' => Arr::only((array) Arr::get($callback, 'message.chat', []), ['id', 'type']),
@@ -94,7 +94,7 @@ class TelegramWebhookIngress
     private function minimizedMessage(array $message): array
     {
         $minimized = Arr::only($message, ['message_id', 'text', 'caption']);
-        $minimized['from'] = Arr::only((array) $message['from'], ['id', 'first_name', 'username']);
+        $minimized['from'] = Arr::only((array) $message['from'], ['id', 'is_bot', 'first_name', 'username']);
         $minimized['chat'] = Arr::only((array) $message['chat'], ['id', 'type']);
 
         $customEmoji = $this->customEmojiEntities($message);
