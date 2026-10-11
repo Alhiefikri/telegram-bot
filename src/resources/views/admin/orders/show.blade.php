@@ -115,6 +115,33 @@
                 @endif
             </div>
 
+            @if ($credentialMail !== null)
+                <x-admin-dashboard.card padding="sm" tone="slate" shadow="none" class="mt-3">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <p class="text-xs font-medium text-admin-muted">Email data akun</p>
+                            <p class="mt-2 text-sm font-semibold text-admin-ink">
+                                {{ $credentialMail['status_label'] }} · {{ $credentialMail['recipient'] ?? 'alamat pengiriman tidak tercatat' }}
+                            </p>
+                            <p class="mt-1 text-xs text-admin-muted">
+                                Percobaan {{ $credentialMail['attempts'] }}
+                                @if ($credentialMail['sent_at']) · terkirim {{ $credentialMail['sent_at'] }}@endif
+                                @if ($credentialMail['last_attempt_at']) · percobaan terakhir {{ $credentialMail['last_attempt_at'] }}@endif
+                                @if ($credentialMail['failed_at']) · gagal {{ $credentialMail['failed_at'] }}@endif
+                                @if ($credentialMail['error_code']) · kode {{ $credentialMail['error_code'] }}@endif
+                            </p>
+                            <p class="mt-1 text-xs text-admin-muted">Alamat diambil dari email checkout pesanan ini; kirim ulang tidak pernah mengganti tujuan.</p>
+                        </div>
+                        @if ($credentialMail['can_resend'])
+                            <form method="POST" action="{{ $credentialMail['resend_url'] }}">
+                                @csrf
+                                <x-admin-dashboard.button type="submit" variant="neutral">Kirim ulang email data akun</x-admin-dashboard.button>
+                            </form>
+                        @endif
+                    </div>
+                </x-admin-dashboard.card>
+            @endif
+
             @if ($paymentAttention)
                 <x-admin-dashboard.notice :tone="$paymentAttention['tone']" class="mt-5 text-sm">
                     <span class="font-semibold">{{ $paymentAttention['label'] }}:</span> {{ $paymentAttention['message'] }}

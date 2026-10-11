@@ -835,6 +835,8 @@ native QRIS, perform provider status lookup, or verify Binance, but paid transit
 by `OrderLifecycle`. `StorefrontOrderAccess` only emits plaintext Recovery Key at issue time;
 the database stores its hash and session grants are time-limited.
 
+Paid account data is also emailed to the checkout address when the guest filled it. `OrderCredentialMailService` owns that delivery and extends the existing `order_notification_events` row with `event_type = credentials_ready`, an encrypted `recipient_email` snapshot, and `next_attempt_at`; the milestone mailer (`GuestOrderNotificationService`) refuses to create or claim that type. The row is the delivery authority: the `notifications` queue only wakes it, the ID-only `SendOrderCredentialMail` job carries no credential plaintext, an attempt-fenced 120-second lease with five attempts survives a worker or Redis loss, and the recipient can never be re-pointed because every retry and every resend reads the stored snapshot rather than `orders.notification_email`. `OrderStateMachine` (paid transition and manual completion), `ManualFulfillmentResolutionService`, and `SupplierFulfillmentService` record the handoff only when `CredentialDeliveryEligibility` allows it and allocated credentials exist, so supplier fulfillment is deferred until it completes; `GuestOrderNotificationService::capture()` additionally refuses to retarget a paid order's address. Delivery fails closed on a logging mail transport and defers, without burning an attempt, when the configured mailer is not a delivering SMTP/SES-style transport. The customer invoice page shows the masked recipient, status, and a throttled resend (`POST /shop/orders/{order}/credential-email`) gated by the same reveal grant as the credentials; Admin order detail exposes an audited resend for the same recorded address. `orders:recover-credential-mails` runs each minute to redispatch retained rows and to materialize handoffs a lifecycle hook missed.
+
 ### 4.3 Admin dashboard
 
 Admin request melewati `AuthorizeAdminAccess`, yang menempelkan `adminUser` ke request. Role canonical ada di [`UserRole`](../../src/app/Enums/UserRole.php): `owner`, `admin`, `finance`, `support`.
@@ -1050,6 +1052,7 @@ checkout
   → OrderLifecycle.applyPaymentPaid()
   → Payment paid + inventory sale + Order processing/completed
   → receipt/admin notification/Sales Proof Post via queue
+  → credential email handoff row + SendOrderCredentialMail via queue
 ```
 
 Flow pelepasan:
@@ -1089,6 +1092,7 @@ Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php)
 - `sakurupiah:reconcile --chunk=100` tiap menit hanya bila `SakurupiahProviderReadiness::scheduleRegistrationEnabledFor()` true (environment enabled, operational ready, verification queue `default` yang disupervisi); bounded page memakai predicate kandidat bersama, narrow select + eager `Order`, cursor `(created_at,id)` yang berputar, dan execution deadline; mutex `withoutOverlapping` dihitung dari execution budget dan provider lookup budget; setelah bootstrap, `schedulingEnabledFor()` memeriksa event scheduler yang terdaftar;
 - `sakurupiah:reconcile-balance-top-ups --chunk=100 --max-top-ups=10` tiap menit hanya bila gate readiness Sakurupiah yang sama (`scheduleRegistrationEnabledFor()`) terbuka; command merekonsiliasi top-up rail Sakurupiah secara bounded melalui status lookup authoritative tanpa menahan database lock di HTTP;
 - `pakasir:reconcile --chunk=100` tiap menit untuk payment legacy;
+- `orders:recover-credential-mails --limit=100 --since-hours=72` tiap menit untuk email data akun: baris durable adalah otoritas pengiriman, queue hanya wakeup, dan command mematerialisasi handoff yang belum tercatat oleh lifecycle hook;
 - `binance:reconcile --chunk=100` tiap menit;
 - `bsc:reconcile --chunk=100` tiap menit pada worker queue yang sama; BSC readiness/RPC failure dan backlog masuk owner alert;
 - Telegram updates/payment-proof recovery and `telegram:reconcile-stock-notifications --chunk=25` remain scheduler work; the heavier `telegram:recover-outbound` ledger/projection sweep is owned by a dedicated supervised container.
@@ -1126,7 +1130,7 @@ Statistik interaktif admin memakai `TelegramStoreStatsReport::growth()` untuk Ha
 
 - `default` — Telegram update processing and bounded Sakurupiah webhook verification.
 - `telegram-outbound` — checkout instructions, Store Balance top-up QR instructions, dan pending-order admin notification.
-- `notifications` — receipt, paid/expired notifications, Sales Proof Post, Store Balance top-up payment proof, cleanup instruction, KlikQRIS owner alert, and legacy Pakasir cancellation attempts.
+- `notifications` — receipt, paid/expired notifications, Sales Proof Post, credential email delivery (data akun pesanan), Store Balance top-up payment proof, cleanup instruction, KlikQRIS owner alert, and legacy Pakasir cancellation attempts.
 - `telegram-broadcast` — admin broadcast dan price notification batches.
 - `telegram-stock` — stock notification recipient batches; each job sends one effect and requeues the movement until complete.
 

@@ -26,6 +26,7 @@ use App\Services\InventoryLedger;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptReservations;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
+use App\Services\OrderCredentialMailService;
 use App\Services\ProductCredentialAllocator;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
@@ -45,6 +46,7 @@ class ManualFulfillmentResolutionService
         private readonly ProductCredentialAllocator $credentials,
         private readonly GuestOrderNotificationService $guestOrderNotifications,
         private readonly ExternalMoneyReceiptWriter $receipts,
+        private readonly OrderCredentialMailService $credentialMails,
     ) {}
 
     public function resolve(ManualFulfillmentReview $review, User $actor, string $action, string $reason, ?string $refundReference = null, ?string $refundResult = null, ?string $ip = null): ManualFulfillmentReview
@@ -177,6 +179,7 @@ class ManualFulfillmentResolutionService
 
             $order->update(['order_status' => OrderStatus::Completed]);
             $this->guestOrderNotifications->record($order, GuestOrderNotificationEvent::FulfillmentCompleted);
+            $this->credentialMails->record($order);
             $resolved = $this->markResolved($locked, ManualFulfillmentReview::STATE_FULFILLED, $actor, $reason);
             $this->audit->log('manual_fulfillment_review.external_handoff_completed', $locked, ['state' => ManualFulfillmentReview::STATE_PENDING], [
                 'fulfillment_id' => $fulfillment->id,
@@ -230,6 +233,7 @@ class ManualFulfillmentResolutionService
             }
             $order->update(['order_status' => OrderStatus::Completed]);
             $this->guestOrderNotifications->record($order, GuestOrderNotificationEvent::FulfillmentCompleted);
+            $this->credentialMails->record($order);
         }
 
         $order->refresh();

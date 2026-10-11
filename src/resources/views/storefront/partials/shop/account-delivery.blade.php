@@ -1,4 +1,44 @@
 <x-storefront.panel as="section" class="mt-5" aria-label="Pengiriman data akun">
+    @if ($isPaid && $canRevealCredentials && ($credentialMail['recipient'] ?? null) !== null)
+        @php
+            $mailCopy = data_get($copy, 'credential_email', []);
+            $mailStatus = $credentialMail['status'] ?? 'pending';
+            $mailTitle = match ($mailStatus) {
+                'sent' => data_get($mailCopy, 'sent_title'),
+                'failed' => data_get($mailCopy, 'failed_title'),
+                default => data_get($mailCopy, 'pending_title'),
+            };
+            $mailBody = match ($mailStatus) {
+                'sent' => data_get($mailCopy, 'sent_body'),
+                'failed' => data_get($mailCopy, 'failed_body'),
+                default => data_get($mailCopy, 'pending_body'),
+            };
+        @endphp
+        <div class="rounded-lg border-[3px] border-[var(--sf-border)] {{ $mailStatus === 'failed' ? 'bg-[#ffd9df]' : 'bg-[var(--sf-surface-warm)]' }} p-3 text-sm font-bold leading-6 text-[var(--sf-ink)]" role="status" aria-live="polite">
+            <p class="font-display text-sm font-black">{{ $mailTitle }}</p>
+            <p class="mt-1">{{ str_replace(':email', $credentialMail['recipient'], (string) $mailBody) }}</p>
+            @if ($mailStatus === 'sent' && filled($credentialMail['sent_at'] ?? null))
+                <p class="mt-1 text-xs font-black uppercase tracking-[0.14em] text-[var(--sf-muted)]">{{ str_replace(':time', $credentialMail['sent_at'], (string) data_get($mailCopy, 'sent_at')) }}</p>
+            @endif
+            @if (($credentialMail['can_resend'] ?? false))
+                <form method="POST" action="{{ $credentialMail['resend_url'] }}" class="mt-3">
+                    @csrf
+                    <button type="submit" class="inline-flex min-h-10 items-center justify-center rounded-lg border-2 border-[var(--sf-border)] bg-white px-4 py-2 text-xs font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">
+                        {{ data_get($mailCopy, 'resend_cta') }}
+                    </button>
+                </form>
+            @endif
+            @error('credential_mail')
+                <p role="alert" class="mt-2 text-sm font-black text-[#9f1d2d]">{{ $message }}</p>
+            @enderror
+        </div>
+    @elseif ($isPaid && $canRevealCredentials)
+        <div class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">
+            <p class="font-display text-sm font-black text-[var(--sf-ink)]">{{ data_get($copy, 'credential_email.no_recipient_title') }}</p>
+            <p class="mt-1">{{ data_get($copy, 'credential_email.no_recipient_body') }}</p>
+        </div>
+    @endif
+
     @if (! $isPaid)
         @if ($isTerminal)
             <h2 class="font-display text-2xl font-black text-[var(--sf-ink)]">Data akun tidak dikirim dari invoice ini</h2>

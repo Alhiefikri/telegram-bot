@@ -174,6 +174,7 @@ class GuestOrderNotificationTest extends TestCase
         $this->assertSame([
             GuestOrderNotificationEvent::OrderCreated->value,
             GuestOrderNotificationEvent::PaymentConfirmed->value,
+            GuestOrderNotificationEvent::CredentialsReady->value,
             GuestOrderNotificationEvent::FulfillmentCompleted->value,
         ], $types);
         Queue::assertPushed(SendGuestOrderNotification::class, 3);
@@ -186,6 +187,14 @@ class GuestOrderNotificationTest extends TestCase
 
         Mail::assertSentTimes(GuestOrderMilestoneMail::class, 3);
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        // The milestone mailer never claims the credential delivery row.
+        $this->assertSame(
+            OrderNotificationEvent::STATUS_PENDING,
+            OrderNotificationEvent::query()
+                ->where('event_type', GuestOrderNotificationEvent::CredentialsReady->value)
+                ->sole()
+                ->status,
+        );
     }
 
     public function test_expiry_and_cancellation_milestones_are_emitted_once(): void

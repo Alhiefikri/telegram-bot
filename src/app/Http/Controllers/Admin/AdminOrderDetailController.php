@@ -8,6 +8,7 @@ use App\Enums\PaymentStatus;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Order;
+use App\Models\OrderNotificationEvent;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\SupplierFulfillment;
@@ -16,6 +17,7 @@ use App\Services\Admin\AdminDashboardSalesData;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\Admin\AdminPaymentOperations;
 use App\Services\Bsc\BscExplorerUrl;
+use App\Services\OrderCredentialMailService;
 use App\Services\Suppliers\SupplierMoney;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\Money;
@@ -27,7 +29,7 @@ use Illuminate\View\View;
 
 class AdminOrderDetailController extends Controller
 {
-    public function __invoke(Request $request, Order $order, AdminDashboardSalesData $salesData, AdminOrderOperations $operations, BscExplorerUrl $bscExplorer, AdminPaymentOperations $paymentOperations): View
+    public function __invoke(Request $request, Order $order, AdminDashboardSalesData $salesData, AdminOrderOperations $operations, BscExplorerUrl $bscExplorer, AdminPaymentOperations $paymentOperations, OrderCredentialMailService $credentialMails): View
     {
         $user = $request->attributes->get('adminUser');
         $canViewSupplierOperations = $user?->role?->canManageStoreOperations() === true;
@@ -146,6 +148,7 @@ class AdminOrderDetailController extends Controller
             ] : null,
             'bscReview' => $this->bscReview($bscPayment, $bscExplorer),
             'salesProof' => $salesData->salesProofState($order, (bool) $user->role?->canManagePaymentSettings()),
+            'credentialMail' => $this->credentialMail($order, $user, $operations, $credentialMails),
             'auditEntries' => $this->auditEntries($order),
             'paymentDetails' => $order->payments->map(fn (Payment $payment): array => $this->paymentDetail($payment, $order, $paymentOperations, $user))->all(),
         ]);
@@ -289,6 +292,48 @@ class AdminOrderDetailController extends Controller
         return strlen($value) <= 8 ? str_repeat('•', strlen($value)) : substr($value, 0, 4).'••••'.substr($value, -4);
     }
 
+    /**
+     * Operator-visible delivery state for the credential email. The stored
+     * recipient is masked and the credential body is never part of this view.
+     *
+     * @return null|array{recipient: ?string, status: string, attempts: int, last_attempt_at: ?string, sent_at: ?string, failed_at: ?string, error_code: ?string, can_resend: bool, resend_url: string}
+     */
+    private function credentialMail(Order $order, ?User $user, AdminOrderOperations $operations, OrderCredentialMailService $credentialMails): ?array
+    {
+        $event = $credentialMails->eventFor($order);
+        if ($event === null && ! filled($order->notification_email)) {
+            return null;
+        }
+
+        $timezone = (string) config('app.timezone');
+        $format = static fn ($value): ?string => $value?->copy()->timezone($timezone)->format('Y-m-d H:i') ?? null;
+        $status = (string) ($event?->status ?? 'not_recorded');
+
+        return [
+            'recipient' => OrderCredentialMailService::maskedRecipient(
+                $event?->recipient_email ?? $order->notification_email,
+            ),
+            'status' => $status,
+            'status_label' => match ($status) {
+                OrderNotificationEvent::STATUS_SENT => 'Terkirim',
+                OrderNotificationEvent::STATUS_SENDING => 'Sedang dikirim',
+                OrderNotificationEvent::STATUS_PENDING => 'Menunggu pengiriman',
+                OrderNotificationEvent::STATUS_FAILED => 'Gagal',
+                OrderNotificationEvent::STATUS_CANCELLED => 'Dibatalkan',
+                default => 'Belum ada pengiriman tercatat',
+            },
+            'attempts' => (int) ($event?->attempts ?? 0),
+            'last_attempt_at' => $format($event?->delivery_started_at),
+            'sent_at' => $format($event?->sent_at),
+            'failed_at' => $format($event?->failed_at),
+            'error_code' => $event?->last_error,
+            'can_resend' => $user !== null
+                && Gate::forUser($user)->allows('resendCredentialMail', $order)
+                && $operations->canResendCredentialMail($order),
+            'resend_url' => route('admin.orders.credential-email', $order),
+        ];
+    }
+
     private function auditActionLabel(string $action): string
     {
         return match ($action) {
@@ -296,6 +341,7 @@ class AdminOrderDetailController extends Controller
             'order.manual_completed' => 'Diselesaikan manual',
             'order.manual_rejected' => 'Ditolak manual',
             'order.receipt_resent' => 'Receipt dikirim ulang',
+            'order.credential_mail_resent' => 'Email data akun dikirim ulang',
             default => str_replace(['.', '_'], ' ', $action),
         };
     }

@@ -77,6 +77,9 @@ Schedule::command('pakasir:reconcile --chunk=100')->everyMinute()->withoutOverla
 Schedule::command('binance:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
 Schedule::command('bsc:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
 Schedule::command('orders:expire-pending')->everyMinute()->withoutOverlapping();
+// Credential emails are durable per order row; the queue is only the wakeup
+// path and this run also materializes handoffs that a lifecycle hook missed.
+Schedule::command('orders:recover-credential-mails --limit=100 --since-hours=72')->everyMinute()->withoutOverlapping(2);
 Schedule::command('telegram:recover-updates --queue=default')->everyMinute()->withoutOverlapping();
 Schedule::command('telegram:forward-payment-proofs --chunk=100')->everyMinute()->withoutOverlapping();
 // The outbound recovery worker owns this bounded sweep in its dedicated container.

@@ -64,10 +64,28 @@ return [
         'buyer_name_help' => 'Checkout tidak perlu akun. Nama ini hanya dipakai untuk menandai invoice Anda.',
         'support_contact_label' => 'Kontak bantuan opsional',
         'support_contact_help' => 'Diisi hanya jika Anda ingin support punya kanal follow-up. Kontak ini bukan bukti kepemilikan pesanan; akses tetap memakai invoice dan Recovery Key.',
-        'email_label' => 'Email untuk notifikasi (opsional)',
-        'email_help' => 'Dengan mengisi email, Anda menyetujui notifikasi transaksional tentang pesanan ini. Email bukan bukti kepemilikan; akses tetap mengikuti kebijakan pesanan.',
+        'email_label' => 'Email untuk data akun & notifikasi (opsional)',
+        'email_help' => 'Isi email untuk menerima notifikasi transaksional pesanan ini sekaligus salinan data akun setelah pembayaran terverifikasi. Email bukan bukti kepemilikan: akses tetap bisa dibuka dari halaman invoice dengan nomor invoice dan Recovery Key. Jika dikosongkan, data akun tetap tampil di halaman invoice.',
         'terms_consent_help' => 'Persetujuan ini disimpan bersama order agar kebijakan yang berlaku saat checkout tetap tercatat.',
         'checkout_cta' => 'Bayar QRIS di Website',
+    ],
+
+    // Copy for the automatic credential email delivery on the paid invoice page.
+    'credential_email' => [
+        'sent_title' => 'Data akun sudah dikirim ke email',
+        'sent_body' => 'Salinan data akun pesanan ini sudah dikirim ke :email. Periksa inbox dan folder spam.',
+        'sent_at' => 'Terkirim :time',
+        'pending_title' => 'Pengiriman email sedang diproses',
+        'pending_body' => 'Salinan data akun ini sedang dikirim ke :email. Data akun tetap bisa disalin di halaman ini.',
+        'failed_title' => 'Pengiriman email belum berhasil',
+        'failed_body' => 'Salinan data akun ini belum berhasil dikirim ke :email. Data akun tetap bisa disalin di halaman ini.',
+        'no_recipient_title' => 'Pesanan ini tidak memakai email pengiriman',
+        'no_recipient_body' => 'Data akun tetap tersedia di halaman invoice ini. Isi email saat checkout berikutnya untuk menerima salinan data akun lewat email.',
+        'resend_cta' => 'Kirim ulang ke email',
+        'resend_sent' => 'Pengiriman ulang dicatat. Periksa email :email, termasuk folder spam.',
+        'resend_pending' => 'Pengiriman email masih berjalan. Tunggu beberapa menit sebelum mencoba lagi.',
+        'resend_unavailable' => 'Pengiriman ulang belum bisa dilakukan sekarang. Buka kembali halaman ini nanti atau hubungi bantuan dengan nomor invoice.',
+        'resend_throttled' => 'Terlalu sering meminta kirim ulang. Tunggu sekitar satu jam lalu coba lagi.',
     ],
 
     'waitlist' => [
@@ -107,7 +125,7 @@ return [
             ],
             [
                 'title' => 'Terima akses',
-                'body' => 'Website menampilkan data akun setelah pembayaran terverifikasi. Simpan invoice dan Recovery Key untuk membuka kembali pesanan website; pesanan Telegram tidak memakai key ini.',
+                'body' => 'Website menampilkan data akun setelah pembayaran terverifikasi, dan salinannya juga dikirim ke email yang Anda isi saat checkout. Simpan invoice dan Recovery Key untuk membuka kembali pesanan website; pesanan Telegram tidak memakai key ini.',
             ],
         ],
     ],
@@ -152,6 +170,10 @@ return [
             'answer' => 'Tidak. Checkout website memakai nama pembeli untuk menandai invoice. Login hanya diperlukan nanti jika produk yang dibeli memang memiliki akun layanan tersendiri.',
         ],
         [
+            'question' => 'Apakah data akun bisa dikirim ke email saya?',
+            'answer' => 'Bisa. Isi email pada kolom email checkout, maka salinan data akun dikirim otomatis setelah pembayaran terverifikasi, dengan tombol kirim ulang ke alamat yang sama di halaman invoice. Email bersifat opsional dan bukan bukti kepemilikan: data akun tetap bisa dibuka dari halaman invoice memakai nomor invoice dan Recovery Key, dan support tidak bisa mengubah alamat tujuan pengiriman.',
+        ],
+        [
             'question' => 'Apakah stok yang tampil benar-benar tersedia?',
             'answer' => 'Katalog menampilkan stok siap berdasarkan data produk aktif di admin. Jika stok habis, kartu produk akan berubah menjadi status tanya stok agar pelanggan tidak mengira produk siap dibeli.',
         ],
@@ -188,6 +210,7 @@ return [
                     'title' => 'Data yang kami pakai',
                     'items' => [
                         'Nama pembeli, email pelanggan bila Anda membuat akun, dan email waitlist bila Anda meminta notifikasi stok; email waitlist disimpan terenkripsi dan hanya dipakai untuk konfirmasi serta satu notifikasi ketersediaan produk.',
+                        'Email checkout bila Anda mengisinya pada pesanan website: dipakai untuk notifikasi transaksional pesanan dan pengiriman salinan data akun setelah pembayaran terverifikasi. Email checkout disimpan terenkripsi bersama pesanan dan tidak bisa dipindahkan ke alamat lain setelah pembayaran.',
                         'Data pembayaran yang diterima dari penyedia QRIS atau pembayaran lain, seperti status transaksi, nominal, referensi pembayaran, dan waktu konfirmasi.',
                         'Pesan support yang Anda kirim melalui WhatsApp atau Telegram admin untuk membantu verifikasi masalah pesanan.',
                     ],
@@ -218,7 +241,7 @@ return [
                     'items' => [
                         'Pelanggan wajib memastikan produk, jumlah, dan harga sebelum checkout.',
                         'Invoice website harus dibayar sesuai total final yang tampil di halaman invoice.',
-                        'Produk digital dikirim atau dibuka setelah pembayaran terverifikasi dan stok tersedia.',
+                        'Produk digital dikirim atau dibuka setelah pembayaran terverifikasi dan stok tersedia. Salinan data akun dikirim ke email yang dicatat saat checkout bila diisi, sementara data akun tetap dapat dibuka dari halaman invoice dengan nomor invoice dan Recovery Key.',
                     ],
                 ],
                 [
@@ -286,6 +309,7 @@ return [
                     'items' => [
                         'Recovery Key, password, MFA secret, token login, dan credential bundle tidak boleh diberikan melalui support.',
                         'Kredensial tidak boleh dibuka berdasarkan invoice, nama pembeli, email, username Telegram, atau screenshot invoice saja.',
+                        'Salinan data akun dikirim otomatis oleh sistem ke email yang dicatat saat checkout; support tidak dapat mengganti tujuan pengiriman atau mengirim kredensial ke alamat lain.',
                         'Support tidak boleh meminta pelanggan mengirim Recovery Key ke chat publik atau grup.',
                     ],
                 ],

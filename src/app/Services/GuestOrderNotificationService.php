@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Exceptions\GuestOrderNotificationDeliveryException;
 use App\Jobs\SendGuestOrderNotification;
 use App\Mail\GuestOrderMilestoneMail;
@@ -29,16 +30,36 @@ final class GuestOrderNotificationService
 
         DB::transaction(function () use ($order, $email): void {
             $lockedOrder = Order::query()->whereKey($order->getKey())->lockForUpdate()->firstOrFail();
-            if ($lockedOrder->notification_email !== $email) {
-                $lockedOrder->forceFill(['notification_email' => $email])->save();
+            if ($lockedOrder->notification_email === $email || ! $this->acceptsRecipientChange($lockedOrder)) {
+                return;
             }
+
+            $lockedOrder->forceFill(['notification_email' => $email])->save();
 
             $this->record($lockedOrder, GuestOrderNotificationEvent::OrderCreated);
         }, 5);
     }
 
+    /**
+     * Only an unpaid checkout may set the notification address. Once the order
+     * leaves PendingPayment the address is frozen for good: a replayed checkout
+     * session must never be able to route paid account data to another address,
+     * and a paid order that was created without one stays without one.
+     */
+    private function acceptsRecipientChange(Order $order): bool
+    {
+        return $order->order_status === OrderStatus::PendingPayment
+            && $order->payment_status === PaymentStatus::Pending;
+    }
+
     public function record(Order $order, GuestOrderNotificationEvent $eventType): ?OrderNotificationEvent
     {
+        if (! $this->ownsEventType($eventType)) {
+            $this->skipUnownedEventType('record', $order->getKey(), $eventType);
+
+            return null;
+        }
+
         if (! filled($order->notification_email)) {
             return null;
         }
@@ -115,10 +136,35 @@ final class GuestOrderNotificationService
         return $email === '' ? null : $email;
     }
 
+    /**
+     * Credential delivery owns its own retry/lease semantics, so the milestone
+     * mailer never creates or claims that event type. A delivery attempt for a
+     * row it does not own is skipped instead of failing the queued job.
+     */
+    private function ownsEventType(?GuestOrderNotificationEvent $eventType): bool
+    {
+        return $eventType !== GuestOrderNotificationEvent::CredentialsReady;
+    }
+
+    private function skipUnownedEventType(string $stage, int|string|null $eventId = null, ?GuestOrderNotificationEvent $eventType = null): void
+    {
+        Log::warning('storefront.guest_notification_unowned_event_type', [
+            'stage' => $stage,
+            'event_id' => $eventId === null ? null : (string) $eventId,
+            'event_type' => $eventType?->value,
+        ]);
+    }
+
     private function claim(int|string $eventId): ?OrderNotificationEvent
     {
         return DB::transaction(function () use ($eventId): ?OrderNotificationEvent {
             $event = OrderNotificationEvent::query()->whereKey($eventId)->lockForUpdate()->firstOrFail();
+
+            if (! $this->ownsEventType($event->event_type)) {
+                $this->skipUnownedEventType('claim', $event->getKey(), $event->event_type);
+
+                return null;
+            }
 
             if ($event->status === OrderNotificationEvent::STATUS_SENT
                 || $event->status === OrderNotificationEvent::STATUS_SENDING) {

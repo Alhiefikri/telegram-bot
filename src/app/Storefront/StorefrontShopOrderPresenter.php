@@ -4,6 +4,7 @@ namespace App\Storefront;
 
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
+use App\Models\OrderNotificationEvent;
 use App\Models\PaymentBscDetail;
 use App\Models\SupplierAccountUnit;
 use App\Models\SupplierFulfillment;
@@ -11,6 +12,7 @@ use App\Services\Binance\BinanceVerificationOutcome;
 use App\Services\Binance\BinanceVerificationStatus;
 use App\Services\Bsc\BscVerificationOutcome;
 use App\Services\Bsc\BscVerificationStatus;
+use App\Services\OrderCredentialMailService;
 use App\Support\PaymentProvider;
 use Carbon\Carbon;
 
@@ -24,6 +26,7 @@ class StorefrontShopOrderPresenter
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
         private readonly StorefrontSeo $seo,
+        private readonly OrderCredentialMailService $credentialMails,
     ) {}
 
     /**
@@ -151,12 +154,44 @@ class StorefrontShopOrderPresenter
             'paidDeliveryType' => $invoice->paidDeliveryType,
             'manualFulfillmentStatus' => $invoice->manualFulfillmentStatus,
             'canRevealCredentials' => $canRevealCredentials,
+            'credentialMail' => $this->credentialMail($invoice->order),
+            'credentialMailResendUrl' => route('storefront.shop.orders.credential-mail', $invoice->order),
             'warrantyUrl' => $canRevealCredentials && (SupplierAccountUnit::query()->where('order_id', $order->id)->exists()
                 || SupplierFulfillment::query()->where('order_id', $order->id)->whereHas('reservedSupplier', fn ($q) => $q->where('provider', 'buymail'))->exists())
                 ? route('warranty.show', ['order' => $order->id, 'locale' => $this->terminalCopy->locale()]) : null,
 
             'accessKey' => $accessKey,
             'orderAccessUrl' => route('storefront.order-access.create'),
+        ];
+    }
+
+    /**
+     * Masked, read-only delivery state for the invoice page. The stored
+     * recipient snapshot is never rendered in full, and the resend action is
+     * only offered where the page already reveals credentials.
+     *
+     * @return null|array{recipient: ?string, status: string, sent_at: ?string, can_resend: bool, resend_url: string}
+     */
+    private function credentialMail(Order $order): ?array
+    {
+        $event = $this->credentialMails->eventFor($order);
+        if ($event === null) {
+            return null;
+        }
+
+        return [
+            'recipient' => OrderCredentialMailService::maskedRecipient(
+                $event->recipient_email ?? $order->notification_email,
+            ),
+            'status' => match ($event->status) {
+                OrderNotificationEvent::STATUS_SENT => 'sent',
+                OrderNotificationEvent::STATUS_PENDING,
+                OrderNotificationEvent::STATUS_SENDING => 'pending',
+                default => 'failed',
+            },
+            'sent_at' => $event->sent_at?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i') ?? null,
+            'can_resend' => $this->credentialMails->isDeliverable($order),
+            'resend_url' => route('storefront.shop.orders.credential-mail', $order),
         ];
     }
 

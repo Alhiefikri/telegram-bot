@@ -42,6 +42,7 @@ class OrderStateMachine implements OrderLifecycle
         private readonly ?BscConfirmationGrace $bscConfirmationGrace = null,
         private readonly ?GuestOrderNotificationService $guestOrderNotifications = null,
         private readonly ?StoreBalanceLedger $storeBalance = null,
+        private readonly ?OrderCredentialMailService $credentialMails = null,
     ) {}
 
     public function markPaymentPaid(Payment $payment): Order
@@ -114,6 +115,7 @@ class OrderStateMachine implements OrderLifecycle
                 }
                 $lockedOrder->update(['order_status' => OrderStatus::Completed]);
                 $this->recordGuestNotification($lockedOrder, GuestOrderNotificationEvent::FulfillmentCompleted);
+                $this->credentialMails()->record($lockedOrder);
 
                 $completed = $lockedOrder->fresh(['payments']);
 
@@ -346,6 +348,7 @@ class OrderStateMachine implements OrderLifecycle
         if (! $this->supplierFulfillment()->hasPending($paid)) {
             $this->dispatchReceiptMaterialization($paid);
         }
+        $this->credentialMails()->record($paid);
 
         return new OrderLifecycleResult(
             order: $paid,
@@ -642,6 +645,11 @@ class OrderStateMachine implements OrderLifecycle
     private function recordGuestNotification(Order $order, GuestOrderNotificationEvent $eventType): void
     {
         ($this->guestOrderNotifications ?? app(GuestOrderNotificationService::class))->record($order, $eventType);
+    }
+
+    private function credentialMails(): OrderCredentialMailService
+    {
+        return $this->credentialMails ?? app(OrderCredentialMailService::class);
     }
 
     private function dispatchAdminPendingNotificationDelete(Order $order): void

@@ -38,6 +38,7 @@ use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\GuestOrderNotificationService;
 use App\Services\InventoryLedger;
 use App\Services\OrderLifecycle;
+use App\Services\OrderCredentialMailService;
 use App\Services\ProductCredentialAllocator;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -792,6 +793,7 @@ final class SupplierFulfillmentService
         ManualFulfillmentReview::query()->where('order_id', $order->id)->whereIn('reason', ['supplier_fulfillment', ManualFulfillmentReview::REASON_LATE_PAYMENT])->where('state', ManualFulfillmentReview::STATE_PENDING)->update(['state' => ManualFulfillmentReview::STATE_FULFILLED, 'resolved_at' => now()]);
         $order->update(['order_status' => OrderStatus::Completed]);
         app(GuestOrderNotificationService::class)->record($order, GuestOrderNotificationEvent::FulfillmentCompleted);
+        app(OrderCredentialMailService::class)->record($order);
         if ((bool) StoreChannelSetting::current()->sales_proof_enabled) {
             $post = SalesProofPost::firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
             $effect = app(TelegramOutboundEffectService::class)->recordSalesProofPost($order, $post);

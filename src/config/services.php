@@ -309,6 +309,14 @@ return [
         'invoice_url_ttl_days' => 7,
         'credential_access_rate_limit_per_minute' => 5,
         'credential_access_session_minutes' => 30,
+        // Durable delivery of paid account data to the checkout email address.
+        // The row state is the delivery authority; the queue is a wakeup path.
+        'credential_email' => [
+            'max_attempts' => 5,
+            'lease_seconds' => 120,
+            'mailer_retry_seconds' => 600,
+            'resend_rate_limit_per_hour' => 3,
+        ],
         // Optional HMAC override; APP_KEY remains the fallback.
         'waitlist_hash_key' => env('STOREFRONT_WAITLIST_HASH_KEY'),
         'waitlist_confirmation_ttl_minutes' => 60,

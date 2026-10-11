@@ -16,6 +16,7 @@ use App\Http\Controllers\Admin\AdminFakeSalesProofPostController;
 use App\Http\Controllers\Admin\AdminLoginController;
 use App\Http\Controllers\Admin\AdminManualFulfillmentReviewController;
 use App\Http\Controllers\Admin\AdminOrderCancelReleaseController;
+use App\Http\Controllers\Admin\AdminOrderCredentialMailResendController;
 use App\Http\Controllers\Admin\AdminOrderDetailController;
 use App\Http\Controllers\Admin\AdminOrderManualCompleteController;
 use App\Http\Controllers\Admin\AdminOrderManualRejectController;
@@ -68,6 +69,7 @@ use App\Http\Controllers\StorefrontShopCartController;
 use App\Http\Controllers\StorefrontShopCheckoutController;
 use App\Http\Controllers\StorefrontShopCheckoutReviewController;
 use App\Http\Controllers\StorefrontShopController;
+use App\Http\Controllers\StorefrontShopCredentialMailResendController;
 use App\Http\Controllers\StorefrontShopOrderCancelController;
 use App\Http\Controllers\StorefrontShopOrderController;
 use App\Http\Controllers\StorefrontShopOrderQrisController;
@@ -140,6 +142,7 @@ Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
     Route::post('orders/{order}/bsc-tx-hash', StorefrontShopBscTxHashController::class)->middleware(['storefront.signed', 'throttle:storefront-bsc-tx-hash'])->name('orders.bsc-tx-hash');
     Route::post('orders/{order}/status', StorefrontShopOrderStatusController::class)->middleware(['storefront.signed', 'throttle:automatic-payment-status-refresh'])->name('orders.status');
     Route::post('orders/{order}/cancel', StorefrontShopOrderCancelController::class)->middleware('storefront.signed')->name('orders.cancel');
+    Route::post('orders/{order}/credential-email', StorefrontShopCredentialMailResendController::class)->middleware('throttle:storefront-credential-mail')->name('orders.credential-mail');
 });
 Route::redirect('/cara-loginoutlook', '/gpt/panduan-login-akun');
 
@@ -295,6 +298,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('{order}/reject-manual', AdminOrderManualRejectController::class)->name('reject-manual');
                 Route::post('{order}/sales-proof/retry', AdminSalesProofRetryController::class)->name('sales-proof.retry');
                 Route::post('{order}/cancel-release', AdminOrderCancelReleaseController::class)->name('cancel-release');
+                Route::post('{order}/credential-email', AdminOrderCredentialMailResendController::class)->name('credential-email');
             });
 
             Route::post('payments/{payment}/reconcile', AdminPaymentReconcileController::class)->name('payments.reconcile');

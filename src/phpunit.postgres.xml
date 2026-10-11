@@ -66,6 +66,7 @@
             <file>tests/Feature/CustomerTelegramAuthenticationPostgresTest.php</file>
             <file>tests/Feature/CustomerGoogleAuthenticationPostgresTest.php</file>
             <file>tests/Feature/CustomerOrderClaimPostgresTest.php</file>
+            <file>tests/Feature/OrderCredentialMailPostgresConcurrencyTest.php</file>
         </testsuite>
     </testsuites>
     <source>

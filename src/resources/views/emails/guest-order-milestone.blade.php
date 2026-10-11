@@ -37,7 +37,7 @@
             </p>
             <p><a href="{{ $orderAccessUrl }}">Akses pesanan</a></p>
 
-            <p style="margin-top:24px;font-size:13px;color:#555">Tautan email ini hanya membuka permukaan invoice/status. Rahasia akses tidak dikirim melalui email.</p>
+            <p style="margin-top:24px;font-size:13px;color:#555">Email status ini tidak memuat data akun. Data akun dikirim lewat email terpisah setelah pembayaran terverifikasi bila email diisi saat checkout, dan tetap bisa dibuka dari halaman invoice sesuai kebijakan pesanan yang berlaku.</p>
         </section>
     </main>
 </body>

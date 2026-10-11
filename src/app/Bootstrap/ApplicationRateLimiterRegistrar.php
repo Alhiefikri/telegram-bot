@@ -177,6 +177,26 @@ class ApplicationRateLimiterRegistrar
             ];
         });
 
+        $this->rateLimiter->for('storefront-credential-mail', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.storefront.credential_email.resend_rate_limit_per_hour', 3));
+            $routeOrder = $request->route('order');
+            $order = is_object($routeOrder) && method_exists($routeOrder, 'getKey')
+                ? (string) $routeOrder->getKey()
+                : 'unknown';
+            $source = $request->ip() ?: 'unknown';
+
+            $rateLimitedResponse = function (Request $request, array $headers) {
+                return back()->withErrors([
+                    'credential_mail' => (string) $this->config->get('storefront.credential_email.resend_throttled'),
+                ]);
+            };
+
+            return [
+                Limit::perHour($limit)->by('storefront:credential-mail:order:'.$order)->response($rateLimitedResponse),
+                Limit::perHour($limit * 2)->by('storefront:credential-mail:source:'.$source)->response($rateLimitedResponse),
+            ];
+        });
+
         $this->rateLimiter->for('customer-login-link', function (Request $request) {
             $input = $request->input('email');
             $email = is_string($input) ? mb_strtolower(trim($input)) : 'unknown';

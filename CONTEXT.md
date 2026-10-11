@@ -87,6 +87,10 @@ _Avoid_: Password reset token, resendable key
 An order-level Telegram or WhatsApp contact supplied during Web Storefront checkout only so support can follow up on operational help. It is not customer-account identity and is not evidence of order ownership.
 _Avoid_: Owner contact, login contact
 
+**Credential Delivery Email**:
+The paid-account copy sent to the optional checkout email address of a Web Storefront Order once payment is confirmed and the credentials are releasable. It is a convenience channel, never an ownership claim: the address is snapshotted when the delivery is recorded, cannot be re-pointed afterwards, and the same credentials stay visible on the Order invoice through the Recovery Key. Retrying or resending always targets that snapshot.
+_Avoid_: Recovery Key delivery, login email, requirement for receiving credentials
+
 **Store Channel**:
 The optional Telegram channel promoted from the Store Bot home, where sales proof, stock updates, promotions, and owner announcements are published. Store Bot access never depends on channel membership.
 _Avoid_: Community, group, access gate

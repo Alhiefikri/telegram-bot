@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
+use App\Services\OrderCredentialMailService;
 use App\Services\OrderLifecycle;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -22,6 +23,7 @@ class AdminOrderOperations
         private readonly TelegramOutboundEffectService $outboundEffects,
         private readonly TelegramOutboundEffectDispatcher $dispatcher,
         private readonly ExternalMoneyReceiptWriter $receipts,
+        private readonly OrderCredentialMailService $credentialMails,
     ) {}
 
     public function canCompleteManualOrder(Order $order): bool
@@ -126,5 +128,28 @@ class AdminOrderOperations
         $this->dispatcher->dispatchExplicitResend($effect);
 
         $this->audit->log('order.receipt_resent', $order, null, ['queue' => 'notifications'], $user, $ip);
+    }
+
+    /**
+     * The credential email always targets the address recorded on the order,
+     * so an operator can re-arm that same delivery but never redirect it.
+     */
+    public function canResendCredentialMail(Order $order): bool
+    {
+        return filled($order->notification_email)
+            && $this->credentialMails->isDeliverable($order);
+    }
+
+    public function resendCredentialMail(Order $order, ?User $user = null, ?string $ip = null): void
+    {
+        if (! $this->canResendCredentialMail($order)) {
+            throw new InvalidArgumentException('Email data akun hanya bisa dikirim ulang untuk pesanan lunas yang sudah punya alamat email pengiriman.');
+        }
+
+        if ($this->credentialMails->rearm($order) === null) {
+            throw new InvalidArgumentException('Pengiriman email data akun masih berjalan. Tunggu beberapa menit lalu coba lagi.');
+        }
+
+        $this->audit->log('order.credential_mail_resent', $order, null, ['queue' => 'notifications'], $user, $ip);
     }
 }

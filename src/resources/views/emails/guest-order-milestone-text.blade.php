@@ -19,4 +19,4 @@ Batas pembayaran: {{ $paymentDeadline }}
 Buka invoice dan status: {{ $invoiceUrl }}
 Akses pesanan: {{ $orderAccessUrl }}
 
-Tautan email ini hanya membuka permukaan invoice/status. Rahasia akses tidak dikirim melalui email.
+Email status ini tidak memuat data akun. Data akun dikirim lewat email terpisah setelah pembayaran terverifikasi bila email diisi saat checkout, dan tetap bisa dibuka dari halaman invoice sesuai kebijakan pesanan yang berlaku.

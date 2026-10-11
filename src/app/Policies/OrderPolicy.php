@@ -37,6 +37,12 @@ class OrderPolicy
         return $user->role?->canResendReceipts() ?? false;
     }
 
+    /** Same capability class as the Telegram receipt resend: the target address is already recorded. */
+    public function resendCredentialMail(User $user, Order $order): bool
+    {
+        return $user->role?->canResendReceipts() ?? false;
+    }
+
     public function completeManual(User $user, Order $order): bool
     {
         return $user->role?->canCompleteManualOrders() ?? false;
