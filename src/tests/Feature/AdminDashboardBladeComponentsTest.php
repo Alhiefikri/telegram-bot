@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Blade;
 use Tests\TestCase;
+
 class AdminDashboardBladeComponentsTest extends TestCase
 {
     use RefreshDatabase;
@@ -123,6 +124,7 @@ class AdminDashboardBladeComponentsTest extends TestCase
         $this->assertStringContainsString('Konten utama', $rendered);
         $this->assertStringContainsString('>Pesanan</span>', $rendered);
     }
+
     public function test_linked_operational_shell_uses_canonical_navigation_and_dashboard_controls(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
