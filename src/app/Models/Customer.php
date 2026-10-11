@@ -16,16 +16,26 @@ class Customer extends Model implements Authenticatable
     /** @use HasFactory<CustomerFactory> */
     use AuthenticatableTrait, HasFactory, Notifiable;
 
-    protected $hidden = ['telegram_id', 'username', 'phone_number', 'email', 'email_verified_at'];
+    protected $hidden = ['telegram_id', 'username', 'phone_number', 'email', 'email_verified_at', 'password', 'remember_token', 'auth_version', 'enrollment_version', 'identities', 'authTokens', 'auth_tokens'];
 
     protected function casts(): array
     {
-        return ['telegram_id' => 'integer', 'email_verified_at' => 'datetime'];
+        return ['telegram_id' => 'integer', 'email_verified_at' => 'datetime', 'password' => 'hashed', 'auth_version' => 'integer', 'enrollment_version' => 'integer'];
     }
 
     public function routeNotificationForMail(): ?string
     {
         return $this->email;
+    }
+
+    public function identities()
+    {
+        return $this->hasMany(CustomerIdentity::class);
+    }
+
+    public function authTokens()
+    {
+        return $this->hasMany(CustomerAuthToken::class);
     }
 
     public function carts()

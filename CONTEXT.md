@@ -67,6 +67,18 @@ _Avoid_: assumed unpaid, verification failure treated as cancellation
 The fulfillment state for a financially valid payment whose Order cannot be fulfilled automatically, requiring an owner decision such as fulfill, refund, or reject.
 _Avoid_: failed payment, ordinary fulfillment
 
+**Customer**:
+The canonical buyer account that owns Carts, Orders, Store Balance and Customer USDT Balance. Existing Store Bot identity is its numeric `telegram_id`; Web Storefront accounts may have nullable email and Telegram ID. Authentication linking never merges Customers or moves their financial or Order ownership.
+_Avoid_: Admin User, OAuth account, automatically merged customer
+
+**Customer Identity**:
+A verified external provider subject bound to one Customer. The first release allows Google and Telegram, one identity per provider per Customer; provider email, username and support contact are not linking authority. A Telegram identity must agree with that same Customer's canonical Store Bot identity.
+_Avoid_: Provider access token, support contact, second customer account
+
+**Customer Authentication Challenge**:
+A purpose-bound, hashed, expiring account proof with durable consumption/attempt state. Its verification, OTP, reset or Telegram purpose cannot grant another operation. An anonymous Telegram challenge binds its originating browser before private-chat proof identifies the existing Customer.
+_Avoid_: Recovery Key, Product Auth Token, Order ownership proof
+
 **Recovery Key**:
 A one-time-displayed customer secret paired with an invoice number to reopen paid digital-account data in the Web Storefront. Only its hash is stored with the order.
 _Avoid_: Password reset token, resendable key

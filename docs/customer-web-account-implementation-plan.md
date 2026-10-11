@@ -1,6 +1,15 @@
 # Customer Web Account Implementation Plan
 
-Status: planning only. The current guest checkout and Recovery Key flow remain live until every phase below is deployed and verified.
+Status: historical first-phase plan. The source implements the dedicated Customer guard, encrypted queued magic-link notification, POST token consumption, owned-order/account views, guest Order claim and read-only balances. This document is not production-delivery evidence.
+
+## Authentication extension (#608, 2026-10-11)
+
+The [new authentication spec](superpowers/specs/2026-10-11-customer-web-account-authentication-design.md), including section 12, and [ticket plan](superpowers/plans/2026-10-11-customer-web-account-authentication-plan.md) supersede this phase's password/OAuth/Telegram-linking exclusions and deferred expansion decisions. [ADR-0001](adr/0001-web-storefront-order-access.md) explicitly records the extension while retaining guest checkout and Recovery Key guarantees.
+
+The #608 foundation is additive: nullable Customer password hash and hidden/guarded auth/enrollment versions, constrained Google/Telegram identities and purpose-bound expiring auth-token records. Existing `first_name` owns profile name; `remember_token`, nullable unique email and verification timestamp already exist. Customer is already authenticatable/notifiable. PostgreSQL proves provider uniqueness races, canonical Telegram ownership, token bounds and immutable bindings. No password routes, provider callbacks, OTP issuance or Telegram proof flow are introduced by this ticket. The existing magic-link schema and behavior remain the migration fallback.
+
+Authentication linking never merges Customers or moves Orders, balances or receivers. `customers.telegram_id` remains canonical Store Bot ownership; an identity row must belong to that same Customer. The first-phase description below remains historical: its account-authority wording does not permit moving Telegram identity to a different Customer. Resend real delivery, Google credentials and integrated browser/Bot evidence remain separate release prerequisites. Production rollback retains the additive schema.
+
 
 ## Goal
 
@@ -24,7 +33,7 @@ The first version uses passwordless email magic links. It deliberately does not 
 ## Current Repo Map
 
 - `App\Models\User` and the `web` guard are admin-only: `src/app/Models/User.php`, `src/config/auth.php`.
-- `App\Models\Customer` already owns orders and carts, but is a plain Eloquent model without an email identity: `src/app/Models/Customer.php`.
+- `App\Models\Customer` now implements Laravel's authenticatable contract, uses `Notifiable`, and owns nullable unique email plus verification timestamp: `src/app/Models/Customer.php`.
 - Every order already has `customer_id`; web guest checkout creates a customer with `telegram_id = null`: `src/app/Storefront/StorefrontShopCheckout.php`.
 - Recovery Key issuance, validation, and temporary per-order grants live in `src/app/Storefront/StorefrontOrderAccess.php`.
 - `/akses-pesanan` validates invoice plus Recovery Key and shows credentials only for paid orders: `src/app/Http/Controllers/StorefrontOrderAccessController.php`.
