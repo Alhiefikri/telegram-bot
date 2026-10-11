@@ -112,7 +112,6 @@ class KlikQrisAdminObservabilityTest extends TestCase
             ->assertSee('sendMessage')
             ->getContent();
 
-
         foreach ([
             'TOKEN_SHOULD_NOT_RENDER',
             'PAYLOAD_SIGNATURE_SHOULD_NOT_RENDER',
@@ -126,7 +125,6 @@ class KlikQrisAdminObservabilityTest extends TestCase
             $this->assertStringNotContainsString($secret, $html);
         }
     }
-
 
     public function test_admin_order_detail_shows_only_the_safe_unknown_callback_condition_and_token(): void
     {
