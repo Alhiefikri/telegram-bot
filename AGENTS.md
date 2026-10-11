@@ -14,6 +14,13 @@ This is a single-context repo with `CONTEXT.md` and `docs/adr/`. See `docs/agent
 ### Deployment platform
 
 This repository does not use Railway. Production deploys run through GitHub Actions (`.github/workflows/deploy-production.yml`) from `main` and update the VPS over SSH. Do not introduce or invoke Railway commands, services, or configuration for this project.
+### CI/CD policy
+
+Run and inspect CI/CD only when the admin explicitly asks for it. A request to commit and push means exactly that: stage, commit, push, then stop.
+
+Never, on your own initiative: dispatch, re-run, cancel, poll, watch, or investigate GitHub Actions runs; push temporary branches or open draft PRs to obtain a CI run; wait for a run "to verify" a push. Pushing to `main` may start `.github/workflows/ci.yml` automatically — leave that run for the admin to inspect. A failing automatic run is not a blocker for the requested commit or push, and does not authorize follow-up work.
+
+If a CI failure looks like a real blocker for the task at hand, report it in one line and stop; only continue when the admin asks you to run CI or fix it.
 ### Configuration policy
 
 `ENV` is reserved for secrets and credentials. Do not add new environment variables for catalog content or presentation settings such as product icons, labels, prices, stock, or other Admin-editable values. Store those values in the database and expose them through the Admin Dashboard so updates do not require an image rebuild or configuration-cache refresh. Existing legacy runtime/deployment knobs remain untouched unless a task explicitly migrates them.
