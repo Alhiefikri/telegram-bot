@@ -889,6 +889,8 @@ Issue #477 release evidence is the focused Storefront feature suite, the respons
 
 `CustomerOwnedOrderQuery` adalah pemilik query histori pada `/akun/pesanan`: query selalu dibatasi oleh `customer_id`, mendukung filter `all`, `waiting`, `processing`, `completed`, dan `issue`, lalu melakukan pagination newest-first dengan query string tetap. `CustomerAccountController` hanya meneruskan hasil query dan status filter ke view. `/akun/pesanan/{order}` tetap customer-scoped; Order non-paid hanya menampilkan status/next step, sedangkan credential dan Recovery Key mengikuti aturan akses paid yang sudah ada.
 
+`CustomerAccountOverviewReader` menyusun identitas, snapshot saldo melalui `CustomerBalanceOverviewReader`, dan hitungan pesanan melalui `CustomerOwnedOrderQuery::counts()`. Signed-in `/akun` memakai `customer.dashboard`; composer untuk view akun berbagi ringkasan dan memakai ulang snapshot halaman saldo yang sudah dibaca. `customer.partials.account-layout`/`account-profile` menyatukan profil, saldo, histori, keamanan, dan klaim. `CustomerIdentityController` menyediakan JSON identitas minimal dengan respons private/no-store; `storefront/account-identity.js` mengisi nama/avatar di navbar tanpa menaruh data pelanggan di HTML katalog yang di-cache publik.
+
 Dashboard tidak lagi memiliki tab Riwayat KlikQRIS atau Withdraw, dan tidak melakukan fetch reporting remote untuk halaman tersebut. `AdminDashboardReportingData` beserta view reporting-nya telah dihapus. Payment, Order, audit, client provider, dan jalur settlement historis tetap ada; penghapusan UI tidak mengubah status transaksi atau inventori.
 
 ## 5. Checkout dan payment rails

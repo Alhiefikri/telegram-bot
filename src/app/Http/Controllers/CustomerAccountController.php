@@ -31,7 +31,19 @@ class CustomerAccountController extends Controller
     public function landing(Request $request, StorefrontPresenter $storefront, StorefrontSeo $seo): Response|RedirectResponse
     {
         if ($request->user('customer')) {
-            return redirect()->route('customer.orders.index');
+            $metadata = $seo->privatePage(
+                'Akun saya | '.$storefront->brand(),
+                'Profil, ringkasan pesanan, dan saldo akun pelanggan.',
+            );
+
+            return $this->view($request, 'customer.dashboard', [
+                'storefront' => $storefront,
+                'brand' => $storefront->brand(),
+                'copy' => config('storefront'),
+                'homeUrl' => route('storefront.home'),
+                'customer' => $request->user('customer'),
+                'metadata' => $metadata,
+            ]);
         }
 
         $authEnabled = app(CustomerAuthAvailability::class)->enabled();

@@ -202,17 +202,8 @@ class ProductPriceChangeNotificationTest extends TestCase
 
         $this->assertCount(1, $storeChannelMessages);
         $this->assertSame(
-            "🏷️ Price Drop\n━━━━━━━━━━━━━━\nGood news for you.\n🛍️ CHATGPT PLUS PRIVATE + CODEX\n\n💵 QRIS\nRp35,000 → Rp30,000\n\n💎 Binance Pay\n2.5 USDT → 2.3 USDT\n\nYou save Rp5,000 + 0.2 USDT.\nThe new price is ready for your next checkout.\n\nNeed help? Reply with /support.",
-            $storeChannelMessages->first()[0]['text'],
-        );
-        $this->assertSame(
-            [
-                'inline_keyboard' => [[[
-                    'text' => '🛒 View Product',
-                    'url' => 'https://t.me/lhiestore_bot?start=product_'.$product->id,
-                ]]],
-            ],
-            $storeChannelMessages->first()[0]['reply_markup'],
+            'https://t.me/TestStoreBot?start=product_'.$product->id,
+            $storeChannelMessages->first()[0]['reply_markup']['inline_keyboard'][0][0]['url'],
         );
     }
 

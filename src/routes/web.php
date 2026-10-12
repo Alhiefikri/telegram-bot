@@ -53,6 +53,7 @@ use App\Http\Controllers\Admin\AdminWarrantyController;
 use App\Http\Controllers\CustomerAccountController;
 use App\Http\Controllers\CustomerEmailOtpController;
 use App\Http\Controllers\CustomerGoogleAuthenticationController;
+use App\Http\Controllers\CustomerIdentityController;
 use App\Http\Controllers\CustomerPasswordAuthenticationController;
 use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontFunnelEventController;
@@ -153,6 +154,7 @@ Route::prefix('auth/google')->name('customer.google.')->middleware([ValidateCust
 
 Route::prefix('akun')->name('customer.')->middleware([ValidateCustomerSession::class, EnsureCustomerAuthAvailable::class])->group(function (): void {
     Route::get('/', [CustomerAccountController::class, 'landing'])->name('account');
+    Route::get('identitas', CustomerIdentityController::class)->name('identity');
     Route::post('register', [CustomerPasswordAuthenticationController::class, 'register'])->name('register');
     Route::post('login', [CustomerPasswordAuthenticationController::class, 'login'])->name('login');
     Route::post('login-code', [CustomerEmailOtpController::class, 'requestCode'])->name('login-code.request');

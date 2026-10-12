@@ -1,5 +1,23 @@
 <script>
 (() => {
+    document.querySelectorAll('[data-email-first]').forEach(form => {
+        const fields = form.querySelector('[data-login-password]');
+        const password = fields.querySelector('input[name="password"]');
+        const submit = form.querySelector('button[type="submit"]');
+        if (form.dataset.passwordExpanded === 'true') return;
+        fields.hidden = true;
+        password.disabled = true;
+        submit.textContent = 'Lanjutkan';
+        form.addEventListener('submit', event => {
+            if (!fields.hidden) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            fields.hidden = false;
+            password.disabled = false;
+            submit.textContent = 'Masuk dengan password';
+            password.focus();
+        });
+    });
     document.querySelectorAll('[data-auth-form]').forEach(form => {
         form.addEventListener('submit', () => {
             const submit = form.querySelector('button[type="submit"], button:not([type])');
@@ -18,7 +36,19 @@
             form.removeAttribute('aria-busy');
         });
     });
+    document.querySelectorAll('[data-password-toggle]').forEach(toggle => {
+        const input = document.getElementById(toggle.getAttribute('aria-controls'));
+        const label = toggle.getAttribute('aria-label');
+        toggle.hidden = false;
+        toggle.addEventListener('click', () => {
+            const visible = input.type === 'password';
+            input.type = visible ? 'text' : 'password';
+            toggle.setAttribute('aria-label', visible ? label.replace('Tampilkan', 'Sembunyikan') : label);
+            toggle.setAttribute('aria-pressed', String(visible));
+        });
+    });
     document.querySelectorAll('input[type="password"]').forEach((input, index) => {
+        if (input.closest('.auth-password-field')) return;
         input.id ||= 'account-password-' + index;
         const toggle = document.createElement('button');
         toggle.type = 'button';

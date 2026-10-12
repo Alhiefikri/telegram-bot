@@ -6,6 +6,8 @@ use App\Models\Cart;
 use App\Models\Order;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\Telegram\TelegramBotApiRequestFactory;
+use App\Services\Telegram\TelegramBotIdentity;
 use App\Support\PakasirCheckoutFlow;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Console\Kernel;
@@ -30,6 +32,13 @@ abstract class TestCase extends BaseTestCase
 
         Cache::flush();
         Http::preventStrayRequests();
+        $this->app->instance(TelegramBotIdentity::class, new class(app(TelegramBotApiRequestFactory::class)) extends TelegramBotIdentity
+        {
+            public function username(): ?string
+            {
+                return trim((string) config('services.telegram.token')) === '' ? null : 'TestStoreBot';
+            }
+        });
     }
 
     /**

@@ -115,7 +115,6 @@ class StorefrontResponseCache
             'support_telegram_admin_username' => config('services.support.telegram_admin_username'),
             'telegram_admin_contact_url' => config('services.telegram.admin_contact_url'),
             'telegram_admin_username' => config('services.telegram.admin_username'),
-            'storefront_telegram_bot_url' => config('storefront.links.telegram_bot_url'),
             'product_placeholder' => config('storefront.product_placeholder'),
             'design_version' => self::DESIGN_VERSION,
             'vite_manifest' => $this->viteManifestFingerprint(),

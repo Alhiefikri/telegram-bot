@@ -28,6 +28,29 @@ final class CustomerOwnedOrderQuery
             ->withQueryString();
     }
 
+    public function counts(Customer $customer): array
+    {
+        $byStatus = Order::query()
+            ->where('customer_id', $customer->getKey())
+            ->selectRaw('order_status, count(*) as total')
+            ->groupBy('order_status')
+            ->pluck('total', 'order_status')
+            ->all();
+
+        $counts = [];
+        foreach (self::FILTERS as $filter) {
+            $statuses = $this->statusesForFilter($filter);
+            $counts[$filter] = $statuses === null
+                ? (int) array_sum($byStatus)
+                : array_sum(array_map(
+                    static fn (OrderStatus $status): int => (int) ($byStatus[$status->value] ?? 0),
+                    $statuses,
+                ));
+        }
+
+        return $counts;
+    }
+
     public function normalizeFilter(mixed $filter): string
     {
         return is_string($filter) && in_array($filter, self::FILTERS, true) ? $filter : 'all';

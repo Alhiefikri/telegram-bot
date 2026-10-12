@@ -94,7 +94,7 @@ const account = (page) => page.goto(environment.APP_URL + "/akun");
 const logout = async (page) => {
   await page.getByRole("button", { name: "Keluar", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Masuk ke akun pelanggan" })
+    page.getByRole("heading", { name: "Masuk", exact: true })
   ).toBeVisible();
 };
 const noOverflow = async (page) =>
@@ -112,10 +112,8 @@ test("registration, verification, password login, OTP, reset and retained magic 
   await page.getByLabel("Email", { exact: true }).fill(email);
   await page.getByLabel("Nama lengkap (opsional)").fill("Browser Customer");
   await page.getByLabel("Password baru", { exact: true }).fill(password);
-  await page.getByLabel("Ulangi password baru", { exact: true }).fill(password);
-  await page
-    .getByRole("button", { name: "Daftar dan kirim verifikasi" })
-    .click();
+  await page.getByLabel("Konfirmasi password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Daftarkan akun" }).click();
   await expect(
     page.getByRole("heading", { name: "Periksa email Anda" })
   ).toBeVisible();
@@ -146,16 +144,15 @@ test("registration, verification, password login, OTP, reset and retained magic 
   await expect(
     page.getByRole("heading", { name: "Keamanan akun" })
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Keluar dari akun pelanggan" })
-    .click();
-  await page.getByLabel("Email", { exact: true }).fill(email);
+  await logout(page);
+  await page.getByLabel("Alamat email", { exact: true }).fill(email);
+  await page.getByRole("button", { name: "Lanjutkan", exact: true }).click();
   await page
     .getByLabel("Password", { exact: true })
     .fill("Wrong account password");
   await page.getByRole("button", { name: "Masuk dengan password" }).click();
   await expect(page.getByRole("alert")).toBeVisible();
-  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Alamat email", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Masuk dengan password" }).click();
   await expect(
@@ -196,7 +193,7 @@ test("registration, verification, password login, OTP, reset and retained magic 
   await page.getByLabel("Ulangi password baru", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Simpan password baru" }).click();
   await expect(
-    page.getByRole("heading", { name: "Masuk ke akun pelanggan" })
+    page.getByRole("heading", { name: "Masuk", exact: true })
   ).toBeVisible();
   await page.goto(
     environment.APP_URL + "/akun/password-reset/confirm#token=" + "f".repeat(64)
@@ -205,6 +202,10 @@ test("registration, verification, password login, OTP, reset and retained magic 
   await page.getByLabel("Ulangi password baru", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Simpan password baru" }).click();
   await expect(page.getByRole("alert")).toContainText("kedaluwarsa");
+  await page
+    .getByRole("link", { name: "Kembali ke masuk", exact: true })
+    .click();
+  await page.getByText("Opsi akses lainnya", { exact: true }).click();
   await page
     .getByRole("link", { name: "Masuk tanpa password melalui link email" })
     .click();
@@ -237,8 +238,10 @@ test("mobile, tablet, desktop and dark account states retain focus and usable co
   }
   await page.setViewportSize({ width: 320, height: 900 });
   await account(page);
-  await page.getByLabel("Email", { exact: true }).focus();
+  await page.getByLabel("Alamat email", { exact: true }).fill(email);
+  await page.getByLabel("Alamat email", { exact: true }).focus();
   await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
   expect(
     await page
       .getByLabel("Password", { exact: true })
@@ -278,7 +281,7 @@ test("no-JavaScript forms support login and unknown-email OTP without account en
   });
   const page = await context.newPage();
   await account(page);
-  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Alamat email", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Masuk dengan password" }).click();
   await expect(
@@ -312,10 +315,8 @@ test("no-JavaScript verification rejects an expired registration and offers reco
     .getByLabel("Email", { exact: true })
     .fill("expired-browser@example.test");
   await page.getByLabel("Password baru", { exact: true }).fill(password);
-  await page.getByLabel("Ulangi password baru", { exact: true }).fill(password);
-  await page
-    .getByRole("button", { name: "Daftar dan kirim verifikasi" })
-    .click();
+  await page.getByLabel("Konfirmasi password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Daftarkan akun" }).click();
   const token = run("mail").token;
   run("expire");
   await page.goto(environment.APP_URL + "/akun/verifikasi-email");
@@ -338,7 +339,8 @@ test("configured Google and Telegram forms link, unlink and sign in without chan
   try {
     await page.setViewportSize({ width: 320, height: 900 });
     await account(page);
-    await page.getByLabel("Email", { exact: true }).fill(email);
+    await page.getByLabel("Alamat email", { exact: true }).fill(email);
+    await page.getByRole("button", { name: "Lanjutkan", exact: true }).click();
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Masuk dengan password" }).click();
     await page.goto(environment.APP_URL + "/akun/keamanan");
@@ -379,9 +381,7 @@ test("configured Google and Telegram forms link, unlink and sign in without chan
     await expect(
       page.getByText("Telegram sudah terhubung.", { exact: false })
     ).toBeVisible();
-    await page
-      .getByRole("button", { name: "Keluar dari akun pelanggan" })
-      .click();
+    await logout(page);
     await page
       .getByRole("button", { name: "Masuk dengan Telegram", exact: true })
       .click();
@@ -460,9 +460,7 @@ test("rollback retains the working magic-link and Recovery Key surface on mobile
     await expect(
       page.getByRole("button", { name: "Simpan password pertama" })
     ).toHaveCount(0);
-    await page
-      .getByRole("button", { name: "Keluar dari akun pelanggan" })
-      .click();
+    await page.getByRole("button", { name: "Keluar", exact: true }).click();
     await page
       .getByRole("link", { name: "Akses dengan invoice + Recovery Key" })
       .click();
@@ -529,4 +527,69 @@ test("Telegram-only accounts verify an unused email on the same account", async 
   } finally {
     run("providers-off");
   }
+});
+
+test("paid invoice credentials require access and reveal only on explicit request", async ({
+  page,
+}) => {
+  const invoice = run("invoice-delivery");
+  const password = "  Invoice <safe> 密碼 & spaces  ";
+  await page.goto(new URL(invoice.invoice_url, environment.APP_URL).href);
+  expect(await page.content()).not.toContain("Legacy-password-2026");
+  expect(await page.content()).not.toContain(
+    Buffer.from(password).toString("base64")
+  );
+  await expect(page.locator("[data-credential-secret]")).toHaveCount(0);
+
+  await page.goto(new URL(invoice.pending_url, environment.APP_URL).href);
+  expect(await page.content()).not.toContain("NeverRevealPending");
+  await expect(page.locator("[data-credential-secret]")).toHaveCount(0);
+
+  await page.goto(environment.APP_URL + "/akses-pesanan");
+  await page.getByLabel("Nomor invoice").fill(invoice.invoice);
+  await page.getByLabel("Recovery key", { exact: true }).fill(invoice.key);
+  await page.getByRole("button", { name: "Buka data pesanan" }).click();
+  await expect(page.locator("[data-credential-secret]").first()).toBeVisible();
+  const field = page
+    .locator("[data-credential-secret]")
+    .filter({
+      has: page.locator('[data-secret-toggle][data-secret-label^="Password"]'),
+    })
+    .first();
+  const value = field.locator("[data-secret-value]");
+  const toggle = field.locator("[data-secret-toggle]");
+  await expect(value).toBeHidden();
+  expect(await value.textContent()).toBe("");
+  await toggle.click();
+  await expect(value).toBeVisible();
+  expect(await value.textContent()).toBe(password);
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(value.locator("script")).toHaveCount(0);
+
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: environment.APP_URL,
+  });
+  await field.locator("[data-credential-copy]").click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(password);
+  await toggle.click();
+  await expect(value).toBeHidden();
+  expect(await value.textContent()).toBe("");
+
+  await toggle.click();
+  await page.evaluate(() =>
+    window.dispatchEvent(new PageTransitionEvent("pagehide"))
+  );
+  await expect(value).toBeHidden();
+  expect(await value.textContent()).toBe("");
+  await toggle.click();
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new PageTransitionEvent("pageshow", { persisted: true })
+    )
+  );
+  await expect(value).toBeHidden();
+  expect(await value.textContent()).toBe("");
+  await noOverflow(page);
 });

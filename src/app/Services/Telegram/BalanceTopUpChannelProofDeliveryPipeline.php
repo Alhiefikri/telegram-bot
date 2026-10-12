@@ -9,6 +9,7 @@ use App\Models\StoreChannelSetting;
 use App\Models\TelegramOutboundEffect;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\PaidInvoice\PaidInvoiceTopUpPresentationAdapter;
+use App\Storefront\StorefrontUrl;
 use InvalidArgumentException;
 use Throwable;
 
@@ -28,6 +29,7 @@ final class BalanceTopUpChannelProofDeliveryPipeline
         private readonly SalesProofPostFormatter $formatter,
         private readonly PaidInvoiceRenderer $invoiceRenderer,
         private readonly PaidInvoiceTopUpPresentationAdapter $invoicePresentation,
+        private readonly StorefrontUrl $urls,
     ) {}
 
     public function deliver(TelegramOutboundEffect $effect): void
@@ -129,7 +131,7 @@ final class BalanceTopUpChannelProofDeliveryPipeline
 
     private function shoppingButtonUrl(): string
     {
-        return (string) (config('storefront.links.telegram_bot_url') ?: 'https://t.me/lhiestore_bot?start=landing');
+        return $this->urls->telegramStartUrl();
     }
 
     private function finalizeNotDeliverable(TelegramOutboundEffect $effect, string $reason, string $message): void

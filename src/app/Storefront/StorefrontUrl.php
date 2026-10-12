@@ -3,10 +3,14 @@
 namespace App\Storefront;
 
 use App\Models\Product;
+use App\Services\Telegram\TelegramBotIdentity;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 class StorefrontUrl
 {
+    public function __construct(private readonly TelegramBotIdentity $botIdentity) {}
+
     public function catalogUrl(?int $productId = null, ?string $search = null): string
     {
         $query = trim((string) $search);
@@ -189,13 +193,13 @@ class StorefrontUrl
 
     public function telegramProductStartUrlForId(int $productId): string
     {
-        $base = (string) (config('storefront.links.telegram_bot_url') ?: 'https://t.me/lhiestore_bot?start=landing');
+        return $this->telegramStartUrl('product_'.$productId);
+    }
 
-        if (preg_match('/([?&])start=[^&]*/', $base) === 1) {
-            return preg_replace('/([?&])start=[^&]*/', '$1start=product_'.$productId, $base) ?: $base;
-        }
-
-        return $base.(str_contains($base, '?') ? '&' : '?').'start=product_'.$productId;
+    public function telegramStartUrl(string $payload = 'landing'): string
+    {
+        return $this->botIdentity->startUrl($payload)
+            ?? throw new RuntimeException('Telegram bot identity is unavailable.');
     }
 
     private function isLocalUrl(string $url): bool

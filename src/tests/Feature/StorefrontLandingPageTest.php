@@ -120,7 +120,6 @@ class StorefrontLandingPageTest extends TestCase
     {
         config([
             'services.telegram.admin_contact_url' => 'https://t.me/lhiestore_support',
-            'storefront.links.telegram_bot_url' => 'https://t.me/lhiestore_bot?start=landing',
         ]);
 
         $html = $this->get('/')->assertOk()->getContent();

@@ -28,7 +28,6 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
     protected function setUp(): void
     {
         parent::setUp();
-        config()->set('storefront.links.telegram_bot_url', 'https://t.me/StoreAuthenticationBot');
         Http::preventStrayRequests();
         Http::fake(function (ClientRequest $request) {
             if ($this->botUnavailable || ($this->callbackUnavailable && str_ends_with($request->url(), '/answerCallbackQuery'))) {

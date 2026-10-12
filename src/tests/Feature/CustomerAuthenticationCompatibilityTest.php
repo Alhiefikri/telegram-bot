@@ -172,7 +172,7 @@ class CustomerAuthenticationCompatibilityTest extends TestCase
             $this->withCookie(config('session.cookie'), session()->getId())->get(route('customer.google.callback', ['state' => $query['state'], 'code' => 'fixture-code']))
                 ->assertRedirect(route('customer.orders.index'));
         } else {
-            config(['services.telegram.token' => 'fixture-token', 'storefront.links.telegram_bot_url' => 'https://t.me/TestStoreBot']);
+            config(['services.telegram.token' => 'fixture-token']);
             $response = $this->postJson(route('customer.telegram.login'))->assertCreated();
             parse_str(parse_url($response->json('deep_link'), PHP_URL_QUERY), $query);
             $service = app(CustomerTelegramAuthenticationService::class);

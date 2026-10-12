@@ -10,11 +10,18 @@
         ? 'Buka keranjang'
         : 'Buka keranjang dengan '.$cartCount.' item';
     $accountUrl = route('customer.account');
-    $accountLabel = auth('customer')->check() ? 'Akun saya' : 'Daftar / Masuk';
+    $headerCustomer = request()->routeIs(
+        'customer.account', 'customer.orders.*', 'customer.balance.show', 'customer.security', 'customer.claim.*',
+    ) && ($customer ?? null) instanceof \App\Models\Customer ? $customer : null;
+    $headerIdentity = $headerCustomer === null
+        ? null
+        : app(\App\Services\Customer\CustomerAccountOverviewReader::class)->identity($headerCustomer);
+    $accountLabel = $headerIdentity['name'] ?? 'Daftar / Masuk';
+    $accountAccessibleLabel = $headerIdentity === null ? $accountLabel : 'Buka profil '.$accountLabel;
     $searchMaxLength = \App\Storefront\StorefrontCatalogSearch::MAX_LENGTH;
 @endphp
 
-<header class="storefront-header sticky top-4 z-50 mx-auto mb-4 mt-4 w-[calc(100%-2rem)] max-w-7xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.1)] transition-all duration-300" data-storefront-header x-data="mobileMenu">
+<header class="storefront-header sticky top-4 z-50 mx-auto mb-4 mt-4 w-[calc(100%-2rem)] max-w-7xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.1)] transition-all duration-300" data-storefront-header data-account-identity-url="{{ route('customer.identity') }}" x-data="mobileMenu">
     <div class="flex min-h-[88px] w-full flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:flex-nowrap">
         <a href="{{ $homeUrl }}" class="order-1 flex min-w-0 shrink-0 items-center gap-2 lg:w-[8rem] xl:w-[9rem]" aria-label="Beranda {{ $brand }}">
             @include('storefront.components.brand-mark', ['brand' => $brand])
@@ -88,7 +95,7 @@
             <x-theme-toggle icon-class="h-7 w-7" class="h-11 w-11 shrink-0 rounded-xl text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" />
         </nav>
 
-        <div class="order-2 ml-auto flex shrink-0 items-center gap-2 lg:order-4">
+        <div class="order-2 ml-auto flex min-w-0 basis-full items-center justify-between gap-2 sm:basis-auto sm:justify-end lg:order-4 lg:shrink-0">
             <x-theme-toggle icon-class="h-7 w-7" class="h-11 w-11 shrink-0 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:hidden" />
             <a href="{{ route('storefront.order-access.create') }}" class="hidden min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--sf-accent)] bg-transparent px-2 text-[10px] font-black text-[var(--sf-accent)] transition-colors hover:bg-[var(--sf-accent-soft)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:inline-flex xl:px-3 xl:text-[11px]" aria-label="Akses pesanan">
                 <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
@@ -97,13 +104,11 @@
                 </svg>
                 <span>Akses Pesanan</span>
             </a>
-            <a href="{{ $accountUrl }}" class="neo-button hidden min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap bg-[var(--sf-accent)] px-2 text-[10px] font-black text-white lg:inline-flex xl:px-3 xl:text-[11px]" aria-label="{{ $accountLabel }}">
-                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8-7v6m3-3h-6" />
-                </svg>
-                <span>{{ $accountLabel }}</span>
+            <a href="{{ $accountUrl }}" class="inline-flex min-h-11 min-w-0 max-w-[11rem] flex-1 items-center justify-center gap-2 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-2 text-xs font-bold text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)] sm:max-w-[8rem] sm:flex-none xl:max-w-[10rem] xl:px-3" data-account-link aria-label="{{ $accountAccessibleLabel }}" title="{{ $accountAccessibleLabel }}">
+                <span class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--sf-accent-soft)] text-xs font-black [&[hidden]]:hidden" data-account-initial aria-hidden="true" @if ($headerIdentity === null) hidden @endif>{{ $headerIdentity['initial'] ?? '' }}</span>
+                <span class="min-w-0 text-center @if ($headerIdentity !== null) truncate @endif" data-account-name>{{ $accountLabel }}</span>
             </a>
-            <a href="{{ $cartUrl }}" class="relative inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:hidden" aria-label="{{ $cartLabel }}">
+            <a href="{{ $cartUrl }}" class="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:hidden" aria-label="{{ $cartLabel }}">
                 <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 7h12l-1 13H7L6 7Zm3 0a3 3 0 0 1 6 0" />
                 </svg>
@@ -215,7 +220,10 @@
                 <a href="{{ route('storefront.order-access.create') }}" class="neo-button mt-2 inline-flex min-h-12 items-center justify-center bg-[var(--sf-accent)] px-4 text-center text-xs font-black text-white">
                     <span>Akses Pesanan</span>
                 </a>
-                <a href="{{ $accountUrl }}" class="flex items-center justify-center rounded-lg border border-[var(--sf-border)] bg-[var(--sf-accent)] px-4 py-3 text-sm font-black text-white">{{ $accountLabel }}</a>
+                <a href="{{ $accountUrl }}" class="flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-4 py-3 text-sm font-bold text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]" data-account-link aria-label="{{ $accountAccessibleLabel }}" title="{{ $accountAccessibleLabel }}">
+                    <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--sf-accent-soft)] text-xs font-black [&[hidden]]:hidden" data-account-initial aria-hidden="true" @if ($headerIdentity === null) hidden @endif>{{ $headerIdentity['initial'] ?? '' }}</span>
+                    <span class="min-w-0 text-center @if ($headerIdentity !== null) truncate @endif" data-account-name>{{ $accountLabel }}</span>
+                </a>
                 <div class="mt-2 flex items-center justify-between gap-3 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-4 py-2">
                     <span class="text-xs font-black uppercase tracking-wide">Tampilan</span>
                     <x-theme-toggle showLabel class="min-h-10 rounded-md border border-[var(--sf-border)] bg-[var(--sf-surface)] px-3 text-xs font-black text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" />
@@ -236,7 +244,10 @@
                 <a href="{{ $homeUrl }}#trending" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Trending</a>
                 <a href="{{ $cartUrl }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Keranjang @if ($cartCount !== null)({{ $cartCount }})@endif</a>
                 <a href="{{ route('storefront.order-access.create') }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Akses Pesanan</a>
-                <a href="{{ $accountUrl }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-accent)] px-3 py-2 text-white">{{ $accountLabel }}</a>
+                <a href="{{ $accountUrl }}" class="inline-flex min-h-11 max-w-full items-center gap-2 rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2 text-[var(--sf-ink)]" aria-label="{{ $accountAccessibleLabel }}" title="{{ $accountAccessibleLabel }}">
+                    <span class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--sf-accent-soft)] text-xs font-black [&[hidden]]:hidden" aria-hidden="true" @if ($headerIdentity === null) hidden @endif>{{ $headerIdentity['initial'] ?? '' }}</span>
+                    <span class="min-w-0 text-center @if ($headerIdentity !== null) truncate @endif">{{ $accountLabel }}</span>
+                </a>
                 <a href="{{ route('storefront.guides.index') }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Panduan</a>
                 <a href="{{ $homeUrl }}#faq" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">FAQ</a>
             </div>

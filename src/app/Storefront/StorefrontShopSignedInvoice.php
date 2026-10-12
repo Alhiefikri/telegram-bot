@@ -409,7 +409,8 @@ class StorefrontShopSignedInvoice
 
     private function expectsAutomaticCredentials(Order $order): bool
     {
-        return $order->orderItems->contains(fn (OrderItem $item): bool => $item->product?->isCredentialManaged() === true);
+        return $order->orderItems->contains(fn (OrderItem $item): bool => $item->stockItems->isNotEmpty()
+            || $item->product?->isCredentialManaged() === true);
     }
 
     private function redirectUrl(Order $order): string

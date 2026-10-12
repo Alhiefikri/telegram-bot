@@ -35,7 +35,6 @@ class CustomerTelegramAuthenticationPostgresTest extends TestCase
             'cache.default' => 'array',
             'cache.limiter' => 'array',
             'services.telegram.token' => 'fixture-token',
-            'storefront.links.telegram_bot_url' => 'https://t.me/lhiestore_bot?start=landing',
         ]);
     }
 

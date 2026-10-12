@@ -362,7 +362,7 @@ class AdminStoreChannelTest extends TestCase
                 && str_contains($caption, 'Thank you for choosing Lhie Store.')
                 && mb_strlen($caption, 'UTF-8') <= 1024
                 && ($replyMarkup['inline_keyboard'][0][0]['text'] ?? null) === '🛒 Shop Now'
-                && ($replyMarkup['inline_keyboard'][0][0]['url'] ?? null) === 'https://t.me/lhiestore_bot?start=product_'.$selectedProduct->id;
+                && ($replyMarkup['inline_keyboard'][0][0]['url'] ?? null) === 'https://t.me/TestStoreBot?start=product_'.$selectedProduct->id;
         });
 
         $this->assertSame(8, $selectedProduct->refresh()->stock);

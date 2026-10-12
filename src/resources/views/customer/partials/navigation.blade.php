@@ -1,5 +1,14 @@
 <nav class="customer-account-nav" aria-label="Navigasi akun pelanggan">
-    @foreach(['customer.orders.index' => 'Pesanan saya', 'customer.balance.show' => 'Saldo saya', 'customer.claim.create' => 'Klaim pesanan', 'customer.security' => 'Keamanan akun'] as $destination => $label)
-        <a href="{{ route($destination) }}" @if(request()->routeIs($destination)) aria-current="page" @endif>{{ $label }}</a>
+    @foreach([
+        'customer.account' => ['label' => 'Akun saya', 'icon' => 'user'],
+        'customer.orders.index' => ['label' => 'Pesanan saya', 'icon' => 'orders'],
+        'customer.balance.show' => ['label' => 'Saldo saya', 'icon' => 'balance'],
+        'customer.claim.create' => ['label' => 'Klaim pesanan', 'icon' => 'claim'],
+        'customer.security' => ['label' => 'Keamanan akun', 'icon' => 'security'],
+    ] as $destination => $item)
+        <a href="{{ route($destination) }}" @if(request()->routeIs($destination)) aria-current="page" @endif>
+            @include('customer.partials.account-icon', ['icon' => $item['icon']])
+            <span>{{ $item['label'] }}</span>
+        </a>
     @endforeach
 </nav>

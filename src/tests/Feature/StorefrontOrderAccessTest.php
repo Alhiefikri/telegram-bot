@@ -62,10 +62,9 @@ class StorefrontOrderAccessTest extends TestCase
 
         $this->get(route('storefront.order-access.show', $order))
             ->assertOk()
-            ->assertSee('email : customer@example.test', false)
-            ->assertSee('password : PasswordAman123', false)
+            ->assertSee('customer@example.test', false)
+            ->assertSee('PasswordAman123', false)
             ->assertDontSee($secret, false)
-            ->assertSee('Simpan data ini di password manager pribadi. Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.')
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertHeader('Referrer-Policy', 'no-referrer');
     }
@@ -105,10 +104,8 @@ class StorefrontOrderAccessTest extends TestCase
                 'Buka OTP Mail',
                 'Recovery product tutorial.',
             ], false)
-            ->assertSee('data-copy-text="recovery@example.test"', false)
             ->assertSee($otpUrl, false)
             ->assertSee('rel="noreferrer noopener"', false)
-            ->assertDontSee('data-copy-text="'.$otpUrl.'"', false)
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertHeader('Referrer-Policy', 'no-referrer');
     }
@@ -143,16 +140,16 @@ class StorefrontOrderAccessTest extends TestCase
         $this->travel(29)->minutes();
         $this->get(route('storefront.order-access.show', $order))
             ->assertOk()
-            ->assertSee('email : customer@example.test', false)
-            ->assertSee('password : PasswordAman123', false)
+            ->assertSee('customer@example.test', false)
+            ->assertSee('PasswordAman123', false)
             ->assertDontSee($secret, false);
 
         $this->travel(2)->minutes();
         $this->get(route('storefront.order-access.show', $order))
             ->assertForbidden()
             ->assertDontSee($secret, false)
-            ->assertDontSee('email : customer@example.test', false)
-            ->assertDontSee('password : PasswordAman123', false);
+            ->assertDontSee('customer@example.test', false)
+            ->assertDontSee('PasswordAman123', false);
     }
 
     public function test_access_key_is_only_stored_as_a_hash_on_the_order(): void

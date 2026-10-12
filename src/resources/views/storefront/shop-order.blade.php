@@ -9,14 +9,28 @@
 
         <main class="flex-grow pb-20 pt-8 sm:pt-12">
             <section class="mx-auto min-w-0 max-w-6xl px-4 pb-2 sm:px-6">
-                <a href="{{ $storefront->catalogUrl() }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]">
-                    <span aria-hidden="true">&larr;</span> Kembali ke katalog
+                @php
+                    $orderBackUrl = $storefront->catalogUrl();
+                    $orderBackLabel = 'Kembali ke katalog';
+                    if (request()->routeIs('customer.orders.show')) {
+                        $orderBackUrl = route('customer.orders.index');
+                        $orderBackLabel = 'Kembali ke pesanan saya';
+                    } elseif (auth('web')->check() && \Illuminate\Support\Facades\Gate::forUser(auth('web')->user())->allows('view', $order)) {
+                        $orderBackUrl = route('admin.dashboard', ['tab' => 'penjualan']);
+                        $orderBackLabel = 'Kembali ke pesanan admin';
+                    } elseif (auth('customer')->check() && (string) auth('customer')->id() === (string) $order->customer_id) {
+                        $orderBackUrl = route('customer.orders.index');
+                        $orderBackLabel = 'Kembali ke pesanan saya';
+                    }
+                @endphp
+                <a href="{{ $orderBackUrl }}" data-order-back-link class="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-[var(--sf-ink)] hover:text-[var(--sf-accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]">
+                    <span aria-hidden="true">&larr;</span> {{ $orderBackLabel }}
                 </a>
 
                 @php
                     $headline = $isPaid ? 'Pembayaran terverifikasi' : ($isBscPayment ? 'Order USDT BEP20 dibuat' : ($isBinancePay ? 'Order Binance Pay dibuat' : (($isManualQris || $isQrisPayable) ? 'Order QRIS dibuat' : $qrisReadinessTitle)));
                     $summary = $isPaid
-                        ? 'sudah lunas. Data akun tersedia di bawah.'
+                        ? 'sudah lunas. Detail pesanan dan pengiriman tersedia di bawah.'
                         : ($isBscPayment ? 'sudah mencadangkan stok. Bayar tepat USDT melalui BNB Smart Chain (BEP20) sebelum masa order berakhir.' : ($isBinancePay ? 'sudah mencadangkan stok. Bayar USDT sesuai instruksi sebelum masa order berakhir.' : (($isManualQris || $isQrisPayable) ? 'sudah mencadangkan stok. Bayar sesuai total QRIS sebelum masa order berakhir.' : 'sudah mencadangkan stok, tetapi QRIS belum siap dibayar. Gunakan tombol retry di bawah atau hubungi bantuan jika tetap gagal.')));
 
                     if ($isTerminal && ! $isPaid) {
@@ -90,21 +104,24 @@
                         </div>
                     </details>
                 @elseif ($isPaid)
+                    @include('storefront.partials.shop.order-summary')
+                    @include('storefront.partials.shop.account-delivery')
                     @if($warrantyUrl ?? null)
-                        <section class="mt-5 rounded-lg border-2 bg-white p-4">
-                            <a class="font-bold underline" href="{{ $warrantyUrl }}">{{ __('order.warranty.title', [], $storefrontLocale) }}</a>
-                            <p class="mt-2 text-sm">{{ __('order.warranty.support', [], $storefrontLocale) }}</p>
+                        <section class="invoice-warranty-section mt-4 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface)] p-3">
+                            <a class="inline-flex min-h-11 items-center font-bold text-[var(--sf-accent)] underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]" href="{{ $warrantyUrl }}">{{ __('order.warranty.title', [], $storefrontLocale) }}</a>
+                            <p class="mt-1 text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ __('order.warranty.support', [], $storefrontLocale) }}</p>
                         </section>
                     @endif
-                    @include('storefront.partials.shop.account-delivery')
                     @include('storefront.partials.support-chooser', [
                         'supportContext' => $supportContext,
                         'supportId' => 'invoice-support',
+                        'supportClass' => 'mt-4',
                     ])
                     @if ($accessKey)
-                        @include('storefront.partials.shop.recovery-key')
+                        <div class="invoice-recovery-section">
+                            @include('storefront.partials.shop.recovery-key')
+                        </div>
                     @endif
-                    @include('storefront.partials.shop.order-summary')
                 @else
                     <x-storefront.panel as="section" class="mt-6" aria-label="Status akhir invoice" role="status" aria-live="polite">
                         <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Status akhir</p>

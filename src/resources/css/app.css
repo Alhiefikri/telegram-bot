@@ -1707,6 +1707,135 @@
     object-fit: cover;
   }
 
+  .storefront-invoice-page {
+    --sf-muted: #52627a;
+  }
+
+  [data-theme="dark"] .storefront-invoice-page {
+    --sf-muted: #a8b4c7;
+  }
+
+  .storefront-invoice-page
+    :is(
+      .invoice-order-summary,
+      .invoice-support-chooser,
+      .invoice-delivery-panel,
+      .invoice-warranty-section,
+      .invoice-recovery-section .neo-panel
+    ) {
+    min-width: 0;
+    border-width: 1px;
+    border-color: var(--sf-border);
+    background: var(--sf-surface);
+    box-shadow: none;
+  }
+
+  .storefront-invoice-page .invoice-recovery-section .neo-panel {
+    background-color: var(--sf-surface) !important;
+    color: var(--sf-ink);
+  }
+
+  .storefront-invoice-page
+    .invoice-recovery-section
+    :is(h2, p, code, button, span) {
+    color: var(--sf-ink) !important;
+  }
+
+  .storefront-invoice-page .invoice-recovery-section .neo-button {
+    border-color: var(--sf-muted);
+    box-shadow: none;
+  }
+
+  .storefront-invoice-page .invoice-order-summary,
+  .storefront-invoice-page .invoice-support-chooser,
+  .storefront-invoice-page .invoice-recovery-section .neo-panel {
+    padding: 1rem;
+  }
+
+  .storefront-invoice-page .invoice-recovery-section code {
+    border-width: 1px;
+    background: var(--sf-surface-warm);
+    box-shadow: none;
+  }
+
+  .storefront-invoice-page .invoice-support-select {
+    max-width: 32rem;
+  }
+
+  .storefront-invoice-page .invoice-support-action {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .storefront-invoice-page .credential-action {
+    display: inline-flex;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: 2px solid var(--sf-muted);
+    border-radius: 0.5rem;
+    background: var(--sf-surface);
+    padding: 0.5rem 0.75rem;
+    color: var(--sf-ink);
+    font: inherit;
+    font-weight: 700;
+  }
+
+  .storefront-invoice-page .credential-action:hover {
+    background: var(--sf-surface-warm);
+  }
+
+  .storefront-invoice-page .credential-value {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    border: 1px solid var(--sf-muted);
+    border-radius: 0.5rem;
+    background: var(--sf-surface);
+    padding: 0.625rem 0.75rem;
+    color: var(--sf-ink);
+    font-family: ui-monospace, monospace;
+    font-size: 1rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .storefront-invoice-page .credential-section {
+    margin-top: 1rem;
+    border-top: 1px solid var(--sf-border);
+    padding-top: 1rem;
+  }
+
+  .storefront-invoice-page
+    :is(
+      .invoice-recovery-section .neo-button,
+      .credential-action,
+      .credential-value,
+      .invoice-support-action,
+      .invoice-support-select
+    ):focus-visible {
+    outline: 2px solid var(--sf-accent);
+    outline-offset: 2px;
+  }
+
+  .storefront-invoice-page .invoice-support-chooser [hidden],
+  .storefront-invoice-page .credential-action[hidden],
+  .storefront-invoice-page [data-secret-mask][hidden],
+  .storefront-invoice-page .credential-value[hidden] {
+    display: none !important;
+  }
+
+  @media (min-width: 640px) {
+    .storefront-invoice-page .invoice-support-action {
+      flex: 0 1 auto;
+    }
+  }
+
   .storefront-invoice-page .invoice-payment-panel {
     box-shadow: 0 16px 32px -24px rgb(18 35 63 / 0.35);
   }

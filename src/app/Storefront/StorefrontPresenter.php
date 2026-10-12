@@ -43,11 +43,6 @@ class StorefrontPresenter
         return $this->support;
     }
 
-    public function telegramBotHref(): string
-    {
-        return config('storefront.links.telegram_bot_url', 'https://t.me/lhiestore_bot?start=landing');
-    }
-
     public function adminLoginHref(): string
     {
         return route('admin.login');

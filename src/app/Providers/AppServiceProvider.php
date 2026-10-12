@@ -34,6 +34,8 @@ use App\Services\Checkout\ManualQrisCheckoutPaymentPreparation;
 use App\Services\Checkout\SakurupiahCheckoutPaymentPreparation;
 use App\Services\Checkout\StoreBalanceCheckoutPaymentPreparation;
 use App\Services\Checkout\UsdtBalanceCheckoutPaymentPreparation;
+use App\Services\Customer\CustomerAccountOverviewReader;
+use App\Services\Customer\CustomerBalanceOverview;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\KlikQris\KlikQrisClient;
@@ -87,6 +89,7 @@ use App\Services\UsdtTreasury\UsdtTreasuryAssetRegistry;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 
@@ -206,6 +209,19 @@ class AppServiceProvider extends ServiceProvider
         $this->app->make(ProductionConfigurationValidator::class)->assertValid();
         $this->configureUrlGeneration();
         Vite::createAssetPathsUsing(fn (string $path, ?bool $secure): string => '/'.ltrim($path, '/'));
+        View::composer([
+            'customer.dashboard', 'customer.orders', 'customer.balance',
+            'customer.security', 'customer.claim',
+        ], function (\Illuminate\View\View $view): void {
+            $customer = request()->user('customer');
+            if ($customer === null) {
+                return;
+            }
+            $data = $view->getData();
+            $overview = $data['overview'] ?? null;
+            $view->with('customer', $customer)->with('accountSummary', app(CustomerAccountOverviewReader::class)
+                ->forCustomer($customer, $overview instanceof CustomerBalanceOverview ? $overview : null));
+        });
 
         Product::observe(ProductAuditObserver::class);
         Product::observe(StorefrontCacheInvalidationObserver::class);

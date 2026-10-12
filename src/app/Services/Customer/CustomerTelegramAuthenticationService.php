@@ -6,6 +6,7 @@ use App\Enums\CustomerIdentityProvider;
 use App\Models\Customer;
 use App\Models\CustomerIdentity;
 use App\Models\CustomerTelegramAuthClaim;
+use App\Services\Telegram\TelegramBotIdentity;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,20 +17,20 @@ final class CustomerTelegramAuthenticationService
     public function __construct(
         private CustomerAuthenticationRateLimiter $limiter,
         private CustomerSessionAuthentication $sessions,
+        private readonly TelegramBotIdentity $botIdentity,
     ) {}
 
     public function ready(): bool
     {
-        return is_string(config('services.telegram.token'))
-            && trim(config('services.telegram.token')) !== ''
-            && $this->botUsername() !== null;
+        return $this->botIdentity->username() !== null;
     }
 
     public function start(Request $request, bool $link): ?array
     {
         $request->session()->forget(['customer_telegram_claim_id', 'customer_telegram_claim_nonce', 'customer_telegram_claim_error']);
         try {
-            if (! $this->ready() || ! $this->limiter->allowTelegramStart($request->session()->getId(), (string) $request->ip())) {
+            $username = $this->botIdentity->username();
+            if ($username === null || ! $this->limiter->allowTelegramStart($request->session()->getId(), (string) $request->ip())) {
                 $request->session()->put('customer_telegram_claim_error', 'unavailable');
 
                 return null;
@@ -71,7 +72,7 @@ final class CustomerTelegramAuthenticationService
             $request->session()->put('customer_telegram_claim_id', $claim->getKey());
             $request->session()->put('customer_telegram_claim_nonce', $nonce);
 
-            return ['deep_link' => 'https://t.me/'.$this->botUsername().'?start='.$capability, 'expires_in' => 300];
+            return ['deep_link' => 'https://t.me/'.$username.'?start='.$capability, 'expires_in' => 300];
         } catch (Throwable) {
             $request->session()->put('customer_telegram_claim_error', 'unavailable');
 
@@ -363,21 +364,5 @@ final class CustomerTelegramAuthenticationService
     private function secret(): string
     {
         return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-    }
-
-    private function botUsername(): ?string
-    {
-        $url = config('storefront.links.telegram_bot_url');
-        if (! is_string($url)) {
-            return null;
-        }
-        $parts = parse_url($url);
-        if (! is_array($parts) || ($parts['scheme'] ?? null) !== 'https' || ($parts['host'] ?? null) !== 't.me'
-            || isset($parts['user']) || isset($parts['pass']) || isset($parts['port']) || isset($parts['fragment'])
-            || preg_match('/\A\/([A-Za-z][A-Za-z0-9_]{4,31})\z/', $parts['path'] ?? '', $match) !== 1) {
-            return null;
-        }
-
-        return $match[1];
     }
 }

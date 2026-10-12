@@ -21,7 +21,12 @@ $app->booted(function () use ($app): void {
     }
     Http::preventStrayRequests();
     if (is_file(dirname($database).'/providers-configured')) {
-        config(['services.telegram.token' => 'disposable-browser-bot', 'storefront.links.telegram_bot_url' => 'https://t.me/disposable_auth_bot']);
+        config(['services.telegram.token' => 'disposable-browser-bot']);
+        Http::fake([
+            'https://api.telegram.org/*/getMe' => Http::response([
+                'ok' => true, 'result' => ['id' => 123456, 'is_bot' => true, 'username' => 'disposable_auth_bot'],
+            ]),
+        ]);
         $app->bind(GoogleOAuthProvider::class, fn () => new class extends GoogleOAuthProvider
         {
             public function configurationFingerprint(): ?string

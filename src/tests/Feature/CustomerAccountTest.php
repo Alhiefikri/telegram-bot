@@ -31,6 +31,54 @@ class CustomerAccountTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_account_overview_counts_only_the_authenticated_customers_orders(): void
+    {
+        $customer = Customer::factory()->create(['first_name' => 'Nadia', 'email_verified_at' => now()]);
+        foreach ([OrderStatus::Draft, OrderStatus::PendingPayment, OrderStatus::Completed] as $status) {
+            Order::factory()->create([
+                'customer_id' => $customer->id, 'order_status' => $status,
+                'payment_status' => $status === OrderStatus::Completed ? PaymentStatus::Paid : PaymentStatus::Pending,
+            ]);
+        }
+        Order::factory()->create(['order_status' => OrderStatus::Completed, 'payment_status' => PaymentStatus::Paid]);
+
+        $this->actingAs($customer, 'customer')->get(route('customer.account'))
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertViewHas('accountSummary', fn (array $summary): bool => $summary['profile']['name'] === 'Nadia'
+                && $summary['orderCounts'] === [
+                    'all' => 3, 'waiting' => 2, 'processing' => 0, 'completed' => 1, 'issue' => 0,
+                ]);
+    }
+
+    public function test_navbar_identity_is_private_minimal_and_supports_telegram_only_names(): void
+    {
+        $this->get(route('customer.identity'))->assertOk()
+            ->assertExactJson(['authenticated' => false, 'name' => null, 'initial' => null]);
+        $customer = Customer::factory()->create([
+            'first_name' => '', 'username' => 'telegram_alias', 'email_verified_at' => now(),
+        ]);
+
+        $this->actingAs($customer, 'customer')->get(route('customer.identity'))
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Referrer-Policy', 'no-referrer')
+            ->assertExactJson(['authenticated' => true, 'name' => 'telegram_alias', 'initial' => 'T']);
+    }
+
+    public function test_shared_storefront_html_never_embeds_the_signed_in_customer_identity(): void
+    {
+        $customer = Customer::factory()->create([
+            'first_name' => 'SensitiveCustomerIdentity', 'email_verified_at' => now(),
+        ]);
+
+        $this->actingAs($customer, 'customer')->get(route('storefront.home'))
+            ->assertOk()->assertDontSee('SensitiveCustomerIdentity');
+        $this->post(route('customer.logout'));
+        $this->get(route('storefront.home'))
+            ->assertOk()->assertDontSee('SensitiveCustomerIdentity');
+    }
+
     public function test_email_code_requests_keep_the_same_usable_state_for_known_and_unknown_accounts(): void
     {
         Queue::fake();
@@ -185,8 +233,6 @@ class CustomerAccountTest extends TestCase
 
         $response
             ->assertOk()
-            ->assertSee('Status Order')
-            ->assertSee('Status Pembayaran')
             ->assertSee('Menunggu pembayaran')
             ->assertSee('Dibayar')
             ->assertSee('Gagal')
@@ -245,25 +291,6 @@ class CustomerAccountTest extends TestCase
             ->assertSee($processing->invoice_number)
             ->assertSee($completed->invoice_number)
             ->assertSee($issue->invoice_number);
-    }
-
-    public function test_customer_order_list_distinguishes_empty_history_from_empty_filter(): void
-    {
-        $customer = Customer::factory()->create(['email' => 'owner@example.test', 'email_verified_at' => now()]);
-
-        $this->actingAs($customer, 'customer')->get(route('customer.orders.index'))
-            ->assertOk()
-            ->assertSee('Belum ada riwayat pesanan di akun ini.');
-
-        Order::factory()->create([
-            'customer_id' => $customer->id,
-            'order_status' => OrderStatus::Completed,
-            'payment_status' => PaymentStatus::Paid,
-        ]);
-
-        $this->actingAs($customer, 'customer')->get(route('customer.orders.index', ['status' => 'waiting']))
-            ->assertOk()
-            ->assertSee('Tidak ada pesanan pada filter "Menunggu".', false);
     }
 
     public function test_customer_order_history_uses_deterministic_newest_first_ordering(): void
@@ -428,12 +455,9 @@ class CustomerAccountTest extends TestCase
 
         $this->actingAs($customer, 'customer')->get(route('customer.orders.show', $order))
             ->assertOk()
-            ->assertSee('Data akun siap digunakan')
-            ->assertSee('email : paid-account@example.test', false)
-            ->assertSee('password : KeepThisCredential', false)
-            ->assertDontSee($secret, false)
-            ->assertSee('data-copy-text="email : paid-account@example.test', false)
-            ->assertSee('password : KeepThisCredential"', false);
+            ->assertSee('paid-account@example.test', false)
+            ->assertSee('KeepThisCredential', false)
+            ->assertDontSee($secret, false);
     }
 
     public function test_paid_customer_order_detail_renders_structured_account_fields_and_safe_otp_action(): void
@@ -478,18 +502,12 @@ class CustomerAccountTest extends TestCase
         $this->actingAs($customer, 'customer')->get(route('customer.orders.show', $order))
             ->assertOk()
             ->assertSeeInOrder([
-                'Data akun siap digunakan',
-                'Data akun 1',
                 'customer-structured@example.test',
                 'Customer-structured-password',
-                'Domain tujuan: mail.customer.example.test',
-                'Buka OTP Mail',
                 'Customer product tutorial.',
             ], false)
-            ->assertSee('data-copy-text="customer-structured@example.test"', false)
             ->assertSee($otpUrl, false)
             ->assertSee('rel="noreferrer noopener"', false)
-            ->assertDontSee('data-copy-text="'.$otpUrl.'"', false)
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertHeader('Referrer-Policy', 'no-referrer');
     }

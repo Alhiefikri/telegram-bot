@@ -1,33 +1,37 @@
 @php
-    $supportId = $supportId ?? 'storefront-support';
+    $supportId = $supportId ?? 'storefront-support-'.\Illuminate\Support\Str::random(8);
     $supportClass = $supportClass ?? 'mt-5';
+    $supportSelectId = $supportId.'-issue-'.\Illuminate\Support\Str::random(8);
 @endphp
 
 @if (! empty($supportContext['categories']))
-    <x-storefront.panel as="section" id="{{ $supportId }}" class="{{ $supportClass }}" aria-labelledby="{{ $supportId }}-title">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div class="min-w-0">
-                <h2 id="{{ $supportId }}-title" class="font-display text-2xl font-black text-[var(--sf-ink)]">{{ $supportContext['title'] ?? 'Butuh bantuan?' }}</h2>
-                @if (! empty($supportContext['body']))
-                    <p class="mt-2 max-w-2xl text-sm font-bold leading-6 text-[var(--sf-muted)]">{{ $supportContext['body'] }}</p>
-                @endif
-            </div>
-            <span class="inline-flex w-fit rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 text-xs font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">
-                WhatsApp + Telegram Admin
-            </span>
+    <x-storefront.panel as="section" id="{{ $supportId }}" padding="sm" class="invoice-support-chooser {{ $supportClass }}" aria-labelledby="{{ $supportId }}-title" data-support-chooser>
+        <h2 id="{{ $supportId }}-title" class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $supportContext['title'] ?? 'Butuh bantuan?' }}</h2>
+        @if (! empty($supportContext['body']))
+            <p class="mt-1 text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $supportContext['body'] }}</p>
+        @endif
+
+        <div class="mt-3" data-support-select-field hidden>
+            <label for="{{ $supportSelectId }}" class="block text-sm font-bold text-[var(--sf-ink)]">Pilih kendala</label>
+            <select id="{{ $supportSelectId }}" class="invoice-support-select mt-2 min-h-11 w-full min-w-0 rounded-lg border-2 border-[var(--sf-muted)] bg-[var(--sf-surface)] px-3 py-2 text-base font-semibold text-[var(--sf-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]" data-support-select>
+                @foreach ($supportContext['categories'] as $category)
+                    <option value="{{ $category['key'] }}" @disabled(! collect($category['options'])->contains(fn ($option) => $option['available']))>{{ $category['label'] }}</option>
+                @endforeach
+            </select>
         </div>
 
-        <div class="mt-5 grid gap-4">
-            @foreach ($supportContext['categories'] as $category)
-                <div class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 shadow-[4px_4px_0_var(--sf-shadow)]">
-                    <p class="text-sm font-black leading-6 text-[var(--sf-ink)]">{{ $category['label'] }}</p>
-                    <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                        @foreach ($category['options'] as $option)
-                            @if ($option['available'])
+        <details class="mt-3" data-support-options>
+            <summary class="min-h-11 cursor-pointer py-2 text-sm font-bold leading-6 text-[var(--sf-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]" data-support-fallback>Pilih kendala dan kontak admin</summary>
+            <div class="space-y-4" data-support-groups>
+                @foreach ($supportContext['categories'] as $category)
+                    <section data-support-group="{{ $category['key'] }}">
+                        <h3 class="mb-2 text-sm font-bold leading-6 text-[var(--sf-ink)]" data-support-group-title>{{ $category['label'] }}</h3>
+                        <div class="flex flex-wrap gap-2">
+                            @forelse (collect($category['options'])->where('available', true) as $option)
                                 <a href="{{ $option['href'] }}"
                                    target="_blank"
                                    rel="noopener noreferrer"
-                                   class="inline-flex min-h-12 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-4 py-3 text-center text-sm font-black text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)] transition hover:-translate-y-0.5 hover:shadow-[5px_5px_0_var(--sf-shadow)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-blue)] focus:ring-offset-2"
+                                   class="invoice-support-action inline-flex min-h-11 items-center justify-center rounded-lg border-2 border-[var(--sf-muted)] bg-[var(--sf-surface)] px-4 py-2 text-center text-sm font-bold text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-surface-warm)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]"
                                    data-support-channel="{{ $option['key'] }}"
                                    data-support-category="{{ $category['key'] }}"
                                    data-support-message="{{ $option['message'] }}"
@@ -36,19 +40,13 @@
                                    @if (! empty($supportContext['subject']['product_id'])) data-support-product-id="{{ $supportContext['subject']['product_id'] }}" @endif>
                                     {{ $option['label'] }}
                                 </a>
-                            @else
-                                <span class="inline-flex min-h-12 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white/70 px-4 py-3 text-center text-sm font-black text-[var(--sf-muted)] opacity-80"
-                                      aria-disabled="true"
-                                      data-support-channel="{{ $option['key'] }}"
-                                      data-support-category="{{ $category['key'] }}"
-                                      data-support-message="{{ $option['message'] }}">
-                                    {{ $option['label'] }} belum aktif
-                                </span>
-                            @endif
-                        @endforeach
-                    </div>
-                </div>
-            @endforeach
-        </div>
+                            @empty
+                                <p class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">Kontak untuk kendala ini belum tersedia.</p>
+                            @endforelse
+                        </div>
+                    </section>
+                @endforeach
+            </div>
+        </details>
     </x-storefront.panel>
 @endif

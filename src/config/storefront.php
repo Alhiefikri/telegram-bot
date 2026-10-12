@@ -15,10 +15,6 @@ return [
         ['label' => 'Support', 'href' => '#support'],
     ],
 
-    'links' => [
-        'telegram_bot_url' => 'https://t.me/lhiestore_bot?start=landing',
-    ],
-
     'product_placeholder' => '/assets/product-placeholder.svg',
     'sitemap' => [
         'max_urls' => 1000,

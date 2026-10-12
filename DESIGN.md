@@ -19,6 +19,8 @@ The public storefront keeps a playful commerce identity: pale paper backgrounds,
 
 The Admin Dashboard and linked operator pages use canonical Variant A: neutral light/dark surfaces, a muted violet action accent, one-pixel separators, 12px corners and restrained elevation. Admin density serves products, orders and financial operations, not storefront decoration. Design dials: ENERGY 1 / RHYTHM 2 / MOTION 1; repeated form/card hierarchy varies only for real tables, queues and reporting.
 
+Signed-in Customer pages keep the storefront blue and paper palette but use a quieter account layout: thin borders, 12px corners and no offset shadows. The desktop overview places identity, balances and order counts at left, with shopping, settings and help at right; mobile stacks the same sections. Order history uses compact rows, not separate oversized status cards. The shared navbar shows the authenticated name and initial without embedding personal identity in publicly cached HTML.
+
 Avoid drifting back to older directions that no longer match the site: orange Warung AI storefront styling, Filament admin assumptions, generic SaaS dark gradients, or sterile premium minimalism.
 
 ### Marketplace storefront refinement

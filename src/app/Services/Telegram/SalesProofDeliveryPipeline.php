@@ -216,7 +216,7 @@ final class SalesProofDeliveryPipeline
 
         return $productId
             ? $this->urls->telegramProductStartUrlForId((int) $productId)
-            : (string) (config('storefront.links.telegram_bot_url') ?: 'https://t.me/lhiestore_bot?start=landing');
+            : $this->urls->telegramStartUrl();
     }
 
     private function isPhotoEffect(TelegramOutboundEffect $effect): bool

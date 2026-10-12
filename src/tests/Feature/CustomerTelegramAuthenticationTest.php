@@ -21,7 +21,7 @@ class CustomerTelegramAuthenticationTest extends TestCase
     {
         parent::setUp();
         $this->withCredentials();
-        config(['services.telegram.token' => 'test-token', 'storefront.links.telegram_bot_url' => 'https://t.me/TestStoreBot']);
+        config(['services.telegram.token' => 'test-token']);
     }
 
     public function test_unused_private_actor_links_only_after_explicit_bot_and_browser_consumption(): void
