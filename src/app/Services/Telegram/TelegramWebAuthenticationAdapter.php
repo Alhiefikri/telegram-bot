@@ -45,6 +45,7 @@ final class TelegramWebAuthenticationAdapter
             "Konfirmasi akun web\n\nLanjutkan hanya jika Anda baru saja meminta masuk atau menghubungkan Telegram dari situs toko di browser Anda sendiri. Tombol ini membuktikan kepemilikan akun Telegram untuk permintaan tersebut.\n\nJika bukan Anda yang memulai, abaikan pesan ini. Jangan teruskan tautan atau tombol ini kepada siapa pun. Permintaan berakhir dalam 5 menit. Setelah konfirmasi, kembali ke browser yang memulai permintaan untuk menyelesaikannya.",
             ['inline_keyboard' => [[[
                 'text' => 'Konfirmasi permintaan akun web',
+                'style' => 'primary',
                 'callback_data' => $confirmation,
             ]]]],
         );
@@ -71,6 +72,13 @@ final class TelegramWebAuthenticationAdapter
             );
         } catch (Throwable) {
             throw new RuntimeException('Telegram web authentication response is unavailable.');
+        }
+
+        if ($confirmed) {
+            $this->send(
+                (string) $chat['id'],
+                'Telegram dikonfirmasi. Kembali ke situs toko di browser yang memulai permintaan, lalu klik "Periksa konfirmasi Telegram" untuk menyelesaikannya.',
+            );
         }
 
         return true;

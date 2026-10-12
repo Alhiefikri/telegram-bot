@@ -14,15 +14,17 @@
                 default => data_get($mailCopy, 'pending_body'),
             };
         @endphp
-        <div class="mb-4 border-b border-[var(--sf-border)] pb-4 text-sm leading-6 text-[var(--sf-ink)]" role="status" aria-live="polite">
+        <div class="invoice-mail-status text-sm leading-5 text-[var(--sf-ink)]" data-mail-status="{{ $mailStatus }}" role="status" aria-live="polite">
             @if (($credentialMail['recipient'] ?? null) !== null)
-                <p class="font-semibold">{{ $mailTitle }}</p>
-                <p class="mt-1">{{ str_replace(':email', $credentialMail['recipient'], (string) $mailBody) }}</p>
-                @if ($mailStatus === 'sent' && filled($credentialMail['sent_at'] ?? null))
-                    <p class="mt-1 text-xs text-[var(--sf-muted)]">{{ str_replace(':time', $credentialMail['sent_at'], (string) data_get($mailCopy, 'sent_at')) }}</p>
-                @endif
+                <div class="min-w-0">
+                    <p class="invoice-mail-title font-semibold">{{ $mailTitle }}</p>
+                    <p class="mt-1 break-words">{{ str_replace(':email', $credentialMail['recipient'], (string) $mailBody) }}</p>
+                    @if ($mailStatus === 'sent' && filled($credentialMail['sent_at'] ?? null))
+                        <p class="mt-1 text-xs text-[var(--sf-muted)]">{{ str_replace(':time', $credentialMail['sent_at'], (string) data_get($mailCopy, 'sent_at')) }}</p>
+                    @endif
+                </div>
                 @if ($credentialMail['can_resend'] ?? false)
-                    <form method="POST" action="{{ $credentialMail['resend_url'] }}" class="mt-2">
+                    <form method="POST" action="{{ $credentialMail['resend_url'] }}" class="invoice-mail-resend">
                         @csrf
                         <button type="submit" class="credential-action">{{ data_get($mailCopy, 'resend_cta') }}</button>
                     </form>
@@ -31,8 +33,10 @@
                     <p role="alert" class="mt-2 font-semibold">{{ $message }}</p>
                 @enderror
             @else
-                <p class="font-semibold">{{ data_get($mailCopy, 'no_recipient_title') }}</p>
-                <p class="mt-1">{{ data_get($mailCopy, 'no_recipient_body') }}</p>
+                <div class="min-w-0">
+                    <p class="font-semibold">{{ data_get($mailCopy, 'no_recipient_title') }}</p>
+                    <p class="mt-1">{{ data_get($mailCopy, 'no_recipient_body') }}</p>
+                </div>
             @endif
         </div>
     @endif
@@ -49,14 +53,24 @@
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div class="min-w-0">
                 <h2 class="font-display text-xl font-bold text-[var(--sf-ink)]">Data akun</h2>
-                <p class="mt-2 text-sm leading-6 text-[var(--sf-muted)]">Password dan data rahasia disembunyikan. Pilih Tampilkan untuk melihat atau Salin untuk menyalin nilai lengkap.</p>
-                <noscript><p class="mt-2 text-sm text-[var(--sf-ink)]">Buka tiap data dengan Tampilkan / Sembunyikan, lalu pilih teks untuk menyalinnya. Aktifkan JavaScript untuk menggunakan tombol Salin.</p></noscript>
+                <p class="mt-1 text-sm leading-6 text-[var(--sf-muted)]">Kredensial disembunyikan. Pilih Lihat kredensial akun, lalu konfirmasi saat Anda siap membukanya di perangkat pribadi.</p>
             </div>
-            <div class="shrink-0" data-copy-group>
+        </div>
+        <dialog class="credential-confirm-dialog" data-credential-confirm aria-labelledby="credential-confirm-title" aria-describedby="credential-confirm-description">
+            <h3 id="credential-confirm-title" class="font-display text-xl font-bold">Lihat kredensial akun?</h3>
+            <p id="credential-confirm-description" class="mt-3 text-sm leading-6 text-[var(--sf-muted)]">Email dan data akses akun akan ditampilkan di halaman ini. Pastikan tidak ada orang lain yang dapat melihat layar Anda.</p>
+            <form method="dialog" class="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button type="submit" value="cancel" class="credential-action" autofocus>Batal</button>
+                <button type="submit" value="reveal" class="credential-action credential-confirm-primary">Ya, tampilkan kredensial</button>
+            </form>
+        </dialog>
+        <details class="mt-4" data-credential-disclosure>
+            <summary class="credential-action credential-reveal-primary cursor-pointer" data-credential-disclosure-toggle>Lihat kredensial akun</summary>
+            <noscript><p class="mt-3 text-sm leading-6 text-[var(--sf-ink)]">Dengan membuka bagian ini, Anda mengonfirmasi ingin melihat kredensial akun. Buka tiap data rahasia dengan Tampilkan / Sembunyikan, lalu pilih teks untuk menyalinnya.</p></noscript>
+            <div class="mt-3" data-copy-group>
                 <button type="button" class="credential-action w-full sm:w-auto" data-credential-copy="{{ base64_encode((string) $accountCopyText) }}" data-copy-success="Semua data akun tersalin." hidden>Salin semua data</button>
                 <p class="mt-1 min-h-5 text-xs text-[var(--sf-ink)]" aria-live="polite" data-copy-status></p>
             </div>
-        </div>
         <div class="mt-4 space-y-5">
             @foreach ($accountGroups as $group)
                 @php($groupIndex = $loop->index)
@@ -82,6 +96,7 @@
             @endforeach
         </div>
         <p class="mt-4 border-t border-[var(--sf-border)] pt-4 text-sm leading-6 text-[var(--sf-ink)]">Simpan data ini di password manager pribadi. Jangan kirim Recovery Key, password, MFA Secret, atau kode MFA ke support.</p>
+        </details>
     @elseif ($accountGroups !== [])
         <h2 class="font-display text-xl font-bold text-[var(--sf-ink)]">Data akun siap dibuka</h2>
         <p class="mt-2 text-sm leading-6 text-[var(--sf-muted)]">Buka kembali menggunakan nomor invoice dan Recovery Key yang Anda simpan saat checkout.</p>
@@ -114,11 +129,11 @@
     @endif
 
     @if ($isPaid && ! auth('customer')->check())
-        <div class="mt-4 border-t border-[var(--sf-border)] pt-4 text-sm leading-6 text-[var(--sf-muted)]">
+        <div class="invoice-save-account text-sm leading-6 text-[var(--sf-muted)]">
             <p>Opsional: simpan pesanan ke akun. Akses dengan invoice dan Recovery Key tetap tersedia.</p>
-            <a href="{{ route('customer.account') }}" class="credential-action mt-2">Simpan pesanan ke akun</a>
+            <a href="{{ route('customer.account') }}" class="credential-action">Simpan pesanan ke akun</a>
         </div>
-    @elseif ($isPaid && ! request()->routeIs('customer.orders.show'))
+    @elseif ($isPaid && ! request()->routeIs('customer.orders.show') && (string) auth('customer')->id() !== (string) $order->customer_id)
         <a href="{{ route('customer.claim.create') }}" class="credential-action mt-4">Simpan pesanan ke akun</a>
     @endif
 </x-storefront.panel>

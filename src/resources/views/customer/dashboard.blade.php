@@ -2,9 +2,10 @@
 
 @section('account-title', 'Akun saya')
 @section('account-description', 'Pesanan, saldo, dan pengaturan akun Lhie Store Anda.')
+@section('account-body-class', 'customer-overview')
 
 @section('account-content')
-    <section class="account-panel account-action-group" aria-labelledby="account-shopping-title">
+    <section class="account-panel account-action-group account-shopping-group" aria-labelledby="account-shopping-title">
         <h2 id="account-shopping-title">Belanja</h2>
         <div class="account-shopping-actions">
             <a class="account-shopping-action" href="{{ route('customer.orders.index') }}">
@@ -25,14 +26,14 @@
         </div>
     </section>
 
-    <section class="account-panel account-action-group" aria-labelledby="account-settings-title">
+    <section class="account-panel account-action-group account-settings-group" aria-labelledby="account-settings-title">
         <h2 id="account-settings-title">Akun</h2>
         <div class="account-action-list">
             <a class="account-action" href="{{ route('customer.security') }}">
                 @include('customer.partials.account-icon', ['icon' => 'security'])
                 <span><strong>Keamanan akun</strong><small>Password dan metode masuk</small></span>
             </a>
-            <a class="account-action" href="{{ route('customer.balance.show') }}">
+            <a class="account-action account-money-action" href="{{ route('customer.balance.show') }}">
                 @include('customer.partials.account-icon', ['icon' => 'balance'])
                 <span><strong>Saldo saya</strong><small>Saldo IDR, USDT, dan aktivitasnya</small></span>
             </a>
@@ -43,7 +44,7 @@
         </div>
     </section>
 
-    <section class="account-panel account-action-group" aria-labelledby="account-help-title">
+    <section class="account-panel account-action-group account-support-group" aria-labelledby="account-help-title">
         <h2 id="account-help-title">Bantuan</h2>
         <div class="account-action-list">
             <a class="account-action" href="{{ route('storefront.guides.index') }}">

@@ -250,6 +250,7 @@ UI requirements:
 - password visibility toggle is progressive enhancement, not required for submission;
 - loading, success, expired-token, invalid-code, rate-limited, unavailable-provider, and generic-error states are explicit;
 - keyboard focus and mobile layout remain usable;
+- generated Telegram confirmation controls use a full-width blue primary check button and a distinct bordered Store Bot link, stacked with a clear gap and 12px corners; both keep at least 44px tap targets and visible keyboard focus. Checking disables the action, announces loading, and preserves pending/error guidance without changing the browser-bound status/consume flow;
 - no field reveals account existence;
 - WhatsApp copy states that it is optional support contact, not a login method;
 - OAuth buttons are rendered only when configured;

@@ -1,20 +1,23 @@
 @php($profile = $accountSummary['profile'])
-<section class="account-profile account-panel" aria-labelledby="account-profile-name">
-    <div class="account-identity">
-        <div class="account-avatar" aria-hidden="true">{{ $profile['initial'] }}</div>
-        <div class="account-identity-copy">
-            <h2 id="account-profile-name">{{ $profile['name'] }}</h2>
-            @if($profile['telegramUsername'])
-                <p class="account-username">{{ '@'.ltrim($profile['telegramUsername'], '@') }}</p>
-            @endif
-            @if($profile['email'])
-                <p class="account-email">{{ $profile['email'] }}</p>
-            @endif
+<div class="account-profile" aria-label="Profil dan saldo">
+    <section class="account-profile-identity account-panel" aria-labelledby="account-profile-name">
+        <div class="account-identity">
+            <div class="account-avatar" aria-hidden="true">{{ $profile['initial'] }}</div>
+            <div class="account-identity-copy">
+                <h2 id="account-profile-name">{{ $profile['name'] }}</h2>
+                @if($profile['telegramUsername'])
+                    <p class="account-username">{{ '@'.ltrim($profile['telegramUsername'], '@') }}</p>
+                @endif
+                @if($profile['email'])
+                    <p class="account-email">{{ $profile['email'] }}</p>
+                @endif
+            </div>
         </div>
-    </div>
-    @if($profile['joinedAt'])
-        <p class="account-joined">Bergabung {{ $profile['joinedAt'] }}</p>
-    @endif
+        @if($profile['joinedAt'])
+            <p class="account-joined">Bergabung {{ $profile['joinedAt'] }}</p>
+        @endif
+    </section>
+    <section class="account-profile-money account-panel" aria-label="Saldo akun">
     <div class="account-profile-balances">
         <div>
             <span>Saldo IDR</span>
@@ -37,9 +40,10 @@
         </div>
     </div>
     <a class="account-text-link" href="{{ route('customer.balance.show') }}">Lihat aktivitas saldo</a>
-    <div class="account-order-summary">
+    </section>
+    <section class="account-order-summary account-panel" aria-labelledby="account-order-summary-title">
         <div class="account-summary-heading">
-            <h3>Pesanan Anda</h3>
+            <h3 id="account-order-summary-title">Pesanan Anda</h3>
             <strong>{{ $accountSummary['orderCounts']['all'] }}</strong>
         </div>
         <dl>
@@ -49,5 +53,5 @@
             <div><dt>Batal / kedaluwarsa</dt><dd>{{ $accountSummary['orderCounts']['issue'] }}</dd></div>
         </dl>
         <p class="account-note">Menunggu mencakup draft dan pesanan yang belum dibayar.</p>
-    </div>
-</section>
+    </section>
+</div>

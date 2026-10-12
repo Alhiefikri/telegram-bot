@@ -87,19 +87,24 @@
             status.textContent = 'Buka Store Bot dan konfirmasi di chat pribadi dalam lima menit, lalu periksa konfirmasi di browser ini. Identitas yang sudah dimiliki akun lain tidak dapat dipindahkan.';
             const link = document.createElement('a');
             link.href = result.deep_link;
-            link.className = 'auth-link';
+            link.className = 'auth-secondary';
             link.textContent = 'Buka Store Bot';
             link.target = '_blank';
             link.rel = 'noopener noreferrer';
             const check = document.createElement('button');
             check.type = 'button';
-            check.className = 'auth-link';
+            check.className = 'auth-submit';
             check.textContent = 'Periksa konfirmasi Telegram';
-            status.append(document.createElement('br'), link, document.createElement('br'), check);
+            const actions = document.createElement('div');
+            actions.className = 'auth-telegram-actions';
+            actions.append(link, check);
             const feedback = document.createElement('p');
-            status.append(feedback);
+            feedback.className = 'auth-telegram-feedback';
+            status.append(actions, feedback);
             check.addEventListener('click', async () => {
                 check.disabled = true;
+                check.setAttribute('aria-busy', 'true');
+                check.textContent = 'Memeriksa konfirmasi...';
                 feedback.textContent = 'Memeriksa konfirmasi...';
                 try {
                     const proof = await call(telegramForm.dataset.statusUrl, 'GET');
@@ -118,6 +123,9 @@
                 } catch {
                     feedback.textContent = 'Telegram sementara tidak tersedia. Coba lagi atau gunakan email.';
                     check.disabled = false;
+                } finally {
+                    check.removeAttribute('aria-busy');
+                    check.textContent = 'Periksa konfirmasi Telegram';
                 }
             });
         } catch {

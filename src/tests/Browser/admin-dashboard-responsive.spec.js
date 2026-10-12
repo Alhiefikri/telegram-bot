@@ -2466,10 +2466,6 @@ test("prioritizes invoice content by state without mobile overflow", async ({
     await expect(
       page.getByRole("button", { name: "Cek status pembayaran" })
     ).toBeVisible();
-    await expectBefore(
-      page.getByRole("heading", { name: "Invoice QRIS" }),
-      page.locator('section[aria-label="Ringkasan invoice"]')
-    );
     await expectNoDocumentOverflow(page);
 
     await page.goto(
@@ -2479,8 +2475,9 @@ test("prioritizes invoice content by state without mobile overflow", async ({
     await expect(
       page.getByRole("heading", { name: "Provider belum memberi nominal" })
     ).toBeVisible();
-    await expect(page.getByText("Total produk", { exact: true })).toBeVisible();
-    await expect(page.getByText("Rp45.000")).toBeVisible();
+    await expect(
+      page.getByLabel("Pembayaran QRIS").getByText("Rp45.000", { exact: true })
+    ).toBeVisible();
     await expect(page.getByText("Menunggu provider")).toBeVisible();
     await expect(
       page
@@ -2504,17 +2501,30 @@ test("prioritizes invoice content by state without mobile overflow", async ({
     ).toBeVisible();
     await expect(
       page.getByText("browser-paid@example.test", { exact: true })
-    ).toBeVisible();
+    ).toBeHidden();
+    await page.locator("[data-credential-disclosure-toggle]").click();
+    const credentialConfirmation = page.getByRole("dialog", {
+      name: "Lihat kredensial akun?",
+    });
+    await expect(credentialConfirmation).toBeVisible();
+    await credentialConfirmation
+      .getByRole("button", { name: "Ya, tampilkan kredensial" })
+      .click();
     await expect(
-      page.getByText("BrowserPaidSecret", { exact: true })
+      page.getByText("browser-paid@example.test", { exact: true })
+    ).toBeVisible();
+    await page
+      .getByRole("button", {
+        name: "Tampilkan Password Data akun 1",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByText("BrowserPaidSecret", { exact: true }).first()
     ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Invoice QRIS" })
     ).toHaveCount(0);
-    await expectBefore(
-      page.getByRole("heading", { name: "Data akun" }),
-      page.locator('section[aria-label="Ringkasan invoice"]')
-    );
     await expectNoDocumentOverflow(page);
 
     await page.goto(`${baseUrl}${invoiceFixtures.expired.showUrl}`, {

@@ -549,6 +549,40 @@ test("paid invoice credentials require access and reveal only on explicit reques
   await page.getByLabel("Nomor invoice").fill(invoice.invoice);
   await page.getByLabel("Recovery key", { exact: true }).fill(invoice.key);
   await page.getByRole("button", { name: "Buka data pesanan" }).click();
+  const disclosure = page.locator("[data-credential-disclosure-toggle]");
+  await expect(page.locator("[data-credential-secret]").first()).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Salin akun", exact: true }).first()
+  ).toBeHidden();
+  const confirmation = page.getByRole("dialog", {
+    name: "Lihat kredensial akun?",
+  });
+  const confirm = confirmation.getByRole("button", {
+    name: "Ya, tampilkan kredensial",
+  });
+  const cancel = confirmation.getByRole("button", {
+    name: "Batal",
+    exact: true,
+  });
+  await disclosure.click();
+  await expect(confirmation).toBeVisible();
+  await expect(cancel).toBeFocused();
+  await expect(page.locator("[data-credential-secret]").first()).toBeHidden();
+  await cancel.click();
+  await expect(confirmation).toBeHidden();
+  await expect(disclosure).toBeFocused();
+  await expect(page.locator("[data-credential-secret]").first()).toBeHidden();
+  await disclosure.press("Enter");
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toBeHidden();
+  await expect(page.locator("[data-credential-secret]").first()).toBeHidden();
+  await disclosure.press("Enter");
+  await page.keyboard.press("Tab");
+  await expect(confirm).toBeFocused();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(cancel).toBeFocused();
+  await confirm.click();
   await expect(page.locator("[data-credential-secret]").first()).toBeVisible();
   const field = page
     .locator("[data-credential-secret]")
@@ -583,6 +617,9 @@ test("paid invoice credentials require access and reveal only on explicit reques
   );
   await expect(value).toBeHidden();
   expect(await value.textContent()).toBe("");
+  await expect(page.locator("[data-credential-secret]").first()).toBeHidden();
+  await disclosure.click();
+  await confirm.click();
   await toggle.click();
   await page.evaluate(() =>
     window.dispatchEvent(
@@ -591,5 +628,12 @@ test("paid invoice credentials require access and reveal only on explicit reques
   );
   await expect(value).toBeHidden();
   expect(await value.textContent()).toBe("");
+  await expect(page.locator("[data-credential-secret]").first()).toBeHidden();
+  await disclosure.click();
+  await confirm.click();
+  await disclosure.click();
+  await expect(page.locator("[data-credential-secret]").first()).toBeHidden();
+  await page.reload();
+  await expect(page.locator("[data-credential-secret]").first()).toBeHidden();
   await noOverflow(page);
 });

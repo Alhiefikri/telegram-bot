@@ -15,13 +15,19 @@
                 <p class="auth-help mt-3">Tambahkan password pertama dalam lima menit setelah masuk melalui link email. Pendaftaran ulang tidak dapat mengubah akun Anda.</p>
                 <form method="POST" action="{{ route('customer.password.enroll') }}" class="account-form" data-auth-form>
                     @csrf
-                    <label class="auth-label">Password baru
-                        <input name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password" aria-describedby="enroll-password-help" class="auth-input">
-                    </label>
-                    <p id="enroll-password-help" class="auth-help">12–128 karakter. Spasi dan pengelola password dapat digunakan.</p>
-                    <label class="auth-label">Ulangi password baru
-                        <input name="password_confirmation" type="password" required minlength="12" maxlength="128" autocomplete="new-password" class="auth-input">
-                    </label>
+                    <div class="account-password-fields">
+                        <div>
+                            <label class="auth-label">Password baru
+                                <input name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password" aria-describedby="enroll-password-help" class="auth-input">
+                            </label>
+                            <p id="enroll-password-help" class="auth-help">12–128 karakter. Spasi dan pengelola password dapat digunakan.</p>
+                        </div>
+                        <div>
+                            <label class="auth-label">Ulangi password baru
+                                <input name="password_confirmation" type="password" required minlength="12" maxlength="128" autocomplete="new-password" class="auth-input">
+                            </label>
+                        </div>
+                    </div>
                     <button type="submit" class="account-button">Simpan password pertama</button>
                     <p data-auth-progress role="status" class="auth-help" hidden>Mengirim permintaan...</p>
                 </form>

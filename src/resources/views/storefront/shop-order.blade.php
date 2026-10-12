@@ -7,7 +7,7 @@
     <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-clip">
         @include('storefront.partials.header')
 
-        <main class="flex-grow pb-20 pt-8 sm:pt-12">
+        <main class="invoice-main flex-grow">
             <section class="mx-auto min-w-0 max-w-6xl px-4 pb-2 sm:px-6">
                 @php
                     $orderBackUrl = $storefront->catalogUrl();
@@ -47,15 +47,15 @@
                     }
                 @endphp
 
-                <div class="invoice-order-hero mx-auto mt-5 flex min-w-0 max-w-6xl flex-col gap-3 border-b-[3px] border-dashed border-[var(--sf-border)] pb-4 sm:flex-row sm:items-end sm:justify-between">
+                <div class="invoice-order-hero mx-auto flex min-w-0 max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-invoice-state="{{ $isPaid ? 'paid' : ($isPendingPayment ? 'pending' : 'terminal') }}">
                     <div class="min-w-0">
-                        <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Order website</p>
+                        <p class="invoice-order-label text-sm font-semibold">Order website</p>
                         <h1 class="mt-1 text-balance font-display text-2xl font-black leading-tight text-[var(--sf-ink)] sm:text-3xl">{{ $headline }}</h1>
                         <p class="mt-1 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
                             Invoice <span class="break-all font-mono font-bold text-[var(--sf-ink)]">{{ $order->invoice_number }}</span> {{ $summary }}
                         </p>
                     </div>
-                    <span class="inline-flex w-fit shrink-0 rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-accent-soft)] px-3 py-1 text-xs font-black uppercase tracking-[0.14em] text-[var(--sf-ink)]">
+                    <span class="invoice-status inline-flex w-fit shrink-0 items-center rounded-lg px-3 py-2 text-sm font-bold">
                         {{ $isPaid ? 'Terverifikasi' : ($isPendingPayment ? 'Menunggu bayar' : 'Status akhir') }}
                     </span>
                 </div>
@@ -89,7 +89,7 @@
                             @if ($canCancel && $isPendingPayment)
                                 <form method="POST" action="{{ $cancelUrl }}" class="rounded-lg border-2 border-[var(--sf-border)] bg-white p-3" onsubmit="return confirm(@js(__('storefront.invoice.qris.cancel.confirm', [], $storefrontLocale)));">
                                     @csrf
-                                    <button type="submit" class="inline-flex min-h-10 items-center justify-center rounded-lg border-2 border-[var(--sf-border)] bg-[#ffd9df] px-4 py-2 text-sm font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.qris.cancel.button', [], $storefrontLocale) }}</button>
+                                    <button type="submit" class="inline-flex min-h-11 items-center justify-center rounded-lg border-2 border-[var(--sf-border)] bg-[#ffd9df] px-4 py-2 text-sm font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.qris.cancel.button', [], $storefrontLocale) }}</button>
                                 </form>
                             @endif
                             @if ($accessKey)
@@ -104,24 +104,30 @@
                         </div>
                     </details>
                 @elseif ($isPaid)
-                    @include('storefront.partials.shop.order-summary')
-                    @include('storefront.partials.shop.account-delivery')
-                    @if($warrantyUrl ?? null)
-                        <section class="invoice-warranty-section mt-4 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface)] p-3">
-                            <a class="inline-flex min-h-11 items-center font-bold text-[var(--sf-accent)] underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]" href="{{ $warrantyUrl }}">{{ __('order.warranty.title', [], $storefrontLocale) }}</a>
-                            <p class="mt-1 text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ __('order.warranty.support', [], $storefrontLocale) }}</p>
-                        </section>
-                    @endif
-                    @include('storefront.partials.support-chooser', [
-                        'supportContext' => $supportContext,
-                        'supportId' => 'invoice-support',
-                        'supportClass' => 'mt-4',
-                    ])
-                    @if ($accessKey)
-                        <div class="invoice-recovery-section">
-                            @include('storefront.partials.shop.recovery-key')
+                    <div class="invoice-paid-workspace">
+                        <div class="invoice-paid-primary">
+                            @include('storefront.partials.shop.account-delivery')
+                            @include('storefront.partials.support-chooser', [
+                                'supportContext' => $supportContext,
+                                'supportId' => 'invoice-support',
+                                'supportClass' => 'mt-0',
+                            ])
                         </div>
-                    @endif
+                        <div class="invoice-paid-sidebar">
+                            @include('storefront.partials.shop.order-summary')
+                            @if($warrantyUrl ?? null)
+                                <section class="invoice-warranty-section rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] p-3">
+                                    <a class="inline-flex min-h-11 items-center font-bold text-[var(--sf-accent)] underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]" href="{{ $warrantyUrl }}">{{ __('order.warranty.title', [], $storefrontLocale) }}</a>
+                                    <p class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ __('order.warranty.support', [], $storefrontLocale) }}</p>
+                                </section>
+                            @endif
+                            @if ($accessKey)
+                                <div class="invoice-recovery-section">
+                                    @include('storefront.partials.shop.recovery-key')
+                                </div>
+                            @endif
+                        </div>
+                    </div>
                 @else
                     <x-storefront.panel as="section" class="mt-6" aria-label="Status akhir invoice" role="status" aria-live="polite">
                         <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-muted)]">Status akhir</p>
@@ -145,7 +151,18 @@
             </section>
         </main>
 
-        @include('storefront.partials.footer')
+        <footer class="invoice-footer">
+            <div class="mx-auto flex max-w-6xl flex-col gap-2 px-4 sm:px-6 md:flex-row md:items-center md:justify-between">
+                <p class="text-xs font-semibold text-[var(--sf-muted)]">&copy; {{ now()->year }} {{ $copy['footer']['copyright_suffix'] }}</p>
+                <nav class="flex flex-wrap gap-x-4" aria-label="Tautan invoice">
+                    <a href="{{ route('storefront.order-access.create') }}">Akses pesanan</a>
+                    <a href="{{ route('storefront.guides.index') }}">Panduan</a>
+                    <a href="{{ route('storefront.policies.privacy') }}">Privasi</a>
+                    <a href="{{ route('storefront.policies.terms') }}">Ketentuan</a>
+                    <a href="{{ route('storefront.policies.refund') }}">Refund</a>
+                </nav>
+            </div>
+        </footer>
     </div>
 </body>
 </html>

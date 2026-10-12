@@ -39,8 +39,16 @@
                         @endif
                     </div>
                     <div class="account-order-statuses">
-                        <p><span>Pesanan</span><strong>{{ $orderStatusLabel }}</strong></p>
-                        <p><span>Pembayaran</span><strong>{{ $paymentStatusLabel }}</strong></p>
+                        <p><span>Pesanan</span><strong @class([
+                            'account-status-success' => $order->order_status?->value === 'completed',
+                            'account-status-waiting' => in_array($order->order_status?->value, ['draft', 'pending_payment', 'processing'], true),
+                            'account-status-issue' => in_array($order->order_status?->value, ['cancelled', 'expired'], true),
+                        ])>{{ $orderStatusLabel }}</strong></p>
+                        <p><span>Pembayaran</span><strong @class([
+                            'account-status-success' => $order->payment_status?->value === 'paid',
+                            'account-status-waiting' => $order->payment_status?->value === 'pending',
+                            'account-status-issue' => in_array($order->payment_status?->value, ['failed', 'expired', 'refunded'], true),
+                        ])>{{ $paymentStatusLabel }}</strong></p>
                     </div>
                     <div class="account-order-total">
                         <strong>{{ number_format($order->total_amount, 0, ',', '.') }} {{ $order->currency }}</strong>

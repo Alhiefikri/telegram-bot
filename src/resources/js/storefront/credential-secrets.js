@@ -11,6 +11,9 @@ function decodeCredential(button) {
 export default function initCredentialSecrets(root = document) {
   const secrets = root.querySelectorAll("[data-credential-secret]");
   const copyButtons = root.querySelectorAll("[data-credential-copy]");
+  const disclosures = root.querySelectorAll("[data-credential-disclosure]");
+  const confirmation = root.querySelector("[data-credential-confirm]");
+  let pendingDisclosure = null;
 
   if (!secrets.length && !copyButtons.length) {
     return;
@@ -30,6 +33,64 @@ export default function initCredentialSecrets(root = document) {
     );
   };
   const maskAll = () => secrets.forEach(mask);
+
+  const closeDisclosures = () => {
+    pendingDisclosure = null;
+    if (confirmation?.open) confirmation.close("cancel");
+    disclosures.forEach((disclosure) => {
+      disclosure.open = false;
+      disclosure.querySelector(
+        "[data-credential-disclosure-toggle]"
+      ).textContent = "Lihat kredensial akun";
+      disclosure.querySelectorAll("[data-copy-status]").forEach((status) => {
+        status.textContent = "";
+      });
+    });
+    maskAll();
+  };
+  confirmation?.addEventListener("close", () => {
+    const disclosure = pendingDisclosure;
+    pendingDisclosure = null;
+    if (
+      confirmation.returnValue !== "reveal" ||
+      !disclosure ||
+      document.hidden
+    ) {
+      return;
+    }
+    disclosure.open = true;
+    disclosure.querySelector(
+      "[data-credential-disclosure-toggle]"
+    ).textContent = "Sembunyikan kredensial akun";
+  });
+  confirmation?.addEventListener("click", (event) => {
+    if (event.target !== confirmation) return;
+    const bounds = confirmation.getBoundingClientRect();
+    if (
+      event.clientX < bounds.left ||
+      event.clientX > bounds.right ||
+      event.clientY < bounds.top ||
+      event.clientY > bounds.bottom
+    ) {
+      confirmation.close("cancel");
+    }
+  });
+  disclosures.forEach((disclosure) => {
+    const toggle = disclosure.querySelector(
+      "[data-credential-disclosure-toggle]"
+    );
+    toggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (disclosure.open) {
+        closeDisclosures();
+        return;
+      }
+      if (!confirmation) return;
+      pendingDisclosure = disclosure;
+      confirmation.returnValue = "cancel";
+      confirmation.showModal();
+    });
+  });
 
   secrets.forEach((secret) => {
     const toggle = secret.querySelector("[data-secret-toggle]");
@@ -90,8 +151,11 @@ export default function initCredentialSecrets(root = document) {
   });
 
   window.addEventListener("blur", maskAll);
-  window.addEventListener("pagehide", maskAll);
-  window.addEventListener("pageshow", maskAll);
-  document.addEventListener("visibilitychange", maskAll);
-  document.addEventListener("freeze", maskAll);
+  window.addEventListener("pagehide", closeDisclosures);
+  window.addEventListener("pageshow", closeDisclosures);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) closeDisclosures();
+    else maskAll();
+  });
+  document.addEventListener("freeze", closeDisclosures);
 }

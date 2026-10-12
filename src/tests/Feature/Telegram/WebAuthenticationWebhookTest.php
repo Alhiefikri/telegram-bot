@@ -57,9 +57,14 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         $this->assertNull(TelegramUpdate::firstOrFail()->customer_id);
         Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) $request['text'], 'browser Anda sendiri')
-            && str_contains((string) $request['text'], 'Jika bukan Anda'));
+            && str_contains((string) $request['text'], 'Jika bukan Anda')
+            && $request['reply_markup']['inline_keyboard'][0][0]['style'] === 'primary');
 
         $this->postTelegramWebhook($this->callbackUpdate(61002, 'confirm-link', $confirmation, ['is_bot' => false]))->assertOk();
+        Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '12345'
+            && $request['text'] === 'Telegram dikonfirmasi. Kembali ke situs toko di browser yang memulai permintaan, lalu klik "Periksa konfirmasi Telegram" untuk menyelesaikannya.'
+            && ! isset($request['reply_markup']));
 
         $this->assertSame('confirmed', $this->authentication()->status($browser));
         $this->assertNull($customer->fresh()->telegram_id);
@@ -115,6 +120,7 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         $this->assertSame(1, Customer::count());
         $this->assertSame('12345', DB::table('customer_telegram_auth_claims')->value('actor_id'));
         $this->assertFalse($this->authentication()->consume($browser));
+        Http::assertNotSent(fn (ClientRequest $request): bool => str_contains((string) $request['text'], 'Telegram dikonfirmasi'));
 
         $this->postTelegramWebhook($this->callbackUpdate(61009, 'right-confirm', $confirmation, ['is_bot' => false]))->assertOk();
         $this->assertSame('confirmed', $this->authentication()->status($browser));
@@ -164,6 +170,7 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         }
 
         Http::assertSentCount(1);
+        Http::assertNotSent(fn (ClientRequest $request): bool => str_contains((string) $request['text'], 'Telegram dikonfirmasi'));
         $this->assertSame('pending', $this->authentication()->status($browser));
         $this->assertFalse($this->authentication()->consume($browser));
         $this->assertSame(1, Customer::count());
@@ -182,13 +189,41 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         $callback = $this->callbackUpdate(61023, 'first-confirm', $confirmation, ['is_bot' => false]);
         $this->postTelegramWebhook($callback)->assertOk();
         $this->postTelegramWebhook($callback)->assertOk();
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
         $this->assertFalse($this->authentication()->confirm($confirmation, '12345', '12345', 'private'));
         $this->assertTrue($this->authentication()->consume($browser));
         $this->assertFalse($this->authentication()->consume($browser));
         $this->postTelegramWebhook($this->callbackUpdate(61024, 'replayed-confirm', $confirmation, ['is_bot' => false]))->assertOk();
+        Http::assertSentCount(4);
+        $this->assertCount(1, Http::recorded(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'Telegram dikonfirmasi')));
+        Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && $request['callback_query_id'] === 'replayed-confirm'
+            && $request['text'] === 'Permintaan akun web tidak dapat digunakan. Mulai lagi dari situs toko.');
         $this->assertSame(1, DB::table('customer_identities')->where('provider', 'telegram')->count());
         $this->assertSame(1, Customer::count());
+    }
+
+    public function test_unknown_and_expired_confirmation_claims_never_send_success_feedback(): void
+    {
+        [$browser, $payload] = $this->start($this->emailCustomer());
+        $this->postTelegramWebhook($this->messageUpdate(61035, '/start '.$payload, ['is_bot' => false]))->assertOk();
+        $confirmation = $this->confirmation();
+
+        $this->postTelegramWebhook($this->callbackUpdate(61036, 'unknown-confirm', 'wa_confirm:'.str_repeat('A', 43), ['is_bot' => false]))->assertOk();
+        $this->assertSame('pending', $this->authentication()->status($browser));
+        $this->travel(5)->minutes();
+        $this->postTelegramWebhook($this->callbackUpdate(61037, 'expired-confirm', $confirmation, ['is_bot' => false]))->assertOk();
+
+        $this->assertSame('expired', $this->authentication()->status($browser));
+        $this->assertFalse($this->authentication()->consume($browser));
+        $this->assertNull(DB::table('customer_telegram_auth_claims')->value('confirmed_at'));
+        Http::assertNotSent(fn (ClientRequest $request): bool => str_contains((string) $request['text'], 'Telegram dikonfirmasi'));
+        foreach (['unknown-confirm', 'expired-confirm'] as $callbackId) {
+            Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+                && $request['callback_query_id'] === $callbackId
+                && $request['text'] === 'Permintaan akun web tidak dapat digunakan. Mulai lagi dari situs toko.');
+        }
     }
 
     public function test_wrong_webhook_secret_cannot_prepare_or_persist_a_proof(): void
@@ -248,10 +283,39 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
 
         $this->assertSame('confirmed', $this->authentication()->status($browser));
         $this->assertTrue($this->authentication()->consume($browser));
+        Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '12345'
+            && str_contains((string) $request['text'], 'Periksa konfirmasi Telegram'));
         Log::shouldHaveReceived('warning')->with('telegram.answer_callback_query_failed', \Mockery::on(
             fn (array $context): bool => ! str_contains(json_encode($context, JSON_THROW_ON_ERROR), $confirmation)
                 && str_contains($context['description'], '[redacted-secret]'),
         ))->once();
+        $this->assertEncryptedUpdates($payload, $confirmation);
+    }
+
+    public function test_persistent_confirmation_feedback_failure_is_secret_safe_without_reversing_proof(): void
+    {
+        [$browser, $payload] = $this->start($this->emailCustomer());
+        $this->postTelegramWebhook($this->messageUpdate(61038, '/start '.$payload, ['is_bot' => false]))->assertOk();
+        $confirmation = $this->confirmation();
+        Bus::fake();
+        $this->botUnavailable = true;
+        $this->providerEcho = $confirmation;
+        $this->postTelegramWebhook($this->callbackUpdate(61039, 'feedback-outage-confirm', $confirmation, ['is_bot' => false]))->assertOk();
+        $update = TelegramUpdate::where('update_id', 61039)->firstOrFail();
+
+        try {
+            app(TelegramUpdateProcessor::class)->process($update);
+            $this->fail('Persistent feedback delivery failure must remain retryable.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Telegram web authentication response is unavailable.', $exception->getMessage());
+            $this->assertNull($exception->getPrevious());
+        }
+
+        $this->assertSame('confirmed', $this->authentication()->status($browser));
+        $this->assertTrue($this->authentication()->consume($browser));
+        $this->assertNull($update->fresh()->processed_at);
+        $this->assertNotNull($update->fresh()->next_retry_at);
         $this->assertEncryptedUpdates($payload, $confirmation);
     }
 
@@ -270,6 +334,9 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         $this->assertTrue($this->authentication()->consume($browser));
         Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
             && is_string($request['text']) && $request['text'] !== '');
+        Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '12345'
+            && str_contains((string) $request['text'], 'Periksa konfirmasi Telegram'));
         $this->assertEncryptedUpdates($payload, $confirmation);
     }
 
@@ -281,6 +348,7 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         $this->assertSame(0, Customer::count());
         $this->assertSame(0, DB::table('customer_telegram_auth_claims')->count());
         $this->assertEncryptedUpdates('wa_short', 'wa_confirm:short');
+        Http::assertNotSent(fn (ClientRequest $request): bool => str_contains((string) $request['text'], 'Telegram dikonfirmasi'));
     }
 
     public function test_unrelated_start_keeps_normal_customer_resolution_and_bot_routing(): void
