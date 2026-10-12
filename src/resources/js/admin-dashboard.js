@@ -145,6 +145,8 @@ const editableStockItems = (items = []) =>
     .map((item, index) => ({
       ...item,
       editing: false,
+      copying: false,
+      copyMessage: "",
       displayIndex: index + 1,
       groupKey: stockGroupFor(item.status).key,
     }));
@@ -641,6 +643,74 @@ export default function adminDashboard(initialState = {}) {
           (item) => item.groupKey === group.key
         ),
       })).filter((group) => group.items.length > 0);
+    },
+
+    stockCredentialText(item) {
+      if (item.credential_format !== "structured_account") {
+        return item.secret ?? "";
+      }
+      const payload = item.credential_payload;
+      if (!payload) return "";
+      const lines = [
+        `Email: ${payload.email}`,
+        `Password: ${payload.password}`,
+      ];
+      if (payload.access_method === "otp_mail_link") {
+        lines.push(`OTP Mail Link: ${payload.access_value}`);
+      } else if (payload.access_method === "auth_token") {
+        lines.push(`Auth Token: ${payload.access_value}`);
+      }
+      if (payload.reader_mail_link) {
+        lines.push(`Reader Mail Link: ${payload.reader_mail_link}`);
+      }
+      if (payload.tutorial_override) {
+        lines.push(`Tutorial: ${payload.tutorial_override}`);
+      }
+      return lines.join("\n");
+    },
+
+    async copyStockCredential(item, article) {
+      const text = this.stockCredentialText(item);
+      if (!text || item.copying) return;
+      const requestId = this.manageStockRequestId;
+      item.copying = true;
+      item.copyMessage = "";
+      try {
+        if (!navigator.clipboard?.writeText) {
+          throw new Error("clipboard_unavailable");
+        }
+        await navigator.clipboard.writeText(text);
+        if (
+          this.manageStockModalOpen &&
+          requestId === this.manageStockRequestId
+        ) {
+          item.copyMessage = "Kredensial tersalin.";
+        }
+      } catch {
+        if (
+          !this.manageStockModalOpen ||
+          requestId !== this.manageStockRequestId ||
+          !article.isConnected
+        )
+          return;
+        const field =
+          article.querySelector("textarea.stock-credential") ??
+          article.querySelector(".stock-credential");
+        field.focus();
+        if (field instanceof HTMLTextAreaElement) {
+          field.select();
+        } else {
+          const range = document.createRange();
+          range.selectNodeContents(field);
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+        item.copyMessage =
+          "Salin otomatis tidak tersedia. Teks dipilih; salin lewat menu browser atau Ctrl+C / Cmd+C.";
+      } finally {
+        item.copying = false;
+      }
     },
 
     manageStockError(field) {

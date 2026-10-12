@@ -424,14 +424,17 @@
                                                             <span x-show="item.repair_needed" class="inline-flex items-center rounded-full border border-admin-line px-2 py-0.5 text-xs font-medium text-neo-warning-text">Perlu repair</span>
                                                         </div>
 
-                                                        <div x-show="item.credential_format !== 'structured_account'" class="mt-1.5 break-all font-mono text-xs leading-5 text-admin-ink" x-text="item.secret"></div>
-                                                        <div x-show="item.credential_format === 'structured_account' && item.credential_payload" class="mt-1.5 space-y-1 text-xs leading-5 text-admin-ink">
-                                                            <p><span class="text-admin-muted">Email:</span> <code class="break-all" x-text="item.credential_payload?.email"></code></p>
-                                                            <p><span class="text-admin-muted">Akses:</span> <span x-text="item.credential_payload?.access_method === 'otp_mail_link' ? `OTP Mail Link · ${item.access_domain || 'domain tidak tersedia'}` : (item.credential_payload?.access_method === 'auth_token' ? 'Auth Token' : 'Tidak ada')"></span></p>
-                                                        </div>
+                                                        <div x-show="item.credential_format !== 'structured_account'" tabindex="0" x-bind:aria-label="`Kredensial akun stok #${item.displayIndex}`" class="stock-credential mt-1.5 select-text break-all font-mono text-xs leading-5 text-admin-ink focus:ring-2 focus:ring-admin-focus" x-text="item.secret"></div>
+                                                        <template x-if="item.credential_format === 'structured_account' && item.credential_payload">
+                                                            <x-admin-dashboard.textarea readonly autocomplete="off" rows="5" x-bind:aria-label="`Kredensial akun stok #${item.displayIndex}`" class="stock-credential mt-1.5 select-text font-mono text-xs" x-bind:value="stockCredentialText(item)"></x-admin-dashboard.textarea>
+                                                        </template>
+                                                        <p x-show="item.copyMessage" x-text="item.copyMessage" role="status" aria-live="polite" class="mt-2 text-xs text-admin-ink"></p>
                                                         <p x-show="item.credential_format === 'structured_account' && !item.credential_payload" class="mt-1.5 text-xs font-medium text-neo-danger-text">Payload tidak dapat dibaca. Read-only.</p>
                                                     </div>
                                                     <div class="flex flex-row gap-1.5 sm:flex-col">
+                                                        <x-admin-dashboard.button type="button" variant="secondary" size="sm" x-show="stockCredentialText(item)" x-bind:disabled="item.copying" x-on:click="copyStockCredential(item, $el.closest('article'))">
+                                                            <span x-text="item.copying ? 'Menyalin…' : 'Salin kredensial'">Salin kredensial</span>
+                                                        </x-admin-dashboard.button>
                                                         <x-admin-dashboard.button type="button" variant="secondary" size="icon" aria-label="Ubah akun stok" x-bind:aria-expanded="item.editing" x-bind:disabled="manageStockDeleting" x-on:click="item.editing = ! item.editing" x-show="item.editable">✏️</x-admin-dashboard.button>
                                                         <form method="POST" x-bind:action="item.delete_url" x-show="item.editable" x-on:submit="if (manageStockDeleting || ! confirm('Hapus akun stok ini?')) $event.preventDefault()">
                                                             @csrf

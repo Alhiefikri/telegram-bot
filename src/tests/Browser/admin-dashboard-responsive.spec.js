@@ -75,6 +75,122 @@ test.afterAll(async () => {
   }
 });
 
+test("paid stock credentials can be copied and selected without becoming editable", async ({
+  page,
+  context,
+}) => {
+  runArtisan([
+    "tinker",
+    "--execute",
+    `
+    $item = \\App\\Models\\OrderItem::where('order_id', '${invoiceFixtures.paid.orderId}')->firstOrFail();
+    \\App\\Models\\ProductStockItem::create([
+      'product_id' => $item->product_id,
+      'order_item_id' => $item->id,
+      'credential_format' => 'structured_account',
+      'credential_payload' => [
+        'version' => 1, 'email' => 'copy-stock@example.test',
+        'password' => 'copy<password>', 'access_method' => 'auth_token',
+        'access_value' => 'copy-token', 'tutorial_override' => 'Open the app',
+      ],
+    ]);
+  `,
+  ]);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+  const card = await getAdminProductCard(page, "Browser Paid Invoice Product");
+  await card.getByRole("button", { name: "Kelola", exact: true }).click();
+  const modal = page.locator("#manage-stock-modal");
+  const copyButtons = modal.getByRole("button", {
+    name: "Salin kredensial",
+    exact: true,
+  });
+  await expect(copyButtons).toHaveCount(2);
+  await expect(copyButtons.first()).toBeEnabled();
+  await copyButtons.first().click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe("browser-paid@example.test|BrowserPaidSecret");
+  await expect(
+    modal.getByRole("button", { name: "Ubah akun stok" })
+  ).toBeHidden();
+  await expect(
+    modal.getByRole("button", { name: "Hapus akun stok" })
+  ).toBeHidden();
+  const field = modal.getByRole("textbox", { name: /Kredensial akun stok/ });
+  const expected =
+    "Email: copy-stock@example.test\nPassword: copy<password>\nAuth Token: copy-token\nTutorial: Open the app";
+  await expect(field).toHaveValue(expected);
+  await field.focus();
+  await page.keyboard.type("must-not-change");
+  await expect(field).toHaveValue(expected);
+  await copyButtons.last().focus();
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(expected);
+  await page.evaluate(() =>
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          throw new Error("denied");
+        },
+      },
+    })
+  );
+  await copyButtons.last().click();
+  await expect(field).toBeFocused();
+  expect(
+    await field.evaluate((e) =>
+      e.value.substring(e.selectionStart, e.selectionEnd)
+    )
+  ).toBe(expected);
+  await expect(modal.getByText(/Salin otomatis tidak tersedia/)).toBeVisible();
+  await copyButtons.first().click();
+  expect(await page.evaluate(() => window.getSelection().toString())).toBe(
+    "browser-paid@example.test|BrowserPaidSecret"
+  );
+  await expect(modal).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(modal).toBeHidden();
+  await card.getByRole("button", { name: "Kelola", exact: true }).click();
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.evaluate(() => {
+    window.stockCopyCalls = 0;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: () => {
+          window.stockCopyCalls++;
+          return new Promise((resolve, reject) => {
+            window.rejectStockCopy = reject;
+          });
+        },
+      },
+    });
+  });
+  await copyButtons.last().dblclick();
+  await expect(modal.getByRole("button", { name: "Menyalin…" })).toBeDisabled();
+  expect(await page.evaluate(() => window.stockCopyCalls)).toBe(1);
+  await page.keyboard.press("Escape");
+  await expect(modal).toBeHidden();
+  await card.getByRole("button", { name: "Kelola", exact: true }).click();
+  await expect(copyButtons.last()).toBeEnabled();
+  await page.evaluate(async () => {
+    window.rejectStockCopy(new Error("late clipboard rejection"));
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+  });
+  await expect(modal.getByText(/Salin otomatis tidak tersedia/)).toBeHidden();
+  expect(pageErrors).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(modal).toBeHidden();
+});
+
 test("storefront navigation: header remains reachable after scrolling", async ({
   page,
 }) => {
