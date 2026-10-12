@@ -1445,15 +1445,15 @@ class TelegramCatalogIntents
         if ($mode === 'catalog') {
             return [[
                 [
-                    'text' => $this->locale->translate($customer, 'catalog.family.filter'),
+                    ...$this->uiIcons->apply('message.search', $this->locale->translate($customer, 'catalog.family.filter')),
                     'callback_data' => 'catalog:categories',
                 ],
                 [
-                    'text' => $this->locale->translate($customer, 'catalog.family.refresh'),
+                    ...$this->uiIcons->apply('message.refresh', $this->locale->translate($customer, 'catalog.family.refresh')),
                     'callback_data' => 'catalog:refresh',
                 ],
                 [
-                    'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
+                    ...$this->uiIcons->apply('menu.back', $this->locale->translate($customer, 'catalog.family.back_menu')),
                     'callback_data' => 'family:back:menu',
                 ],
             ]];

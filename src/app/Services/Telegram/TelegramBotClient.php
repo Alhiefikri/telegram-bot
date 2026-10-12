@@ -441,6 +441,27 @@ class TelegramBotClient
         return $this->normalizeCustomEmojiText($payload);
     }
 
+    private function defaultInlineButtonStyles(array|string $replyMarkup): array|string
+    {
+        $markup = is_string($replyMarkup) ? json_decode($replyMarkup) : $replyMarkup;
+        $rows = is_array($markup) ? ($markup['inline_keyboard'] ?? null) : ($markup->inline_keyboard ?? null);
+        if (! is_array($rows)) {
+            return $replyMarkup;
+        }
+
+        foreach ($rows as $rowIndex => $row) {
+            foreach ($row as $buttonIndex => $button) {
+                if (is_array($markup)) {
+                    $markup['inline_keyboard'][$rowIndex][$buttonIndex]['style'] ??= 'primary';
+                } else {
+                    $markup->inline_keyboard[$rowIndex][$buttonIndex]->style ??= 'primary';
+                }
+            }
+        }
+
+        return is_string($replyMarkup) ? json_encode($markup, JSON_THROW_ON_ERROR) : $markup;
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
@@ -449,6 +470,7 @@ class TelegramBotClient
     {
         if (is_array($payload['reply_markup'] ?? null) || is_string($payload['reply_markup'] ?? null)) {
             $payload['reply_markup'] = $this->customEmoji->iconsFromReplyMarkup($payload['reply_markup']);
+            $payload['reply_markup'] = $this->defaultInlineButtonStyles($payload['reply_markup']);
         }
         if (isset($payload['parse_mode'])) {
             foreach (['text', 'caption'] as $field) {

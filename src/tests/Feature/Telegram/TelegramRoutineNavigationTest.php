@@ -425,6 +425,10 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
             ['catalog:categories', 'catalog:refresh', 'family:back:menu'],
             array_column($keyboard[array_key_last($keyboard)], 'callback_data'),
         );
+        foreach ($keyboard[array_key_last($keyboard)] as $button) {
+            $this->assertSame('primary', $button['style']);
+            $this->assertMatchesRegularExpression('/\A(?:🔎|🔄|⬅️) /u', $button['text']);
+        }
         $this->assertStringContainsString('Stock 2', json_encode($keyboard, JSON_THROW_ON_ERROR));
 
         DB::table('products')->where('id', $product->id)->update(['stock' => 7]);

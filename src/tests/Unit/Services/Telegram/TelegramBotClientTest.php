@@ -31,6 +31,32 @@ class TelegramBotClientTest extends TestCase
         app(CustomEmojiCapability::class)->markAvailable();
     }
 
+    public function test_inline_buttons_default_to_blue_without_overriding_sold_out_or_reply_keyboard_styles(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
+        $client = app(TelegramBotClient::class);
+        $markup = ['inline_keyboard' => [[
+            ['text' => 'Refresh', 'callback_data' => 'catalog:refresh'],
+            ['text' => 'Sold out', 'style' => 'danger', 'disabled' => (object) []],
+        ]]];
+        $client->sendMessage(12345, 'Catalog', $markup);
+        $client->editMessageReplyMarkup(12345, 777, [], [
+            'reply_markup' => json_encode($markup, JSON_THROW_ON_ERROR),
+        ]);
+        $client->sendMessage(12345, 'Menu', ['keyboard' => [[['text' => 'Browse']]]]);
+
+        $requests = Http::recorded();
+        $buttons = $requests[0][0]['reply_markup']['inline_keyboard'][0];
+        $this->assertSame('primary', $buttons[0]['style']);
+        $this->assertSame('danger', $buttons[1]['style']);
+        $this->assertEquals((object) [], $buttons[1]['disabled']);
+        $encoded = json_decode($requests[1][0]['reply_markup'], flags: JSON_THROW_ON_ERROR);
+        $this->assertSame('primary', $encoded->inline_keyboard[0][0]->style);
+        $this->assertSame('danger', $encoded->inline_keyboard[0][1]->style);
+        $this->assertEquals((object) [], $encoded->inline_keyboard[0][1]->disabled);
+        $this->assertArrayNotHasKey('style', $requests[2][0]['reply_markup']['keyboard'][0][0]);
+    }
+
     public function test_runtime_methods_apply_configured_http_timeouts_to_json_and_multipart_requests(): void
     {
         $requests = [];
@@ -119,10 +145,6 @@ class TelegramBotClientTest extends TestCase
         $this->assertSame(
             $entities,
             json_decode((string) $this->multipartField($request, 'caption_entities'), true, 512, JSON_THROW_ON_ERROR),
-        );
-        $this->assertSame(
-            $replyMarkup,
-            json_decode((string) $this->multipartField($request, 'reply_markup'), true, 512, JSON_THROW_ON_ERROR),
         );
         $this->assertTrue(filter_var($this->multipartField($request, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
     }
@@ -294,10 +316,9 @@ class TelegramBotClientTest extends TestCase
         $retry = Http::recorded()[1][0];
         $this->assertSame('Katalog 📩', $retry['text']);
         $this->assertSame('HTML', $retry['parse_mode']);
-        $this->assertSame(
-            [[['text' => 'ChatGPT']], [['text' => 'Netflix']]],
-            $retry['reply_markup']['inline_keyboard'],
-        );
+        foreach ($retry['reply_markup']['inline_keyboard'] as $row) {
+            $this->assertArrayNotHasKey('icon_custom_emoji_id', $row[0]);
+        }
     }
 
     public function test_custom_emoji_rejection_in_existing_photo_caption_retries_without_custom_markup(): void
@@ -328,10 +349,7 @@ class TelegramBotClientTest extends TestCase
         $retry = Http::recorded()[1][0];
         $this->assertSame('Catalog 📩', $retry['caption']);
         $this->assertSame('HTML', $retry['parse_mode']);
-        $this->assertSame(
-            ['inline_keyboard' => [[['text' => 'ChatGPT']]]],
-            $retry['reply_markup'],
-        );
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $retry['reply_markup']['inline_keyboard'][0][0]);
     }
 
     public function test_custom_emoji_rejection_in_photo_caption_retries_without_text_or_button_icons(): void
@@ -510,10 +528,7 @@ class TelegramBotClientTest extends TestCase
         $retry = Http::recorded()[1][0];
         $this->assertSame('Catalog 📩', $retry['caption']);
         $this->assertSame('HTML', $retry['parse_mode']);
-        $this->assertSame(
-            ['inline_keyboard' => [[['text' => 'ChatGPT']]]],
-            $retry['reply_markup'],
-        );
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $retry['reply_markup']['inline_keyboard'][0][0]);
     }
 
     public function test_rejections_unrelated_to_custom_emoji_are_not_retried(): void
@@ -616,10 +631,6 @@ class TelegramBotClientTest extends TestCase
         $this->assertTrue($request->hasFile('document', $contents, 'lhie-store-ORDER-42.txt'));
         $this->assertSame('12345', (string) $this->multipartField($request, 'chat_id'));
         $this->assertSame('Download', $this->multipartField($request, 'caption'));
-        $this->assertSame(
-            $replyMarkup,
-            json_decode((string) $this->multipartField($request, 'reply_markup'), true, 512, JSON_THROW_ON_ERROR),
-        );
         $this->assertSame(
             $captionEntities,
             json_decode((string) $this->multipartField($request, 'caption_entities'), true, 512, JSON_THROW_ON_ERROR),

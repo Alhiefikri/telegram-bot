@@ -36,7 +36,12 @@ reply-keyboard labels also create a fresh root and remove the old keyboard.
 
 ### Catalog refresh exception (2026-10-12)
 
-The family catalog footer is one row: Filter, Refresh, Back to menu.
+The family catalog footer is one row: Filter, Refresh, Back to menu, with icons
+from the existing `message.search`, `message.refresh`, and `menu.back` DB slots.
+Inline buttons without an explicit semantic style default to blue (`primary`)
+at the Telegram transport boundary, for both sends and edits. Catalog stock
+exhaustion retains red (`danger`); navigation is blue even when the catalog is
+empty. Reply keyboards are not styled.
 `catalog:refresh` returns to the unfiltered first catalog page and bypasses the
 public projection cache, so it reads current catalog visibility and stock.
 It deletes only the originating catalog message, then sends a replacement and

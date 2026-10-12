@@ -26,3 +26,7 @@ If a CI failure looks like a real blocker for the task at hand, report it in one
 `ENV` is reserved for secrets and credentials. Do not add new environment variables for catalog content or presentation settings such as product icons, labels, prices, stock, or other Admin-editable values. Store those values in the database and expose them through the Admin Dashboard so updates do not require an image rebuild or configuration-cache refresh. Existing legacy runtime/deployment knobs remain untouched unless a task explicitly migrates them.
 
 For product icons specifically, use the optional Product `icon` field and the Admin Dashboard Tambah/Edit Produk form. Never reintroduce `TG_KEYBOARD_ICON_*`, `TG_ICON_*`, or other icon-related ENV settings.
+
+### Telegram button presentation
+
+Default inline buttons are blue (`style: primary`), not Telegram's unstyled dark buttons. Catalog products/Plans with no available stock are red (`style: danger`); navigation buttons remain blue. Every catalog footer button has a relevant icon, using the existing DB-backed UI icon slots and their Unicode fallbacks. Keep this convention for future button changes.
