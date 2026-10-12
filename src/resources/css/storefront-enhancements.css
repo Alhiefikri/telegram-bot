@@ -1,6 +1,10 @@
 /* Shared by the public landing bundle and the customer storefront bundle. */
 @layer components {
   .storefront-banner-carousel {
+    /* Single source of truth for the slide width. The track padding below is
+       derived from it, so the peek stays symmetric and the first and last
+       banner always reach their snap position. */
+    --sf-banner-slide: min(78vw, 72rem);
     width: 100%;
     max-width: none;
     margin: 0 auto;
@@ -12,8 +16,8 @@
     width: 100%;
     overflow-x: auto;
     gap: clamp(0.75rem, 2vw, 1.5rem);
-    padding-inline: 11%;
-    scroll-padding-inline: 11%;
+    padding-inline: calc((100% - var(--sf-banner-slide)) / 2);
+    scroll-padding-inline: calc((100% - var(--sf-banner-slide)) / 2);
     scroll-snap-type: x mandatory;
     scrollbar-width: none;
   }
@@ -21,9 +25,12 @@
     display: none;
   }
   .storefront-banner-slide {
-    flex: 0 0 min(78vw, 72rem);
+    flex: 0 0 var(--sf-banner-slide);
     min-width: 0;
-    aspect-ratio: 4 / 1;
+    /* The uploaded art's own ratio (set on the carousel) keeps text and icons
+       inside the frame; the 4:1 fallback only covers banners with no readable
+       dimensions. */
+    aspect-ratio: var(--sf-banner-aspect, 4 / 1);
     scroll-snap-align: center;
     overflow: hidden;
     border-radius: 1.25rem;
@@ -51,14 +58,14 @@
     border: 1px solid var(--sf-border);
   }
   @media (max-width: 639px) {
+    .storefront-banner-carousel {
+      /* The padding formula above then resolves to 1rem on both sides. */
+      --sf-banner-slide: calc(100vw - 2rem);
+    }
     .storefront-banner-track {
       gap: 0.75rem;
-      padding-inline: 1rem;
-      scroll-padding-inline: 1rem;
     }
     .storefront-banner-slide {
-      flex-basis: calc(100vw - 2rem);
-      aspect-ratio: 3 / 1;
       border-radius: 0.875rem;
     }
   }
@@ -72,6 +79,107 @@
     stroke-width: 2.2;
     stroke-linecap: round;
     stroke-linejoin: round;
+  }
+  /* Hero carousel controls ride on the banner: arrows at the slide edges that
+     reveal on hover/focus, and a status pill on the banner's bottom edge. The
+     .carousel-controls row below stays for the best-seller rail, whose
+     controls live in its own header. */
+  .storefront-banner-viewport {
+    position: relative;
+  }
+  .carousel-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .carousel-overlay[hidden] {
+    display: none;
+  }
+  .carousel-overlay > * {
+    pointer-events: auto;
+  }
+  .carousel-nav {
+    position: absolute;
+    top: 50%;
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border: 1px solid rgb(255 255 255 / 0.28);
+    border-radius: 50%;
+    background: rgb(15 23 42 / 0.62);
+    color: #ffffff;
+    cursor: pointer;
+    transform: translateY(-50%);
+  }
+  .carousel-nav svg {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  .carousel-nav:hover {
+    background: rgb(15 23 42 / 0.78);
+  }
+  /* Sits just outside the active slide, inside the peek. */
+  .carousel-nav--prev {
+    left: max(0.5rem, calc((100% - var(--sf-banner-slide)) / 2 - 3.5rem));
+  }
+  .carousel-nav--next {
+    right: max(0.5rem, calc((100% - var(--sf-banner-slide)) / 2 - 3.5rem));
+  }
+  .carousel-status {
+    position: absolute;
+    bottom: 0.75rem;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.375rem 0.25rem 0.625rem;
+    border: 1px solid rgb(255 255 255 / 0.18);
+    border-radius: 999px;
+    background: rgb(15 23 42 / 0.72);
+    transform: translateX(-50%);
+  }
+  .carousel-pause {
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: #ffffff;
+    cursor: pointer;
+  }
+  .carousel-pause:hover {
+    background: rgb(255 255 255 / 0.16);
+  }
+  [data-carousel-pause] svg {
+    width: 1.125rem;
+    height: 1.125rem;
+  }
+  [data-carousel-pause] [data-icon="play"],
+  [data-carousel-pause][aria-pressed="true"] [data-icon="pause"] {
+    display: none;
+  }
+  [data-carousel-pause][aria-pressed="true"] [data-icon="play"] {
+    display: block;
+  }
+  @media (hover: hover) {
+    .carousel-nav {
+      opacity: 0;
+    }
+    .storefront-banner-viewport:hover .carousel-nav,
+    .storefront-banner-viewport:focus-within .carousel-nav {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .carousel-nav {
+      transition:
+        opacity 200ms ease,
+        background-color 200ms ease;
+    }
   }
   .carousel-controls {
     display: flex;
@@ -99,24 +207,32 @@
   }
   .carousel-dots {
     display: flex;
+    align-items: center;
   }
   .carousel-dots button {
+    display: grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 2rem;
     border: 0;
     background: transparent;
-    min-width: 28px;
+    cursor: pointer;
   }
   .carousel-dots button::after {
     content: "";
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--sf-muted);
-    transition: width 200ms;
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.8);
   }
   .carousel-dots button[aria-current="true"]::after {
-    width: 18px;
-    border-radius: 6px;
-    background: var(--sf-accent);
+    width: 1.25rem;
+    background: #ffffff;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .carousel-dots button::after {
+      transition: width 200ms ease;
+    }
   }
   .family-media-column {
     border-radius: 1rem 1rem 0 0;

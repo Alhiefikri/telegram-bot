@@ -1,7 +1,7 @@
 @if (isset($productsTab['banners']))
 <x-admin-dashboard.card as="section" id="admin-storefront-banners" padding="compact" shadow="sm" aria-labelledby="admin-storefront-banners-title">
     <h3 id="admin-storefront-banners-title" class="text-lg font-semibold text-admin-ink">Banner beranda storefront</h3>
-    <p class="mt-1 max-w-3xl text-sm leading-6 text-admin-muted">Maksimal 5 banner, tampil berurutan dari slot 1–5. Rekomendasi 1600 × 500 piksel (16:5), JPG/PNG/WebP maksimal 5 MB. Gambar memenuhi area banner dengan crop ringan yang terpusat. Banner ini khusus beranda web.</p>
+    <p class="mt-1 max-w-3xl text-sm leading-6 text-admin-muted">Maksimal 5 banner, tampil berurutan dari slot 1–5. JPG/PNG/WebP maksimal 5 MB. Rekomendasi 1600 × 500 piksel atau lebih lebar: banner tampil memakai rasio gambarnya sendiri antara 16:9 dan 4:1, dan rasio di luar itu dipotong terpusat. Banner ini khusus beranda web.</p>
     @if ($canManageProducts)
         @if ($errors->getBag('storefrontBanners')->any())
             <div role="alert" class="mt-3 rounded-lg border border-admin-line bg-neo-danger-pale p-3 text-sm font-medium text-neo-danger-text">
@@ -18,7 +18,7 @@
                 <details class="rounded-lg border border-admin-line bg-admin-surface p-3" @if ($slot === 0) open @endif>
                     <summary class="min-h-11 cursor-pointer text-sm font-medium text-admin-ink">Banner {{ $slot + 1 }} · {{ $banner ? $banner['title'] : 'Kosong' }}</summary>
                     @if ($banner)
-                        <img src="/storage/{{ $banner['path'] }}" alt="{{ $banner['title'] }}" width="1600" height="400" loading="lazy" class="my-3 aspect-[4/1] w-full rounded-lg bg-admin-surface-muted object-contain">
+                        <img src="/storage/{{ $banner['path'] }}" alt="{{ $banner['title'] }}" width="{{ $banner['width'] ?? 1600 }}" height="{{ $banner['height'] ?? 400 }}" loading="lazy" style="aspect-ratio: {{ $productsTab['banners']['aspect'] ?? '4 / 1' }}" class="my-3 w-full rounded-lg bg-admin-surface-muted object-cover">
                     @endif
                     <div class="grid gap-3 sm:grid-cols-2">
                         <div>

@@ -88,7 +88,7 @@
                 <div class="carousel-controls" data-carousel-controls hidden>
                     <button type="button" data-carousel-prev aria-label="Produk terlaris sebelumnya">←</button>
                     <button type="button" data-carousel-next aria-label="Produk terlaris berikutnya">→</button>
-                    <button type="button" data-carousel-pause aria-label="Jeda pergantian otomatis" aria-pressed="false">Ⅱ</button>
+                    <button type="button" data-carousel-pause aria-label="Jeda pergantian otomatis" aria-pressed="false"><svg data-icon="pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M9.5 5v14" /><path d="M14.5 5v14" /></svg><svg data-icon="play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 5.5 18 12l-9.5 6.5z" /></svg></button>
                 </div>
             </div>
             <div class="storefront-trending-grid" data-carousel-track role="list" aria-label="Produk trending">

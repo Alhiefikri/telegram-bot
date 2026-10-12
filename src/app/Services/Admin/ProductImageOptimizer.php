@@ -164,6 +164,31 @@ final class ProductImageOptimizer
         return '/storage/'.ltrim($path, '/');
     }
 
+    /**
+     * Intrinsic size of a managed image. Banner markup needs it to reserve the
+     * right box and to render the uploaded art without cropping.
+     *
+     * @return array{width: int, height: int}|null
+     */
+    public function dimensions(?string $path): ?array
+    {
+        if (! $path || str_starts_with($path, '/') || str_contains($path, '..')) {
+            return null;
+        }
+
+        $disk = Storage::disk('public');
+        if (! $disk->exists($path)) {
+            return null;
+        }
+
+        $size = @getimagesize($disk->path($path));
+        if (! is_array($size) || $size[0] < 1 || $size[1] < 1) {
+            return null;
+        }
+
+        return ['width' => (int) $size[0], 'height' => (int) $size[1]];
+    }
+
     public function telegramUrl(?string $path): ?string
     {
         if ($path === null

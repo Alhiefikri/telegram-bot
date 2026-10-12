@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\UserRole;
 use App\Models\StorefrontSetting;
 use App\Models\User;
+use App\Storefront\StorefrontBanners;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -57,6 +58,41 @@ class StorefrontBannersTest extends TestCase
             ->assertSessionHasErrors(['version'], null, 'storefrontBanners');
         $this->assertSame([], Storage::disk('public')->allFiles('storefront/banners'));
         $this->assertSame(1, StorefrontSetting::current()->homepage_banners_version);
+    }
+
+    public function test_published_banners_expose_the_uploaded_art_ratio_for_the_hero_box(): void
+    {
+        Storage::fake('public');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $slots = $this->slots();
+        $slots[0] = ['title' => 'Banner Lebar', 'link' => null, 'image' => UploadedFile::fake()->image('wide.png', 2046, 769)];
+        $this->actingAs($admin)->post(route('admin.storefront-banners.update'), ['version' => 0, 'banners' => $slots])
+            ->assertSessionHasNoErrors();
+
+        $banners = app(StorefrontBanners::class);
+        $published = $banners->published();
+
+        $this->assertSame(2046, $published[0]['width']);
+        $this->assertSame(769, $published[0]['height']);
+        $this->assertSame('2046 / 769', $banners->heroAspect($published));
+        $this->get('/')->assertOk()->assertSee('--sf-banner-aspect: 2046 / 769', false);
+        $this->get('/admin?tab=produk')->assertOk()->assertSee('aspect-ratio: 2046 / 769', false);
+    }
+
+    public function test_hero_aspect_clamps_out_of_band_art_and_defaults_without_banners(): void
+    {
+        Storage::fake('public');
+        $banners = app(StorefrontBanners::class);
+        $this->assertSame('4 / 1', $banners->heroAspect($banners->published()));
+
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $slots = $this->slots();
+        $slots[0] = ['title' => 'Banner Persegi', 'link' => null, 'image' => UploadedFile::fake()->image('square.png', 1000, 1000)];
+        $this->actingAs($admin)->post(route('admin.storefront-banners.update'), ['version' => 0, 'banners' => $slots])
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame('1000 / 563', $banners->heroAspect($banners->published()));
+        $this->get('/')->assertOk()->assertSee('--sf-banner-aspect: 1000 / 563', false);
     }
 
     public function test_support_cannot_change_banners(): void

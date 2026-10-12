@@ -185,10 +185,82 @@ test("carousel supports navigation, pause, reduced motion and mobile layout", as
     .boundingBox();
   expect(desktopHeroBox?.width ?? 0).toBeGreaterThan(1200);
   expect(desktopSlideBox?.height ?? 0).toBeLessThan(320);
+  // Controls ride on the banner: no control row is reserved below the slide.
+  expect(
+    (desktopHeroBox?.height ?? 0) - (desktopSlideBox?.height ?? 0)
+  ).toBeLessThan(64);
+  const statusBox = await carousel.locator(".carousel-status").boundingBox();
+  expect(statusBox?.y ?? 0).toBeGreaterThan(desktopSlideBox?.y ?? 0);
+  expect((statusBox?.y ?? 0) + (statusBox?.height ?? 0)).toBeLessThan(
+    (desktopSlideBox?.y ?? 0) + (desktopSlideBox?.height ?? 0)
+  );
   await page.screenshot({
     path: testInfo.outputPath("storefront-desktop.png"),
     fullPage: true,
   });
+});
+
+test("reveals banner arrows on hover and keeps them usable by keyboard", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  const carousel = page.locator(".storefront-banner-carousel");
+  await carousel.scrollIntoViewIfNeeded();
+  const overshoot = await page.evaluate(
+    () => document.documentElement.scrollWidth - innerWidth
+  );
+  expect(overshoot).toBeLessThanOrEqual(0);
+
+  const opacity = () =>
+    carousel
+      .locator(".carousel-nav")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => getComputedStyle(node).opacity)
+      );
+
+  if (
+    (await page.evaluate(() => matchMedia("(hover: hover)").matches)) === false
+  ) {
+    // Touch-only input has no hover reveal: the controls stay visible instead.
+    expect(await opacity()).toEqual(["1", "1"]);
+    return;
+  }
+
+  expect(await opacity()).toEqual(["0", "0"]);
+  const slideBox = await carousel
+    .locator("[data-carousel-slide]")
+    .first()
+    .boundingBox();
+  await page.mouse.move(
+    (slideBox?.x ?? 0) + (slideBox?.width ?? 0) / 2,
+    (slideBox?.y ?? 0) + (slideBox?.height ?? 0) / 2
+  );
+  await expect.poll(opacity, { timeout: 3000 }).toEqual(["1", "1"]);
+
+  // Arrows sit beside the active slide, not on top of its artwork.
+  const navBoxes = await carousel
+    .locator(".carousel-nav")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getBoundingClientRect().toJSON())
+    );
+  const active = await carousel
+    .locator("[data-carousel-slide]")
+    .first()
+    .boundingBox();
+  for (const nav of navBoxes) {
+    const clear =
+      nav.right <= (active?.x ?? 0) + 2 ||
+      nav.left >= (active?.x ?? 0) + (active?.width ?? 0) - 2;
+    expect(clear).toBe(true);
+  }
+
+  await carousel.locator(".carousel-nav--next").focus();
+  await page.keyboard.press("Enter");
+  await expect(carousel.locator("[data-carousel-dot]").nth(1)).toHaveAttribute(
+    "aria-current",
+    "true"
+  );
 });
 
 test("carousel advances automatically and pauses on hover", async ({
@@ -206,6 +278,46 @@ test("carousel advances automatically and pauses on hover", async ({
   await carousel.hover();
   await page.waitForTimeout(6500);
   await expect(dots.nth(1)).toHaveAttribute("aria-current", "true");
+});
+
+test("keeps the active banner centered once the slide width is capped", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  const carousel = page.locator(".storefront-banner-carousel");
+  await carousel.scrollIntoViewIfNeeded();
+  await carousel
+    .getByRole("button", { name: "Jeda pergantian otomatis" })
+    .click();
+
+  const geometry = () =>
+    page.evaluate(() => {
+      const root = document.querySelector("[data-storefront-carousel]");
+      const track = root.querySelector("[data-carousel-track]");
+      const slides = [...root.querySelectorAll("[data-carousel-slide]")];
+      const active = [
+        ...root.querySelectorAll("[data-carousel-dot]"),
+      ].findIndex((dot) => dot.getAttribute("aria-current") === "true");
+      const slide = slides[active].getBoundingClientRect();
+      const box = track.getBoundingClientRect();
+      return {
+        // Symmetric peeks are the exact centering invariant: it is twice the
+        // distance between the slide centre and the track centre.
+        symmetry: Math.round(slide.left - box.left - (box.right - slide.right)),
+      };
+    });
+
+  expect(Math.abs((await geometry()).symmetry)).toBeLessThanOrEqual(2);
+
+  await carousel.getByRole("button", { name: "Banner berikutnya" }).click();
+  await expect(carousel.locator("[data-carousel-dot]").nth(1)).toHaveAttribute(
+    "aria-current",
+    "true"
+  );
+  await expect
+    .poll(async () => Math.abs((await geometry()).symmetry), { timeout: 5000 })
+    .toBeLessThanOrEqual(2);
 });
 
 test("family image stays contained and preview closes with Escape", async ({

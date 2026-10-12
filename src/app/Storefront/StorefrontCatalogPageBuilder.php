@@ -38,7 +38,7 @@ class StorefrontCatalogPageBuilder
      */
     public function homeViewData(StorefrontCatalogQuery|string|null $query): array
     {
-        return $this->home($query)->viewData() + ['homepageBanners' => $this->banners->published()];
+        return $this->home($query)->viewData() + $this->bannerViewData();
     }
 
     /**
@@ -46,7 +46,20 @@ class StorefrontCatalogPageBuilder
      */
     public function shopViewData(StorefrontCatalogQuery|string|null $query): array
     {
-        return $this->shop($query)->viewData() + ['homepageBanners' => $this->banners->published()];
+        return $this->shop($query)->viewData() + $this->bannerViewData();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function bannerViewData(): array
+    {
+        $banners = $this->banners->published();
+
+        return [
+            'homepageBanners' => $banners,
+            'homepageBannerAspect' => $this->banners->heroAspect($banners),
+        ];
     }
 
     private function build(string $context, StorefrontCatalogQuery $query): StorefrontCatalogPage

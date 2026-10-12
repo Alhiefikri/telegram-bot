@@ -58,7 +58,6 @@ export default function initCarousels() {
         "aria-label",
         userPaused ? "Putar pergantian otomatis" : "Jeda pergantian otomatis"
       );
-      pause.textContent = userPaused ? "▶" : "Ⅱ";
     };
     root.querySelector("[data-carousel-controls]")?.removeAttribute("hidden");
     root

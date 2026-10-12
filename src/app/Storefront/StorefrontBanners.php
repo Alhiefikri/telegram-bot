@@ -15,6 +15,13 @@ final class StorefrontBanners
 {
     public const MAX_BANNERS = 5;
 
+    /** Aspect band the hero slide box accepts; art outside it is center-cropped. */
+    private const MIN_HERO_ASPECT = 16 / 9;
+
+    private const MAX_HERO_ASPECT = 4.0;
+
+    private const DEFAULT_HERO_ASPECT = '4 / 1';
+
     public function __construct(
         private readonly ProductImageOptimizer $images,
         private readonly AuditLogger $audit,
@@ -23,10 +30,21 @@ final class StorefrontBanners
     public function dashboard(): array
     {
         $setting = StorefrontSetting::current();
+        $slots = collect($setting->homepage_banners ?? [])
+            ->map(function (mixed $slot): mixed {
+                if (! is_array($slot) || ! filled($slot['path'] ?? null)) {
+                    return $slot;
+                }
+                $size = $this->images->dimensions($slot['path']);
+
+                return $size === null ? $slot : $slot + $size;
+            })
+            ->all();
 
         return [
-            'slots' => $setting->homepage_banners ?? [],
+            'slots' => $slots,
             'version' => $setting->homepage_banners_version ?? 0,
+            'aspect' => $this->heroAspect($slots),
             'update_url' => route('admin.storefront-banners.update'),
         ];
     }
@@ -35,12 +53,48 @@ final class StorefrontBanners
     {
         return collect(StorefrontSetting::current()->homepage_banners ?? [])
             ->filter(fn (mixed $banner): bool => is_array($banner) && filled($banner['path'] ?? null))
-            ->map(fn (array $banner): array => [
-                'imageUrl' => $this->images->publicUrl($banner['path']),
-                'title' => $banner['title'],
-                'link' => $banner['link'] ?? null,
-            ])
+            ->map(function (array $banner): array {
+                $size = $this->images->dimensions($banner['path']);
+
+                return [
+                    'imageUrl' => $this->images->publicUrl($banner['path']),
+                    'title' => $banner['title'],
+                    'link' => $banner['link'] ?? null,
+                    'width' => $size['width'] ?? null,
+                    'height' => $size['height'] ?? null,
+                ];
+            })
             ->values()->all();
+    }
+
+    /**
+     * CSS `aspect-ratio` for the hero slide box, read from the first banner whose
+     * file dimensions resolve, so the uploaded art renders whole instead of being
+     * cropped to a ratio the owner never chose. Kept pure: the caller passes the
+     * banner entries it already resolved.
+     *
+     * @param  list<array<string, mixed>>  $banners
+     */
+    public function heroAspect(array $banners): string
+    {
+        foreach ($banners as $banner) {
+            $width = (int) ($banner['width'] ?? 0);
+            $height = (int) ($banner['height'] ?? 0);
+            if ($width < 1 || $height < 1) {
+                continue;
+            }
+            $ratio = $width / $height;
+            if ($ratio < self::MIN_HERO_ASPECT) {
+                return $width.' / '.max(1, (int) round($width / self::MIN_HERO_ASPECT));
+            }
+            if ($ratio > self::MAX_HERO_ASPECT) {
+                return $width.' / '.max(1, (int) round($width / self::MAX_HERO_ASPECT));
+            }
+
+            return $width.' / '.$height;
+        }
+
+        return self::DEFAULT_HERO_ASPECT;
     }
 
     /** Saves fixed ordered slots; image paths always come from the database or optimizer. */
