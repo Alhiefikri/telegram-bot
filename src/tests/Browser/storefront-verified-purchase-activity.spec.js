@@ -238,7 +238,8 @@ test("reveals banner arrows on hover and keeps them usable by keyboard", async (
   );
   await expect.poll(opacity, { timeout: 3000 }).toEqual(["1", "1"]);
 
-  // Arrows sit beside the active slide, not on top of its artwork.
+  // Arrows ride on the active slide's edges: the neighbour peek is narrower
+  // than the button, so outside placement would clip them.
   const navBoxes = await carousel
     .locator(".carousel-nav")
     .evaluateAll((nodes) =>
@@ -249,10 +250,10 @@ test("reveals banner arrows on hover and keeps them usable by keyboard", async (
     .first()
     .boundingBox();
   for (const nav of navBoxes) {
-    const clear =
-      nav.right <= (active?.x ?? 0) + 2 ||
-      nav.left >= (active?.x ?? 0) + (active?.width ?? 0) - 2;
-    expect(clear).toBe(true);
+    const inside =
+      nav.left >= (active?.x ?? 0) - 2 &&
+      nav.right <= (active?.x ?? 0) + (active?.width ?? 0) + 2;
+    expect(inside).toBe(true);
   }
 
   await carousel.locator(".carousel-nav--next").focus();
@@ -318,6 +319,39 @@ test("keeps the active banner centered once the slide width is capped", async ({
   await expect
     .poll(async () => Math.abs((await geometry()).symmetry), { timeout: 5000 })
     .toBeLessThanOrEqual(2);
+});
+
+test("keeps the neighbouring banner a narrow peek", async ({ page }) => {
+  // 2505px matches the widest layout the owner reported: the retired 72rem
+  // slide cap left most of the second banner on screen instead of a hint.
+  for (const width of [1440, 1920, 2505]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+    const carousel = page.locator(".storefront-banner-carousel");
+    await carousel.scrollIntoViewIfNeeded();
+    await carousel
+      .getByRole("button", { name: "Jeda pergantian otomatis" })
+      .click();
+
+    const geometry = await page.evaluate(() => {
+      const root = document.querySelector("[data-storefront-carousel]");
+      const track = root.querySelector("[data-carousel-track]");
+      const slides = [...root.querySelectorAll("[data-carousel-slide]")];
+      const box = track.getBoundingClientRect();
+      const active = slides[0].getBoundingClientRect();
+      const neighbour = slides[1].getBoundingClientRect();
+      return {
+        slide: Math.round(active.width),
+        peek: Math.round(box.right - neighbour.left),
+        overflow: document.documentElement.scrollWidth - window.innerWidth,
+      };
+    });
+
+    expect(geometry.overflow).toBeLessThanOrEqual(0);
+    // The next banner stays discoverable without competing with the active one.
+    expect(geometry.peek).toBeGreaterThan(0);
+    expect(geometry.peek / geometry.slide).toBeLessThanOrEqual(0.06);
+  }
 });
 
 test("family image stays contained and preview closes with Escape", async ({

@@ -1,12 +1,19 @@
 /* Shared by the public landing bundle and the customer storefront bundle. */
 @layer components {
   .storefront-banner-carousel {
-    /* Single source of truth for the slide width. The track padding below is
-       derived from it, so the peek stays symmetric and the first and last
-       banner always reach their snap position. */
-    --sf-banner-slide: min(78vw, 72rem);
-    width: 100%;
-    max-width: none;
+    /* The hero rides the floating header card's width, and the slide leaves one
+       peek token of room on each side. The track padding below derives from the
+       slide width, so both peeks stay symmetric and the first and last banner
+       always reach their snap position. */
+    --sf-banner-frame: min(100vw - 2rem, 80rem);
+    --sf-banner-gap: clamp(0.75rem, 2vw, 1.5rem);
+    --sf-banner-peek: clamp(1rem, 2.5vw, 2.5rem);
+    --sf-banner-slide: calc(
+      var(--sf-banner-frame) - 2 *
+        (var(--sf-banner-peek) + var(--sf-banner-gap))
+    );
+    width: var(--sf-banner-frame);
+    max-width: 100%;
     margin: 0 auto;
     padding: clamp(0.75rem, 1.5vw, 1.25rem) 0 clamp(1rem, 2vw, 1.5rem);
     box-sizing: border-box;
@@ -15,7 +22,7 @@
     display: flex;
     width: 100%;
     overflow-x: auto;
-    gap: clamp(0.75rem, 2vw, 1.5rem);
+    gap: var(--sf-banner-gap);
     padding-inline: calc((100% - var(--sf-banner-slide)) / 2);
     scroll-padding-inline: calc((100% - var(--sf-banner-slide)) / 2);
     scroll-snap-type: x mandatory;
@@ -59,11 +66,11 @@
   }
   @media (max-width: 639px) {
     .storefront-banner-carousel {
-      /* The padding formula above then resolves to 1rem on both sides. */
+      /* Full-bleed frame whose slide keeps a 1rem gutter per side; the padding
+         formula above resolves those two tokens into that gutter. */
+      --sf-banner-frame: 100vw;
+      --sf-banner-gap: 0.75rem;
       --sf-banner-slide: calc(100vw - 2rem);
-    }
-    .storefront-banner-track {
-      gap: 0.75rem;
     }
     .storefront-banner-slide {
       border-radius: 0.875rem;
@@ -120,12 +127,13 @@
   .carousel-nav:hover {
     background: rgb(15 23 42 / 0.78);
   }
-  /* Sits just outside the active slide, inside the peek. */
+  /* Ride just inside the active slide's edges: the peek gutter is narrower than
+     the button, so centring the arrows inside it would clip them. */
   .carousel-nav--prev {
-    left: max(0.5rem, calc((100% - var(--sf-banner-slide)) / 2 - 3.5rem));
+    left: calc((100% - var(--sf-banner-slide)) / 2 + 0.5rem);
   }
   .carousel-nav--next {
-    right: max(0.5rem, calc((100% - var(--sf-banner-slide)) / 2 - 3.5rem));
+    right: calc((100% - var(--sf-banner-slide)) / 2 + 0.5rem);
   }
   .carousel-status {
     position: absolute;
