@@ -19,7 +19,7 @@ concurrency:
 jobs:
   workflow-security:
     name: Workflow validation and dependency audit
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, ci]
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -44,7 +44,7 @@ jobs:
 
   application-tests:
     name: Application, browser, and PostgreSQL tests
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, ci]
     needs: [workflow-security]
     container:
       image: ubuntu:24.04
@@ -247,9 +247,19 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # This job runs in a container, so its steps write into the runner's
+      # workspace as root. Hand the workspace back to the runner user or the
+      # next job on this persistent self-hosted runner cannot check out.
+      - name: Restore self-hosted workspace ownership
+        if: always()
+        working-directory: .
+        run: |
+          host_owner="$(stat -c '%u:%g' "$RUNNER_TEMP")"
+          chown -R "$host_owner" "$GITHUB_WORKSPACE"
+
   docker-build:
     name: Build, verify, and publish production image
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, ci]
     needs: application-tests
     timeout-minutes: 35
     permissions:

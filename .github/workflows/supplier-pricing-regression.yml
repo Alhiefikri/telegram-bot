@@ -16,7 +16,7 @@ concurrency:
 jobs:
   supplier-pricing:
     name: Supplier markup, profit, money, and availability
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, ci]
     timeout-minutes: 15
     env:
       APP_ENV: testing

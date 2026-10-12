@@ -13,15 +13,34 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
 
 ## Runners
 
-CI jobs run on GitHub-hosted `ubuntu-24.04` runners, and production deploy and
-recovery jobs use the same image. No job runs on the production VPS, so CI work
-never consumes the store's CPU, memory, or bandwidth.
+CI jobs run on the repository's dedicated self-hosted runner
+`telegram-bot-ci-vps` (`[self-hosted, Linux, X64, ci]`); production deploy and
+recovery jobs use the same runner through the `deploy` label
+(`[self-hosted, Linux, X64, deploy]`). That runner is its own VPS, not the
+production VPS, so CI work never consumes the store's CPU, memory, or
+bandwidth. Self-hosted execution also keeps the release path independent of
+GitHub-hosted Actions minutes and spending limits.
+
+Before dispatching or rerunning a deploy, confirm the label points at the
+intended runner:
+
+```bash
+gh api repos/Alhiefikri/telegram-bot/actions/runners \
+  --jq '.runners[] | {id,name,status,busy,labels:[.labels[].name]}'
+```
+
+A stale runner must never carry the `deploy` label. The runner VPS must hold the
+production host key in `~ubuntu/.ssh/known_hosts`; deploy automation never
+disables host-key checking.
 
 PHP test jobs run inside an `ubuntu:24.04` job container so `setup-php` has its
 supported Linux environment. The PostgreSQL service is reached through its
 `postgres` service-network alias from that job container. Container jobs
 explicitly use Bash because Ubuntu job containers otherwise default to `sh`,
-which rejects `set -o pipefail`.
+which rejects `set -o pipefail`. Because that container writes into the
+persistent runner workspace as root, the job ends with a
+`Restore self-hosted workspace ownership` step so the next job on this runner
+can still check out.
 
 The test lanes deliberately run `npm ci` without the `setup-node` npm cache.
 The production image builds from public Docker Hub bases (`composer:2`,
