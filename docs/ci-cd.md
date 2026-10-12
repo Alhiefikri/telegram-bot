@@ -21,6 +21,11 @@ production VPS, so CI work never consumes the store's CPU, memory, or
 bandwidth. Self-hosted execution also keeps the release path independent of
 GitHub-hosted Actions minutes and spending limits.
 
+`.github/actionlint.yaml` declares the custom `ci` and `deploy` runner labels
+for workflow validation. Keep this file committed alongside runner-routing
+changes; otherwise `actionlint` rejects valid self-hosted job labels before
+application tests and image publication can run.
+
 Before dispatching or rerunning a deploy, confirm the label points at the
 intended runner:
 
