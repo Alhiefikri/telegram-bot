@@ -163,6 +163,10 @@ _Avoid_: Binance Pay ID, wallet credential, private key
 The owner-controlled store setting selects Manual, KlikQRIS, or Sakurupiah for new checkouts without changing Payments already created with another provider. A provider must pass its readiness gate before selection; Sakurupiah production requires both production credentials. Pakasir is not selectable for new checkout; historical Pakasir Payments remain on their original provider.
 _Avoid_: Customer provider choice, automatic provider fallback
 
+**Rejected Provider Create**:
+A provider invoice create answered with the provider's own failure contract (an application status and reason, on the documented response envelope or a non-retryable HTTP failure). It proves that no provider transaction exists for the merchant reference, so the Payment stays recoverable and the same reference is created again after the cause is corrected; it is never treated as an ambiguous outcome. Distinct from an ambiguous create, where the request may already have been accepted.
+_Avoid_: failed payment, terminal create failure, duplicate invoice retry
+
 **Checkout Maintenance**:
 The Owner/Admin-controlled store state that temporarily prevents new customer Orders while catalog access, cart management, and existing Order lifecycles remain available.
 _Avoid_: Store Maintenance, Store Closure

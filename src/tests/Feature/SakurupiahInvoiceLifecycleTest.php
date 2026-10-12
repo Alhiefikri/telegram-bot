@@ -344,25 +344,128 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED, $payment->fresh()->provider_create_state);
     }
 
-    public function test_provider_application_rejection_persists_the_safe_application_status(): void
+    public function test_provider_application_rejection_is_retryable_on_the_same_reference(): void
     {
         $payment = $this->payment();
-        Http::fake(fn () => Http::response([
-            'status' => '400',
-            'message' => 'provider-secret-message',
-        ], 200));
+        $attempts = 0;
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->andReturnUsing(function () use (&$attempts, $payment): SakurupiahInvoice {
+            $attempts++;
 
-        $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
+            if ($attempts === 1) {
+                throw new SakurupiahApplicationException(
+                    'createInvoice',
+                    '400',
+                    providerMessage: 'Gagal membuat Invoice. hubungi tim dukungan',
+                );
+            }
 
-        $this->assertSame(SakurupiahInvoiceOutcome::RecoveryPending, $result->outcome());
+            return $this->invoice($payment);
+        });
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $lifecycle = app(SakurupiahInvoiceLifecycleService::class);
+        $rejected = $lifecycle->lifecycle($payment);
+
+        $this->assertSame(SakurupiahInvoiceOutcome::Creating, $rejected->outcome());
+        $fresh = $payment->fresh();
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED, $fresh->provider_create_state);
+        $this->assertSame(
+            SakurupiahApplicationException::class.'|application_status:400|provider_message:Gagal membuat Invoice. hubungi tim dukungan',
+            $fresh->provider_create_last_error,
+        );
+        $this->assertNull($fresh->provider_reference);
+        $this->assertSame(1, $attempts);
+
+        // The retry interval keeps one rejected Payment from re-creating on
+        // every refresh, and a throttled recovery pass must not downgrade the
+        // rejection into an ambiguous state it does not have.
+        $throttled = $lifecycle->lifecycle($payment);
+        $this->assertSame(SakurupiahInvoiceOutcome::Creating, $throttled->outcome());
+        $this->assertSame(1, $attempts);
+
+        $throttledRecovery = $lifecycle->tryRefreshStatus($payment);
+        $this->assertNotNull($throttledRecovery);
+        $this->assertSame(SakurupiahInvoiceOutcome::Creating, $throttledRecovery->outcome());
+        $this->assertSame(1, $attempts);
+        $this->assertSame(
+            SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED,
+            $payment->fresh()->provider_create_state,
+        );
+
+        // A customer status refresh retries the same merchant reference once
+        // the interval has passed, so the QR arrives without a new checkout.
+        $this->travel(61)->seconds();
+        $recovered = $lifecycle->tryRefreshStatus($payment);
+
+        $this->assertNotNull($recovered);
+        $this->assertTrue($recovered->isPayable());
+        $this->assertSame(2, $attempts);
+        $this->assertSame('trx-411', $payment->fresh()->provider_reference);
+        $this->assertSame(1, Payment::query()->where('order_id', $payment->order_id)->count());
+
+        // The recovered presentation is reused instead of creating again.
+        $again = $lifecycle->lifecycle($payment);
+        $this->assertTrue($again->isPayable());
+        $this->assertSame(2, $attempts);
+    }
+
+    public function test_customer_status_refresh_gate_covers_retryable_and_referenced_payments(): void
+    {
+        $lifecycle = app(SakurupiahInvoiceLifecycleService::class);
+        $rejected = $this->payment([
+            'merchant_ref' => 'INV-411-A',
+            'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED,
+            'provider_create_attempted_at' => now(),
+        ]);
+        $ambiguous = $this->payment([
+            'merchant_ref' => 'INV-411-B',
+            'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN,
+            'provider_create_attempted_at' => now()->subHour(),
+        ]);
+        $referenced = $this->payment([
+            'merchant_ref' => 'INV-411-C',
+            'provider_reference' => 'trx-411',
+            'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_PROVIDER_QRIS_UNUSABLE,
+        ]);
+
+        $this->assertFalse($lifecycle->isCustomerStatusRefreshable($rejected));
+        $this->assertFalse($lifecycle->isCustomerStatusRefreshable($ambiguous));
+        $this->assertTrue($lifecycle->isCustomerStatusRefreshable($referenced));
+
+        $this->travel(61)->seconds();
+
+        $this->assertTrue($lifecycle->isCustomerStatusRefreshable($rejected));
+    }
+
+    public function test_provider_application_error_status_stays_ambiguous_and_is_not_recreated(): void
+    {
+        $payment = $this->payment();
+        $attempts = 0;
+        Http::fake(function () use (&$attempts) {
+            $attempts++;
+
+            return Http::response(['status' => '500', 'message' => 'internal'], 200);
+        });
+
+        $lifecycle = app(SakurupiahInvoiceLifecycleService::class);
+        $first = $lifecycle->lifecycle($payment);
+
+        $this->assertSame(SakurupiahInvoiceOutcome::RecoveryPending, $first->outcome());
         $fresh = $payment->fresh();
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN, $fresh->provider_create_state);
         $this->assertSame(
-            SakurupiahApplicationException::class.'|application_status:400',
+            SakurupiahApplicationException::class.'|application_status:500|provider_message:internal',
             $fresh->provider_create_last_error,
         );
-        $this->assertStringNotContainsString('provider-secret-message', (string) $fresh->provider_create_last_error);
-        Http::assertSentCount(1);
+
+        // A provider 5xx-class status may have partially created the
+        // transaction, so it must never be re-created.
+        $this->travel(120)->seconds();
+        $second = $lifecycle->lifecycle($payment);
+
+        $this->assertSame(SakurupiahInvoiceOutcome::RecoveryPending, $second->outcome());
+        $this->assertSame(1, $attempts);
     }
 
     public function test_create_5xx_is_recovery_pending_and_not_retried(): void

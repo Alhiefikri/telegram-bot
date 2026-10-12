@@ -10,6 +10,8 @@ final class SakurupiahHttpException extends SakurupiahProviderException
         string $operation,
         int $status,
         bool $outcomeUnknown = false,
+        ?string $providerStatus = null,
+        ?string $providerMessage = null,
         ?Throwable $previous = null,
     ) {
         parent::__construct(
@@ -19,6 +21,8 @@ final class SakurupiahHttpException extends SakurupiahProviderException
             retryable: ! $outcomeUnknown && self::isRetryableStatus($status),
             outcomeUnknown: $outcomeUnknown,
             operation: $operation,
+            providerStatus: $providerStatus,
+            providerMessage: $providerMessage,
             previous: $previous,
         );
     }

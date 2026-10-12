@@ -104,6 +104,33 @@ final class SakurupiahInvoiceLifecycleService
     }
 
     /**
+     * Customer-facing refresh gate. A Payment that still has a provider
+     * reference may always be re-checked; a definitively rejected create may be
+     * attempted again on the same merchant reference because the provider
+     * proved that no transaction exists for it yet.
+     */
+    public function isCustomerStatusRefreshable(Payment $payment): bool
+    {
+        if ($this->classifyLocalState($payment) !== null) {
+            return false;
+        }
+
+        return filled($payment->provider_reference) || $this->canRetryCreate($payment);
+    }
+
+    /**
+     * Advance one Payment while the caller already holds this Payment's cache
+     * lock.
+     *
+     * The reconciliation seam owns that lock for the whole verification call;
+     * this method deliberately does not acquire it again.
+     */
+    public function recoverWhileLocked(Payment $payment): SakurupiahInvoiceLifecycleResult
+    {
+        return $this->recoverLocked($payment);
+    }
+
+    /**
      * Explicitly refresh a persisted provider reference under the same lock as
      * create/recovery. Later callback and reconciliation code can use this seam
      * without opening a second concurrency model.
@@ -206,6 +233,10 @@ final class SakurupiahInvoiceLifecycleService
 
         if ($payment->provider_create_state === self::STATE_CREATE_FAILED
             && blank($payment->provider_reference)) {
+            if (! $this->createRetryAllowed($payment)) {
+                return $this->classifyPersisted($payment);
+            }
+
             $this->resetPreRequestFailure($payment);
             $payment->refresh();
         }
@@ -228,8 +259,36 @@ final class SakurupiahInvoiceLifecycleService
             return $this->classifyPersisted($payment);
         }
 
+        return $this->attemptCreateLocked($payment);
+    }
+
+    /**
+     * Create one provider invoice for a Payment whose outcome is still known
+     * locally. The caller already holds this Payment's cache lock and has
+     * proven that no earlier create was accepted for the merchant reference.
+     */
+    private function attemptCreateLocked(Payment $payment): SakurupiahInvoiceLifecycleResult
+    {
         try {
             $request = $this->buildCreateRequest($payment);
+        } catch (Throwable $exception) {
+            if (! $exception instanceof SakurupiahCreatePreRequestException
+                && ! $exception instanceof SakurupiahReadinessException) {
+                throw $exception;
+            }
+
+            $this->markCreationDefinitivelyFailed($payment, $exception);
+
+            if ($exception instanceof SakurupiahCreatePreRequestException) {
+                throw $exception;
+            }
+
+            throw new SakurupiahCreatePreRequestException(previous: $exception);
+        }
+
+        $this->markCreationDispatched($payment);
+
+        try {
             $invoice = $this->provider->createInvoice($request);
         } catch (SakurupiahCreatePreRequestException|SakurupiahReadinessException $exception) {
             $this->markCreationDefinitivelyFailed($payment, $exception);
@@ -239,6 +298,20 @@ final class SakurupiahInvoiceLifecycleService
             }
 
             throw new SakurupiahCreatePreRequestException(previous: $exception);
+        } catch (SakurupiahProviderException $exception) {
+            if (! $exception->isProviderRejection()) {
+                $this->markCreationOutcomeUnknown($payment, $exception);
+
+                return SakurupiahInvoiceLifecycleResult::state(SakurupiahInvoiceOutcome::RecoveryPending);
+            }
+
+            // The provider answered with its documented failure contract, so
+            // the request was rejected and no transaction exists for this
+            // merchant reference. The same reference may be created again once
+            // the merchant or channel condition is corrected.
+            $this->markCreationDefinitivelyFailed($payment, $exception);
+
+            return SakurupiahInvoiceLifecycleResult::state(SakurupiahInvoiceOutcome::Creating);
         } catch (Throwable $exception) {
             $this->markCreationOutcomeUnknown($payment, $exception);
 
@@ -286,9 +359,35 @@ final class SakurupiahInvoiceLifecycleService
 
         $providerReference = trim((string) $payment->provider_reference);
         if ($providerReference === '') {
-            $this->markRecoveryUnconfirmed($payment, 'missing_provider_reference');
+            if (! $this->isRetryableCreate($payment)) {
+                $this->markRecoveryUnconfirmed($payment, 'missing_provider_reference');
 
-            return SakurupiahInvoiceLifecycleResult::state(SakurupiahInvoiceOutcome::RecoveryPending);
+                return SakurupiahInvoiceLifecycleResult::state(SakurupiahInvoiceOutcome::RecoveryPending);
+            }
+
+            if (! $this->canRetryCreate($payment)) {
+                // The reference stays retryable; the interval only delays the
+                // next create. A retryable rejection is never downgraded to an
+                // ambiguous outcome it does not have, or it could never be
+                // created again.
+                return $this->classifyPersisted($payment->refresh());
+            }
+
+            $this->resetPreRequestFailure($payment);
+            $payment->refresh();
+
+            if ($this->markCreationAttempted($payment)) {
+                try {
+                    return $this->attemptCreateLocked($payment);
+                } catch (SakurupiahCreatePreRequestException) {
+                    // The cause is already recorded on the Payment. A recovery
+                    // pass reports the persisted state instead of failing the
+                    // caller's refresh or sweep.
+                    return $this->classifyPersisted($payment->refresh());
+                }
+            }
+
+            return $this->classifyPersisted($payment->refresh());
         }
 
         try {
@@ -616,7 +715,6 @@ final class SakurupiahInvoiceLifecycleService
 
                 $lockedPayment->update([
                     'provider_create_state' => self::STATE_CREATING,
-                    'provider_create_attempted_at' => now(),
                 ]);
 
                 return true;
@@ -628,6 +726,23 @@ final class SakurupiahInvoiceLifecycleService
         }
 
         return $reserved;
+    }
+
+    /**
+     * Record that the create request is about to reach the provider. The retry
+     * interval is measured from this instant, so an attempt that never left the
+     * application (a pre-request failure) can be retried immediately.
+     */
+    private function markCreationDispatched(Payment $payment): void
+    {
+        $this->lifecycleCoordinator->withLockedOrderPayment(
+            $payment,
+            function (Order $_order, Payment $lockedPayment): void {
+                $lockedPayment->update(['provider_create_attempted_at' => now()]);
+            },
+        );
+
+        $payment->refresh();
     }
 
     private function markCreationOutcomeUnknown(Payment $payment, Throwable|string $error): void
@@ -684,7 +799,9 @@ final class SakurupiahInvoiceLifecycleService
 
                 $lockedPayment->update([
                     'provider_create_state' => self::STATE_RECOVERY_UNCONFIRMED,
-                    'provider_create_last_error' => $reason,
+                    // A missing reference says nothing about why the create
+                    // failed. Keep the specific reason already recorded.
+                    'provider_create_last_error' => $lockedPayment->provider_create_last_error ?: $reason,
                 ]);
             },
         );
@@ -862,6 +979,43 @@ final class SakurupiahInvoiceLifecycleService
         return $this->lifecycleCoordinator->canCreateNativeQris($order, $payment);
     }
 
+    /**
+     * A definitive create rejection (or a pre-request failure) leaves no
+     * provider transaction for this merchant reference, so the same reference
+     * may be created again. Ambiguous outcomes are never retried: the provider
+     * may already have accepted that create.
+     */
+    private function isRetryableCreate(Payment $payment): bool
+    {
+        return $payment->provider_create_state === self::STATE_CREATE_FAILED
+            && blank($payment->provider_reference)
+            && ! $this->hasProviderProjection($payment);
+    }
+
+    private function canRetryCreate(Payment $payment): bool
+    {
+        $order = $payment->order;
+
+        return $this->isRetryableCreate($payment)
+            && $this->createRetryAllowed($payment)
+            && $order !== null
+            && $this->canCreate($order, $payment);
+    }
+
+    /**
+     * Bound how often a rejected create is re-sent for one Payment so a
+     * provider-side outage cannot turn every status refresh into a create.
+     */
+    private function createRetryAllowed(Payment $payment): bool
+    {
+        $intervalSeconds = max(0, (int) config('services.sakurupiah.create_retry_min_interval_seconds', 60));
+        $attemptedAt = $payment->provider_create_attempted_at;
+
+        return $intervalSeconds === 0
+            || $attemptedAt === null
+            || $attemptedAt->addSeconds($intervalSeconds)->isPast();
+    }
+
     private function tightenExpiry(Order $order, Payment $payment, ?CarbonImmutable $providerExpiresAt): void
     {
         if ($providerExpiresAt === null) {
@@ -964,15 +1118,17 @@ final class SakurupiahInvoiceLifecycleService
      */
     private function exceptionCode(Throwable $exception): string
     {
-        if ($exception instanceof SakurupiahApplicationException) {
-            return substr($exception::class.'|application_status:'.$exception->providerStatus, 0, 500);
+        $code = match (true) {
+            $exception instanceof SakurupiahProviderException && filled($exception->providerStatus) => $exception::class.'|application_status:'.$exception->providerStatus,
+            $exception instanceof SakurupiahProviderException && $exception->httpStatus !== null => $exception::class.'|http_status:'.$exception->httpStatus,
+            default => $exception::class,
+        };
+
+        if ($exception instanceof SakurupiahProviderException && filled($exception->providerMessage)) {
+            $code .= '|provider_message:'.preg_replace('/\s+/', ' ', (string) $exception->providerMessage);
         }
 
-        if ($exception instanceof SakurupiahProviderException && $exception->httpStatus !== null) {
-            return substr($exception::class.'|http_status:'.$exception->httpStatus, 0, 500);
-        }
-
-        return substr($exception::class, 0, 500);
+        return substr($code, 0, 500);
     }
 
     private function runtimeEnvironment(): SakurupiahEnvironment

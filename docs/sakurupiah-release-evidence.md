@@ -276,6 +276,76 @@ Sakurupiah webhook verification is explicitly queued on `default`. The release u
 
 The release path must use the supervised `default` queue. Do not move Sakurupiah verification to an unserved queue or add a second worker without updating the readiness contract and release evidence.
 
+## 2026-10-12 — production "no QR" incident: rejected creates were treated as ambiguous
+
+Live production checkout `INV-20261012-01M4R9AD07S2EANN49S3VK5X5W` (and an
+earlier `INV-20261012-01M4R6BZATN5NY5J1AR5HQZ91C`) produced no QR. Sanitized
+production evidence for the first invoice:
+
+- `payments.provider_create_state` ended `recovery_unconfirmed` with
+  `provider_create_last_error = missing_provider_reference`; the Payment had no
+  provider reference, no total, no fee, and no presentation.
+- `payment_events` recorded exactly one create observation:
+  `provider_create | outcome_unknown | App\Services\Sakurupiah\SakurupiahApplicationException|application_status:400`.
+- A read-only live `create.php` probe against the same production merchant with
+  a probe reference answered HTTP `200` with `{"status":"400","message":"Gagal
+  membuat Invoice. hubungi tim dukungan"}`. Probes of the same endpoint with
+  intentionally invalid parameters answered the documented specific reasons
+  (`Signature tidak valid`, `Batas minimal pembayaran adalah IDR 200`,
+  `Kode pembayaran tidak aktif…`), and provider history reported no transaction
+  for either failing merchant reference.
+
+Root cause (application, not presentation): the create path marked a create
+whose response arrived as a transport-ambiguous outcome, so the provider's own
+failure contract (`status` + `message`) was discarded and the Payment became
+permanently un-creatable; the next observation then relabelled it
+`recovery_unconfirmed`. The customer-visible Telegram/storefront copy showed the
+`recovery_pending` state ("Restoring QRIS payment"), which is why no QR or
+provider instruction ever appeared.
+
+Fix in this repository:
+
+- The client reads the documented failure contract from both the HTTP-200
+  envelope with a non-200 `status` and a non-retryable HTTP failure carrying the
+  same JSON, and raises it as `SakurupiahApplicationException` with the provider
+  status plus a sanitized, bounded reason (merchant reference and transaction ID
+  redacted). `SakurupiahProviderException::isProviderRejection()` is the single
+  predicate for "the provider decided".
+- A rejected create persists `create_failed` (never `outcome_unknown`) together
+  with `…|application_status:<status>|provider_message:<reason>` in
+  `provider_create_last_error`, so the cause is diagnosable from the Admin Order
+  detail and from the sanitized payment row.
+- The same merchant reference is created again when the condition is corrected,
+  at most once per `services.sakurupiah.create_retry_min_interval_seconds`
+  (default 60). The customer's **Check Payment**, the storefront status refresh,
+  and the scheduled `sakurupiah:reconcile` sweep all retry it; a throttled retry
+  stays `create_failed` instead of being downgraded.
+- The reconciliation sweep reports a `recovered` counter and queues the
+  presentation-recovery instruction effect when its work turns a Payment
+  payable, so the QR reaches the customer without another action.
+- Pre-request failures (notably the readiness gate) stamp no dispatch time, so
+  they retry immediately, and an ambiguous outcome remains non-retryable exactly
+  as before.
+
+Verification for this change:
+
+- `php artisan test --filter='Sakurupiah'`: **PASS** — 179 tests, 176 passed, 3
+  skipped, 1,135 assertions.
+- `SakurupiahStorefrontTest`: new case proves a rejected create is reported as a
+  retryable state and recovers to a payable QR on status refresh — 8 tests.
+- Live sandbox end-to-end through the real lifecycle and the real provider:
+  a below-minimum create was rejected and persisted
+  `application_status:400|provider_message:Batas minimal pembayaran adalah IDR 200`;
+  after the cause was corrected the retry on the same merchant reference returned
+  `payable` with a provider QR image presentation and total `200`; the persisted
+  presentation was reused on the next call with no second provider invoice.
+- Pint (`--test`) passed for every changed file after one formatting pass.
+
+Not covered by this change: the two historical Payments above stay stuck,
+because an ambiguous historical outcome is never re-created. The paid-out
+invoice `…01M4R9AD…` was cancelled; `…01M4R6BZ…` is still `pending_payment` and
+needs a fresh checkout (or an operator decision) after deployment.
+
 ## External behavior notes
 
 Sandbox observations and regression evidence are recorded here for operators.

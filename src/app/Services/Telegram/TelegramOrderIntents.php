@@ -24,7 +24,6 @@ use App\Services\PaymentReceiptReport;
 use App\Services\ProviderVerification\ProviderVerificationProfile;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
-use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\Warranty\WarrantyOrderAccess;
@@ -355,7 +354,7 @@ class TelegramOrderIntents
         }
 
         $payment = $order->payments->first();
-        $sakurupiahPresentationPendingBeforeRefresh = $this->isSakurupiahPresentationPending($payment);
+        $sakurupiahWasPayable = $this->isSakurupiahPayable($payment);
         $klikQrisPresentationPendingBeforeRefresh = $this->isKlikQrisPresentationPending($payment);
         $refreshNotice = $this->refreshProviderPaymentStatus($customer, $order, $payment);
         $sakurupiahPresentationRecovered = false;
@@ -367,9 +366,8 @@ class TelegramOrderIntents
                 'payments' => fn ($query) => $query->latest(),
             ]);
             $payment = $order->payments->first();
-            $sakurupiahPresentationRecovered = $sakurupiahPresentationPendingBeforeRefresh
-                && $payment?->provider_create_state === SakurupiahInvoiceLifecycleService::STATE_CREATED
-                && $this->sakurupiahLifecycle->classify($payment)->isPayable();
+            $sakurupiahPresentationRecovered = ! $sakurupiahWasPayable
+                && $this->isSakurupiahPayable($payment);
             $klikQrisPresentationRecovered = $klikQrisPresentationPendingBeforeRefresh
                 && $payment?->provider === PaymentProvider::KLIKQRIS
                 && $payment?->status === PaymentStatus::Pending
@@ -582,13 +580,18 @@ class TelegramOrderIntents
         };
     }
 
-    private function isSakurupiahPresentationPending(?Payment $payment): bool
+    private function isSakurupiahRefreshable(?Payment $payment): bool
     {
         return $payment !== null
             && strtolower(trim((string) $payment->provider)) === PaymentProvider::SAKURUPIAH
-            && $payment->status === PaymentStatus::Pending
-            && filled($payment->provider_reference)
-            && $this->sakurupiahLifecycle->classify($payment)->outcome() === SakurupiahInvoiceOutcome::ProviderPresentationPending;
+            && $this->sakurupiahLifecycle->isCustomerStatusRefreshable($payment);
+    }
+
+    private function isSakurupiahPayable(?Payment $payment): bool
+    {
+        return $payment !== null
+            && strtolower(trim((string) $payment->provider)) === PaymentProvider::SAKURUPIAH
+            && $this->sakurupiahLifecycle->classify($payment)->isPayable();
     }
 
     private function isKlikQrisPresentationPending(?Payment $payment): bool
@@ -681,7 +684,7 @@ class TelegramOrderIntents
 
     private function refreshPendingSakurupiahPresentation(Customer $customer, Order $order, ?Payment $payment): ?string
     {
-        if (! $this->isSakurupiahPresentationPending($payment)
+        if (! $this->isSakurupiahRefreshable($payment)
             || $order->order_status !== OrderStatus::PendingPayment
             || ! $this->sakurupiahReadiness->checkout()->isReady()) {
             return null;

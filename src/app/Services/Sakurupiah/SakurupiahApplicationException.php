@@ -10,6 +10,7 @@ final class SakurupiahApplicationException extends SakurupiahProviderException
         string $operation,
         string $providerStatus,
         bool $outcomeUnknown = false,
+        ?string $providerMessage = null,
         ?Throwable $previous = null,
     ) {
         parent::__construct(
@@ -18,11 +19,9 @@ final class SakurupiahApplicationException extends SakurupiahProviderException
             retryable: false,
             outcomeUnknown: $outcomeUnknown,
             operation: $operation,
+            providerStatus: $providerStatus,
+            providerMessage: $providerMessage,
             previous: $previous,
         );
-
-        $this->providerStatus = $providerStatus;
     }
-
-    public readonly string $providerStatus;
 }

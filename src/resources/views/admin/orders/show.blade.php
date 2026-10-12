@@ -225,6 +225,7 @@
                                 <div><dt class="text-xs font-medium text-admin-muted">Base amount</dt><dd class="text-sm font-semibold text-admin-ink">{{ $detail['base_amount'] }}</dd></div>
                                 <div><dt class="text-xs font-medium text-admin-muted">Final amount</dt><dd class="text-sm font-semibold text-admin-ink">{{ $detail['final_amount'] }}</dd></div>
                                 <div><dt class="text-xs font-medium text-admin-muted">provider_create_state</dt><dd class="text-sm font-semibold text-admin-ink">{{ $detail['provider_create_state'] }}</dd></div>
+                                <div class="sm:col-span-2"><dt class="text-xs font-medium text-admin-muted">Create diagnostic</dt><dd class="break-all text-xs text-admin-ink">{{ $detail['provider_create_last_error'] }}</dd></div>
                                 <div><dt class="text-xs font-medium text-admin-muted">Provider status</dt><dd class="text-sm font-semibold text-admin-ink">{{ $detail['provider_status'] }}</dd></div>
                                 <div><dt class="text-xs font-medium text-admin-muted">Expiry</dt><dd class="text-sm font-semibold text-admin-ink">{{ $detail['expires_at'] }}</dd></div>
                                 <div><dt class="text-xs font-medium text-admin-muted">Callback count</dt><dd class="text-sm font-semibold text-admin-ink">{{ $detail['callback_count'] }}</dd></div>

@@ -63,6 +63,10 @@ final class SakurupiahReconciliationQuery
                     ->orWhereIn('provider_create_state', [
                         SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN,
                         SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED,
+                        // A definitively rejected create is retried on the same
+                        // merchant reference, so the scheduled sweep must keep
+                        // selecting it until it becomes payable or expires.
+                        SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED,
                     ]);
             });
     }

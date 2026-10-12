@@ -5,10 +5,13 @@ namespace App\Console\Commands;
 use App\Enums\SakurupiahEnvironment;
 use App\Models\Payment;
 use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
+use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderLookupBudget;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahReconciliationOutcome;
 use App\Services\Sakurupiah\SakurupiahReconciliationQuery;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use DateTimeImmutable;
 use DateTimeInterface;
 use Illuminate\Console\Command;
@@ -28,6 +31,9 @@ final class ReconcileSakurupiahPayments extends Command
         SakurupiahCallbackProcessor $processor,
         SakurupiahProviderReadiness $readiness,
         SakurupiahReconciliationQuery $reconciliationQuery,
+        SakurupiahInvoiceLifecycleService $lifecycle,
+        TelegramOutboundEffectService $outboundEffects,
+        TelegramOutboundEffectDispatcher $outboundEffectDispatcher,
     ): int {
         $chunk = $this->validatedChunk();
         if ($chunk === null) {
@@ -63,6 +69,7 @@ final class ReconcileSakurupiahPayments extends Command
         $invalid = 0;
         $busy = 0;
         $failed = 0;
+        $recovered = 0;
 
         try {
             $cursor = $this->resumeCursor($cursorKey);
@@ -87,6 +94,7 @@ final class ReconcileSakurupiahPayments extends Command
                 // Advance only after this row produces a durable outcome. A
                 // failed row stays at the cursor for the next scheduled retry.
                 $paymentCursor = $this->cursorFor($payment);
+                $payableBefore = $lifecycle->classify($payment)->isPayable();
 
                 try {
                     $outcome = $processor->reconcilePayment($payment);
@@ -108,6 +116,14 @@ final class ReconcileSakurupiahPayments extends Command
                     SakurupiahReconciliationOutcome::Busy => $busy++,
                     default => $pending++,
                 };
+
+                // A sweep that turned an unpresentable Payment into a payable
+                // one delivers its QR instructions; the customer was told to
+                // wait, so recovery must not depend on another action.
+                if (! $payableBefore && $lifecycle->classify($payment)->isPayable()) {
+                    $recovered++;
+                    $this->deliverRecoveredInstructions($payment, $outboundEffects, $outboundEffectDispatcher);
+                }
 
                 if (hrtime(true) >= $executionDeadline) {
                     $budgetExhausted = true;
@@ -131,7 +147,7 @@ final class ReconcileSakurupiahPayments extends Command
             return self::FAILURE;
         }
 
-        $summary = "paid={$paid} expired={$expired} pending={$pending} verification_pending={$verificationPending} invalid={$invalid} busy={$busy} failed={$failed} budget_exhausted=".($budgetExhausted ? '1' : '0');
+        $summary = "paid={$paid} expired={$expired} pending={$pending} verification_pending={$verificationPending} invalid={$invalid} busy={$busy} failed={$failed} recovered={$recovered} budget_exhausted=".($budgetExhausted ? '1' : '0');
 
         if ($failed > 0) {
             $this->error('sakurupiah:reconcile completed with partial failures: '.$summary);
@@ -169,6 +185,33 @@ final class ReconcileSakurupiahPayments extends Command
     private function cursorKey(SakurupiahEnvironment $environment): string
     {
         return 'sakurupiah:reconcile:cursor:'.$environment->value;
+    }
+
+    /**
+     * Deliver QR instructions for a Payment this sweep turned payable. The
+     * recovery effect is created once per Payment, so repeated sweeps and a
+     * customer refresh cannot deliver it twice. Delivery failures never fail
+     * the sweep: the ledger keeps the effect for its own recovery path.
+     */
+    private function deliverRecoveredInstructions(
+        Payment $payment,
+        TelegramOutboundEffectService $outboundEffects,
+        TelegramOutboundEffectDispatcher $outboundEffectDispatcher,
+    ): void {
+        try {
+            $payment->loadMissing('order.customer');
+            $order = $payment->order;
+            if ($order === null) {
+                return;
+            }
+
+            $effect = $outboundEffects->recordSakurupiahPresentationRecovery($order, $payment, $order->customer);
+            if ($effect !== null) {
+                $outboundEffectDispatcher->dispatch($effect);
+            }
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 
     /**

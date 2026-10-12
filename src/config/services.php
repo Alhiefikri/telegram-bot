@@ -247,6 +247,11 @@ return [
         'lookup_retry_delay_ms' => 250,
         'lookup_retry_max_delay_ms' => 1000,
         'lock_lease_seconds' => 90,
+        // A definitive provider rejection of an invoice create is retried on
+        // the same merchant reference, at most once per this interval. The
+        // interval keeps a provider outage from turning every customer status
+        // refresh and every reconciliation sweep into a create request.
+        'create_retry_min_interval_seconds' => 60,
         'webhook_rate_limit_per_minute' => 30,
         'status_refresh_rate_limit_per_minute' => 3,
         'readiness_cache_seconds' => 60,

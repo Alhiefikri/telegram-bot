@@ -89,6 +89,7 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
             body: $invoice->toProviderPayload($apiId, $signature),
             lookup: false,
             outcomeUnknown: true,
+            redactions: [$invoice->merchantRef],
         );
 
         try {
@@ -113,6 +114,7 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
                 'trx_id' => $trxId,
             ],
             lookup: true,
+            redactions: [$trxId],
         );
 
         try {
@@ -138,6 +140,7 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
             path: 'transaction.php',
             body: $body,
             lookup: true,
+            redactions: [$filter->trxId, $filter->merchantRef],
         );
 
         try {
@@ -161,6 +164,7 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
 
     /**
      * @param  array<string, int|string>  $body
+     * @param  list<string|null>  $redactions
      */
     private function successfulPayload(
         string $operation,
@@ -168,18 +172,20 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
         array $body,
         bool $lookup,
         bool $outcomeUnknown = false,
+        array $redactions = [],
     ): array {
-        $response = $this->post($operation, $path, $body, $lookup);
+        $response = $this->post($operation, $path, $body, $lookup, $redactions);
         $payload = $this->decode($response, $operation, $outcomeUnknown);
-        $this->assertApplicationSuccess($payload, $operation, $outcomeUnknown);
+        $this->assertApplicationSuccess($payload, $operation, $outcomeUnknown, $redactions);
 
         return $payload;
     }
 
     /**
      * @param  array<string, int|string>  $body
+     * @param  list<string|null>  $redactions
      */
-    private function post(string $operation, string $path, array $body, bool $lookup): Response
+    private function post(string $operation, string $path, array $body, bool $lookup, array $redactions = []): Response
     {
         $this->assertReady();
 
@@ -203,6 +209,22 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
                 return $response;
             }
 
+            // The provider documents its own failure contract: an application
+            // status plus the reason in `message`. When that contract answers a
+            // non-retryable HTTP failure the request was processed and
+            // rejected, so no transport ambiguity remains. Retryable transport
+            // statuses keep the HTTP failure so a lookup can retry them.
+            $rejection = SakurupiahHttpException::isRetryableStatus($response->status())
+                ? null
+                : $this->providerFailureEnvelope($response);
+            if ($rejection !== null) {
+                throw new SakurupiahApplicationException(
+                    operation: $operation,
+                    providerStatus: $rejection['status'],
+                    providerMessage: SakurupiahProviderMessage::sanitize($rejection['message'], $redactions),
+                );
+            }
+
             $exception = new SakurupiahHttpException(
                 operation: $operation,
                 status: $response->status(),
@@ -218,6 +240,34 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
         }
 
         throw new SakurupiahTransportException($operation, outcomeUnknown: ! $lookup);
+    }
+
+    /**
+     * Read the provider's documented failure contract from a response body.
+     *
+     * @return array{status: string, message: ?string}|null
+     */
+    private function providerFailureEnvelope(Response $response): ?array
+    {
+        try {
+            $payload = json_decode($response->body(), true, 32, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING);
+        } catch (JsonException) {
+            return null;
+        }
+
+        if (! is_array($payload) || array_is_list($payload) || ! array_key_exists('status', $payload)) {
+            return null;
+        }
+
+        $status = $this->canonicalApplicationStatus($payload['status']);
+        if ($status === null || $status === '200') {
+            return null;
+        }
+
+        return [
+            'status' => $status,
+            'message' => is_string($payload['message'] ?? null) ? $payload['message'] : null,
+        ];
     }
 
     /** @return array<mixed> */
@@ -236,24 +286,46 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
         return $payload;
     }
 
-    /** @param array<mixed> $payload */
-    private function assertApplicationSuccess(array $payload, string $operation, bool $outcomeUnknown): void
+    /**
+     * @param  array<mixed>  $payload
+     * @param  list<string|null>  $redactions
+     */
+    private function assertApplicationSuccess(array $payload, string $operation, bool $outcomeUnknown, array $redactions = []): void
     {
         if (! array_key_exists('status', $payload)) {
             throw new SakurupiahSchemaException($operation, outcomeUnknown: $outcomeUnknown);
         }
 
-        $status = $payload['status'];
-        if (is_int($status)) {
-            if ($status === 200) {
-                return;
-            }
+        $status = $this->canonicalApplicationStatus($payload['status']);
+        if ($status === null) {
+            throw new SakurupiahSchemaException($operation, outcomeUnknown: $outcomeUnknown);
+        }
 
-            throw new SakurupiahApplicationException($operation, (string) $status, outcomeUnknown: $outcomeUnknown);
+        if ($status === '200') {
+            return;
+        }
+
+        throw new SakurupiahApplicationException(
+            operation: $operation,
+            providerStatus: $status,
+            providerMessage: SakurupiahProviderMessage::sanitize($payload['message'] ?? null, $redactions),
+            outcomeUnknown: $outcomeUnknown,
+        );
+    }
+
+    /**
+     * Canonicalize the provider application status without casting it.
+     *
+     * @return string|null Null when the value is not a documented status.
+     */
+    private function canonicalApplicationStatus(mixed $status): ?string
+    {
+        if (is_int($status)) {
+            return $status === 200 ? '200' : (string) $status;
         }
 
         if (! is_string($status) || preg_match('/^\d+$/', $status) !== 1) {
-            throw new SakurupiahSchemaException($operation, outcomeUnknown: $outcomeUnknown);
+            return null;
         }
 
         $canonicalStatus = ltrim($status, '0') ?: '0';
@@ -261,18 +333,10 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
         if (strlen($canonicalStatus) > strlen($maximumStatus)
             || (strlen($canonicalStatus) === strlen($maximumStatus) && strcmp($canonicalStatus, $maximumStatus) > 0)
         ) {
-            throw new SakurupiahSchemaException($operation, outcomeUnknown: $outcomeUnknown);
+            return null;
         }
 
-        if ($status !== $canonicalStatus) {
-            throw new SakurupiahSchemaException($operation, outcomeUnknown: $outcomeUnknown);
-        }
-
-        if ($canonicalStatus === '200') {
-            return;
-        }
-
-        throw new SakurupiahApplicationException($operation, $status, outcomeUnknown: $outcomeUnknown);
+        return $status === $canonicalStatus ? $canonicalStatus : null;
     }
 
     private function assertReady(): void

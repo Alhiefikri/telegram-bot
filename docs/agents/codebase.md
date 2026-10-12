@@ -1025,12 +1025,30 @@ and amount evidence, and delegates paid/expired transitions to `OrderLifecycle`.
 Late paid observations on terminal Orders become `ManualFulfillmentReview`
 without auto-fulfillment.
 
+Create outcomes are separated by whether the provider answered with its own
+failure contract. A documented rejection (application status plus reason, on
+either the HTTP-200 envelope or a non-retryable HTTP failure) proves that no
+transaction exists for the merchant reference, so it is persisted as
+`create_failed` with a sanitized `provider_create_last_error`
+(`…|application_status:<status>|provider_message:<reason>`, identifiers
+redacted and bounded) and the same reference is created again once the
+condition is corrected, at most once per
+`services.sakurupiah.create_retry_min_interval_seconds` (default 60). An
+ambiguous outcome (transport failure, retryable HTTP status, unreadable
+response) stays `outcome_unknown`/`recovery_unconfirmed` and is never
+re-created; it is only re-observed. `isCustomerStatusRefreshable()` is the
+customer-facing gate for both, and the reconciliation sweep delivers the
+`SakurupiahCheckoutInstructions` presentation-recovery effect when a sweep
+turns a Payment payable.
+
 [`ReconcileSakurupiahPayments`](../../src/app/Console/Commands/ReconcileSakurupiahPayments.php)
 (`sakurupiah:reconcile --chunk=100`) scans only Sakurupiah QRIS IDR Payments
 with a merchant reference in bounded eligible states, ordered deterministically
-by `(created_at, id)` with eager `order` loading. Terminal rows are bounded by
-a recent `updated_at` lookback. It reports only aggregate counts and redacted
-identifiers. The Postgres partial index
+by `(created_at, id)` with eager `order` loading; `outcome_unknown`,
+`recovery_unconfirmed`, and the retryable `create_failed` states are eligible
+too, so a rejected create is retried by the same bounded sweep. Terminal rows
+are bounded by a recent `updated_at` lookback. It reports only aggregate counts
+and redacted identifiers. The Postgres partial index
 `payments_sakurupiah_reconcile_cursor_idx` matches the scan predicate.
 
 The scheduler registers `sakurupiah:reconcile` every minute only when

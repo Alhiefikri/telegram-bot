@@ -272,6 +272,72 @@ class SakurupiahStorefrontTest extends TestCase
         ];
     }
 
+    public function test_rejected_create_is_reported_as_retryable_and_recovers_on_status_refresh(): void
+    {
+        [$order, $payment] = $this->payment([
+            'invoice_number' => 'INV-SAK-STOREFRONT-REJECTED',
+            'provider_reference' => null,
+            'provider_presentation' => null,
+            'provider_total_payment' => null,
+            'provider_fee' => null,
+            'provider_created_at' => null,
+            'provider_expires_at' => null,
+            'provider_payload' => [],
+            'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED,
+            'provider_create_last_error' => 'application_status:400|provider_message:Gagal membuat Invoice',
+            'provider_create_attempted_at' => now()->subMinutes(5),
+        ]);
+
+        $invoice = app(StorefrontShopSignedInvoice::class)->read($order);
+
+        $this->assertFalse($invoice->isQrisPayable);
+        $this->assertSame('creating', $invoice->qrisReadinessState);
+        $this->assertNull($invoice->qrisImageSource);
+        $this->assertNull($invoice->hostedPaymentUrl);
+
+        // The provider requires a reachable customer phone for the create.
+        $order->customer->update(['phone_number' => '08123456789']);
+
+        $provider = $this->mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')
+            ->once()
+            ->andReturn(new \App\Services\Sakurupiah\SakurupiahInvoice(
+                trxId: 'trx-retried-storefront',
+                merchantRef: (string) $payment->merchant_ref,
+                paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+                status: SakurupiahTransactionStatus::Pending,
+                total: 20_450,
+                amount: 20_000,
+                fee: SakurupiahFee::from(450),
+                createdAt: CarbonImmutable::now()->subMinute(),
+                expiresAt: $payment->expired_at->toImmutable(),
+                qr: self::DIRECT_QRIS,
+                sanitizedPayload: [
+                    'data' => [[
+                        'trx_id' => 'trx-retried-storefront',
+                        'merchant_ref' => $payment->merchant_ref,
+                        'payment_kode' => 'QRISC',
+                        'payment_status' => 'pending',
+                        'total' => '20450',
+                        'fee' => '450',
+                        'qr' => self::DIRECT_QRIS,
+                    ]],
+                ],
+                merchantFee: 1,
+            ));
+
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
+            ->assertOk()
+            ->assertJsonPath('qris_ready', true)
+            ->assertJsonPath('should_reload', true);
+
+        $fresh = $payment->fresh();
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $fresh->provider_create_state);
+        $this->assertSame('trx-retried-storefront', $fresh->provider_reference);
+        $this->assertNotNull($fresh->provider_presentation);
+        $this->assertTrue(app(StorefrontShopSignedInvoice::class)->read($order->fresh())->isQrisPayable);
+    }
+
     /** @return array{0: Order, 1: Payment} */
     private function payment(array $attributes = []): array
     {

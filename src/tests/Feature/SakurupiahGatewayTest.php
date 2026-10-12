@@ -164,17 +164,50 @@ class SakurupiahGatewayTest extends TestCase
         Http::assertSentCount(2);
     }
 
-    public function test_status_does_not_retry_unauthorized_http_failure(): void
+    public function test_status_does_not_retry_provider_application_rejection(): void
     {
-        Http::fake(fn () => Http::response(['status' => '401'], 401));
+        Http::fake(fn () => Http::response(['status' => '401', 'message' => 'Merchant tidak aktif'], 401));
+
+        try {
+            app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+            $this->fail('Expected provider application rejection.');
+        } catch (SakurupiahApplicationException $exception) {
+            $this->assertSame('401', $exception->providerStatus);
+            $this->assertSame('Merchant tidak aktif', $exception->providerMessage);
+            $this->assertTrue($exception->isProviderRejection());
+            $this->assertFalse($exception->isOutcomeUnknown());
+        }
+        Http::assertSentCount(1);
+    }
+
+    public function test_status_does_not_retry_http_failure_without_the_provider_contract(): void
+    {
+        Http::fake(fn () => Http::response('<html>gateway timeout</html>', 401));
 
         try {
             app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
             $this->fail('Expected HTTP failure.');
         } catch (SakurupiahHttpException $exception) {
             $this->assertSame(401, $exception->httpStatus);
+            $this->assertNull($exception->providerStatus);
+            $this->assertFalse($exception->isProviderRejection());
         }
         Http::assertSentCount(1);
+    }
+
+    public function test_provider_rejection_redacts_known_identifiers(): void
+    {
+        Http::fake(fn () => Http::response([
+            'status' => '400',
+            'message' => "Kode ref atau merchant_ref trx-408 sudah ada\nstatus pending",
+        ], 400));
+
+        try {
+            app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+            $this->fail('Expected provider application rejection.');
+        } catch (SakurupiahApplicationException $exception) {
+            $this->assertSame('Kode ref atau merchant_ref [redacted] sudah ada status pending', $exception->providerMessage);
+        }
     }
 
     public function test_create_transport_failure_is_outcome_unknown_and_never_retried(): void
@@ -250,10 +283,27 @@ class SakurupiahGatewayTest extends TestCase
 
     public function test_client_distinguishes_http_failure(): void
     {
-        Http::fake(fn () => Http::response(['status' => '400'], 400));
+        Http::fake(fn () => Http::response('<html>bad request</html>', 400));
 
         $this->expectException(SakurupiahHttpException::class);
         app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+    }
+
+    public function test_client_reads_the_documented_failure_contract_from_a_4xx_response(): void
+    {
+        Http::fake(fn () => Http::response([
+            'status' => '400',
+            'message' => 'Gagal membuat Invoice. hubungi tim dukungan',
+        ], 400));
+
+        try {
+            app(SakurupiahProviderAdapter::class)->createInvoice($this->invoice());
+            $this->fail('Expected provider application rejection.');
+        } catch (SakurupiahApplicationException $exception) {
+            $this->assertSame('400', $exception->providerStatus);
+            $this->assertSame('Gagal membuat Invoice. hubungi tim dukungan', $exception->providerMessage);
+            $this->assertFalse($exception->isOutcomeUnknown());
+        }
     }
 
     public function test_history_preserves_provider_mechant_spelling(): void

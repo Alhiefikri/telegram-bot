@@ -116,9 +116,14 @@ final class SakurupiahCallbackProcessor
 
         $providerReference = trim((string) $payment->provider_reference);
         if ($providerReference === '') {
-            $this->lifecycle->persistRecoveryUnconfirmed($payment, 'missing_provider_reference');
+            // No provider reference exists yet. A definitively rejected create
+            // is retried on the same merchant reference; an ambiguous outcome
+            // only records the missing observation.
+            $recovered = $this->lifecycle->recoverWhileLocked($payment);
 
-            return SakurupiahReconciliationOutcome::VerificationPending;
+            return $recovered->isPayable()
+                ? SakurupiahReconciliationOutcome::Pending
+                : SakurupiahReconciliationOutcome::VerificationPending;
         }
 
         try {

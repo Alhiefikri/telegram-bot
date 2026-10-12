@@ -195,6 +195,7 @@ class AdminOrderDetailController extends Controller
             'base_amount' => Money::idr((int) $payment->amount),
             'final_amount' => $payment->provider_total_payment !== null ? Money::idr((int) $payment->provider_total_payment) : '-',
             'provider_create_state' => $payment->provider_create_state ?: '-',
+            'provider_create_last_error' => $this->bounded((string) $payment->provider_create_last_error, 200) ?: '-',
             'provider_status' => $eventSummary[0]['provider_status'] ?? '-',
             'expires_at' => $payment->provider_expires_at?->copy()->timezone((string) config('app.timezone'))->format('Y-m-d H:i') ?? '-',
             'callback_count' => (int) $callbackCount,

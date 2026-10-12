@@ -149,18 +149,69 @@ starting its loop. That health check includes `--supervisor`, so live worker
 ownership is verified before the scheduler can run; the bootstrap readiness
 gate itself remains a non-invasive queue/schema/schedule configuration check.
 
+## Create rejection and QR recovery
+
+The provider documents its own failure contract: an application status plus a
+reason in `message`. Either shape carries that contract — the HTTP-200 envelope
+with a non-200 `status`, or a non-retryable HTTP failure whose body is the same
+JSON. When a create is answered that way, the provider decided: no transaction
+exists for the merchant reference yet.
+
+- The Payment is persisted as `create_failed` and stays payable/recoverable. It
+  is not downgraded to `outcome_unknown`, because that state must never be
+  re-created.
+- `provider_create_last_error` records the sanitized cause
+  (`…|application_status:<status>|provider_message:<reason>`). The reason is
+  bounded to 200 characters, whitespace-normalized, and has the merchant
+  reference and transaction ID redacted, so it never stores a credential or an
+  identifier.
+- The same merchant reference is created again when the condition is corrected,
+  at most once per `services.sakurupiah.create_retry_min_interval_seconds`
+  (default 60 seconds). The customer's **Check Payment**, the storefront invoice
+  refresh, and the scheduled sweep all retry it, so a corrected
+  merchant/channel condition does not need a new checkout and needs no operator
+  step. The admin manual reconcile stays limited to Payments that already have a
+  provider reference.
+- A sweep that turns an unpresentable Payment payable also queues the QR
+  instruction effect for the customer; the delivery effect key is per Payment,
+  so repeated sweeps cannot send it twice.
+- An ambiguous outcome stays `outcome_unknown`/`recovery_unconfirmed` and is
+  never re-created. It only performs status lookups until it becomes observable.
+
+Diagnose a rejected create from the Admin Order detail (`Create diagnostic`) or
+from the sanitized payment row, then correct the merchant/channel condition:
+
+```bash
+cd src
+php artisan sakurupiah:check-readiness --json   # channel/contract/readiness
+php artisan sakurupiah:reconcile --chunk=100     # retry + observe
+```
+
+Observed production example: `application_status:400|provider_message:Gagal
+membuat Invoice. hubungi tim dukungan` on a live `QRISC` create. The provider
+accepted the request shape (a rejected-signature request answers
+`Signature tidak valid`) and rejected the transaction creation itself, so the
+correct action is a provider-side/merchant-side check, not a code change.
+
 ## Reconciliation
 
 `sakurupiah:reconcile` scans only Sakurupiah QRIS IDR Payments in bounded
 eligible states, ordered deterministically by `(created_at, id)`, with a fair
 persisted cursor, a hard execution deadline, eager relation loading, and a
-per-Payment single-flight lock. It never issues a create request, never holds a
-database transaction across HTTP, and reports only aggregate counts and redacted
-identifiers:
+per-Payment single-flight lock. It holds no database transaction across HTTP and
+reports only aggregate counts and redacted identifiers:
 
 ```bash
 php artisan sakurupiah:reconcile --chunk=100
 ```
+
+Status lookup is the normal action. The one create-shaped exception is a
+**definitively rejected create** (`provider_create_state=create_failed` without a
+provider reference): the provider proved that no transaction exists for that
+merchant reference, so the sweep re-creates the invoice on the same reference,
+at most once per `services.sakurupiah.create_retry_min_interval_seconds`
+(default 60). An ambiguous create outcome is never re-created — it is only
+re-observed.
 
 Expected summary counters:
 
@@ -172,6 +223,8 @@ Expected summary counters:
   the Order stays unchanged and the next sweep retries.
 - `invalid` — identity/amount mismatch recorded; no lifecycle change.
 - `busy` — the Payment lock was held by create/callback/refresh work.
+- `recovered` — this sweep turned an unpresentable Payment payable and queued its
+  QR delivery effect (or reused the persisted presentation).
 - `failed` — an unexpected error; inspect the sanitized log, never raw payloads.
 - `budget_exhausted=1` — the execution deadline stopped the page early; the
   persisted cursor resumes the next bounded sweep.

@@ -14,15 +14,20 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\TelegramOutboundEffect;
 use App\Services\OrderLifecycle;
 use App\Services\Sakurupiah\SakurupiahAmount;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
+use App\Services\Sakurupiah\SakurupiahFee;
+use App\Services\Sakurupiah\SakurupiahInvoice;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahProviderLookupBudget;
 use App\Services\Sakurupiah\SakurupiahStatus;
 use App\Services\Sakurupiah\SakurupiahTransactionStatus;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
@@ -444,6 +449,108 @@ class SakurupiahReconciliationTest extends TestCase
         $this->assertStringContainsString('sakurupiah:reconcile --chunk=100', $schedule);
         $this->assertStringContainsString('ReconcileSakurupiahPayments::schedulerMutexMinutes()', $schedule);
         $this->assertStringContainsString('scheduleRegistrationEnabledFor', $schedule);
+    }
+
+    public function test_command_retries_a_rejected_create_on_the_same_reference_and_delivers_the_qr(): void
+    {
+        $payment = $this->sakurupiahPayment([
+            'merchant_ref' => 'SAKU-REJECTED',
+            'provider_reference' => null,
+            'provider_payment_method' => null,
+            'provider_total_payment' => null,
+            'provider_fee' => null,
+            'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED,
+            'provider_create_last_error' => 'application_status:400|provider_message:Gagal membuat Invoice',
+            'provider_create_attempted_at' => now()->subMinutes(5),
+        ]);
+
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')
+            ->andReturnUsing(fn (): SakurupiahStatus => $this->providerStatus($payment->fresh(), SakurupiahTransactionStatus::Pending));
+        $provider->shouldReceive('transactionHistory')->never();
+        $provider->shouldReceive('createInvoice')->once()->andReturn($this->payableInvoice($payment));
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->artisan('sakurupiah:reconcile --chunk=10')
+            ->expectsOutputToContain('pending=1 verification_pending=0 invalid=0 busy=0 failed=0 recovered=1')
+            ->assertExitCode(0);
+
+        $fresh = $payment->fresh();
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $fresh->provider_create_state);
+        $this->assertSame('trx-retried', $fresh->provider_reference);
+        $this->assertNotNull($fresh->provider_presentation);
+        $this->assertSame(
+            1,
+            TelegramOutboundEffect::query()
+                ->where('effect_key', TelegramOutboundEffectService::sakurupiahPresentationRecoveryEffectKey((string) $payment->getKey()))
+                ->count(),
+        );
+
+        // A later sweep reuses the persisted presentation instead of creating
+        // a second provider invoice.
+        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        $this->assertSame('trx-retried', $payment->fresh()->provider_reference);
+    }
+
+    public function test_command_keeps_a_rejected_create_retryable_inside_the_retry_interval(): void
+    {
+        $payment = $this->sakurupiahPayment([
+            'merchant_ref' => 'SAKU-THROTTLED',
+            'provider_reference' => null,
+            'provider_payment_method' => null,
+            'provider_total_payment' => null,
+            'provider_fee' => null,
+            'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED,
+            'provider_create_last_error' => 'application_status:400',
+            'provider_create_attempted_at' => now(),
+        ]);
+
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->never();
+        $provider->shouldReceive('transactionStatus')->never();
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->artisan('sakurupiah:reconcile --chunk=10')
+            ->expectsOutputToContain('verification_pending=1')
+            ->assertExitCode(0);
+
+        $fresh = $payment->fresh();
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED, $fresh->provider_create_state);
+        $this->assertNull($fresh->provider_reference);
+    }
+
+    private function payableInvoice(Payment $payment, string $trxId = 'trx-retried'): SakurupiahInvoice
+    {
+        $amount = (int) $payment->amount;
+        $total = $amount + 84;
+
+        return new SakurupiahInvoice(
+            trxId: $trxId,
+            merchantRef: (string) $payment->merchant_ref,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+            status: SakurupiahTransactionStatus::Pending,
+            total: $total,
+            amount: $amount,
+            fee: SakurupiahFee::from(84),
+            createdAt: CarbonImmutable::now()->subMinute(),
+            expiresAt: CarbonImmutable::now()->addDay(),
+            checkoutUrl: 'https://sakurupiah.id/pay/invoice',
+            sanitizedPayload: [
+                'status' => '200',
+                'data' => [[
+                    'trx_id' => $trxId,
+                    'merchant_ref' => $payment->merchant_ref,
+                    'payment_kode' => 'QRISC',
+                    'payment_status' => 'pending',
+                    'amount' => (string) $amount,
+                    'total' => (string) $total,
+                    'fee' => '84',
+                    'checkout_url' => 'https://sakurupiah.id/pay/invoice',
+                ]],
+            ],
+            merchantFee: 1,
+        );
     }
 
     private function sakurupiahPayment(array $attributes = []): Payment

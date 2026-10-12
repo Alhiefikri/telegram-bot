@@ -61,6 +61,8 @@ Karena callback tidak membawa amount dan dokumentasi status endpoint hanya menun
 
 Create yang timeout, connection error, HTTP 5xx, invalid JSON setelah request mungkin terkirim, atau duplicate-reference behavior yang belum diketahui harus masuk recovery pada Payment yang sama. Jangan mengganti Sakurupiah dengan Manual/KlikQRIS dan jangan membuat `Payment` kedua.
 
+Sebaliknya, create yang dijawab dengan kontrak kegagalan provider sendiri (application status + `message`, baik pada envelope HTTP 200 maupun pada HTTP failure non-retryable) adalah keputusan: tidak ada transaksi milik `merchant_ref` tersebut. Payment tetap recoverable pada reference yang sama dan boleh di-create ulang setelah kondisinya diperbaiki, dibatasi `services.sakurupiah.create_retry_min_interval_seconds`; statusnya tidak boleh diturunkan menjadi outcome ambigu yang tidak dapat di-create ulang.
+
 ### 6. Tidak ada perubahan Payment historis
 
 Payment yang telah dibuat mempertahankan `provider`, `method`, setting snapshot, callback interpretation, dan lifecycle asal. Perubahan provider aktif tidak me-reinterpret Payment lama. Pakasir tetap compatibility lane sampai retirement gate terpisah selesai.

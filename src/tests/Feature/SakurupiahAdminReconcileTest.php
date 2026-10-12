@@ -123,6 +123,27 @@ class SakurupiahAdminReconcileTest extends TestCase
             ->assertSee('12 total, 10 ditampilkan');
     }
 
+    public function test_order_detail_shows_the_provider_create_diagnostic(): void
+    {
+        $this->withoutVite();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $payment = $this->sakurupiahPayment([
+            'merchant_ref' => 'SAKU-DIAGNOSTIC',
+            'provider_reference' => null,
+            'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED,
+            'provider_create_last_error' => 'application_status:400|provider_message:Gagal membuat Invoice. hubungi tim dukungan',
+        ]);
+
+        $html = $this->actingAs($owner)
+            ->get(route('admin.orders.show', $payment->order_id))
+            ->assertOk()
+            ->assertSee('Create diagnostic')
+            ->assertSee('Gagal membuat Invoice. hubungi tim dukungan')
+            ->getContent();
+
+        $this->assertStringNotContainsString('SAKU-DIAGNOSTIC', $html);
+    }
+
     public function test_order_detail_shows_manual_reconcile_action_only_when_reconcilable(): void
     {
         $this->withoutVite();
