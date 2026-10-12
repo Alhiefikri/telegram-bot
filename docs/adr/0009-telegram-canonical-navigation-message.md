@@ -34,6 +34,22 @@ inline catalog callbacks then edit that new message, not an older `/start`
 panel. If no root exists, the command keeps the existing send path. Legacy
 reply-keyboard labels also create a fresh root and remove the old keyboard.
 
+### Catalog refresh exception (2026-10-12)
+
+The family catalog footer is one row: Filter, Refresh, Back to menu.
+`catalog:refresh` returns to the unfiltered first catalog page and bypasses the
+public projection cache, so it reads current catalog visibility and stock.
+It deletes only the originating catalog message, then sends a replacement and
+promotes that message to the private chat's canonical root. Existing generation
+leases serialize replacement; callbacks targeting the previous root are stale.
+Group refresh replaces the originating public catalog message without creating
+a private root. Legacy private catalogs without a root establish one on refresh.
+The empty catalog retains the same footer.
+
+Deletion precedes delivery as requested. If delivery fails after deletion,
+the customer may need `/product` to reopen the catalog; ambiguous sends are
+not retried blindly.
+
 Rendering leases the stored generation before touching Telegram and commits the
 new screen/locale projection only after the edit is proven. A lost lease, an
 ambiguous Telegram result, or `message is not modified` therefore never

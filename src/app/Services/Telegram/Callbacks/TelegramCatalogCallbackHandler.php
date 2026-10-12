@@ -15,6 +15,7 @@ use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
+use App\Services\Telegram\TelegramNavigationRootService;
 
 class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
 {
@@ -27,6 +28,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
         private TelegramLocale $locale,
         private TelegramMenuIntents $menu,
         private TelegramNavigationPresenter $navigation,
+        private TelegramNavigationRootService $roots,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -41,7 +43,7 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
 
     public function supports(TelegramCallbackContext $context): bool
     {
-        return in_array($context->data, ['katalog', 'back:categories', 'catalog:categories', 'family:back:menu'], true)
+        return in_array($context->data, ['katalog', 'back:categories', 'catalog:categories', 'catalog:refresh', 'family:back:menu'], true)
             || preg_match('/^category:([1-9][0-9]*|uncategorized)(?::page:[1-9][0-9]*)?$/', $context->data) === 1
             || preg_match('/^family:list:[1-9][0-9]{0,18}(?::o[a-f0-9]{16})?$/', $context->data) === 1
             || preg_match('/^family:search:[a-f0-9]{16}:[1-9][0-9]{0,18}$/', $context->data) === 1
@@ -54,6 +56,23 @@ class TelegramCatalogCallbackHandler implements TelegramCallbackHandler
     {
         if ($context->data === 'family:back:menu') {
             $this->handleBackToMenu($context);
+
+            return true;
+        }
+
+        if ($context->data === 'catalog:refresh') {
+            $root = $context->isPrivate()
+                ? $this->roots->currentForChat($context->customer, $context->chatId)
+                : null;
+            if ($context->messageId === null || ($root !== null && $this->navigation->matchRoot($context->customer, $context) === null)) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'callback.navigation_stale'));
+
+                return true;
+            }
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->session->forgetWithLock($context->customer);
+            $this->catalogQueries->forget($context->customer);
+            $this->catalog->sendCatalogPage($context->customer, $context->chatId, messageId: $context->messageId, refresh: true);
 
             return true;
         }

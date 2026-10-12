@@ -120,13 +120,17 @@ class TelegramNavigationRootService
         return $this->persistRoot($customer, trim($chatId), $surface, $sent);
     }
 
-    public function render(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRenderOutcome
+    public function render(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface, bool $refresh = false): TelegramNavigationRenderOutcome
     {
         $chatId = trim($chatId);
         $claimed = $this->claim($root, $chatId);
         if ($claimed === null) {
             return TelegramNavigationRenderOutcome::Superseded;
         }
+        if ($refresh) {
+            return $this->replaceRoot($claimed, $chatId, $surface, deleteBeforeSend: true);
+        }
+
         if (($surface->screen === TelegramNavigationScreen::Product
                 && ($claimed->screen !== TelegramNavigationScreen::Product
                     || ($claimed->media_kind === TelegramNavigationMediaKind::Photo
@@ -290,9 +294,12 @@ class TelegramNavigationRootService
      * whether the replacement can stay a photo (caption within the media
      * limit) or must be sent as text.
      */
-    private function replaceRoot(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface): TelegramNavigationRenderOutcome
+    private function replaceRoot(TelegramNavigationRoot $root, string $chatId, TelegramNavigationSurface $surface, bool $deleteBeforeSend = false): TelegramNavigationRenderOutcome
     {
         try {
+            if ($deleteBeforeSend) {
+                $this->bot->deleteMessage($chatId, $root->message_id);
+            }
             $sent = $surface->screen === TelegramNavigationScreen::Product
                 ? $this->sendProduct($chatId, $surface)
                 : $this->banner->send(
@@ -334,8 +341,8 @@ class TelegramNavigationRootService
                 'customer_id' => $root->customer_id,
                 'message_id' => $sent->messageId,
             ]);
-        } elseif ($root->screen === TelegramNavigationScreen::Product
-            || $surface->screen === TelegramNavigationScreen::Product) {
+        } elseif (! $deleteBeforeSend && ($root->screen === TelegramNavigationScreen::Product
+            || $surface->screen === TelegramNavigationScreen::Product)) {
             try {
                 $this->bot->deleteMessage($chatId, $root->message_id);
             } catch (Throwable $exception) {

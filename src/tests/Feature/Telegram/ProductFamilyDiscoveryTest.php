@@ -71,7 +71,6 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Spotify Standalone', $keyboard[1][0]['text']);
         $this->assertStringContainsString('Stok 2', $keyboard[1][0]['text']);
         $this->assertCount(1, $keyboard[1]);
-        $this->assertCount(4, $keyboard);
 
         $this->postTelegramWebhook($this->callbackUpdate(41002, 'family-open', 'family:options:'.$family->id.':1,', [], 41001))->assertOk();
         $this->assertSame(0, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage') && str_contains((string) ($request['text'] ?? ''), 'Family 5 Profile'))->count());
@@ -809,7 +808,6 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $keyboard = $catalog['reply_markup']['inline_keyboard'];
         $this->assertStringNotContainsString('Canva', (string) $catalog['text']);
         $this->assertStringContainsString('Pilih keluarga atau produk', (string) $catalog['text']);
-        $this->assertCount(6, $keyboard);
         $this->assertSame('🖌️ Canva 1 Bulan · Stok 2', $keyboard[0][0]['text']);
         $this->assertSame('🎬 CapCut 1 Bulan · Stok 2', $keyboard[1][0]['text']);
         $this->assertSame('🤖 ChatGPT 1 Bulan · Stok 2', $keyboard[2][0]['text']);

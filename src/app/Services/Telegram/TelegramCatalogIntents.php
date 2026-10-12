@@ -77,6 +77,7 @@ class TelegramCatalogIntents
         ?int $messageId = null,
         bool $establishFreshRoot = false,
         bool $removeLegacyReplyKeyboard = false,
+        bool $refresh = false,
     ): void {
         $requestedPage = max(1, $page);
         $query = CatalogBrowseQuery::fromValues(
@@ -85,7 +86,7 @@ class TelegramCatalogIntents
             page: $requestedPage,
             perPage: self::FAMILY_LIST_PER_PAGE,
         );
-        $result = $this->cachedPublicBrowse($query);
+        $result = $refresh ? $this->browse->browsePublic($query) : $this->cachedPublicBrowse($query);
         if ($result->pagination->total > 0 && $result->pagination->currentPage !== $requestedPage) {
             $this->sendStaleCatalog($customer, $chatId, $messageId, $establishFreshRoot, $removeLegacyReplyKeyboard);
 
@@ -111,6 +112,7 @@ class TelegramCatalogIntents
             $messageId,
             establishFreshRoot: $establishFreshRoot,
             removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
+            refresh: $refresh,
         );
     }
 
@@ -1006,6 +1008,7 @@ class TelegramCatalogIntents
         ?int $messageId = null,
         bool $establishFreshRoot = false,
         bool $removeLegacyReplyKeyboard = false,
+        bool $refresh = false,
     ): void {
         $maintenance = $this->maintenance->current();
         $html = $mode !== 'catalog';
@@ -1057,6 +1060,7 @@ class TelegramCatalogIntents
                 $messageId,
                 establishFreshRoot: $establishFreshRoot,
                 removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
+                refresh: $refresh,
             );
 
             return;
@@ -1109,6 +1113,7 @@ class TelegramCatalogIntents
             options: $html ? ['parse_mode' => 'HTML'] : [],
             establishFreshRoot: $establishFreshRoot,
             removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
+            refresh: $refresh,
         );
     }
 
@@ -1126,6 +1131,7 @@ class TelegramCatalogIntents
         array $options = [],
         bool $establishFreshRoot = false,
         bool $removeLegacyReplyKeyboard = false,
+        bool $refresh = false,
     ): void {
         $root = $messageId === null
             ? $this->roots->currentForChat($customer, $chatId)
@@ -1157,7 +1163,23 @@ class TelegramCatalogIntents
                 $text,
                 $replyMarkup,
                 $options,
-            ));
+            ), refresh: $refresh);
+
+            return;
+        }
+        if ($refresh && $messageId !== null) {
+            $this->bot->deleteMessage($chatId, $messageId);
+            if ((string) $customer->telegram_id === $chatId) {
+                $this->roots->establishText($customer, $chatId, new TelegramNavigationSurface(
+                    TelegramNavigationScreen::Catalog,
+                    $this->locale->code($customer),
+                    $text,
+                    $replyMarkup,
+                    $options,
+                ));
+            } else {
+                $this->bot->sendMessage($chatId, $text, $replyMarkup, $options);
+            }
 
             return;
         }
@@ -1421,16 +1443,20 @@ class TelegramCatalogIntents
     private function browseNavigationKeyboard(Customer $customer, string $mode, bool $includeEmptyFallback = true): array
     {
         if ($mode === 'catalog') {
-            return [
-                [[
-                    'text' => $this->locale->translate($customer, 'catalog.family.filter_category'),
+            return [[
+                [
+                    'text' => $this->locale->translate($customer, 'catalog.family.filter'),
                     'callback_data' => 'catalog:categories',
-                ]],
-                [[
+                ],
+                [
+                    'text' => $this->locale->translate($customer, 'catalog.family.refresh'),
+                    'callback_data' => 'catalog:refresh',
+                ],
+                [
                     'text' => $this->locale->translate($customer, 'catalog.family.back_menu'),
                     'callback_data' => 'family:back:menu',
-                ]],
-            ];
+                ],
+            ]];
         }
         if ($mode === 'category') {
             return [[[

@@ -405,6 +405,51 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
             && ($request['text'] ?? null) === app(TelegramLocale::class)->translate($customer, 'callback.navigation_recovery'));
     }
 
+    public function test_catalog_refresh_replaces_the_message_with_uncached_stock_and_rejects_old_callbacks(): void
+    {
+        $this->fakeCanonicalTelegram();
+        Customer::factory()->create(['telegram_id' => 45450, 'locale' => 'en']);
+        $family = ProductFamily::factory()->create(['name' => 'Fresh family']);
+        $product = Product::factory()->create([
+            'name' => 'Fresh plan',
+            'product_family_id' => $family->id,
+            'is_active' => true,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+        $this->postTelegramWebhook($this->messageUpdate(45450, '/start', [], 45450))->assertOk();
+        $oldMessageId = TelegramNavigationRoot::query()->sole()->message_id;
+        $this->postTelegramWebhook($this->callbackUpdate(45451, 'open-refresh-list', 'katalog', [], 45450, 'private', $oldMessageId))->assertOk();
+        $keyboard = $this->lastCanonicalEdit(45450)['reply_markup']['inline_keyboard'];
+        $this->assertSame(
+            ['catalog:categories', 'catalog:refresh', 'family:back:menu'],
+            array_column($keyboard[array_key_last($keyboard)], 'callback_data'),
+        );
+        $this->assertStringContainsString('Stock 2', json_encode($keyboard, JSON_THROW_ON_ERROR));
+
+        DB::table('products')->where('id', $product->id)->update(['stock' => 7]);
+        $this->postTelegramWebhook($this->callbackUpdate(45452, 'refresh-list', 'catalog:refresh', [], 45450, 'private', $oldMessageId))->assertOk();
+        $newMessageId = TelegramNavigationRoot::query()->sole()->message_id;
+        $this->assertNotSame($oldMessageId, $newMessageId);
+        $sends = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto')
+            || str_ends_with($request->url(), '/sendMessage'));
+        $fresh = $sends->last()[0]->data();
+        $this->assertStringContainsString('Stock 7', json_encode($fresh['reply_markup'], JSON_THROW_ON_ERROR));
+        $effects = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/deleteMessage')
+            || str_ends_with($request->url(), '/sendPhoto')
+            || str_ends_with($request->url(), '/sendMessage'))->values();
+        $this->assertStringEndsWith('/deleteMessage', $effects[$effects->count() - 2][0]->url());
+        $this->assertSame($oldMessageId, (int) $effects[$effects->count() - 2][0]['message_id']);
+
+        $this->postTelegramWebhook($this->callbackUpdate(45453, 'stale-refresh-list', 'catalog:refresh', [], 45450, 'private', $oldMessageId))->assertOk();
+        $this->assertSame(2, $this->routineMessageCount(45450));
+        $this->assertCount(1, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/deleteMessage')));
+        $this->postTelegramWebhook($this->callbackUpdate(45454, 'fresh-filter', 'catalog:categories', [], 45450, 'private', $newMessageId))->assertOk();
+        $this->assertSame($newMessageId, (int) $this->lastCanonicalEdit(45450)['message_id']);
+        $this->postTelegramWebhook($this->callbackUpdate(45455, 'fresh-back-home', 'family:back:menu', [], 45450, 'private', $newMessageId))->assertOk();
+        $this->assertSame(TelegramNavigationScreen::Home, TelegramNavigationRoot::query()->sole()->screen);
+    }
+
     public function test_catalog_navigation_edits_the_canonical_message_and_returns_home(): void
     {
         $this->fakeCanonicalTelegram();
