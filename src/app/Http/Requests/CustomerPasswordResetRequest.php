@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rules\Password;
 
 class CustomerPasswordResetRequest extends FormRequest
 {
@@ -15,7 +16,7 @@ class CustomerPasswordResetRequest extends FormRequest
     {
         return [
             'token' => ['nullable', 'string', 'max:128'],
-            'password' => ['required', 'string', 'min:12', 'max:128', 'confirmed'],
+            'password' => ['required', 'string', Password::min(8)->numbers()->symbols(), 'regex:/\p{Lu}/u', 'max:128', 'confirmed'],
         ];
     }
 }

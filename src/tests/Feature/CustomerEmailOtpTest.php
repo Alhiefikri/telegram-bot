@@ -106,7 +106,7 @@ class CustomerEmailOtpTest extends TestCase
         $customer = $this->customer();
         [$challenge, $code, $token] = $this->issue($customer);
         $this->post(route('customer.password-reset.consume'), [
-            'token' => $challenge, 'password' => 'Unwanted replacement password', 'password_confirmation' => 'Unwanted replacement password',
+            'token' => $challenge, 'password' => 'Unwanted replacement password1!', 'password_confirmation' => 'Unwanted replacement password1!',
         ])->assertSessionHas('customer_login_error');
         $this->assertNull($customer->fresh()->password);
         $this->assertNull($token->fresh()->consumed_at);

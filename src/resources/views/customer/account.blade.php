@@ -69,7 +69,7 @@
                                     <label for="account-password">{{ $authView === 'register' ? 'Password baru' : 'Password' }}</label>
                                     <span class="auth-field auth-password-field">
                                         @include('customer.partials.auth-icon', ['icon' => 'password'])
-                                        <input id="account-password" class="auth-input" name="password" type="password" required @if($authView === 'register') minlength="12" aria-describedby="register-password-help" @endif maxlength="128" autocomplete="{{ $authView === 'register' ? 'new-password' : 'current-password' }}" placeholder="{{ $authView === 'register' ? 'Min. 12 karakter' : 'Password kamu' }}">
+                                        <input id="account-password" class="auth-input" name="password" type="password" required @if($authView === 'register') minlength="8" aria-describedby="register-password-help" @endif maxlength="128" autocomplete="{{ $authView === 'register' ? 'new-password' : 'current-password' }}" placeholder="{{ $authView === 'register' ? 'Min. 8 karakter' : 'Password kamu' }}">
                                         <button type="button" class="auth-password-toggle" data-password-toggle aria-label="Tampilkan password" aria-controls="account-password" aria-pressed="false" hidden>@include('customer.partials.auth-icon', ['icon' => 'eye'])</button>
                                     </span>
                                 </div>
@@ -78,13 +78,13 @@
                                         <label for="account-password-confirmation">Konfirmasi password</label>
                                         <span class="auth-field auth-password-field">
                                             @include('customer.partials.auth-icon', ['icon' => 'password'])
-                                            <input id="account-password-confirmation" class="auth-input" name="password_confirmation" type="password" required minlength="12" maxlength="128" autocomplete="new-password" placeholder="Ulangi password" aria-describedby="register-password-help">
+                                            <input id="account-password-confirmation" class="auth-input" name="password_confirmation" type="password" required minlength="8" maxlength="128" autocomplete="new-password" placeholder="Ulangi password" aria-describedby="register-password-help">
                                             <button type="button" class="auth-password-toggle" data-password-toggle aria-label="Tampilkan konfirmasi password" aria-controls="account-password-confirmation" aria-pressed="false" hidden>@include('customer.partials.auth-icon', ['icon' => 'eye'])</button>
                                         </span>
                                     </div>
                                 @endif
                             </div>
-                            @if($authView === 'register')<p id="register-password-help" class="auth-help">12–128 karakter. Verifikasi email diperlukan sebelum masuk.</p>@endif
+                            @if($authView === 'register')<p id="register-password-help" class="auth-help">Minimal 8 karakter, dengan huruf besar, angka, dan simbol.</p>@endif
                         @endif
                         @if($authView === 'reset')
                             <p class="auth-help">Instruksi pemulihan dikirim melalui email jika akun dapat digunakan. Link berlaku 30 menit. Setelah reset, semua sesi pelanggan berakhir.</p>

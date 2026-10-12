@@ -120,7 +120,7 @@ class CustomerAuthenticationCompatibilityTest extends TestCase
         $this->login($customer, $customer, 'magic');
         $this->assertNull($customer->fresh()->password);
         $this->withCookie(config('session.cookie'), session()->getId())->get(route('customer.orders.show', $order))->assertOk()->assertSee('LEGACY-CREDENTIAL');
-        $this->post(route('customer.password.enroll'), ['password' => 'First legacy password', 'password_confirmation' => 'First legacy password'])
+        $this->post(route('customer.password.enroll'), ['password' => 'First legacy password1!', 'password_confirmation' => 'First legacy password1!'])
             ->assertRedirect(route('customer.security'))->assertSessionHas('customer_login_sent');
         $this->withCookie(config('session.cookie'), session()->getId());
         $this->get(route('customer.orders.show', $order))->assertOk()->assertSee('LEGACY-CREDENTIAL');

@@ -17,11 +17,11 @@
                     <p id="challenge-help" class="text-sm text-[var(--sf-muted)]">Jika kode belum terisi, salin 64 karakter setelah #token= dari link email. Jangan bagikan kode ini.</p>
                     @if($reset)
                         <label class="block text-sm font-black">Password baru
-                            <input name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password" aria-describedby="reset-password-help" class="mt-2 w-full rounded-lg border border-[var(--sf-muted)] bg-white px-4 py-3 focus:ring-2 focus:ring-[var(--sf-accent)]">
+                            <input name="password" type="password" required minlength="8" maxlength="128" autocomplete="new-password" aria-describedby="reset-password-help" class="mt-2 w-full rounded-lg border border-[var(--sf-muted)] bg-white px-4 py-3 focus:ring-2 focus:ring-[var(--sf-accent)]">
                         </label>
-                        <p id="reset-password-help" class="text-sm text-[var(--sf-muted)]">12–128 karakter. Spasi dan pengelola password dapat digunakan.</p>
+                        <p id="reset-password-help" class="text-sm text-[var(--sf-muted)]">Minimal 8 karakter, dengan huruf besar, angka, dan simbol.</p>
                         <label class="block text-sm font-black">Ulangi password baru
-                            <input name="password_confirmation" type="password" required minlength="12" maxlength="128" autocomplete="new-password" class="mt-2 w-full rounded-lg border border-[var(--sf-muted)] bg-white px-4 py-3 focus:ring-2 focus:ring-[var(--sf-accent)]">
+                            <input name="password_confirmation" type="password" required minlength="8" maxlength="128" autocomplete="new-password" class="mt-2 w-full rounded-lg border border-[var(--sf-muted)] bg-white px-4 py-3 focus:ring-2 focus:ring-[var(--sf-accent)]">
                         </label>
                     @endif
                     <button class="neo-button w-full bg-[var(--sf-accent)] px-5 py-3 text-sm font-black text-white">{{ $reset ? 'Simpan password baru' : 'Konfirmasi email dan masuk' }}</button>

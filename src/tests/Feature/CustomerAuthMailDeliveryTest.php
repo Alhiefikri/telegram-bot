@@ -303,8 +303,8 @@ class CustomerAuthMailDeliveryTest extends TestCase
         $work = CustomerAuthMailWork::query()->where('login_link_id', $link->id)->sole();
         $this->post(route('customer.password-reset.consume'), [
             'token' => $plainReset,
-            'password' => 'New customer password after reset',
-            'password_confirmation' => 'New customer password after reset',
+            'password' => 'New customer password after reset1!',
+            'password_confirmation' => 'New customer password after reset1!',
         ])->assertRedirect(route('customer.account'));
         $this->assertNotNull($link->fresh()->used_at);
         $this->assertSame(0, app(CustomerAuthMailDeliveryService::class)->recover());

@@ -373,7 +373,7 @@ These contracts resolve implementation choices; they are not claims about implem
 
 ### Registration and account recovery
 
-- Password minimum 12 characters, maximum 128 characters; allow paste, spaces, and password managers; do not require arbitrary character classes. Never trim or lowercase a password.
+- Updated password policy: minimum 8 characters, maximum 128 characters; require an uppercase letter, a number and a symbol, with lowercase letters optional. Allow paste, spaces, and password managers. Never trim or lowercase a password. Existing passwords remain valid for login.
 - Registration cannot overwrite a password, profile, or verified email on an existing Customer. Duplicate registration returns generic guidance to sign in or recover access.
 - Pending registration credentials expire after 30 minutes. Email verification binds the registration version and proposed password hash. An older verification cannot install credentials after a later enrollment or reset.
 - Verification and reset tokens use at least 32 random bytes and expire after 30 minutes. Store hashes; deliver through encrypted work. A GET may show a confirmation form but must not consume a token. Consumption is CSRF-protected POST to avoid email scanner side effects.

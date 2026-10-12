@@ -18,13 +18,13 @@
                     <div class="account-password-fields">
                         <div>
                             <label class="auth-label">Password baru
-                                <input name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password" aria-describedby="enroll-password-help" class="auth-input">
+                                <input name="password" type="password" required minlength="8" maxlength="128" autocomplete="new-password" aria-describedby="enroll-password-help" class="auth-input">
                             </label>
-                            <p id="enroll-password-help" class="auth-help">12–128 karakter. Spasi dan pengelola password dapat digunakan.</p>
+                            <p id="enroll-password-help" class="auth-help">Minimal 8 karakter, dengan huruf besar, angka, dan simbol.</p>
                         </div>
                         <div>
                             <label class="auth-label">Ulangi password baru
-                                <input name="password_confirmation" type="password" required minlength="12" maxlength="128" autocomplete="new-password" class="auth-input">
+                                <input name="password_confirmation" type="password" required minlength="8" maxlength="128" autocomplete="new-password" class="auth-input">
                             </label>
                         </div>
                     </div>

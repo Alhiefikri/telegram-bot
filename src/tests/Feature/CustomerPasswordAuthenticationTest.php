@@ -40,7 +40,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
 
     public function test_registration_is_pending_until_post_verification_authenticates_the_customer(): void
     {
-        $password = '  Mixed Case password  ';
+        $password = '  Mixed Case password1!  ';
         $token = $this->register(' New@Example.TEST ', $password, 'New Customer');
         $customer = Customer::query()->where('email', 'new@example.test')->sole();
         $challenge = CustomerAuthToken::query()->where('token_hash', hash('sha256', $token))->sole();
@@ -83,7 +83,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
 
     public function test_duplicate_pending_registration_cannot_replace_the_proposed_password_or_name(): void
     {
-        $token = $this->register('pending@example.test', 'Original pending password', 'Original Name');
+        $token = $this->register('pending@example.test', 'Original pending password1!', 'Original Name');
         $customer = Customer::query()->where('email', 'pending@example.test')->sole();
         $original = $customer->getAttributes();
         $challenge = CustomerAuthToken::query()->sole()->getAttributes();
@@ -91,8 +91,8 @@ class CustomerPasswordAuthenticationTest extends TestCase
 
         $this->post(route('customer.register'), [
             'email' => ' PENDING@EXAMPLE.TEST ',
-            'password' => 'Attacker replacement password',
-            'password_confirmation' => 'Attacker replacement password',
+            'password' => 'Attacker replacement password1!',
+            'password_confirmation' => 'Attacker replacement password1!',
             'name' => 'Replacement Name',
         ])->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_sent');
 
@@ -102,8 +102,8 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $this->assertSame(1, CustomerAuthMailWork::query()->count());
         $this->post(route('customer.verification.consume'), ['token' => $token])
             ->assertRedirect(route('customer.orders.index'));
-        $this->assertTrue($this->passwordMatches('Original pending password', $customer->fresh()));
-        $this->assertFalse($this->passwordMatches('Attacker replacement password', $customer->fresh()));
+        $this->assertTrue($this->passwordMatches('Original pending password1!', $customer->fresh()));
+        $this->assertFalse($this->passwordMatches('Attacker replacement password1!', $customer->fresh()));
         $this->assertSame('Original Name', $customer->fresh()->first_name);
     }
 
@@ -120,8 +120,8 @@ class CustomerPasswordAuthenticationTest extends TestCase
             $attributes = $customer->fresh()->getAttributes();
             $this->post(route('customer.register'), [
                 'email' => strtoupper($customer->email),
-                'password' => 'Attempted account takeover',
-                'password_confirmation' => 'Attempted account takeover',
+                'password' => 'Attempted account takeover1!',
+                'password_confirmation' => 'Attempted account takeover1!',
                 'name' => 'Submitted Name',
             ])->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_sent');
             $this->assertSame($attributes, $customer->fresh()->getAttributes());
@@ -138,9 +138,12 @@ class CustomerPasswordAuthenticationTest extends TestCase
     public function test_registration_validates_password_length_confirmation_and_email_without_flashing_passwords(): void
     {
         foreach ([
-            ['password' => str_repeat('a', 11), 'confirmation' => str_repeat('a', 11)],
-            ['password' => str_repeat('b', 129), 'confirmation' => str_repeat('b', 129)],
-            ['password' => 'Valid password value', 'confirmation' => 'Different password value'],
+            ['password' => 'Abcd1!X', 'confirmation' => 'Abcd1!X'],
+            ['password' => str_repeat('b', 126).'A1!', 'confirmation' => str_repeat('b', 126).'A1!'],
+            ['password' => 'Valid1!X', 'confirmation' => 'Different1!X'],
+            ['password' => 'abcdef1!', 'confirmation' => 'abcdef1!'],
+            ['password' => 'Abcdefg!', 'confirmation' => 'Abcdefg!'],
+            ['password' => 'Abcdefg1', 'confirmation' => 'Abcdefg1'],
         ] as $input) {
             $this->from(route('customer.account'))->post(route('customer.register'), [
                 'email' => 'invalid@example.test',
@@ -151,8 +154,8 @@ class CustomerPasswordAuthenticationTest extends TestCase
             $this->assertArrayNotHasKey('password_confirmation', session()->getOldInput());
         }
         $this->post(route('customer.register'), [
-            'email' => 'not-an-email', 'password' => 'Valid password value',
-            'password_confirmation' => 'Valid password value',
+            'email' => 'not-an-email', 'password' => 'Valid1!X',
+            'password_confirmation' => 'Valid1!X',
         ])->assertSessionHasErrors('email');
 
         $this->assertSame(0, Customer::query()->count());
@@ -160,10 +163,10 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $this->assertSame(0, CustomerAuthMailWork::query()->count());
     }
 
-    public function test_registration_accepts_both_password_length_boundaries_without_character_class_rules(): void
+    public function test_registration_accepts_eight_and_128_character_passwords_with_required_character_classes(): void
     {
-        $this->register('minimum@example.test', str_repeat('a', 12));
-        $this->register('maximum@example.test', str_repeat('b', 128));
+        $this->register('minimum@example.test', 'ABCDE1!X');
+        $this->register('maximum@example.test', str_repeat('b', 125).'A1!');
 
         $this->assertSame(2, Customer::query()->count());
         $this->assertSame(2, CustomerAuthToken::query()->count());
@@ -172,8 +175,8 @@ class CustomerPasswordAuthenticationTest extends TestCase
     public function test_long_and_unicode_passwords_authenticate_without_ignoring_characters_after_seventy_two_bytes(): void
     {
         foreach ([
-            'long@example.test' => str_repeat('a', 127).'X',
-            'unicode@example.test' => str_repeat('界', 127).'X',
+            'long@example.test' => str_repeat('a', 125).'1!X',
+            'unicode@example.test' => str_repeat('界', 125).'1!X',
         ] as $email => $password) {
             $verification = $this->register($email, $password);
             $this->post(route('customer.verification.consume'), ['token' => $verification])
@@ -238,7 +241,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
 
     public function test_password_spaces_and_case_are_significant_at_registration_login_and_reset(): void
     {
-        $password = '  My spaced password  ';
+        $password = '  My spaced password1!  ';
         $token = $this->register('spaces@example.test', $password);
         $this->post(route('customer.verification.consume'), ['token' => $token])
             ->assertRedirect(route('customer.orders.index'));
@@ -253,7 +256,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
             ->assertRedirect(route('customer.orders.index'));
 
         $reset = $this->requestReset('spaces@example.test');
-        $replacement = '  Reset with spaces  ';
+        $replacement = '  Reset with spaces1!  ';
         $this->consumeReset($reset, $replacement)->assertRedirect(route('customer.account'));
         $customer = Customer::query()->where('email', 'spaces@example.test')->sole();
         $this->assertTrue($this->passwordMatches($replacement, $customer));
@@ -318,11 +321,11 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $this->assertNotSame($csrfToken, session()->token());
         $this->assertNotNull($challenge->fresh()->consumed_at);
         $this->withCookie(config('session.cookie'), session()->getId());
-        $this->assertTrue($this->passwordMatches('Replacement customer password', $customer->fresh()));
+        $this->assertTrue($this->passwordMatches('Replacement customer password1!', $customer->fresh()));
         $this->get(route('customer.orders.index'))->assertRedirect(route('customer.account'));
         $this->post(route('customer.login'), ['email' => $customer->email, 'password' => 'Original customer password'])
             ->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_error');
-        $this->post(route('customer.login'), ['email' => $customer->email, 'password' => 'Replacement customer password'])
+        $this->post(route('customer.login'), ['email' => $customer->email, 'password' => 'Replacement customer password1!'])
             ->assertRedirect(route('customer.orders.index'));
     }
 
@@ -340,7 +343,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
 
         $this->consumeReset($reset)->assertRedirect(route('customer.account'));
         $hash = $customer->fresh()->password;
-        $this->consumeReset($reset, 'Replay replacement password')
+        $this->consumeReset($reset, 'Replay replacement password1!')
             ->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_error');
         $this->assertSame($hash, $customer->fresh()->password);
         $this->assertGuest('customer');
@@ -370,9 +373,12 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $token = $this->requestReset($customer->email);
 
         foreach ([
-            [str_repeat('a', 11), str_repeat('a', 11)],
-            [str_repeat('b', 129), str_repeat('b', 129)],
-            ['Valid replacement password', 'Mismatched confirmation'],
+            ['Abcd1!X', 'Abcd1!X'],
+            [str_repeat('b', 126).'A1!', str_repeat('b', 126).'A1!'],
+            ['Valid1!X', 'Mismatched1!X'],
+            ['abcdef1!', 'abcdef1!'],
+            ['Abcdefg!', 'Abcdefg!'],
+            ['Abcdefg1', 'Abcdefg1'],
         ] as [$password, $confirmation]) {
             $this->post(route('customer.password-reset.consume'), [
                 'token' => $token, 'password' => $password, 'password_confirmation' => $confirmation,
@@ -382,8 +388,8 @@ class CustomerPasswordAuthenticationTest extends TestCase
             }
             $this->assertNull(CustomerAuthToken::query()->sole()->consumed_at);
         }
-        $this->consumeReset($token, str_repeat('c', 12))->assertRedirect(route('customer.account'));
-        $this->assertTrue($this->passwordMatches(str_repeat('c', 12), $customer->fresh()));
+        $this->consumeReset($token, 'ABCDE1!X')->assertRedirect(route('customer.account'));
+        $this->assertTrue($this->passwordMatches('ABCDE1!X', $customer->fresh()));
     }
 
     public function test_malformed_and_unknown_tokens_fail_without_creating_or_authenticating_customers(): void
@@ -418,7 +424,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $this->assertSame($oldVersion + 1, $customer->fresh()->auth_version);
         $this->assertGuest('customer');
         $this->assertAuthenticatedAs($admin, 'web');
-        $this->consumeReset($firstReset, 'Revoked reset password')
+        $this->consumeReset($firstReset, 'Revoked reset password1!')
             ->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_error');
         $this->post(route('customer.login-link.consume'), ['token' => $legacyToken])
             ->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_error');
@@ -432,12 +438,12 @@ class CustomerPasswordAuthenticationTest extends TestCase
 
     public function test_stale_registration_verification_cannot_install_credentials_after_legacy_recovery_and_reset(): void
     {
-        $verification = $this->register('recovered@example.test', 'Stale enrollment password');
+        $verification = $this->register('recovered@example.test', 'Stale enrollment password1!');
         $customer = Customer::query()->where('email', 'recovered@example.test')->sole();
         $enrollmentVersion = $customer->enrollment_version;
         $this->loginWithLegacyLink($customer);
         $reset = $this->requestReset($customer->email);
-        $this->consumeReset($reset, 'Recovered customer password')->assertRedirect(route('customer.account'));
+        $this->consumeReset($reset, 'Recovered customer password1!')->assertRedirect(route('customer.account'));
         $hash = $customer->fresh()->password;
         $this->assertGreaterThan($enrollmentVersion, $customer->fresh()->enrollment_version);
 
@@ -445,10 +451,10 @@ class CustomerPasswordAuthenticationTest extends TestCase
             ->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_error');
 
         $this->assertSame($hash, $customer->fresh()->password);
-        $this->assertTrue($this->passwordMatches('Recovered customer password', $customer->fresh()));
-        $this->assertFalse($this->passwordMatches('Stale enrollment password', $customer->fresh()));
+        $this->assertTrue($this->passwordMatches('Recovered customer password1!', $customer->fresh()));
+        $this->assertFalse($this->passwordMatches('Stale enrollment password1!', $customer->fresh()));
         $this->assertGuest('customer');
-        $this->post(route('customer.login'), ['email' => $customer->email, 'password' => 'Recovered customer password'])
+        $this->post(route('customer.login'), ['email' => $customer->email, 'password' => 'Recovered customer password1!'])
             ->assertRedirect(route('customer.orders.index'));
     }
 
@@ -460,12 +466,12 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $sessionId = session()->getId();
 
         $this->post(route('customer.password.enroll'), [
-            'password' => 'First legacy customer password',
-            'password_confirmation' => 'First legacy customer password',
+            'password' => 'First legacy customer password1!',
+            'password_confirmation' => 'First legacy customer password1!',
         ])->assertRedirect(route('customer.security'))->assertSessionHas('customer_login_sent');
 
         $customer = $customer->fresh();
-        $this->assertTrue($this->passwordMatches('First legacy customer password', $customer));
+        $this->assertTrue($this->passwordMatches('First legacy customer password1!', $customer));
         $this->assertSame($version + 1, $customer->auth_version);
         $this->assertSame($customer->auth_version, session('customer_auth_version'));
         $this->assertNotSame($sessionId, session()->getId());
@@ -473,8 +479,8 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $hash = $customer->password;
 
         $this->post(route('customer.password.enroll'), [
-            'password' => 'Unwanted replacement password',
-            'password_confirmation' => 'Unwanted replacement password',
+            'password' => 'Unwanted replacement password1!',
+            'password_confirmation' => 'Unwanted replacement password1!',
         ])->assertRedirect(route('customer.security'))->assertSessionHas('customer_login_error');
         $this->assertSame($hash, $customer->fresh()->password);
     }
@@ -484,7 +490,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $customer = Customer::factory()->create(['email' => 'legacy@example.test', 'email_verified_at' => now()]);
         $this->loginWithLegacyLink($customer);
         $this->travel(301)->seconds();
-        $input = ['password' => 'First legacy customer password', 'password_confirmation' => 'First legacy customer password'];
+        $input = ['password' => 'First legacy customer password1!', 'password_confirmation' => 'First legacy customer password1!'];
 
         $this->post(route('customer.password.enroll'), $input)
             ->assertRedirect(route('customer.security'))->assertSessionHas('customer_login_error');
@@ -568,14 +574,14 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $this->get(route('storefront.order-access.show', $order))
             ->assertOk()->assertSee('PaidCredential123', false);
         $this->assertGuest('customer');
-        $this->post(route('customer.login'), ['email' => $customer->email, 'password' => 'Replacement customer password'])
+        $this->post(route('customer.login'), ['email' => $customer->email, 'password' => 'Replacement customer password1!'])
             ->assertRedirect(route('customer.orders.index'));
         $this->get(route('customer.orders.index'))->assertOk()->assertSee($order->invoice_number)->assertDontSee($foreignOrder->invoice_number);
     }
 
     public function test_auth_mail_has_fragment_only_links_and_no_plaintext_secrets_at_rest_or_in_responses(): void
     {
-        $password = 'Secret pending password value';
+        $password = 'Secret pending password value1!';
         $token = $this->register('private@example.test', $password);
         $work = CustomerAuthMailWork::query()->sole();
         $challenge = CustomerAuthToken::query()->sole();
@@ -649,8 +655,8 @@ class CustomerPasswordAuthenticationTest extends TestCase
 
         $this->travel(61)->seconds();
         $this->post(route('customer.register'), [
-            'email' => $customer->email, 'password' => 'Unwanted customer password',
-            'password_confirmation' => 'Unwanted customer password',
+            'email' => $customer->email, 'password' => 'Unwanted customer password1!',
+            'password_confirmation' => 'Unwanted customer password1!',
         ])->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_sent');
         $this->travel(61)->seconds();
         $this->post(route('customer.password-reset.request'), ['email' => $customer->email])
@@ -664,7 +670,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
             ->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_sent');
         $this->assertSame($replacement, $this->issuedToken($customer->email, CustomerAuthTokenPurpose::PasswordReset));
         $this->consumeReset($replacement)->assertRedirect(route('customer.account'));
-        $this->assertTrue($this->passwordMatches('Replacement customer password', $customer->fresh()));
+        $this->assertTrue($this->passwordMatches('Replacement customer password1!', $customer->fresh()));
     }
 
     public function test_missing_rate_storage_fails_closed_without_creating_authentication_work(): void
@@ -676,8 +682,8 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $this->post(route('customer.password-reset.request'), ['email' => $customer->email])
             ->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_sent');
         $this->post(route('customer.register'), [
-            'email' => 'new-unavailable@example.test', 'password' => 'New customer password',
-            'password_confirmation' => 'New customer password',
+            'email' => 'new-unavailable@example.test', 'password' => 'New customer password1!',
+            'password_confirmation' => 'New customer password1!',
         ])->assertRedirect(route('customer.account'))->assertSessionHas('customer_login_sent');
         $this->assertGuest('customer');
         $this->assertSame(1, Customer::query()->count());
@@ -736,7 +742,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
         return $customer->fresh();
     }
 
-    private function register(string $email, string $password = 'Pending customer password', ?string $name = null): string
+    private function register(string $email, string $password = 'Pending customer password1!', ?string $name = null): string
     {
         $this->post(route('customer.register'), [
             'email' => $email, 'password' => $password, 'password_confirmation' => $password, 'name' => $name,
@@ -773,7 +779,7 @@ class CustomerPasswordAuthenticationTest extends TestCase
         $this->assertAuthenticatedAs($customer, 'customer');
     }
 
-    private function consumeReset(string $token, string $password = 'Replacement customer password'): TestResponse
+    private function consumeReset(string $token, string $password = 'Replacement customer password1!'): TestResponse
     {
         return $this->post(route('customer.password-reset.consume'), [
             'token' => $token, 'password' => $password, 'password_confirmation' => $password,
