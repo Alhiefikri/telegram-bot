@@ -55,10 +55,13 @@ Gunakan scope paling kecil yang cocok dengan arsitektur saat ini:
   memang rupiah integer.
 - Checkout customer tetap memilih rail QRIS yang sama; jangan menambah pemilih
   17 channel baru pada release pertama.
-- `merchant_fee = 1` direkomendasikan agar beban fee berada di merchant dan
-  nominal customer tetap sama dengan amount Order. Ini harus dikonfirmasi lewat
-  sandbox karena response provider memiliki `total`, `fee`, dan `amount_merchant`
-  dengan aturan yang belum lengkap.
+- `merchant_fee = 2` (buyer bears the fee) adalah kebijakan release saat ini:
+  fee channel QRIS dibebankan ke pembeli, sehingga provider menambahkan fee di
+  atas nominal Order (`total = amount + fee`) dan merchant menerima penuh
+  nominal Order. Kebijakannya dipin di
+  `services.sakurupiah.qris_contract` (`fee_payer = customer`), bukan ENV.
+  Provider meng-echo payer sebagai kata (`Merchant` atau `Pelanggan`), dan
+  response `total`, `fee`, `amount_merchant` harus tetap divalidasi per sandbox.
 - Channel, fee, dan expiry bukan data katalog. Jangan menambah ENV untuk
   label/price/channel presentation. Jika nantinya harus dapat diubah Owner,
   simpan di setting database/Admin; credential dan deployment knobs tetap
@@ -188,7 +191,7 @@ Field yang didokumentasikan:
 | `email` | Optional | Kirim hanya bila diperlukan; jangan log |
 | `phone` | Required; contoh `08`, `62`, `60` | Perlakukan sebagai string, normalisasi hanya setelah dikonfirmasi |
 | `amount` | Required integer; tidak ada currency field | Local integer amount; block bila unit/currency belum terkonfirmasi |
-| `merchant_fee` | `1` merchant, `2` customer; kosong/false disebut default merchant | V1 gunakan `1` dan validasi fee response |
+| `merchant_fee` | `1` merchant, `2` customer; kosong/false disebut default merchant | Release ini memakai `2` (buyer) dan memvalidasi echo `Merchant`/`Pelanggan` terhadap `fee_payer` terkonfigurasi |
 | `merchant_ref` | Required unique string | Pakai `Payment.merchant_ref`; jangan membuat reference kedua |
 | `expired` | Optional integer jam; default 24 jam/channel default; timezone `Asia/Jakarta` | Policy wajib ditutup karena local TTL saat ini berbasis menit |
 | `produk[]`, `qty[]`, `harga[]`, `size[]`, `note[]` | Optional conditional arrays | V1 jangan kirim sebelum length/reconciliation contract jelas |

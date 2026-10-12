@@ -407,13 +407,15 @@ final class SakurupiahCallbackProcessor
 
     private function statusWithAmountEvidence(Payment $payment, SakurupiahStatus $status): ?SakurupiahStatus
     {
+        $expectedAmounts = SakurupiahInvoiceLifecycleService::expectedProviderAmounts($payment);
+
         if ($status->amountValue() !== null) {
-            return $status->amountValue() === (int) $payment->amount ? $status : null;
+            return in_array($status->amountValue(), $expectedAmounts, true) ? $status : null;
         }
 
         $history = $this->fetchMatchingHistory($payment);
         if ($history === null
-            || $history->amountValue() !== (int) $payment->amount
+            || ! in_array($history->amountValue(), $expectedAmounts, true)
             || ($history->currency !== null
                 && strtoupper(trim($history->currency)) !== strtoupper(trim((string) $payment->currency)))) {
             return null;

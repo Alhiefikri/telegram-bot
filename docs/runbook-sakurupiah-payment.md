@@ -149,6 +149,46 @@ starting its loop. That health check includes `--supervisor`, so live worker
 ownership is verified before the scheduler can run; the bootstrap readiness
 gate itself remains a non-invasive queue/schema/schedule configuration check.
 
+## QRIS fee policy
+
+The QRIS channel fee is charged to the buyer. `services.sakurupiah.qris_contract`
+pins the policy in code (`fee_payer = customer`, `merchant_fee = 2`); there is no
+ENV switch, because a fee policy is a reviewed release decision, not a
+deployment secret. The provider documents both modes:
+
+| Contract | Create request | Customer pays | Merchant settles |
+| --- | --- | --- | --- |
+| `fee_payer = customer` (current) | `merchant_fee = 2` | `amount + fee` | the full order amount |
+| `fee_payer = merchant` | `merchant_fee = 1` | the order amount | `amount - fee` |
+
+Live sandbox confirmation of the current contract: order amount `20000` → fee
+`240` → payable total `20240`, echoed `merchant_fee = "Pelanggan"`, and the
+provider's transaction history reports `amount = 20240` (the final total).
+
+Consequences that the release enforces:
+
+- The configured `fee_payer` and `merchant_fee` are one decision. The readiness
+  check, the production configuration validator, and the create request all read
+  the same rule, and a mismatched pair fails the create before any provider
+  request instead of sending an ambiguous invoice.
+- The create response's echoed payer must equal the configured payer. A
+  mismatch is an invoice integrity failure, so the Payment stays pending instead
+  of presenting a total the store did not authorize.
+- Amount evidence accepts the base order amount **and** the recorded final
+  total, because the provider reports the base amount in the create response and
+  the final total in transaction history. An amount that is neither keeps the
+  Payment unverified.
+- The payer is snapshotted with the payment presentation
+  (`customer_pays_fee`), so the customer copy keeps telling the truth for
+  Payments created under an earlier policy.
+- Store Balance top-ups follow the same contract: the customer pays credit plus
+  fee, and the ledger still credits only the requested amount.
+
+To switch back to merchant-borne fees, change both `fee_payer` and
+`merchant_fee` together in `services.sakurupiah.qris_contract`, run the focused
+Sakurupiah suite, and redeploy. Existing Payments keep their snapshotted payer;
+the switch affects new creates only.
+
 ## Create rejection and QR recovery
 
 The provider documents its own failure contract: an application status plus a

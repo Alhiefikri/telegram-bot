@@ -1018,6 +1018,17 @@ operational budgets remain pinned in application configuration. Readiness still
 checks the runtime channel, queue, scheduler, and payment schema before
 provider I/O.
 
+The QRIS fee is borne by the buyer (`fee_payer = customer` / `merchant_fee = 2`),
+so the provider adds the channel fee on top of the order amount, the customer
+pays the final total, and the merchant settles the full order amount.
+`SakurupiahQrisContract` is the single rule read by readiness, the production
+configuration validator, and the create request; a mismatched pair fails the
+create locally. The provider echoes the payer as a word and reports the base
+amount in the create response but the **final total** in transaction history, so
+`SakurupiahInvoiceLifecycleService::expectedProviderAmounts()` defines the
+amount evidence a Payment owns (base amount and recorded total) and the payer is
+snapshotted with the presentation (`customer_pays_fee`).
+
 `SakurupiahCallbackProcessor::reconcilePayment()` is the reconciliation seam:
 under the same per-Payment cache lock used by create/callback/refresh, it
 performs an authoritative status lookup (never a create), validates identity

@@ -23,6 +23,7 @@ use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleResult;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahPayableInvoice;
+use App\Services\Sakurupiah\SakurupiahQrisContract;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 use App\Support\PaymentProvider;
 
@@ -84,6 +85,7 @@ class StorefrontShopSignedInvoice
             payableAmountDisplay: $payable?->totalAmountDisplay(),
             qrisEffectiveExpiresAt: $payable?->effectiveExpiresAt(),
             hostedPaymentUrl: $this->hostedPaymentUrl($projection, $payment, $sakurupiahPayable),
+            qrisFeePayer: $this->qrisFeePayer($payment, $sakurupiahPayable),
             accountGroups: $accountGroups,
             usageGuides: $state === StorefrontShopSignedInvoiceState::Paid ? $delivery->usageGuides() : [],
             accountCopyText: $this->accountCopyText($accountGroups),
@@ -94,6 +96,23 @@ class StorefrontShopSignedInvoice
             bscVerificationStatus: $bscVerificationStatus,
             bscExplorerUrl: $this->bscExplorerUrl($payment),
         );
+    }
+
+    /**
+     * Who pays the QRIS channel fee. A payable Sakurupiah invoice carries the
+     * payer validated at create time; the configured contract covers a Payment
+     * that has no payable presentation yet.
+     */
+    private function qrisFeePayer(?Payment $payment, ?SakurupiahPayableInvoice $sakurupiahPayable): string
+    {
+        if (! $this->isSakurupiahPayment($payment)) {
+            return (string) config('services.pakasir.qris_fee.payer', 'customer');
+        }
+
+        $customerPays = $sakurupiahPayable?->customerPaysFee()
+            ?? SakurupiahQrisContract::customerPaysFee(SakurupiahQrisContract::configured());
+
+        return $customerPays ? 'customer' : 'store';
     }
 
     private function latestPayment(Order $order): ?Payment

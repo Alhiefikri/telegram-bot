@@ -167,6 +167,10 @@ _Avoid_: Customer provider choice, automatic provider fallback
 A provider invoice create answered with the provider's own failure contract (an application status and reason, on the documented response envelope or a non-retryable HTTP failure). It proves that no provider transaction exists for the merchant reference, so the Payment stays recoverable and the same reference is created again after the cause is corrected; it is never treated as an ambiguous outcome. Distinct from an ambiguous create, where the request may already have been accepted.
 _Avoid_: failed payment, terminal create failure, duplicate invoice retry
 
+**QRIS Fee Payer**:
+The release-pinned policy that decides who bears the QRIS channel fee: `merchant` means the customer pays only the order amount and the store absorbs the fee, `customer` means the provider adds the fee on top of the order amount and the customer pays the final total while the store still settles the full order amount. It is configured in application code, sent to the provider as `merchant_fee`, echoed back per transaction, snapshotted with the payment presentation, and never applied retroactively to an existing Payment.
+_Avoid_: customer fee choice, provider default, per-invoice fee toggle
+
 **Checkout Maintenance**:
 The Owner/Admin-controlled store state that temporarily prevents new customer Orders while catalog access, cart management, and existing Order lifecycles remain available.
 _Avoid_: Store Maintenance, Store Closure

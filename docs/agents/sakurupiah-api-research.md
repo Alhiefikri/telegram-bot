@@ -440,3 +440,31 @@ and keeps the hosted URL as a secondary link when it also passes the policy.
 EMV support remains only an opportunistic path for a provider payload that
 happens to validate; the rejection of arbitrary opaque `qr` content as a
 scannable QR is intentional and unchanged.
+
+## 2026-10-13 — Fee payer and reported amount semantics (live sandbox, `QRISC`)
+
+Four live sandbox creates through the documented contract (same sandbox
+merchant, unique merchant references) fixed the fee/amount semantics that the
+provider documentation leaves open:
+
+| `merchant_fee` | `amount` | `total` | `fee` | `amount_merchant` | echoed `merchant_fee` |
+| --- | --- | --- | --- | --- | --- |
+| `1` | `10000` | `10000` | `0` | `9830` | `"Merchant"` |
+| `2` | `10000` | `10170` | `170` | `10000` | `"Pelanggan"` |
+| `2` | `200` | `301` | `101` | `200` | `"Pelanggan"` |
+
+Consequences that a consumer must implement rather than assume:
+
+1. The provider echoes the payer as a **word**, either `Merchant` or
+   `Pelanggan`. Both are documented here as observed values; a parser that only
+   accepts `1`/`2`/`merchant`/`customer`/`buyer` rejects every buyer-fee create.
+2. With `merchant_fee = 2` the create response omits `amount` and reports
+   `total = amount requested + fee`; `amount_merchant` is the requested amount,
+   so the merchant still settles the full order amount.
+3. `transaction.php` history reports `amount` as **the final total** in
+   buyer-fee mode (`20240` for a `20000` request) while `status-transaction.php`
+   reports only `status`. Amount evidence for a payment must therefore accept
+   the base amount and the recorded final total, or a buyer-fee payment can
+   never be confirmed as paid.
+4. `checkout_url` remains a hosted page and `qr` remains a provider-hosted QR
+   image URL for this channel (consistent with the 2026-09-17 entry).

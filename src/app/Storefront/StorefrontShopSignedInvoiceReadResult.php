@@ -36,6 +36,7 @@ class StorefrontShopSignedInvoiceReadResult
         public readonly ?string $payableAmountDisplay,
         public readonly ?CarbonImmutable $qrisEffectiveExpiresAt,
         public readonly ?string $hostedPaymentUrl,
+        public readonly string $qrisFeePayer,
         public readonly array $accountGroups,
         public readonly array $usageGuides,
         public readonly string $accountCopyText,

@@ -293,6 +293,89 @@ class SakurupiahWebhookTest extends TestCase
         $this->assertNotNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
     }
 
+    public function test_paid_callback_accepts_the_recorded_final_total_when_the_buyer_bears_the_fee(): void
+    {
+        Queue::fake();
+        StoreChannelSetting::create([
+            'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
+            'sales_proof_enabled' => true,
+            'telegram_chat_id' => '-100123',
+        ]);
+        $payment = $this->payment();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful),
+        );
+        // Live provider behaviour for `merchant_fee = 2`: the history row
+        // reports the final total the customer paid, not the base amount.
+        $provider->shouldReceive('transactionHistory')->once()->andReturn([
+            new SakurupiahHistoryItem(
+                trxId: (string) $payment->provider_reference,
+                merchantRef: (string) $payment->merchant_ref,
+                paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+                amount: (int) $payment->provider_total_payment,
+                status: SakurupiahTransactionStatus::Successful,
+                sanitizedPayload: [
+                    'data' => [[
+                        'trx_id' => $payment->provider_reference,
+                        'merchant_ref' => $payment->merchant_ref,
+                        'payment_kode' => SakurupiahCreateInvoice::METHOD_QRISC,
+                        'amount' => (string) $payment->provider_total_payment,
+                        'status' => 'berhasil',
+                    ]],
+                ],
+            ),
+        ]);
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))
+            ->assertOk()
+            ->assertExactJson(['success' => true]);
+
+        $payment->refresh();
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(PaymentStatus::Paid, $payment->order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
+    }
+
+    public function test_paid_callback_rejects_a_history_amount_the_payment_does_not_own(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful),
+        );
+        $provider->shouldReceive('transactionHistory')->once()->andReturn([
+            new SakurupiahHistoryItem(
+                trxId: (string) $payment->provider_reference,
+                merchantRef: (string) $payment->merchant_ref,
+                paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+                amount: (int) $payment->provider_total_payment + 1,
+                status: SakurupiahTransactionStatus::Successful,
+                sanitizedPayload: [
+                    'data' => [[
+                        'trx_id' => $payment->provider_reference,
+                        'merchant_ref' => $payment->merchant_ref,
+                        'payment_kode' => SakurupiahCreateInvoice::METHOD_QRISC,
+                        'amount' => (string) ((int) $payment->provider_total_payment + 1),
+                        'status' => 'berhasil',
+                    ]],
+                ],
+            ),
+        ]);
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))
+            ->assertOk()
+            ->assertExactJson(['success' => true]);
+
+        $payment->refresh();
+        $this->assertSame(PaymentStatus::Pending, $payment->status);
+        $this->assertSame(0, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
+    }
+
     public function test_paid_callback_requires_matching_authoritative_amount_before_order_lifecycle(): void
     {
         Queue::fake();

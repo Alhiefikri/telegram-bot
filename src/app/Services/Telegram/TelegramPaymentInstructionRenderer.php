@@ -366,7 +366,7 @@ class TelegramPaymentInstructionRenderer
             $this->text($locale, 'payment.product_total', ['amount' => $this->formatRupiah($order->total_amount)]),
             $this->text($locale, 'payment.qris_fee', ['fee' => $this->formatRupiah($payable->providerFee())]),
             $this->text($locale, 'payment.qris_total', ['amount' => $payable->totalAmountDisplay()]),
-            $this->text($locale, 'payment.qris_fee_store'),
+            $this->text($locale, $payable->customerPaysFee() ? 'payment.qris_fee_customer' : 'payment.qris_fee_store'),
             '',
             $this->text($locale, 'payment.sakurupiah.exact_amount'),
             $payable->isDirectQris() || $payable->isQrisImage()

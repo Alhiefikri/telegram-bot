@@ -27,6 +27,14 @@ Release awal menggunakan:
 - provider API method `QRISC`, yaitu channel yang disetujui merchant target;
 - currency lokal `IDR` **hanya setelah dikonfirmasi oleh merchant test/provider**;
 - `merchant_fee = 1` sebagai default kebijakan awal agar fee ditanggung merchant dan nominal customer tetap sama dengan Order;
+
+> **Perubahan kebijakan (2026-10-13):** Owner memilih fee ditanggung pembeli.
+> `qris_contract` sekarang `fee_payer = customer` / `merchant_fee = 2`, sehingga
+> provider menambahkan fee channel di atas nominal Order (`total = amount + fee`),
+> merchant menerima penuh nominal Order, dan customer membayar total final yang
+> ditampilkan. Bukti sandbox live: amount `20000` → fee `240` → total `20240`,
+> echo `merchant_fee = "Pelanggan"`, dan row history provider melaporkan `amount`
+> sebesar total (`20240`), bukan nominal Order.
 - provider switch Owner yang berlaku hanya untuk checkout baru.
 
 Dukungan DANA, GOPAY, ShopeePay, Virtual Account, Alfamart, Indomaret,

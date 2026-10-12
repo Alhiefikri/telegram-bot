@@ -3,6 +3,7 @@
 namespace App\Bootstrap;
 
 use App\Services\Bsc\BscReadiness;
+use App\Services\Sakurupiah\SakurupiahQrisContract;
 use Illuminate\Contracts\Config\Repository;
 use RuntimeException;
 
@@ -180,22 +181,13 @@ class ProductionConfigurationValidator
 
         if ($productionEnabled) {
             $contract = (array) $this->config->get('services.sakurupiah.qris_contract', []);
-            if (($contract['currency'] ?? null) !== 'IDR' || ($contract['currency_confirmed'] ?? false) !== true) {
+            if (! SakurupiahQrisContract::currencyIsQualified($contract)) {
                 throw new RuntimeException('SAKURUPIAH_QRIS_CURRENCY_CONTRACT must be qualified before production enablement.');
             }
-            $feePayer = $contract['fee_payer'] ?? null;
-            $merchantFee = $contract['merchant_fee'] ?? null;
-            if (! in_array($feePayer, ['merchant', 'customer'], true)
-                || ($feePayer === 'merchant' && $merchantFee !== 1)
-                || ($feePayer === 'customer' && $merchantFee !== 2)
-                || ($contract['fee_confirmed'] ?? false) !== true
-            ) {
+            if (! SakurupiahQrisContract::feeRuleIsQualified($contract)) {
                 throw new RuntimeException('SAKURUPIAH_QRIS_FEE_CONTRACT must be qualified before production enablement.');
             }
-            if (($contract['expiry_confirmed'] ?? false) !== true
-                || ! is_int($contract['expiry_hours'] ?? null)
-                || $contract['expiry_hours'] < 1
-            ) {
+            if (! SakurupiahQrisContract::expiryIsQualified($contract)) {
                 throw new RuntimeException('SAKURUPIAH_QRIS_EXPIRY_CONTRACT must be qualified before production enablement.');
             }
         }

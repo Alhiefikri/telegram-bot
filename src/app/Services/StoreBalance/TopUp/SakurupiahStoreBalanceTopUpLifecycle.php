@@ -467,14 +467,23 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
         bool $trusted,
     ): StoreBalanceTopUpSettlementEvidence {
         $paidAt = $status->occurredAt ?? null;
+        $baseAmount = (int) $topUp->amount;
+        $recordedTotal = (int) ($topUp->provider_total_payment ?? $baseAmount);
+
+        // The provider reports the base amount in one observation and the final
+        // total in another when the buyer bears the QRIS fee. A reported amount
+        // that is neither stays as observed so the matcher still rejects it.
+        $reportedAmount = $status->amountValue();
 
         return new StoreBalanceTopUpSettlementEvidence(
             provider: PaymentProvider::SAKURUPIAH,
             merchantReference: (string) $topUp->merchant_ref,
             providerReference: $status->transactionId(),
             providerStatus: (string) ($status->statusValue() ?? ''),
-            amount: $status->amountValue() ?? (int) $topUp->amount,
-            totalAmount: $status->totalValue() ?? (int) ($topUp->provider_total_payment ?? $topUp->amount),
+            amount: $reportedAmount === null || $reportedAmount === $baseAmount || $reportedAmount === $recordedTotal
+                ? $baseAmount
+                : $reportedAmount,
+            totalAmount: $status->totalValue() ?? $recordedTotal,
             trusted: $trusted,
             providerFee: $status->feeValue(),
             paidAt: $paidAt === null ? null : CarbonImmutable::instance($paidAt),

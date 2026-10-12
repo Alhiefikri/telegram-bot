@@ -294,6 +294,74 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->assertSame('qris_image', $payment->fresh()->provider_presentation['mode']);
     }
 
+    public function test_customer_borne_fee_contract_sends_merchant_fee_two_and_keeps_the_payer_across_rehydration(): void
+    {
+        $this->travelTo('2026-09-02 07:00:00');
+        config()->set('services.sakurupiah.qris_contract.fee_payer', 'customer');
+        config()->set('services.sakurupiah.qris_contract.merchant_fee', 2);
+
+        $payment = $this->payment();
+        Http::fake(fn () => Http::response([
+            'status' => '200',
+            'data' => [[
+                'trx_id' => 'trx-411',
+                'merchant_ref' => $payment->merchant_ref,
+                'payment_kode' => 'QRISC',
+                'payment_status' => 'pending',
+                'amount' => '12000',
+                'total' => '12084',
+                'fee' => '84',
+                'merchant_fee' => 'Pelanggan',
+                'date' => '2026-09-02',
+                'time' => '12:00:00',
+                'expired' => '2026-09-03 12:00:00',
+                'checkout_url' => 'https://sakurupiah.id/pay/invoice',
+            ]],
+        ], 200));
+
+        $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
+
+        $this->assertTrue($result->isPayable());
+        $this->assertTrue($result->payable()?->customerPaysFee());
+        $this->assertSame(12084, $result->payable()?->totalAmount());
+        $this->assertSame(84, $result->payable()?->providerFee());
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/create.php')
+            && $request['merchant_fee'] === 2);
+
+        $this->assertTrue($payment->fresh()->provider_presentation['customer_pays_fee']);
+
+        // The persisted payer survives rehydration, so the customer copy stays
+        // truthful even after the configured policy changes.
+        config()->set('services.sakurupiah.qris_contract.fee_payer', 'merchant');
+        config()->set('services.sakurupiah.qris_contract.merchant_fee', 1);
+        $rehydrated = app(SakurupiahInvoiceLifecycleService::class)->classify($payment->fresh());
+
+        $this->assertTrue($rehydrated->isPayable());
+        $this->assertTrue($rehydrated->payable()?->customerPaysFee());
+    }
+
+    public function test_inconsistent_fee_payer_contract_blocks_the_create_request(): void
+    {
+        config()->set('services.sakurupiah.qris_contract.fee_payer', 'customer');
+        config()->set('services.sakurupiah.qris_contract.merchant_fee', 1);
+
+        $payment = $this->payment();
+        Http::fake();
+
+        try {
+            app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
+            $this->fail('Expected an inconsistent fee contract to stop the create request.');
+        } catch (SakurupiahCreatePreRequestException) {
+            $this->addToAssertionCount(1);
+        }
+
+        Http::assertNothingSent();
+        $this->assertSame(
+            SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED,
+            $payment->fresh()->provider_create_state,
+        );
+    }
+
     public function test_http_create_response_is_parsed_and_sent_once_after_local_payment_exists(): void
     {
         $this->travelTo('2026-09-02 07:00:00');

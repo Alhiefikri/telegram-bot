@@ -26,6 +26,7 @@ final readonly class SakurupiahPayableInvoice
         private string $paymentMethod,
         private int $totalAmount,
         private int $providerFee,
+        private bool $customerPaysFee,
         private CarbonImmutable $effectiveExpiresAt,
         private ?string $qrisPayload,
         private ?string $qrisImageUrl,
@@ -62,6 +63,11 @@ final readonly class SakurupiahPayableInvoice
             throw new SakurupiahInvoiceIntegrityException('fee_payer');
         }
 
+        // The provider echoes who bears the fee. When it omits the field, the
+        // validated configured contract is the only known payer.
+        $customerPaysFee = $merchantFee === null
+            ? SakurupiahQrisContract::customerPaysFee(SakurupiahQrisContract::configured())
+            : $merchantFee === 2;
         $fee = $invoice->fee?->fixedAmount();
         if ($fee === null || $invoice->totalValue() < (int) $payment->amount) {
             throw new SakurupiahInvoiceIntegrityException('fee');
@@ -104,6 +110,7 @@ final readonly class SakurupiahPayableInvoice
             paymentMethod: $invoice->paymentCode,
             totalAmount: $invoice->totalValue(),
             providerFee: $fee,
+            customerPaysFee: $customerPaysFee,
             effectiveExpiresAt: $effectiveExpiresAt,
             qrisPayload: $qrisPayload,
             qrisImageUrl: $qrisImageUrl,
@@ -211,6 +218,9 @@ final readonly class SakurupiahPayableInvoice
             paymentMethod: $paymentMethod,
             totalAmount: $total,
             providerFee: $fee,
+            // Historical snapshots predate the recorded payer, so the
+            // configured contract is their only known payer.
+            customerPaysFee: $snapshot['customer_pays_fee'] ?? SakurupiahQrisContract::customerPaysFee(SakurupiahQrisContract::configured()),
             effectiveExpiresAt: $effectiveExpiresAt,
             qrisPayload: $mode === 'qris' ? $qrisPayload : null,
             qrisImageUrl: $mode === 'qris_image' ? $qrisImageUrl : null,
@@ -246,6 +256,15 @@ final readonly class SakurupiahPayableInvoice
     public function providerFee(): int
     {
         return $this->providerFee;
+    }
+
+    /**
+     * Whether the channel fee is charged to the customer on top of the order
+     * amount, i.e. the payable total includes it.
+     */
+    public function customerPaysFee(): bool
+    {
+        return $this->customerPaysFee;
     }
 
     public function effectiveExpiresAt(): CarbonImmutable
@@ -291,6 +310,7 @@ final readonly class SakurupiahPayableInvoice
             'qris_payload' => $this->qrisPayload,
             'qris_image_url' => $this->qrisImageUrl,
             'checkout_url' => $this->checkoutUrl,
+            'customer_pays_fee' => $this->customerPaysFee,
             'effective_expires_at' => $this->effectiveExpiresAt->toIso8601String(),
         ];
     }

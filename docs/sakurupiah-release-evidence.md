@@ -346,6 +346,50 @@ because an ambiguous historical outcome is never re-created. The paid-out
 invoice `…01M4R9AD…` was cancelled; `…01M4R6BZ…` is still `pending_payment` and
 needs a fresh checkout (or an operator decision) after deployment.
 
+## 2026-10-13 — buyer-borne QRIS fee policy
+
+The Owner changed the QRIS fee policy so the buyer bears the channel fee. The
+contract is pinned in `services.sakurupiah.qris_contract` as
+`fee_payer = customer` / `merchant_fee = 2`; the readiness check, the production
+configuration validator, and the create request now read one shared rule
+(`SakurupiahQrisContract::feeRuleIsQualified()`), so a mismatched pair fails the
+create locally instead of sending an ambiguous invoice.
+
+Live sandbox evidence (real provider, `QRISC`, unique merchant references):
+
+| `merchant_fee` | amount | total | fee | echoed payer | history `amount` |
+| --- | --- | --- | --- | --- | --- |
+| `1` | `10000` | `10000` | `0` | `"Merchant"` | `10000` |
+| `2` | `10000` | `10170` | `170` | `"Pelanggan"` | — |
+| `2` | `20000` (app lifecycle) | `20240` | `240` | `"Pelanggan"` | `20240` |
+
+Two latent production defects were found and fixed by that evidence:
+
+1. `SakurupiahInvoice`/`SakurupiahStatus` parsed the echoed payer only as
+   `1`/`2`/`merchant`/`buyer`/`customer`, so the provider's documented
+   `"Pelanggan"` word made every buyer-fee create response fail schema
+   validation and produce no QR. Both parsers now accept `pelanggan`.
+2. `transaction.php` history reports the **final total** in buyer-fee mode while
+   the create response reports the base amount, so the previous single-value
+   amount evidence would have left every buyer-fee payment permanently
+   unverified — the customer would pay and the Order would never fulfill.
+   `SakurupiahInvoiceLifecycleService::expectedProviderAmounts()` now defines
+   the owned amounts (base amount and recorded final total) and the callback
+   processor, refresh identity check, and Store Balance top-up evidence all use
+   it. An amount that is neither still stays unverified.
+
+Presentation consequences: the payer is snapshotted with the payment
+presentation (`customer_pays_fee`), the Telegram caption and the storefront
+invoice label the fee as paid by the customer, and the final payable total is
+what the customer is told to pay. The store still settles the full order amount
+(`amount_merchant = amount`).
+
+Verification: focused Sakurupiah suites **PASS** (218 tests including the new
+buyer-fee settlement, parser, and snapshot-round-trip cases), and a live
+sandbox lifecycle run through the app reported fee `240`, total `20240`,
+`customerPaysFee=true` with the payer persisted and rehydrated, and provider
+history `amount = 20240` matching the Payment's owned amounts.
+
 ## External behavior notes
 
 Sandbox observations and regression evidence are recorded here for operators.

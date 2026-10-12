@@ -104,6 +104,28 @@ final class SakurupiahInvoiceLifecycleService
     }
 
     /**
+     * Amounts this Payment legitimately owns: its base amount and the final
+     * total recorded from the create response.
+     *
+     * The provider reports the base amount in the create response but the final
+     * total in transaction history when the buyer bears the QRIS fee, so a
+     * single amount-equality check would either reject a legitimate buyer-fee
+     * settlement or accept a foreign amount. Both snapshot values are evidence
+     * for exactly this Payment.
+     *
+     * @return list<int>
+     */
+    public static function expectedProviderAmounts(Payment $payment): array
+    {
+        $amounts = [(int) $payment->amount];
+        if ($payment->provider_total_payment !== null) {
+            $amounts[] = (int) $payment->provider_total_payment;
+        }
+
+        return array_values(array_unique($amounts));
+    }
+
+    /**
      * Customer-facing refresh gate. A Payment that still has a provider
      * reference may always be re-checked; a definitively rejected create may be
      * attempted again on the same merchant reference because the provider
@@ -836,18 +858,14 @@ final class SakurupiahInvoiceLifecycleService
                 'Sakurupiah '.$environment->label().' environment is not ready.',
             );
 
-            $contract = config('services.sakurupiah.qris_contract', []);
+            $contract = SakurupiahQrisContract::configured();
             $merchantFee = $contract['merchant_fee'] ?? null;
             $expiryHours = $contract['expiry_hours'] ?? null;
-            if (($contract['currency'] ?? null) !== 'IDR'
-                || ($contract['currency_confirmed'] ?? false) !== true
-                || ($contract['fee_payer'] ?? null) !== 'merchant'
-                || ($contract['fee_confirmed'] ?? false) !== true
+            if (! SakurupiahQrisContract::currencyIsQualified($contract)
+                || ! SakurupiahQrisContract::feeRuleIsQualified($contract)
+                || ! SakurupiahQrisContract::expiryIsQualified($contract)
                 || ! is_int($merchantFee)
-                || ! in_array($merchantFee, [1, 2], true)
-                || ($contract['expiry_confirmed'] ?? false) !== true
                 || ! is_int($expiryHours)
-                || $expiryHours < 1
             ) {
                 throw new SakurupiahCreatePreRequestException('Sakurupiah QRIS contract is not ready.');
             }
@@ -1072,7 +1090,8 @@ final class SakurupiahInvoiceLifecycleService
             return 'currency_mismatch';
         }
 
-        if ($status->amountValue() !== null && $status->amountValue() !== (int) $payment->amount) {
+        if ($status->amountValue() !== null
+            && ! in_array($status->amountValue(), self::expectedProviderAmounts($payment), true)) {
             return 'amount_mismatch';
         }
 

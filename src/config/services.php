@@ -235,8 +235,12 @@ return [
         'qris_contract' => [
             'currency' => 'IDR',
             'currency_confirmed' => true,
-            'fee_payer' => 'merchant',
-            'merchant_fee' => 1,
+            // The buyer bears the QRIS fee. The provider adds the channel fee
+            // on top of the order amount (`total = amount + fee`), the merchant
+            // settles the full order amount, and the customer sees the final
+            // total before paying.
+            'fee_payer' => 'customer',
+            'merchant_fee' => 2,
             'fee_confirmed' => true,
             'expiry_hours' => 24,
             'expiry_confirmed' => true,

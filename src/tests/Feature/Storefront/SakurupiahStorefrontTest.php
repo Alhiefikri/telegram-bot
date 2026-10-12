@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Services\Sakurupiah\SakurupiahAmount;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahFee;
+use App\Services\Sakurupiah\SakurupiahInvoice;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahStatus;
@@ -301,7 +302,7 @@ class SakurupiahStorefrontTest extends TestCase
         $provider = $this->mock(SakurupiahProviderAdapter::class);
         $provider->shouldReceive('createInvoice')
             ->once()
-            ->andReturn(new \App\Services\Sakurupiah\SakurupiahInvoice(
+            ->andReturn(new SakurupiahInvoice(
                 trxId: 'trx-retried-storefront',
                 merchantRef: (string) $payment->merchant_ref,
                 paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
@@ -336,6 +337,33 @@ class SakurupiahStorefrontTest extends TestCase
         $this->assertSame('trx-retried-storefront', $fresh->provider_reference);
         $this->assertNotNull($fresh->provider_presentation);
         $this->assertTrue(app(StorefrontShopSignedInvoice::class)->read($order->fresh())->isQrisPayable);
+    }
+
+    public function test_customer_borne_fee_is_labelled_as_paid_by_the_customer(): void
+    {
+        config()->set('services.sakurupiah.qris_contract.fee_payer', 'customer');
+        config()->set('services.sakurupiah.qris_contract.merchant_fee', 2);
+
+        [$order] = $this->payment([
+            'invoice_number' => 'INV-SAK-STOREFRONT-CUSTOMER-FEE',
+            'provider_total_payment' => 20_450,
+            'provider_fee' => 450,
+            'provider_presentation' => [
+                'mode' => 'hosted',
+                'qris_payload' => null,
+                'checkout_url' => 'https://sakurupiah.id/pay/invoice',
+                'customer_pays_fee' => true,
+            ],
+        ]);
+
+        $invoice = app(StorefrontShopSignedInvoice::class)->read($order);
+
+        $this->assertSame('customer', $invoice->qrisFeePayer);
+
+        $html = $this->get($invoice->redirectUrl)->assertOk()->getContent();
+        $this->assertStringContainsString('Biaya QRIS (dibayar pelanggan)', $html);
+        $this->assertStringNotContainsString('Biaya QRIS (ditanggung toko)', $html);
+        $this->assertStringContainsString('Rp20.450', $html);
     }
 
     /** @return array{0: Order, 1: Payment} */

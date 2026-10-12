@@ -115,7 +115,7 @@ class StorefrontShopOrderPresenter
             'isSakurupiah' => $isSakurupiah,
             'isHostedSakurupiah' => $isSakurupiah && $invoice->isPendingPayment() && filled($invoice->hostedPaymentUrl) && ! filled($invoice->qrisImageSource),
             'isHostedPakasir' => $invoice->payment?->provider === 'pakasir' && $invoice->payment?->method === 'hosted',
-            'qrisFeePayer' => $isSakurupiah ? 'store' : config('services.pakasir.qris_fee.payer', 'customer'),
+            'qrisFeePayer' => $invoice->qrisFeePayer,
             'binanceVerificationMode' => $invoice->binanceVerificationStatus?->mode ?? 'amount_unique',
             'binanceVerificationStatus' => $this->binanceStatus($invoice->binanceVerificationStatus),
             'binanceVerificationAutomatic' => ($invoice->binanceVerificationStatus?->automatic ?? false)

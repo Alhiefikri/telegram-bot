@@ -130,6 +130,8 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         $this->assertCount(1, $sendPhotos);
         $body = $sendPhotos->first()[0]->body();
         $this->assertStringContainsString('Rp20.450', $body);
+        $this->assertStringContainsString('The QRIS fee is paid by the customer and is included in the total above.', $body);
+        $this->assertStringNotContainsString('The QRIS fee is covered by the store', $body);
         $this->assertStringNotContainsString('could not be prepared', $body);
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
     }
@@ -168,6 +170,8 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         $body = $sendPhotos->first()[0]->body();
         $this->assertStringContainsString('Rp20.000', $body);
         $this->assertStringNotContainsString('Rp20.450', $body);
+        $this->assertStringContainsString('The QRIS fee is covered by the store', $body);
+        $this->assertStringNotContainsString('The QRIS fee is paid by the customer', $body);
         $this->assertStringNotContainsString('could not be prepared', $body);
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect?->fresh()->state);
     }

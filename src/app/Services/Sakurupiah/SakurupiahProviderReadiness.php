@@ -779,22 +779,13 @@ final class SakurupiahProviderReadiness
         $contract = (array) config('services.sakurupiah.qris_contract', []);
         $invalid = [];
 
-        if (($contract['currency'] ?? null) !== 'IDR' || ($contract['currency_confirmed'] ?? false) !== true) {
+        if (! SakurupiahQrisContract::currencyIsQualified($contract)) {
             $invalid['SAKURUPIAH_QRIS_CURRENCY_CONTRACT'] = 'Sakurupiah QRIS currency contract is not qualified.';
         }
-        $feePayer = $contract['fee_payer'] ?? null;
-        $merchantFee = $contract['merchant_fee'] ?? null;
-        if (! in_array($feePayer, ['merchant', 'customer'], true)
-            || ($feePayer === 'merchant' && $merchantFee !== 1)
-            || ($feePayer === 'customer' && $merchantFee !== 2)
-            || ($contract['fee_confirmed'] ?? false) !== true
-        ) {
+        if (! SakurupiahQrisContract::feeRuleIsQualified($contract)) {
             $invalid['SAKURUPIAH_QRIS_FEE_CONTRACT'] = 'Sakurupiah QRIS fee contract is not qualified.';
         }
-        if (($contract['expiry_confirmed'] ?? false) !== true
-            || ! is_int($contract['expiry_hours'] ?? null)
-            || $contract['expiry_hours'] < 1
-        ) {
+        if (! SakurupiahQrisContract::expiryIsQualified($contract)) {
             $invalid['SAKURUPIAH_QRIS_EXPIRY_CONTRACT'] = 'Sakurupiah QRIS expiry contract is not qualified.';
         }
 

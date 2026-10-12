@@ -234,9 +234,11 @@ final readonly class SakurupiahStatus
             return null;
         }
 
+        // The provider echoes the payer as a word: `Merchant` when the store
+        // bears the fee and `Pelanggan` when the buyer does.
         return match (strtolower($value)) {
             '1', 'merchant' => 1,
-            '2', 'buyer', 'customer' => 2,
+            '2', 'buyer', 'customer', 'pelanggan' => 2,
             default => throw new SakurupiahSchemaException,
         };
     }
