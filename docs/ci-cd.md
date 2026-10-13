@@ -13,15 +13,17 @@ Deploy production tidak otomatis dari push karena bot commerce ini punya databas
 
 ## Runners
 
-CI jobs run on the repository's dedicated self-hosted runner
-`telegram-bot-ci-vps` (`[self-hosted, Linux, X64, ci]`); production deploy and
-recovery jobs use the same runner through the `deploy` label
-(`[self-hosted, Linux, X64, deploy]`). That runner is its own VPS, not the
-production VPS, so CI work never consumes the store's CPU, memory, or
-bandwidth. Self-hosted execution also keeps the release path independent of
-GitHub-hosted Actions minutes and spending limits.
+CI and scheduled supplier regression jobs use standard GitHub-hosted
+`ubuntu-24.04` runners. While this repository is public, their compute does
+not consume the private-repository Actions minute allowance. Artifact and
+registry storage still have separate limits.
 
-`.github/actionlint.yaml` declares the custom `ci` and `deploy` runner labels
+Production deploy and recovery jobs remain on `telegram-bot-ci-vps` through
+`[self-hosted, Linux, X64, deploy]`. This runner has its own VPS, separate
+from production. Tests and image builds no longer compete with deployment
+for that runner's CPU, disk, or network.
+
+`.github/actionlint.yaml` declares the custom `deploy` runner label
 for workflow validation. Keep this file committed alongside runner-routing
 changes; otherwise `actionlint` rejects valid self-hosted job labels before
 application tests and image publication can run.
@@ -55,10 +57,8 @@ PHP test jobs run inside an `ubuntu:24.04` job container so `setup-php` has its
 supported Linux environment. The PostgreSQL service is reached through its
 `postgres` service-network alias from that job container. Container jobs
 explicitly use Bash because Ubuntu job containers otherwise default to `sh`,
-which rejects `set -o pipefail`. Because that container writes into the
-persistent runner workspace as root, the job ends with a
-`Restore self-hosted workspace ownership` step so the next job on this runner
-can still check out.
+which rejects `set -o pipefail`. The hosted runner workspace is ephemeral,
+so no persistent self-hosted workspace ownership repair is required.
 
 The test lanes deliberately run `npm ci` without the `setup-node` npm cache.
 The production image builds from public Docker Hub bases (`composer:2`,

@@ -1,6 +1,6 @@
 ---
 name: telegram-bot-cicd
-description: "Operate this repo's GitHub Actions CI/CD safely: use the VPS self-hosted runner, dispatch production deploys from green main commits, and verify production release identity."
+description: "Operate this repo's GitHub Actions CI/CD safely: use GitHub-hosted CI, dispatch production deploys from green main commits through the VPS runner, and verify production release identity."
 ---
 
 # Telegram Bot CI/CD
@@ -28,7 +28,7 @@ services, or configuration.
 - Runner service on the runner VPS:
   `actions.runner.Alhiefikri-telegram-bot.telegram-bot-ci-vps.service`
 - Intended active runner name: `telegram-bot-ci-vps`
-- Intended active runner labels: `self-hosted`, `Linux`, `X64`, `ci`, `deploy`
+- Intended active runner labels: `self-hosted`, `Linux`, `X64`, `deploy`
 
 The runner VPS is only a GitHub Actions runner. Do not deploy the application
 there and do not inspect or mutate unrelated workloads. In particular, do not
@@ -42,8 +42,12 @@ Production is a different VPS reached by the deploy workflow over SSH.
 CI jobs route to:
 
 ```text
-[self-hosted, Linux, X64, ci]
+ubuntu-24.04
 ```
+
+Scheduled supplier regression jobs also use `ubuntu-24.04`. Standard hosted
+runner compute is free while the repository is public; artifact and registry
+storage remain separately limited.
 
 Production deploy and recovery jobs route to:
 
@@ -62,7 +66,7 @@ gh api repos/Alhiefikri/telegram-bot/actions/runners \
 Expected healthy state:
 
 - `telegram-bot-ci-vps` is `online`.
-- `telegram-bot-ci-vps` has both `ci` and `deploy` labels.
+- `telegram-bot-ci-vps` has the `deploy` label.
 - Any old local runner, especially `alhiefikri-telegram-bot`, must not have the
   `deploy` label.
 
