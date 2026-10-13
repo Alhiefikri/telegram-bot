@@ -751,6 +751,7 @@
   "receipt.delivery_note": "📌 Nota penghantaran:",
   "receipt.otp_button": "Buka OTP Mail #:number",
   "receipt.support_button": "Hubungi Sokongan",
+  "receipt.txt.automatic": "📎 Kredensial lengkap dan pautan invois ada dalam fail TXT dilampirkan.",
   "receipt.txt.title": "⬇️ Sahkan Muat Turun",
   "receipt.txt.product_label": "📦 Produk",
   "receipt.txt.order_label": "🧾 Pesanan",

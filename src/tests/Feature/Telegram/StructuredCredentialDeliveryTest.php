@@ -18,6 +18,7 @@ use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramMessageUnit;
 use App\Services\Telegram\TelegramOrderIntents;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramPaidOrderTxtExporter;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -94,7 +95,7 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
         }
     }
 
-    public function test_long_auth_token_stays_one_code_entity_in_one_bounded_unit(): void
+    public function test_long_auth_token_is_delivered_intact_in_a_txt_file(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 778899, 'locale' => 'id']);
         [$order, $item] = $this->paidOrder($customer, 'Long Token Bundle');
@@ -111,29 +112,17 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
             )->toArray(),
         ]);
 
-        $this->fakeTelegramHttp();
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendDocument' => Http::response(['ok' => true, 'result' => ['message_id' => 7788991]]),
+        ]);
         app(TelegramReceiptNotifier::class)->send($order->fresh());
-
-        $messages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'long-token@example.test'));
-        $this->assertCount(1, $messages);
-        $message = $messages->first()[0];
-        $this->assertLessThanOrEqual(3900, mb_strlen((string) $message['text'], 'UTF-8'));
-        $this->assertCount(3, $message['entities'] ?? []);
-        $this->assertSame(3400, $message['entities'][2]['length']);
-        $tokenPosition = strpos((string) $message['text'], $token);
-        $this->assertNotFalse($tokenPosition);
-        $this->assertSame(
-            intdiv(
-                strlen(mb_convert_encoding(
-                    substr((string) $message['text'], 0, $tokenPosition),
-                    'UTF-16LE',
-                    'UTF-8',
-                )),
-                2,
-            ),
-            $message['entities'][2]['offset'],
-        );
+        $document = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument'))->sole()[0];
+        $payload = app(TelegramPaidOrderTxtExporter::class)->export($order->fresh(), $customer);
+        $this->assertTrue($document->hasFile('document', $payload->documentContents(), $payload->filename()));
+        $this->assertStringContainsString('long-token@example.test', $payload->documentContents());
+        $this->assertSame(1, substr_count($payload->documentContents(), $token));
+        $this->assertStringContainsString('Auth Token : '.$token, $payload->documentContents());
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
     }
 
     public function test_grouped_long_auth_token_keeps_product_and_account_context(): void

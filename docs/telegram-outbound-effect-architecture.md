@@ -480,3 +480,38 @@ legacy behavior, Binance Payment Verification, checkout idempotency, inventory
 invariants, queue names, or customer-facing message content. It does not claim
 exactly-once remote Telegram delivery; it makes ambiguity explicit and
 operator-controlled.
+
+
+### Automatic TXT buyer receipts
+
+New receipt groups snapshot `receipt_layout_version = v2` and the selected
+render mode. Short deliveries retain protected chat credentials; their Support
+button, confidentiality/copy guidance, and thank-you footer live together in
+the following action panel, without a separate footer message. At five accounts, more than
+800 credential characters, at least 30 newlines, or a line longer than 300
+characters, the notifier selects TXT before chat rendering can reject an
+oversized credential. Rendered credential blocks over 800 characters also
+select TXT. This policy is code-owned, with no presentation ENV settings.
+
+Document groups contain one non-secret invoice summary (`sendPhoto`, or
+`sendMessage` for the explicit image fallback), then one credential-bearing
+`sendDocument`. Both units use the existing strict receipt ledger ordering.
+The existing paid-order TXT exporter authorizes the Customer, includes all
+credentials, delivery notes, guides, the signed invoice URL with the existing
+Order-based expiry, and localized confidentiality guidance. Recovery Keys
+remain hash-only and are never reconstructed or changed by export.
+
+Files are generated in memory, bounded to the existing 1 MiB export limit, and
+uploaded via multipart without plaintext persistence. Documents deliberately
+use `protect_content = false` so the buyer can save the TXT; the caption warns
+against sharing. Only successful delivery of the complete group marks the
+Order receipt sent and materializes its one action panel. Failed or ambiguous
+document sends block completion; ambiguous uploads are never automatically
+resent. Image rejection can create the explicit text/document fallback, whose
+completed group also gets an action panel and supports recovery of that
+handoff. Already-materialized receipt rows without the new layout snapshot
+retain their original chat layout and transport selection.
+
+Telegram API reference checked through Context7:
+<https://core.telegram.org/bots/api#senddocument> (multipart uploads, caption
+limit of 1024 characters, and content-protection behavior).

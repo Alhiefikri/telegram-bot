@@ -753,6 +753,7 @@
   "receipt.delivery_note": "📌 Delivery note:",
   "receipt.otp_button": "Open OTP Mail #:number",
   "receipt.support_button": "Contact Support",
+  "receipt.txt.automatic": "📎 Your complete credentials and invoice link are in the attached TXT file.",
   "receipt.txt.title": "⬇️ Confirm Download",
   "receipt.txt.product_label": "📦 Product",
   "receipt.txt.order_label": "🧾 Order",

@@ -752,6 +752,7 @@
   "receipt.delivery_note": "📌 Catatan pengiriman:",
   "receipt.otp_button": "Buka OTP Mail #:number",
   "receipt.support_button": "Hubungi Support",
+  "receipt.txt.automatic": "📎 Kredensial lengkap dan link invoice ada di file TXT terlampir.",
   "receipt.txt.title": "⬇️ Konfirmasi Download",
   "receipt.txt.product_label": "📦 Produk",
   "receipt.txt.order_label": "🧾 Order",

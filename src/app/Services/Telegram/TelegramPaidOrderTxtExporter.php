@@ -9,11 +9,12 @@ use App\Services\Credentials\CredentialDelivery;
 use App\Services\Credentials\CredentialDeliveryAccount;
 use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\Credentials\CredentialDeliveryProductGroup;
+use App\Storefront\StorefrontInvoiceUrl;
 use InvalidArgumentException;
 use Throwable;
 
 /**
- * Builds the explicitly requested full credential export in memory.
+ * Builds the full credential export for automatic receipts and requested downloads in memory.
  *
  * The paid credential projection is the only source of credential values. The
  * resulting payload is intentionally usable only during the current transport
@@ -25,6 +26,8 @@ final class TelegramPaidOrderTxtExporter
 
     public function __construct(
         private readonly CredentialDeliveryPresentation $credentialPresentation,
+        private readonly TelegramLocale $locale,
+        private readonly StorefrontInvoiceUrl $invoiceUrls,
     ) {}
 
     /**
@@ -84,6 +87,8 @@ final class TelegramPaidOrderTxtExporter
             'LHIE STORE',
             'Order : '.$this->displayLine($this->orderReference($order), 'Order reference'),
             'Items : '.$this->totalQuantity($order),
+            'Invoice : '.url($this->invoiceUrls->show($order)),
+            $this->locale->translate($order->customer, 'receipt.save_details'),
         ];
 
         $sections = [];

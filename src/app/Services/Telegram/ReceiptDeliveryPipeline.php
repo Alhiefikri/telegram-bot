@@ -176,7 +176,7 @@ final class ReceiptDeliveryPipeline
             TelegramOutboundEffect::query()
                 ->where('source_type', Order::class)
                 ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
-                ->where('template_version', TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION)
+                ->whereIn('template_version', [TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION, TelegramOutboundEffectService::TEMPLATE_RECEIPT_TEXT_FALLBACK])
                 ->where('sequence', 1)
                 ->where('state', TelegramOutboundEffectState::Sent->value)
                 ->whereNotNull('effect_group_key'),

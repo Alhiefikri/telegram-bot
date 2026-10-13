@@ -20,6 +20,14 @@ class TelegramReceiptNotifier
 {
     public const PHOTO_CAPTION_LIMIT = 1024;
 
+    private const TXT_ACCOUNT_THRESHOLD = 5;
+
+    private const TXT_CHARACTER_THRESHOLD = 800;
+
+    private const TXT_LINE_LENGTH_THRESHOLD = 300;
+
+    private const TXT_NEWLINE_THRESHOLD = 30;
+
     public function __construct(
         private TelegramBotClient $bot,
         private TelegramLocale $locale,
@@ -112,7 +120,7 @@ class TelegramReceiptNotifier
      * Build one transient plan for a single render attempt. No returned value
      * may cross a queue, cache, log, or outbound-effect persistence boundary.
      */
-    public function receiptPlan(Order $order): TelegramReceiptPlan
+    public function receiptPlan(Order $order, ?bool $documentDelivery = null, bool $compact = true): TelegramReceiptPlan
     {
         $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
         $customer = $order->customer;
@@ -129,26 +137,66 @@ class TelegramReceiptNotifier
                 throw new \InvalidArgumentException('Telegram receipt credential projection is incomplete.');
             }
 
+            $automatic = $documentDelivery === null;
+            $documentDelivery ??= $this->requiresDocument($delivery);
+            $credentialBlocks = $documentDelivery || $delivery->isEmpty()
+                ? [] : $this->credentialRenderer->receiptBlocks($customer, $delivery);
+            if ($automatic && ! $documentDelivery) {
+                $credentialText = implode("\n", array_map(static fn (TelegramMessageUnit $unit): string => $unit->text(), $credentialBlocks));
+                $documentDelivery = mb_strlen($credentialText, 'UTF-8') > self::TXT_CHARACTER_THRESHOLD;
+            }
             $blocks = $this->receiptHeaderBlocks($order, $customer);
+            if ($documentDelivery) {
+                if (preg_match('/\A[1-9][0-9]*\z/D', trim((string) $customer->telegram_id)) !== 1) {
+                    throw new \InvalidArgumentException('Telegram receipt document requires a private Customer chat.');
+                }
+                // Validate the complete export before materializing a durable plan.
+                if (app(TelegramPaidOrderTxtExporter::class)->export($order, $customer) === null) {
+                    throw new \InvalidArgumentException('Telegram receipt document is unavailable.');
+                }
+                $payment = $this->canonicalPaidPayment($order);
+                $summary = $this->combineReceiptBlocks([
+                    $blocks[0],
+                    new TelegramMessageUnit($this->locale->translate($customer, 'receipt.total_quantity', [
+                        'quantity' => $order->orderItems->sum(fn ($item): int => max(0, (int) $item->quantity)),
+                    ])),
+                    new TelegramMessageUnit($this->locale->translate($customer, 'receipt.amount_paid', [
+                        'amount' => $this->formatPaidAmount($order, $payment),
+                    ])),
+                ]);
+                $caption = new TelegramMessageUnit(
+                    $this->locale->translate($customer, 'receipt.txt.automatic')."\n\n".$this->locale->translate($customer, 'receipt.save_details'),
+                    containsCredentials: true,
+                );
+
+                return new TelegramReceiptPlan(
+                    photoUnits: [$summary, $caption],
+                    textUnits: [$summary, $caption],
+                    productCount: $this->credentialRenderer->receiptProductCount($delivery),
+                    accountCount: $delivery->accountCount(),
+                    guides: $delivery->usageGuides(),
+                    documentDelivery: true,
+                );
+            }
             if ($delivery->isEmpty()) {
                 $blocks[] = new TelegramMessageUnit(
                     "\n".$this->locale->translate($customer, 'receipt.no_credentials'),
                 );
             } else {
-                array_push($blocks, ...$this->credentialRenderer->receiptBlocks($customer, $delivery));
+                array_push($blocks, ...$credentialBlocks);
             }
 
-            $footerLines = [
-                $this->locale->translate($customer, 'receipt.save_details'),
-            ];
-            if (! $delivery->isEmpty()) {
-                $footerLines[] = $this->locale->translate($customer, 'receipt.copy_guidance');
+            if (! $compact) {
+                $footerLines = [$this->locale->translate($customer, 'receipt.save_details')];
+                if (! $delivery->isEmpty()) {
+                    $footerLines[] = $this->locale->translate($customer, 'receipt.copy_guidance');
+                }
+                $footerLines[] = $this->locale->translate($customer, 'receipt.thanks');
+                $blocks[] = new TelegramMessageUnit(
+                    "\n".implode("\n\n", $footerLines),
+                    replyMarkup: $this->receiptReplyMarkup($customer, []),
+                );
             }
-            $footerLines[] = $this->locale->translate($customer, 'receipt.thanks');
-            $blocks[] = new TelegramMessageUnit(
-                "\n".implode("\n\n", $footerLines),
-                replyMarkup: $this->receiptReplyMarkup($customer, []),
-            );
 
             return new TelegramReceiptPlan(
                 photoUnits: $this->packReceiptBlocks(
@@ -411,9 +459,13 @@ class TelegramReceiptNotifier
         }
 
         if ($effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION) {
-            $plan = $this->receiptPlan($order);
+            $plan = $this->receiptPlanForEffect($order, $effect);
             $this->assertReceiptPlanMatchesEffect($plan, $effect, textFallback: false);
             $unit = $plan->photoUnit((int) $effect->sequence);
+
+            if ($plan->usesDocument() && (int) $effect->sequence === 2) {
+                return $this->sendReceiptDocument($order, $customer, $unit);
+            }
 
             if ((int) $effect->sequence === 1) {
                 $invoice = $this->renderInvoiceUnit($order);
@@ -441,9 +493,12 @@ class TelegramReceiptNotifier
         }
 
         if ($effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_TEXT_FALLBACK) {
-            $plan = $this->receiptPlan($order);
+            $plan = $this->receiptPlanForEffect($order, $effect);
             $this->assertReceiptPlanMatchesEffect($plan, $effect, textFallback: true);
             $unit = $plan->textUnit((int) $effect->sequence);
+            if ($plan->usesDocument() && (int) $effect->sequence === 2) {
+                return $this->sendReceiptDocument($order, $customer, $unit);
+            }
 
             return $this->bot->sendMessage(
                 $customer->telegram_id,
@@ -742,6 +797,66 @@ class TelegramReceiptNotifier
             'units' => $units,
             'guides' => $guides,
         ];
+    }
+
+    private function requiresDocument(CredentialDelivery $delivery): bool
+    {
+        if ($delivery->accountCount() >= self::TXT_ACCOUNT_THRESHOLD) {
+            return true;
+        }
+        $length = 0;
+        $lines = 0;
+        foreach ($delivery->groups() as $group) {
+            $values = [$group->defaultTutorial()];
+            foreach ($group->accounts() as $account) {
+                array_push($values, $account->text(), $account->accessValue(), $account->readerMailLink(), $account->tutorial());
+            }
+            foreach ($values as $value) {
+                if ($value === null) {
+                    continue;
+                }
+                $length += mb_strlen($value, 'UTF-8');
+                $lines += substr_count($value, "\n");
+                if ($length > self::TXT_CHARACTER_THRESHOLD || $lines >= self::TXT_NEWLINE_THRESHOLD) {
+                    return true;
+                }
+                foreach (explode("\n", $value) as $line) {
+                    if (mb_strlen($line, 'UTF-8') > self::TXT_LINE_LENGTH_THRESHOLD) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function receiptPlanForEffect(Order $order, TelegramOutboundEffect $effect): TelegramReceiptPlan
+    {
+        $metadata = $effect->outcome_metadata ?? [];
+
+        return $this->receiptPlan(
+            $order,
+            documentDelivery: in_array($metadata['render_mode'] ?? '', ['photo_document', 'text_document'], true),
+            compact: ($metadata['receipt_layout_version'] ?? null) === 'v2',
+        );
+    }
+
+    private function sendReceiptDocument(Order $order, Customer $customer, TelegramMessageUnit $unit): array
+    {
+        $payload = app(TelegramPaidOrderTxtExporter::class)->export($order, $customer);
+        if ($payload === null) {
+            throw new TelegramOutboundPreSendException('Telegram receipt document is unavailable.');
+        }
+
+        return $this->bot->sendDocument(
+            $customer->telegram_id,
+            $payload->documentContents(),
+            $payload->filename(),
+            $unit->text(),
+            [],
+            ['protect_content' => false],
+        );
     }
 
     private function assertReceiptPlanMatchesEffect(

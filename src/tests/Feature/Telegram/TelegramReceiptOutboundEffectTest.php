@@ -39,7 +39,9 @@ use App\Services\Telegram\TelegramMessageChunker;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectReviewService;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramPaidOrderTxtExporter;
 use App\Services\Telegram\TelegramProductNameRenderer;
+use App\Services\Telegram\TelegramReceiptActionPanel;
 use App\Services\Telegram\TelegramReceiptNotifier;
 use App\Services\Telegram\TelegramReceiptPlan;
 use App\Services\Telegram\TelegramSupportContact;
@@ -305,7 +307,11 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Issue 334 Product', $caption);
         $this->assertStringContainsString('Product note once', $caption);
         $this->assertSame(1, substr_count($caption, 'Product note once'));
-        $this->assertStringContainsString('LHIE STORE', $caption);
+        $this->assertStringNotContainsString('LHIE STORE', $caption);
+        $panel = TelegramOutboundEffect::query()->where('source_id', (string) $order->id)->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS)->sole();
+        $this->assertSame('v2', $panel->outcome_metadata['receipt_layout_version']);
+        $panelText = app(TelegramReceiptActionPanel::class)->render($order, $order->customer->locale, true, withPrivacyGuidance: true)->text();
+        $this->assertStringContainsString('LHIE STORE', $panelText);
         $this->assertTrue(filter_var($this->telegramRequestField($photo, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
 
         $expectedTitles = [
@@ -459,7 +465,11 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertStringEndsWith('/sendPhoto', $photoRequest->url());
         $caption = (string) $this->telegramRequestField($photoRequest, 'caption');
         $this->assertStringContainsString('🔐', $caption);
-        $this->assertStringContainsString('LHIE STORE', $caption);
+        $this->assertStringNotContainsString('LHIE STORE', $caption);
+        $panel = TelegramOutboundEffect::query()->where('source_id', (string) $order->id)->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS)->sole();
+        $this->assertSame('v2', $panel->outcome_metadata['receipt_layout_version']);
+        $panelText = app(TelegramReceiptActionPanel::class)->render($order, $order->customer->locale, true, withPrivacyGuidance: true)->text();
+        $this->assertStringContainsString('LHIE STORE', $panelText);
 
         $photoBytes = $this->telegramRequestField($photoRequest, 'photo');
         $this->assertIsString($photoBytes);
@@ -897,7 +907,6 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame(TelegramOutboundEffectState::Sent, $first->fresh()->state);
         $this->assertSame(TelegramOutboundEffectState::Sent, $summary->fresh()->state);
         $this->assertSame(TelegramOutboundEffectState::Unknown, $credential->fresh()->state);
-        $this->assertSame(TelegramOutboundEffectState::Pending, $later->fresh()->state);
         $this->assertNull($order->fresh()->telegram_receipt_sent_at);
         $this->assertStringNotContainsString(
             'buyer0@example.test',
@@ -1004,90 +1013,28 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertNull($order->fresh()->telegram_receipt_sent_at);
     }
 
-    public function test_overflow_receipt_uses_one_photo_and_minimum_ordered_continuations(): void
+    public function test_overflow_receipt_uses_one_photo_and_one_complete_document(): void
     {
         Queue::fake();
         $order = $this->multiChunkPaidOrder();
         $plan = app(TelegramReceiptNotifier::class)->receiptPlan($order);
-        $this->assertSame(4, $plan->photoUnitCount());
-
-        $sendMessageCount = 0;
+        $this->assertTrue($plan->usesDocument());
+        $this->assertSame(2, $plan->photoUnitCount());
         $this->fakeTelegramHttp([
-            'https://api.telegram.org/*/sendPhoto' => Http::response([
-                'ok' => true,
-                'result' => ['message_id' => 820001],
-            ]),
-            'https://api.telegram.org/*/sendMessage' => function () use (&$sendMessageCount): mixed {
-                $sendMessageCount++;
-
-                return Http::response([
-                    'ok' => true,
-                    'result' => ['message_id' => 820001 + $sendMessageCount],
-                ]);
-            },
+            'https://api.telegram.org/*/sendDocument' => Http::response(['ok' => true, 'result' => ['message_id' => 820002]]),
         ]);
-
         app(TelegramReceiptNotifier::class)->send($order);
-
-        $requests = Http::recorded()
-            ->filter(static function (array $record): bool {
-                $url = $record[0]->url();
-
-                return str_ends_with($url, '/sendPhoto')
-                    || str_ends_with($url, '/sendMessage');
-            })
-            ->values();
-        $this->assertCount($plan->photoUnitCount(), $requests);
-        $this->assertSame(1, $requests->filter(
-            static fn (array $record): bool => str_ends_with($record[0]->url(), '/sendPhoto'),
-        )->count());
-        foreach ($requests as $record) {
-            $this->assertTrue(
-                filter_var($this->telegramRequestField($record[0], 'protect_content'), FILTER_VALIDATE_BOOLEAN),
-                'Every normal receipt unit must remain protected.',
-            );
-        }
-
-        $texts = $requests->map(function (array $record): string {
-            $request = $record[0];
-
-            return (string) ($this->telegramRequestField($request, 'caption')
-                ?? $this->telegramRequestField($request, 'text')
-                ?? '');
-        })->values();
-        $this->assertStringContainsString('✅ Pembayaran diterima', $texts->first());
-        $this->assertStringNotContainsString('✅ Pembayaran diterima', $texts->slice(1)->implode("\n"));
-        $this->assertStringContainsString('Terima kasih sudah belanja di LHIE STORE.', $texts->last());
-        $this->assertStringNotContainsString(
-            'Terima kasih sudah belanja di LHIE STORE.',
-            $texts->slice(0, -1)->implode("\n"),
-        );
-
-        $this->assertLessThanOrEqual(
-            TelegramReceiptPlan::PHOTO_CAPTION_LIMIT,
-            mb_strlen($texts->first(), 'UTF-8'),
-        );
-        foreach ($texts->slice(1) as $text) {
-            $this->assertLessThanOrEqual(TelegramReceiptPlan::MESSAGE_TEXT_LIMIT, mb_strlen($text, 'UTF-8'));
-        }
-
+        $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')));
+        $document = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument'))->sole()[0];
+        $payload = app(TelegramPaidOrderTxtExporter::class)->export($order, $order->customer);
+        $this->assertTrue($document->hasFile('document', $payload->documentContents(), $payload->filename()));
         for ($index = 0; $index < 60; $index++) {
-            $credentialEmail = 'buyer'.$index.'@example.test';
-            $occurrences = $texts->filter(
-                static fn (string $text): bool => str_contains($text, $credentialEmail),
-            )->count();
-            $this->assertSame(1, $occurrences, $credentialEmail.' must remain in one receipt chunk.');
+            $this->assertSame(1, substr_count($payload->documentContents(), 'buyer'.$index.'@example.test'));
         }
-
-        $effects = TelegramOutboundEffect::query()
-            ->where('effect_group_key', TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->id))
-            ->orderBy('sequence')
-            ->get();
-        $this->assertCount($plan->photoUnitCount(), $effects);
-        $this->assertTrue($effects->every(
-            fn (TelegramOutboundEffect $effect): bool => $effect->state === TelegramOutboundEffectState::Sent,
-        ));
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        $effects = TelegramOutboundEffect::query()->where('effect_group_key', TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->id))->get();
+        $this->assertCount(2, $effects);
+        $this->assertTrue($effects->every(fn ($effect): bool => $effect->state === TelegramOutboundEffectState::Sent));
     }
 
     public function test_queued_overflow_receipt_dispatches_its_next_strict_chunk_after_photo_success(): void
@@ -1235,9 +1182,8 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             ->where('effect_group_key', $first->effect_group_key)
             ->orderBy('sequence')
             ->get();
-        $this->assertGreaterThanOrEqual(3, $effects->count());
+        $this->assertCount(2, $effects);
         $second = $effects[1];
-        $later = $effects[2];
 
         $sendMessageCount = 0;
         Http::preventStrayRequests();
@@ -1246,7 +1192,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
                 'ok' => true,
                 'result' => ['message_id' => 830001],
             ]),
-            'https://api.telegram.org/*/sendMessage' => function () use (&$sendMessageCount): never {
+            'https://api.telegram.org/*/sendDocument' => function () use (&$sendMessageCount): never {
                 $sendMessageCount++;
                 throw new ConnectionException('continuation timed out after Telegram accepted it');
             },
@@ -1258,7 +1204,6 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
 
         $this->assertSame(TelegramOutboundEffectState::Sent, $first->fresh()->state);
         $this->assertSame(TelegramOutboundEffectState::Unknown, $second->fresh()->state);
-        $this->assertSame(TelegramOutboundEffectState::Pending, $later->fresh()->state);
         $this->assertSame(1, $sendMessageCount);
         $this->assertNull($order->fresh()->telegram_receipt_sent_at);
     }
@@ -1314,7 +1259,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
     {
         Queue::fake();
         $order = $this->multiChunkPaidOrder();
-        $this->fakeTelegramHttp();
+        $this->fakeTelegramHttp(['https://api.telegram.org/*/sendDocument' => Http::response(['ok' => true, 'result' => ['message_id' => 830099]])]);
         $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order);
         $this->assertNotNull($effect);
 
@@ -1357,7 +1302,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')),
         );
         $this->assertCount(
-            $fallback->count(),
+            $fallback->count() - 1,
             Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')),
         );
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);

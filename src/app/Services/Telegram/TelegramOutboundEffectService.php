@@ -258,6 +258,7 @@ class TelegramOutboundEffectService
         'has_header',
         'has_footer',
         'render_mode',
+        'receipt_layout_version',
         'attachment_type',
         'attachment_present',
         'payment_method',
@@ -1461,8 +1462,7 @@ class TelegramOutboundEffectService
             $firstReceipt = $receiptEffects->first();
             if ($firstReceipt === null
                 || $firstReceipt->sequence !== 1
-                || $firstReceipt->telegram_method !== 'sendPhoto'
-                || $firstReceipt->template_version !== self::TEMPLATE_RECEIPT_PHOTO_CAPTION) {
+                || ! in_array($firstReceipt->template_version, [self::TEMPLATE_RECEIPT_PHOTO_CAPTION, self::TEMPLATE_RECEIPT_TEXT_FALLBACK], true)) {
                 return null;
             }
 
@@ -1508,6 +1508,7 @@ class TelegramOutboundEffectService
                     $order,
                     (string) ($customer?->locale ?? TelegramLocale::DEFAULT_LOCALE),
                     $txtAvailable,
+                    withPrivacyGuidance: ($receiptMetadata['receipt_layout_version'] ?? null) === 'v2',
                 );
                 $keyboard = $panel->replyMarkup();
                 $keyboardBytes = strlen(json_encode($keyboard, JSON_THROW_ON_ERROR));
@@ -1536,6 +1537,7 @@ class TelegramOutboundEffectService
                 'attempts' => 0,
                 'next_attempt_at' => $now,
                 'outcome_metadata' => [
+                    'receipt_layout_version' => $receiptMetadata['receipt_layout_version'] ?? 'v1',
                     'delivery_context' => 'receipt_actions',
                     'action_count' => count($keyboard['inline_keyboard'] ?? []),
                     'txt_available' => $txtAvailable,
@@ -1760,6 +1762,8 @@ class TelegramOutboundEffectService
         $baseGroupKey = self::receiptEffectGroupKey($orderId);
         if ($receiptGroupKey === $baseGroupKey) {
             $version = 'v2';
+        } elseif ($receiptGroupKey === self::receiptTextFallbackEffectGroupKey($orderId)) {
+            $version = 'text-fallback';
         } elseif (preg_match('/\A'.preg_quote($baseGroupKey, '/').':resend:v([1-9][0-9]*)\z/D', $receiptGroupKey, $matches) === 1) {
             $version = 'resend-v'.$matches[1];
         } else {
@@ -2216,6 +2220,7 @@ class TelegramOutboundEffectService
                     'product_count' => $this->optionalNonNegativeCount($metadata['product_count'] ?? null) ?? 0,
                     'item_count' => $this->optionalNonNegativeCount($metadata['item_count'] ?? null) ?? 0,
                     'receipt_group_key' => $receiptGroupKey,
+                    'receipt_layout_version' => $metadata['receipt_layout_version'] ?? 'v1',
                     'receipt_actions_version' => self::RECEIPT_ACTIONS_OPT_IN_VERSION,
                     ...$this->safePanelSizeMetadata($metadata),
                 ],
@@ -2361,7 +2366,10 @@ class TelegramOutboundEffectService
             ? self::TEMPLATE_RECEIPT_TEXT_FALLBACK
             : self::TEMPLATE_RECEIPT_PHOTO_CAPTION;
         $planMetadata = $this->receiptPlanMetadata($plan, $textFallback);
-        $planMetadata['render_mode'] = $textFallback ? 'text_fallback' : 'photo_caption';
+        $planMetadata['render_mode'] = $plan->usesDocument()
+            ? ($textFallback ? 'text_document' : 'photo_document')
+            : ($textFallback ? 'text_fallback' : 'photo_caption');
+        $planMetadata['receipt_layout_version'] = 'v2';
 
         $first = null;
         for ($sequence = 1; $sequence <= $unitCount; $sequence++) {
@@ -2373,10 +2381,10 @@ class TelegramOutboundEffectService
                 'unit_role' => $textFallback || $sequence > 1 ? 'receipt_chunk' : 'invoice_caption',
                 'receipt_chunk_index' => $sequence - 1,
             ];
-            if (! $textFallback) {
-                $metadata['attachment_type'] = 'photo';
+            $metadata['receipt_actions_version'] = self::RECEIPT_ACTIONS_OPT_IN_VERSION;
+            if ((! $textFallback && $sequence === 1) || ($plan->usesDocument() && $sequence === 2)) {
+                $metadata['attachment_type'] = $sequence === 2 ? 'document' : 'photo';
                 $metadata['attachment_present'] = true;
-                $metadata['receipt_actions_version'] = self::RECEIPT_ACTIONS_OPT_IN_VERSION;
             }
             if ($explicit) {
                 $metadata['duplicate_risk_acknowledged'] = true;
@@ -2397,9 +2405,9 @@ class TelegramOutboundEffectService
                     'target_type' => 'customer',
                     'telegram_chat_id' => (string) $customer->telegram_id,
                     'queue' => self::RECEIPT_QUEUE,
-                    'telegram_method' => $textFallback
-                        ? 'sendMessage'
-                        : ($sequence === 1 ? 'sendPhoto' : 'sendMessage'),
+                    'telegram_method' => $plan->usesDocument() && $sequence === 2
+                        ? 'sendDocument'
+                        : ($textFallback ? 'sendMessage' : ($sequence === 1 ? 'sendPhoto' : 'sendMessage')),
                     'locale' => $customer->locale,
                     'template_version' => $template,
                     'state' => TelegramOutboundEffectState::Pending->value,
@@ -2688,7 +2696,7 @@ class TelegramOutboundEffectService
     {
         if ($effect->effect_type !== self::TYPE_RECEIPT_CREDENTIALS
             || $effect->source_type !== Order::class
-            || $effect->template_version !== self::TEMPLATE_RECEIPT_PHOTO_CAPTION
+            || ! in_array($effect->template_version, [self::TEMPLATE_RECEIPT_PHOTO_CAPTION, self::TEMPLATE_RECEIPT_TEXT_FALLBACK], true)
             || $effect->effect_group_key === null) {
             return false;
         }
@@ -2698,6 +2706,7 @@ class TelegramOutboundEffectService
         $baseGroupKey = self::receiptEffectGroupKey($orderId);
 
         return $groupKey === $baseGroupKey
+            || $groupKey === self::receiptTextFallbackEffectGroupKey($orderId)
             || preg_match('/\A'.preg_quote($baseGroupKey, '/').':resend:v[1-9][0-9]*\z/D', $groupKey) === 1;
     }
 

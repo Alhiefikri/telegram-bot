@@ -27,7 +27,7 @@ final class TelegramReceiptActionPanel
         private readonly TelegramSupportContact $supportContact,
     ) {}
 
-    public function render(Order $order, string $locale, bool $txtAvailable): TelegramMessageUnit
+    public function render(Order $order, string $locale, bool $txtAvailable, bool $withPrivacyGuidance = false): TelegramMessageUnit
     {
         $orderId = $this->callbackOrderId($order);
         $rows = [];
@@ -63,8 +63,18 @@ final class TelegramReceiptActionPanel
             'callback_data' => self::MAIN_MENU_CALLBACK_PREFIX.$orderId,
         ]];
 
+        $lines = [];
+        if ($withPrivacyGuidance) {
+            $lines[] = $this->locale->translateLocale($locale, 'receipt.save_details');
+            if ($txtAvailable) {
+                $lines[] = $this->locale->translateLocale($locale, 'receipt.copy_guidance');
+            }
+            $lines[] = $this->locale->translateLocale($locale, 'receipt.thanks');
+        }
+        $lines[] = $this->locale->translateLocale($locale, 'receipt.actions.message');
+
         return new TelegramMessageUnit(
-            $this->locale->translateLocale($locale, 'receipt.actions.message'),
+            implode("\n\n", $lines),
             replyMarkup: ['inline_keyboard' => $rows],
         );
     }

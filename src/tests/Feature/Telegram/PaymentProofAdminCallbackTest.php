@@ -829,7 +829,9 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Rotate the password and MFA after signing in.', $receiptText);
         $this->assertStringContainsString('Netflix setup guide', $receiptText);
         $this->assertStringNotContainsString(url('/netflix/setup'), $receiptText);
-        $this->assertStringContainsString('Thank you for shopping at LHIE STORE.', $receiptText);
+        $this->assertStringNotContainsString('Thank you for shopping at LHIE STORE.', $receiptText);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], 'Thank you for shopping at LHIE STORE.'));
         $this->assertStringNotContainsString('🌙', $receiptText);
         $this->assertStringNotContainsString('Need help signing in and securing the account?', $receiptText);
         $this->assertStringNotContainsString('/gpt/panduan-login-akun', $receiptText);
@@ -842,8 +844,9 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         );
         $this->assertSame('Netflix setup guide', data_get($guideMarkup, 'inline_keyboard.0.0.text'));
         $this->assertSame(url('/netflix/setup'), data_get($guideMarkup, 'inline_keyboard.0.0.url'));
-        $this->assertSame('Contact Support', data_get($guideMarkup, 'inline_keyboard.1.0.text'));
-        $this->assertSame('https://t.me/store_support', data_get($guideMarkup, 'inline_keyboard.1.0.url'));
+        $this->assertCount(1, $guideMarkup['inline_keyboard']);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && data_get($request->data(), 'reply_markup.inline_keyboard.1.0.url') === 'https://t.me/store_support');
 
         $visibleReceipt = json_encode([
             'caption' => $receiptText,
@@ -911,7 +914,9 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->assertStringContainsString('merchant-delivery-note::KEEP-OPAQUE', $text);
         $this->assertStringContainsString('buyer@example.test', $text);
         $this->assertStringContainsString('Locale-Secret', $text);
-        $this->assertStringContainsString($copy['thanks'], $text);
+        $this->assertStringNotContainsString($copy['thanks'], $text);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) $request['text'], $copy['thanks']));
         $this->assertStringNotContainsString($copy['otherTitle'], $text);
         $this->assertStringNotContainsString($copy['otherDeliveryNote'], $text);
         $this->assertStringNotContainsString(url('/locale-guide'), $text);
@@ -2065,15 +2070,15 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         $customer = Customer::factory()->create(['telegram_id' => 777, 'locale' => 'id']);
         $order = Order::factory()->create(['customer_id' => $customer->id, 'payment_status' => PaymentStatus::Paid]);
-        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid, 'paid_at' => now()]);
 
         app(TelegramReceiptNotifier::class)->send($order);
 
+        Http::assertSent(fn ($r) => (str_ends_with($r->url(), '/sendPhoto') || str_ends_with($r->url(), '/sendMessage'))
+            && str_contains((string) ($this->telegramRequestField($r, 'caption') ?? $this->telegramRequestField($r, 'text')), 'Pembayaran diterima')
+            && empty($this->telegramRequestField($r, 'reply_markup')));
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && $r['chat_id'] === 777
-            && str_contains($r['text'], 'Pembayaran diterima')
-            && count(data_get($r->data(), 'reply_markup.inline_keyboard', [])) === 1
-            && data_get($r->data(), 'reply_markup.inline_keyboard.0.0.text') === 'Hubungi Support'
+            && (string) $r['chat_id'] === '777'
             && data_get($r->data(), 'reply_markup.inline_keyboard.0.0.url') === 'https://t.me/store_support');
         Queue::assertPushedOn('notifications', DeleteBuyerCheckoutMessages::class, fn (DeleteBuyerCheckoutMessages $job): bool => $job->orderId === $order->id);
     }

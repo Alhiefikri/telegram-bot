@@ -83,6 +83,7 @@ final class ReceiptActionPanelDeliveryPipeline
                     $order,
                     (string) ($claimed->locale ?: $customer->locale),
                     $metadata['txt_available'],
+                    withPrivacyGuidance: ($metadata['receipt_layout_version'] ?? null) === 'v2',
                 );
             } catch (Throwable) {
                 $finalized = $this->finalizeNotDeliverable(
@@ -179,8 +180,7 @@ final class ReceiptActionPanelDeliveryPipeline
         $firstMetadata = is_array($first?->outcome_metadata) ? $first->outcome_metadata : [];
 
         return $first !== null
-            && $first->telegram_method === 'sendPhoto'
-            && $first->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION
+            && in_array($first->template_version, [TelegramOutboundEffectService::TEMPLATE_RECEIPT_PHOTO_CAPTION, TelegramOutboundEffectService::TEMPLATE_RECEIPT_TEXT_FALLBACK], true)
             && ($firstMetadata['receipt_actions_version'] ?? null) === TelegramOutboundEffectService::RECEIPT_ACTIONS_OPT_IN_VERSION
             && $this->ledger->isReceiptGroupComplete($groupKey);
     }
