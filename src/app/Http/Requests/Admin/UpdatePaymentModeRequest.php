@@ -31,7 +31,7 @@ class UpdatePaymentModeRequest extends FormRequest
     {
         return [
             'update_scope' => ['sometimes', 'string', Rule::in(['provider_switch', 'binance_settings', 'binance_verification', 'bsc_settings'])],
-            'payment_mode' => ['required', 'string', Rule::in($this->isProviderSwitch() ? [PaymentProvider::MANUAL, PaymentProvider::SAKURUPIAH] : PaymentProvider::known())],
+            'payment_mode' => ['required', 'string', Rule::in($this->isProviderSwitch() ? PaymentProvider::allowed() : PaymentProvider::known())],
             'payment_provider_version' => ['sometimes', 'integer', 'min:0'],
             'confirm_provider_switch' => $this->isProviderSwitch() ? ['required', 'accepted'] : ['sometimes'],
             'binance_pay_enabled' => ['sometimes', 'boolean'],

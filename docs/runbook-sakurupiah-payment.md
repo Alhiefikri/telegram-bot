@@ -109,6 +109,14 @@ No image rebuild is needed for a credential-only change. Run the readiness
 check, then select **Sakurupiah** in **Admin → Mode pembayaran**. The switch
 changes new checkout only; existing Payments keep their stored provider.
 
+The Owner can switch back to **KlikQRIS** from Manual or Sakurupiah in
+**Admin → Pengaturan → Pembayaran & toko** when KlikQRIS readiness passes.
+Manual, KlikQRIS and Sakurupiah remain visible even when an automatic provider
+is unready; its readiness card shows the reason and its activation button is
+disabled until configuration is ready again. Temporary provider trouble is not
+provider retirement. Switching does not delete credentials or change the provider
+of existing Payments.
+
 If the pair is absent, production is disabled automatically. A partial pair is
 invalid and must be corrected before startup.
 

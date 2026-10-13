@@ -25,20 +25,26 @@ class PaymentProviderSwitchTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_klikqris_switch_is_rejected_even_with_configured_credentials(): void
+    public function test_owner_can_return_to_klikqris_after_switching_to_manual_or_sakurupiah(): void
     {
         $owner = User::factory()->create(['role' => UserRole::Owner]);
         $setting = ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
         KlikQrisSandboxScenarios::configureReadySandbox();
 
-        $this->actingAs($owner)->post(route('admin.payment-mode.update'), [
-            'update_scope' => 'provider_switch',
-            'payment_mode' => 'klikqris',
-            'confirm_provider_switch' => '1',
-        ])->assertSessionHasErrors(['payment_mode'], null, 'paymentMode');
+        foreach (['manual', 'sakurupiah'] as $previousProvider) {
+            $setting->update(['payment_mode' => $previousProvider]);
+            $this->actingAs($owner)->post(route('admin.payment-mode.update'), [
+                'update_scope' => 'provider_switch',
+                'payment_mode' => 'klikqris',
+                'payment_provider_version' => $setting->fresh()->payment_provider_version,
+                'confirm_provider_switch' => '1',
+            ])->assertSessionHasNoErrors()
+                ->assertRedirect('/admin?tab=settings&section=pembayaran#admin-payment-settings');
 
-        $this->assertSame('manual', $setting->fresh()->payment_mode);
-        $this->assertDatabaseMissing('audit_logs', ['action' => 'payment_provider.switched']);
+            $this->assertSame('klikqris', $setting->fresh()->payment_mode);
+        }
+
+        $this->assertDatabaseCount('audit_logs', 2);
     }
 
     public function test_pakasir_is_not_available_for_new_provider_switches(): void

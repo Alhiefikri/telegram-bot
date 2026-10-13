@@ -7,23 +7,60 @@ use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Models\Customer;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardData;
+use App\Services\Admin\AdminDashboardOverviewData;
 use App\Services\Admin\AdminDashboardSalesData;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
 
 class AdminDashboardOverviewTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_ready_klikqris_does_not_raise_a_provider_replacement_alert(): void
+    {
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        ManualPaymentSetting::create(['payment_mode' => 'klikqris', 'is_active' => true]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $overview = app(AdminDashboardOverviewData::class)->forAdmin($owner, 0);
+        $providerAlerts = array_filter(
+            $overview['attention'],
+            fn (array $item): bool => $item['title'] === 'Provider pembayaran perlu diperiksa',
+        );
+
+        $this->assertSame([], $providerAlerts);
+    }
+
+    public function test_unready_klikqris_keeps_owner_selection_and_requests_configuration_repair(): void
+    {
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        config(['services.klikqris.sandbox_api_key' => '']);
+        $setting = ManualPaymentSetting::create(['payment_mode' => 'klikqris', 'is_active' => true]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $overview = app(AdminDashboardOverviewData::class)->forAdmin($owner, 0);
+        $providerAlerts = array_values(array_filter(
+            $overview['attention'],
+            fn (array $item): bool => $item['title'] === 'Provider pembayaran perlu diperiksa',
+        ));
+
+        $this->assertCount(1, $providerAlerts);
+        $this->assertStringContainsString('Periksa konfigurasi provider.', $providerAlerts[0]['detail']);
+        $this->assertStringNotContainsString('Ganti provider', $providerAlerts[0]['detail']);
+        $this->assertSame('klikqris', $setting->fresh()->payment_mode);
+    }
 
     public function test_stats_request_skips_inactive_tab_data_queries(): void
     {

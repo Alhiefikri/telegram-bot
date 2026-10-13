@@ -5,6 +5,7 @@ namespace App\Services\Admin;
 use App\Models\ManualPaymentSetting;
 use App\Models\User;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\PaymentReceiptReport;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Support\Money;
@@ -33,6 +34,7 @@ final class AdminDashboardOverviewData
         private readonly PaymentReceiptReport $receipts,
         private readonly AdminDashboardSalesData $sales,
         private readonly CheckoutMaintenance $maintenance,
+        private readonly KlikQrisProviderReadiness $klikQrisReadiness,
         private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
         private readonly AdminBalanceOperationsData $balanceOperations,
     ) {}
@@ -556,13 +558,14 @@ final class AdminDashboardOverviewData
             ];
         }
         $provider = ManualPaymentSetting::current()?->paymentProvider() ?? PaymentProvider::MANUAL;
-        if ($canManage && (in_array($provider, [PaymentProvider::KLIKQRIS, PaymentProvider::PAKASIR], true)
+        if ($canManage && ($provider === PaymentProvider::PAKASIR
+            || ($provider === PaymentProvider::KLIKQRIS && ! $this->klikQrisReadiness->checkout()->isReady())
             || ($provider === PaymentProvider::SAKURUPIAH && ! $this->sakurupiahReadiness->observe()->isReady()))) {
             $items[] = [
                 'title' => 'Provider pembayaran perlu diperiksa',
-                'detail' => in_array($provider, [PaymentProvider::KLIKQRIS, PaymentProvider::PAKASIR], true)
+                'detail' => $provider === PaymentProvider::PAKASIR
                     ? PaymentProvider::label($provider).' tidak lagi tersedia untuk dipilih. Ganti provider sebelum membuka pembayaran baru.'
-                    : 'Sakurupiah belum siap menerima pembayaran baru. Periksa konfigurasi provider.',
+                    : PaymentProvider::label($provider).' belum siap menerima pembayaran baru. Periksa konfigurasi provider.',
                 'url' => $settingsUrl.'#admin-payment-settings',
                 'action' => 'Periksa pembayaran',
             ];

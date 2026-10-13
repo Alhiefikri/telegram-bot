@@ -98,6 +98,16 @@
                                     QR Manual
                                 </x-admin-dashboard.button>
                             </form>
+                            <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="KlikQRIS" x-on:submit.prevent="openPaymentProviderSwitch($event)">
+                                @csrf
+                                <input type="hidden" name="update_scope" value="provider_switch">
+                                <input type="hidden" name="payment_mode" value="klikqris">
+                                <input type="hidden" name="payment_provider_version" value="{{ $paymentControl['payment_provider_version'] }}">
+                                <input type="hidden" name="confirm_provider_switch" value="1">
+                                <x-admin-dashboard.button type="submit" :variant="$paymentControl['requested_mode'] === 'klikqris' ? 'purple' : 'neutral'" size="sm" class="w-full disabled:cursor-not-allowed disabled:opacity-60" :disabled="! $paymentControl['can_enable_klikqris']" title="{{ $paymentControl['klikqris_guard_message'] }}">
+                                    KlikQRIS
+                                </x-admin-dashboard.button>
+                            </form>
                             <form method="POST" action="{{ $paymentControl['update_url'] }}" data-provider-switch-from="{{ $paymentControl['requested_provider_label'] }}" data-provider-switch-target="Sakurupiah" x-on:submit.prevent="openPaymentProviderSwitch($event)">
                                 @csrf
                                 <input type="hidden" name="update_scope" value="provider_switch">
