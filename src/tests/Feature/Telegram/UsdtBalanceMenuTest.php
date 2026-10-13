@@ -230,6 +230,27 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertSame('superseded', $intent->fresh()->state);
     }
 
+    public function test_usdt_chooser_keeps_history_navigation_on_the_canonical_root(): void
+    {
+        $root = $this->startRoot();
+
+        $this->sendText('/usdt');
+        $edit = $this->lastCanonicalEdit(self::CHAT_ID);
+        $buttons = array_merge(...$edit['reply_markup']['inline_keyboard']);
+        $callbacks = array_column($buttons, 'callback_data');
+        $this->assertContains('usdt:history', $callbacks);
+        $this->assertContains('menu:home', $callbacks);
+        foreach ($buttons as $button) {
+            $this->assertSame('primary', $button['style']);
+        }
+
+        $this->tap('chooser-history', 'usdt:history', $root);
+        $this->assertSame(2, $this->editCount(self::CHAT_ID));
+        $this->assertSame($root->message_id, $root->fresh()->message_id);
+        $this->assertSame(1, $this->routineMessageCount(self::CHAT_ID));
+        $this->assertNoMoneyOrOutbound();
+    }
+
     public function test_invalid_amount_is_rejected_locally_without_any_preview(): void
     {
         $root = $this->startRoot();
@@ -241,6 +262,10 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Nominal USDT tidak valid', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
 
         $this->assertSame(0, CustomerUsdtFundingIntent::query()->count());
+        $this->assertSame(0, CustomerUsdtTopUp::query()->count());
+        $this->assertSame(2, $this->editCount(self::CHAT_ID));
+        $this->assertSame($root->message_id, $root->fresh()->message_id);
+        $this->assertSame(1, $this->routineMessageCount(self::CHAT_ID));
         $this->assertNoMoneyOrOutbound();
     }
 
@@ -294,6 +319,17 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertSame('cancelled', CustomerUsdtFundingIntent::query()->sole()->state);
         $this->assertSame(0, CustomerUsdtTopUp::query()->count());
 
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? null) === 'cancel-1'
+            && str_contains((string) ($request['text'] ?? ''), 'dibatalkan'));
+        $callbacks = array_column(
+            array_merge(...$this->lastCanonicalEdit(self::CHAT_ID)['reply_markup']['inline_keyboard']),
+            'callback_data',
+        );
+        $this->assertContains('usdt:history', $callbacks);
+        $this->assertNotContains('usdt:confirm:'.$nonce, $callbacks);
+        $this->assertSame(2, $this->editCount(self::CHAT_ID));
+        $this->assertSame(1, $this->routineMessageCount(self::CHAT_ID));
         $this->sendText('/usdt 2');
         $staleNonce = CustomerUsdtFundingIntent::query()->where('state', 'pending')->sole()->nonce;
         $this->postTelegramWebhook($this->callbackUpdate(
@@ -491,6 +527,10 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('+1.5 USDT', $copy);
         $this->assertSame([], $this->rpc->calls);
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());
+        $this->assertEntriesUnchanged(1);
+        $this->assertSame(0, DB::table('telegram_outbound_effects')->count());
+        $this->assertSame(1, $this->routineMessageCount(554003));
+        $this->assertSame($intruderRoot->message_id, $intruderRoot->fresh()->message_id);
     }
 
     /**

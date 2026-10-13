@@ -1214,7 +1214,7 @@ class StorefrontShopCheckoutTest extends TestCase
     {
         Queue::fake();
         $product = $this->availableProductWithCredentials(
-            secrets: ['account@example.test|pass'],
+            secrets: ['account@example.test|Allocated-account-password'],
             attributes: [
                 'name' => 'Allocated Account Product',
                 'delivery_note' => 'Ganti password dan MFA setelah login pertama.',
@@ -1230,6 +1230,15 @@ class StorefrontShopCheckoutTest extends TestCase
             buyerName: 'paid_buyer',
         );
         $this->assertRedirectsToSignedOrderShow($response->headers->get('Location'), $order);
+        $invoiceUrl = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
+        $this->get($invoiceUrl)
+            ->assertOk()
+            ->assertViewHas('isPaid', false)
+            ->assertViewHas('accountGroups', [])
+            ->assertDontSee('account@example.test', false)
+            ->assertDontSee('Allocated-account-password', false)
+            ->assertDontSee(base64_encode('account@example.test'), false)
+            ->assertDontSee(base64_encode('Allocated-account-password'), false);
 
         $product->update([
             'delivery_note' => 'Catatan baru yang tidak boleh diterima pembeli lama.',
@@ -1239,29 +1248,47 @@ class StorefrontShopCheckoutTest extends TestCase
 
         app(OrderStateMachine::class)->markPaymentPaid($payment);
 
-        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
+        $paidInvoice = $this->get($invoiceUrl)
             ->assertOk()
-            ->assertSee('Data akun')
-            ->assertSee('Allocated Account Product')
-            ->assertSee('email : account@example.test', false)
-            ->assertSee('password : pass', false)
-            ->assertDontSee('account@example.test|pass', false)
-            ->assertSee('Simpan pesanan ke akun')
-            ->assertSee('invoice plus Recovery Key tetap bisa dipakai')
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Referrer-Policy', 'no-referrer')
+            ->assertViewHas('isPaid', true)
+            ->assertViewHas('canRevealCredentials', true)
+            ->assertSeeText('account@example.test')
+            ->assertSeeText('Allocated-account-password')
+            ->assertDontSee('account@example.test|Allocated-account-password', false)
             ->assertSee('Ganti password dan MFA setelah login pertama.')
             ->assertDontSee('Catatan baru yang tidak boleh diterima pembeli lama.')
             ->assertSee('Panduan penggunaan provider lama')
             ->assertSee(url('/provider-lama/cara-pakai'), false)
             ->assertDontSee('Panduan provider baru')
             ->assertDontSee('/provider-baru/cara-pakai', false);
+        $groups = $paidInvoice->viewData('accountGroups');
+        $this->assertCount(1, $groups);
+        $this->assertSame('Allocated Account Product', $groups[0]['product_name']);
+        $this->assertCount(1, $groups[0]['secrets']);
+        $this->assertSame('account@example.test', $groups[0]['secrets'][0]['parts']['email']);
+        $this->assertSame('Allocated-account-password', $groups[0]['secrets'][0]['parts']['password']);
         $orderItem = $order->orderItems()->sole();
         $this->assertSame('Ganti password dan MFA setelah login pertama.', $orderItem->delivery_note);
         $this->assertTrue($orderItem->delivery_note_snapshotted);
         $this->assertSame('Panduan penggunaan provider lama', $orderItem->usage_guide_title);
         $this->assertSame('/provider-lama/cara-pakai', $orderItem->usage_guide_url);
         $this->assertTrue($orderItem->usage_guide_snapshotted);
+        $this->assertSame('account@example.test|Allocated-account-password', $orderItem->stockItems()->sole()->secret);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+
+        $this->app['session']->flush();
+        $this->actingAs(Customer::factory()->create(), 'customer');
+        $this->get($invoiceUrl)
+            ->assertOk()
+            ->assertViewHas('canRevealCredentials', false)
+            ->assertDontSee('account@example.test', false)
+            ->assertDontSee('Allocated-account-password', false)
+            ->assertDontSee(base64_encode('account@example.test'), false)
+            ->assertDontSee(base64_encode('Allocated-account-password'), false)
+            ->assertDontSee(url('/provider-lama/cara-pakai'), false);
     }
 
     private function assertRouteContract(string $name, string $method, string $uri): \Illuminate\Routing\Route

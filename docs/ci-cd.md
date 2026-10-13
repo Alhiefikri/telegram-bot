@@ -26,6 +26,16 @@ for workflow validation. Keep this file committed alongside runner-routing
 changes; otherwise `actionlint` rejects valid self-hosted job labels before
 application tests and image publication can run.
 
+The Telegram USDT chooser must provide button rows inside `inline_keyboard`,
+including its history button. Invalid amounts, cancelled previews, and stale
+or foreign callbacks share this surface; they must still edit the canonical
+message without creating a top-up or ledger entry.
+
+Payment recovery tests supply isolated Telegram credentials and the
+Sakurupiah sandbox HTTPS callback/return configuration explicitly. Paid
+invoice tests verify allocated credentials, access restrictions, and
+snapshotted guides rather than serialized labels or workflow source text.
+
 Before dispatching or rerunning a deploy, confirm the label points at the
 intended runner:
 

@@ -62,7 +62,7 @@ final class TelegramUsdtBalanceIntents
             TelegramNavigationScreen::UsdtBalance,
             $this->locale->code($customer),
             $this->captions->html(implode("\n", $lines)),
-            ['inline_keyboard' => [$this->historyRow($customer), $this->menu->navigationRow($customer)]],
+            ['inline_keyboard' => [[$this->historyRow($customer)], $this->menu->navigationRow($customer)]],
         );
     }
 

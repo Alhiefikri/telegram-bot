@@ -322,6 +322,7 @@ class AdminDashboardSalesRenderingTest extends TestCase
         $this->actingAs(User::factory()->create([
             'role' => UserRole::Owner,
         ]));
+        config()->set('services.telegram.token', 'test-token');
         StoreChannelSetting::create(['singleton_key' => StoreChannelSetting::SINGLETON_KEY, 'sales_proof_enabled' => true, 'telegram_chat_id' => '-100123']);
         Http::fake(['https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 919]])]);
 
@@ -341,7 +342,7 @@ class AdminDashboardSalesRenderingTest extends TestCase
         $this->post(route('admin.orders.sales-proof.retry', $order))->assertRedirect('/admin?tab=penjualan#sales-proof-'.$order->id);
 
         $post = $order->salesProofPost()->firstOrFail();
-        $this->assertSame(SalesProofPost::STATUS_SENT, $post->status);
+        $this->assertSame(SalesProofPost::STATUS_SENT, $post->status, (string) $post->last_error);
         $this->assertSame(4, $post->attempts);
         $this->assertSame('919', $post->telegram_message_id);
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);

@@ -40,7 +40,11 @@ class SakurupiahStorefrontTest extends TestCase
             'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
             'sandbox_api_id' => 'api-test',
             'sandbox_api_key' => 'secret-key',
+            'sandbox_callback_url' => 'https://store.example.test/api/webhook/sakurupiah',
+            'sandbox_return_url' => 'https://store.example.test/shop/orders',
             'sandbox_allowed_hosts' => ['sakurupiah.id'],
+            'sandbox_callback_allowed_hosts' => ['store.example.test'],
+            'sandbox_return_allowed_hosts' => ['store.example.test'],
             'qris_contract' => [
                 'currency' => 'IDR',
                 'currency_confirmed' => true,
@@ -288,6 +292,7 @@ class SakurupiahStorefrontTest extends TestCase
             'provider_create_last_error' => 'application_status:400|provider_message:Gagal membuat Invoice',
             'provider_create_attempted_at' => now()->subMinutes(5),
         ]);
+        $this->assertNull($payment->provider_presentation);
 
         $invoice = app(StorefrontShopSignedInvoice::class)->read($order);
 
@@ -302,6 +307,9 @@ class SakurupiahStorefrontTest extends TestCase
         $provider = $this->mock(SakurupiahProviderAdapter::class);
         $provider->shouldReceive('createInvoice')
             ->once()
+            ->withArgs(fn (SakurupiahCreateInvoice $request): bool => $request->merchantRef === $payment->merchant_ref
+                && $request->phone === '08123456789'
+                && $request->amountValue() === 20_000)
             ->andReturn(new SakurupiahInvoice(
                 trxId: 'trx-retried-storefront',
                 merchantRef: (string) $payment->merchant_ref,
@@ -326,6 +334,7 @@ class SakurupiahStorefrontTest extends TestCase
                 ],
                 merchantFee: 1,
             ));
+        $provider->shouldNotReceive('transactionStatus');
 
         $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
             ->assertOk()
@@ -336,7 +345,57 @@ class SakurupiahStorefrontTest extends TestCase
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $fresh->provider_create_state);
         $this->assertSame('trx-retried-storefront', $fresh->provider_reference);
         $this->assertNotNull($fresh->provider_presentation);
-        $this->assertTrue(app(StorefrontShopSignedInvoice::class)->read($order->fresh())->isQrisPayable);
+        $recoveredInvoice = app(StorefrontShopSignedInvoice::class)->read($order->fresh());
+        $this->assertTrue($recoveredInvoice->isQrisPayable);
+        $this->assertSame(20_450, $recoveredInvoice->payableAmount);
+        $this->assertNotNull($recoveredInvoice->qrisImageSource);
+        $this->get($recoveredInvoice->qrisImageSource)
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+        $this->assertSame(1, Order::query()->count());
+        $this->assertSame(1, Payment::query()->count());
+    }
+
+    #[DataProvider('nonCreatableRefreshStates')]
+    public function test_status_refresh_does_not_create_without_a_phone_or_for_an_ambiguous_outcome(string $state, ?string $phone, string $expectedState): void
+    {
+        [$order, $payment] = $this->payment([
+            'provider_reference' => null,
+            'provider_presentation' => null,
+            'provider_total_payment' => null,
+            'provider_fee' => null,
+            'provider_created_at' => null,
+            'provider_expires_at' => null,
+            'provider_payload' => [],
+            'provider_create_state' => $state,
+            'provider_create_attempted_at' => now()->subMinutes(5),
+        ]);
+        $order->customer->update(['phone_number' => $phone, 'telegram_id' => null]);
+        $provider = $this->mock(SakurupiahProviderAdapter::class);
+        $provider->shouldNotReceive('createInvoice');
+        $provider->shouldNotReceive('transactionStatus');
+
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false))
+            ->assertOk()
+            ->assertJsonPath('ok', false)
+            ->assertJsonPath('status', 'qris_not_ready');
+
+        $fresh = $payment->fresh();
+        $this->assertSame($expectedState, $fresh->provider_create_state);
+        $this->assertSame(PaymentStatus::Pending, $fresh->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertNull($fresh->provider_reference);
+        $this->assertNull($fresh->provider_presentation);
+        $this->assertFalse(app(StorefrontShopSignedInvoice::class)->read($order->fresh())->isQrisPayable);
+    }
+
+    public static function nonCreatableRefreshStates(): array
+    {
+        return [
+            'rejected create without a phone' => [SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED, null, SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED],
+            'unknown create with a phone' => [SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN, '08123456789', SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED],
+            'unconfirmed recovery with a phone' => [SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED, '08123456789', SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED],
+        ];
     }
 
     public function test_customer_borne_fee_is_labelled_as_paid_by_the_customer(): void
@@ -371,7 +430,7 @@ class SakurupiahStorefrontTest extends TestCase
     {
         $expiresAt = now()->addMinutes(20)->startOfSecond();
         $invoiceNumber = $attributes['invoice_number'] ?? 'INV-SAK-STOREFRONT';
-        $presentation = $attributes['provider_presentation'] ?? [
+        $presentation = array_key_exists('provider_presentation', $attributes) ? $attributes['provider_presentation'] : [
             'mode' => 'hosted',
             'qris_payload' => null,
             'checkout_url' => 'https://sakurupiah.id/pay/invoice',
