@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Models\Customer;
 use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramUiIcon;
+use App\Services\Telegram\TelegramHtmlCaption;
 use App\Services\Telegram\TelegramTranslationCatalog;
 use App\Services\Telegram\TelegramUiIcons;
 use Illuminate\Http\Client\Request;
@@ -102,6 +103,26 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
         $this->assertSame(
             '<tg-emoji emoji-id="'.self::EMOJI_ID.'" data-omp-icon="1">🪙</tg-emoji> Pay via: Customer 💳 choice',
             $text,
+        );
+    }
+
+    public function test_rendering_copy_twice_keeps_one_wrapper_and_stays_safe_to_escape(): void
+    {
+        TelegramUiIcon::query()->where('key', 'message.receipt')->sole()->update([
+            'fallback_emoji' => '🧾',
+            'custom_emoji_id' => self::EMOJI_ID,
+        ]);
+        $icons = app(TelegramUiIcons::class);
+        $icons->forget();
+
+        $once = $icons->renderLegacyIcons('🧾 Invoice: INV-1');
+        $twice = $icons->renderLegacyIcons($once);
+
+        $this->assertSame($once, $twice, 'A second render pass must not nest wrappers.');
+        $this->assertSame(1, substr_count($twice, '<tg-emoji'), 'Only one wrapper survives two render passes.');
+        $this->assertSame(
+            '&lt;tag&gt; <tg-emoji emoji-id="'.self::EMOJI_ID.'">🧾</tg-emoji> Invoice: INV-1',
+            app(TelegramHtmlCaption::class)->html('<tag> '.$twice, PHP_INT_MAX),
         );
     }
 

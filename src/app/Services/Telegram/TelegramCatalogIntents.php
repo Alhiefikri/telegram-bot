@@ -168,14 +168,14 @@ class TelegramCatalogIntents
         $lines = [
             trim($this->locale->translate($customer, 'catalog.family.options_title', [
                 'icon' => $this->captions->icon($familyIcon),
-                'name' => $this->escapeHtml($family->name),
+                'name' => $this->escapeText($family->name),
             ])),
             '━━━━━━━━━━━━━━',
-            $this->escapeHtml($this->locale->translate($customer, 'catalog.family.sold_total', ['sold' => $totalSold])),
+            $this->escapeText($this->locale->translate($customer, 'catalog.family.sold_total', ['sold' => $totalSold])),
             '━━━━━━━━━━━━━━',
         ];
         if ($lastPage > 1) {
-            $lines[] = $this->escapeHtml($this->locale->translate($customer, 'catalog.family.page', [
+            $lines[] = $this->escapeText($this->locale->translate($customer, 'catalog.family.page', [
                 'page' => $page,
                 'pages' => $lastPage,
             ]));
@@ -191,7 +191,7 @@ class TelegramCatalogIntents
         $maintenance = $this->maintenance->current();
         if ($maintenance->active) {
             $lines[] = '';
-            $lines[] = $this->escapeHtml($this->maintenanceNotice($customer, $maintenance));
+            $lines[] = $this->escapeText($this->maintenanceNotice($customer, $maintenance));
         }
         $stateToken = $this->catalogQueries->familyState($customer)['token'] ?? null;
         $optionButtons = $pageMembers
@@ -590,7 +590,7 @@ class TelegramCatalogIntents
         $showUsdtPricing = $binanceAvailable && $quote?->baseUsdtUnitAmount !== null;
         $detailIcon = $this->detailIcon($product);
         $lines = [
-            $this->captions->icon($detailIcon).' '.$this->escapeHtml($product->name),
+            $this->captions->icon($detailIcon).' '.$this->escapeText($product->name),
             '',
             $this->locale->translate(
                 $customer,
@@ -684,11 +684,11 @@ class TelegramCatalogIntents
         $warrantyPolicy = LocalizedProductCopy::resolve($copy, 'warranty_policy', $this->locale->code($customer));
         if (trim($warrantyPolicy['text']) !== '') {
             $lines[] = '';
-            $lines[] = '<blockquote>'.$this->escapeHtml($this->locale->translate($customer, 'catalog.replacement_refund_policy'))."\n".$this->content->html($product, $warrantyPolicy['column']).'</blockquote>';
+            $lines[] = '<blockquote>'.$this->escapeText($this->locale->translate($customer, 'catalog.replacement_refund_policy'))."\n".$this->content->html($product, $warrantyPolicy['column']).'</blockquote>';
         }
         if ($maintenance->active) {
             $lines[] = '';
-            $lines[] = $this->escapeHtml($this->maintenanceNotice($customer, $maintenance));
+            $lines[] = $this->escapeText($this->maintenanceNotice($customer, $maintenance));
             if ($availableStock < 1) {
                 $lines[] = $this->locale->translate($customer, 'catalog.sold_out_guidance');
             }
@@ -1021,26 +1021,26 @@ class TelegramCatalogIntents
             $title .= $search;
         }
         $pagination = $result->pagination;
-        $lines = [$html ? $this->escapeHtml($title) : $title];
+        $lines = [$html ? $this->escapeText($title) : $title];
         if ($categoryTitle !== null) {
             $categoryLabel = $this->locale->translate($customer, 'catalog.category.label').$categoryTitle;
-            $lines[] = $html ? $this->escapeHtml($categoryLabel) : $categoryLabel;
+            $lines[] = $html ? $this->escapeText($categoryLabel) : $categoryLabel;
         }
         if ($pagination->hasPages()) {
             $pageLine = $this->locale->translate($customer, 'catalog.family.page', [
                 'page' => $pagination->currentPage,
                 'pages' => $pagination->lastPage,
             ]);
-            $lines[] = $html ? $this->escapeHtml($pageLine) : $pageLine;
+            $lines[] = $html ? $this->escapeText($pageLine) : $pageLine;
         }
         if ($categoryDescription !== null && trim($categoryDescription) !== '') {
             $lines[] = '';
-            $lines[] = $html ? $this->escapeHtml($categoryDescription) : $categoryDescription;
+            $lines[] = $html ? $this->escapeText($categoryDescription) : $categoryDescription;
         }
         if ($maintenance->active && $result->entries !== []) {
             $lines[] = '';
             $notice = $this->maintenanceNotice($customer, $maintenance);
-            $lines[] = $html ? $this->escapeHtml($notice) : $notice;
+            $lines[] = $html ? $this->escapeText($notice) : $notice;
         }
 
         if ($result->entries === []) {
@@ -1071,7 +1071,7 @@ class TelegramCatalogIntents
             $lines[] = $this->locale->translate($customer, 'catalog.family.choose');
         } else {
             $lines[] = '';
-            $lines[] = $this->escapeHtml($this->locale->translate($customer, 'catalog.category.choose_product'));
+            $lines[] = $this->escapeText($this->locale->translate($customer, 'catalog.category.choose_product'));
             foreach ($result->entries as $index => $entry) {
                 $lines[] = '';
                 $lines[] = $this->entryBlock($customer, $entry, $index + 1);
@@ -1080,7 +1080,7 @@ class TelegramCatalogIntents
 
         if ($mode === 'search' && $pagination->hasPages()) {
             $lines[] = '';
-            $lines[] = $this->escapeHtml($this->locale->translate($customer, 'search.more'));
+            $lines[] = $this->escapeText($this->locale->translate($customer, 'search.more'));
         }
 
         $keyboard = $this->entryKeyboard($customer, $result->entries, $pagination->currentPage, $originToken, $mode);
@@ -1252,10 +1252,10 @@ class TelegramCatalogIntents
                 : $this->familyIcon($family);
 
             return trim($this->locale->translate($customer, 'catalog.family.list_item', [
-                'number' => $this->escapeHtml(sprintf('%02d.', $number)),
+                'number' => $this->escapeText(sprintf('%02d.', $number)),
                 'icon' => $this->captions->icon($icon),
-                'name' => $this->escapeHtml($singleOption instanceof CatalogProductReadModel ? $singleOption->name : $family->name),
-                'availability' => $this->escapeHtml($this->familyAvailabilitySuffix($customer, $family)),
+                'name' => $this->escapeText($singleOption instanceof CatalogProductReadModel ? $singleOption->name : $family->name),
+                'availability' => $this->escapeText($this->familyAvailabilitySuffix($customer, $family)),
             ]));
         }
 
@@ -1265,8 +1265,8 @@ class TelegramCatalogIntents
         }
         $icon = $this->catalogIcon($product);
 
-        return $number.'. '.$this->captions->icon($icon).' '.$this->escapeHtml($product->name)."\n"
-            .$this->escapeHtml($this->locale->translate($customer, 'catalog.family.standalone_summary', [
+        return $number.'. '.$this->captions->icon($icon).' '.$this->escapeText($product->name)."\n"
+            .$this->escapeText($this->locale->translate($customer, 'catalog.family.standalone_summary', [
                 'price' => number_format($product->priceAmount, 0, ',', '.'),
                 'stock' => $product->availableStock,
             ]));
@@ -1302,7 +1302,7 @@ class TelegramCatalogIntents
     private function familyOptionBlock(Customer $customer, CatalogProductReadModel $member, int $number, CatalogIcon $icon): string
     {
         $lines = [
-            sprintf('%02d. %s %s', $number, $this->captions->icon($icon), $this->escapeHtml($member->label)),
+            sprintf('%02d. %s %s', $number, $this->captions->icon($icon), $this->escapeText($member->label)),
             $this->locale->translate($customer, 'catalog.family.option_price', [
                 'amount' => number_format($member->priceAmount, 0, ',', '.'),
             ]),
@@ -1351,9 +1351,15 @@ class TelegramCatalogIntents
             : null;
     }
 
-    private function escapeHtml(string $value): string
+    /**
+     * Escape HTML for catalog copy that may already carry a rendered icon
+     * wrapper. `TelegramTranslationCatalog` wraps a pictographic translation as
+     * `<tg-emoji … data-omp-icon="1">`, so escaping it with `htmlspecialchars`
+     * alone would make the customer read the tag instead of the icon.
+     */
+    private function escapeText(string $value): string
     {
-        return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        return $this->captions->escapeTextPreservingIcons($value);
     }
 
     private function catalogIcon(CatalogProductReadModel $product): CatalogIcon

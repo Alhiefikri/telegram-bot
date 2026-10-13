@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Product;
 use App\Services\Credentials\StructuredCredentialPayload;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramReceiptPlan;
 use App\Services\Telegram\TelegramUiIcons;
@@ -19,6 +20,7 @@ final readonly class AccountInputReceiptPreview
     public function __construct(
         private TelegramLocale $locale,
         private TelegramUiIcons $uiIcons,
+        private CustomEmojiCapability $customEmoji,
     ) {}
 
     /**
@@ -85,18 +87,26 @@ final readonly class AccountInputReceiptPreview
             'photo_caption_estimate' => $captionEstimate,
             'continuation_count_estimate' => $continuationCount,
             'warning_codes' => $warnings,
+            // The dashboard renders these as plain text, so the internal icon
+            // markers are stripped to their glyphs before they leave this seam.
             'preview' => [
                 'locale' => $locale,
-                'title' => $this->locale->translateLocale($locale, 'receipt.title'),
-                'order_id' => $this->locale->translateLocale($locale, 'receipt.order_id', ['order' => '[ORDER ID]']),
-                'payment_method' => $this->locale->translateLocale($locale, 'receipt.payment_method', ['method' => '[PAYMENT METHOD]']),
-                'paid_at' => $this->locale->translateLocale($locale, 'receipt.paid_at', ['date' => '[PAID DATE]']),
-                'amount_paid' => $this->locale->translateLocale($locale, 'receipt.amount_paid', ['amount' => '[TOTAL]']),
-                'product_detail' => $this->locale->translateLocale($locale, 'receipt.product_detail'),
+                'title' => $this->stripped($locale, 'receipt.title'),
+                'order_id' => $this->stripped($locale, 'receipt.order_id', ['order' => '[ORDER ID]']),
+                'payment_method' => $this->stripped($locale, 'receipt.payment_method', ['method' => '[PAYMENT METHOD]']),
+                'paid_at' => $this->stripped($locale, 'receipt.paid_at', ['date' => '[PAID DATE]']),
+                'amount_paid' => $this->stripped($locale, 'receipt.amount_paid', ['amount' => '[TOTAL]']),
+                'product_detail' => $this->stripped($locale, 'receipt.product_detail'),
                 'delivery_note_occurrences' => $note === '' ? 0 : 1,
                 'usage_guide_occurrences' => $guideTitle !== '' && $guideUrl !== '' ? 1 : 0,
             ],
         ];
+    }
+
+    /** @param array<string, scalar|null> $replace */
+    private function stripped(string $locale, string $key, array $replace = []): string
+    {
+        return $this->customEmoji->stripTextCustomEmoji($this->locale->translateLocale($locale, $key, $replace));
     }
 
     /** @param list<StructuredCredentialPayload> $accounts */

@@ -11,7 +11,6 @@ use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
-use App\Services\Telegram\TelegramProductNameRenderer;
 use App\Services\Telegram\TelegramReceiptObservability;
 use App\Services\Telegram\TelegramReceiptTxtConfirmationSession;
 use App\Services\Telegram\TelegramReceiptTxtRateLimiter;
@@ -45,7 +44,6 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
         private TelegramReceiptTxtConfirmationSession $confirmation,
         private TelegramReceiptObservability $observability,
         private TelegramReceiptTxtRateLimiter $rateLimiter,
-        private TelegramProductNameRenderer $productNames,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -334,48 +332,5 @@ class TelegramOrderTxtCallbackHandler implements TelegramCallbackHandler
         }
 
         return [$order, null];
-    }
-
-    /** @return array<string, string> */
-    private function summaryLines(Order $order): array
-    {
-        $lines = [];
-        foreach ($order->orderItems->sortBy('id')->values() as $item) {
-            $lines[] = $this->productNames->render(
-                (string) $item->product_name,
-                $item->product_icon,
-                $item->product_custom_emoji_id,
-            );
-        }
-
-        $reference = trim((string) $order->invoice_number);
-
-        return [
-            'product_lines' => implode("\n", $lines),
-            'order_reference' => $reference !== '' ? $reference : '#'.(string) $order->getKey(),
-            'item_count' => (string) $this->sumQuantities($order),
-        ];
-    }
-
-    private function sumQuantities(Order $order): int
-    {
-        $count = 0;
-        foreach ($order->orderItems as $item) {
-            $quantity = (int) $item->getAttribute('quantity');
-            $count += $quantity;
-        }
-
-        return $count;
-    }
-
-    private function confirmationMessage(TelegramCallbackContext $context, Order $order): string
-    {
-        $summary = $this->summaryLines($order);
-
-        return $this->locale->translate($context->customer, 'receipt.txt.confirmation', [
-            'product' => $summary['product_lines'],
-            'order' => $summary['order_reference'],
-            'items' => $summary['item_count'],
-        ]);
     }
 }

@@ -24,7 +24,6 @@ final class BalanceTopUpPaymentProofDeliveryPipeline
         private readonly TelegramOutboundResponseValidator $responseValidator,
         private readonly TelegramBotClient $bot,
         private readonly TelegramLocale $locale,
-        private readonly TelegramHtmlCaption $html,
     ) {}
 
     public function deliver(string $topUpId, ?string $effectId = null): void
@@ -79,10 +78,13 @@ final class BalanceTopUpPaymentProofDeliveryPipeline
             }
 
             $locale = TelegramLocale::DEFAULT_LOCALE;
+            // Raw copy, not HTML: the receipt marker wrappers are consumed into
+            // custom emoji entities by TelegramBotClient, while an HTML-encoded
+            // string would be delivered with its escape sequences visible.
             $response = $this->bot->sendPhotoReference(
                 (string) $claimed->telegram_chat_id,
                 (string) $topUp->payment_proof_file_id,
-                $this->html->html(implode("\n", $this->lines($topUp, $locale)), 1024),
+                implode("\n", $this->lines($topUp, $locale)),
                 $this->replyMarkup($topUp, $locale),
             );
             $messageId = $this->responseValidator->messageIdFromResponse($response, 'Store Balance top-up payment proof');

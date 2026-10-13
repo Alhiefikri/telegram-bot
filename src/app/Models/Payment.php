@@ -8,6 +8,7 @@ use App\Services\KlikQris\KlikQrisAmount;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\Pakasir\PakasirQrisFeePolicy;
 use App\Services\Pakasir\QrisEmvPayload;
+use App\Support\Money;
 use App\Support\PaymentProvider;
 use Database\Factories\PaymentFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -253,7 +254,10 @@ class Payment extends Model
             return null;
         }
 
-        return 'IDR '.$totalAmount->display();
+        // The provider sends a padded decimal string such as "10366.00".
+        // Customers read whole rupiah, so present the validated total in the
+        // same Rp format every other IDR surface uses.
+        return Money::rupiah($totalAmount->rupiah());
     }
 
     private function providerName(): string

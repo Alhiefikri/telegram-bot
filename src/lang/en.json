@@ -754,7 +754,6 @@
   "receipt.otp_button": "Open OTP Mail #:number",
   "receipt.support_button": "Contact Support",
   "receipt.txt.title": "⬇️ Confirm Download",
-  "receipt.txt.confirmation": "⬇️ Confirm Download\n\n📦 Product:\n:product\n🧾 Order: :order\n📎 Format: TXT (.txt)\n📊 Items: :items\n\n⚠️ The file will contain your complete product credentials.\nIt can be saved, copied, or forwarded after download.\n\nGenerate this file and send it here?",
   "receipt.txt.product_label": "📦 Product",
   "receipt.txt.order_label": "🧾 Order",
   "receipt.txt.format_label": "📎 Format",

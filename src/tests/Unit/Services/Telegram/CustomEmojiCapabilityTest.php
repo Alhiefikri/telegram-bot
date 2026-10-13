@@ -110,6 +110,53 @@ class CustomEmojiCapabilityTest extends TestCase
         $this->assertSame($sorted, $offsets);
     }
 
+    public function test_catalog_wrapper_without_the_internal_marker_still_becomes_a_custom_emoji_entity(): void
+    {
+        $text = 'Product <tg-emoji emoji-id="'.self::EMOJI_ID.'">🛍️</tg-emoji> then 987654321';
+        $entities = [[
+            'type' => 'code',
+            'offset' => $this->utf16Offset($text, '987654321'),
+            'length' => 9,
+        ]];
+
+        $result = app(CustomEmojiCapability::class)->textAndEntities($text, $entities);
+
+        $this->assertSame('Product 🛍️ then 987654321', $result['text']);
+        $this->assertSame(['custom_emoji', 'code'], array_column($result['entities'], 'type'));
+        $this->assertSame(self::EMOJI_ID, $result['entities'][0]['custom_emoji_id']);
+        $this->assertSame('987654321', $this->resolve($result['text'], $result['entities'][1]));
+    }
+
+    public function test_marked_and_catalog_wrappers_are_converted_in_one_pass(): void
+    {
+        $text = 'A <tg-emoji emoji-id="'.self::EMOJI_ID.'" data-omp-icon="1">🪙</tg-emoji> '
+            .'B <tg-emoji emoji-id="5420323339723881652">⚠️</tg-emoji> C';
+
+        $result = app(CustomEmojiCapability::class)->textAndEntities($text);
+
+        $this->assertSame('A 🪙 B ⚠️ C', $result['text']);
+        $this->assertSame(['custom_emoji', 'custom_emoji'], array_column($result['entities'], 'type'));
+        $this->assertSame(
+            [self::EMOJI_ID, '5420323339723881652'],
+            array_column($result['entities'], 'custom_emoji_id'),
+        );
+        $this->assertSame(
+            ['🪙', '⚠️'],
+            array_map(
+                fn (array $entity): string => $this->resolve($result['text'], $entity),
+                $result['entities'],
+            ),
+        );
+    }
+
+    public function test_strip_removes_marked_and_catalog_wrappers_while_keeping_glyphs(): void
+    {
+        $text = 'A <tg-emoji emoji-id="'.self::EMOJI_ID.'" data-omp-icon="1">🪙</tg-emoji> '
+            .'B <tg-emoji emoji-id="5420323339723881652">⚠️</tg-emoji> C';
+
+        $this->assertSame('A 🪙 B ⚠️ C', app(CustomEmojiCapability::class)->stripTextCustomEmoji($text));
+    }
+
     private function utf16Offset(string $text, string $needle): int
     {
         $byteOffset = strpos($text, $needle);

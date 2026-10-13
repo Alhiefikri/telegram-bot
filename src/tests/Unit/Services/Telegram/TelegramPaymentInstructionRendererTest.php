@@ -265,7 +265,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
     }
 
     #[DataProvider('klikQrisExactAmountDisplays')]
-    public function test_klikqris_instruction_displays_exact_validated_provider_amount(mixed $providerValue, string $expectedDisplay): void
+    public function test_klikqris_instruction_displays_the_validated_provider_total_as_rupiah(mixed $providerValue, string $expectedDisplay): void
     {
         $order = $this->orderWithItems(CarbonImmutable::parse('2026-07-04 17:00:00', 'Asia/Jakarta'));
         $payment = $this->klikPayment($order, 1000, $providerValue, 1016);
@@ -279,16 +279,16 @@ class TelegramPaymentInstructionRendererTest extends TestCase
             $instruction->captionLines(),
             "Caption lines:\n".$instruction->caption(),
         );
-        $this->assertStringNotContainsString('IDR 1,016.00', $instruction->caption());
+        $this->assertStringNotContainsString('IDR 1016.00', $instruction->caption(), 'Provider decimal padding must not reach the caption.');
     }
 
     public static function klikQrisExactAmountDisplays(): array
     {
         return [
-            'integer' => [1016, 'IDR 1016'],
-            'integer string' => ['1016', 'IDR 1016'],
-            'one zero decimal' => ['1016.0', 'IDR 1016.0'],
-            'two zero decimals' => ['1016.00', 'IDR 1016.00'],
+            'integer' => [1016, 'Rp1.016'],
+            'integer string' => ['1016', 'Rp1.016'],
+            'one zero decimal' => ['1016.0', 'Rp1.016'],
+            'two zero decimals' => ['1016.00', 'Rp1.016'],
         ];
     }
 
@@ -488,7 +488,7 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertCaptionIncludes($instruction, [
             '✅ Checkout QRIS berjaya dibuat',
             '🧾 Invois: INV-RENDERER-103',
-            '💳 Jumlah bayaran QRIS: IDR 125875.00',
+            '💳 Jumlah bayaran QRIS: Rp125.875',
         ]);
         $this->assertStringContainsString('QRIS ini sah selama 15 minit', $instruction->caption());
         $this->assertStringContainsString('Menunggu jumlah akhir', $retry);

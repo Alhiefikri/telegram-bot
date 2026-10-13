@@ -25,11 +25,11 @@ class PaymentQrisReadinessTest extends TestCase
     }
 
     #[DataProvider('klikQrisProviderAmountDisplays')]
-    public function test_klikqris_total_amount_display_uses_exact_validated_provider_representation(mixed $providerValue, string $expectedDisplay): void
+    public function test_klikqris_total_amount_display_formats_the_validated_provider_total_as_rupiah(mixed $providerValue, int $providerTotal, string $expectedDisplay): void
     {
         $payment = new Payment([
             'provider' => 'klikqris',
-            'provider_total_payment' => 1016,
+            'provider_total_payment' => $providerTotal,
             'provider_payload' => ['data' => ['total_amount' => $providerValue]],
         ]);
 
@@ -39,10 +39,11 @@ class PaymentQrisReadinessTest extends TestCase
     public static function klikQrisProviderAmountDisplays(): array
     {
         return [
-            'integer' => [1016, 'IDR 1016'],
-            'integer string' => ['1016', 'IDR 1016'],
-            'one zero decimal' => ['1016.0', 'IDR 1016.0'],
-            'two zero decimals' => ['1016.00', 'IDR 1016.00'],
+            'integer' => [1016, 1016, 'Rp1.016'],
+            'integer string' => ['1016', 1016, 'Rp1.016'],
+            'one zero decimal' => ['1016.0', 1016, 'Rp1.016'],
+            'two zero decimals' => ['1016.00', 1016, 'Rp1.016'],
+            'grouped provider decimals' => ['10366.00', 10366, 'Rp10.366'],
         ];
     }
 

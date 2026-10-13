@@ -59,7 +59,7 @@ class KlikQrisCustomerSurfacesIntegrationTest extends TelegramBotTestSupport
         $this->assertTrue($invoice->isQrisPayable);
         $this->assertSame('https://klikqris.com/storage/sandbox/qris_surface.png', $invoice->qrisImageSource);
         $this->assertSame(1016, $invoice->payableAmount);
-        $this->assertSame('IDR 1016.00', $invoice->payableAmountDisplay);
+        $this->assertSame('Rp1.016', $invoice->payableAmountDisplay);
         $this->assertNotNull($invoice->qrisEffectiveExpiresAt);
         $this->assertSame($orderDeadline->timestamp, $invoice->qrisEffectiveExpiresAt->timestamp);
 

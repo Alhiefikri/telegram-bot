@@ -115,7 +115,7 @@ final class TelegramStockIntents
             ENT_QUOTES | ENT_SUBSTITUTE,
             'UTF-8',
         );
-        $buy = '<a href="'.$url.'">'.$this->escapeHtml($this->locale->translate($customer, 'stock.buy')).'</a>';
+        $buy = '<a href="'.$url.'">'.$this->captions->escapeTextPreservingIcons($this->locale->translate($customer, 'stock.buy')).'</a>';
 
         return $this->locale->translate($customer, 'stock.variant', [
             'icon' => $this->captions->icon($icon),

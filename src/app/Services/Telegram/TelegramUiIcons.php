@@ -14,6 +14,12 @@ class TelegramUiIcons
 {
     public const CACHE_KEY = 'telegram-ui-icons-v2';
 
+    /**
+     * Any rendered wrapper, trusted or catalog. `renderLegacyIcons` must leave
+     * these untouched so a second render pass cannot nest them.
+     */
+    private const WRAPPER_PATTERN = '~<tg-emoji\b[^>]*>.*?</tg-emoji>~si';
+
     private const CACHE_MINUTES = 10;
 
     private bool $memoLoaded = false;
@@ -136,8 +142,39 @@ class TelegramUiIcons
             return $text;
         }
 
-        return preg_replace_callback($render['pattern'], function (array $match) use ($render, $scope): string {
-            $icon = $render['icons']->get($match[0]);
+        // Copy may already carry a rendered wrapper: a caller can pass text back
+        // through this seam, and translation templates are shared. Rendering the
+        // glyph inside an existing wrapper would nest wrappers, and an escape
+        // step would then turn the outer one into visible text for the customer.
+        if (! str_contains($text, '<tg-emoji')) {
+            return $this->replaceLegacyGlyphs($text, $render['pattern'], $render['icons'], $scope);
+        }
+
+        $segments = [];
+        $cursor = 0;
+        if (preg_match_all(self::WRAPPER_PATTERN, $text, $matches, PREG_OFFSET_CAPTURE) > 0) {
+            foreach ($matches[0] as [$markup, $byteOffset]) {
+                $segments[] = $this->replaceLegacyGlyphs(substr($text, $cursor, $byteOffset - $cursor), $render['pattern'], $render['icons'], $scope);
+                $segments[] = $markup;
+                $cursor = $byteOffset + strlen($markup);
+            }
+        }
+        $segments[] = $this->replaceLegacyGlyphs(substr($text, $cursor), $render['pattern'], $render['icons'], $scope);
+
+        return implode('', $segments);
+    }
+
+    /**
+     * @param  Collection<string, TelegramUiIcon>  $icons
+     */
+    private function replaceLegacyGlyphs(string $text, string $pattern, Collection $icons, string $scope): string
+    {
+        if ($text === '') {
+            return '';
+        }
+
+        return preg_replace_callback($pattern, function (array $match) use ($icons, $scope): string {
+            $icon = $icons->get($match[0]);
 
             return $icon instanceof TelegramUiIcon ? $this->renderIcon($icon, $scope) : $match[0];
         }, $text) ?? $text;

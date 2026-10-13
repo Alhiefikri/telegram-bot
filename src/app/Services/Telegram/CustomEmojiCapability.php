@@ -20,6 +20,16 @@ class CustomEmojiCapability
 
     public const SCOPE_CHANNEL = 'channel';
 
+    /**
+     * Every wrapper a renderer can produce, including catalog wrappers written
+     * by TelegramProductContent/TelegramHtmlCaption. Those carry no internal
+     * marker; a plain-text send still has to consume them.
+     */
+    private const ANY_WRAPPER_PATTERN = '~<tg-emoji\b[^>]*>([^<]*)</tg-emoji>~u';
+
+    /** Captures the identifier of an already matched wrapper opener. */
+    private const WRAPPER_ID_PATTERN = '~<tg-emoji\b[^>]*\bemoji-id="([^"]+)"~';
+
     private const RETRY_AFTER_MINUTES = 30;
 
     public function isAvailable(string $scope = self::SCOPE_MESSAGES): bool
@@ -112,12 +122,23 @@ class CustomEmojiCapability
      * Convert Telegram custom-emoji HTML wrappers to UTF-16-offset message
      * entities without enabling HTML parsing for otherwise plain copy.
      *
+     * Every wrapper is consumed: a trusted registry wrapper becomes a custom
+     * emoji entity, and a catalog wrapper without the internal marker keeps its
+     * glyph. A plain-text payload must never carry literal `<tg-emoji>` markup,
+     * because Telegram does not parse it and the customer would read it.
+     *
      * @param  list<array<string, mixed>>  $entities
      * @return array{text: string, entities: list<array<string, mixed>>}
      */
     public function textAndEntities(string $text, array $entities = []): array
     {
-        $pattern = '~<tg-emoji\\b(?=[^>]*\\bdata-omp-icon="1")[^>]*\\bemoji-id="([^"]+)"[^>]*>([^<]*)</tg-emoji>~u';
+        if (! str_contains($text, '<tg-emoji')) {
+            return ['text' => $text, 'entities' => $entities];
+        }
+
+        $pattern = '~<tg-emoji\b(?=[^>]*\bdata-omp-icon="1")[^>]*\bemoji-id="([^"]+)"[^>]*>([^<]*)</tg-emoji>'
+            .'|'
+            .'<tg-emoji\b[^>]*>([^<]*)</tg-emoji>~u';
         if (preg_match_all($pattern, $text, $matches, PREG_OFFSET_CAPTURE) < 1) {
             return ['text' => $text, 'entities' => $entities];
         }
@@ -128,15 +149,27 @@ class CustomEmojiCapability
         $added = [];
         foreach ($matches[0] as $index => [$markup, $byteOffset]) {
             $rendered .= substr($text, $cursor, $byteOffset - $cursor);
-            $glyph = html_entity_decode($matches[2][$index][0], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            // Group 1/2 belong to the trusted-marked alternative, group 3 to the
+            // catalog wrapper without the internal marker.
+            $id = $matches[1][$index][0];
+            $glyphSource = $matches[3][$index][0];
+            if ($id === '') {
+                preg_match(self::WRAPPER_ID_PATTERN, $markup, $opener);
+                $id = (string) ($opener[1] ?? '');
+            } else {
+                $glyphSource = $matches[2][$index][0];
+            }
+            $glyph = html_entity_decode($glyphSource, ENT_QUOTES | ENT_HTML5, 'UTF-8');
             $offset = $this->utf16Length($rendered);
             $rendered .= $glyph;
-            $added[] = [
-                'type' => 'custom_emoji',
-                'offset' => $offset,
-                'length' => $this->utf16Length($glyph),
-                'custom_emoji_id' => $matches[1][$index][0],
-            ];
+            if ($id !== '') {
+                $added[] = [
+                    'type' => 'custom_emoji',
+                    'offset' => $offset,
+                    'length' => $this->utf16Length($glyph),
+                    'custom_emoji_id' => $id,
+                ];
+            }
             $markupStart = $this->utf16Length(substr($text, 0, $byteOffset));
             $markupUnits = $this->utf16Length($markup);
             $removals[] = [
@@ -335,11 +368,13 @@ class CustomEmojiCapability
     }
 
     /**
-     * Remove Telegram custom-emoji HTML wrappers while keeping their fallback glyphs.
+     * Remove Telegram custom-emoji HTML wrappers while keeping their fallback
+     * glyphs. Every wrapper is removed, because a plain-text payload renders
+     * markup literally and a rejected custom emoji must degrade to its glyph.
      */
     public function stripTextCustomEmoji(string $html): string
     {
-        return preg_replace('~<tg-emoji\\b(?=[^>]*\\bdata-omp-icon="1")[^>]*>(.*?)</tg-emoji>~si', '$1', $html) ?? $html;
+        return preg_replace(self::ANY_WRAPPER_PATTERN, '$1', $html) ?? $html;
     }
 
     public function stripHtmlCustomEmoji(string $html): string

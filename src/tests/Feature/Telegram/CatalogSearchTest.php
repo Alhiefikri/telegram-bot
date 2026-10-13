@@ -13,6 +13,7 @@ use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use App\Models\StoreChannelSetting;
+use App\Models\TelegramUiIcon;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramProductNotificationService;
@@ -470,6 +471,39 @@ class CatalogSearchTest extends TelegramBotTestSupport
             && str_contains((string) $request['text'], 'Filter kategori opsional')
             && str_contains(json_encode($request->data()), 'category:'.$category->id)
             && str_contains(json_encode($request->data()), 'category:uncategorized'));
+    }
+
+    public function test_category_listing_keeps_the_wrapped_title_icon_and_escapes_dynamic_copy(): void
+    {
+        $this->fakeTelegramHttp();
+        TelegramUiIcon::query()->where('key', 'menu.products')->sole()->update([
+            'fallback_emoji' => '🛍️',
+            'custom_emoji_id' => '5368324170671202286',
+        ]);
+        Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'id']);
+        $category = Category::factory()->create([
+            'name' => 'Games',
+            'description' => 'Voucher <game> & akses',
+        ]);
+        Product::factory()->create([
+            'name' => 'Diamond',
+            'category_id' => $category->id,
+            'stock' => 2,
+            'reserved_stock' => 0,
+        ]);
+
+        $this->postTelegramWebhook($this->callbackUpdate(140, 'title-icon-category', 'category:'.$category->id))->assertOk();
+
+        $categoryMessage = Http::recorded()
+            ->map(fn (array $record) => $record[0])
+            ->first(fn ($request) => str_ends_with($request->url(), '/sendMessage') && str_contains((string) ($request['text'] ?? ''), 'Games'));
+        $this->assertNotNull($categoryMessage);
+        $text = (string) $categoryMessage['text'];
+
+        $this->assertStringContainsString('<tg-emoji emoji-id="5368324170671202286">🛍️</tg-emoji>', $text);
+        $this->assertStringNotContainsString('&lt;tg-emoji', $text);
+        $this->assertStringNotContainsString('data-omp-icon', $text);
+        $this->assertStringContainsString('Voucher &lt;game&gt; &amp; akses', $text);
     }
 
     public function test_inline_catalog_navigation_edits_one_message_through_product_back(): void

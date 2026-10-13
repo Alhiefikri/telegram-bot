@@ -752,7 +752,6 @@
   "receipt.otp_button": "Buka OTP Mail #:number",
   "receipt.support_button": "Hubungi Sokongan",
   "receipt.txt.title": "⬇️ Sahkan Muat Turun",
-  "receipt.txt.confirmation": "⬇️ Sahkan Muat Turun\n\n📦 Produk:\n:product\n🧾 Pesanan: :order\n📎 Format: TXT (.txt)\n📊 Item: :items\n\n⚠️ Fail ini akan mengandungi kredensial produk lengkap anda.\nIa boleh disimpan, disalin, atau diteruskan selepas muat turun.\n\nBuat fail ini dan hantar di sini?",
   "receipt.txt.product_label": "📦 Produk",
   "receipt.txt.order_label": "🧾 Pesanan",
   "receipt.txt.format_label": "📎 Format",

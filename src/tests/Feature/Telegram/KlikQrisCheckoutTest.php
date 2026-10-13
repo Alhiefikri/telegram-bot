@@ -116,8 +116,9 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString(self::PNG_BYTES, $request->body());
         $this->assertStringContainsString('filename="klikqris-INV-KLIK-600.png"', $request->body());
         $caption = $request->body();
-        $this->assertStringContainsString('IDR 1016.00', $caption);
-        $this->assertStringNotContainsString('Rp 1.016', $caption);
+        $this->assertStringContainsString('Rp1.016', $caption);
+        $this->assertStringNotContainsString('IDR 1016.00', $caption);
+        $this->assertStringNotContainsString('<tg-emoji', $caption, 'Custom emoji markup must never reach the delivered caption.');
         $this->assertStringContainsString('Do not round or change any digit', $caption);
         $this->assertStringContainsString('INV-KLIK-600', $caption);
         $this->assertStringContainsString('15 minutes', $caption);

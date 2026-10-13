@@ -80,7 +80,8 @@ class KlikQrisStorefrontTest extends TestCase
         $html = $this->get($result->redirectUrl)->assertOk()->getContent();
 
         $this->assertStringContainsString('https://klikqris.com/storage/sandbox/qris_storefront.png', $html);
-        $this->assertStringContainsString('IDR 1016.00', $html);
+        $this->assertStringContainsString('Rp1.016', $html);
+        $this->assertStringNotContainsString('IDR 1016.00', $html);
         $this->assertStringContainsString('data-native-qris-crop="top-square"', $html);
         $this->assertStringContainsString('Batas bayar', $html);
         $this->assertStringNotContainsString('pakasir', strtolower($html));

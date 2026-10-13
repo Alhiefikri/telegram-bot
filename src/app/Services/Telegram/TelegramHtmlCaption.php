@@ -23,6 +23,17 @@ final class TelegramHtmlCaption
         return '<blockquote>'.$this->escapeWithCustomEmoji($plainText, PHP_INT_MAX).'</blockquote>';
     }
 
+    /**
+     * Escape copy that may already contain trusted registry icon wrappers.
+     * `htmlspecialchars` alone would turn such a wrapper into visible
+     * `&lt;tg-emoji …&gt;` text, because the escaping runs after
+     * `TelegramTranslationCatalog` rendered the icon.
+     */
+    public function escapeTextPreservingIcons(string $text): string
+    {
+        return $this->escapeWithCustomEmoji($text, PHP_INT_MAX);
+    }
+
     public function icon(CatalogIcon $icon): string
     {
         $glyph = $this->escape($icon->glyph);

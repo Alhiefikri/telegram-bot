@@ -52,10 +52,17 @@ to mirror the real catalog and for every Product to be configured explicitly.
   `TelegramTranslationCatalog` resolves source glyphs in trusted translation
   templates before interpolation; code templates render static prefixes before
   adding customer, Product, payment, or credential values.
-- Plain message/caption text converts `<tg-emoji>` wrappers into Telegram custom
-  emoji entities. Inline keyboard labels use the configured Unicode fallback.
+- Plain message/caption text consumes every `<tg-emoji>` wrapper into Telegram
+  custom emoji entities, including catalog wrappers that carry no internal
+  marker; no literal markup may reach a customer. Inline keyboard labels use the
+  configured Unicode fallback.
   Store Channel promotions attempt custom emoji entities and fall back to
   Unicode when Telegram rejects them; the Web Storefront uses Product glyphs.
+- Translated copy that renders a `message.*` icon already carries its wrapper.
+  Rendering static copy is idempotent, so a second pass never nests wrappers,
+  and any later escaping of such copy must preserve trusted wrappers
+  (`TelegramHtmlCaption::escapeTextPreservingIcons()`); plain `htmlspecialchars`
+  would expose the tag as customer-visible text.
 - The `catalog_brand_icons` table, its name patterns, its Admin Dashboard page
   (`/admin/brand-icons`), and the brand callback namespace are retired. The
   `products.custom_emoji_id` column replaces them; a Product model change

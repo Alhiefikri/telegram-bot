@@ -164,7 +164,7 @@ class KlikQrisSandboxValidationCommandTest extends TestCase
         $this->assertStringContainsString('payment_uuid='.$payment->id, $output);
         $this->assertStringContainsString('merchant_ref_hash='.$merchantHash, $output);
         $this->assertStringContainsString('normalized_status=paid', $output);
-        $this->assertStringContainsString('total=IDR 30119', $output);
+        $this->assertStringContainsString('total=Rp30.119', $output);
         $this->assertStringContainsString('expires_at=', $output);
         $this->assertStringNotContainsString($apiKey, $output);
         $this->assertStringNotContainsString($merchantId, $output);

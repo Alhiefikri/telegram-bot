@@ -90,7 +90,7 @@ class KlikQrisNativeQrisTest extends TestCase
         $this->assertNotNull($payable);
         $this->assertSame($fresh->klikQrisQrisUrl(), $payable->qrisUrl());
         $this->assertSame(1016, $payable->totalAmount());
-        $this->assertSame('IDR 1016.0', $payable->totalAmountDisplay());
+        $this->assertSame('Rp1.016', $payable->totalAmountDisplay());
         $this->assertTrue($payable->effectiveExpiresAt()->equalTo($fresh->provider_expires_at));
         $this->assertSame('created', $fresh->provider_create_state);
         $this->assertSame(1016, $fresh->provider_total_payment);

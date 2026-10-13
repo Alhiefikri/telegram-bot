@@ -229,7 +229,7 @@ class TelegramBotClientTest extends TestCase
         $this->assertArrayNotHasKey('parse_mode', $request->data());
     }
 
-    public function test_untrusted_custom_emoji_markup_remains_literal_in_text_and_buttons(): void
+    public function test_admin_authored_custom_emoji_markup_becomes_an_entity_and_degrades_in_buttons(): void
     {
         Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response([
             'ok' => true,
@@ -245,9 +245,39 @@ class TelegramBotClientTest extends TestCase
         ]);
 
         $request = Http::recorded()[0][0];
-        $this->assertSame('Admin text '.$literal, $request['text']);
-        $this->assertSame($literal, $request['reply_markup']['inline_keyboard'][0][0]['text']);
-        $this->assertArrayNotHasKey('entities', $request->data());
+        // A plain-text payload must never contain literal markup: the wrapper
+        // becomes an entity, and button labels keep the glyph.
+        $this->assertSame('Admin text 🪙', $request['text']);
+        $this->assertSame('🪙', $request['reply_markup']['inline_keyboard'][0][0]['text']);
+        $this->assertSame([[
+            'type' => 'custom_emoji',
+            'offset' => 11,
+            'length' => 2,
+            'custom_emoji_id' => '5368324170671202286',
+        ]], $request['entities']);
+    }
+
+    public function test_catalog_custom_emoji_markup_becomes_a_custom_emoji_entity_in_plain_text(): void
+    {
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response([
+            'ok' => true,
+            'result' => ['message_id' => 782],
+        ])]);
+
+        app(TelegramBotClient::class)->sendMessage(
+            12345,
+            'Product <tg-emoji emoji-id="5420323339723881652">⚠️</tg-emoji> shipped',
+        );
+
+        $request = Http::recorded()[0][0];
+        $this->assertSame('Product ⚠️ shipped', $request['text']);
+        $this->assertSame([[
+            'type' => 'custom_emoji',
+            'offset' => 8,
+            'length' => 2,
+            'custom_emoji_id' => '5420323339723881652',
+        ]], $request['entities']);
+        $this->assertArrayNotHasKey('parse_mode', $request->data());
     }
 
     public function test_custom_emoji_markup_in_inline_button_text_becomes_the_button_icon(): void

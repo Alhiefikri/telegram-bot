@@ -228,6 +228,71 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
 
     }
 
+    public function test_product_detail_keeps_the_warning_icon_wrapper_and_escapes_the_policy_copy(): void
+    {
+        $this->fakeTelegramHttp();
+        TelegramUiIcon::query()->where('key', 'message.warning')->sole()->update([
+            'fallback_emoji' => '⚠️',
+            'custom_emoji_id' => '5420323339723881652',
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 318004, 'locale' => 'id']);
+        $product = Product::factory()->create([
+            'name' => 'Policy Icon Product',
+            'description' => 'Deskripsi produk.',
+            'warranty_policy' => 'Penggantian 1x & pemeriksaan <admin>.',
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+
+        $text = (string) $this->lastDetailMessage('Policy Icon Product')['text'];
+
+        $this->assertStringContainsString(
+            '<tg-emoji emoji-id="5420323339723881652">⚠️</tg-emoji> Kebijakan Penggantian &amp; Pengembalian Dana',
+            $text,
+        );
+        $this->assertStringNotContainsString('&lt;tg-emoji', $text);
+        $this->assertStringNotContainsString('data-omp-icon', $text);
+        $this->assertStringContainsString('Penggantian 1x &amp; pemeriksaan &lt;admin&gt;.', $text);
+    }
+
+    public function test_product_detail_keeps_the_maintenance_icon_wrapper_when_maintenance_is_active(): void
+    {
+        $this->fakeTelegramHttp();
+        TelegramUiIcon::query()->where('key', 'message.maintenance')->sole()->update([
+            'fallback_emoji' => '⏸️',
+            'custom_emoji_id' => '5420323339723881653',
+        ]);
+        $setting = CheckoutMaintenanceSetting::query()->firstOrFail();
+        $setting->update([
+            'is_active' => true,
+            'public_note' => null,
+            'version' => 1,
+            'activated_at' => now(),
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 318005, 'locale' => 'id']);
+        $product = Product::factory()->create([
+            'name' => 'Maintenance Detail Product',
+            'price_amount' => 10000,
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+
+        $text = (string) $this->lastDetailMessage('Maintenance Detail Product')['text'];
+
+        $this->assertStringContainsString(
+            '<tg-emoji emoji-id="5420323339723881653">⏸️</tg-emoji> Checkout sedang dalam maintenance',
+            $text,
+        );
+        $this->assertStringNotContainsString('&lt;tg-emoji', $text);
+        $this->assertStringNotContainsString('data-omp-icon', $text);
+    }
+
     public function test_product_detail_renders_reachable_tiers_and_jumps_to_the_next_tier(): void
     {
         $this->fakeTelegramHttp();

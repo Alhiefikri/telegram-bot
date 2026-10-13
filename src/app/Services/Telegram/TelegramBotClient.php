@@ -491,9 +491,7 @@ class TelegramBotClient
             $entities = is_array($entities) ? $entities : [];
             $rendered = $this->customEmoji->textAndEntities($payload[$field], $entities);
             $payload[$field] = $rendered['text'];
-            if ($rendered['entities'] !== []) {
-                $payload[$entitiesField] = $rendered['entities'];
-            }
+            $payload[$entitiesField] = $rendered['entities'];
         }
 
         return $payload;
