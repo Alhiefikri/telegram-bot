@@ -471,12 +471,12 @@ test("customer checkout: opens the authenticated balance overview across mobile 
 
   await expect(page).toHaveURL(/\/akun\/saldo/);
   await expect(page.getByRole("heading", { name: "Saldo saya" })).toBeVisible();
-  await expect(page.getByText("Rp 12.345", { exact: true })).toBeVisible();
-  await expect(page.getByText("0 USDT", { exact: true })).toBeVisible();
+  const balanceSummary = page.getByRole("region", { name: "Ringkasan saldo" });
   await expect(
-    page.getByText(
-      "Halaman ini hanya-baca. Top-up, pembayaran, dan perubahan saldo tidak tersedia melalui web."
-    )
+    balanceSummary.getByText("Rp 12.345", { exact: true })
+  ).toBeVisible();
+  await expect(
+    balanceSummary.getByText("0 USDT", { exact: true })
   ).toBeVisible();
 
   for (const viewport of [

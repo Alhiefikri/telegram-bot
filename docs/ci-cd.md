@@ -35,6 +35,9 @@ Payment recovery tests supply isolated Telegram credentials and the
 Sakurupiah sandbox HTTPS callback/return configuration explicitly. Paid
 invoice tests verify allocated credentials, access restrictions, and
 snapshotted guides rather than serialized labels or workflow source text.
+Browser balance checks scope amounts to the `Ringkasan saldo` region because
+the account profile also displays the same balances; duplicate summary text
+must not make the checkout smoke fail with an ambiguous locator.
 
 Before dispatching or rerunning a deploy, confirm the label points at the
 intended runner:
