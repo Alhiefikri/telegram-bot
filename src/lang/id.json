@@ -742,6 +742,7 @@
   "receipt.product_detail": "🔐 Detail Produk",
   "receipt.account_label": "Data akun #:number",
   "receipt.copy_guidance": "💡 Ketuk nilai akun untuk menyalin. Jangan bagikan data ini.",
+  "receipt.copy_block_guidance": "💡 Tekan ikon salin pada blok akun untuk menyalin kredensial. Jangan bagikan data ini.",
   "receipt.no_credentials": "Detail produk belum memiliki data akun untuk ditampilkan.",
   "receipt.account_details": "🔐 Data akun",
   "receipt.save_details": "⚠️ Simpan data ini baik-baik dan jangan dibagikan ke orang lain.",

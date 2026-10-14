@@ -148,6 +148,15 @@ class CustomEmojiCapability
         $removals = [];
         $added = [];
         foreach ($matches[0] as $index => [$markup, $byteOffset]) {
+            $markupStart = $this->utf16Length(substr($text, 0, $byteOffset));
+            $markupUnits = $this->utf16Length($markup);
+            foreach ($entities as $entity) {
+                if (($entity['type'] ?? null) === 'pre'
+                    && $markupStart < $entity['offset'] + $entity['length']
+                    && $markupStart + $markupUnits > $entity['offset']) {
+                    continue 2;
+                }
+            }
             $rendered .= substr($text, $cursor, $byteOffset - $cursor);
             // Group 1/2 belong to the trusted-marked alternative, group 3 to the
             // catalog wrapper without the internal marker.
@@ -170,8 +179,6 @@ class CustomEmojiCapability
                     'custom_emoji_id' => $id,
                 ];
             }
-            $markupStart = $this->utf16Length(substr($text, 0, $byteOffset));
-            $markupUnits = $this->utf16Length($markup);
             $removals[] = [
                 'start' => $markupStart,
                 'end' => $markupStart + $markupUnits,

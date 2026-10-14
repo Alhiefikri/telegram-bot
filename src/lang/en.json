@@ -743,6 +743,7 @@
   "receipt.product_detail": "🔐 Product Detail",
   "receipt.account_label": "Account #:number",
   "receipt.copy_guidance": "💡 Tap an account value to copy it. Do not share these details.",
+  "receipt.copy_block_guidance": "💡 Use the copy icon on the account block to copy your credentials. Do not share these details.",
   "receipt.no_credentials": "This Product Detail has no account data to display.",
   "receipt.account_details": "🔐 Account details",
   "receipt.save_details": "⚠️ Save these details securely and do not share them with anyone.",

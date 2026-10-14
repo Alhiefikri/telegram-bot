@@ -37,7 +37,7 @@ use Tests\Support\TelegramBotTestSupport;
 
 final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
 {
-    public function test_completed_new_receipt_materializes_one_panel_effect_after_the_protected_receipt(): void
+    public function test_completed_new_receipt_materializes_one_panel_effect_after_the_receipt(): void
     {
         Queue::fake();
         config()->set('services.telegram.admin_contact_url', 'https://t.me/lhie_support');
@@ -73,7 +73,6 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         );
 
         $photo = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->sole()[0];
-        $this->assertTrue(filter_var($this->telegramRequestField($photo, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
         $this->assertEmpty($this->telegramRequestField($photo, 'reply_markup'));
         $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')));
         $this->assertStringNotContainsString('Simpan data ini', (string) $this->telegramRequestField($photo, 'caption'));

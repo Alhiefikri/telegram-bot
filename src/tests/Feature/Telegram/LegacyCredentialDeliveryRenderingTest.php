@@ -51,18 +51,18 @@ class LegacyCredentialDeliveryRenderingTest extends TelegramBotTestSupport
             $text = (string) $this->telegramRequestField($request, $photo ? 'caption' : 'text');
             $entities = $this->telegramRequestField($request, $photo ? 'caption_entities' : 'entities') ?? [];
             $entities = is_string($entities) ? json_decode($entities, true, flags: JSON_THROW_ON_ERROR) : $entities;
-            $codes = array_values(array_filter($entities, fn (array $entity): bool => $entity['type'] === 'code'));
+            $codes = array_values(array_filter($entities, fn (array $entity): bool => $entity['type'] === 'pre'));
             $values = array_map(fn (array $entity): string => $this->telegramEntityText($text, $entity), $codes);
 
             // Telegram rejects invalid ranges in both captions and text. Model
             // that response so a swallowed send error still fails completion.
-            if ($values !== [$email, $password] || ($photo && $rejectPhoto)) {
+            if ($values !== [$email.' | '.$password] || ($photo && $rejectPhoto)) {
                 return Http::response(['ok' => false, 'description' => 'Bad Request: invalid message entities'], 400);
             }
 
             $this->assertStringNotContainsString('<tg-emoji', $text);
             $this->assertTrue(collect($entities)->contains(fn (array $entity): bool => $entity['type'] === 'custom_emoji'));
-            $this->assertTrue(filter_var($this->telegramRequestField($request, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
+            $this->assertFalse(filter_var($this->telegramRequestField($request, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
             $deliveredMethods[] = $photo ? 'sendPhoto' : 'sendMessage';
 
             return Http::response(['ok' => true, 'result' => ['message_id' => 123458]]);
@@ -92,7 +92,7 @@ class LegacyCredentialDeliveryRenderingTest extends TelegramBotTestSupport
 
         $rendered = app(TelegramReceiptNotifier::class)->render($order->fresh());
         $credentialUnit = collect($rendered['units'])->first(
-            fn (TelegramMessageUnit $unit): bool => str_contains($unit->text(), 'email : legacy@example.test'),
+            fn (TelegramMessageUnit $unit): bool => str_contains($unit->text(), 'legacy@example.test'),
         );
         $tutorialUnit = collect($rendered['units'])->first(
             fn (TelegramMessageUnit $unit): bool => str_contains($unit->text(), 'Auth Token : tutorial text'),
@@ -100,7 +100,10 @@ class LegacyCredentialDeliveryRenderingTest extends TelegramBotTestSupport
 
         $this->assertInstanceOf(TelegramMessageUnit::class, $credentialUnit);
         $this->assertInstanceOf(TelegramMessageUnit::class, $tutorialUnit);
-        $this->assertCount(3, $credentialUnit->entities());
+        $this->assertSame(
+            ['legacy@example.test | Legacy-password | Legacy-mfa'],
+            array_map(fn (array $entity): string => $this->telegramEntityText($credentialUnit->text(), $entity), $credentialUnit->entities()),
+        );
         $tutorialPosition = strpos($tutorialUnit->text(), 'Auth Token : tutorial text');
         $this->assertNotFalse($tutorialPosition);
         $tutorialOffset = intdiv(
@@ -127,41 +130,26 @@ class LegacyCredentialDeliveryRenderingTest extends TelegramBotTestSupport
             ->last();
 
         $this->assertNotNull($orderDetail);
-        $this->assertCount(3, $orderDetail[0]['entities'] ?? []);
+        foreach ($orderDetail[0]['entities'] ?? [] as $entity) {
+            $this->assertStringNotContainsString('tutorial text', $this->telegramEntityText((string) $orderDetail[0]['text'], $entity));
+        }
     }
 
-    public function test_legacy_two_part_receipt_and_order_detail_are_labeled_without_mfa(): void
+    public function test_opaque_multiline_credential_is_copied_without_tutorial_or_product_text(): void
     {
-        $customer = Customer::factory()->create(['telegram_id' => 445567, 'locale' => 'id']);
-        $order = $this->legacyPaidOrder($customer, 'legacy-two-part@example.test|Legacy-password');
-
+        $customer = Customer::factory()->create(['telegram_id' => 445569, 'locale' => 'id']);
+        $secret = "username: opaque😀\npassword: <&>`value\nrecovery: 00123";
+        $order = $this->legacyPaidOrder($customer, $secret);
         $this->fakeTelegramHttp();
+        app(TelegramReceiptNotifier::class)->send($order->fresh());
 
-        $rendered = app(TelegramReceiptNotifier::class)->render($order->fresh());
-        $credentialUnit = collect($rendered['units'])->first(
-            fn (TelegramMessageUnit $unit): bool => str_contains($unit->text(), 'email : legacy-two-part@example.test'),
-        );
-
-        $this->assertInstanceOf(TelegramMessageUnit::class, $credentialUnit);
-        $this->assertStringContainsString('password : Legacy-password', $credentialUnit->text());
-        $this->assertStringNotContainsString('legacy-two-part@example.test|Legacy-password', $credentialUnit->text());
-        $this->assertCount(2, $credentialUnit->entities());
-
-        app(TelegramOrderIntents::class)->sendOrderDetail(
-            $customer,
-            (string) $customer->telegram_id,
-            $order->invoice_number,
-        );
-
-        $orderDetail = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && (string) ($request['chat_id'] ?? '') === '445567'
-            && str_contains((string) ($request['text'] ?? ''), 'email : legacy-two-part@example.test'))
-            ->last();
-
-        $this->assertNotNull($orderDetail);
-        $this->assertStringContainsString('password : Legacy-password', (string) ($orderDetail[0]['text'] ?? ''));
-        $this->assertStringNotContainsString('legacy-two-part@example.test|Legacy-password', (string) ($orderDetail[0]['text'] ?? ''));
-        $this->assertCount(2, $orderDetail[0]['entities'] ?? []);
+        $photo = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->sole()[0];
+        $caption = (string) $this->telegramRequestField($photo, 'caption');
+        $entities = json_decode((string) $this->telegramRequestField($photo, 'caption_entities'), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame([$secret], array_map(fn (array $entity): string => $this->telegramEntityText($caption, $entity), $entities));
+        $this->assertSame('pre', $entities[0]['type']);
+        $this->assertSame('copy', $entities[0]['language']);
+        $this->assertFalse(filter_var($this->telegramRequestField($photo, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
     }
 
     private function legacyPaidOrder(

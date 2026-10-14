@@ -10,8 +10,6 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\SupplierAccountUnit;
 use App\Models\SupplierFulfillment;
-use App\Services\CredentialDeliveryFormatter;
-use App\Services\Credentials\CredentialDelivery;
 use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
@@ -55,7 +53,6 @@ class TelegramOrderIntents
         private SakurupiahProviderReadiness $sakurupiahReadiness,
         private TelegramLocale $locale,
         private TelegramMenuIntents $menu,
-        private CredentialDeliveryFormatter $credentialFormatter,
         private CredentialDeliveryPresentation $credentialPresentation,
         private TelegramCredentialDeliveryRenderer $credentialRenderer,
         private TelegramMessageChunker $messageChunker,
@@ -428,7 +425,7 @@ class TelegramOrderIntents
             $lines[] = $refreshNotice;
         }
         $delivery = $this->credentialPresentation->forCustomer($customer, $order, $payment);
-        if ($this->hasStructuredAccount($delivery)) {
+        if (! $delivery->isEmpty()) {
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'order.detail.account_details');
             $units = [
@@ -442,15 +439,9 @@ class TelegramOrderIntents
                 new TelegramMessageUnit($this->orderInstruction($customer, $order, $payment)),
             ];
         } else {
-            $accountLines = $this->accountSecretLines($customer, $delivery);
-            if ($accountLines !== []) {
-                $lines[] = '';
-                $lines[] = $this->locale->translate($customer, 'order.detail.account_details');
-                array_push($lines, ...$accountLines);
-            }
             $lines[] = '';
             $lines[] = $this->orderInstruction($customer, $order, $payment);
-            $units = $this->unitsFromLines($lines, withCredentialEntities: true);
+            $units = $this->unitsFromLines($lines);
         }
 
         if (SupplierAccountUnit::query()->where('order_id', $order->id)->exists()
@@ -718,56 +709,14 @@ class TelegramOrderIntents
         return $this->locale->translate($customer, 'order.refresh.not_paid');
     }
 
-    private function accountSecretLines(Customer $customer, CredentialDelivery $delivery): array
-    {
-        $lines = [];
-        foreach ($delivery->groups() as $group) {
-            $lines[] = $this->productNames->render(
-                $group->productName(),
-                $group->productIcon(),
-                $group->productCustomEmojiId(),
-            );
-            foreach ($group->accounts() as $account) {
-                $lines[] = $account->number().'. '.$account->text();
-
-                if ($account->isStructured()
-                    && $account->tutorial() !== null
-                    && $account->tutorial() !== $group->defaultTutorial()) {
-                    $lines[] = $this->locale->translate($customer, 'order.detail.delivery_note');
-                    $lines[] = $account->tutorial();
-                }
-            }
-            if ($group->defaultTutorial() !== null) {
-                $lines[] = $this->locale->translate($customer, 'order.detail.delivery_note');
-                $lines[] = $group->defaultTutorial();
-            }
-        }
-
-        return $lines;
-    }
-
     /** @return list<TelegramMessageUnit> */
-    private function unitsFromLines(array $lines, bool $withCredentialEntities = false): array
+    private function unitsFromLines(array $lines): array
     {
         return array_map(
             fn (string $chunk): TelegramMessageUnit => new TelegramMessageUnit(
                 text: $chunk,
-                entities: $withCredentialEntities ? $this->credentialFormatter->codeEntities($chunk) : [],
             ),
             $this->messageChunker->fromLines($lines),
         );
-    }
-
-    private function hasStructuredAccount(CredentialDelivery $delivery): bool
-    {
-        foreach ($delivery->groups() as $group) {
-            foreach ($group->accounts() as $account) {
-                if ($account->isStructured()) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 }

@@ -488,6 +488,9 @@ class TelegramBotClient
             }
 
             $entities = $payload[$entitiesField] ?? [];
+            if (is_string($entities)) {
+                $entities = json_decode($entities, true, flags: JSON_THROW_ON_ERROR);
+            }
             $entities = is_array($entities) ? $entities : [];
             $rendered = $this->customEmoji->textAndEntities($payload[$field], $entities);
             $payload[$field] = $rendered['text'];
@@ -673,11 +676,26 @@ class TelegramBotClient
     private function withoutCustomEmojiMarkup(array $payload): array
     {
         $isHtml = ($payload['parse_mode'] ?? null) === 'HTML';
-        foreach (['text', 'caption'] as $field) {
-            if (is_string($payload[$field] ?? null)) {
-                $payload[$field] = $isHtml
-                    ? $this->customEmoji->stripHtmlCustomEmoji($payload[$field])
-                    : $this->customEmoji->stripTextCustomEmoji($payload[$field]);
+        foreach (['text' => 'entities', 'caption' => 'caption_entities'] as $field => $entityField) {
+            if (! is_string($payload[$field] ?? null)) {
+                continue;
+            }
+            if ($isHtml) {
+                $payload[$field] = $this->customEmoji->stripHtmlCustomEmoji($payload[$field]);
+
+                continue;
+            }
+            $entities = $payload[$entityField] ?? [];
+            $encodedEntities = is_string($entities);
+            if ($encodedEntities) {
+                $entities = json_decode($entities, true, flags: JSON_THROW_ON_ERROR);
+            }
+            $rendered = $this->customEmoji->textAndEntities($payload[$field], $entities);
+            $payload[$field] = $rendered['text'];
+            if (isset($payload[$entityField]) || $rendered['entities'] !== []) {
+                $payload[$entityField] = $encodedEntities
+                    ? json_encode($rendered['entities'], JSON_THROW_ON_ERROR)
+                    : $rendered['entities'];
             }
         }
 

@@ -259,6 +259,7 @@ class TelegramOutboundEffectService
         'has_footer',
         'render_mode',
         'receipt_layout_version',
+        'credential_layout_version',
         'attachment_type',
         'attachment_present',
         'payment_method',
@@ -1668,7 +1669,10 @@ class TelegramOutboundEffectService
             }
 
             try {
-                $plan = $this->receiptNotifier->receiptPlan($order);
+                $plan = $this->receiptNotifier->receiptPlan(
+                    $order,
+                    copyableCredentials: ($locked->outcome_metadata['credential_layout_version'] ?? null) === 'copy-v1',
+                );
             } catch (\Throwable) {
                 return null;
             }
@@ -2370,6 +2374,7 @@ class TelegramOutboundEffectService
             ? ($textFallback ? 'text_document' : 'photo_document')
             : ($textFallback ? 'text_fallback' : 'photo_caption');
         $planMetadata['receipt_layout_version'] = 'v2';
+        $planMetadata['credential_layout_version'] = $plan->usesCopyableCredentials() ? 'copy-v1' : 'fields-v1';
 
         $first = null;
         for ($sequence = 1; $sequence <= $unitCount; $sequence++) {
@@ -3027,6 +3032,8 @@ class TelegramOutboundEffectService
                 $safe[$key] = (int) $value;
             } elseif (in_array($key, ['attachment_present', 'late_evidence', 'has_photo', 'has_header', 'has_footer', 'txt_available', 'contains_credentials'], true)
                 && is_bool($value)) {
+                $safe[$key] = $value;
+            } elseif ($key === 'credential_layout_version' && in_array($value, ['copy-v1', 'fields-v1'], true)) {
                 $safe[$key] = $value;
             } elseif ($key === 'exception' && is_string($value)
                 && preg_match('/\A[A-Za-z_][A-Za-z0-9_\\\\]*\z/', $value) === 1) {

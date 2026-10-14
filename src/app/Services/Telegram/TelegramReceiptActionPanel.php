@@ -67,7 +67,7 @@ final class TelegramReceiptActionPanel
         if ($withPrivacyGuidance) {
             $lines[] = $this->locale->translateLocale($locale, 'receipt.save_details');
             if ($txtAvailable) {
-                $lines[] = $this->locale->translateLocale($locale, 'receipt.copy_guidance');
+                $lines[] = $this->locale->translateLocale($locale, 'receipt.copy_block_guidance');
             }
             $lines[] = $this->locale->translateLocale($locale, 'receipt.thanks');
         }

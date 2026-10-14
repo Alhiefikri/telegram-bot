@@ -484,10 +484,24 @@ operator-controlled.
 
 ### Automatic TXT buyer receipts
 
-New receipt groups snapshot `receipt_layout_version = v2` and the selected
-render mode. Short deliveries retain protected chat credentials; their Support
-button, confidentiality/copy guidance, and thank-you footer live together in
-the following action panel, without a separate footer message. At five accounts, more than
+New receipt groups snapshot `receipt_layout_version = v2`,
+`credential_layout_version = copy-v1`, and the selected render mode.
+Short deliveries use one native Telegram `pre` entity with `language = copy`
+per account: `email | password | MFA/Auth Token` where present.
+Opaque legacy payloads remain verbatim. Tutorial text, Product context and OTP
+Mail links stay outside the copied block; OTP Mail remains an access button.
+The renderer constructs UTF-16 entity ranges from the actual appended text,
+and emoji conversion must not rewrite literal markup inside a `pre` entity.
+Both initial normalization and custom-emoji fallback honor these entity ranges,
+including JSON-encoded caption entities; fallback removes decoration, not
+credential text.
+Credential-bearing captions, continuation messages and image-fallback messages
+use `protect_content = false` to allow copying. They can consequently also be
+forwarded/saved; paid Customer ownership and confidentiality guidance remain
+required. Non-credential receipt units retain content protection.
+Their Support button, confidentiality/copy guidance, and thank-you footer live
+together in the following action panel, without a separate footer message.
+At five accounts, more than
 800 credential characters, at least 30 newlines, or a line longer than 300
 characters, the notifier selects TXT before chat rendering can reject an
 oversized credential. Rendered credential blocks over 800 characters also
@@ -511,6 +525,17 @@ resent. Image rejection can create the explicit text/document fallback, whose
 completed group also gets an action panel and supports recovery of that
 handoff. Already-materialized receipt rows without the new layout snapshot
 retain their original chat layout and transport selection.
+
+Credential layout is part of durable sequence identity. Existing text-only
+and invoice/Product Detail templates retain their original flattened boundaries
+and tutorial/token placement. Existing photo-caption/fallback groups without
+`credential_layout_version = copy-v1` use the frozen
+`TelegramCredentialDeliveryRendererV1` field layout and retain content protection.
+Fallback inherits its source layout; explicit resend creates a new copy-layout
+group without rewriting the original. Only closed `copy-v1`/`fields-v1` layout
+identifiers are exposed in Manual Delivery Review, never credential contents.
+Changing a historic renderer in place can resend an already-delivered account or
+mark fulfillment complete while skipping a pending Auth Token.
 
 Telegram API reference checked through Context7:
 <https://core.telegram.org/bots/api#senddocument> (multipart uploads, caption

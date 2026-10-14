@@ -38,7 +38,7 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
             'credential_format' => CredentialFormat::StructuredAccount,
             'credential_payload' => StructuredCredentialPayload::fromValues(
                 'otp@example.test',
-                'Otp-password',
+                'Päss😀<&>`<tg-emoji emoji-id="123">🔐</tg-emoji>',
                 CredentialAccessMethod::OtpMailLink,
                 $otpUrl,
                 'Tutorial akun OTP.',
@@ -83,10 +83,13 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
             512,
             JSON_THROW_ON_ERROR,
         );
-        $this->assertTrue(collect($entities)->contains(
-            fn (array $entity): bool => $entity['type'] === 'code'
-                && $entity['length'] === strlen('fake-auth-token-value'),
-        ));
+        $blocks = array_values(array_filter($entities, fn (array $entity): bool => $entity['type'] === 'pre'));
+        $this->assertSame([
+            'otp@example.test | Päss😀<&>`<tg-emoji emoji-id="123">🔐</tg-emoji>',
+            'auth@example.test | Auth-password | fake-auth-token-value',
+        ], array_map(fn (array $entity): string => $this->telegramEntityText($caption, $entity), $blocks));
+        $this->assertSame(['copy', 'copy'], array_column($blocks, 'language'));
+        $this->assertFalse(filter_var($this->telegramRequestField($photo, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
 
         foreach (TelegramOutboundEffect::query()->where('source_id', (string) $order->id)->get() as $effect) {
             $attributes = json_encode($effect->getAttributes(), JSON_THROW_ON_ERROR);
@@ -175,16 +178,42 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
 
         $entities = $tokenUnit->entities();
         $this->assertCount(1, $entities);
-        $tokenOffset = strpos($tokenUnit->text(), $token);
-        $this->assertNotFalse($tokenOffset);
         $this->assertSame(
-            intdiv(
-                strlen(mb_convert_encoding(substr($tokenUnit->text(), 0, $tokenOffset), 'UTF-16LE', 'UTF-8')),
-                2,
-            ),
-            $entities[0]['offset'],
+            'long-grouped@example.test | Password | '.$token,
+            $this->telegramEntityText($tokenUnit->text(), $entities[0]),
         );
-        $this->assertSame(3400, $entities[0]['length']);
+        $this->assertSame('pre', $entities[0]['type']);
+        $this->assertSame('copy', $entities[0]['language']);
+    }
+
+    public function test_account_and_long_token_split_only_between_complete_copy_blocks(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 778801, 'locale' => 'id']);
+        [$order, $item] = $this->paidOrder($customer, 'Token Boundary');
+        $password = str_repeat('P', 600);
+        $token = str_repeat('T', 3500);
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'boundary@example.test',
+                $password,
+                CredentialAccessMethod::AuthToken,
+                $token,
+            )->toArray(),
+        ]);
+
+        $detail = app(TelegramReceiptNotifier::class)->renderProductDetail($order->fresh());
+        $copied = [];
+        foreach ($detail['units'] as $unit) {
+            $this->assertLessThanOrEqual(3900, $unit->characterLength());
+            foreach ($unit->entities() as $entity) {
+                $this->assertSame('pre', $entity['type']);
+                $copied[] = $this->telegramEntityText($unit->text(), $entity);
+            }
+        }
+        $this->assertSame(['boundary@example.test | '.$password, $token], $copied);
     }
 
     public function test_ambiguous_structured_receipt_enters_manual_review_without_blind_resend(): void

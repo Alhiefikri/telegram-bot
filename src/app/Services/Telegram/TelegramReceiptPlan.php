@@ -27,6 +27,7 @@ final readonly class TelegramReceiptPlan
         private int $accountCount,
         private array $guides = [],
         private bool $documentDelivery = false,
+        private bool $copyableCredentials = true,
     ) {
         if ($this->photoUnits === [] || $this->textUnits === []) {
             throw new InvalidArgumentException('Telegram receipt plan must contain deliverable units.');
@@ -52,6 +53,11 @@ final readonly class TelegramReceiptPlan
     public function usesDocument(): bool
     {
         return $this->documentDelivery;
+    }
+
+    public function usesCopyableCredentials(): bool
+    {
+        return $this->copyableCredentials;
     }
 
     public function photoUnitCount(): int

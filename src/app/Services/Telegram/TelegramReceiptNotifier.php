@@ -120,7 +120,7 @@ class TelegramReceiptNotifier
      * Build one transient plan for a single render attempt. No returned value
      * may cross a queue, cache, log, or outbound-effect persistence boundary.
      */
-    public function receiptPlan(Order $order, ?bool $documentDelivery = null, bool $compact = true): TelegramReceiptPlan
+    public function receiptPlan(Order $order, ?bool $documentDelivery = null, bool $compact = true, bool $copyableCredentials = true): TelegramReceiptPlan
     {
         $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
         $customer = $order->customer;
@@ -138,9 +138,12 @@ class TelegramReceiptNotifier
             }
 
             $automatic = $documentDelivery === null;
+            $renderer = $copyableCredentials
+                ? $this->credentialRenderer
+                : app(TelegramCredentialDeliveryRendererV1::class);
             $documentDelivery ??= $this->requiresDocument($delivery);
             $credentialBlocks = $documentDelivery || $delivery->isEmpty()
-                ? [] : $this->credentialRenderer->receiptBlocks($customer, $delivery);
+                ? [] : $renderer->receiptBlocks($customer, $delivery);
             if ($automatic && ! $documentDelivery) {
                 $credentialText = implode("\n", array_map(static fn (TelegramMessageUnit $unit): string => $unit->text(), $credentialBlocks));
                 $documentDelivery = mb_strlen($credentialText, 'UTF-8') > self::TXT_CHARACTER_THRESHOLD;
@@ -176,6 +179,7 @@ class TelegramReceiptNotifier
                     accountCount: $delivery->accountCount(),
                     guides: $delivery->usageGuides(),
                     documentDelivery: true,
+                    copyableCredentials: $copyableCredentials,
                 );
             }
             if ($delivery->isEmpty()) {
@@ -189,7 +193,7 @@ class TelegramReceiptNotifier
             if (! $compact) {
                 $footerLines = [$this->locale->translate($customer, 'receipt.save_details')];
                 if (! $delivery->isEmpty()) {
-                    $footerLines[] = $this->locale->translate($customer, 'receipt.copy_guidance');
+                    $footerLines[] = $this->locale->translate($customer, $copyableCredentials ? 'receipt.copy_block_guidance' : 'receipt.copy_guidance');
                 }
                 $footerLines[] = $this->locale->translate($customer, 'receipt.thanks');
                 $blocks[] = new TelegramMessageUnit(
@@ -212,6 +216,7 @@ class TelegramReceiptNotifier
                 productCount: $this->credentialRenderer->receiptProductCount($delivery),
                 accountCount: $delivery->accountCount(),
                 guides: $delivery->usageGuides(),
+                copyableCredentials: $copyableCredentials,
             );
         } catch (\Throwable $exception) {
             if ($exception instanceof TelegramOutboundPreSendException) {
@@ -294,7 +299,7 @@ class TelegramReceiptNotifier
      *
      * @return array{units: list<TelegramMessageUnit>, guides: list<array{title: string, url: string}>}
      */
-    public function renderProductDetail(Order $order, ?Customer $customer = null): array
+    public function renderProductDetail(Order $order, ?Customer $customer = null, bool $copyableCredentials = true): array
     {
         $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
         $customer ??= $order->customer;
@@ -350,9 +355,12 @@ class TelegramReceiptNotifier
         }
 
         $units = $this->unitsFromLines($summaryLines);
+        $renderer = $copyableCredentials
+            ? $this->credentialRenderer
+            : app(TelegramCredentialDeliveryRendererV1::class);
         array_push(
             $units,
-            ...$this->credentialRenderer->groupedAccountUnits(
+            ...$renderer->groupedAccountUnits(
                 customer: $customer,
                 delivery: $delivery,
                 accountLabelTranslationKey: 'receipt.account_label',
@@ -363,7 +371,7 @@ class TelegramReceiptNotifier
         $units[] = new TelegramMessageUnit(
             implode("\n\n", [
                 $this->locale->translate($customer, 'receipt.save_details'),
-                $this->locale->translate($customer, 'receipt.copy_guidance'),
+                $this->locale->translate($customer, $copyableCredentials ? 'receipt.copy_block_guidance' : 'receipt.copy_guidance'),
                 $this->locale->translate($customer, 'receipt.thanks'),
             ]),
             replyMarkup: $this->receiptReplyMarkup($customer, $guides),
@@ -469,7 +477,7 @@ class TelegramReceiptNotifier
 
             if ((int) $effect->sequence === 1) {
                 $invoice = $this->renderInvoiceUnit($order);
-                $options = ['protect_content' => true];
+                $options = ['protect_content' => ! $plan->usesCopyableCredentials() || ! $unit->containsCredentials()];
                 if ($unit->entities() !== []) {
                     $options['caption_entities'] = $unit->entities();
                 }
@@ -488,7 +496,7 @@ class TelegramReceiptNotifier
                 $customer->telegram_id,
                 $unit->text(),
                 $unit->replyMarkup(),
-                array_merge(['protect_content' => true], $unit->options()),
+                array_merge(['protect_content' => ! $plan->usesCopyableCredentials() || ! $unit->containsCredentials()], $unit->options()),
             );
         }
 
@@ -504,7 +512,7 @@ class TelegramReceiptNotifier
                 $customer->telegram_id,
                 $unit->text(),
                 $unit->replyMarkup(),
-                array_merge(['protect_content' => true], $unit->options()),
+                array_merge(['protect_content' => ! $plan->usesCopyableCredentials() || ! $unit->containsCredentials()], $unit->options()),
             );
         }
 
@@ -541,7 +549,7 @@ class TelegramReceiptNotifier
             );
         }
 
-        $detail = $this->renderProductDetail($order, $customer);
+        $detail = $this->renderProductDetail($order, $customer, copyableCredentials: false);
         $index = max(0, (int) $effect->sequence - 2);
         $unit = $detail['units'][$index] ?? null;
         if (! $unit instanceof TelegramMessageUnit) {
@@ -598,7 +606,7 @@ class TelegramReceiptNotifier
 
         $units = [
             ...$this->unitsFromLines($headerLines),
-            ...$this->credentialRenderer->accountUnits(
+            ...app(TelegramCredentialDeliveryRendererV1::class)->accountUnits(
                 $customer,
                 $delivery,
                 'receipt.otp_button',
@@ -839,6 +847,7 @@ class TelegramReceiptNotifier
             $order,
             documentDelivery: in_array($metadata['render_mode'] ?? '', ['photo_document', 'text_document'], true),
             compact: ($metadata['receipt_layout_version'] ?? null) === 'v2',
+            copyableCredentials: ($metadata['credential_layout_version'] ?? null) === 'copy-v1',
         );
     }
 
@@ -884,38 +893,6 @@ class TelegramReceiptNotifier
         return false;
     }
 
-    private function canonicalPaidPayment(Order $order): ?Payment
-    {
-        return $order->payments
-            ->filter(fn ($payment): bool => $payment instanceof Payment
-                && (string) $payment->order_id === (string) $order->getKey()
-                && $payment->status === PaymentStatus::Paid
-                && $payment->paid_at !== null)
-            ->sortBy([
-                ['paid_at', 'asc'],
-                ['id', 'asc'],
-            ])
-            ->first();
-    }
-
-    private function formatPaidAmount(Order $order, ?Payment $payment): string
-    {
-        $currency = strtoupper(trim((string) ($payment?->currency ?: $order->currency ?: 'IDR')));
-        $amount = $payment?->provider_total_payment !== null
-            ? (int) $payment->provider_total_payment
-            : (int) $order->total_amount;
-
-        if ($currency === 'USDT') {
-            return UsdtMicroAmount::formatUnits((int) ($payment?->amount ?? 0)).' USDT';
-        }
-
-        if ($currency === 'IDR') {
-            return $this->locale->idr(max(0, $amount));
-        }
-
-        return number_format(max(0, $amount), 0, ',', '.').' '.$currency;
-    }
-
     private function accountSecretLines(Customer $customer, CredentialDelivery $delivery): array
     {
         $lines = [];
@@ -948,6 +925,38 @@ class TelegramReceiptNotifier
         }
 
         return $lines;
+    }
+
+    private function canonicalPaidPayment(Order $order): ?Payment
+    {
+        return $order->payments
+            ->filter(fn ($payment): bool => $payment instanceof Payment
+                && (string) $payment->order_id === (string) $order->getKey()
+                && $payment->status === PaymentStatus::Paid
+                && $payment->paid_at !== null)
+            ->sortBy([
+                ['paid_at', 'asc'],
+                ['id', 'asc'],
+            ])
+            ->first();
+    }
+
+    private function formatPaidAmount(Order $order, ?Payment $payment): string
+    {
+        $currency = strtoupper(trim((string) ($payment?->currency ?: $order->currency ?: 'IDR')));
+        $amount = $payment?->provider_total_payment !== null
+            ? (int) $payment->provider_total_payment
+            : (int) $order->total_amount;
+
+        if ($currency === 'USDT') {
+            return UsdtMicroAmount::formatUnits((int) ($payment?->amount ?? 0)).' USDT';
+        }
+
+        if ($currency === 'IDR') {
+            return $this->locale->idr(max(0, $amount));
+        }
+
+        return number_format(max(0, $amount), 0, ',', '.').' '.$currency;
     }
 
     /** @param  list<array{title: string, url: string}>  $guides */

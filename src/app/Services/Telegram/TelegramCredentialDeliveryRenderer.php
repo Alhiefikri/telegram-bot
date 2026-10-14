@@ -4,7 +4,6 @@ namespace App\Services\Telegram;
 
 use App\Enums\CredentialAccessMethod;
 use App\Models\Customer;
-use App\Services\CredentialDeliveryFormatter;
 use App\Services\Credentials\CredentialDelivery;
 use App\Services\Credentials\CredentialDeliveryAccount;
 use App\Services\Credentials\CredentialDeliveryProductGroup;
@@ -20,7 +19,6 @@ final class TelegramCredentialDeliveryRenderer
     public const MESSAGE_LIMIT = 3900;
 
     public function __construct(
-        private readonly CredentialDeliveryFormatter $credentialFormatter,
         private readonly TelegramLocale $locale,
         private readonly TelegramMessageChunker $messageChunker,
         private readonly TelegramUiIcons $uiIcons,
@@ -225,131 +223,17 @@ final class TelegramCredentialDeliveryRenderer
         $label = $this->locale->translate($customer, 'receipt.account_label', [
             'number' => $displayNumber,
         ]);
-        $lines = $firstAccount
-            ? [$this->productName($group), '', $label]
-            : [$label];
-        $fields = [];
 
-        if ($account->isStructured()) {
-            $email = $account->email();
-            $password = $account->password();
-            if (! is_string($email) || ! is_string($password)) {
-                throw new InvalidArgumentException('Structured credential fields are invalid.');
-            }
-
-            $lines[] = 'email : '.$email;
-            $fields[] = ['label' => 'email', 'value' => $email];
-            $lines[] = 'password : '.$password;
-            $fields[] = ['label' => 'password', 'value' => $password];
-        } else {
-            $lines[] = $account->text();
-        }
-
-        $replyMarkup = $this->otpReplyMarkup(
+        return $this->copyableAccountUnits(
             $customer,
+            $group,
             $account,
+            $firstAccount ? [$this->productName($group), '', $label] : [$label],
+            $label,
             'receipt.otp_button',
+            'receipt.delivery_note',
             displayNumber: $displayNumber,
         );
-        if ($account->accessMethod() === CredentialAccessMethod::OtpMailLink) {
-            $domain = $this->validatedDomain($account->accessValue());
-            if ($domain === null) {
-                throw new InvalidArgumentException('Structured OTP Mail Link is invalid.');
-            }
-            $lines[] = $this->locale->translate($customer, 'receipt.access_otp', ['domain' => $domain]);
-        }
-
-        $token = null;
-        if ($account->accessMethod() === CredentialAccessMethod::AuthToken) {
-            $token = $account->accessValue();
-            if (! is_string($token) || $token === '') {
-                throw new InvalidArgumentException('Structured Auth Token is invalid.');
-            }
-        }
-
-        $tokenLines = $token === null
-            ? []
-            : [
-                $this->locale->translate($customer, 'receipt.access_auth_token'),
-                'Auth Token : '.$token,
-            ];
-        $tokenFields = $token === null
-            ? []
-            : [['label' => 'Auth Token', 'value' => $token]];
-        $tokenNeedsOwnUnit = false;
-
-        $withToken = [...$lines, ...$tokenLines];
-        if ($token !== null && mb_strlen(implode("\n", $withToken), 'UTF-8') <= self::MESSAGE_LIMIT) {
-            $lines = $withToken;
-            $fields = [...$fields, ...$tokenFields];
-        } elseif ($token !== null) {
-            $tokenNeedsOwnUnit = true;
-        }
-
-        $accountText = implode("\n", $lines);
-        $tutorial = $account->tutorial() !== null
-            && $account->tutorial() !== $group->defaultTutorial()
-            ? $account->tutorial()
-            : null;
-        $tutorialSeparate = false;
-        if ($tutorial !== null) {
-            $withTutorial = implode("\n", [
-                $accountText,
-                '',
-                $this->locale->translate($customer, 'receipt.delivery_note'),
-                $tutorial,
-            ]);
-            if (mb_strlen($withTutorial, 'UTF-8') <= self::MESSAGE_LIMIT) {
-                $accountText = $withTutorial;
-            } else {
-                $tutorialSeparate = true;
-            }
-        }
-
-        if (mb_strlen($accountText, 'UTF-8') > self::MESSAGE_LIMIT) {
-            throw new InvalidArgumentException('Telegram account delivery unit exceeds the configured limit.');
-        }
-
-        $entities = $fields === []
-            ? ($account->legacyParts() !== null ? $this->credentialFormatter->codeEntities($accountText) : [])
-            : $this->credentialFormatter->codeEntitiesForFields($accountText, $fields);
-        $blocks = [
-            new TelegramMessageUnit(
-                text: $accountText,
-                entities: $entities,
-                replyMarkup: $replyMarkup,
-                containsCredentials: true,
-            ),
-        ];
-
-        if ($tokenNeedsOwnUnit) {
-            $tokenText = implode("\n", [
-                $label,
-                ...$tokenLines,
-            ]);
-            if (mb_strlen($tokenText, 'UTF-8') > self::MESSAGE_LIMIT) {
-                throw new InvalidArgumentException('Telegram Auth Token delivery unit exceeds the configured limit.');
-            }
-
-            $blocks[] = new TelegramMessageUnit(
-                text: $tokenText,
-                entities: $this->credentialFormatter->codeEntitiesForFields($tokenText, $tokenFields),
-                containsCredentials: true,
-            );
-        }
-
-        if ($tutorialSeparate && $tutorial !== null) {
-            array_push(
-                $blocks,
-                ...$this->nonSecretBlocks([
-                    $label,
-                    $this->locale->translate($customer, 'receipt.delivery_note'),
-                    $tutorial,
-                ]),
-            );
-        }
-
-        return $blocks;
     }
 
     /**
@@ -379,106 +263,16 @@ final class TelegramCredentialDeliveryRenderer
         $label = $this->locale->translate($customer, $accountLabelTranslationKey, [
             'number' => $account->number(),
         ]);
-        $lines = [];
-        if ($firstAccount) {
-            $lines[] = $this->productName($group);
-            $lines[] = '';
-        }
-        $lines[] = $label;
-        $fields = [];
 
-        if ($account->isStructured()) {
-            $email = $account->email();
-            $password = $account->password();
-            if (! is_string($email) || ! is_string($password)) {
-                throw new InvalidArgumentException('Structured credential fields are invalid.');
-            }
-
-            $lines[] = 'email : '.$email;
-            $fields[] = ['label' => 'email', 'value' => $email];
-            $lines[] = 'password : '.$password;
-            $fields[] = ['label' => 'password', 'value' => $password];
-        } else {
-            $lines[] = $account->text();
-        }
-
-        if ($account->accessMethod() === CredentialAccessMethod::OtpMailLink) {
-            $domain = $this->validatedDomain($account->accessValue());
-            if ($domain !== null) {
-                $lines[] = 'OTP Mail: '.$domain;
-            }
-        }
-
-        $token = null;
-        if ($account->accessMethod() === CredentialAccessMethod::AuthToken) {
-            $token = $account->accessValue();
-            if (! is_string($token) || $token === '') {
-                throw new InvalidArgumentException('Structured Auth Token is invalid.');
-            }
-        }
-
-        $tokenLines = $token === null
-            ? []
-            : ['Auth Token Outlook/Hotmail', 'Auth Token : '.$token];
-        $tokenFields = $token === null
-            ? []
-            : [['label' => 'Auth Token', 'value' => $token]];
-
-        $tutorial = $account->tutorial() !== null
-            && $account->tutorial() !== $group->defaultTutorial()
-            ? $account->tutorial()
-            : null;
-        $credentialLines = [...$lines, ...$tokenLines];
-        $withTutorial = $tutorial === null
-            ? $credentialLines
-            : [...$credentialLines, '', $this->locale->translate($customer, $deliveryNoteTranslationKey), $tutorial];
-        $tokenNeedsOwnUnit = $token !== null
-            && mb_strlen(implode("\n", $withTutorial), 'UTF-8') > self::MESSAGE_LIMIT;
-        if ($tokenNeedsOwnUnit) {
-            $withTutorial = $tutorial === null
-                ? $lines
-                : [...$lines, '', $this->locale->translate($customer, $deliveryNoteTranslationKey), $tutorial];
-        }
-
-        $accountText = implode("\n", $withTutorial);
-        if (mb_strlen($accountText, 'UTF-8') > self::MESSAGE_LIMIT) {
-            throw new InvalidArgumentException('Telegram account delivery unit exceeds the configured limit.');
-        }
-
-        $accountEntities = $this->credentialFormatter->codeEntitiesForFields(
-            $accountText,
-            [...$fields, ...($tokenNeedsOwnUnit ? [] : $tokenFields)],
+        return $this->copyableAccountUnits(
+            $customer,
+            $group,
+            $account,
+            $firstAccount ? [$this->productName($group), '', $label] : [$label],
+            $label,
+            $otpButtonTranslationKey,
+            $deliveryNoteTranslationKey,
         );
-        if ($accountEntities === [] && $account->isLegacy()) {
-            $accountEntities = $this->credentialFormatter->codeEntities($accountText);
-        }
-
-        $units = [
-            new TelegramMessageUnit(
-                text: $accountText,
-                entities: $accountEntities,
-                replyMarkup: $this->otpReplyMarkup($customer, $account, $otpButtonTranslationKey),
-            ),
-        ];
-
-        if ($tokenNeedsOwnUnit) {
-            $tokenUnitLines = [
-                ...($account->number() === 1 && $firstAccount ? [$this->productName($group), ''] : []),
-                $label.' — Auth Token Outlook/Hotmail',
-                ...$tokenLines,
-            ];
-            $tokenText = implode("\n", $tokenUnitLines);
-            if (mb_strlen($tokenText, 'UTF-8') > self::MESSAGE_LIMIT) {
-                throw new InvalidArgumentException('Telegram Auth Token delivery unit exceeds the configured limit.');
-            }
-
-            $units[] = new TelegramMessageUnit(
-                text: $tokenText,
-                entities: $this->credentialFormatter->codeEntitiesForFields($tokenText, $tokenFields),
-            );
-        }
-
-        return $units;
     }
 
     /**
@@ -491,143 +285,132 @@ final class TelegramCredentialDeliveryRenderer
         string $otpButtonTranslationKey,
         string $deliveryNoteTranslationKey,
     ): array {
-        $number = $account->number();
-        $label = 'Data akun #'.$number;
-        $lines = [
-            $this->productName($group),
-            '',
+        $label = 'Data akun #'.$account->number();
+
+        return $this->copyableAccountUnits(
+            $customer,
+            $group,
+            $account,
+            [$this->productName($group), '', $label],
             $label,
-        ];
-        $fields = [];
+            $otpButtonTranslationKey,
+            $deliveryNoteTranslationKey,
+            includeDefaultTutorial: true,
+        );
+    }
 
-        if ($account->isStructured()) {
-            $email = $account->email();
-            $password = $account->password();
-            if (! is_string($email) || ! is_string($password)) {
-                throw new InvalidArgumentException('Structured credential fields are invalid.');
-            }
-
-            $lines[] = 'email : '.$email;
-            $fields[] = ['label' => 'email', 'value' => $email];
-            $lines[] = 'password : '.$password;
-            $fields[] = ['label' => 'password', 'value' => $password];
-        } else {
-            $lines[] = $account->text();
+    /**
+     * @param  list<string>  $header
+     * @return list<TelegramMessageUnit>
+     */
+    private function copyableAccountUnits(
+        Customer $customer,
+        CredentialDeliveryProductGroup $group,
+        CredentialDeliveryAccount $account,
+        array $header,
+        string $label,
+        string $otpButtonTranslationKey,
+        string $deliveryNoteTranslationKey,
+        ?int $displayNumber = null,
+        bool $includeDefaultTutorial = false,
+    ): array {
+        $prefix = implode("\n", $header)."\n";
+        $credential = $this->copyText($account);
+        $token = $account->accessMethod() === CredentialAccessMethod::AuthToken
+            ? $account->accessValue() : null;
+        if ($account->accessMethod() === CredentialAccessMethod::AuthToken
+            && (! is_string($token) || $token === '')) {
+            throw new InvalidArgumentException('Structured Auth Token is invalid.');
         }
-
+        $accessNote = '';
         if ($account->accessMethod() === CredentialAccessMethod::OtpMailLink) {
             $domain = $this->validatedDomain($account->accessValue());
-            if ($domain !== null) {
-                $lines[] = 'OTP Mail: '.$domain;
+            if ($domain === null) {
+                throw new InvalidArgumentException('Structured OTP Mail Link is invalid.');
+            }
+            $accessNote = "\n".$this->locale->translate($customer, 'receipt.access_otp', ['domain' => $domain]);
+        } elseif ($token !== null) {
+            $accessNote = "\n".$this->locale->translate($customer, 'receipt.access_auth_token');
+        }
+        $separateToken = $token !== null
+            && mb_strlen($prefix.$credential.' | '.$token.$accessNote, 'UTF-8') > self::MESSAGE_LIMIT;
+        if ($token !== null && ! $separateToken) {
+            $credential .= ' | '.$token;
+        }
+        $text = $prefix.$credential.$accessNote;
+        $entities = [$this->copyEntity($prefix, $credential)];
+        if (mb_strlen($text, 'UTF-8') > self::MESSAGE_LIMIT) {
+            throw new InvalidArgumentException('Telegram account delivery unit exceeds the configured limit.');
+        }
+
+        $tutorial = $account->tutorial();
+        if (! $includeDefaultTutorial && $tutorial === $group->defaultTutorial()) {
+            $tutorial = null;
+        }
+        $separateTutorial = null;
+        if ($tutorial !== null) {
+            $withTutorial = $text."\n\n".$this->locale->translate($customer, $deliveryNoteTranslationKey)."\n".$tutorial;
+            if (mb_strlen($withTutorial, 'UTF-8') <= self::MESSAGE_LIMIT) {
+                $text = $withTutorial;
+            } else {
+                $separateTutorial = $tutorial;
             }
         }
-
-        $token = null;
-        if ($account->accessMethod() === CredentialAccessMethod::AuthToken) {
-            $token = $account->accessValue();
-            if (! is_string($token) || $token === '') {
-                throw new InvalidArgumentException('Structured Auth Token is invalid.');
+        $units = [new TelegramMessageUnit(
+            text: $text,
+            entities: $entities,
+            replyMarkup: $this->otpReplyMarkup($customer, $account, $otpButtonTranslationKey, $displayNumber),
+            containsCredentials: true,
+        )];
+        if ($separateToken) {
+            $tokenPrefix = $this->productName($group)."\n\n".$label."\nAuth Token Outlook/Hotmail\n";
+            if (mb_strlen($tokenPrefix.$token, 'UTF-8') > self::MESSAGE_LIMIT) {
+                throw new InvalidArgumentException('Telegram Auth Token delivery unit exceeds the configured limit.');
             }
-        }
-
-        $tokenLines = [];
-        $tokenFields = [];
-        if ($token !== null) {
-            $tokenLines = [
-                'Auth Token Outlook/Hotmail',
-                'Auth Token : '.$token,
-            ];
-            $tokenFields[] = ['label' => 'Auth Token', 'value' => $token];
-        }
-
-        $baseTextWithToken = implode("\n", [...$lines, ...$tokenLines]);
-        $tokenNeedsOwnUnit = $token !== null && mb_strlen($baseTextWithToken, 'UTF-8') > self::MESSAGE_LIMIT;
-        if (! $tokenNeedsOwnUnit) {
-            $lines = [...$lines, ...$tokenLines];
-            $fields = [...$fields, ...$tokenFields];
-        }
-
-        $replyMarkup = $this->otpReplyMarkup($customer, $account, $otpButtonTranslationKey);
-        $accountUnit = $this->unitWithTutorial(
-            customer: $customer,
-            group: $group,
-            account: $account,
-            label: $label,
-            lines: $lines,
-            fields: $fields,
-            replyMarkup: $replyMarkup,
-            deliveryNoteTranslationKey: $deliveryNoteTranslationKey,
-        );
-        $units = [$accountUnit['unit']];
-
-        if ($tokenNeedsOwnUnit) {
-            $tokenUnitText = implode("\n", [
-                $this->productName($group),
-                '',
-                $label.' — Auth Token Outlook/Hotmail',
-                ...$tokenLines,
-            ]);
             $units[] = new TelegramMessageUnit(
-                text: $tokenUnitText,
-                entities: $this->credentialFormatter->codeEntitiesForFields($tokenUnitText, $tokenFields),
+                text: $tokenPrefix.$token,
+                entities: [$this->copyEntity($tokenPrefix, $token)],
+                containsCredentials: true,
             );
         }
-
-        if ($accountUnit['tutorial'] !== null) {
-            $tutorialText = implode("\n", [
+        if ($separateTutorial !== null) {
+            array_push($units, ...$this->nonSecretBlocks([
                 $this->productName($group),
                 '',
                 $label,
                 $this->locale->translate($customer, $deliveryNoteTranslationKey),
-                $accountUnit['tutorial'],
-            ]);
-            $units[] = new TelegramMessageUnit($tutorialText);
+                $separateTutorial,
+            ]));
         }
 
         return $units;
     }
 
-    /**
-     * @param  list<string>  $lines
-     * @param  list<array{label: string, value: string}>  $fields
-     * @param  array<string, mixed>  $replyMarkup
-     * @return array{unit: TelegramMessageUnit, tutorial: ?string}
-     */
-    private function unitWithTutorial(
-        Customer $customer,
-        CredentialDeliveryProductGroup $group,
-        CredentialDeliveryAccount $account,
-        string $label,
-        array $lines,
-        array $fields,
-        array $replyMarkup,
-        string $deliveryNoteTranslationKey,
-    ): array {
-        $tutorial = $account->tutorial();
-        $baseText = implode("\n", $lines);
-        $withTutorial = $tutorial === null
-            ? $baseText
-            : implode("\n", [
-                ...$lines,
-                '',
-                $this->locale->translate($customer, $deliveryNoteTranslationKey),
-                $tutorial,
-            ]);
+    private function copyText(CredentialDeliveryAccount $account): string
+    {
+        if ($account->isLegacy()) {
+            $parts = $account->legacyParts();
 
-        $separateTutorial = null;
-        if ($tutorial !== null && mb_strlen($withTutorial, 'UTF-8') > self::MESSAGE_LIMIT) {
-            $withTutorial = $baseText;
-            $separateTutorial = $tutorial;
+            return $parts === null ? $account->text()
+                : $parts['email'].' | '.$parts['password'].($parts['mfa'] === null ? '' : ' | '.$parts['mfa']);
+        }
+        $email = $account->email();
+        $password = $account->password();
+        if (! is_string($email) || ! is_string($password)) {
+            throw new InvalidArgumentException('Structured credential fields are invalid.');
         }
 
+        return $email.' | '.$password;
+    }
+
+    /** @return array{type: string, offset: int, length: int, language: string} */
+    private function copyEntity(string $prefix, string $credential): array
+    {
         return [
-            'unit' => new TelegramMessageUnit(
-                text: $withTutorial,
-                entities: $this->credentialFormatter->codeEntitiesForFields($withTutorial, $fields)
-                    ?: ($account->isLegacy() ? $this->credentialFormatter->codeEntities($withTutorial) : []),
-                replyMarkup: $replyMarkup,
-            ),
-            'tutorial' => $separateTutorial,
+            'type' => 'pre',
+            'offset' => intdiv(strlen(mb_convert_encoding($prefix, 'UTF-16LE', 'UTF-8')), 2),
+            'length' => intdiv(strlen(mb_convert_encoding($credential, 'UTF-16LE', 'UTF-8')), 2),
+            'language' => 'copy',
         ];
     }
 

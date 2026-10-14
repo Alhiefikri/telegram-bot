@@ -741,6 +741,7 @@
   "receipt.product_detail": "🔐 Butiran Produk",
   "receipt.account_label": "Data akaun #:number",
   "receipt.copy_guidance": "💡 Ketik nilai akaun untuk menyalinnya. Jangan kongsikan butiran ini.",
+  "receipt.copy_block_guidance": "💡 Tekan ikon salin pada blok akaun untuk menyalin butiran log masuk. Jangan kongsikan butiran ini.",
   "receipt.no_credentials": "Butiran Produk ini tiada data akaun untuk dipaparkan.",
   "receipt.account_details": "🔐 Butiran akaun",
   "receipt.save_details": "⚠️ Simpan butiran ini dengan selamat dan jangan kongsikan kepada sesiapa.",

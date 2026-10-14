@@ -11,6 +11,7 @@ use App\Services\Telegram\TelegramCallbackAckState;
 use App\Services\Telegram\TelegramHtmlCaption;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 use Throwable;
 
@@ -29,6 +30,61 @@ class TelegramBotClientTest extends TestCase
         ]);
 
         app(CustomEmojiCapability::class)->markAvailable();
+    }
+
+    #[DataProvider('copyBlockFallbackCases')]
+    public function test_custom_emoji_fallback_preserves_literal_copy_block_and_utf16_range(bool $cachedUnavailable, bool $photo): void
+    {
+        if ($cachedUnavailable) {
+            app(CustomEmojiCapability::class)->markUnavailable('Cached rejection');
+        }
+        $calls = 0;
+        Http::fake(function () use (&$calls, $cachedUnavailable) {
+            $calls++;
+            if (! $cachedUnavailable && $calls === 1) {
+                return Http::response(['ok' => false, 'description' => "Bad Request: can't use custom emoji in this chat"], 400);
+            }
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 801]]);
+        });
+        $prefix = '<tg-emoji emoji-id="5368324170671202286" data-omp-icon="1">📦</tg-emoji> Demo'."\n";
+        $credential = 'buyer@example.test | a<tg-emoji emoji-id="123">🔐</tg-emoji>b';
+        $entities = [[
+            'type' => 'pre',
+            'language' => 'copy',
+            'offset' => intdiv(strlen(mb_convert_encoding($prefix, 'UTF-16LE', 'UTF-8')), 2),
+            'length' => intdiv(strlen(mb_convert_encoding($credential, 'UTF-16LE', 'UTF-8')), 2),
+        ]];
+        if ($photo) {
+            app(TelegramBotClient::class)->sendPhoto(12345, 'dummy-photo', 'receipt.png', $prefix.$credential, [], [
+                'caption_entities' => json_encode($entities, JSON_THROW_ON_ERROR),
+            ]);
+        } else {
+            app(TelegramBotClient::class)->sendMessage(12345, $prefix.$credential, [], ['entities' => $entities]);
+        }
+        $request = Http::recorded()->last()[0];
+        $text = $photo ? $this->multipartField($request, 'caption') : $request['text'];
+        $resultEntities = $photo ? $this->multipartField($request, 'caption_entities') : $request['entities'];
+        if (is_string($resultEntities)) {
+            $resultEntities = json_decode($resultEntities, true, flags: JSON_THROW_ON_ERROR);
+        }
+        $this->assertSame("📦 Demo\n".$credential, $text);
+        $this->assertSame(['pre'], array_column($resultEntities, 'type'));
+        $utf16 = mb_convert_encoding($text, 'UTF-16LE', 'UTF-8');
+        $entity = $resultEntities[0];
+        $this->assertSame(intdiv(strlen($utf16), 2), $entity['offset'] + $entity['length']);
+        $this->assertSame($credential, mb_convert_encoding(
+            substr($utf16, $entity['offset'] * 2, $entity['length'] * 2),
+            'UTF-8', 'UTF-16LE',
+        ));
+    }
+
+    public static function copyBlockFallbackCases(): iterable
+    {
+        yield 'cached message' => [true, false];
+        yield 'rejected message' => [false, false];
+        yield 'cached JSON caption' => [true, true];
+        yield 'rejected JSON caption' => [false, true];
     }
 
     public function test_inline_buttons_default_to_blue_without_overriding_sold_out_or_reply_keyboard_styles(): void

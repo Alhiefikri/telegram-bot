@@ -312,7 +312,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame('v2', $panel->outcome_metadata['receipt_layout_version']);
         $panelText = app(TelegramReceiptActionPanel::class)->render($order, $order->customer->locale, true, withPrivacyGuidance: true)->text();
         $this->assertStringContainsString('LHIE STORE', $panelText);
-        $this->assertTrue(filter_var($this->telegramRequestField($photo, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
+        $this->assertFalse(filter_var($this->telegramRequestField($photo, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
 
         $expectedTitles = [
             'id' => '✅ Pembayaran diterima',
@@ -359,17 +359,12 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         }
 
         $entities = json_decode((string) $this->telegramRequestField($photo, 'caption_entities'), true, 512, JSON_THROW_ON_ERROR);
-        $this->assertCount(count($fields), $entities);
-        foreach ($fields as $field) {
-            $byteOffset = strpos($caption, $field);
-            $this->assertNotFalse($byteOffset);
-            $prefix = substr($caption, 0, $byteOffset);
-            $this->assertTrue(collect($entities)->contains(
-                fn (array $entity): bool => $entity['type'] === 'code'
-                    && $entity['offset'] === intdiv(strlen(mb_convert_encoding($prefix, 'UTF-16LE', 'UTF-8')), 2)
-                    && $entity['length'] === intdiv(strlen(mb_convert_encoding($field, 'UTF-16LE', 'UTF-8')), 2),
-            ));
-        }
+        $this->assertSame(
+            [implode(' | ', $fields)],
+            array_map(fn (array $entity): string => $this->telegramEntityText($caption, $entity), $entities),
+        );
+        $this->assertSame('pre', $entities[0]['type']);
+        $this->assertSame('copy', $entities[0]['language']);
 
         $photoBytes = $this->telegramRequestField($photo, 'photo');
         foreach ($sensitiveValues as $value) {
@@ -650,6 +645,12 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
     public function test_preexisting_text_only_receipt_template_remains_dispatchable(): void
     {
         $order = $this->paidOrderWithoutCredentials();
+        $item = $order->orderItems()->sole();
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'secret' => 'old-receipt@example.test|Old-password',
+        ]);
         $groupKey = TelegramOutboundEffectService::legacyReceiptEffectGroupKey($order->id);
         $effect = TelegramOutboundEffect::create([
             'effect_key' => $groupKey.':unit:1',
@@ -687,6 +688,9 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
 
         $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        $request = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'))->sole()[0];
+        $this->assertStringContainsString('old-receipt@example.test', (string) $request['text']);
+        $this->assertStringContainsString('Old-password', (string) $request['text']);
         $this->assertCount(
             1,
             Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')),
@@ -695,6 +699,70 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             0,
             Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')),
         );
+    }
+
+    public function test_partially_sent_legacy_invoice_keeps_token_in_its_pending_successor(): void
+    {
+        Queue::fake();
+        $order = $this->paidOrderWithoutCredentials();
+        $item = $order->orderItems()->sole();
+        $token = str_repeat('T', 3400);
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'old-token@example.test', 'Old-password', CredentialAccessMethod::AuthToken,
+                $token, str_repeat('Tutorial ', 100),
+            )->toArray(),
+        ]);
+        $first = $this->recordLegacyReceiptGroup($order);
+        $effects = TelegramOutboundEffect::where('effect_group_key', $first->effect_group_key)->orderBy('sequence')->get();
+        foreach ($effects->where('sequence', '<', 4) as $effect) {
+            $effect->forceFill([
+                'state' => TelegramOutboundEffectState::Sent,
+                'sent_at' => now()->subMinute(),
+                'telegram_message_id' => (string) (810000 + $effect->sequence),
+            ])->save();
+        }
+        $this->fakeTelegramHttp();
+        foreach ($effects->where('sequence', '>=', 4) as $effect) {
+            app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+        }
+        $sentText = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'))
+            ->map(fn ($pair): string => (string) $pair[0]['text'])->implode("\n");
+        $this->assertSame(1, substr_count($sentText, $token));
+        $this->assertStringNotContainsString('old-token@example.test', $sentText);
+        $this->assertStringNotContainsString(str_repeat('Tutorial ', 100), $sentText);
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
+    public function test_pending_photo_receipt_without_copy_marker_keeps_its_original_field_layout(): void
+    {
+        Queue::fake();
+        $order = $this->paidOrderWithoutCredentials();
+        $item = $order->orderItems()->sole();
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'secret' => 'old-photo@example.test|Old-password',
+        ]);
+        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
+        $metadata = $effect->outcome_metadata;
+        unset($metadata['credential_layout_version']);
+        $effect->forceFill(['outcome_metadata' => $metadata])->save();
+        $this->fakeTelegramHttp();
+        app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+
+        $request = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->sole()[0];
+        $caption = (string) $this->telegramRequestField($request, 'caption');
+        $entities = json_decode((string) $this->telegramRequestField($request, 'caption_entities'), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame(['old-photo@example.test', 'Old-password'], array_map(
+            fn (array $entity): string => $this->telegramEntityText($caption, $entity),
+            $entities,
+        ));
+        $this->assertTrue(filter_var($this->telegramRequestField($request, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
     }
 
     public function test_legacy_receipt_groups_are_not_silently_upgraded_with_action_panels(): void
@@ -1252,7 +1320,6 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertCount(1, $messages);
         $message = $messages->sole()[0];
         $this->assertStringContainsString('Payment received', (string) $this->telegramRequestField($message, 'text'));
-        $this->assertTrue(filter_var($this->telegramRequestField($message, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
     }
 
     public function test_runtime_pre_send_image_failure_materializes_and_delivers_text_fallback(): void
@@ -1605,7 +1672,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
     private function recordLegacyReceiptGroup(Order $order): TelegramOutboundEffect
     {
         $order->loadMissing(['customer', 'orderItems.stockItems', 'orderItems.product', 'payments']);
-        $detailUnits = app(TelegramReceiptNotifier::class)->renderProductDetail($order)['units'];
+        $detailUnits = app(TelegramReceiptNotifier::class)->renderProductDetail($order, copyableCredentials: false)['units'];
         $groupKey = TelegramOutboundEffectService::legacyReceiptEffectGroupKey((string) $order->id);
         $unitCount = 1 + count($detailUnits);
         $first = null;
