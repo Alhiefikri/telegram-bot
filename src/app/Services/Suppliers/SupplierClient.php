@@ -40,8 +40,11 @@ final class SupplierClient
         }
         $provider = $this->ready($supplier);
         $deadline = hrtime(true) + 40_000_000_000;
-        $account = $this->read($supplier, $provider === SupplierProvider::ProdSeller ? '/balance' : '/me', $deadline);
+        $account = $this->read($supplier, in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::Canboso], true) ? '/balance' : '/me', $deadline);
         $catalog = $this->read($supplier, '/products', $deadline);
+        if ($provider === SupplierProvider::Canboso) {
+            return $this->canbosoSnapshot($supplier, $account, $catalog);
+        }
         $this->currency($supplier, $account);
         $this->currency($supplier, $catalog);
         $balance = $this->money($account['balance'] ?? $account['wallet_balance'] ?? null, roundUp: false);
@@ -125,10 +128,11 @@ final class SupplierClient
             $body = match ($provider) {
                 SupplierProvider::ProdSeller => ['productId' => $id, 'quantity' => $quantity],
                 SupplierProvider::ToolOrax => ['product_id' => (int) $id, 'quantity' => $quantity],
+                SupplierProvider::Canboso => ['key' => $supplier->api_key, 'product_id' => $id, 'quantity' => $quantity],
                 default => ['service_id' => $id, 'quantity' => $quantity],
             };
             $headers = [];
-            if ($provider === SupplierProvider::ProdSeller || $provider === SupplierProvider::NyStore) {
+            if (in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::NyStore, SupplierProvider::Canboso], true)) {
                 $headers['Idempotency-Key'] = $reference;
             }
             if ($provider === SupplierProvider::NyStore) {
@@ -141,6 +145,7 @@ final class SupplierClient
             }
             $path = match ($provider) {
                 SupplierProvider::ProdSeller, SupplierProvider::ToolOrax => '/orders',
+                SupplierProvider::Canboso => '/purchase',
                 default => '/order',
             };
             $response = $this->send($supplier, 'POST', $path, $body, $headers);
@@ -170,6 +175,9 @@ final class SupplierClient
             return new SupplierOrderResult($this->noPurchase($provider, $response) ? 'rejected' : 'ambiguous', errorCode: $this->httpCode($response->status()));
         }
         try {
+            if ($provider === SupplierProvider::Canboso) {
+                return $this->canbosoResult($supplier, $this->payload($response, $supplier->api_key), $quantity, $id);
+            }
             $result = $this->result($supplier, $this->payload($response, $supplier->api_key), $quantity, null, $id, $reference);
         } catch (SupplierUnavailable) {
             return new SupplierOrderResult('ambiguous', errorCode: 'invalid_payload');
@@ -212,6 +220,17 @@ final class SupplierClient
         }
         $provider = $this->ready($supplier, allowInactive: true);
         $orderId = $this->identifier($orderId);
+        if ($provider === SupplierProvider::Canboso) {
+            $payload = $this->read($supplier, '/orders?orderCode='.rawurlencode($orderId), allowInactive: true);
+            $rows = $payload['orders'] ?? null;
+            if (($payload['success'] ?? null) !== true || ! is_array($rows) || ! array_is_list($rows)
+                || count($rows) !== 1 || ($rows[0]['orderCode'] ?? null) !== $orderId) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+
+            // History deliberately omits credentials and cannot authorize delivery.
+            return new SupplierOrderResult('ambiguous', $orderId, errorCode: 'delivery_unavailable', identityTrusted: true);
+        }
         $path = match ($provider) {
             SupplierProvider::ProdSeller, SupplierProvider::ToolOrax => '/orders/',
             default => '/order/',
@@ -476,23 +495,39 @@ final class SupplierClient
         if ($timeout <= 0) {
             throw new SupplierUnavailable('snapshot_timeout');
         }
+        $options = $method === 'POST' ? ['json' => $body] : [];
+        if ($provider === SupplierProvider::Canboso && $method === 'GET') {
+            parse_str(parse_url($path, PHP_URL_QUERY) ?? '', $query);
+            $path = explode('?', $path, 2)[0];
+            $options = ['query' => ['key' => $supplier->api_key] + $query];
+        }
         try {
             $response = $this->request($supplier, Http::acceptJson(), $timeout, $headers)
-                ->send($method, $provider->baseUrl().$path, $method === 'POST' ? ['json' => $body] : []);
+                ->send($method, $provider->baseUrl().$path, $options);
         } catch (Throwable) {
             // Even an oversized response can follow a successful purchase.
             throw new SupplierUnavailable($deadline !== null && hrtime(true) >= $deadline ? 'snapshot_timeout' : 'transport');
         }
-        $this->observeRateLimit($provider, $response);
+        try {
+            $this->observeRateLimit($provider, $response);
+        } catch (SupplierUnavailable $exception) {
+            // A cache failure after dispatch is not evidence of no purchase.
+            if ($provider === SupplierProvider::Canboso && $method === 'POST') {
+                throw new SupplierUnavailable('transport');
+            }
+            throw $exception;
+        }
 
         return $response;
     }
 
     private function request(Supplier $supplier, PendingRequest $request, float $timeout, array $headers = []): PendingRequest
     {
-        $authentication = $supplier->provider === SupplierProvider::ToolOrax->value
-            ? ['X-Shop-API-Key' => $supplier->api_key]
-            : ['X-API-Key' => $supplier->api_key];
+        $authentication = match ($supplier->provider) {
+            SupplierProvider::ToolOrax->value => ['X-Shop-API-Key' => $supplier->api_key],
+            SupplierProvider::Canboso->value => [],
+            default => ['X-API-Key' => $supplier->api_key],
+        };
 
         return $request->acceptJson()->asJson()->timeout($timeout)->connectTimeout(min(4, $timeout))
             ->withHeaders($authentication + $headers)
@@ -516,11 +551,12 @@ final class SupplierClient
     {
         $retry = trim((string) $response->header('Retry-After'));
         $seconds = $provider === SupplierProvider::ProdSeller ? 900 : 60;
+        $maximum = $provider === SupplierProvider::Canboso ? 21_600 : 3600;
         if ($retry !== '' && ctype_digit($retry)) {
-            $seconds = min(3600, max(1, (int) $retry));
+            $seconds = min($maximum, max(1, (int) $retry));
         } elseif ($retry !== '') {
             try {
-                $seconds = min(3600, max(1, CarbonImmutable::parse($retry)->getTimestamp() - now()->getTimestamp()));
+                $seconds = min($maximum, max(1, CarbonImmutable::parse($retry)->getTimestamp() - now()->getTimestamp()));
             } catch (Throwable) {
                 // Malformed headers retain the provider's conservative fallback.
             }
@@ -556,6 +592,7 @@ final class SupplierClient
             SupplierProvider::CSxStore => [60, 60, 45],
             // ShopBot publishes no rate-limit contract; stay deliberately small.
             SupplierProvider::ToolOrax => [30, 60, 20],
+            SupplierProvider::Canboso => [30, 60, 20],
         };
         // A shared provider bucket is deliberately conservative: all configured
         // accounts on this application may share the same outbound IP.
@@ -607,13 +644,105 @@ final class SupplierClient
         }
 
         $values = 0;
-        array_walk_recursive($payload, static function ($value) use ($key, &$values): void {
-            if (++$values > 50_000 || (is_string($value) && (strlen($value) > 16_000 || ($key !== null && str_contains($value, $key))))) {
-                throw new SupplierUnavailable('invalid_payload');
+        $inspect = static function (array $data) use ($key, &$values, &$inspect): void {
+            foreach ($data as $name => $value) {
+                if (++$values > 50_000
+                    || (is_string($name) && (strlen($name) > 16_000 || ($key !== null && str_contains($name, $key))))
+                    || (is_string($value) && (strlen($value) > 16_000 || ($key !== null && str_contains($value, $key))))) {
+                    throw new SupplierUnavailable('invalid_payload');
+                }
+                if (is_array($value)) {
+                    $inspect($value);
+                }
             }
-        });
+        };
+        $inspect($payload);
 
         return $payload;
+    }
+
+    private function canbosoSnapshot(Supplier $supplier, array $account, array $catalog): SupplierCatalogSnapshot
+    {
+        foreach ([$account, $catalog] as $payload) {
+            if (($payload['success'] ?? null) !== true || ($payload['walletCurrency'] ?? null) !== $supplier->currency) {
+                throw new SupplierUnavailable('currency_mismatch');
+            }
+        }
+        $rows = $catalog['products'] ?? null;
+        if (! is_array($rows) || ! array_is_list($rows) || count($rows) > self::MAX_PRODUCTS) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $products = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            if (! is_array($row) || ! is_array($row['price'] ?? null) || ! is_array($row['availability'] ?? null)) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $this->currency($supplier, $row['price']);
+            if (($row['price']['currency'] ?? null) !== $supplier->currency) {
+                throw new SupplierUnavailable('currency_mismatch');
+            }
+            $id = $this->identifier($row['productId'] ?? null);
+            if (isset($seen[$id])) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $seen[$id] = true;
+            $requiresInput = ($row['productType'] ?? null) !== 'account' || ! empty($row['purchaseRequirements']);
+            $products[] = $this->product(SupplierProvider::Canboso, [
+                'name' => $row['name'] ?? null,
+                'description' => $row['description'] ?? null,
+                'price' => $row['price']['amount'] ?? null,
+                'stock' => $row['availability']['available'] ?? null,
+                'requires_input' => $requiresInput,
+            ], $id);
+        }
+
+        return new SupplierCatalogSnapshot($this->money($account['balance'] ?? null, roundUp: false), $supplier->currency, $products);
+    }
+
+    private function canbosoResult(Supplier $supplier, array $payload, int $quantity, string $productId): SupplierOrderResult
+    {
+        $row = $payload['order'] ?? null;
+        $payment = $payload['payment'] ?? null;
+        if (($payload['success'] ?? null) !== true || ! is_array($row) || ! is_array($payment)) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $this->currency($supplier, $payment);
+        if (($payment['currency'] ?? null) !== $supplier->currency
+            || ($row['productId'] ?? null) !== $productId || ($row['quantity'] ?? null) !== $quantity
+            || ($row['productType'] ?? null) !== 'account') {
+            return new SupplierOrderResult('ambiguous', errorCode: 'payload_mismatch');
+        }
+        $id = $this->identifier($row['orderCode'] ?? null);
+        $cost = $this->money($payment['amount'] ?? null);
+        $quantityMatches = ($row['bonusQuantity'] ?? null) === 0 && ($row['finalQuantity'] ?? null) === $quantity;
+        $accounts = $payload['delivery']['accounts'] ?? [];
+        if (! is_array($accounts) || ! array_is_list($accounts) || count($accounts) > self::MAX_QUANTITY) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $deliveries = [];
+        $users = [];
+        foreach ($accounts as $account) {
+            if (! is_array($account)) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $user = $this->text($account['user'] ?? null, 1000);
+            $users[$user] = true;
+            $lines = [$user, $this->text($account['password'] ?? null, 4000)];
+            foreach (['verifyEmail', 'expiryText', 'otherInfo'] as $field) {
+                if (isset($account[$field]) && $account[$field] !== '') {
+                    $lines[] = $field.': '.$this->text($account[$field], 4000);
+                }
+            }
+            $deliveries[] = $this->text(implode("\n", $lines), 16_000);
+        }
+        $completed = ($row['status'] ?? null) === 'completed';
+        $complete = $completed && $quantityMatches && count($deliveries) === $quantity && count($users) === $quantity;
+
+        return new SupplierOrderResult(
+            $complete ? 'delivered' : 'ambiguous', $id, $quantity, $cost, $deliveries,
+            $complete ? null : ($quantityMatches ? 'incomplete_delivery' : 'unexpected_delivery_quantity'), identityTrusted: true, deliveryTrusted: $complete,
+        );
     }
 
     private function product(SupplierProvider $provider, array $row, string $id): SupplierProductData
@@ -781,6 +910,9 @@ final class SupplierClient
 
     private function noPurchase(SupplierProvider $provider, Response $response): bool
     {
+        if ($provider === SupplierProvider::Canboso) {
+            return in_array($response->status(), [400, 401, 404, 429], true);
+        }
         $status = $response->status();
         if ($provider === SupplierProvider::Warzone) {
             return in_array($status, [400, 401, 403, 404, 405, 413, 429, 503], true);

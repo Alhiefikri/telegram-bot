@@ -19,19 +19,13 @@ final class ProductQuantityPricing
             throw new InvalidArgumentException('Product quantity must be positive.');
         }
 
-        $tierQuery = $product->exists
-            ? $product->quantityPriceTiers()
-                ->select(['id', 'product_id', 'minimum_quantity', 'price_amount', 'usdt_price_amount'])
-            : null;
         $tiers = $product->relationLoaded('quantityPriceTiers')
             ? $product->quantityPriceTiers
-            : ($tierQuery?->limit(self::MAX_TIERS)->get() ?? collect());
-
-        if (count($tiers) === self::MAX_TIERS
-            && $tierQuery !== null
-            && (clone $tierQuery)->offset(self::MAX_TIERS)->limit(1)->exists()) {
-            throw $this->invalidSchedule('more than five tiers are configured');
-        }
+            : ($product->exists
+                ? $product->quantityPriceTiers()
+                    ->select(['id', 'product_id', 'minimum_quantity', 'price_amount', 'usdt_price_amount'])
+                    ->limit(self::MAX_TIERS + 1)->get()
+                : collect());
 
         $baseIdrUnitAmount = (int) $product->price_amount;
         $baseUsdtUnitAmount = $product->usdt_price_amount === null

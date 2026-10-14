@@ -47,7 +47,7 @@ final class SupplierAdminRequest extends FormRequest
         return match ($action) {
             'store', 'update' => [
                 'name' => ['required', 'string', 'max:120', 'not_regex:/[\x00-\x1F\x7F]/'],
-                'provider' => ['required', Rule::in(['prodseller', 'csxstore', 'arrs', 'warzone', 'aivault', 'nystore', 'toolorax', 'buymail'])],
+                'provider' => ['required', Rule::enum(SupplierProvider::class)],
                 'api_key' => [$action === 'store' ? 'required' : 'nullable', 'string', 'max:2048', 'not_regex:/[\x00-\x20\x7F]/'],
                 'webhook_secret' => ['nullable', 'string', 'max:256', 'regex:/\Awhsec_[A-Za-z0-9_-]{8,240}\z/D'],
                 'currency' => ['required', Rule::in(['USD', 'USDT', 'IDR'])],

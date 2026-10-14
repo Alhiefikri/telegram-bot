@@ -11,7 +11,7 @@ Supplier Balance is the operator's money at the external shop, not Customer Stor
 Dashboard menampilkan setiap koneksi sebagai kartu dengan status aktif/nonaktif, saldo tersedia, saldo total, dana ditahan, dan waktu sinkron. Aksi monitor, katalog, sinkronisasi, serta deposit BuyMail tersedia sebagai tombol; form Tambah/Edit koneksi dapat dibuka tanpa berpindah halaman. Daftar produk toko menampilkan harga jual dan status publik dengan tombol **Atur supplier & harga**. Katalog privat memakai kartu produk dengan harga beli, stok, dana/unit ditahan, pemetaan, dan form impor/hubungkan yang dapat dibuka per produk. Semua halaman supplier mendukung layout mobile serta pilihan tema terang/gelap.
 
 1. Open **Admin → Supplier Reseller** and fill the connection form. Clicking **Buat/Simpan supplier** opens an inline password dialog if recent confirmation is missing; successful confirmation resumes saving automatically. Incorrect passwords or cancelling retain the API key and other inputs in the current browser form. No secret is flashed to server session or persisted to browser storage. Operational recovery still requires recent confirmation.
-2. Add a connection: supported provider, API key, whole-IDR conversion rate, active flag and low-balance threshold. The Dashboard derives the private name and configured currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official and ToolOraX (ShopBot) use USD; BuyMail uses IDR with rate 1. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation. The configured USD for NyStore/ToolOraX is not production account-currency sign-off; see **Credential, currency and threshold sign-off**.
+2. Add a connection: supported provider, API key, whole-IDR conversion rate, active flag and low-balance threshold. The Dashboard derives the private name and configured currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official, ToolOraX (ShopBot) and Canboso use USD; BuyMail uses IDR with rate 1. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation. The configured USD for NyStore/ToolOraX is not production account-currency sign-off; see **Credential, currency and threshold sign-off**.
 3. Do not put supplier API keys in ENV. The database stores encrypted credentials using the application's encryption key; saved keys are not displayed back. Keep APP_KEY and encrypted database backups together under the existing backup policy. Losing the key makes those credentials unreadable.
 4. For ARRS/Warzone, confirm the actual account currency with the supplier. Also obtain authoritative currency evidence for the actual NyStore/ToolOraX accounts before activation or spend. Dollar-like presentation and USDT funding are not wallet-currency evidence. A mismatch must block activation and receive contract review, not a forced dropdown/ENV override.
 5. Activate the connection and click **Sinkron katalog dan saldo**. The local button is a CSRF-protected POST, but provider catalog/balance requests are GET-only. Read-only catalog fetching must not buy anything.
@@ -22,6 +22,51 @@ Dashboard menampilkan setiap koneksi sebagai kartu dengan status aktif/nonaktif,
 10. Top up the external supplier account through that supplier's own supported payment flow. This application does not create a supplier funding transaction. Sync after funding to update availability.
 
 An account supports multiple SKUs with one credential. Adding another SKU from an implemented provider is an Admin operation, not a code change. A new provider contract or an unsupported fulfillment/input type still needs implementation and qualification.
+
+### Canboso
+
+Canboso memakai origin tetap `https://canboso.com/api/v2/telegram-buyer` sesuai [Buyer API](https://canboso.com/api/swagger/). Adapter membaca `/balance` dan `/products` dengan buyer key, lalu membeli melalui `/purchase` dengan `Idempotency-Key` dan reference purchase yang sama. API key tetap terenkripsi di database.
+
+- Koneksi ini memakai wallet **USD**. `walletCurrency` dan currency harga/payment harus cocok; key wallet VND ditolak, bukan dikonversi diam-diam.
+- Hanya produk `account` tanpa `purchaseRequirements` yang eligible untuk fulfillment instan. Slot dan upgrade akun tetap terlihat di katalog privat tetapi tidak dapat menjadi sumber pembelian otomatis.
+- Harga katalog menjadi estimasi konservatif tanpa mengandalkan diskon promosi. Bonus atau jumlah delivery yang berbeda dari quantity pesanan masuk review; adapter tidak membuang atau mengalokasikan bonus secara diam-diam.
+- GET `/orders?orderCode=...` tidak mengembalikan kredensial. Status `completed` di history tidak mengizinkan delivery; operator perlu memulihkan bukti privat melalui monitor existing. Timeout tanpa order ID mengikuti bounded same-reference replay existing, bukan purchase baru.
+- Limiter berbagi budget konservatif 30 request/menit, maksimal 20 read/menit, dan menghormati `Retry-After` sampai enam jam. Tidak ada retry HTTP dalam loop.
+- Top-up wallet dilakukan di Canboso. Sesudah top-up, sinkronkan saldo dan pastikan kurs IDR/USD sesuai biaya funding sebelum mapping/publikasi produk.
+
+Regresi: `CanbosoSupplierTest` mencakup exact money, input-only SKU, currency mismatch, korelasi purchase, delivery yang tidak lengkap/bonus, history tanpa credential, dan cooldown enam jam.
+
+Regresi kesiapan tambahan:
+
+- `CanbosoPostgresConcurrencyTest`: delapan race multi-process untuk dispatch tunggal, wallet/stock terakhir, lease sync, rotasi credential saat snapshot berlangsung, replay ber-reference sama, stale finalization, batas replay setelah dispatch hilang, dan budget request bersama. Memerlukan PostgreSQL disposable bernama test, `RUN_CONCURRENCY_TESTS=1`, `pcntl`/`posix`, dan `phpunit.concurrency.xml`; SQLite tidak membuktikan locking.
+- `CanbosoQueryBudgetTest`: pertumbuhan katalog 1–401 SKU, Product publik, Dashboard, render katalog privat, chunk write 200 row, dan mapping dengan lima tier harga. Test membedakan SELECT per-SKU yang tidak perlu dari projection UPDATE per-Product yang memang diperlukan.
+- `CanbosoSecurityTest`: identitas akun duplikat meski password berbeda, spoofed payment/order, payload/transfer bounds, secret pada nama field maupun nilai JSON, kegagalan cooldown setelah dispatch, transaksi finansial, authorization/password/CSRF, ciphertext, audit/session, dan rotasi saat commitment masih aktif.
+
+`ProductQuantityPricing::quote` membaca maksimal enam tier sebagai sentinel saat relation belum dimuat; relation lengkap yang sudah eager-loaded tidak melakukan overflow probe per kalkulasi. Schedule dengan lebih dari lima tier tetap ditolak.
+
+Jalankan regresi SQLite dari `src/`:
+
+```sh
+php artisan test --compact --filter='CanbosoSupplierTest|CanbosoQueryBudgetTest|CanbosoSecurityTest|SupplierClientTest|SupplierAdminTest|SupplierFulfillmentTest|SupplierAvailabilityTest|ProductQuantityPricingTest'
+```
+
+Untuk race, siapkan PostgreSQL 16 disposable dengan `DB_DATABASE` yang mengandung `test`, kosongkan `DB_URL`, lalu jalankan dengan environment DB terisolasi dan `RUN_CONCURRENCY_TESTS=1`:
+
+```sh
+vendor/bin/phpunit --configuration=phpunit.concurrency.xml --filter='CanbosoPostgresConcurrencyTest|SupplierPostgresConcurrencyTest' --fail-on-skipped --display-skipped --no-coverage
+```
+
+Pengujian memakai HTTP sintetis. Budget lintas-proses memakai shared database cache; pengujian ini tidak mengklaim verifikasi Redis production atau debit/delivery real di Canboso. Top-up, pembelian terkendali, bukti delivery provider, dan konfigurasi worker/cache production tetap memerlukan qualification operator sebelum penjualan.
+
+Bukti lokal 14 Oktober 2026:
+
+- PostgreSQL 16: 19 test supplier concurrency lulus, 370 assertion, tanpa skip; termasuk delapan race Canboso.
+- Run non-race mencakup 349 skenario: 347 lulus pada run utama. Dua test rotasi membaca instance Eloquent yang belum direfresh; sesudah memperbaiki assertion persisted-state, rerun keduanya lulus dengan 26 assertion.
+- Smoke standalone PostgreSQL melewati sync → checkout → pembayaran manual sintetis → worker → replay worker: nol POST sebelum pembayaran, satu POST purchase, satu credential milik Order Item yang benar, wallet `$1.00 → $0.95`, dan seluruh hold dilepas.
+- Reproducer akun duplikat/password berbeda serta key echo sebagai nama field berubah dari delivery trusted menjadi ambiguous/untrusted. Empat quote dengan lima tier eager-loaded mempertahankan harga yang sama, dengan query tambahan turun dari empat menjadi nol.
+
+
+
 
 ## Nonaktifkan atau lepas mapping
 
@@ -49,7 +94,7 @@ An account supports multiple SKUs with one credential. Adding another SKU from a
 - Top-up langsung di supplier dideteksi pada tick sync yang sudah jatuh tempo. Koneksi sehat biasanya dibaca paling cepat tiap menit; ProdSeller memakai interval konservatif `max(60, ceil((jumlah SKU + 2) × 900 / 180))` detik karena setiap SKU bisa membutuhkan detail GET. Ini mengurangi full-catalog polling dan menyisakan budget untuk recovery/purchase. Freshness checkout tetap lima menit; katalog besar yang tidak dapat diperbarui dalam budget akan kedaluwarsa, **bukan** mendapat freshness palsu.
 - Angka public adalah kapasitas pembelian aman, bukan raw stock supplier. Jika tetap 4 setelah sync berhasil, bandingkan saldo tersedia (total dikurangi dana ditahan), biaya/unit, unit ditahan, batas quantity provider, dan harga tier retail mulai quantity 5 terhadap minimum profit/buffer. Saldo dan raw stock besar tidak boleh melewati tier yang membuat pembelian rugi. Purchase dengan debit belum terselesaikan tetap menjaga wallet observation sebelumnya; selesaikan recovery, jangan menghapus hold.
 - Kegagalan sync menyimpan `sync_failures` dan `sync_next_attempt_at` di DB: jeda 2, 4, 8, 16, lalu maksimal 30 menit. HTTP 429 dan local budget exhaustion menunggu setidaknya cooldown yang diketahui; sukses mereset failure count. Scheduler, `--supplier`, dan tombol Admin tidak dapat melewati backoff kegagalan, termasuk setelah Redis/cache hilang. Manual sync koneksi sehat tetap dapat meminta refresh sebelum interval otomatis.
-- Client supplier umum menyimpan cooldown bersama per provider setelah HTTP 429, termasuk response pooled detail; `Retry-After` menerima seconds atau HTTP-date (maksimal satu jam), dengan fallback 15 menit untuk ProdSeller dan satu menit untuk provider lain. Selama cooldown, GET/POST berhenti sebelum HTTP. Local limiter tetap memisahkan read budget dari kapasitas purchase; tidak ada retry POST otomatis atau perubahan aturan ambiguity. BuyMail mempertahankan limiter/cooldown adapter existing.
+- Client supplier umum menyimpan cooldown bersama per provider setelah HTTP 429, termasuk response pooled detail; `Retry-After` menerima seconds atau HTTP-date (maksimal satu jam, atau enam jam untuk Canboso), dengan fallback 15 menit untuk ProdSeller dan satu menit untuk provider lain. Selama cooldown, GET/POST berhenti sebelum HTTP. Local limiter tetap memisahkan read budget dari kapasitas purchase; tidak ada retry POST otomatis atau perubahan aturan ambiguity. BuyMail mempertahankan limiter/cooldown adapter existing.
 
 ### Automated pricing regression
 

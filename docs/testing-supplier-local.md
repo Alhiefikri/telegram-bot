@@ -40,6 +40,15 @@ SQLite ini cukup untuk walkthrough UI dan satu order terkendali. Bukti race,
 locking, dan kesiapan production memerlukan PostgreSQL/concurrency gate;
 SQLite tidak membuktikan perilaku tersebut.
 
+### Koneksi Canboso
+
+Canboso sudah tersimpan sebagai supplier **ID 5** di database supplier-local, dengan API key terenkripsi dan kurs awal Rp18.000/USD mengikuti koneksi lokal lain. Kurs ini perlu disesuaikan dengan biaya funding aktual sebelum penjualan.
+
+Smoke GET melalui `SupplierCatalogSync` membaca wallet USD bersaldo **0**, 203 SKU, dan 123 SKU orderable pada saat pengecekan. Belum ada mapping Product publik, pembelian supplier, atau top-up. Produk slot/upgrade tidak eligible untuk pengiriman otomatis. Angka katalog dapat berubah pada sinkron berikutnya.
+
+Gunakan halaman Admin lokal yang sama untuk membuka katalog Canboso, mengimpor draft atau memetakan SKU ekuivalen. Top-up wallet di Canboso lalu sinkronkan saldo sebelum mengaktifkan penjualan. Koneksi lokal ini bukan penambahan supplier di VPS production.
+
+
 ## API key dan produk test
 
 1. Login Admin → Supplier Reseller. Isi form dan klik **Buat supplier**;
