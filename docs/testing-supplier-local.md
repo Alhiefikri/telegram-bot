@@ -48,6 +48,12 @@ Smoke GET melalui `SupplierCatalogSync` membaca wallet USD bersaldo **0**, 203 S
 
 Gunakan halaman Admin lokal yang sama untuk membuka katalog Canboso, mengimpor draft atau memetakan SKU ekuivalen. Top-up wallet di Canboso lalu sinkronkan saldo sebelum mengaktifkan penjualan. Koneksi lokal ini bukan penambahan supplier di VPS production.
 
+Pada 14 Oktober 2026, key dari permintaan terbaru berbeda dari key yang tersimpan. Endpoint `/balance` memverifikasi key baru dengan HTTP 200, wallet USD, dan saldo 0. `SupplierManager` memperbarui koneksi ID 5 dengan optimistic version dan audit; pemeriksaan persisted-state memastikan key cocok dan tersimpan sebagai ciphertext. Kurs Rp18.000/USD tetap dipertahankan, bukan dianggap sebagai biaya funding yang sudah diverifikasi.
+
+Endpoint `/products` mengembalikan HTTP 503. `SupplierCatalogSync` mencatat `last_error = upstream` dan backoff; 203 SKU lama tetap tersimpan tetapi freshness koneksi tidak berlaku. Angka 123 SKU orderable di atas berasal dari smoke sebelumnya, bukan hasil key baru. Belum ada pembelian atau debit wallet dalam pengecekan ini. Tunggu backoff dan pemulihan endpoint sebelum sinkron ulang; jangan menganggap katalog lama sebagai kapasitas yang siap dijual.
+
+Verifikasi permintaan key terbaru: `CanbosoSupplierTest`, `CanbosoQueryBudgetTest`, dan `CanbosoSecurityTest` lulus 149 test dengan 7.300 assertion. `CanbosoPostgresConcurrencyTest` lulus delapan race multi-process pada PostgreSQL 16 disposable, 205 assertion, tanpa skip. Smoke persisted-state menunjukkan nol mapping publik, nol purchase, nol reserved balance, key tidak muncul dalam serialisasi model maupun audit, dan katalog tidak fresh setelah kegagalan upstream. Test memakai HTTP sintetis; GET saldo real tidak membuktikan debit atau delivery provider.
+
 
 ## API key dan produk test
 
