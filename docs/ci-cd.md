@@ -18,15 +18,9 @@ CI and scheduled supplier regression jobs use standard GitHub-hosted
 not consume the private-repository Actions minute allowance. Artifact and
 registry storage still have separate limits.
 
-Production deploy and recovery jobs remain on `telegram-bot-ci-vps` through
-`[self-hosted, Linux, X64, deploy]`. This runner has its own VPS, separate
-from production. Tests and image builds no longer compete with deployment
-for that runner's CPU, disk, or network.
-
-`.github/actionlint.yaml` declares the custom `deploy` runner label
-for workflow validation. Keep this file committed alongside runner-routing
-changes; otherwise `actionlint` rejects valid self-hosted job labels before
-application tests and image publication can run.
+Production deploy and recovery jobs also use GitHub-hosted `ubuntu-24.04`.
+No workflow schedules work on the former runner VPS. Production remains the
+SSH deployment target; CI tests and image builds run on GitHub infrastructure.
 
 The Telegram USDT chooser must provide button rows inside `inline_keyboard`,
 including its history button. Invalid amounts, cancelled previews, and stale
@@ -41,17 +35,9 @@ Browser balance checks scope amounts to the `Ringkasan saldo` region because
 the account profile also displays the same balances; duplicate summary text
 must not make the checkout smoke fail with an ambiguous locator.
 
-Before dispatching or rerunning a deploy, confirm the label points at the
-intended runner:
-
-```bash
-gh api repos/Alhiefikri/telegram-bot/actions/runners \
-  --jq '.runners[] | {id,name,status,busy,labels:[.labels[].name]}'
-```
-
-A stale runner must never carry the `deploy` label. The runner VPS must hold the
-production host key in `~ubuntu/.ssh/known_hosts`; deploy automation never
-disables host-key checking.
+Deploy and recovery create their SSH configuration on each ephemeral hosted
+runner using the existing production environment secrets. SSH host-key checking
+remains enabled. No dedicated runner registration, label, or service is required.
 
 PHP test jobs run inside an `ubuntu:24.04` job container so `setup-php` has its
 supported Linux environment. The PostgreSQL service is reached through its

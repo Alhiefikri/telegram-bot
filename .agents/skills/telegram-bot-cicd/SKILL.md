@@ -1,6 +1,6 @@
 ---
 name: telegram-bot-cicd
-description: "Operate this repo's GitHub Actions CI/CD safely: use GitHub-hosted CI, dispatch production deploys from green main commits through the VPS runner, and verify production release identity."
+description: "Operate this repo's GitHub Actions CI/CD safely: use GitHub-hosted CI and deployment runners, deploy green main commits to production over SSH, and verify production release identity."
 ---
 
 # Telegram Bot CI/CD
@@ -23,19 +23,6 @@ services, or configuration.
 - Production public release marker: `https://lhiestore.web.id/release-sha.txt`
 - Production canonical URL: `https://lhiestore.web.id`
 - Production SSH host for read-only checks: `ssh -p 2468 alhiefikri@43.134.177.28`
-- Runner VPS: `ssh ubuntu@43.156.207.168`
-- Runner install path on the runner VPS: `/opt/actions-runner-telegram-bot`
-- Runner service on the runner VPS:
-  `actions.runner.Alhiefikri-telegram-bot.telegram-bot-ci-vps.service`
-- Intended active runner name: `telegram-bot-ci-vps`
-- Intended active runner labels: `self-hosted`, `Linux`, `X64`, `deploy`
-
-The runner VPS is only a GitHub Actions runner. Do not deploy the application
-there and do not inspect or mutate unrelated workloads. In particular, do not
-touch `viet-tool` or any unrelated container/process unless the user explicitly
-asks for that separate system.
-
-Production is a different VPS reached by the deploy workflow over SSH.
 
 ## Runner Rules
 
@@ -49,42 +36,20 @@ Scheduled supplier regression jobs also use `ubuntu-24.04`. Standard hosted
 runner compute is free while the repository is public; artifact and registry
 storage remain separately limited.
 
-Production deploy and recovery jobs route to:
+Production deploy and recovery jobs also route to `ubuntu-24.04`.
+Do not start or repair the former self-hosted runner VPS for these workflows.
+Production remains the separate SSH target, not the Actions execution host.
 
-```text
-[self-hosted, Linux, X64, deploy]
-```
+Deploy and recovery configure SSH on their ephemeral hosted runners with the
+existing production environment secrets. Do not use `StrictHostKeyChecking=no`.
 
-Before dispatching or rerunning production deploys, confirm the deploy label
-points to the intended runner:
-
-```bash
-gh api repos/Alhiefikri/telegram-bot/actions/runners \
-  --jq '.runners[] | {id,name,status,busy,labels:[.labels[].name]}'
-```
-
-Expected healthy state:
-
-- `telegram-bot-ci-vps` is `online`.
-- `telegram-bot-ci-vps` has the `deploy` label.
-- Any old local runner, especially `alhiefikri-telegram-bot`, must not have the
-  `deploy` label.
-
-If a job is stuck on a stale runner, identify the attached runner before
-retrying:
+If runner routing needs diagnosis, inspect the workflow job labels and runner:
 
 ```bash
 gh api repos/Alhiefikri/telegram-bot/actions/runs/<run-id>/jobs \
   --jq '.jobs[] | {name,status,conclusion,runner_name,runner_id,labels:.labels,started_at,completed_at}'
 ```
 
-Do not repeatedly rerun a workflow that is attached to the wrong runner. Fix the
-runner label/state first, cancel the stuck run once, then dispatch a fresh run.
-
-The runner VPS needs the production host key in `~ubuntu/.ssh/known_hosts`.
-Do not use `StrictHostKeyChecking=no`. If deploy fails with
-`Host key verification failed`, copy or verify the trusted production host key
-before retrying.
 
 ## Normal Release Flow
 
@@ -215,12 +180,10 @@ explicitly authorized manual production mutation.
 
 Common failures:
 
-- `Host key verification failed`: the runner VPS lacks the production host key.
-  Fix `~ubuntu/.ssh/known_hosts` on the runner VPS using a trusted key; do not
-  disable host-key checking.
-- Job stuck on `Set up job` or attached to `alhiefikri-telegram-bot`: remove the
-  `deploy` label from stale runners, make sure `telegram-bot-ci-vps` is online
-  with `deploy`, cancel the stuck run once, then dispatch a fresh run.
+- `Host key verification failed`: inspect the hosted job's SSH configuration and
+  verify the trusted production host key; do not disable host-key checking.
+- Job attached to a self-hosted runner: correct the workflow's `runs-on` to
+  `ubuntu-24.04` before dispatching again. Do not restart the former runner VPS.
 - `Remote deployment state could not prove a healthy candidate release`: inspect
   the release artifacts and production release state before retrying. If
   production inspection is needed, use `audit-production-ssh`.

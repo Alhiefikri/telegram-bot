@@ -1,6 +1,0 @@
-# Custom labels of the repository's dedicated self-hosted runner
-# (telegram-bot-ci-vps). actionlint rejects `runs-on` labels it does not know,
-# so the deployment routing label is declared here.
-self-hosted-runner:
-  labels:
-    - deploy
