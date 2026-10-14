@@ -46,6 +46,7 @@
             <file>tests/Feature/SupplierHealthPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SupplierFulfillmentTest.php</file>
             <file>tests/Feature/SupplierPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/CanbosoPostgresConcurrencyTest.php</file>
             <file>tests/Feature/BuyMailAccountIdentityTest.php</file>
             <file>tests/Feature/BuyMailClientTest.php</file>
             <file>tests/Feature/BuyMailFulfillmentTest.php</file>
