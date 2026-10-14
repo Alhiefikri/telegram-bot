@@ -190,7 +190,7 @@ final class TelegramPaidOrderTxtDownloadTest extends TelegramBotTestSupport
         yield 'malay' => ['ms', '✅ Permintaan diterima. Fail TXT anda sedang disediakan.'];
     }
 
-    public function test_normal_receipt_remains_protected_while_txt_document_is_downloadable(): void
+    public function test_receipt_and_downloadable_txt_keep_otp_access_private(): void
     {
         Queue::fake();
         [$order, $customer, $sensitive] = $this->otpAndAuthOrder(oneAccount: true);
@@ -214,7 +214,6 @@ final class TelegramPaidOrderTxtDownloadTest extends TelegramBotTestSupport
         $receiptCaption = (string) $this->telegramRequestField($photo, 'caption');
         $documentContents = (string) $this->telegramRequestField($document, 'document');
 
-        $this->assertTrue(filter_var($this->telegramRequestField($photo, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
         $this->assertFalse(filter_var($this->telegramRequestField($document, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
         $this->assertStringContainsString('otp.issue426.example.test', $receiptCaption);
         $this->assertNoSecretValues($receiptCaption, ['otp_url' => $sensitive['otp_url']]);

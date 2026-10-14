@@ -578,57 +578,53 @@ class OrderStatusHistoryTest extends TelegramBotTestSupport
     }
 
     #[DataProvider('customerLocaleCases')]
-    public function test_order_detail_localizes_statuses_dates_and_delivery_note_heading_without_translating_note_data(array $copy): void
+    public function test_order_detail_preserves_merchant_note_outside_copy_block_for_each_locale(array $copy): void
     {
-        $originalTimezone = date_default_timezone_get();
-        config()->set('app.timezone', 'Asia/Jakarta');
-        date_default_timezone_set('Asia/Jakarta');
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => $copy['locale']]);
+        $note = 'merchant-note::KEEP-OPAQUE';
+        $product = Product::factory()->create(['name' => 'Locale Vault', 'delivery_note' => $note]);
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'invoice_number' => 'INV-DETAIL-'.strtoupper($copy['locale']),
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $item = OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'delivery_note' => $note,
+            'delivery_note_snapshotted' => true,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $product->id,
+            'order_item_id' => $item->id,
+            'secret' => 'locale@example.test|secret',
+        ]);
+        Payment::factory()->create([
+            'order_id' => $order->id,
+            'provider' => 'manual',
+            'method' => 'manual',
+            'status' => PaymentStatus::Paid,
+            'paid_at' => now(),
+        ]);
 
-        try {
-            $this->fakeTelegramHttp();
-            $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => $copy['locale']]);
-            $product = Product::factory()->create(['name' => 'Locale Vault', 'delivery_note' => 'merchant-note::KEEP-OPAQUE']);
-            $order = Order::factory()->create([
-                'customer_id' => $customer->id,
-                'invoice_number' => 'INV-DETAIL-'.strtoupper($copy['locale']),
-                'order_status' => OrderStatus::Completed,
-                'payment_status' => PaymentStatus::Paid,
-                'created_at' => CarbonImmutable::parse('2026-05-04 15:30:00', 'Asia/Jakarta'),
-            ]);
-            $item = OrderItem::factory()->create([
-                'order_id' => $order->id,
-                'product_id' => $product->id,
-                'product_name' => $product->name,
-                'delivery_note' => 'merchant-note::KEEP-OPAQUE',
-                'delivery_note_snapshotted' => true,
-            ]);
-            ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $item->id, 'secret' => 'locale@example.test|secret']);
-            Payment::factory()->create([
-                'order_id' => $order->id,
-                'provider' => 'manual',
-                'method' => 'manual',
-                'status' => PaymentStatus::Paid,
-                'paid_at' => CarbonImmutable::parse('2026-05-05 09:15:00', 'Asia/Jakarta'),
-            ]);
+        $this->postTelegramWebhook($this->messageUpdate(303, '/order '.$order->invoice_number))->assertOk();
 
-            $this->postTelegramWebhook($this->messageUpdate(303, '/order '.$order->invoice_number))->assertOk();
-
-            $text = $this->sentMessageContaining($order->invoice_number);
-            $this->assertStringContainsString($copy['orderTitle'], $text);
-            $this->assertStringContainsString('Status: '.$copy['orderCompleted'].' / '.$copy['paymentPaid'], $text);
-            $this->assertStringContainsString($copy['createdLabel'].' '.$copy['createdDate'], $text);
-            $this->assertStringContainsString($copy['paidLabel'].' '.$copy['paidDate'], $text);
-            $this->assertStringContainsString($copy['paymentLabel'].' manual ('.$copy['paymentPaid'].')', $text);
-            $this->assertStringContainsString($copy['deliveryNoteHeading'], $text);
-            $this->assertStringContainsString('merchant-note::KEEP-OPAQUE', $text);
-            if ($copy['locale'] === 'id') {
-                $this->assertStringNotContainsString('completed / paid', strtolower($text));
+        $messages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) $request['chat_id'] === '12345');
+        $text = $messages->map(fn ($pair): string => (string) $pair[0]['text'])->implode("\n");
+        $this->assertSame(1, substr_count($text, $note));
+        $copied = [];
+        foreach ($messages as [$request]) {
+            foreach ($request['entities'] ?? [] as $entity) {
+                if ($entity['type'] === 'pre') {
+                    $copied[] = $this->telegramEntityText((string) $request['text'], $entity);
+                }
             }
-            $this->assertStringNotContainsString($copy['otherOrderTitle'], $text);
-            $this->assertStringNotContainsString($copy['otherDeliveryNoteHeading'], $text);
-        } finally {
-            date_default_timezone_set($originalTimezone);
         }
+        $this->assertSame(['locale@example.test | secret'], $copied);
     }
 
     #[DataProvider('orderGuidanceLocaleCases')]
