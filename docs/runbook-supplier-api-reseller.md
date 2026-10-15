@@ -33,7 +33,7 @@ Select **Nastele** in the existing Supplier Reseller connection form and enter a
 replacement API key, actual IDR funding cost for **one VND**, and a low-balance
 threshold in micro-VND (`1 VND = 1000000` micros). The rate may be below Rp1.
 The application does not fetch an FX rate or infer one from the supplier name.
-Migration `2026_10_15_000001_add_nastele_supplier_support` widens connection and
+Migration `2026_10_15_000002_add_nastele_supplier_support` widens connection and
 purchase-snapshot rates to exact six-place decimals. Final IDR cost rounds up;
 existing integer-rate snapshots retain their economic value. Rollback refuses
 VND connections or fractional history rather than truncating financial evidence.

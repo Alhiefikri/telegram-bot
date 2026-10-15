@@ -12,6 +12,7 @@ use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
 use App\Models\User;
 use App\Services\Suppliers\SupplierAvailability;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
@@ -26,7 +27,7 @@ final class SupplierPricingClarityTest extends TestCase
         $migration = require database_path('migrations/2026_10_15_000001_remove_supplier_price_policy_buffer.php');
         $migration->down();
         $product = Product::factory()->create(['price_amount' => 12345]);
-        \Illuminate\Support\Facades\DB::table('supplier_price_policies')->insert([
+        DB::table('supplier_price_policies')->insert([
             'product_id' => $product->id, 'mode' => 'manual', 'markup_basis_points' => 0,
             'profit_idr' => 3000, 'minimum_profit_idr' => 1000, 'buffer_idr' => 500,
             'rounding_idr' => 1, 'version' => 7, 'created_at' => now(), 'updated_at' => now(),

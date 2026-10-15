@@ -419,7 +419,8 @@ final class SupplierClient
         if (! $allowInactive && ! $supplier->is_active) {
             throw new SupplierUnavailable('inactive');
         }
-        if (! in_array($supplier->currency, ['USD', 'USDT', 'VND'], true)
+        $accountCurrencies = $provider === SupplierProvider::Nastele ? ['VND'] : ['USD', 'USDT'];
+        if (! in_array($supplier->currency, $accountCurrencies, true)
             || ($provider->requiresCurrencyConfirmation() && ! $supplier->currency_confirmed)
             || (! $provider->requiresCurrencyConfirmation() && $supplier->currency !== $provider->defaultCurrency())) {
             throw new SupplierUnavailable('currency_mismatch');

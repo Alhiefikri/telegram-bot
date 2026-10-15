@@ -13,7 +13,7 @@ return new class extends Migration
         Schema::table('supplier_purchases', fn (Blueprint $table) => $table->decimal('exchange_rate_idr', 16, 6)->change());
         if (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE suppliers DROP CONSTRAINT supplier_money_guard');
-            DB::statement("ALTER TABLE suppliers ADD CONSTRAINT supplier_money_guard CHECK (reserved_balance_micros >= 0 AND exchange_rate_idr > 0 AND version > 0 AND currency IN ('USD', 'USDT', 'IDR', 'VND') AND (provider <> 'buymail' OR (currency = 'IDR' AND exchange_rate_idr = 1)) AND (provider <> 'nastele' OR currency = 'VND'))");
+            DB::statement("ALTER TABLE suppliers ADD CONSTRAINT supplier_money_guard CHECK (reserved_balance_micros >= 0 AND exchange_rate_idr > 0 AND version > 0 AND currency IN ('USD', 'USDT', 'IDR', 'VND') AND (provider <> 'buymail' OR (currency = 'IDR' AND exchange_rate_idr = 1)) AND (provider <> 'nastele' OR currency = 'VND') AND (currency <> 'VND' OR provider = 'nastele'))");
         }
     }
 
