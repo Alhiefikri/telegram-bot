@@ -863,7 +863,6 @@ class ProductFamilyCatalogTest extends TestCase
         $this->assertSame($family->id, app(CatalogBrowse::class)->showPublicFamily($family->id)->id);
     }
 
-
     public function test_creating_a_product_from_a_family_shortcut_assigns_that_family(): void
     {
         Storage::fake('public');

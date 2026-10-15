@@ -542,11 +542,10 @@ class AdminDashboardStockFlowsTest extends TestCase
             'subject_id' => (string) $product->id,
         ]);
 
-        $this->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertSeeInOrder(['Canva Pro', 'Stok', '5'])
-            ->assertSeeInOrder(['Canva Pro', 'Tersedia', '4'])
-            ->assertSeeInOrder(['Canva Pro', 'Dipesan', '1']);
+        $cardHtml = $this->productCardHtml($admin, [$product->id]);
+        $this->assertCardContainsInOrder($cardHtml, ['Canva Pro', 'Stok', '5']);
+        $this->assertCardContainsInOrder($cardHtml, ['Canva Pro', 'Tersedia', '4']);
+        $this->assertCardContainsInOrder($cardHtml, ['Canva Pro', 'Dipesan', '1']);
     }
 
     public function test_admin_can_add_bulk_access_token_rows_from_quick_input(): void
@@ -854,11 +853,15 @@ class AdminDashboardStockFlowsTest extends TestCase
 
         $dashboard = $this->get('/admin?tab=produk')
             ->assertOk()
-            ->assertDontSee('keep-me@example.test|pass')
-            ->assertSee('stockItemsUrl', false)
-            ->assertSeeInOrder([$product->name, 'Stok', '1']);
+            ->assertDontSee('keep-me@example.test|pass');
 
         $this->assertStringNotContainsString('delete-me@example.test|pass', $dashboard->getContent());
+
+        $cardHtml = $this->productCardHtml($admin, [$product->id]);
+        $this->assertStringContainsString('stockItemsUrl', $cardHtml);
+        $this->assertStringNotContainsString('keep-me@example.test|pass', $cardHtml);
+        $this->assertStringNotContainsString('delete-me@example.test|pass', $cardHtml);
+        $this->assertCardContainsInOrder($cardHtml, [$product->name, 'Stok', '1']);
     }
 
     public function test_stock_item_management_rejects_claimed_and_cross_product_rows(): void
@@ -906,5 +909,24 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertDatabaseHas('product_stock_items', ['id' => $stockItem->id]);
         $this->assertSame(1, $product->fresh()->stock);
         $this->assertSame(1, $product->fresh()->reserved_stock);
+    }
+
+    private function productCardHtml(User $admin, array $productIds): string
+    {
+        return (string) $this->actingAs($admin)
+            ->getJson(route('admin.products.cards', ['ids' => array_values($productIds)]))
+            ->assertOk()
+            ->json('html');
+    }
+
+    private function assertCardContainsInOrder(string $cardHtml, array $needles): void
+    {
+        $offset = 0;
+
+        foreach ($needles as $needle) {
+            $position = strpos($cardHtml, $needle, $offset);
+            $this->assertNotFalse($position, 'Product card should contain ['.$needle.'] after offset '.$offset.'.');
+            $offset = (int) $position + strlen($needle);
+        }
     }
 }

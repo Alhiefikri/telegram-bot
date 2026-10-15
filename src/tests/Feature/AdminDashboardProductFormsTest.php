@@ -140,16 +140,16 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertSee('Canva Pro 1 Bulan')
             ->assertSee('Tools Premium')
             ->assertSee('IDR 75.000')
-            ->assertSee('Aktif')
-            ->assertSeeInOrder(['Stok', '0'])
-            ->assertSeeInOrder(['Tersedia', '0'])
-            ->assertSeeInOrder(['Dipesan', '0'])
-
-            ->assertSee('Akses Canva Pro siap pakai.')
             ->assertSee('Replacement &amp; Refund Policy', false)
-            ->assertSee('productWarrantyPolicy', false)
+            ->assertSee('productWarrantyPolicy', false);
 
-            ->assertSee('/assets/product-placeholder.svg', false);
+        $cardHtml = $this->productCardHtml($admin, [$product->id]);
+        $this->assertStringContainsString('Aktif', $cardHtml);
+        $this->assertCardContainsInOrder($cardHtml, ['Stok', '0']);
+        $this->assertCardContainsInOrder($cardHtml, ['Tersedia', '0']);
+        $this->assertCardContainsInOrder($cardHtml, ['Dipesan', '0']);
+        $this->assertStringContainsString('Akses Canva Pro siap pakai.', $cardHtml);
+        $this->assertStringContainsString('/assets/product-placeholder.svg', $cardHtml);
     }
 
     public function test_admin_can_create_replace_and_disable_quantity_price_tiers(): void
@@ -223,9 +223,7 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertRedirect('/admin?tab=produk#product-'.$product->id);
 
         $this->assertDatabaseCount('product_quantity_price_tiers', 0);
-        $this->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertSee('quantityPriceTiers', false);
+        $this->assertStringContainsString('quantityPriceTiers', $this->productCardHtml($admin, [$product->id]));
     }
 
     public function test_invalid_quantity_price_schedule_preserves_submitted_rows_and_persisted_state(): void
@@ -371,9 +369,7 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertSame(800, $width);
         $this->assertSame(333, $height);
 
-        $this->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertSee('/storage/'.$product->image_path, false);
+        $this->assertStringContainsString('/storage/'.$product->image_path, $this->productCardHtml($admin, [$product->id]));
     }
 
     public function test_admin_can_replace_product_image_without_clobbering_other_fields(): void
@@ -452,7 +448,7 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertSame([1600, 667, IMAGETYPE_WEBP], [$channelWidth, $channelHeight, $channelType]);
         $createdAudit = AuditLog::query()->where('action', 'product.created')->sole();
         $this->assertSame($product->telegram_channel_image_path, $createdAudit->new_values['telegram_channel_image_path']);
-        $this->get('/admin?tab=produk')->assertOk()->assertSee(basename($product->telegram_channel_image_path), false);
+        $this->assertStringContainsString(basename($product->telegram_channel_image_path), $this->productCardHtml($admin, [$product->id]));
     }
 
     public function test_replacing_channel_image_preserves_detail_media_and_cleans_old_file(): void
@@ -675,8 +671,9 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertDontSee('Pratinjau publik')
             ->assertDontSee('product-type', false)
             ->assertDontSee('product-featured-rank', false)
-            ->assertDontSee('Lisensi software')
-            ->assertSee('Pilihan utama #1');
+            ->assertDontSee('Lisensi software');
+
+        $this->assertStringContainsString('Pilihan utama #1', $this->productCardHtml($admin, [$product->id]));
     }
 
     public function test_basic_product_update_preserves_removed_customer_detail_values(): void
@@ -941,8 +938,9 @@ class AdminDashboardProductFormsTest extends TestCase
 
         $this->get('/admin?tab=produk')
             ->assertOk()
-            ->assertSee('Pause')
             ->assertSee('○ Tidak tampil');
+
+        $this->assertStringContainsString('Pause', $this->productCardHtml($admin, [$product->id]));
 
         $this->actingAs($admin)
             ->patch(route('admin.products.visibility.update', $product), ['is_active' => '1'])
@@ -953,8 +951,9 @@ class AdminDashboardProductFormsTest extends TestCase
 
         $this->get('/admin?tab=produk')
             ->assertOk()
-            ->assertSee('Aktif')
             ->assertSee('● Tampil di toko');
+
+        $this->assertStringContainsString('Aktif', $this->productCardHtml($admin, [$product->id]));
     }
 
     public function test_admin_can_create_category_with_unique_slug_from_produk_tab(): void
@@ -1165,5 +1164,24 @@ class AdminDashboardProductFormsTest extends TestCase
             ->assertOk()
             ->assertSee('Product Details + Refund Policy English maksimal 3000')
             ->assertSee('\u0022productContentLocale\u0022:\u0022en\u0022', false);
+    }
+
+    private function productCardHtml(User $admin, array $productIds): string
+    {
+        return (string) $this->actingAs($admin)
+            ->getJson(route('admin.products.cards', ['ids' => array_values($productIds)]))
+            ->assertOk()
+            ->json('html');
+    }
+
+    private function assertCardContainsInOrder(string $cardHtml, array $needles): void
+    {
+        $offset = 0;
+
+        foreach ($needles as $needle) {
+            $position = strpos($cardHtml, $needle, $offset);
+            $this->assertNotFalse($position, 'Product card should contain ['.$needle.'] after offset '.$offset.'.');
+            $offset = (int) $position + strlen($needle);
+        }
     }
 }

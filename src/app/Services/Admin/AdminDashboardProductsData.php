@@ -359,6 +359,7 @@ final class AdminDashboardProductsData
                     ],
                 ]];
             });
+
         return $productPayloadsById;
     }
 
