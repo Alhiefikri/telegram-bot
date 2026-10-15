@@ -193,7 +193,12 @@ class AdminDashboardOverviewTest extends TestCase
         $this->get('/admin?tab=produk&sales_filter=waiting&source=telegram')
             ->assertOk()
             ->assertSee('Produk Baru 20')
-            ->assertDontSee($oldest->name)
+            ->assertViewHas('productsTab', function (array $tab) use ($oldest): bool {
+                $this->assertNotContains($oldest->id, array_column($tab['products'], 'id'));
+                $this->assertContains('product-'.$oldest->id, array_column($tab['clientCatalog']['groups'], 'id'));
+
+                return true;
+            })
             ->assertSee('Halaman 1 dari 2')
             ->assertSee('products_page=2', false)
             ->assertSee('tab=produk', false)
@@ -204,7 +209,7 @@ class AdminDashboardOverviewTest extends TestCase
             ->assertOk()
             ->assertSee($oldest->name)
             ->assertSee('○ Tidak tampil')
-            ->assertSee(route('admin.products.update', $oldest), false)
+            ->assertSee(route('admin.products.workspace', $oldest), false)
             ->assertSee('Halaman 2 dari 2')
             ->assertSee('products_page=1', false);
     }

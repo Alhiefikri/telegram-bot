@@ -26,7 +26,7 @@ use Tests\Support\TelegramBotTestSupport;
 
 class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
 {
-    public function test_receipt_keeps_each_structured_account_and_otp_button_together(): void
+    public function test_explicit_chat_receipt_keeps_each_structured_account_and_otp_button_together(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 445566, 'locale' => 'id']);
         [$order, $item] = $this->paidOrder($customer, 'Structured Bundle');
@@ -56,46 +56,61 @@ class StructuredCredentialDeliveryTest extends TelegramBotTestSupport
             )->toArray(),
         ]);
 
-        $this->fakeTelegramHttp();
-        app(TelegramReceiptNotifier::class)->send($order->fresh());
-
-        $photos = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'));
-        $this->assertCount(1, $photos);
-        $photo = $photos->sole()[0];
-        $caption = (string) $this->telegramRequestField($photo, 'caption');
+        $plan = app(TelegramReceiptNotifier::class)->receiptPlan($order->fresh(), documentDelivery: false);
+        $this->assertFalse($plan->usesDocument());
+        $this->assertSame(1, $plan->photoUnitCount());
+        $unit = $plan->photoUnit(1);
+        $caption = $unit->text();
         $this->assertStringContainsString('mail.example.test', $caption);
         $this->assertStringNotContainsString($otpUrl, $caption);
         $this->assertStringContainsString('fake-auth-token-value', $caption);
 
-        $markup = json_decode(
-            (string) $this->telegramRequestField($photo, 'reply_markup'),
-            true,
-            512,
-            JSON_THROW_ON_ERROR,
-        );
+        $markup = $unit->replyMarkup();
         $this->assertSame('Buka OTP Mail #1', data_get($markup, 'inline_keyboard.0.0.text'));
         $this->assertSame($otpUrl, data_get($markup, 'inline_keyboard.0.0.url'));
         $this->assertStringContainsString('Tutorial akun OTP.', $caption);
 
-        $entities = json_decode(
-            (string) $this->telegramRequestField($photo, 'caption_entities'),
-            true,
-            512,
-            JSON_THROW_ON_ERROR,
-        );
+        $entities = $unit->entities();
         $blocks = array_values(array_filter($entities, fn (array $entity): bool => $entity['type'] === 'pre'));
         $this->assertSame([
             'otp@example.test | Päss😀<&>`<tg-emoji emoji-id="123">🔐</tg-emoji>',
             'auth@example.test | Auth-password | fake-auth-token-value',
         ], array_map(fn (array $entity): string => $this->telegramEntityText($caption, $entity), $blocks));
         $this->assertSame(['copy', 'copy'], array_column($blocks, 'language'));
-        $this->assertFalse(filter_var($this->telegramRequestField($photo, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
+    }
 
-        foreach (TelegramOutboundEffect::query()->where('source_id', (string) $order->id)->get() as $effect) {
-            $attributes = json_encode($effect->getAttributes(), JSON_THROW_ON_ERROR);
-            $this->assertStringNotContainsString('fake-auth-token-value', $attributes);
-            $this->assertStringNotContainsString($otpUrl, $attributes);
+    public function test_single_short_auth_token_and_shared_note_are_counted_once_for_chat_delivery(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 778898, 'locale' => 'id']);
+        [$order, $item] = $this->paidOrder($customer, 'Short Token Bundle');
+        $token = str_repeat('T', 700);
+        $item->update([
+            'delivery_note' => str_repeat('n', 200),
+            'delivery_note_snapshotted' => true,
+        ]);
+        ProductStockItem::create([
+            'product_id' => $item->product_id,
+            'order_item_id' => $item->id,
+            'credential_format' => CredentialFormat::StructuredAccount,
+            'credential_payload' => StructuredCredentialPayload::fromValues(
+                'short-token@example.test',
+                'Password',
+                CredentialAccessMethod::AuthToken,
+                $token,
+            )->toArray(),
+        ]);
+
+        $this->fakeTelegramHttp();
+        app(TelegramReceiptNotifier::class)->send($order->fresh());
+
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
+        $receiptText = '';
+        foreach (Http::recorded() as [$request]) {
+            $receiptText .= (string) $this->telegramRequestField($request, 'caption');
+            $receiptText .= (string) $this->telegramRequestField($request, 'text');
         }
+        $this->assertSame(1, substr_count($receiptText, $token));
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
     }
 
     public function test_long_auth_token_is_delivered_intact_in_a_txt_file(): void

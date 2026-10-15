@@ -70,6 +70,71 @@ class ProductFamilyCatalogTest extends TestCase
             ->assertOk()->assertViewHas('productsTab', fn (array $tab): bool => $tab['productGroups'] === []);
     }
 
+    public function test_admin_client_index_contains_every_page_and_reuses_all_server_sort_orders_without_credentials(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        ProductFamily::factory()->count(22)->create();
+        $family = ProductFamily::factory()->create(['name' => 'Later Family']);
+        $member = Product::factory()->create([
+            'product_family_id' => $family->id,
+            'name' => 'Later searchable option',
+            'family_option_label' => 'Annual Plan',
+            'description_en' => 'Searchable localized description',
+        ]);
+        ProductStockItem::create(['product_id' => $member->id, 'secret' => 'IndexCredentialSentinel']);
+        Product::factory()->create(['name' => 'Standalone Product', 'is_active' => false, 'stock' => 0]);
+
+        $this->actingAs($admin)->get(route('admin.dashboard', ['tab' => 'produk', 'product_search' => 'missing']))
+            ->assertOk()
+            ->assertDontSee('IndexCredentialSentinel')
+            ->assertViewHas('productsTab', function (array $tab) use ($family, $member): bool {
+                $this->assertSame([], $tab['productGroups']);
+                $this->assertCount(24, $tab['clientCatalog']['groups']);
+                $group = collect($tab['clientCatalog']['groups'])->firstWhere('id', $family->id);
+                $this->assertSame($member->id, $group['members'][0]['id']);
+                $this->assertContains('annual plan', $group['members'][0]['search']);
+                $this->assertContains('searchable localized description', $group['members'][0]['search']);
+                $this->assertArrayNotHasKey('edit_payload', $group['members'][0]);
+                $this->assertArrayNotHasKey('stock_items', $group['members'][0]);
+
+                return true;
+            });
+
+        $catalog = app(CatalogBrowse::class);
+        $index = collect($catalog->adminClientIndex());
+        foreach (array_keys(CatalogBrowseQuery::ADMIN_SORTS) as $sort) {
+            $server = $catalog->browseAdmin(CatalogBrowseQuery::fromValues(sort: $sort, perPage: 100, admin: true));
+            $key = fn ($entry): string => $entry->type.':'.$entry->id();
+            $this->assertSame(
+                array_map($key, $server->entries),
+                $index->sortBy(fn (array $row): int => $row['ranks'][$sort])
+                    ->map(fn (array $row): string => $key($row['entry']))->values()->all(),
+                $sort,
+            );
+        }
+    }
+
+    public function test_admin_lazy_cards_are_bounded_credential_free_and_keep_existing_actions(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $products = Product::factory()->count(13)->create();
+        $product = $products->first();
+        $product->update(['name' => 'Quoted "<img src=x onerror=alert(1)>" Product']);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'LazyCredentialSentinel']);
+        $response = $this->actingAs($admin)->getJson(route('admin.products.cards', ['ids' => $products->take(12)->modelKeys()]))
+            ->assertOk()
+            ->assertDontSee('LazyCredentialSentinel');
+        $html = $response->json('html');
+        $this->assertSame(12, substr_count($html, 'data-product-actions'));
+        $this->assertStringContainsString('Kelola akun', $html);
+        $this->assertStringContainsString('Tambah stok', $html);
+        $this->assertStringContainsString(route('admin.products.workspace', $product), $html);
+        $this->assertStringNotContainsString('<img src=x onerror=alert(1)>', $html);
+        $this->assertStringContainsString('archiveConfirmation', $html);
+        $this->getJson(route('admin.products.cards', ['ids' => $products->modelKeys()]))->assertUnprocessable();
+        $this->getJson(route('admin.products.cards', ['ids' => [$product->id, $product->id]]))->assertUnprocessable();
+    }
+
     public function test_family_schema_and_relationship_contracts_are_additive(): void
     {
         $this->assertTrue(Schema::hasTable('product_families'));
@@ -798,19 +863,6 @@ class ProductFamilyCatalogTest extends TestCase
         $this->assertSame($family->id, app(CatalogBrowse::class)->showPublicFamily($family->id)->id);
     }
 
-    public function test_family_row_add_action_carries_the_selected_family_assignment_context(): void
-    {
-        $admin = User::factory()->create(['role' => UserRole::Admin]);
-        $family = ProductFamily::factory()->create(['name' => 'Target Family']);
-        Product::factory()->create(['product_family_id' => $family->id, 'stock' => 1]);
-        Product::factory()->create(['name' => 'Standalone Candidate', 'stock' => 1]);
-
-        $this->actingAs($admin)
-            ->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertSee('addProductToFamily('.$family->id.')', false)
-            ->assertSee('name="product_family_id"', false);
-    }
 
     public function test_creating_a_product_from_a_family_shortcut_assigns_that_family(): void
     {

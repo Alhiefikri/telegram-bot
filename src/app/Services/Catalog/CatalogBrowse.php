@@ -29,6 +29,9 @@ final class CatalogBrowse
     /** @var list<CatalogFamilyReadModel>|null */
     private ?array $unfilteredAdminFamilies = null;
 
+    /** @var list<CatalogBrowseEntry>|null */
+    private ?array $unfilteredAdminEntries = null;
+
     /** @var list<string> */
     private const CATEGORY_COLUMNS = ['id', 'name', 'slug', 'description', 'sort_order'];
 
@@ -178,6 +181,45 @@ final class CatalogBrowse
         return $result->families;
     }
 
+    /**
+     * Credential-free discovery metadata. Ranks come from the same comparators
+     * as server pagination, so the browser only filters and orders integer keys.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function adminClientIndex(): array
+    {
+        if ($this->unfilteredAdminEntries === null) {
+            $this->browse(new CatalogBrowseQuery(perPage: 100), public: false);
+        }
+        $entries = collect($this->unfilteredAdminEntries ?? []);
+        $ranks = [];
+        foreach (array_keys(CatalogBrowseQuery::ADMIN_SORTS) as $sort) {
+            $entries
+                ->sort(fn (CatalogBrowseEntry $left, CatalogBrowseEntry $right): int => $this->compareEntries($left, $right, $sort, []))
+                ->values()
+                ->each(function (CatalogBrowseEntry $entry, int $rank) use (&$ranks, $sort): void {
+                    $ranks[$entry->type.':'.$entry->id()][$sort] = $rank;
+                });
+        }
+
+        return $entries->map(function (CatalogBrowseEntry $entry) use ($ranks): array {
+            $family = $entry->family;
+            $members = $family?->members ?? ($entry->product === null ? [] : [$entry->product]);
+
+            return [
+                'entry' => $entry,
+                'ranks' => $ranks[$entry->type.':'.$entry->id()],
+                'search' => $family === null ? [] : $this->searchValues([$family->name, $family->slug, $family->description]),
+                'members' => array_map(fn (CatalogProductReadModel $product): array => [
+                    'id' => $product->id,
+                    'name' => $product->optionLabel ?: $product->name,
+                    'search' => $this->searchValues($this->productSearchValues($product)),
+                ], $members),
+            ];
+        })->all();
+    }
+
     private function browse(CatalogBrowseQuery $query, bool $public, bool $familiesOnly = false): CatalogBrowseResult
     {
         $query = CatalogBrowseQuery::fromValues(
@@ -265,6 +307,9 @@ final class CatalogBrowse
             ->concat($standalone->map(fn (CatalogProductReadModel $product): CatalogBrowseEntry => CatalogBrowseEntry::product($product)))
             ->sort(fn (CatalogBrowseEntry $left, CatalogBrowseEntry $right): int => $this->compareEntries($left, $right, $query->sort, $familySoldQuantities))
             ->values();
+        if (! $public && ! $familiesOnly && $query->search === '' && $query->category === null && $query->sort === CatalogBrowseQuery::DEFAULT_SORT) {
+            $this->unfilteredAdminEntries ??= $entries->all();
+        }
 
         $total = $entries->count();
         $lastPage = max(1, (int) ceil($total / $query->perPage));
@@ -468,7 +513,13 @@ final class CatalogBrowse
             return true;
         }
 
-        return collect([
+        return collect($this->productSearchValues($product))
+            ->contains(fn (mixed $value): bool => $this->contains($value === null ? null : (string) $value, $search));
+    }
+
+    private function productSearchValues(CatalogProductReadModel $product): array
+    {
+        return [
             $product->name,
             $product->description,
             ...array_values($product->copy),
@@ -476,7 +527,15 @@ final class CatalogBrowse
             $product->categoryName,
             $product->categorySlug,
             ...array_values($product->merchandising),
-        ])->contains(fn (mixed $value): bool => $this->contains($value === null ? null : (string) $value, $search));
+        ];
+    }
+
+    private function searchValues(array $values): array
+    {
+        return array_values(array_unique(array_map(
+            fn (mixed $value): string => $this->lower((string) $value),
+            array_filter($values, fn (mixed $value): bool => $value !== null && $value !== ''),
+        )));
     }
 
     private function contains(?string $value, string $search): bool

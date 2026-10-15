@@ -12,8 +12,11 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\TelegramUiIcon;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramDocumentPayload;
 use App\Services\Telegram\TelegramPaidOrderTxtExporter;
+use App\Services\Telegram\TelegramTranslationCatalog;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Tests\Support\TelegramBotTestSupport;
@@ -144,6 +147,30 @@ final class TelegramPaidOrderTxtExporterTest extends TelegramBotTestSupport
         $this->assertNotFalse($noneAccountStart);
         $this->assertNotFalse($otpAccountStart);
         $this->assertStringNotContainsString('access:', substr($contents, $noneAccountStart, $otpAccountStart - $noneAccountStart));
+    }
+
+    public function test_txt_warning_is_plain_unicode_without_changing_literal_credential_markup(): void
+    {
+        TelegramUiIcon::query()->where('key', 'message.warning')->sole()->update([
+            'custom_emoji_id' => '5420323339723881652',
+        ]);
+        app(CustomEmojiCapability::class)->markAvailable();
+        $secret = '<tg-emoji emoji-id="123456">⚠️</tg-emoji> <b>literal</b> &amp; <>&';
+        [$order, $customer] = $this->paidOrderWithLegacy($secret);
+        $customer->update(['locale' => 'id']);
+
+        $payload = app(TelegramPaidOrderTxtExporter::class)->export($order->fresh(), $customer);
+
+        $this->assertInstanceOf(TelegramDocumentPayload::class, $payload);
+        [$header] = explode("\n\n", $payload->documentContents(), 2);
+        $this->assertStringContainsString(
+            app(TelegramTranslationCatalog::class)->get('receipt.save_details', 'id'),
+            $header,
+        );
+        $this->assertStringContainsString('⚠️', $header);
+        $this->assertStringNotContainsString('<', $header);
+        $this->assertStringNotContainsString('>', $header);
+        $this->assertStringEndsWith("Account #1\n".$secret, $payload->documentContents());
     }
 
     public function test_it_returns_no_payload_when_the_paid_order_has_no_allocated_credentials(): void

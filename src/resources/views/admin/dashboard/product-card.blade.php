@@ -5,6 +5,7 @@
                                     editPayload: @js($product['edit_payload']),
                                     stockPayload: @js($product['stock_payload']),
                                     shareUrl: @js($product['share_url']),
+                                    archiveConfirmation: @js('Arsipkan produk '.$product['name'].' dari toko?'),
                                     moreActionsOpen: false
                                 }"
                             >
@@ -154,7 +155,7 @@
                                             {{ $product['visibility_action_label'] }}
                                         </x-admin-dashboard.button>
                                     </form>
-                                    <form method="POST" action="{{ $product['delete_url'] }}" class="min-w-0" x-on:submit="if (! confirm('Arsipkan produk {{ addslashes($product['name']) }} dari toko?')) $event.preventDefault()">
+                                    <form method="POST" action="{{ $product['delete_url'] }}" class="min-w-0" x-on:submit="if (! confirm(archiveConfirmation)) $event.preventDefault()">
                                         @csrf
                                         @method('DELETE')
                                         <x-admin-dashboard.button

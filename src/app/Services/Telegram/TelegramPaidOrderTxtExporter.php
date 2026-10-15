@@ -27,6 +27,7 @@ final class TelegramPaidOrderTxtExporter
     public function __construct(
         private readonly CredentialDeliveryPresentation $credentialPresentation,
         private readonly TelegramLocale $locale,
+        private readonly TelegramTranslationCatalog $translations,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
     ) {}
 
@@ -88,7 +89,7 @@ final class TelegramPaidOrderTxtExporter
             'Order : '.$this->displayLine($this->orderReference($order), 'Order reference'),
             'Items : '.$this->totalQuantity($order),
             'Invoice : '.url($this->invoiceUrls->show($order)),
-            $this->locale->translate($order->customer, 'receipt.save_details'),
+            $this->translations->get('receipt.save_details', $this->locale->code($order->customer)),
         ];
 
         $sections = [];

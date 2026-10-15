@@ -89,23 +89,23 @@
                     @endif
                 </x-admin-dashboard.card>
 
-                <section id="admin-product-families" class="space-y-4" aria-labelledby="admin-product-families-title">
+                <section id="admin-product-families" class="space-y-4" aria-labelledby="admin-product-families-title" x-data="productCatalog(@js($productsTab['clientCatalog']))">
                     <div class="flex flex-wrap items-end justify-between gap-3">
                         <div class="min-w-0">
                             <h3 id="admin-product-families-title" class="text-lg font-semibold text-admin-ink">Daftar Product Family</h3>
                             <p class="mt-1 text-sm leading-6 text-admin-muted">Semua Product ditampilkan sebagai satu family agar daftar tetap ringkas. Family bisa berisi satu atau beberapa Product.</p>
                         </div>
-                        <x-admin-dashboard.badge tone="purple">{{ count($productGroups) }} family di halaman ini</x-admin-dashboard.badge>
+                        <x-admin-dashboard.badge tone="purple"><span x-text="pageGroups.length + ' family di halaman ini'">{{ count($productGroups) }} family di halaman ini</span></x-admin-dashboard.badge>
                     </div>
 
                     @php($productFilters = $productsTab['filters'] ?? ['search' => '', 'sort' => 'name_asc'])
-                    <form method="GET" action="{{ route('admin.dashboard') }}#admin-product-families" class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                    <form method="GET" action="{{ route('admin.dashboard') }}#admin-product-families" x-on:submit.prevent="filter()" class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
                         <input type="hidden" name="tab" value="produk">
                         <label class="min-w-0 text-sm font-medium text-admin-ink">Cari produk / family
-                            <input type="search" name="product_search" value="{{ $productFilters['search'] }}" maxlength="255" placeholder="Nama produk, pilihan, atau family" class="mt-1 min-h-11 w-full rounded-lg border border-admin-muted bg-admin-surface px-3 text-admin-ink placeholder:text-admin-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus">
+                            <input type="search" name="product_search" value="{{ $productFilters['search'] }}" x-model="search" x-on:input.debounce.150ms="filter()" maxlength="255" placeholder="Nama produk, pilihan, atau family" class="mt-1 min-h-11 w-full rounded-lg border border-admin-muted bg-admin-surface px-3 text-admin-ink placeholder:text-admin-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus">
                         </label>
                         <label class="min-w-0 text-sm font-medium text-admin-ink">Urutkan family / produk
-                            <select name="product_sort" class="mt-1 min-h-11 w-full rounded-lg border border-admin-muted bg-admin-surface px-3 text-admin-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus">
+                            <select name="product_sort" x-model="sort" x-on:change="filter()" class="mt-1 min-h-11 w-full rounded-lg border border-admin-muted bg-admin-surface px-3 text-admin-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus">
                                 @foreach (\App\Catalog\CatalogBrowseQuery::ADMIN_SORTS as $value => $label)
                                     <option value="{{ $value }}" @selected($productFilters['sort'] === $value)>{{ $label }}</option>
                                 @endforeach
@@ -113,46 +113,101 @@
                         </label>
                         <div class="flex min-w-0 flex-wrap gap-2">
                             <x-admin-dashboard.button type="submit" variant="primary" size="sm">Terapkan</x-admin-dashboard.button>
-                            <x-admin-dashboard.button :href="route('admin.dashboard', ['tab' => 'produk']).'#admin-product-families'" variant="neutral" size="sm">Reset</x-admin-dashboard.button>
+                            <x-admin-dashboard.button :href="route('admin.dashboard', ['tab' => 'produk']).'#admin-product-families'" x-on:click.prevent="reset()" variant="neutral" size="sm">Reset</x-admin-dashboard.button>
                         </div>
                     </form>
-                    <p class="text-xs text-admin-muted">Urutan: {{ \App\Catalog\CatalogBrowseQuery::ADMIN_SORTS[$productFilters['sort']] }}. Pencarian mencakup semua halaman; family tetap dikelompokkan.</p>
+                    <p class="text-xs text-admin-muted" role="status">Urutan: <span x-text="sortLabels[sort]">{{ \App\Catalog\CatalogBrowseQuery::ADMIN_SORTS[$productFilters['sort']] }}</span>. Pencarian mencakup semua halaman; family tetap dikelompokkan. <span x-cloak x-show="ready" x-text="filteredGroups.length + ' family ditemukan.'"></span></p>
 
-                    @forelse ($productGroups as $group)
-                        <x-admin-dashboard.card as="article" id="admin-product-family-group-{{ $group['id'] }}" padding="compact" shadow="sm">
-                            <div class="contents" x-data="{ familyExpanded: false, familyEditPayload: @js($group['edit_payload']) }">
-                            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div class="min-w-0">
-                                    <div class="flex flex-wrap items-center gap-3">
-                                        <img src="{{ $group['image_url'] ?: $productPlaceholder['image_url'] }}" alt="Gambar {{ $group['name'] }}" width="56" height="56" loading="lazy" decoding="async" class="h-14 w-14 shrink-0 rounded-lg border border-admin-line bg-admin-surface object-contain">
-                                        <div class="min-w-0 flex-[1_1_8rem]"><p class="text-xs text-admin-muted">{{ $group['image_path'] ? 'Gambar khusus' : 'Gambar default' }}{{ ($group['is_single_product_group'] ?? false) ? ' produk' : ' family' }}</p>
-                                    <div class="flex flex-wrap items-center gap-2">
-                                        <h4 class="break-words text-lg font-semibold text-admin-ink">{{ $group['name'] }}</h4>
-                                        <x-admin-dashboard.badge>{{ $group['category'] }}</x-admin-dashboard.badge>
-                                    </div>
+                    <div x-cloak x-show="ready" class="space-y-4">
+                        <template x-for="group in pageGroups" :key="group.id">
+                            <x-admin-dashboard.card as="article" x-bind:id="'admin-product-family-group-' + group.id" padding="compact" shadow="sm">
+                                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div class="min-w-0">
+                                        <div class="flex flex-wrap items-center gap-3">
+                                            <img x-bind:src="group.image_url || @js($productPlaceholder['image_url'])" x-bind:alt="'Gambar ' + group.name" width="56" height="56" loading="lazy" decoding="async" class="h-14 w-14 shrink-0 rounded-lg border border-admin-line bg-admin-surface object-contain">
+                                            <div class="min-w-0 flex-[1_1_8rem]">
+                                                <p class="text-xs text-admin-muted" x-text="(group.image_path ? 'Gambar khusus' : 'Gambar default') + (group.is_single_product_group ? ' produk' : ' family')"></p>
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <h4 class="break-words text-lg font-semibold text-admin-ink" x-text="group.name"></h4>
+                                                    <x-admin-dashboard.badge><span x-text="group.category"></span></x-admin-dashboard.badge>
+                                                </div>
+                                            </div>
                                         </div>
+                                        <p class="mt-1 text-xs text-admin-muted" x-text="group.member_count + ' Product · ' + group.available_member_count + ' tersedia · ' + group.sold_out_member_count + ' habis'"></p>
+                                        <p class="mt-1 text-sm font-semibold text-admin-ink" x-text="(group.minimum_price || 'Harga belum diatur') + (group.minimum_usdt_price !== null ? ' · USDT ' + group.minimum_usdt_price : '')"></p>
                                     </div>
-                                    <p class="mt-1 text-xs text-admin-muted">{{ $group['member_count'] }} Product · {{ $group['available_member_count'] }} tersedia · {{ $group['sold_out_member_count'] }} habis</p>
-                                    <p class="mt-1 text-sm font-semibold text-admin-ink">{{ $group['minimum_price'] ?? 'Harga belum diatur' }}{{ $group['minimum_usdt_price'] !== null ? ' · USDT '.$group['minimum_usdt_price'] : '' }}</p>
+                                    <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+                                        <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-bind:aria-controls="'admin-product-family-members-' + group.id" x-bind:aria-expanded="(selectedGroupId === group.id).toString()" x-on:click="toggleGroup(group)">
+                                            <span x-text="selectedGroupId === group.id ? 'Tutup daftar product' : 'Lihat product'"></span>
+                                        </x-admin-dashboard.button>
+                                        @if ($canManageProducts)
+                                            <template x-if="!group.is_single_product_group">
+                                                <div class="contents">
+                                                    <x-admin-dashboard.button type="button" variant="warning" size="sm" x-on:click="addProductToFamily(group.id)">+ Tambah Product</x-admin-dashboard.button>
+                                                    <x-admin-dashboard.button type="button" variant="secondary" size="sm" x-on:click="openProductFamilyEditModal(group.edit_payload)">Edit family</x-admin-dashboard.button>
+                                                </div>
+                                            </template>
+                                        @endif
+                                    </div>
                                 </div>
-                                <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-                                    <x-admin-dashboard.button type="button" variant="neutral" size="sm" aria-controls="admin-product-family-members-{{ $group['id'] }}" x-bind:aria-expanded="familyExpanded.toString()" x-on:click="familyExpanded = ! familyExpanded">
-                                        <span x-text="familyExpanded ? 'Tutup daftar product' : 'Lihat product'">Lihat product</span>
-                                    </x-admin-dashboard.button>
-                                    @if ($canManageProducts && ! ($group['is_single_product_group'] ?? false))
-                                        <x-admin-dashboard.button type="button" variant="warning" size="sm" x-on:click="addProductToFamily({{ $group['id'] }})">+ Tambah Product</x-admin-dashboard.button>
-                                        <x-admin-dashboard.button type="button" variant="secondary" size="sm" x-on:click="openProductFamilyEditModal(familyEditPayload)">Edit family</x-admin-dashboard.button>
-                                    @endif
-                                </div>
+                                <template x-if="selectedGroupId === group.id">
+                                    <div x-bind:id="'admin-product-family-members-' + group.id" class="mt-4 space-y-3" x-bind:aria-busy="detailLoading.toString()">
+                                        <p x-show="detailLoading" role="status" class="text-sm text-admin-muted">Memuat detail product...</p>
+                                        <div x-show="detailError" role="alert" class="space-y-2">
+                                            <p class="text-sm text-admin-ink" x-text="detailError"></p>
+                                            <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-on:click="loadDetails(group)">Coba lagi</x-admin-dashboard.button>
+                                            @if ($canManageProducts)
+                                                <div class="flex flex-wrap gap-2">
+                                                    <template x-for="member in orderedMembers(group).slice((memberPage - 1) * 12, memberPage * 12)" :key="member.id">
+                                                        <x-admin-dashboard.button :href="route('admin.dashboard', ['tab' => 'produk'])" x-bind:href="workspaceUrl(member.id)" variant="neutral" size="sm"><span x-text="'Kelola ' + member.name"></span></x-admin-dashboard.button>
+                                                    </template>
+                                                </div>
+                                            @endif
+                                        </div>
+                                        <x-admin-dashboard.notice x-show="!group.members.length" tone="neutral" class="text-xs">Belum ada Product dalam family ini. Tambahkan Product melalui form grouping.</x-admin-dashboard.notice>
+                                        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" x-html="detailHtml"></div>
+                                        <nav x-show="memberLastPage(group) > 1" aria-label="Halaman product dalam family" class="flex flex-wrap items-center justify-between gap-2">
+                                            <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-bind:disabled="memberPage <= 1" x-on:click="openGroup(group, memberPage - 1)">Product sebelumnya</x-admin-dashboard.button>
+                                            <p class="text-xs text-admin-muted" x-text="'Halaman product ' + memberPage + ' dari ' + memberLastPage(group)"></p>
+                                            <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-bind:disabled="memberPage >= memberLastPage(group)" x-on:click="openGroup(group, memberPage + 1)">Product berikutnya</x-admin-dashboard.button>
+                                        </nav>
+                                    </div>
+                                </template>
+                            </x-admin-dashboard.card>
+                        </template>
+                        <x-admin-dashboard.empty-state x-show="filteredGroups.length === 0" title="Tidak ada produk atau family yang cocok. Ubah pencarian atau tekan Reset." />
+                        <nav x-show="lastPage > 1" aria-label="Halaman produk" class="flex flex-col items-center gap-3 rounded-[var(--admin-radius)] border border-admin-line bg-admin-surface px-3 py-3 sm:flex-row sm:justify-between">
+                            <p role="status" class="text-xs font-medium text-admin-muted" x-text="'Halaman ' + page + ' dari ' + lastPage"></p>
+                            <div class="flex flex-wrap items-center justify-center gap-2">
+                                <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-bind:disabled="page <= 1" x-on:click="goToPage(page - 1)">← Sebelumnya</x-admin-dashboard.button>
+                                <template x-for="number in pages" :key="number">
+                                    <x-admin-dashboard.button type="button" variant="neutral" size="sm" class="min-w-11" x-bind:aria-current="number === page ? 'page' : null" x-bind:class="number === page ? '!bg-admin-accent-soft !text-admin-accent-strong' : ''" x-on:click="goToPage(number)"><span x-text="number"></span></x-admin-dashboard.button>
+                                </template>
+                                <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-bind:disabled="page >= lastPage" x-on:click="goToPage(page + 1)">Berikutnya →</x-admin-dashboard.button>
                             </div>
-                            <div id="admin-product-family-members-{{ $group['id'] }}" x-cloak x-show="familyExpanded" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                                @forelse ($group['members'] as $product)
-                                    @include('admin.dashboard.product-card')
-                                @empty
-                                    <x-admin-dashboard.notice tone="neutral" class="text-xs">Belum ada Product dalam family ini. Tambahkan Product melalui form grouping.</x-admin-dashboard.notice>
-                                @endforelse
-                            </div>
-                            </div>
+                        </nav>
+                    </div>
+
+                    <div x-show="!ready" class="space-y-4">
+                    @forelse ($productGroups as $group)
+                        <x-admin-dashboard.card as="article" padding="compact" shadow="sm">
+                            <h4 class="break-words text-lg font-semibold text-admin-ink">{{ $group['name'] }}</h4>
+                            <p class="mt-1 text-xs text-admin-muted">{{ $group['member_count'] }} Product · {{ $group['available_member_count'] }} tersedia · {{ $group['sold_out_member_count'] }} habis</p>
+                            <ul class="mt-3 space-y-2 text-sm text-admin-ink">
+                                @foreach (array_slice($group['members'], 0, 12) as $product)
+                                    <li>
+                                        @if ($canManageProducts)
+                                            <a href="{{ route('admin.products.workspace', $product['id']) }}" class="inline-flex min-h-11 items-center underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus">{{ $product['name'] }}</a>
+                                        @else
+                                            {{ $product['name'] }}
+                                        @endif
+                                        <span class="text-xs text-admin-muted">{{ $product['price'] }} · {{ $product['visibility_label'] }}</span>
+                                    </li>
+                                @endforeach
+                            </ul>
+                            @if (count($group['members']) > 12)
+                                <p class="mt-2 text-xs text-admin-muted">Menampilkan 12 product pertama. Cari nama product untuk melihat pilihan lainnya.</p>
+                            @endif
                         </x-admin-dashboard.card>
                     @empty
                         <x-admin-dashboard.empty-state :title="$productFilters['search'] !== '' ? 'Tidak ada produk atau family yang cocok. Ubah pencarian atau tekan Reset.' : 'Belum ada Product di halaman ini.'" />
@@ -190,6 +245,7 @@
                         </div>
                     </nav>
                 @endif
+                    </div>
                 </section>
 
                 @include('admin.dashboard.stock-modals')

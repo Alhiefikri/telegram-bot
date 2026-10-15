@@ -49,6 +49,7 @@ final class AdminDashboardProductsData
             'productGroups' => $productPage['productGroups'],
             'pagination' => $productPage['pagination'],
             'filters' => $productPage['filters'],
+            'clientCatalog' => $this->clientCatalog($productPage),
             'placeholder' => [
                 'image_url' => $this->placeholder->imageUrl(),
                 'is_custom' => $this->placeholder->isCustom(),
@@ -94,6 +95,122 @@ final class AdminDashboardProductsData
                 ? ($entry->family?->members ?? [])
                 : ($entry->product === null ? [] : [$entry->product]))
             ->keyBy('id');
+        $productPayloadsById = $this->productPayloads($productIds, $catalogProducts, $includeManageableStockItems, $includeStockItems);
+
+        $productPayload = fn (?CatalogProductReadModel $product): ?array => $product === null
+            ? null
+            : $productPayloadsById->get($product->id);
+        $flatPayloads = collect($catalog->entries)
+            ->flatMap(function (CatalogBrowseEntry $entry) use ($productPayload): array {
+                if ($entry->isFamily()) {
+                    return collect($entry->family?->members ?? [])
+                        ->map(fn (CatalogProductReadModel $product): ?array => $productPayload($product))
+                        ->filter()
+                        ->all();
+                }
+
+                $payload = $productPayload($entry->product);
+
+                return $payload === null ? [] : [$payload];
+            })
+            ->values()
+            ->all();
+        $productGroups = collect($catalog->entries)
+            ->map(function (CatalogBrowseEntry $entry) use ($productPayload): ?array {
+                if ($entry->isFamily() && $entry->family instanceof CatalogFamilyReadModel) {
+                    $family = $entry->family;
+                    $members = collect($family->members)
+                        ->map(fn (CatalogProductReadModel $product): ?array => $productPayload($product))
+                        ->filter()
+                        ->values()
+                        ->all();
+
+                    return $this->familyGroupPayload($family, $members);
+                }
+
+                $payload = $productPayload($entry->product);
+
+                return $payload === null ? null : $this->singleProductGroupPayload($payload);
+            })
+            ->filter()
+            ->values()
+            ->all();
+        $pagination = $catalog->pagination;
+        $pageFilters = collect(request()->query())->except(['tab', 'products_page'])->all();
+        $pageUrl = fn (int $page): string => route('admin.dashboard', ['tab' => 'produk', 'products_page' => $page] + $pageFilters).'#admin-product-families';
+
+        return [
+            'products' => $flatPayloads,
+            'productGroups' => $productGroups,
+            'filters' => ['search' => $query->search, 'sort' => $query->sort],
+            'families' => $catalog->families,
+            'pagination' => [
+                'currentPage' => $pagination->currentPage,
+                'lastPage' => $pagination->lastPage,
+                'previousUrl' => $pagination->currentPage > 1 ? $pageUrl($pagination->currentPage - 1) : null,
+                'nextUrl' => $pagination->currentPage < $pagination->lastPage ? $pageUrl($pagination->currentPage + 1) : null,
+                'pages' => collect(range(1, $pagination->lastPage))
+                    ->map(fn (int $page): array => [
+                        'number' => $page,
+                        'url' => $pageUrl($page),
+                        'current' => $page === $pagination->currentPage,
+                    ])
+                    ->all(),
+            ],
+        ];
+    }
+
+    /** @param list<int> $ids */
+    public function cardsFor(array $ids): array
+    {
+        return $this->productPayloads(collect(array_slice($ids, 0, 12)), collect(), false, false)->values()->all();
+    }
+
+    private function clientCatalog(array $page): array
+    {
+        $groups = [];
+        foreach ($this->catalog->adminClientIndex() as $metadata) {
+            $entry = $metadata['entry'];
+            if ($entry->family !== null) {
+                $group = $this->familyGroupPayload($entry->family, []);
+            } else {
+                $product = $entry->product;
+                if ($product === null) {
+                    continue;
+                }
+                $group = $this->singleProductGroupPayload([
+                    'id' => $product->id,
+                    'name' => $product->name,
+                    'description' => '',
+                    'image_path' => $product->imagePath,
+                    'image_url' => $product->imageUrl,
+                    'category' => $product->categoryName ?? 'Tanpa kategori',
+                    'available_stock' => $product->availableStock,
+                    'price_amount' => $product->priceAmount,
+                    'price' => Money::idr($product->priceAmount),
+                    'usdt_price_amount' => $this->formatUsdtPrice($product->usdtPriceAmount),
+                ]);
+            }
+            unset($group['description'], $group['delete_confirmation']);
+            $group['members'] = $metadata['members'];
+            $group['search'] = $metadata['search'];
+            $group['ranks'] = $metadata['ranks'];
+            $groups[] = $group;
+        }
+
+        return [
+            'groups' => $groups,
+            'search' => $page['filters']['search'],
+            'sort' => $page['filters']['sort'],
+            'page' => $page['pagination']['currentPage'],
+            'sortLabels' => CatalogBrowseQuery::ADMIN_SORTS,
+            'cardsUrl' => route('admin.products.cards'),
+            'workspaceUrl' => route('admin.products.workspace', ['product' => '__PRODUCT__']),
+        ];
+    }
+
+    private function productPayloads(Collection $productIds, Collection $catalogProducts, bool $includeManageableStockItems, bool $includeStockItems): Collection
+    {
         $products = Product::query()
             ->with(['category:id,name', 'family:id,name,icon,custom_emoji_id,telegram_image_path', 'quantityPriceTiers:id,product_id,minimum_quantity,price_amount,usdt_price_amount'])
             ->withAvailability()
@@ -242,68 +359,7 @@ final class AdminDashboardProductsData
                     ],
                 ]];
             });
-
-        $productPayload = fn (?CatalogProductReadModel $product): ?array => $product === null
-            ? null
-            : $productPayloadsById->get($product->id);
-        $flatPayloads = collect($catalog->entries)
-            ->flatMap(function (CatalogBrowseEntry $entry) use ($productPayload): array {
-                if ($entry->isFamily()) {
-                    return collect($entry->family?->members ?? [])
-                        ->map(fn (CatalogProductReadModel $product): ?array => $productPayload($product))
-                        ->filter()
-                        ->all();
-                }
-
-                $payload = $productPayload($entry->product);
-
-                return $payload === null ? [] : [$payload];
-            })
-            ->values()
-            ->all();
-        $productGroups = collect($catalog->entries)
-            ->map(function (CatalogBrowseEntry $entry) use ($productPayload): ?array {
-                if ($entry->isFamily() && $entry->family instanceof CatalogFamilyReadModel) {
-                    $family = $entry->family;
-                    $members = collect($family->members)
-                        ->map(fn (CatalogProductReadModel $product): ?array => $productPayload($product))
-                        ->filter()
-                        ->values()
-                        ->all();
-
-                    return $this->familyGroupPayload($family, $members);
-                }
-
-                $payload = $productPayload($entry->product);
-
-                return $payload === null ? null : $this->singleProductGroupPayload($payload);
-            })
-            ->filter()
-            ->values()
-            ->all();
-        $pagination = $catalog->pagination;
-        $pageFilters = collect(request()->query())->except(['tab', 'products_page'])->all();
-        $pageUrl = fn (int $page): string => route('admin.dashboard', ['tab' => 'produk', 'products_page' => $page] + $pageFilters).'#admin-product-families';
-
-        return [
-            'products' => $flatPayloads,
-            'productGroups' => $productGroups,
-            'filters' => ['search' => $query->search, 'sort' => $query->sort],
-            'families' => $catalog->families,
-            'pagination' => [
-                'currentPage' => $pagination->currentPage,
-                'lastPage' => $pagination->lastPage,
-                'previousUrl' => $pagination->currentPage > 1 ? $pageUrl($pagination->currentPage - 1) : null,
-                'nextUrl' => $pagination->currentPage < $pagination->lastPage ? $pageUrl($pagination->currentPage + 1) : null,
-                'pages' => collect(range(1, $pagination->lastPage))
-                    ->map(fn (int $page): array => [
-                        'number' => $page,
-                        'url' => $pageUrl($page),
-                        'current' => $page === $pagination->currentPage,
-                    ])
-                    ->all(),
-            ],
-        ];
+        return $productPayloadsById;
     }
 
     /**

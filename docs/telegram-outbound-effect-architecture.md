@@ -501,19 +501,22 @@ forwarded/saved; paid Customer ownership and confidentiality guidance remain
 required. Non-credential receipt units retain content protection.
 Their Support button, confidentiality/copy guidance, and thank-you footer live
 together in the following action panel, without a separate footer message.
-At five accounts, more than
-800 credential characters, at least 30 newlines, or a line longer than 300
-characters, the notifier selects TXT before chat rendering can reject an
-oversized credential. Rendered credential blocks over 800 characters also
-select TXT. This policy is code-owned, with no presentation ENV settings.
+More than one delivered account selects TXT automatically. A single account
+stays in chat unless its raw credential/access fields and delivery notes exceed
+1024 Unicode characters (the existing photo-caption budget). Shared tutorials
+and structured access fields are counted once; Telegram HTML, labels, line
+length and newline count do not force a short credential into a document.
+This policy is code-owned, with no presentation ENV settings.
 
 Document groups contain one non-secret invoice summary (`sendPhoto`, or
 `sendMessage` for the explicit image fallback), then one credential-bearing
 `sendDocument`. Both units use the existing strict receipt ledger ordering.
 The existing paid-order TXT exporter authorizes the Customer, includes all
 credentials, delivery notes, guides, the signed invoice URL with the existing
-Order-based expiry, and localized confidentiality guidance. Recovery Keys
-remain hash-only and are never reconstructed or changed by export.
+Order-based expiry, and localized confidentiality guidance. The guidance uses
+plain catalog text with Unicode emoji, never Telegram HTML; credential values
+remain verbatim. Recovery Keys remain hash-only and are never reconstructed
+or changed by export.
 
 Files are generated in memory, bounded to the existing 1 MiB export limit, and
 uploaded via multipart without plaintext persistence. Documents deliberately

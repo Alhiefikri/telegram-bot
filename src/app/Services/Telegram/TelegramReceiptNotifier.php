@@ -20,13 +20,8 @@ class TelegramReceiptNotifier
 {
     public const PHOTO_CAPTION_LIMIT = 1024;
 
-    private const TXT_ACCOUNT_THRESHOLD = 5;
-
-    private const TXT_CHARACTER_THRESHOLD = 800;
-
-    private const TXT_LINE_LENGTH_THRESHOLD = 300;
-
-    private const TXT_NEWLINE_THRESHOLD = 30;
+    // Keep caption-sized credential data in chat; layout text and icon HTML do not consume this budget.
+    private const TXT_CHARACTER_THRESHOLD = TelegramReceiptPlan::PHOTO_CAPTION_LIMIT;
 
     public function __construct(
         private TelegramBotClient $bot,
@@ -137,17 +132,12 @@ class TelegramReceiptNotifier
                 throw new \InvalidArgumentException('Telegram receipt credential projection is incomplete.');
             }
 
-            $automatic = $documentDelivery === null;
             $renderer = $copyableCredentials
                 ? $this->credentialRenderer
                 : app(TelegramCredentialDeliveryRendererV1::class);
             $documentDelivery ??= $this->requiresDocument($delivery);
             $credentialBlocks = $documentDelivery || $delivery->isEmpty()
                 ? [] : $renderer->receiptBlocks($customer, $delivery);
-            if ($automatic && ! $documentDelivery) {
-                $credentialText = implode("\n", array_map(static fn (TelegramMessageUnit $unit): string => $unit->text(), $credentialBlocks));
-                $documentDelivery = mb_strlen($credentialText, 'UTF-8') > self::TXT_CHARACTER_THRESHOLD;
-            }
             $blocks = $this->receiptHeaderBlocks($order, $customer);
             if ($documentDelivery) {
                 if (preg_match('/\A[1-9][0-9]*\z/D', trim((string) $customer->telegram_id)) !== 1) {
@@ -809,29 +799,29 @@ class TelegramReceiptNotifier
 
     private function requiresDocument(CredentialDelivery $delivery): bool
     {
-        if ($delivery->accountCount() >= self::TXT_ACCOUNT_THRESHOLD) {
+        if ($delivery->accountCount() > 1) {
             return true;
         }
         $length = 0;
-        $lines = 0;
         foreach ($delivery->groups() as $group) {
             $values = [$group->defaultTutorial()];
             foreach ($group->accounts() as $account) {
-                array_push($values, $account->text(), $account->accessValue(), $account->readerMailLink(), $account->tutorial());
+                if ($account->isLegacy()) {
+                    $values[] = $account->text();
+                } else {
+                    array_push($values, $account->email(), $account->password(), $account->accessValue(), $account->readerMailLink());
+                }
+                if ($account->tutorial() !== $group->defaultTutorial()) {
+                    $values[] = $account->tutorial();
+                }
             }
             foreach ($values as $value) {
                 if ($value === null) {
                     continue;
                 }
                 $length += mb_strlen($value, 'UTF-8');
-                $lines += substr_count($value, "\n");
-                if ($length > self::TXT_CHARACTER_THRESHOLD || $lines >= self::TXT_NEWLINE_THRESHOLD) {
+                if ($length > self::TXT_CHARACTER_THRESHOLD) {
                     return true;
-                }
-                foreach (explode("\n", $value) as $line) {
-                    if (mb_strlen($line, 'UTF-8') > self::TXT_LINE_LENGTH_THRESHOLD) {
-                        return true;
-                    }
                 }
             }
         }

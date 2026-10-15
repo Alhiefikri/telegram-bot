@@ -24,6 +24,7 @@ use App\Http\Controllers\Admin\AdminPasswordConfirmationController;
 use App\Http\Controllers\Admin\AdminPaymentModeController;
 use App\Http\Controllers\Admin\AdminPaymentReconcileController;
 use App\Http\Controllers\Admin\AdminProductAccountStockController;
+use App\Http\Controllers\Admin\AdminProductCardsController;
 use App\Http\Controllers\Admin\AdminProductCreateController;
 use App\Http\Controllers\Admin\AdminProductDeleteController;
 use App\Http\Controllers\Admin\AdminProductFamilyCreateController;
@@ -321,6 +322,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
             });
 
             Route::prefix('products')->name('products.')->group(function (): void {
+                Route::get('cards', AdminProductCardsController::class)->name('cards');
                 Route::patch('{product}/family', AdminProductFamilyMembershipController::class)->name('family.update');
                 Route::post('/', AdminProductCreateController::class)->name('store');
                 Route::patch('{product}', AdminProductUpdateController::class)->name('update');

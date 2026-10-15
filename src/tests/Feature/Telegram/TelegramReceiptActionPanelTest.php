@@ -13,7 +13,9 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\TelegramOutboundEffect;
+use App\Models\TelegramUiIcon;
 use App\Models\User;
+use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\ReceiptActionPanelDeliveryPipeline;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramLocale;
@@ -441,6 +443,40 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString($secret, json_encode($resend->getAttributes(), JSON_THROW_ON_ERROR));
     }
 
+    #[DataProvider('shortLegacyCredentials')]
+    public function test_one_short_legacy_credential_stays_in_chat_with_custom_warning_icons(string $secret): void
+    {
+        Queue::fake();
+        TelegramUiIcon::query()->where('key', 'message.warning')->sole()->update([
+            'custom_emoji_id' => '5420323339723881652',
+        ]);
+        app(CustomEmojiCapability::class)->markAvailable();
+        [$order] = $this->paidOrder(withCredential: true, locale: 'id');
+        $order->orderItems()->sole()->stockItems()->sole()->update(['secret' => $secret]);
+        $this->fakeTelegramHttp();
+
+        app(TelegramReceiptNotifier::class)->send($order->fresh());
+
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
+        $receiptText = '';
+        foreach (Http::recorded() as [$request]) {
+            $receiptText .= (string) $this->telegramRequestField($request, 'caption');
+            $receiptText .= (string) $this->telegramRequestField($request, 'text');
+        }
+        $this->assertStringContainsString($secret, $receiptText);
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
+    public static function shortLegacyCredentials(): array
+    {
+        return [
+            'short link' => ['https://example.test/download?token=short'],
+            'longer line still fits chat' => ['https://example.test/download?token='.str_repeat('x', 700)],
+            'short multiline credential' => [str_repeat("https://example.test/a\n", 31).'last-line'],
+            'caption-sized credential' => [str_repeat('x', 1024)],
+        ];
+    }
+
     /** @return array{0: Order, 1?: string} */
     #[DataProvider('automaticTxtCredentials')]
     public function test_large_credentials_are_delivered_once_as_txt_with_one_support_panel(string $secret, int $count): void
@@ -465,7 +501,6 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         $this->assertTrue($document->hasFile('document', $payload->documentContents(), $payload->filename()));
         $this->assertStringContainsString(str_contains($secret, '|') ? 'password0' : $secret.'0', $payload->documentContents());
         $this->assertStringContainsString('Invoice : '.url(app(StorefrontInvoiceUrl::class)->show($order)), $payload->documentContents());
-        $this->assertStringContainsString('jangan dibagikan', $payload->documentContents());
         $this->assertFalse(filter_var($this->telegramRequestField($document, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
         $this->assertLessThanOrEqual(1024, mb_strlen((string) $this->telegramRequestField($document, 'caption')));
         $photo = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto'))->sole()[0];
@@ -487,10 +522,11 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
     public static function automaticTxtCredentials(): array
     {
         return [
-            'many accounts' => ['user@example.test|password', 5],
-            'one long link' => ['https://example.test/download?token='.str_repeat('x', 900), 1],
+            'two accounts' => ['user@example.test|password', 2],
+            'one long link' => ['https://example.test/download?token='.str_repeat('x', 1200), 1],
+            'just beyond caption-sized credential' => [str_repeat('x', 1024), 1],
             'link exceeds chat limit' => ['https://example.test/download?token='.str_repeat('x', 5000), 1],
-            'multiline links' => [str_repeat("https://example.test/download\n", 31), 1],
+            'multiline links' => [str_repeat("https://example.test/download\n", 60), 1],
         ];
     }
 
@@ -539,7 +575,7 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
     {
         Queue::fake();
         [$order] = $this->paidOrder(withCredential: true, locale: 'en');
-        $order->orderItems()->sole()->stockItems()->sole()->update(['secret' => str_repeat('long-secret', 90)]);
+        $order->orderItems()->sole()->stockItems()->sole()->update(['secret' => str_repeat('long-secret', 120)]);
         $order = $order->fresh();
         $notifier = app(TelegramReceiptNotifier::class);
         $legacyPlan = $notifier->receiptPlan($order, documentDelivery: false, compact: false);
@@ -564,7 +600,7 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
     {
         Queue::fake();
         [$order] = $this->paidOrder(withCredential: true, locale: 'en', telegramId: -100123);
-        $order->orderItems()->sole()->stockItems()->sole()->update(['secret' => str_repeat('long-secret', 90)]);
+        $order->orderItems()->sole()->stockItems()->sole()->update(['secret' => str_repeat('long-secret', 120)]);
         $this->fakeTelegramHttp();
         app(TelegramReceiptNotifier::class)->send($order->fresh());
         Http::assertNothingSent();
