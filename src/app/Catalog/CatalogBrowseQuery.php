@@ -9,6 +9,17 @@ final readonly class CatalogBrowseQuery
     /** @var list<string> */
     public const SORTS = [self::DEFAULT_SORT, 'newest', 'price_asc', 'price_desc'];
 
+    public const ADMIN_SORTS = [
+        'name_asc' => 'Nama A–Z',
+        'name_desc' => 'Nama Z–A',
+        'members_desc' => 'Jumlah produk terbanyak',
+        'members_asc' => 'Jumlah produk tersedikit',
+        'newest' => 'Terbaru',
+        'price_asc' => 'Harga terendah',
+        'price_desc' => 'Harga tertinggi',
+        'recommended' => 'Urutan katalog (tersedia, family, prioritas, nama)',
+    ];
+
     public const DEFAULT_PER_PAGE = 24;
 
     public function __construct(
@@ -25,11 +36,12 @@ final readonly class CatalogBrowseQuery
         mixed $sort = null,
         mixed $page = null,
         int $perPage = self::DEFAULT_PER_PAGE,
+        bool $admin = false,
     ): self {
         return new self(
             search: self::normalizeSearch($search),
             category: self::normalizeCategory($category),
-            sort: self::normalizeSort($sort),
+            sort: $admin && is_string($sort) && isset(self::ADMIN_SORTS[$sort]) ? $sort : self::normalizeSort($sort),
             page: self::normalizePage($page),
             perPage: max(1, min(100, $perPage)),
         );

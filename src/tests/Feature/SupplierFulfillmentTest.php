@@ -502,7 +502,7 @@ class SupplierFulfillmentTest extends TestCase
         $product = Product::factory()->create(['stock' => $local, 'reserved_stock' => 0, 'price_amount' => 5000]);
         $supplier = Supplier::forceCreate(['name' => 'Private connection', 'provider' => $provider, 'api_key' => 'fixture-secret', 'currency' => $provider === 'prodseller' ? 'USDT' : 'USD', 'currency_confirmed' => true, 'exchange_rate_idr' => 1000, 'balance_micros' => 10_000_000, 'is_active' => true, 'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5)]);
         $sku = SupplierCatalogItem::create(['supplier_id' => $supplier->id, 'external_id' => 'fixture-sku', 'name' => 'Private supplier SKU', 'unit_price_micros' => 1_000_000, 'stock' => 10, 'orderable' => true, 'requires_input' => false, 'synced_at' => now(), 'price_tiers' => [], 'bulk_discounts' => []]);
-        SupplierPricePolicy::create(['product_id' => $product->id, 'mode' => 'manual', 'minimum_profit_idr' => 500, 'buffer_idr' => 0, 'rounding_idr' => 1]);
+        SupplierPricePolicy::create(['product_id' => $product->id, 'mode' => 'manual', 'minimum_profit_idr' => 500, 'rounding_idr' => 1]);
         ProductSupplierSource::create(['product_id' => $product->id, 'supplier_catalog_item_id' => $sku->id, 'is_active' => true, 'priority' => 0]);
         app(SupplierAvailability::class)->refreshProducts([$product->id]);
         $customer = Customer::factory()->create(['telegram_id' => 790001]);

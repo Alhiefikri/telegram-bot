@@ -9,14 +9,16 @@
                                 }"
                             >
                             @if ($product['image_url'])
-                                <div class="-mx-1 -mt-1 mb-3 flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-admin-line bg-admin-surface">
+                                <div class="mb-3 flex items-center gap-3">
                                     <img
                                         src="{{ $product['image_url'] }}"
                                         alt="{{ $product['name'] }}"
-                                        class="h-full w-full object-cover object-center"
+                                        width="56" height="56"
+                                        class="h-14 w-14 shrink-0 rounded-lg border border-admin-line object-contain"
                                         loading="lazy"
                                         decoding="async"
                                     >
+                                    <p class="text-xs text-admin-muted">Web: {{ $product['image_path'] ? 'gambar khusus' : 'default toko' }}<br>Bot: {{ $product['telegram_image_path'] ? 'gambar khusus' : 'fallback family / teks' }}<br>Channel: {{ $product['telegram_channel_image_path'] ? 'poster khusus' : 'tanpa poster khusus' }}</p>
                                 </div>
                             @endif
                             {{-- Variant label + status badge --}}

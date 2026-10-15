@@ -43,7 +43,7 @@ final class ProductSupplierManager
             $source = new ProductSupplierSource;
             $source->forceFill(['product_id' => $product->id, 'supplier_catalog_item_id' => $catalog->id, 'priority' => 100, 'is_active' => false, 'version' => 1])->save();
             $policy = new SupplierPricePolicy;
-            $policy->forceFill(['product_id' => $product->id, 'mode' => 'manual', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'buffer_idr' => 0, 'rounding_idr' => 1, 'version' => 1])->save();
+            $policy->forceFill(['product_id' => $product->id, 'mode' => 'manual', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'rounding_idr' => 1, 'version' => 1])->save();
             $supplier->version = (int) $supplier->version + 1;
             $supplier->save();
             $this->audit->log('supplier.product_imported', $product, null, ['catalog_item_id' => $catalog->id, 'source_id' => $source->id], $actor, $ip);
@@ -77,7 +77,7 @@ final class ProductSupplierManager
             $source->save();
             if (! SupplierPricePolicy::query()->where('product_id', $locked->id)->exists()) {
                 $policy = new SupplierPricePolicy;
-                $policy->forceFill(['product_id' => $locked->id, 'mode' => 'manual', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'buffer_idr' => 0, 'rounding_idr' => 1, 'version' => 1])->save();
+                $policy->forceFill(['product_id' => $locked->id, 'mode' => 'manual', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'rounding_idr' => 1, 'version' => 1])->save();
             }
             $supplier->version = (int) $supplier->version + 1;
             $supplier->save();
@@ -202,7 +202,7 @@ final class ProductSupplierManager
             $policy = SupplierPricePolicy::query()->where('product_id', $locked->id)->first() ?? new SupplierPricePolicy;
             $this->version($policy->exists ? (int) $policy->version : 0, (int) $input['version']);
             $created = ! $policy->exists;
-            $policy->forceFill(['product_id' => $locked->id, ...array_intersect_key($input, array_flip(['mode', 'markup_basis_points', 'profit_idr', 'minimum_profit_idr', 'buffer_idr', 'rounding_idr']))]);
+            $policy->forceFill(['product_id' => $locked->id, ...array_intersect_key($input, array_flip(['mode', 'markup_basis_points', 'profit_idr', 'minimum_profit_idr', 'rounding_idr']))]);
             if (! $created && ! $policy->isDirty()) {
                 return $policy;
             }
@@ -248,14 +248,21 @@ final class ProductSupplierManager
     {
         $micros = $this->pricing->costMicros($item, 1);
         if ($micros === null) {
-            return ['cost_idr' => null, 'retail_idr' => null];
+            return ['cost_idr' => null, 'retail_idr' => null, 'profit_idr' => null];
         }
         $supplier = Supplier::query()->findOrFail($item->supplier_id);
         $cost = SupplierMoney::costIdr($micros, (int) $supplier->exchange_rate_idr);
         $policy = new SupplierPricePolicy;
         $policy->forceFill($input);
 
-        return ['cost_idr' => $cost, 'retail_idr' => $input['mode'] === 'manual' ? (int) $product->price_amount : $this->pricing->retailPrice($policy, $cost)];
+        $retail = $input['mode'] === 'manual' ? (int) $product->price_amount : $this->pricing->retailPrice($policy, $cost);
+        $profit = $retail === null ? null : $retail - $cost;
+
+        return [
+            'cost_idr' => $cost,
+            'retail_idr' => $retail,
+            'profit_idr' => $profit,
+        ];
     }
 
     private function version(int $actual, int $expected): void

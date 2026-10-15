@@ -40,7 +40,6 @@ const fixture = () => ({
     markup_basis_points: 1250,
     profit_idr: 5000,
     minimum_profit_idr: 0,
-    buffer_idr: 0,
     rounding_idr: 100,
   },
   urls: {
@@ -328,13 +327,12 @@ for (const [label, fetchRequest] of [
     assert.equal(state.openSection, "detail");
     assert.ok(state.feedback.detail);
   });
-test("server localized field errors select matching locale and expose optional specifications", async () => {
+test("server localized field errors select matching locale", async () => {
   const state = create(async () =>
     response(
       {
         errors: {
           description_en: ["English too long"],
-          device_limit: ["Too long"],
         },
       },
       422
@@ -343,7 +341,6 @@ test("server localized field errors select matching locale and expose optional s
   await state.save("detail");
   assert.equal(state.contentLocale, "en");
   assert.equal(state.error("detail", "description_en"), "English too long");
-  assert.equal(state.specificationErrors(), true);
 });
 test("server basis point validation maps back to the human percent field", async () => {
   const state = create(async () =>
@@ -814,20 +811,6 @@ test("stock editing and credentials drive unload dirty event without storing sec
   assert.equal(state.events.at(-1).body.dirty, false);
 });
 
-test("existing merchandising lists display as multiline strings and survive unrelated saves", async () => {
-  const payload = fixture();
-  payload.product.included_items = ["Satu", "Dua"];
-  payload.product.limitations = ["Batas satu", "Batas dua"];
-  const state = productWorkspace(payload, {
-    fetchRequest: async () => response({ workspace: payload }),
-  });
-  assert.equal(state.draft.detail.included_items, "Satu\nDua");
-  assert.equal(state.saved.detail.limitations, "Batas satu\nBatas dua");
-  state.draft.detail.included_items += "\nTiga";
-  await state.save("price");
-  assert.equal(state.draft.detail.included_items, "Satu\nDua\nTiga");
-  assert.equal(state.saved.detail.included_items, "Satu\nDua");
-});
 for (const mode of ["manual", "fixed"])
   test(`switching invalid hidden percent to ${mode} uses prior basis points`, async () => {
     let submitted;

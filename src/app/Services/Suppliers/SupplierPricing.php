@@ -19,7 +19,6 @@ final class SupplierPricing
         if ($costIdr < 0) {
             throw new InvalidArgumentException('Invalid supplier cost.');
         }
-        $base = $this->add($costIdr, (int) $policy->buffer_idr);
         // Divide before multiplying so a representable percentage cannot overflow
         // just because the unscaled cost × basis-points intermediate is larger.
         $percent = $policy->mode === 'fixed' ? 0 : $this->add(
@@ -32,7 +31,7 @@ final class SupplierPricing
             'hybrid' => max($percent, (int) $policy->profit_idr),
             default => throw new InvalidArgumentException('Manual pricing retains the Product retail price.'),
         };
-        $amount = $this->add($base, $profit);
+        $amount = $this->add($costIdr, $profit);
 
         return $this->multiply($this->ceilDiv($amount, (int) $policy->rounding_idr), (int) $policy->rounding_idr);
     }
@@ -75,7 +74,7 @@ final class SupplierPricing
             throw new InvalidArgumentException('Invalid supplier retail ceiling.');
         }
 
-        return max(0, $retailSubtotal - $this->multiply($this->add((int) $policy->minimum_profit_idr, (int) $policy->buffer_idr), $quantity));
+        return max(0, $retailSubtotal - $this->multiply((int) $policy->minimum_profit_idr, $quantity));
     }
 
     public function isEligible(Product $product, Supplier $supplier, SupplierCatalogItem $item, SupplierPricePolicy $policy, int $quantity, int $retailSubtotal): bool
@@ -95,7 +94,7 @@ final class SupplierPricing
             $cost = $this->costMicros($item, $quantity);
 
             return $cost !== null
-                && $retailSubtotal >= $this->multiply($this->add((int) $policy->minimum_profit_idr, (int) $policy->buffer_idr), $quantity)
+                && $retailSubtotal >= $this->multiply((int) $policy->minimum_profit_idr, $quantity)
                 && $cost <= max(0, $supplier->balance_micros - $supplier->reserved_balance_micros)
                 && SupplierMoney::costIdr($cost, $supplier->exchange_rate_idr) <= $this->maximumCostIdr($policy, $retailSubtotal, $quantity);
         } catch (InvalidArgumentException) {
@@ -172,7 +171,7 @@ final class SupplierPricing
         if (! in_array($policy->mode, ['manual', 'percent', 'fixed', 'hybrid'], true)
             || ! in_array((int) $policy->rounding_idr, [1, 100, 500, 1000], true)
             || $policy->markup_basis_points < 0 || $policy->profit_idr < 0
-            || $policy->minimum_profit_idr < 0 || $policy->buffer_idr < 0) {
+            || $policy->minimum_profit_idr < 0) {
             throw new InvalidArgumentException('Invalid supplier price policy.');
         }
     }

@@ -130,7 +130,7 @@ final class AdminSupplierController extends Controller
         }
 
         $workspace = app(AdminProductWorkspaceData::class)->for($product, includeOptions: true);
-        $workspace['policy'] = array_intersect_key($input, array_flip(['version', 'mode', 'markup_basis_points', 'profit_idr', 'minimum_profit_idr', 'buffer_idr', 'rounding_idr']));
+        $workspace['policy'] = array_intersect_key($input, array_flip(['version', 'mode', 'markup_basis_points', 'profit_idr', 'minimum_profit_idr', 'rounding_idr']));
         $workspace['price_preview'] = $pricePreview;
         $workspace['preview_catalog_item_id'] = $item->id;
         $workspace['initial_section'] = 'price';

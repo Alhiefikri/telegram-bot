@@ -19,15 +19,15 @@ final class SupplierPricingTest extends TestCase
     #[DataProvider('automaticPrices')]
     public function test_automatic_modes_round_up_using_whole_idr(string $mode, int $basisPoints, int $profit, int $rounding, int $expected): void
     {
-        $policy = $this->policy(['mode' => $mode, 'markup_basis_points' => $basisPoints, 'profit_idr' => $profit, 'buffer_idr' => 199, 'rounding_idr' => $rounding]);
+        $policy = $this->policy(['mode' => $mode, 'markup_basis_points' => $basisPoints, 'profit_idr' => $profit, 'rounding_idr' => $rounding]);
         $this->assertSame($expected, app(SupplierPricing::class)->retailPrice($policy, 10001));
     }
 
     public static function automaticPrices(): array
     {
         return [
-            'percentage fraction rounds up' => ['percent', 1250, 0, 1, 11451],
-            'fixed rounds to hundred' => ['fixed', 0, 1000, 100, 11200],
+            'percentage fraction rounds up' => ['percent', 1250, 0, 1, 11252],
+            'fixed rounds to hundred' => ['fixed', 0, 1000, 100, 11100],
             'hybrid fixed floor' => ['hybrid', 100, 2000, 500, 12500],
             'hybrid percentage wins' => ['hybrid', 2500, 1000, 1000, 13000],
         ];
@@ -53,17 +53,17 @@ final class SupplierPricingTest extends TestCase
         $this->assertSame(3240004, $pricing->costMicros($item, 4));
         $this->assertSame(5400006, $pricing->costMicros($item, 6));
         $this->assertSame(8000008, $pricing->costMicros($item, 10));
-        $this->assertSame(26600, $pricing->maximumCostIdr($this->policy(['minimum_profit_idr' => 1000, 'buffer_idr' => 700]), 30000, 2));
+        $this->assertSame(28000, $pricing->maximumCostIdr($this->policy(['minimum_profit_idr' => 1000]), 30000, 2));
     }
 
     public function test_fixed_profit_does_not_calculate_an_unused_percentage(): void
     {
         $policy = $this->policy([
             'mode' => 'fixed', 'markup_basis_points' => 100000,
-            'profit_idr' => 5000, 'buffer_idr' => 1000,
+            'profit_idr' => 5000,
         ]);
 
-        $this->assertSame(PHP_INT_MAX - 4000, app(SupplierPricing::class)->retailPrice($policy, PHP_INT_MAX - 10000));
+        $this->assertSame(PHP_INT_MAX - 5000, app(SupplierPricing::class)->retailPrice($policy, PHP_INT_MAX - 10000));
     }
 
     public function test_percentage_accepts_a_representable_price_without_intermediate_overflow(): void
@@ -74,7 +74,7 @@ final class SupplierPricingTest extends TestCase
     }
 
     #[DataProvider('pricingBoundaries')]
-    public function test_markup_profit_buffer_and_rounding_boundaries(array $settings, int $cost, int $expected): void
+    public function test_markup_profit_and_rounding_boundaries(array $settings, int $cost, int $expected): void
     {
         $this->assertSame($expected, app(SupplierPricing::class)->retailPrice($this->policy($settings), $cost));
     }
@@ -82,10 +82,9 @@ final class SupplierPricingTest extends TestCase
     public static function pricingBoundaries(): array
     {
         return [
-            'zero markup still includes buffer' => [['mode' => 'percent', 'buffer_idr' => 500], 20000, 20500],
+            'zero markup retains supplier cost' => [['mode' => 'percent'], 20000, 20000],
             'one percent means one hundred basis points' => [['mode' => 'percent', 'markup_basis_points' => 100], 20000, 20200],
             'smallest markup rounds fractional rupiah up' => [['mode' => 'percent', 'markup_basis_points' => 1], 1, 2],
-            'percentage is applied to modal, not buffer' => [['mode' => 'percent', 'markup_basis_points' => 1000, 'buffer_idr' => 1000], 20000, 23000],
             'percent ignores fixed profit' => [['mode' => 'percent', 'markup_basis_points' => 1000, 'profit_idr' => 1000000], 20000, 22000],
             'fixed ignores saved percentage' => [['mode' => 'fixed', 'markup_basis_points' => 100000, 'profit_idr' => 3000], 20000, 23000],
             'hybrid equal amounts are not added together' => [['mode' => 'hybrid', 'markup_basis_points' => 1000, 'profit_idr' => 2000], 20000, 22000],
@@ -97,26 +96,26 @@ final class SupplierPricingTest extends TestCase
         ];
     }
 
-    public function test_buffer_and_minimum_profit_are_enforced_for_every_unit_at_the_exact_boundary(): void
+    public function test_minimum_profit_is_enforced_for_every_unit_at_the_exact_boundary(): void
     {
         [$product, $supplier, $item] = $this->resources();
-        $policy = $this->policy(['minimum_profit_idr' => 1000, 'buffer_idr' => 500]);
+        $policy = $this->policy(['minimum_profit_idr' => 1000]);
         $pricing = app(SupplierPricing::class);
 
-        $this->assertTrue($pricing->isEligible($product, $supplier, $item, $policy, 2, 35000));
-        $this->assertFalse($pricing->isEligible($product, $supplier, $item, $policy, 2, 34999));
-        $this->assertSame(0, $pricing->maximumCostIdr($policy, 2999, 2));
+        $this->assertTrue($pricing->isEligible($product, $supplier, $item, $policy, 2, 34000));
+        $this->assertFalse($pricing->isEligible($product, $supplier, $item, $policy, 2, 33999));
+        $this->assertSame(0, $pricing->maximumCostIdr($policy, 1999, 2));
     }
 
     public function test_minimum_profit_is_a_purchase_guard_not_an_extra_automatic_markup(): void
     {
         [$product, $supplier, $item] = $this->resources();
-        $policy = $this->policy(['mode' => 'percent', 'markup_basis_points' => 500, 'minimum_profit_idr' => 1000, 'buffer_idr' => 100]);
+        $policy = $this->policy(['mode' => 'percent', 'markup_basis_points' => 500, 'minimum_profit_idr' => 1000]);
         $pricing = app(SupplierPricing::class);
 
-        $this->assertSame(16900, $pricing->retailPrice($policy, 16000));
-        $this->assertFalse($pricing->isEligible($product, $supplier, $item, $policy, 1, 16900));
-        $this->assertTrue($pricing->isEligible($product, $supplier, $item, $policy, 1, 17100));
+        $this->assertSame(16800, $pricing->retailPrice($policy, 16000));
+        $this->assertFalse($pricing->isEligible($product, $supplier, $item, $policy, 1, 16999));
+        $this->assertTrue($pricing->isEligible($product, $supplier, $item, $policy, 1, 17000));
     }
 
     public function test_price_overflow_fails_closed_without_float_math(): void
@@ -189,7 +188,7 @@ final class SupplierPricingTest extends TestCase
 
     private function policy(array $extra = []): SupplierPricePolicy
     {
-        return new SupplierPricePolicy(array_merge(['product_id' => 1, 'mode' => 'manual', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'buffer_idr' => 0, 'rounding_idr' => 1], $extra));
+        return new SupplierPricePolicy(array_merge(['product_id' => 1, 'mode' => 'manual', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'rounding_idr' => 1], $extra));
     }
 
     private function resources(): array

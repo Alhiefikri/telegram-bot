@@ -15,9 +15,15 @@
          x-on:workspace-stock-dirty="externalDirty = $event.detail.dirty"
          x-on:workspace-stock-busy="stockBusyChanged($event.detail.busy)"
          x-on:workspace-stock-saved="acceptStockSaved($event.detail)">
-        <a class="workspace-skip" href="#workspace-sections">Langsung ke pengaturan produk</a>
+        <a class="workspace-skip" href="#workspace-sections" x-on:click="openSection = openSection || 'detail'; $nextTick(() => document.getElementById('workspace-trigger-' + openSection)?.focus())">Langsung ke pengaturan produk</a>
         <header class="workspace-heading">
-            <div><p class="workspace-muted">Produk toko #{{ $workspace['product']['id'] }}</p><h2 class="workspace-title" x-text="workspace.product.name">{{ $workspace['product']['name'] }}</h2><p class="workspace-muted">Buka bagian yang ingin diatur. Isian tetap ada saat bagian ditutup.</p></div>
+            <div class="workspace-product-identity">
+                <img class="workspace-thumbnail" x-bind:src="workspace.product.image_url" alt="Gambar kartu produk tersimpan" width="72" height="72" decoding="async">
+                <div><p class="workspace-muted">Produk toko #{{ $workspace['product']['id'] }}</p><h2 class="workspace-title" x-text="workspace.product.name">{{ $workspace['product']['name'] }}</h2>
+                    <p class="workspace-muted" x-text="'Web: ' + (workspace.product.image_path ? 'gambar khusus' : 'default toko') + ' · Bot: ' + (workspace.product.telegram_image_path ? 'gambar khusus' : 'fallback family / teks') + ' · Channel: ' + (workspace.product.telegram_channel_image_path ? 'poster khusus' : 'tanpa poster khusus')"></p>
+                    <button class="workspace-button" type="button" x-on:click="openSection = 'appearance'; $nextTick(() => document.getElementById('workspace-trigger-appearance').focus())">Atur gambar</button>
+                </div>
+            </div>
             <div class="workspace-overview-price"><span class="workspace-muted">Harga jual IDR tersimpan</span><strong x-text="money(workspace.product.price_amount)"></strong><span class="workspace-status" x-bind:class="workspace.product.is_active ? 'workspace-success' : 'workspace-warning'" x-text="workspace.product.is_active ? 'Aktif di katalog' : 'Tidak aktif di katalog'"></span></div>
         </header>
         <div class="workspace-toolbar"><p x-text="hasUnsaved() ? 'Ada perubahan belum disimpan. Simpan di bagian masing-masing sebelum meninggalkan halaman.' : 'Tidak ada perubahan yang belum disimpan.'" role="status"></p><button class="workspace-button" type="button" x-on:click="const section = openSection; openSection = null; $nextTick(() => section && document.getElementById('workspace-trigger-' + section).focus())" x-bind:disabled="!openSection">Tutup bagian terbuka</button></div>
@@ -45,11 +51,6 @@
                             @endforeach</div>
                         @endforeach
                         </div></fieldset>
-                        <details class="workspace-fieldset" x-bind:open="specificationErrors()"><summary>Spesifikasi tambahan & dukungan</summary><div class="workspace-grid">
-                        @foreach(['product_type' => 'Jenis produk', 'access_duration' => 'Durasi akses', 'region' => 'Region', 'account_type' => 'Jenis akun', 'device_limit' => 'Batas perangkat', 'included_items' => 'Yang termasuk', 'limitations' => 'Batasan penggunaan', 'fulfillment_expectation' => 'Estimasi pemenuhan', 'support_policy' => 'Kebijakan dukungan'] as $field => $label)
-                            <label>{{ $label }}<textarea name="{{ $field }}" rows="2" x-model="draft.detail.{{ $field }}" x-bind:aria-invalid="Boolean(error('detail', '{{ $field }}'))" aria-describedby="workspace-error-{{ $field }}"></textarea><span id="workspace-error-{{ $field }}" class="workspace-field-error" x-text="error('detail', '{{ $field }}')"></span></label>
-                        @endforeach
-                        </div></details>
                         <fieldset class="workspace-fieldset"><legend>Panduan & pengiriman</legend><p class="workspace-muted">Panduan tampil jika judul dan URL diisi. Catatan pengiriman hanya dikirim ke pembeli setelah pembayaran dan akun tersedia.</p><div class="workspace-grid">
                         @foreach(['usage_guide_title' => 'Judul panduan', 'usage_guide_url' => 'URL panduan'] as $field => $label)
                             <label>{{ $label }}<input name="{{ $field }}" maxlength="{{ $field === 'usage_guide_title' ? 160 : 2048 }}" x-model="draft.detail.{{ $field }}" x-bind:aria-invalid="Boolean(error('detail', '{{ $field }}'))" aria-describedby="workspace-error-{{ $field }}"><span id="workspace-error-{{ $field }}" class="workspace-field-error" x-text="error('detail', '{{ $field }}')"></span></label>
@@ -101,12 +102,26 @@
                     </form>
                     <form data-workspace-form="policy" class="workspace-fieldset" x-on:submit.prevent="save('policy')"><h4>Kebijakan harga supplier</h4><p class="workspace-info">Harga otomatis memakai supplier aktif dan layak pertama menurut urutan, bukan supplier termurah. Kelayakan basis harga tidak menjamin stok atau saldo saat checkout. Simpan harga dasar dan kebijakan secara terpisah.</p><div class="workspace-grid"><label>Cara menentukan harga<select name="mode" x-model="draft.policy.mode"><option value="manual">Manual: saya tentukan sendiri</option><option value="percent">Otomatis: persentase dari modal</option><option value="fixed">Otomatis: keuntungan rupiah</option><option value="hybrid">Otomatis: persentase atau keuntungan minimum</option></select></label><label x-show="draft.policy.mode !== 'manual'">Bulatkan harga jual ke atas<select name="rounding_idr" x-model="draft.policy.rounding_idr">@foreach([1,100,500,1000] as $rounding)<option value="{{ $rounding }}">{{ $rounding === 1 ? 'Tanpa pembulatan tambahan' : 'Kelipatan Rp'.number_format($rounding, 0, ',', '.') }}</option>@endforeach</select></label>
                         <label x-show="['percent','hybrid'].includes(draft.policy.mode)">Tambahan dari modal (%)<input name="markup_percent" type="text" inputmode="decimal" x-model="draft.policy.markup_percent" x-bind:aria-invalid="Boolean(error('policy', 'markup_percent'))" aria-describedby="workspace-error-percent"><span class="workspace-muted">Contoh: 12,5 berarti 12,5%. Maksimal 1000%, 2 angka desimal.</span><span id="workspace-error-percent" class="workspace-field-error" x-text="error('policy', 'markup_percent')"></span></label>
-                        @foreach(['profit_idr' => 'Keuntungan rupiah / produk', 'minimum_profit_idr' => 'Keuntungan minimal setelah cadangan biaya', 'buffer_idr' => 'Cadangan biaya tambahan / produk'] as $field => $label)
+                        @foreach(['profit_idr' => 'Keuntungan rupiah / produk', 'minimum_profit_idr' => 'Keuntungan minimum / produk'] as $field => $label)
                         <label @if($field === 'profit_idr') x-show="['fixed','hybrid'].includes(draft.policy.mode)" @endif>{{ $label }}<input name="{{ $field }}" type="number" min="0" max="1000000000" step="1" x-model="draft.policy.{{ $field }}" x-bind:aria-invalid="Boolean(error('policy', '{{ $field }}'))"><span class="workspace-field-error" x-text="error('policy', '{{ $field }}')"></span></label>
                         @endforeach
-                    </div><p class="workspace-muted">Mode gabungan memilih tambahan yang lebih besar antara persentase dan keuntungan rupiah. Cadangan biaya bukan potongan otomatis. Supplier tidak dipakai jika sisa keuntungan di bawah minimum setelah cadangan diperhitungkan.</p>
+                    </div><p class="workspace-muted">Mode gabungan memilih tambahan yang lebih besar antara persentase dan keuntungan rupiah. Supplier tidak dipakai jika harga jual dikurangi harga beli berada di bawah keuntungan minimum.</p>
                     @include('admin.products.workspace-feedback', ['formKey' => 'policy', 'saveLabel' => 'Simpan kebijakan harga'])</form>
-                    <div class="workspace-fieldset"><h4>Simulasi harga per SKU</h4><p class="workspace-muted">Simulasi memakai draf kebijakan dan data server. Tidak menyimpan, tidak membeli produk, dan tidak mengubah supplier basis harga tersimpan.</p><div class="workspace-actions"><label>SKU untuk simulasi<select x-model="previewCatalogId"><option value="">Pilih sumber supplier</option><template x-for="source in workspace.sources" :key="source.id"><option x-bind:value="source.catalog_item_id" x-text="source.supplier.name + ' · ' + source.catalog.name"></option></template></select></label><button type="button" class="workspace-button" x-on:click="previewPrice()" x-bind:disabled="previewLoading || !previewCatalogId" x-text="previewLoading ? 'Menghitung…' : 'Hitung simulasi'"></button></div><div class="workspace-info" x-show="preview" role="status"><p>Harga beli: <strong x-text="money(preview?.cost_idr)"></strong></p><p>Harga jual simulasi: <strong x-text="money(preview?.retail_idr)"></strong></p><p x-show="preview && preview.retail_idr === null">Belum dapat dihitung. Perbarui katalog supplier lalu coba lagi.</p></div><p class="workspace-field-error" x-text="feedback.preview" role="alert"></p></div>
+                    <div class="workspace-fieldset">
+                        <h4>Simulasi harga per SKU</h4>
+                        <p class="workspace-muted">Memakai draf kebijakan dan data server tanpa menyimpan atau membeli. Mode manual memakai harga jual tersimpan.</p>
+                        <div class="workspace-actions"><label>SKU untuk simulasi<select x-model="previewCatalogId"><option value="">Pilih sumber supplier</option><template x-for="source in workspace.sources" :key="source.id"><option x-bind:value="source.catalog_item_id" x-text="source.supplier.name + ' · ' + source.catalog.name"></option></template></select></label><button type="button" class="workspace-button" x-on:click="previewPrice()" x-bind:disabled="previewLoading || !previewCatalogId" x-text="previewLoading ? 'Menghitung…' : 'Hitung simulasi'"></button></div>
+                        <div class="workspace-info" x-show="preview" role="status" aria-live="polite">
+                            <dl class="workspace-preview-prices">
+                                <div><dt>Harga beli / unit</dt><dd x-text="money(preview?.cost_idr)"></dd></div>
+                                <div><dt>Harga jual simulasi</dt><dd x-text="money(preview?.retail_idr)"></dd></div>
+                                <div><dt>Keuntungan / unit</dt><dd x-text="money(preview?.profit_idr)"></dd></div>
+                            </dl>
+                            <p class="workspace-muted">Keuntungan = harga jual − harga beli, belum memperhitungkan biaya aktual lain atau diskon jumlah.</p>
+                            <p x-show="preview && preview.retail_idr === null">Belum dapat dihitung. Perbarui katalog supplier lalu coba lagi.</p>
+                        </div>
+                        <p class="workspace-field-error" x-text="feedback.preview" role="alert"></p>
+                    </div>
                 @elseif($section === 'appearance')
                     <form data-workspace-form="appearance" x-on:submit.prevent="save('appearance')">
                         <div class="workspace-grid">

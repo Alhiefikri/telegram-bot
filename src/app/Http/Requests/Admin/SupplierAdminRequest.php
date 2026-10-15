@@ -90,7 +90,6 @@ final class SupplierAdminRequest extends FormRequest
                 'markup_basis_points' => ['required', 'integer', 'min:0', 'max:100000'],
                 'profit_idr' => ['required', 'integer', 'min:0', 'max:1000000000'],
                 'minimum_profit_idr' => ['required', 'integer', 'min:0', 'max:1000000000'],
-                'buffer_idr' => ['required', 'integer', 'min:0', 'max:1000000000'],
                 'rounding_idr' => ['required', Rule::in([1, 100, 500, 1000])],
                 'catalog_item_id' => [$action === 'preview' ? 'required' : 'nullable', 'integer', 'exists:supplier_catalog_items,id'],
             ],

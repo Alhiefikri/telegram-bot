@@ -437,10 +437,28 @@ final class SupplierAdminTest extends TestCase
         $item = $this->item($supplier, ['unit_price_micros' => 1250000]);
         $product = Product::factory()->create(['price_amount' => 45000]);
         $this->source($product, $item);
-        $this->postJson(route('admin.products.supplier-pricing.preview', $product), $this->pricingInput(['mode' => 'hybrid', 'markup_basis_points' => 1000, 'profit_idr' => 3000, 'buffer_idr' => 250, 'rounding_idr' => 1000, 'catalog_item_id' => $item->id]))->assertOk()->assertExactJson(['cost_idr' => 20000, 'retail_idr' => 24000])->assertDontSee(self::KEY);
+        $this->postJson(route('admin.products.supplier-pricing.preview', $product), $this->pricingInput(['mode' => 'hybrid', 'markup_basis_points' => 1000, 'profit_idr' => 3000, 'rounding_idr' => 1000, 'catalog_item_id' => $item->id]))->assertOk()->assertExactJson(['cost_idr' => 20000, 'retail_idr' => 23000, 'profit_idr' => 3000])->assertDontSee(self::KEY);
         $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput())->assertRedirect();
         $this->assertSame(45000, $product->refresh()->price_amount);
         $this->post(route('admin.products.supplier-pricing', $product), $this->pricingInput(['mode' => 'fixed']))->assertStatus(409);
+    }
+
+    public function test_manual_preview_reports_losses_and_break_even_without_clamping_or_writing(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['exchange_rate_idr' => 16000]);
+        $item = $this->item($supplier, ['unit_price_micros' => 1250000]);
+        $product = Product::factory()->create(['price_amount' => 19000]);
+        $this->source($product, $item);
+        $input = $this->pricingInput(['mode' => 'manual', 'catalog_item_id' => $item->id]);
+        $this->postJson(route('admin.products.supplier-pricing.preview', $product), $input)
+            ->assertOk()->assertJsonPath('profit_idr', -1000);
+        $this->assertSame(19000, $product->fresh()->price_amount);
+        $product->update(['price_amount' => 20000]);
+        $this->postJson(route('admin.products.supplier-pricing.preview', $product), $input)
+            ->assertOk()->assertJsonPath('profit_idr', 0);
+        $this->assertSame(0, SupplierPricePolicy::query()->count());
+        $this->assertSame(0, SupplierPurchase::query()->count());
     }
 
     public function test_browser_preview_shows_readable_prices_and_preserves_unsaved_settings_without_buying(): void
@@ -452,13 +470,12 @@ final class SupplierAdminTest extends TestCase
         $product = Product::factory()->create(['price_amount' => 45000]);
         $this->source($product, $item);
 
-        $this->post(route('admin.products.supplier-pricing.preview', $product), $this->pricingInput(['mode' => 'manual', 'minimum_profit_idr' => 3000, 'buffer_idr' => 250, 'catalog_item_id' => $item->id]))
+        $this->post(route('admin.products.supplier-pricing.preview', $product), $this->pricingInput(['mode' => 'manual', 'minimum_profit_idr' => 3000, 'catalog_item_id' => $item->id]))
             ->assertOk()
             ->assertDontSee(self::KEY)
-            ->assertViewHas('workspace', fn (array $workspace): bool => $workspace['price_preview'] === ['cost_idr' => 20000, 'retail_idr' => 45000]
+            ->assertViewHas('workspace', fn (array $workspace): bool => $workspace['price_preview'] === ['cost_idr' => 20000, 'retail_idr' => 45000, 'profit_idr' => 25000]
                 && $workspace['policy']['mode'] === 'manual'
                 && $workspace['policy']['minimum_profit_idr'] === 3000
-                && $workspace['policy']['buffer_idr'] === 250
                 && $workspace['preview_catalog_item_id'] === $item->id
             );
 
@@ -740,7 +757,7 @@ final class SupplierAdminTest extends TestCase
 
     private function pricingInput(array $overrides = []): array
     {
-        return array_replace(['version' => 0, 'mode' => 'manual', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'buffer_idr' => 0, 'rounding_idr' => 1], $overrides);
+        return array_replace(['version' => 0, 'mode' => 'manual', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'rounding_idr' => 1], $overrides);
     }
 
     private function supplier(array $overrides = []): Supplier

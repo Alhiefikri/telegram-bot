@@ -98,14 +98,39 @@
                         <x-admin-dashboard.badge tone="purple">{{ count($productGroups) }} family di halaman ini</x-admin-dashboard.badge>
                     </div>
 
+                    @php($productFilters = $productsTab['filters'] ?? ['search' => '', 'sort' => 'name_asc'])
+                    <form method="GET" action="{{ route('admin.dashboard') }}#admin-product-families" class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                        <input type="hidden" name="tab" value="produk">
+                        <label class="min-w-0 text-sm font-medium text-admin-ink">Cari produk / family
+                            <input type="search" name="product_search" value="{{ $productFilters['search'] }}" maxlength="255" placeholder="Nama produk, pilihan, atau family" class="mt-1 min-h-11 w-full rounded-lg border border-admin-muted bg-admin-surface px-3 text-admin-ink placeholder:text-admin-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus">
+                        </label>
+                        <label class="min-w-0 text-sm font-medium text-admin-ink">Urutkan family / produk
+                            <select name="product_sort" class="mt-1 min-h-11 w-full rounded-lg border border-admin-muted bg-admin-surface px-3 text-admin-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus">
+                                @foreach (\App\Catalog\CatalogBrowseQuery::ADMIN_SORTS as $value => $label)
+                                    <option value="{{ $value }}" @selected($productFilters['sort'] === $value)>{{ $label }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                        <div class="flex min-w-0 flex-wrap gap-2">
+                            <x-admin-dashboard.button type="submit" variant="primary" size="sm">Terapkan</x-admin-dashboard.button>
+                            <x-admin-dashboard.button :href="route('admin.dashboard', ['tab' => 'produk']).'#admin-product-families'" variant="neutral" size="sm">Reset</x-admin-dashboard.button>
+                        </div>
+                    </form>
+                    <p class="text-xs text-admin-muted">Urutan: {{ \App\Catalog\CatalogBrowseQuery::ADMIN_SORTS[$productFilters['sort']] }}. Pencarian mencakup semua halaman; family tetap dikelompokkan.</p>
+
                     @forelse ($productGroups as $group)
                         <x-admin-dashboard.card as="article" id="admin-product-family-group-{{ $group['id'] }}" padding="compact" shadow="sm">
                             <div class="contents" x-data="{ familyExpanded: false, familyEditPayload: @js($group['edit_payload']) }">
                             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div class="min-w-0">
+                                    <div class="flex flex-wrap items-center gap-3">
+                                        <img src="{{ $group['image_url'] ?: $productPlaceholder['image_url'] }}" alt="Gambar {{ $group['name'] }}" width="56" height="56" loading="lazy" decoding="async" class="h-14 w-14 shrink-0 rounded-lg border border-admin-line bg-admin-surface object-contain">
+                                        <div class="min-w-0 flex-[1_1_8rem]"><p class="text-xs text-admin-muted">{{ $group['image_path'] ? 'Gambar khusus' : 'Gambar default' }}{{ ($group['is_single_product_group'] ?? false) ? ' produk' : ' family' }}</p>
                                     <div class="flex flex-wrap items-center gap-2">
                                         <h4 class="break-words text-lg font-semibold text-admin-ink">{{ $group['name'] }}</h4>
                                         <x-admin-dashboard.badge>{{ $group['category'] }}</x-admin-dashboard.badge>
+                                    </div>
+                                        </div>
                                     </div>
                                     <p class="mt-1 text-xs text-admin-muted">{{ $group['member_count'] }} Product · {{ $group['available_member_count'] }} tersedia · {{ $group['sold_out_member_count'] }} habis</p>
                                     <p class="mt-1 text-sm font-semibold text-admin-ink">{{ $group['minimum_price'] ?? 'Harga belum diatur' }}{{ $group['minimum_usdt_price'] !== null ? ' · USDT '.$group['minimum_usdt_price'] : '' }}</p>
@@ -130,7 +155,7 @@
                             </div>
                         </x-admin-dashboard.card>
                     @empty
-                        <x-admin-dashboard.empty-state title="Belum ada Product di halaman ini." />
+                        <x-admin-dashboard.empty-state :title="$productFilters['search'] !== '' ? 'Tidak ada produk atau family yang cocok. Ubah pencarian atau tekan Reset.' : 'Belum ada Product di halaman ini.'" />
                     @endforelse
 
                 @if ($productsPagination['lastPage'] > 1)

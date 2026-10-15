@@ -90,7 +90,7 @@ final class AdminProductWorkspaceData
         $sourcesTruncated = $sources->count() > 100;
         $sources = $sources->take(100);
         $policy = SupplierPricePolicy::query()->where('product_id', $product->id)->first();
-        $policyData = $policy?->only(['version', 'mode', 'markup_basis_points', 'profit_idr', 'minimum_profit_idr', 'buffer_idr', 'rounding_idr']) ?? ['version' => 0, 'mode' => 'manual', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'buffer_idr' => 0, 'rounding_idr' => 1];
+        $policyData = $policy?->only(['version', 'mode', 'markup_basis_points', 'profit_idr', 'minimum_profit_idr', 'rounding_idr']) ?? ['version' => 0, 'mode' => 'manual', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'rounding_idr' => 1];
 
         return [
             'product' => $data,

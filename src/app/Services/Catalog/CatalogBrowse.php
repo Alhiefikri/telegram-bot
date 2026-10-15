@@ -186,6 +186,7 @@ final class CatalogBrowse
             sort: $query->sort,
             page: $query->page,
             perPage: $query->perPage,
+            admin: ! $public,
         );
         $productQuery = $this->productQuery($public, $query->category);
         if ($familiesOnly) {
@@ -489,6 +490,20 @@ final class CatalogBrowse
         string $sort,
         array $familySoldQuantities,
     ): int {
+        if (in_array($sort, ['name_asc', 'name_desc', 'members_asc', 'members_desc'], true)) {
+            $comparison = match ($sort) {
+                'name_desc' => $this->compareNames($right->name(), $left->name()),
+                'members_asc' => ($left->family?->optionCount ?? 1) <=> ($right->family?->optionCount ?? 1),
+                'members_desc' => ($right->family?->optionCount ?? 1) <=> ($left->family?->optionCount ?? 1),
+                default => $this->compareNames($left->name(), $right->name()),
+            };
+
+            return $comparison
+                ?: $this->compareNames($left->name(), $right->name())
+                ?: ($left->isFamily() <=> $right->isFamily())
+                ?: ($left->id() <=> $right->id());
+        }
+
         if ($sort === 'newest') {
             return $this->compareNullableStrings($right->createdAt(), $left->createdAt())
                 ?: $this->compareNames($left->name(), $right->name())

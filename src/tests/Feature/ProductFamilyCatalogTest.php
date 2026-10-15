@@ -41,6 +41,35 @@ class ProductFamilyCatalogTest extends TestCase
         $this->withoutVite();
     }
 
+    public function test_admin_search_and_group_size_sort_apply_before_pagination_and_keep_filters(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $small = ProductFamily::factory()->create(['name' => 'Alpha Family']);
+        $large = ProductFamily::factory()->create(['name' => 'Zulu Family']);
+        Product::factory()->create(['product_family_id' => $small->id, 'name' => 'Find this option']);
+        Product::factory()->count(3)->create(['product_family_id' => $large->id]);
+        ProductFamily::factory()->count(21)->create();
+
+        $this->actingAs($admin)->get(route('admin.dashboard', ['tab' => 'produk', 'product_sort' => 'members_desc']))
+            ->assertOk()->assertViewHas('productsTab', function (array $tab) use ($large): bool {
+                $this->assertSame($large->id, $tab['productGroups'][0]['id']);
+                $this->assertStringContainsString('product_sort=members_desc', $tab['pagination']['nextUrl']);
+
+                return true;
+            });
+        $this->get(route('admin.dashboard', ['tab' => 'produk', 'product_search' => 'find this option', 'products_page' => 9]))
+            ->assertOk()->assertViewHas('productsTab', function (array $tab) use ($small): bool {
+                $this->assertSame([$small->id], array_column($tab['productGroups'], 'id'));
+                $this->assertSame(1, $tab['pagination']['currentPage']);
+
+                return true;
+            });
+        $this->get(route('admin.dashboard', ['tab' => 'produk', 'product_search' => 'zULu']))
+            ->assertOk()->assertViewHas('productsTab', fn (array $tab): bool => array_column($tab['productGroups'], 'id') === [$large->id]);
+        $this->get(route('admin.dashboard', ['tab' => 'produk', 'product_search' => 'no match']))
+            ->assertOk()->assertViewHas('productsTab', fn (array $tab): bool => $tab['productGroups'] === []);
+    }
+
     public function test_family_schema_and_relationship_contracts_are_additive(): void
     {
         $this->assertTrue(Schema::hasTable('product_families'));

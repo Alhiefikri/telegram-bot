@@ -3280,3 +3280,14 @@
   ):not([class~="text-white"], [class~="text-white"] *) {
   color: #050505 !important;
 }
+
+/* The legacy dark input rule is important; keep catalog filters distinguishable in both themes. */
+.admin-page #admin-product-families :is(input[type="search"], select) {
+  border-color: var(--admin-muted) !important;
+}
+
+#admin-product-families,
+#workspace-sections,
+.workspace-trigger {
+  scroll-margin-top: 10rem;
+}

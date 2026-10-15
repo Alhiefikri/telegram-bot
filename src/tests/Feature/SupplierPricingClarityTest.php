@@ -20,6 +20,34 @@ use Tests\Support\NonTransactionalDatabaseTestCase as TestCase;
 #[Group('postgres-release')]
 final class SupplierPricingClarityTest extends TestCase
 {
+    public function test_removing_buffer_preserves_saved_retail_and_rejects_pre_migration_policy_versions(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $migration = require database_path('migrations/2026_10_15_000001_remove_supplier_price_policy_buffer.php');
+        $migration->down();
+        $product = Product::factory()->create(['price_amount' => 12345]);
+        \Illuminate\Support\Facades\DB::table('supplier_price_policies')->insert([
+            'product_id' => $product->id, 'mode' => 'manual', 'markup_basis_points' => 0,
+            'profit_idr' => 3000, 'minimum_profit_idr' => 1000, 'buffer_idr' => 500,
+            'rounding_idr' => 1, 'version' => 7, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $migration->up();
+        $policy = SupplierPricePolicy::query()->where('product_id', $product->id)->sole();
+        $this->assertSame(12345, $product->fresh()->price_amount);
+        $this->assertSame(8, $policy->version);
+        $this->assertSame(3000, $policy->profit_idr);
+        $this->assertSame(1000, $policy->minimum_profit_idr);
+        $input = [
+            'version' => 7, 'mode' => 'manual', 'markup_basis_points' => 0,
+            'profit_idr' => 3000, 'minimum_profit_idr' => 1000, 'rounding_idr' => 1,
+        ];
+        $this->postJson(route('admin.products.supplier-pricing', $product), $input)
+            ->assertStatus(409)->assertJsonValidationErrors('version');
+        $this->postJson(route('admin.products.supplier-pricing', $product), array_replace($input, ['version' => 8]))
+            ->assertOk()->assertJsonPath('workspace.policy.version', 8);
+        $this->assertSame(12345, $product->fresh()->price_amount);
+    }
+
     #[DataProvider('savedModesAndPreviewFormats')]
     public function test_backup_sku_preview_never_changes_saved_price_policy_or_source_selection(string $savedMode, bool $json): void
     {
@@ -47,20 +75,18 @@ final class SupplierPricingClarityTest extends TestCase
             'markup_basis_points' => 1000,
             'profit_idr' => 3000,
             'minimum_profit_idr' => 1000,
-            'buffer_idr' => 250,
             'rounding_idr' => 1000,
             'catalog_item_id' => $backup->supplier_catalog_item_id,
         ];
 
         if ($json) {
             $this->postJson(route('admin.products.supplier-pricing.preview', $product), $input)
-                ->assertOk()->assertExactJson(['cost_idr' => 8000, 'retail_idr' => 12000]);
+                ->assertOk()->assertExactJson(['cost_idr' => 8000, 'retail_idr' => 11000, 'profit_idr' => 3000]);
         } else {
             $this->post(route('admin.products.supplier-pricing.preview', $product), $input)->assertOk()
-                ->assertViewHas('workspace', fn (array $workspace): bool => $workspace['price_preview'] === ['cost_idr' => 8000, 'retail_idr' => 12000]
+                ->assertViewHas('workspace', fn (array $workspace): bool => $workspace['price_preview'] === ['cost_idr' => 8000, 'retail_idr' => 11000, 'profit_idr' => 3000]
                     && $workspace['preview_catalog_item_id'] === $backup->supplier_catalog_item_id
                     && $workspace['policy']['mode'] === 'hybrid'
-                    && $workspace['policy']['buffer_idr'] === 250
                 );
         }
 
@@ -89,7 +115,7 @@ final class SupplierPricingClarityTest extends TestCase
     private function policy(Product $product, string $mode): SupplierPricePolicy
     {
         $policy = new SupplierPricePolicy;
-        $policy->forceFill(['product_id' => $product->id, 'mode' => $mode, 'markup_basis_points' => 0, 'profit_idr' => 5000, 'minimum_profit_idr' => 0, 'buffer_idr' => 0, 'rounding_idr' => 1, 'version' => 3])->save();
+        $policy->forceFill(['product_id' => $product->id, 'mode' => $mode, 'markup_basis_points' => 0, 'profit_idr' => 5000, 'minimum_profit_idr' => 0, 'rounding_idr' => 1, 'version' => 3])->save();
 
         return $policy;
     }

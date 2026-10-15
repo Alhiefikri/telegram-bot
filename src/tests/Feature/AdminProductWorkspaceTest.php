@@ -92,7 +92,9 @@ final class AdminProductWorkspaceTest extends TestCase
     {
         $this->manager();
         $product = $this->tieredProduct();
-        $before = $product->only(['price_amount', 'usdt_price_amount', 'icon', 'is_active', 'featured_rank', 'image_path', 'stock', 'reserved_stock']);
+        $product->forceFill(['product_type' => 'Digital account', 'access_duration' => '1 month', 'region' => 'Global', 'account_type' => 'Private', 'device_limit' => '1 device', 'included_items' => ['Access'], 'limitations' => ['No sharing'], 'fulfillment_expectation' => 'Instant', 'support_policy' => 'Contact support'])->save();
+        $product->refresh();
+        $before = $product->only(['price_amount', 'usdt_price_amount', 'icon', 'is_active', 'featured_rank', 'image_path', 'stock', 'reserved_stock', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'support_policy']);
         $this->saveSection($product, 'detail', ['name' => 'Updated name', 'description_en' => 'English description', 'delivery_note' => 'Private delivery instructions', 'price_amount' => 1, 'is_active' => false, 'quantity_price_tiers_present' => true, 'quantity_price_tiers' => []])
             ->assertOk()->assertJsonPath('workspace.product.name', 'Updated name');
         $this->assertSame($before, $product->fresh()->only(array_keys($before)));
@@ -328,7 +330,7 @@ final class AdminProductWorkspaceTest extends TestCase
     {
         $this->manager();
         $product = Product::factory()->create(['stock' => 8, 'reserved_stock' => 3]);
-        $input = ['version' => 0, 'mode' => 'manual', 'markup_basis_points' => 1250, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'buffer_idr' => 0, 'rounding_idr' => 100];
+        $input = ['version' => 0, 'mode' => 'manual', 'markup_basis_points' => 1250, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'rounding_idr' => 100];
         $this->postJson(route('admin.products.supplier-pricing', $product), $input)->assertOk()->assertJsonPath('workspace.policy.version', 1)->assertJsonPath('workspace.policy.markup_basis_points', 1250);
         $auditCount = AuditLog::query()->count();
         $this->postJson(route('admin.products.supplier-pricing', $product), array_replace($input, ['version' => 1]))->assertOk()->assertJsonPath('workspace.policy.version', 1);
@@ -344,7 +346,7 @@ final class AdminProductWorkspaceTest extends TestCase
         $this->manager();
         $product = Product::factory()->create(['price_amount' => 12345]);
         $item = $this->catalogItem();
-        $this->postJson(route('admin.products.supplier-pricing.preview', $product), ['version' => 0, 'mode' => 'percent', 'markup_basis_points' => 1000, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'buffer_idr' => 0, 'rounding_idr' => 1, 'catalog_item_id' => $item->id])->assertUnprocessable();
+        $this->postJson(route('admin.products.supplier-pricing.preview', $product), ['version' => 0, 'mode' => 'percent', 'markup_basis_points' => 1000, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'rounding_idr' => 1, 'catalog_item_id' => $item->id])->assertUnprocessable();
         $this->assertSame(12345, $product->fresh()->price_amount);
         $this->assertSame(0, SupplierPricePolicy::query()->count());
     }
@@ -366,7 +368,7 @@ final class AdminProductWorkspaceTest extends TestCase
         $item = $this->catalogItem();
         $item->supplier->forceFill(['is_active' => true, 'sync_expires_at' => now()->addHour()])->save();
         $this->source($product, $item, ['is_active' => true]);
-        $this->postJson(route('admin.products.supplier-pricing', $product), ['version' => 0, 'mode' => 'fixed', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'buffer_idr' => 0, 'rounding_idr' => 1])
+        $this->postJson(route('admin.products.supplier-pricing', $product), ['version' => 0, 'mode' => 'fixed', 'markup_basis_points' => 0, 'profit_idr' => 0, 'minimum_profit_idr' => 0, 'rounding_idr' => 1])
             ->assertUnprocessable()->assertJsonValidationErrors('mode');
         $this->assertSame(100000, $product->fresh()->price_amount);
         $this->assertSame(90000, $product->quantityPriceTiers()->sole()->price_amount);

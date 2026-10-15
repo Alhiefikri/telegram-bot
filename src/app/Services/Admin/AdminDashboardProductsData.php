@@ -48,6 +48,7 @@ final class AdminDashboardProductsData
             'products' => $productPage['products'],
             'productGroups' => $productPage['productGroups'],
             'pagination' => $productPage['pagination'],
+            'filters' => $productPage['filters'],
             'placeholder' => [
                 'image_url' => $this->placeholder->imageUrl(),
                 'is_custom' => $this->placeholder->isCustom(),
@@ -65,7 +66,16 @@ final class AdminDashboardProductsData
 
     private function latestProducts(bool $includeManageableStockItems, int $productsPage, bool $includeStockItems): array
     {
-        $catalog = $this->catalog->browseAdmin(new CatalogBrowseQuery(page: max(1, $productsPage), perPage: 20));
+        $search = request()->query('product_search', '');
+        $sort = request()->query('product_sort', 'name_asc');
+        $query = CatalogBrowseQuery::fromValues(
+            search: is_string($search) ? mb_substr($search, 0, 255) : '',
+            sort: is_string($sort) && isset(CatalogBrowseQuery::ADMIN_SORTS[$sort]) ? $sort : 'name_asc',
+            page: max(1, $productsPage),
+            perPage: 20,
+            admin: true,
+        );
+        $catalog = $this->catalog->browseAdmin($query);
         $productIds = collect($catalog->entries)
             ->flatMap(function (CatalogBrowseEntry $entry): array {
                 if ($entry->isFamily()) {
@@ -272,12 +282,13 @@ final class AdminDashboardProductsData
             ->values()
             ->all();
         $pagination = $catalog->pagination;
-        $query = collect(request()->query())->except(['tab', 'products_page'])->all();
-        $pageUrl = fn (int $page): string => route('admin.dashboard', ['tab' => 'produk', 'products_page' => $page] + $query);
+        $pageFilters = collect(request()->query())->except(['tab', 'products_page'])->all();
+        $pageUrl = fn (int $page): string => route('admin.dashboard', ['tab' => 'produk', 'products_page' => $page] + $pageFilters).'#admin-product-families';
 
         return [
             'products' => $flatPayloads,
             'productGroups' => $productGroups,
+            'filters' => ['search' => $query->search, 'sort' => $query->sort],
             'families' => $catalog->families,
             'pagination' => [
                 'currentPage' => $pagination->currentPage,

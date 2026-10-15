@@ -7,18 +7,9 @@ const detailFields = [
   "description",
   "description_ms",
   "description_en",
-  "product_type",
-  "access_duration",
-  "region",
-  "account_type",
-  "device_limit",
-  "included_items",
-  "limitations",
-  "fulfillment_expectation",
   "warranty_policy",
   "warranty_policy_ms",
   "warranty_policy_en",
-  "support_policy",
   "delivery_note",
   "usage_guide_title",
   "usage_guide_url",
@@ -28,7 +19,6 @@ const policyFields = [
   "mode",
   "profit_idr",
   "minimum_profit_idr",
-  "buffer_idr",
   "rounding_idr",
 ];
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -68,8 +58,6 @@ export function basisPointsToPercent(value) {
 
 function formsFor(workspace) {
   const detail = pick(workspace.product, detailFields);
-  for (const field of ["included_items", "limitations"])
-    if (Array.isArray(detail[field])) detail[field] = detail[field].join("\n");
   return {
     detail,
     price: {
@@ -184,19 +172,6 @@ export default function productWorkspace(
       event.preventDefault();
       this.contentLocale = next;
       globalThis.document?.getElementById(`workspace-locale-${next}`)?.focus();
-    },
-    specificationErrors() {
-      return [
-        "product_type",
-        "access_duration",
-        "region",
-        "account_type",
-        "device_limit",
-        "included_items",
-        "limitations",
-        "fulfillment_expectation",
-        "support_policy",
-      ].some((field) => this.error("detail", field));
     },
     toggle(section) {
       if (sections.includes(section))

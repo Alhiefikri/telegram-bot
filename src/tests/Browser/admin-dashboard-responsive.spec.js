@@ -4160,7 +4160,7 @@ test("supplier catalog forms preserve draft import, mapping and pricing without 
   );
   await page.locator("#workspace-trigger-price").click();
   const priceForm = page.locator('[data-workspace-form="policy"]');
-  await priceForm.locator('[name="buffer_idr"]').fill("500");
+  await priceForm.locator('[name="minimum_profit_idr"]').fill("500");
   await Promise.all([
     page.waitForResponse(
       (response) =>
@@ -4174,7 +4174,9 @@ test("supplier catalog forms preserve draft import, mapping and pricing without 
   ]);
   await page.reload();
   await page.locator("#workspace-trigger-price").click();
-  await expect(priceForm.locator('[name="buffer_idr"]')).toHaveValue("500");
+  await expect(priceForm.locator('[name="minimum_profit_idr"]')).toHaveValue(
+    "500"
+  );
   const saved = JSON.parse(
     runArtisan([
       "tinker",

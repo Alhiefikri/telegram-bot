@@ -75,19 +75,20 @@ Verifikasi permintaan key terbaru: `CanbosoSupplierTest`, `CanbosoQueryBudgetTes
 6. Buka sumber supplier produk, konfirmasi ekuivalensi dan aktifkan mapping.
    Di tab Produk, edit nama/deskripsi/panduan dan aktifkan produk untuk buyer.
    Gunakan stok lokal **0** supaya pembelian benar-benar menguji supplier.
-7. Isi pengaturan harga, lalu klik **Lihat perkiraan modal & harga jual**.
-   Hasil muncul di halaman yang sama dalam rupiah: harga beli supplier,
-   harga jual, selisih, dan sisa setelah cadangan biaya. Angka yang kamu isi
-   tetap ada agar bisa disimpan setelah diperiksa. Pengecekan tidak menyimpan
-   pengaturan atau membeli produk. Permintaan JSON eksplisit tetap tersedia
-   untuk pemanggil programatis; browser biasa mendapatkan halaman HTML.
-   Fee pembayaran/funding tambahan perlu diperhitungkan melalui buffer dan
-   pencatatan biaya aktual, bukan dianggap sudah termasuk dalam gross profit.
+7. Isi kebijakan harga pada bagian **Harga jual**, pilih SKU, lalu klik
+   **Hitung simulasi**. Hasil muncul di halaman yang sama dalam rupiah:
+   harga beli supplier, harga jual, dan keuntungan per unit. Angka yang kamu
+   isi tetap ada agar bisa disimpan setelah diperiksa. Pengecekan tidak
+   menyimpan pengaturan atau membeli produk. Permintaan JSON eksplisit
+   tetap tersedia untuk pemanggil programatis; browser biasa mendapatkan
+   halaman HTML. Cadangan biaya tidak lagi digunakan. Fee pembayaran/funding
+   tambahan dicatat sebagai biaya aktual, bukan dianggap sudah termasuk
+   dalam keuntungan per unit.
 
 ## Margin dan kenaikan harga
 
 Contoh: biaya $0.10, kurs Rp16.000/USD → biaya Rp1.600. Retail Rp3.000,
-minimum profit Rp1.000, buffer Rp200 → batas biaya pembelian Rp1.800/unit.
+minimum profit Rp1.000 → batas biaya pembelian Rp2.000/unit.
 Biaya yang telah diketahui di atas batas itu tidak eligible untuk supplier
 checkout. Manual mempertahankan retail; fixed/percent/hybrid menghitung ulang
 harga dasar saat sync, sementara snapshot pesanan lama tetap.
@@ -99,7 +100,7 @@ menutupi hasil guard. Ini menguji batas margin, bukan mengubah harga provider.
 
 Uji otomatis respons harga berubah berada pada suite Supplier/BuyMail. Provider
 CSxStore tidak mendokumentasikan field max-price/quote lock pada POST order.
-Precheck, freshness dan buffer tidak menjamin harga tidak berubah saat request
+Precheck dan freshness tidak menjamin harga tidak berubah saat request
 sedang berlangsung. Biaya aktual di atas ceiling perlu review, bukan klaim
 bahwa debit supplier pasti dapat dicegah atau dibatalkan.
 
@@ -133,6 +134,8 @@ order supplier yang sama lewat monitor privat apabila identitasnya diketahui.
    checkout kedua untuk “mencoba ulang” outcome yang belum diketahui.
 
 ## Bukti saat penyiapan
+
+Catatan berikut merekam penyiapan terdahulu. Nilai cadangan biaya di catatan historis bukan pengaturan yang masih tersedia; fitur tersebut sudah dihapus.
 
 - Migration isolated berhasil; tabel supplier tersedia dan belum ada koneksi.
 - HTTP login dan halaman Admin Supplier Reseller berhasil (200) menggunakan
