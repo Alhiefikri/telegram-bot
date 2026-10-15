@@ -542,6 +542,172 @@ class SupplierFulfillmentTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_nastele_owner_funding_rate_purchase_allocates_credentials_once_with_exact_idr_cost(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->nasteleFixture();
+
+        // Phase 1: the funded connection was observed, never hand-set.
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($request) => $request->method() === 'GET' && str_ends_with($request->url(), '/balance'));
+        Http::assertSent(fn ($request) => $request->method() === 'GET' && str_ends_with($request->url(), '/products'));
+        $this->assertSame(300_000_000_000, $supplier->balance_micros);
+        $this->assertSame(69_000_000_000, $sku->unit_price_micros);
+        $this->assertSame(4, $sku->stock);
+        $this->assertTrue($sku->orderable);
+        $this->assertFalse($sku->requires_input);
+
+        $order = $this->checkout($cart);
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+
+        // Reservation is local: one wallet hold and one SKU hold for one 69.000 VND unit.
+        Http::assertSentCount(2);
+        $this->assertSame('reserved', $f->state);
+        $this->assertSame(1, $f->quantity);
+        $this->assertSame(69_000_000_000, $f->reserved_cost_micros);
+        $this->assertSame(49500, $f->maximum_cost_idr);
+        $this->assertSame(69_000_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+
+        $paid = app(OrderLifecycle::class)->applyManualCompletion($order);
+        $this->assertSame(PaymentStatus::Paid, $paid->order->payment_status);
+        $this->assertSame(OrderStatus::Processing, $paid->order->order_status);
+        Http::assertSentCount(2);
+
+        Http::swap(new Factory);
+        $this->fakeNasteleOrders(7911, null, ['nastele-vnd-43@example.test | OwnerFunding-47770'], ['nastele-vnd-43@example.test | OwnerFunding-47770']);
+        app(SupplierFulfillmentService::class)->process($f->id);
+
+        // Phase 2: exactly one purchase POST and no fallback dispatch.
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => $request->method() === 'POST' && str_ends_with($request->url(), '/orders'));
+        Http::assertSent(fn ($request) => $request->data()['productId'] === 43 && $request->data()['qty'] === 1);
+        $this->assertSame(1, $f->fresh()->purchases()->count());
+        $purchase = SupplierPurchase::sole();
+        $this->assertSame('delivered', $purchase->state);
+        $this->assertNotNull($purchase->committed_at);
+        $this->assertSame(69_000_000_000, $purchase->actual_cost_micros);
+        $this->assertSame('0.692308', $purchase->exchange_rate_idr);
+        // Exact evidence: ceil(69.000 VND x 0.692308) = 47770 IDR, not 69.000 x 18.000.
+        $this->assertSame(47770, SupplierMoney::costIdr($purchase->actual_cost_micros, $purchase->exchange_rate_idr));
+        $this->assertLessThanOrEqual($f->maximum_cost_idr, 47770);
+
+        // The credential is allocated exactly once and owned by this order.
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(1, ProductStockItem::count());
+        $stockItem = ProductStockItem::sole();
+        $this->assertSame('nastele-vnd-43@example.test | OwnerFunding-47770', $stockItem->secret);
+        $this->assertSame($f->order_item_id, $stockItem->order_item_id);
+        $this->assertSame($purchase->id, $stockItem->supplier_purchase_id);
+        $this->assertSame($order->id, $stockItem->orderItem->order_id);
+        $this->assertSame(1, $f->fresh()->orderItem->stockItems()->count());
+
+        // The provider currency wallet is debited exactly once and the SKU hold released.
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(231_000_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $sku->fresh()->reserved_quantity);
+        $this->assertSame(3, $sku->fresh()->stock);
+    }
+
+    public function test_nastele_unconfirmed_create_keeps_holds_and_exact_get_recovers_without_a_second_post(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->nasteleFixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+
+        Http::swap(new Factory);
+        $this->fakeNasteleOrders(7911, 'pending', [], ['nastele-vnd-43@example.test | OwnerFunding-47770']);
+        app(SupplierFulfillmentService::class)->process($f->id);
+
+        // The create response proved neither delivery nor debit, so every hold stays.
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => $request->method() === 'POST' && str_ends_with($request->url(), '/orders'));
+        $this->assertSame(1, SupplierPurchase::count());
+        $purchase = SupplierPurchase::sole();
+        $this->assertSame('7911', $purchase->supplier_order_id);
+        $this->assertSame('awaiting_delivery', $purchase->state);
+        $this->assertNull($purchase->committed_at);
+        $this->assertNull($purchase->actual_cost_micros);
+        $this->assertSame(69_000_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, ProductStockItem::count());
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame('awaiting_delivery', $f->fresh()->state);
+
+        $this->travel(2)->minutes();
+        app(SupplierFulfillmentService::class)->recover();
+        app(SupplierFulfillmentService::class)->process($f->id);
+        $this->travelBack();
+
+        // Recovery read the exact order; the create was never replayed.
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($request) => $request->method() === 'GET' && str_ends_with($request->url(), '/orders/7911'));
+        $this->assertSame(1, Http::recorded(fn ($request) => $request->method() === 'POST')->count());
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame('delivered', $purchase->fresh()->state);
+        $this->assertSame(69_000_000_000, $purchase->fresh()->actual_cost_micros);
+        $this->assertSame(47770, SupplierMoney::costIdr($purchase->fresh()->actual_cost_micros, $purchase->fresh()->exchange_rate_idr));
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(1, ProductStockItem::count());
+        $this->assertSame('nastele-vnd-43@example.test | OwnerFunding-47770', ProductStockItem::sole()->secret);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(231_000_000_000, $supplier->fresh()->balance_micros);
+    }
+
+    /**
+     * Synthetic Nastele VND connection funded through the real catalog sync:
+     * SKU 43 at 69.000 VND, an observed wallet of 300.000 VND and the owner
+     * funding rate 0.692308 IDR per VND.
+     *
+     * @return array{0: Product, 1: Supplier, 2: SupplierCatalogItem, 3: Cart}
+     */
+    private function nasteleFixture(): array
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $product->update(['price_amount' => 50000]);
+        $supplier->forceFill(['provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '0.692308', 'balance_micros' => 0])->save();
+        $sku->update(['external_id' => '43', 'currency' => 'VND']);
+        Http::fake(function ($request) {
+            if ($request->method() === 'GET' && str_ends_with($request->url(), '/balance')) {
+                return Http::response(['success' => true, 'data' => ['balance' => 300_000, 'currency' => 'VND']]);
+            }
+            if ($request->method() === 'GET' && str_ends_with($request->url(), '/products')) {
+                return Http::response(['success' => true, 'data' => [[
+                    'id' => 43, 'name' => 'Nastele VND account', 'price' => 69000, 'stock' => 4, 'currency' => 'VND',
+                ]]]);
+            }
+
+            return Http::response(['success' => false], 405);
+        });
+        $this->assertTrue(app(SupplierCatalogSync::class)->sync($supplier->fresh()));
+
+        return [$product->fresh(), $supplier->fresh(), $sku->fresh(), $cart];
+    }
+
+    /**
+     * @param  list<string>  $createAccounts
+     * @param  list<string>  $recoveredAccounts
+     */
+    private function fakeNasteleOrders(int $orderId, ?string $createStatus, array $createAccounts, array $recoveredAccounts): void
+    {
+        Http::fake(function ($request) use ($orderId, $createStatus, $createAccounts, $recoveredAccounts) {
+            if ($request->method() === 'POST') {
+                $created = ['orderId' => $orderId, 'totalAmount' => 69000, 'items' => [['quantity' => 1, 'unitPrice' => 69000, 'accounts' => $createAccounts]]];
+                if ($createStatus !== null) {
+                    $created['status'] = $createStatus;
+                }
+
+                return Http::response(['success' => true, 'data' => $created], 201);
+            }
+
+            return Http::response(['success' => true, 'data' => [
+                'orderId' => $orderId, 'status' => 'completed', 'totalAmount' => 69000,
+                'items' => [['quantity' => 1, 'unitPrice' => 69000, 'accounts' => $recoveredAccounts]],
+            ]]);
+        });
+    }
+
     protected function fixture(int $local = 0, int $quantity = 1, string $provider = 'prodseller'): array
     {
         $product = Product::factory()->create(['stock' => $local, 'reserved_stock' => 0, 'price_amount' => 5000]);

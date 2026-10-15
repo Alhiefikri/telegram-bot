@@ -16,9 +16,11 @@ use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
 use App\Models\User;
+use App\Services\Admin\AdminProductWorkspaceData;
 use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\AuditLogger;
 use App\Services\Suppliers\ProductSupplierManager;
+use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierMoney;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -130,6 +132,115 @@ final class SupplierAdminTest extends TestCase
         $this->patch(route('admin.suppliers.update', $supplier), $input + ['currency' => 'USD', 'version' => 1])->assertStatus(422);
         $this->patch(route('admin.suppliers.update', $supplier), array_replace($input, ['exchange_rate_idr' => '0.0000001', 'version' => 1]))->assertStatus(422);
         $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertSee('Nastele')->assertDontSee(self::KEY);
+    }
+
+    public function test_nastele_rate_band_rejects_per_usdt_values_and_accepts_six_place_vnd_precision(): void
+    {
+        $this->owner();
+        Http::fake();
+        $input = $this->connectionInput(['provider' => 'nastele', 'currency' => 'VND', 'currency_confirmed' => 1]);
+        $store = fn (string $rate) => $this->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson(route('admin.suppliers.store'), array_replace($input, ['exchange_rate_idr' => $rate]));
+        foreach (['18000', '1', '1.000001', '0.05'] as $rate) {
+            $response = $store($rate)->assertStatus(422)->assertJsonValidationErrors('exchange_rate_idr');
+            $this->assertStringContainsString('VND', (string) $response->json('errors.exchange_rate_idr.0'));
+            $this->assertStringContainsString('USDT', (string) $response->json('errors.exchange_rate_idr.0'));
+            $this->assertStringNotContainsString(self::KEY, $response->getContent());
+            $this->assertSame(0, Supplier::query()->count());
+        }
+        $store('0.692308')->assertOk();
+        $supplier = Supplier::query()->sole();
+        $this->assertSame('VND', $supplier->currency);
+        $this->assertSame('0.692308', $supplier->exchange_rate_idr);
+        $this->assertSame(47770, SupplierMoney::costIdr(69_000_000_000, $supplier->exchange_rate_idr));
+        $this->assertStringNotContainsString(self::KEY, json_encode(session()->all()));
+        Http::assertNothingSent();
+    }
+
+    public function test_nastele_rate_band_applies_to_an_update_sent_outside_the_browser_form(): void
+    {
+        $this->owner();
+        Http::fake();
+        $supplier = $this->supplier(['provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '0.692308']);
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->patchJson(route('admin.suppliers.update', $supplier), $this->connectionInput(['provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '18000', 'version' => 1]))
+            ->assertStatus(422)->assertJsonValidationErrors('exchange_rate_idr');
+        $this->assertSame('0.692308', $supplier->fresh()->exchange_rate_idr);
+        $this->assertSame(1, (int) $supplier->fresh()->version);
+        Http::assertNothingSent();
+    }
+
+    public function test_rate_bands_leave_other_provider_contracts_untouched(): void
+    {
+        $this->owner();
+        Http::fake();
+        foreach ([
+            'prodseller' => ['USDT', 16000],
+            'csxstore' => ['USD', '0.692308'],
+        ] as $provider => [$currency, $rate]) {
+            $this->withSession(['auth.password_confirmed_at' => time()])
+                ->post(route('admin.suppliers.store'), $this->connectionInput(['provider' => $provider, 'currency' => $currency, 'exchange_rate_idr' => $rate]))->assertRedirect();
+            $saved = Supplier::query()->where('provider', $provider)->sole();
+            $this->assertSame($currency, $saved->currency);
+            $this->assertSame((string) $rate, rtrim(rtrim((string) $saved->exchange_rate_idr, '0'), '.'));
+        }
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.suppliers.store'), $this->connectionInput(['provider' => 'buymail', 'currency' => 'IDR', 'exchange_rate_idr' => 1]))->assertRedirect();
+        $this->assertSame('1.000000', Supplier::query()->where('provider', 'buymail')->sole()->exchange_rate_idr);
+        $this->assertSame(3, Supplier::query()->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_the_new_connection_form_prefills_no_rate_and_shows_the_vnd_band(): void
+    {
+        $html = view('admin.suppliers.connection-form', ['connection' => ['provider' => 'nastele', 'currency' => 'VND']])->render();
+
+        // The stored rate field itself must never arrive prefilled with a dollar figure.
+        preg_match('/<input[^>]*name="exchange_rate_idr"[^>]*>/', $html, $rateInput);
+        $this->assertNotSame('', $rateInput[0] ?? '');
+        $this->assertMatchesRegularExpression('/value=""/', $rateInput[0]);
+        $this->assertStringNotContainsString('value="18000"', $rateInput[0]);
+        $this->assertStringContainsString('x-text="rateDerivation"', $html);
+        $this->assertStringContainsString('x-text="sampleDerivation"', $html);
+        $this->assertStringContainsString('x-text="rateWarning"', $html);
+        $this->assertStringContainsString('0.999999', $html);
+        // The optional VND deposit helper must never become a submitted supplier field.
+        $this->assertStringContainsString('x-model="calcVndPerUsdt"', $html);
+        $this->assertStringContainsString('x-model="calcIdrPerUsdt"', $html);
+        $this->assertStringContainsString('x-on:click="applyRateSuggestion()"', $html);
+        $this->assertStringContainsString('x-bind:disabled="calcSuggestion === \'\'"', $html);
+        $this->assertStringContainsString("providers[provider].currency === 'VND'", $html);
+        // No placeholder may look like a stored value; the worked example lives in the copy.
+        $this->assertStringNotContainsString('placeholder="18000"', $html);
+        $this->assertStringNotContainsString('name="calc', $html);
+    }
+
+    public function test_rate_only_change_keeps_a_still_valid_observation_and_recomputes_capacity(): void
+    {
+        $this->owner();
+        Http::fake();
+        $supplier = $this->supplier(['provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '0.650001', 'balance_micros' => 300_000_000_000, 'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(4)]);
+        $item = $this->item($supplier, ['external_id' => '43', 'currency' => 'VND', 'unit_price_micros' => 69_000_000_000, 'stock' => 20, 'synced_at' => now()]);
+        $product = Product::factory()->create(['price_amount' => 60000, 'stock' => 0]);
+        $this->source($product, $item, ['is_active' => true]);
+        SupplierPricePolicy::query()->create(['product_id' => $product->id, 'mode' => 'manual', 'rounding_idr' => 1]);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->assertSame(4, $product->fresh()->supplier_available_stock);
+        $observedAt = $supplier->fresh()->synced_at;
+
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->patch(route('admin.suppliers.update', $supplier), $this->connectionInput([
+                'provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '0.692308', 'version' => 1,
+            ]))->assertRedirect();
+
+        $corrected = $supplier->fresh();
+        $this->assertSame('0.692308', $corrected->exchange_rate_idr);
+        $this->assertSame(2, (int) $corrected->version);
+        $this->assertSame($observedAt?->getTimestamp(), $corrected->synced_at?->getTimestamp(), 'A rate change does not invalidate the provider observation.');
+        $this->assertNotNull($corrected->sync_expires_at);
+        $this->assertSame(4, $product->fresh()->supplier_available_stock, 'Capacity must be recomputed from the still valid observation.');
+        $this->assertSame(47770, app(AdminProductWorkspaceData::class)->cost($item->fresh())['idr']);
+        Http::assertNothingSent();
     }
 
     public function test_fixed_currency_cannot_be_overridden_by_a_submitted_dropdown_value(): void

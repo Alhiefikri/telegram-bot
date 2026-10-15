@@ -64,6 +64,48 @@ final class AdminProductWorkspaceQueryTest extends TestCase
         $this->assertSame([], array_values(array_filter($queries, fn (array $query): bool => str_contains($query['query'], 'from "categories"'))));
     }
 
+    public function test_workspace_reports_the_vnd_unit_cost_as_ceil_of_dong_times_the_stored_idr_rate(): void
+    {
+        $product = Product::factory()->create();
+        $item = $this->vndSource($product, '0.692308');
+
+        $source = app(AdminProductWorkspaceData::class)->for($product)['sources'][0];
+
+        $this->assertSame('69000', $source['cost']['unit']);
+        $this->assertSame(47770, $source['cost']['idr'], 'Cost must be ceil(69,000 VND x 0.692308 IDR/VND).');
+        $this->assertFalse($source['cost']['implausible']);
+        $this->assertLessThan(69000 * 18000, $source['cost']['idr'], 'A rupiah-per-USDT rate must never produce the stored unit cost.');
+        $this->assertSame('0.692308', $source['supplier']['exchange_rate_idr']);
+        $this->assertSame(47770, app(AdminProductWorkspaceData::class)->cost($item)['idr']);
+
+        // The Admin workspace payload itself must carry that cost for the card.
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
+        $this->getJson(route('admin.products.workspace', $product))
+            ->assertOk()
+            ->assertJsonPath('sources.0.cost.idr', 47770)
+            ->assertJsonPath('sources.0.cost.implausible', false);
+    }
+
+    public function test_workspace_flags_a_unit_cost_that_came_from_a_rupiah_per_usdt_rate(): void
+    {
+        $product = Product::factory()->create();
+        $this->vndSource($product, '18000');
+
+        $cost = app(AdminProductWorkspaceData::class)->for($product)['sources'][0]['cost'];
+
+        $this->assertSame(1_242_000_000, $cost['idr']);
+        $this->assertTrue($cost['implausible']);
+    }
+
+    private function vndSource(Product $product, string $rate): SupplierCatalogItem
+    {
+        $supplier = Supplier::forceCreate(['name' => 'Nastele VND', 'provider' => 'nastele', 'api_key' => 'private-workspace-rate-key', 'currency' => 'VND', 'currency_confirmed' => true, 'exchange_rate_idr' => $rate, 'is_active' => true, 'version' => 1, 'reserved_balance_micros' => 0, 'low_balance_threshold_micros' => 0]);
+        $item = SupplierCatalogItem::forceCreate(['supplier_id' => $supplier->id, 'external_id' => '43', 'name' => 'Nastele SKU', 'currency' => 'VND', 'unit_price_micros' => 69_000_000_000, 'stock' => 100, 'reserved_quantity' => 0, 'orderable' => true, 'requires_input' => false, 'price_tiers' => [], 'bulk_discounts' => []]);
+        ProductSupplierSource::forceCreate(['product_id' => $product->id, 'supplier_catalog_item_id' => $item->id, 'priority' => 10, 'is_active' => true, 'version' => 1]);
+
+        return $item;
+    }
+
     private function capture(callable $action): array
     {
         DB::flushQueryLog();

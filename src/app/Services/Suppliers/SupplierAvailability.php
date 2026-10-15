@@ -88,6 +88,11 @@ final class SupplierAvailability
 
                 continue;
             }
+            if (! SupplierExchangeRate::isPlausible($supplier->currency, $supplier->exchange_rate_idr)) {
+                $reasons[] = SupplierExchangeRate::reason($supplier->currency) ?? 'Kurs supplier tidak wajar untuk koneksi ini.';
+
+                continue;
+            }
             if ($supplier->synced_at === null || $supplier->sync_expires_at === null
                 || ! $supplier->sync_expires_at->isFuture() || $item->synced_at === null) {
                 $reasons[] = 'Observasi katalog supplier sudah stale; sinkronkan sebelum kapasitas dapat digunakan.';
@@ -179,6 +184,7 @@ final class SupplierAvailability
                 if ($policy === null || ! $source->is_active || $supplier === null || ! $supplier->is_active
                     || $supplier->purchase_paused_until?->isFuture()
                     || ! $supplier->currency_confirmed
+                    || ! SupplierExchangeRate::isPlausible($supplier->currency, $supplier->exchange_rate_idr)
                     || ($item->currency !== null && $item->currency !== $supplier->currency) || ! $item->orderable || $item->requires_input) {
                     continue;
                 }

@@ -9,6 +9,7 @@ use App\Models\ProductSupplierSource;
 use App\Models\SupplierCatalogItem;
 use App\Models\SupplierPricePolicy;
 use App\Services\ProductStockIntake;
+use App\Services\Suppliers\SupplierExchangeRate;
 use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierPricing;
 use App\Storefront\StorefrontProductPlaceholder;
@@ -137,7 +138,13 @@ final class AdminProductWorkspaceData
             $idr = null;
         }
 
-        return ['unit' => $micros === null ? null : rtrim(rtrim(SupplierMoney::decimal($micros), '0'), '.'), 'idr' => $idr];
+        return [
+            'unit' => $micros === null ? null : rtrim(rtrim(SupplierMoney::decimal($micros), '0'), '.'),
+            'idr' => $idr,
+            // A rate outside the plausible band (e.g. rupiah per USDT on a VND wallet)
+            // still prints its arithmetic, but the card must not present it as usable cost.
+            'implausible' => ! SupplierExchangeRate::isPlausible($item->supplier->currency, $item->supplier->exchange_rate_idr),
+        ];
     }
 
     private function usdt(?int $micros): ?string

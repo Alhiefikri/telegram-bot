@@ -14,6 +14,8 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
+use RuntimeException;
 
 final class SupplierManager
 {
@@ -73,29 +75,28 @@ final class SupplierManager
                 throw ValidationException::withMessages(['connection' => 'Riwayat akun terikat pada koneksi ini. Buat koneksi baru untuk akun atau provider lain.']);
             }
             $protectedChanges = $verifiedAccountId !== null ? ['provider', 'currency', 'currency_confirmed', 'exchange_rate_idr'] : ['credential', 'provider', 'currency', 'currency_confirmed', 'exchange_rate_idr'];
-            if (! $created && array_intersect($changed, $protectedChanges)
-                && SupplierDeposit::query()->where('supplier_id', $connection->id)->whereIn('state', ['requested', 'sending', 'unknown', 'pending', 'cancel_requested', 'review'])->exists()) {
-                throw ValidationException::withMessages(['connection' => 'Deposit supplier masih belum selesai. Pulihkan terlebih dahulu.']);
-            }
-            if (! $created && array_intersect($changed, $protectedChanges)
-                && ((int) $connection->reserved_balance_micros > 0
-                    || SupplierFulfillment::query()->where('reserved_supplier_id', $connection->id)->where('reserved_quantity', '>', 0)->exists()
-                    || SupplierPurchase::query()->where('supplier_id', $connection->id)->whereIn('state', ['reserved', 'sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists())) {
-                throw ValidationException::withMessages(['connection' => 'Komitmen supplier masih aktif. Selesaikan pembelian sebelum mengubah kredensial atau mata uang.']);
-            }
+            $this->guardOpenCommitments($connection, $changed, $protectedChanges, $created);
             if (! $created && $changed === []) {
                 return [$connection, []];
             }
-            // Observations expire on every connection change; financial holds remain intact.
-            $connection->synced_at = null;
-            $connection->sync_expires_at = null;
+            // Observations expire when the facts behind them change. A rate-only
+            // correction leaves the provider's catalog rows, wallet and stock
+            // untouched, so its still valid observation is kept and the
+            // after-commit refresh recomputes capacity at the new rate.
+            $rateOnly = ! $created && $changed === ['exchange_rate_idr'];
+            if (! $rateOnly) {
+                $connection->synced_at = null;
+                $connection->sync_expires_at = null;
+            }
             $connection->sync_token = null;
             $connection->last_error = null;
             $connection->version = $created ? 1 : (int) $connection->version + 1;
             $connection->save();
-            foreach ($products as $product) {
-                $product->supplier_available_until = null;
-                $product->save();
+            if (! $rateOnly) {
+                foreach ($products as $product) {
+                    $product->supplier_available_until = null;
+                    $product->save();
+                }
             }
             $this->audit->log($created ? 'supplier.created' : 'supplier.updated', $connection, null, ['supplier_id' => $connection->id, 'changed_fields' => $changed, 'version' => $connection->version], $actor, $ip);
 
@@ -106,6 +107,76 @@ final class SupplierManager
         }
 
         return $saved;
+    }
+
+    /**
+     * Explicit operator correction of a stored conversion rate (`suppliers:rate-audit --fix`).
+     * It reuses the connection commitment guards, the ascending Product -> Supplier lock
+     * order and the optimistic version of save(); historical supplier_purchases snapshots
+     * are never rewritten and the still valid provider observation is kept.
+     *
+     * @return bool true when the stored rate actually changed
+     *
+     * @throws InvalidArgumentException when the replacement is outside the currency band
+     * @throws RuntimeException when the connection moved concurrently or still holds commitments
+     */
+    public function correctRate(Supplier $supplier, string $rate, ?User $actor, ?string $ip): bool
+    {
+        if (! SupplierExchangeRate::isPlausible($supplier->currency, $rate)) {
+            throw new InvalidArgumentException('Kurs pengganti berada di luar rentang wajar untuk mata uang koneksi ini.');
+        }
+        [$corrected, $ids] = DB::transaction(function () use ($supplier, $rate, $actor, $ip): array {
+            $ids = $this->productIds((int) $supplier->id);
+            // Product rows first, then the connection: the documented lock order of
+            // save() and of every availability refresh.
+            Product::query()->whereIn('id', $ids)->orderBy('id')->lockForUpdate()->get();
+            $connection = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
+            if ((int) $connection->version !== (int) $supplier->version || $this->productIds((int) $connection->id) !== $ids) {
+                throw new RuntimeException('Koneksi supplier berubah selama audit. Jalankan ulang perintah.');
+            }
+            try {
+                $this->guardOpenCommitments($connection, ['exchange_rate_idr'], ['exchange_rate_idr'], false);
+            } catch (ValidationException $exception) {
+                throw new RuntimeException((string) $exception->validator->errors()->first(), previous: $exception);
+            }
+            $previous = (string) $connection->exchange_rate_idr;
+            if (SupplierExchangeRate::equals($previous, $rate)) {
+                return [false, []];
+            }
+            $connection->exchange_rate_idr = $rate;
+            $connection->sync_token = null;
+            $connection->last_error = null;
+            $connection->version = (int) $connection->version + 1;
+            $connection->save();
+            $this->audit->log('supplier.rate_corrected', $connection, ['exchange_rate_idr' => $previous], ['exchange_rate_idr' => (string) $connection->exchange_rate_idr, 'version' => $connection->version, 'command' => 'suppliers:rate-audit'], $actor, $ip);
+
+            return [true, $ids];
+        }, 5);
+        if ($ids !== []) {
+            $this->availability->refreshProducts($ids);
+        }
+
+        return $corrected;
+    }
+
+    /**
+     * Changing credentials, currency or provider is refused while money is still moving.
+     *
+     * @throws ValidationException
+     */
+    private function guardOpenCommitments(Supplier $connection, array $changed, array $protectedChanges, bool $created): void
+    {
+        if ($created || array_intersect($changed, $protectedChanges) === []) {
+            return;
+        }
+        if (SupplierDeposit::query()->where('supplier_id', $connection->id)->whereIn('state', ['requested', 'sending', 'unknown', 'pending', 'cancel_requested', 'review'])->exists()) {
+            throw ValidationException::withMessages(['connection' => 'Deposit supplier masih belum selesai. Pulihkan terlebih dahulu.']);
+        }
+        if ((int) $connection->reserved_balance_micros > 0
+            || SupplierFulfillment::query()->where('reserved_supplier_id', $connection->id)->where('reserved_quantity', '>', 0)->exists()
+            || SupplierPurchase::query()->where('supplier_id', $connection->id)->whereIn('state', ['reserved', 'sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists()) {
+            throw ValidationException::withMessages(['connection' => 'Komitmen supplier masih aktif. Selesaikan pembelian sebelum mengubah kredensial atau mata uang.']);
+        }
     }
 
     private function productIds(int $supplierId): array

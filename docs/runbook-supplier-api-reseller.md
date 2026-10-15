@@ -15,7 +15,7 @@ Daftar Produk menyediakan pencarian nama produk, pilihan, dan family lintas hala
 Form Detail produk tidak lagi menampilkan Spesifikasi tambahan & dukungan (jenis produk, durasi akses, region, jenis akun, batas perangkat, yang termasuk, batasan penggunaan, estimasi pemenuhan, dan kebijakan dukungan). Penyimpanan detail tidak mengirim ulang field tersebut; nilai lama tetap tersimpan, tanpa penghapusan data atau perubahan tampilan Web Storefront yang memakai metadata lama.
 
 1. Open **Admin → Supplier Reseller** and fill the connection form. Clicking **Buat/Simpan supplier** opens an inline password dialog if recent confirmation is missing; successful confirmation resumes saving automatically. Incorrect passwords or cancelling retain the API key and other inputs in the current browser form. No secret is flashed to server session or persisted to browser storage. Operational recovery still requires recent confirmation.
-2. Add a connection: supported provider, API key, IDR conversion rate (up to six decimal places), active flag and low-balance threshold. The Dashboard derives the private name and configured currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official, ToolOraX (ShopBot) and Canboso use USD; BuyMail uses IDR with rate 1; Nastele uses VND. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation. The configured USD for NyStore/ToolOraX is not production account-currency sign-off; see **Credential, currency and threshold sign-off**.
+2. Add a connection: supported provider, API key, IDR conversion rate (up to six decimal places), active flag and low-balance threshold. The Dashboard derives the private name and configured currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official, ToolOraX (ShopBot) and Canboso use USD; BuyMail uses IDR with rate 1; Nastele uses VND. The rate is the IDR value of **one** unit of that currency and is validated against the plausible band recorded for it (Nastele VND: `0.1`–`0.999999`); an implausible value is rejected server-side with an Indonesian explanation however the request arrived and must be corrected explicitly, see `suppliers:rate-audit`. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation. The configured USD for NyStore/ToolOraX is not production account-currency sign-off; see **Credential, currency and threshold sign-off**.
 3. Do not put supplier API keys in ENV. The database stores encrypted credentials using the application's encryption key; saved keys are not displayed back. Keep APP_KEY and encrypted database backups together under the existing backup policy. Losing the key makes those credentials unreadable.
 4. For ARRS/Warzone, confirm the actual account currency with the supplier. Also obtain authoritative currency evidence for the actual NyStore/ToolOraX accounts before activation or spend. Dollar-like presentation and USDT funding are not wallet-currency evidence. A mismatch must block activation and receive contract review, not a forced dropdown/ENV override.
 5. Activate the connection and click **Sinkron katalog dan saldo**. The local button is a CSRF-protected POST, but provider catalog/balance requests are GET-only. Read-only catalog fetching must not buy anything.
@@ -39,14 +39,104 @@ existing integer-rate snapshots retain their economic value. Rollback refuses
 VND connections or fractional history rather than truncating financial evidence.
 
 When funding in USDT, calculate `IDR per VND = actual IDR per USDT / VND credited
-per USDT`, including funding fees in the actual cost. At an illustrative
-Rp18,000/USDT and 24,000 VND/USDT, enter `0.75`, not `18000`; a 69,000 VND
-SKU then costs Rp51,750 (2.875 USDT), rounded up only at the final IDR amount.
-The supplier's estimated USDT quote is not a live FX feed or an exact SKU price.
-New connections no longer prefill a dollar rate. Changing the currency clears
-the rate and requires re-entry; opening an existing connection preserves its
-saved rate. Existing incorrect rates must be corrected explicitly through Admin;
-the fix does not rewrite supplier configuration or historical Purchase snapshots.
+per USDT`, including funding fees in the actual cost. Work from what the deposit
+page actually credits and from what one SKU actually costs: an observed 2.87 USDT
+for a 69,000 VND SKU implies about 24,000 VND per USDT, so at Rp18,000/USDT the
+correct entry is **0.75**, not `18000` — and that 69,000 VND SKU costs
+**Rp51,750** (= ceiling of 69,000 × 0.75), not Rp47,770. The optimistic 26,000
+VND/USDT estimate would understate the unit cost by roughly eight percent and
+invite selling below cost. Fewer VND per USDT means a higher, more conservative
+rate: at 24,000 VND/USDT a 69,000 VND SKU costs Rp51,750 (`0.75`), at 23,500
+VND/USDT it costs Rp52,852 (`0.765957`), and at 25,500 VND/USDT it costs Rp48,706
+(`0.705882`) only if the deposit really credits that much. Read the credited VND
+and the USDT actually spent per SKU from the supplier's own pages; the supplier's
+estimated USDT quote is not a live FX feed or an exact SKU price.
+
+A rate is only accepted inside the plausible band for its currency:
+`0.1 ≤ IDR per 1 VND ≤ 0.999999`. `SupplierAdminRequest` enforces that band on
+both `store` and `update`, so a rupiah-per-USDT figure is rejected with an
+Indonesian explanation even when the request is sent outside the browser form,
+and nothing is written. Other providers keep their existing contract (ProdSeller
+16000, BuyMail exactly 1); `SupplierPricing::isEligible()`,
+`SupplierAvailability::refreshLocked()` and `ProductSupplierManager` also refuse
+an out-of-band stored rate, so it can never authorize a purchase, a capacity
+projection or an automatic retail price. New connections no longer prefill a
+dollar rate. Changing the currency clears the rate and requires re-entry;
+opening an existing connection preserves its saved rate.
+
+The connection form shows the live derivation of what was typed (`1 VND ≈
+Rp0,692308 ⇒ SKU 69.000 VND ≈ Rp47.770` from the mapped catalog's most expensive
+SKU) and warns before saving when the number is outside the band. The product
+workspace card **Harga beli / unit** marks a cost computed from an out-of-band
+rate as unusable, and `SupplierAvailability::explainZeroCapacity()` names the
+out-of-band rate as the reason for a zero safe capacity.
+
+#### Correcting a stored rate
+
+Existing incorrect rows are corrected explicitly, never silently:
+
+```
+php artisan suppliers:rate-audit                                     # read-only report
+php artisan suppliers:rate-audit --fix --to=0.692308 --force         # apply one explicit rate
+php artisan suppliers:rate-audit --fix --to=0.692308 --actor=1       # interactive confirmation + audit actor
+```
+
+The report lists every connection whose stored rate is outside the band of its
+currency with its affected product count, and changes nothing. `--fix` requires
+an explicit `--to`, refuses a value the band rejects, and asks
+`Terapkan kurs <to> ke seluruh koneksi di atas?` before writing unless `--force`
+is given. Each change writes one `supplier.rate_corrected` audit row with the old
+and new rate and bumps the connection `version`, keeps the still valid provider
+observation (a rate does not invalidate catalog, wallet or stock evidence),
+refreshes the availability projection for the mapped products so capacity follows
+the wallet, SKU stock and profit guard again, and never rewrites
+`supplier_purchases` cost snapshots. Re-running the same command is a no-op once
+every row is inside the band. A connection with an unfinished deposit or reserved
+commitment is reported and left unchanged; resolve it first.
+
+#### Change record — 2026-10-15
+
+A live Nastele connection stored `18000` — the rupiah price of one USDT — as the
+rupiah price of one VND. A 69,000 VND SKU then reported **Rp1,242,000,000** per
+unit, `SupplierPricing::isEligible()` was false for every quantity, `capacity()`
+and `supplier_available_stock` stayed 0 (external stock never synced even with a
+funded wallet), and an automatic price policy could have republished the inflated
+amount as the retail price.
+
+Added: `SupplierExchangeRate` as the single owner of the plausible band and its
+Indonesian explanations; enforcement in `SupplierAdminRequest` on `store`/`update`
+for any client, not only the browser form; refusal in `SupplierPricing::isEligible()`
+and `SupplierAvailability::refreshLocked()`; the `cost.implausible` marker plus a
+warning on the Admin workspace **Harga beli / unit** card and the price simulation;
+the out-of-band rate named in `SupplierAvailability::explainZeroCapacity()`; the
+live form derivation and band warning; and the `suppliers:rate-audit`
+report/correction command. A rate-only connection change now keeps the still valid
+provider observation instead of expiring it, so the after-commit refresh recomputes
+capacity at the corrected rate immediately.
+
+Observed verification (local results, not CI and not a production deploy):
+`NasteleSupplierTest`, `SupplierAdminTest`, `SupplierFulfillmentTest`,
+`AdminProductWorkspaceQueryTest`, `SupplierAvailabilityTest`,
+`SupplierRateAuditCommandTest` and `Unit/Suppliers/SupplierExchangeRateTest` passed
+— 139 tests / 1,155 assertions; the complete SQLite suite passed with no failures
+(4,395 of 4,619 tests green, 224 pre-existing skips, 41,940 assertions) and the 176
+JavaScript tests passed, including the form suite. All 14
+`SupplierPostgresConcurrencyTest` scenarios passed — 235 assertions —
+on disposable PostgreSQL 16.15, including the new race where one worker corrects
+the stored rate while three checkouts contend for the same VND wallet: hold =
+committed reservations, no duplicate purchase, no over-reservation, lock order
+preserved.
+
+An end-to-end HTTP smoke on a synthetic connection with a 69,000 VND SKU observed
+the Admin workspace card move from `Rp1.242.000.000` with `implausible = true` and
+capacity 0, to `Rp47.770` with capacity 4, after the rate was corrected to
+`0.692308`. A full sync → checkout → verified payment → purchase → delivery run at
+that rate posted exactly one purchase and allocated one order-owned credential at
+`Rp47.770`. In a real browser session, typing `18000` into the connection form
+showed `1 VND ≈ Rp18.000` with `SKU 69.000 VND ≈ Rp1.242.000.000` and the band
+warning, typing `0.692308` showed `1 VND ≈ Rp0,692308` with
+`SKU 69.000 VND ≈ Rp47.770` and no warning, and the empty **Tambah supplier** form
+prefilled nothing (no horizontal overflow at 390 px).
 
 The [Partner API contract](https://nastele.online/api/partner/docs) uses a fixed
 HTTPS origin and `X-API-Key` header. Sync reads `GET /balance` and
@@ -643,7 +733,14 @@ Admin Product availability uses local-only existence/count projections plus fres
 php artisan suppliers:sync --limit=5
 php artisan suppliers:sync --supplier=<supplier-id> --limit=1
 php artisan suppliers:recover --limit=25
+php artisan suppliers:rate-audit
+php artisan suppliers:rate-audit --fix --to=<idr-per-unit> --force
 ```
+
+`suppliers:rate-audit` is operator-run, never scheduled: it only reports unless
+`--fix` is given explicitly, corrects just the connections whose stored rate is
+outside the plausible band of their currency, and never rewrites purchase
+snapshots (see **Correcting a stored rate**).
 
 The scheduler launches bounded sync/recovery first each minute in the background with a two-minute overlap mutex, before synchronous payment/notification sweeps. Sync skips accounts observed less than one minute ago, keeps the five-minute freshness gate, uses attempted-at ordering for fairness and a durable per-account read lease. Stock-notification reconciliation also runs in the background, using family-scoped ledger queries and PostgreSQL recovery cursor indexes; historical terminal Telegram HTTP 400/403 failures no longer occupy its dispatch index. Recovery discovers durable PostgreSQL work even if Redis lost a wakeup job. Provider request budgets, bounded snapshots/bodies/catalog counts and freshness gates are safety boundaries; increasing only a row limit does not remove them.
 

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
 use App\Services\Suppliers\SupplierClient;
+use App\Services\Suppliers\SupplierExchangeRate;
 use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierPricing;
 use App\Services\Suppliers\SupplierUnavailable;
@@ -68,6 +69,52 @@ final class NasteleSupplierTest extends TestCase
         }
         $this->assertSame(19501, SupplierMoney::costIdr(30_000_000_000, $this->supplier()->exchange_rate_idr));
         Http::assertSentCount(2);
+    }
+
+    public function test_snapshot_and_wholesale_tiers_convert_at_the_owner_funding_rate_with_a_final_ceiling(): void
+    {
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/balance')) {
+                return Http::response(['success' => true, 'data' => ['balance' => 1000000, 'currency' => 'VND']]);
+            }
+
+            return Http::response(['success' => true, 'data' => [[
+                'id' => 43, 'name' => 'Synthetic SKU', 'price' => 69000, 'stock' => 100,
+                'wholesale_tiers' => [['minQuantity' => 25, 'unitPrice' => 62000], ['minQuantity' => 10, 'unitPrice' => 66000]],
+            ]]]);
+        });
+        $snapshot = app(SupplierClient::class)->snapshot($this->supplier()->forceFill(['exchange_rate_idr' => '0.692308']));
+
+        $this->assertSame('VND', $snapshot->currency);
+        $this->assertSame(1_000_000_000_000, $snapshot->balanceMicros);
+        $product = $snapshot->products[0];
+        $this->assertSame(69_000_000_000, $product->unitPriceMicros);
+        $sku = $this->item()->forceFill(['unit_price_micros' => $product->unitPriceMicros, 'price_tiers' => $product->priceTiers]);
+        $pricing = app(SupplierPricing::class);
+        $this->assertSame(69_000_000_000, $pricing->costMicros($sku, 1));
+        $this->assertSame(621_000_000_000, $pricing->costMicros($sku, 9));
+        $this->assertSame(660_000_000_000, $pricing->costMicros($sku, 10));
+        $this->assertSame(1_550_000_000_000, $pricing->costMicros($sku, 25));
+        // 69.000 VND x 0.692308 = 47.769,252 -> Rp47.770; ceiling applies only to the final IDR amount.
+        $this->assertSame(47770, SupplierMoney::costIdr($pricing->costMicros($sku, 1), '0.692308'));
+        $this->assertSame(456924, SupplierMoney::costIdr($pricing->costMicros($sku, 10), '0.692308'));
+        $this->assertSame(1073078, SupplierMoney::costIdr($pricing->costMicros($sku, 25), '0.692308'));
+        $this->assertSame(20770, SupplierMoney::costIdr(30_000_000_000, '0.692308'));
+        // The owner's conservative market estimate and the earlier synthetic rate stay exact.
+        $this->assertSame(48706, SupplierMoney::costIdr(69_000_000_000, '0.705882'));
+        $this->assertSame(19501, SupplierMoney::costIdr(30_000_000_000, '0.650001'));
+        Http::assertSentCount(2);
+    }
+
+    public function test_a_rupiah_per_usdt_rate_is_outside_the_vnd_band(): void
+    {
+        $supplier = $this->supplier()->forceFill(['exchange_rate_idr' => '18000']);
+        $sku = $this->item()->forceFill(['unit_price_micros' => 69_000_000_000]);
+
+        $this->assertFalse(SupplierExchangeRate::isPlausible($supplier->currency, $supplier->exchange_rate_idr));
+        $this->assertTrue(SupplierExchangeRate::isPlausible($supplier->currency, '0.692308'));
+        $this->assertSame(1_242_000_000, SupplierMoney::costIdr($sku->unit_price_micros, '18000'));
+        $this->assertSame(47770, SupplierMoney::costIdr($sku->unit_price_micros, '0.692308'));
     }
 
     public function test_successful_create_and_exact_get_deliver_only_complete_distinct_accounts(): void

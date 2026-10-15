@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Enums\SupplierProvider;
+use App\Services\Suppliers\SupplierExchangeRate;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -125,7 +126,29 @@ final class SupplierAdminRequest extends FormRequest
             if (in_array($this->input('provider'), ['arrs', 'warzone'], true) && ! $this->boolean('currency_confirmed')) {
                 $validator->errors()->add('currency_confirmed', 'Konfirmasi mata uang supplier diperlukan.');
             }
+            // A rate outside the plausible band of the connection currency is a
+            // configuration error, not a price: reject it however the request arrived.
+            $rate = $this->input('exchange_rate_idr');
+            if ($selected !== null && ! $validator->errors()->has('exchange_rate_idr')
+                && (is_string($rate) || is_int($rate) || is_float($rate))
+                && ! SupplierExchangeRate::isPlausible($selected->defaultCurrency(), $rate)) {
+                $validator->errors()->add('exchange_rate_idr', (string) SupplierExchangeRate::requirement($selected->label(), $selected->defaultCurrency()));
+            }
         }];
+    }
+
+    /** Explanations written by this class. Everything else is replaced, so a request value is never echoed. */
+    private function safeMessages(string $field): array
+    {
+        return match ($field) {
+            'currency' => ['Mata uang harus sesuai provider.', 'BuyMail menggunakan IDR dengan kurs 1.'],
+            'currency_confirmed' => ['Konfirmasi mata uang supplier diperlukan.'],
+            'exchange_rate_idr' => array_values(array_filter(array_map(
+                fn (SupplierProvider $provider): ?string => SupplierExchangeRate::requirement($provider->label(), $provider->defaultCurrency()),
+                SupplierProvider::cases(),
+            ))),
+            default => [],
+        };
     }
 
     protected function failedValidation(Validator $validator): void
@@ -133,8 +156,9 @@ final class SupplierAdminRequest extends FormRequest
         // Never flash a request body containing an API key or delivery credentials.
         // Generic field errors also avoid validator values (e.g. an attacker-controlled enum).
         $errors = [];
-        foreach ($validator->errors()->keys() as $field) {
-            $errors[$field] = ['Nilai bidang tidak valid.'];
+        foreach ($validator->errors()->messages() as $field => $messages) {
+            $safe = array_values(array_unique(array_intersect($messages, $this->safeMessages($field))));
+            $errors[$field] = $safe === [] ? ['Nilai bidang tidak valid.'] : $safe;
         }
         throw new HttpResponseException(response()->json(['message' => 'Data supplier tidak valid.', 'errors' => $errors], 422));
     }

@@ -81,7 +81,8 @@ final class SupplierPricing
     {
         $providerMaximum = $supplier->provider === 'buymail' ? min(50, max(1, (int) ($supplier->account_metadata['max_quantity_per_order'] ?? 50))) : 10000;
         if ($quantity < 1 || $quantity > $providerMaximum || $supplier->purchase_paused_until?->isFuture() || ! $supplier->is_active || ! $supplier->currency_confirmed
-            || $supplier->exchange_rate_idr <= 0 || $supplier->synced_at === null
+            || $supplier->exchange_rate_idr <= 0 || ! SupplierExchangeRate::isPlausible($supplier->currency, $supplier->exchange_rate_idr)
+            || $supplier->synced_at === null
             || $supplier->sync_expires_at === null || ! $supplier->sync_expires_at->isFuture()
             || $item->supplier_id !== $supplier->id || $item->synced_at === null
             || ($item->currency !== null && $item->currency !== $supplier->currency)

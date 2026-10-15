@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
@@ -29,10 +30,14 @@ use App\Services\OrderLifecycle;
 use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
+use App\Services\Suppliers\SupplierExchangeRate;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Suppliers\SupplierManager;
 use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
+use App\Services\Suppliers\SupplierPricing;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -134,6 +139,95 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         $this->assertSame(30_000_000_000, $supplier->fresh()->reserved_balance_micros);
         $this->assertSame(1, $sku->fresh()->reserved_quantity);
         $this->assertSame(1, Order::count());
+    }
+
+    #[Group('postgres-release')]
+    public function test_nastele_rate_correction_racing_checkouts_never_overreserves_or_deadlocks(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $product->update(['price_amount' => 50000]);
+        // The broken production value: the rupiah price of one USDT kept as the rupiah price of one VND.
+        // The wallet funds exactly two 69.000 VND units at the committed 0.692308, and none at 18000.
+        $supplier->forceFill([
+            'provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '18000',
+            'balance_micros' => 138_000_000_000, 'reserved_balance_micros' => 0,
+            'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5),
+        ])->save();
+        $sku->update(['external_id' => '43', 'currency' => 'VND', 'unit_price_micros' => 69_000_000_000, 'stock' => 5]);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->assertSame(0, $product->fresh()->supplier_available_stock);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+
+        $carts = [$cart, $this->cart($product->id, 790002), $this->cart($product->id, 790003)];
+        $checkout = function (int $cartId): array {
+            try {
+                $this->checkout(Cart::findOrFail($cartId));
+
+                return ['outcome' => 'reserved'];
+            } catch (InsufficientStock) {
+                return ['outcome' => 'unavailable'];
+            } catch (Throwable $error) {
+                $state = $error instanceof QueryException ? (string) ($error->errorInfo[0] ?? '') : '';
+
+                return ['outcome' => 'error', 'error' => $state === '' ? $error::class : $error::class.' '.$state];
+            }
+        };
+        $results = $this->race(array_merge(
+            [fn (): array => ['outcome' => app(SupplierManager::class)->correctRate($supplier->fresh(), '0.692308', null, null) ? 'corrected' : 'unchanged']],
+            array_map(fn (Cart $raceCart): callable => fn (): array => $checkout($raceCart->id), $carts),
+        ));
+        $outcomes = array_column($results, 'outcome');
+        $reserved = count(array_filter($outcomes, fn (string $outcome): bool => $outcome === 'reserved'));
+
+        // No worker may die on a lock-order deadlock or a lock timeout, and every checkout that loses
+        // must lose with the documented unavailable-stock error instead of a half-committed reservation.
+        $this->assertSame([], array_values(array_column($results, 'error')));
+        $this->assertNotContains('unchanged', $outcomes);
+        $this->assertContains('corrected', $outcomes);
+        $this->assertLessThanOrEqual(2, $reserved);
+        $fulfillments = SupplierFulfillment::query()->orderBy('id')->get();
+        $this->assertSame($reserved, $fulfillments->count());
+        $this->assertSame($reserved, Order::count());
+        $this->assertSame(0, SupplierPurchase::count());
+        $committedCost = 0;
+        foreach ($fulfillments as $fulfillment) {
+            $candidate = $fulfillment->sources_snapshot[0];
+            $this->assertSame('0.692308', $candidate['exchange_rate_idr']);
+            $this->assertSame(1, $fulfillment->reserved_quantity);
+            $this->assertSame($candidate['expected_cost_micros'], $fulfillment->reserved_cost_micros);
+            $this->assertSame(47770, SupplierMoney::costIdr($candidate['expected_cost_micros'], $candidate['exchange_rate_idr']));
+            $this->assertSame('reserved', $fulfillment->state);
+            $this->assertNull($fulfillment->current_purchase_id);
+            $committedCost += $candidate['expected_cost_micros'];
+        }
+        $this->assertSame(69_000_000_000 * $reserved, $committedCost);
+        $this->assertSame($committedCost, (int) $supplier->fresh()->reserved_balance_micros);
+        $this->assertLessThanOrEqual((int) $supplier->fresh()->balance_micros, (int) $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame($reserved, (int) $sku->fresh()->reserved_quantity);
+        foreach ($carts as $raceCart) {
+            $orders = Order::query()->where('cart_id', $raceCart->id)->count();
+            $this->assertLessThanOrEqual(1, $orders);
+            $this->assertSame($orders === 1, $raceCart->fresh()->status === CartStatus::CheckedOut);
+        }
+
+        $this->assertSame('0.692308', $supplier->fresh()->exchange_rate_idr);
+        // A rate does not invalidate the provider observation, so capacity is recomputed from it.
+        $this->assertTrue((bool) ($supplier->fresh()->sync_expires_at?->isFuture()));
+        $audit = AuditLog::query()->where('action', 'supplier.rate_corrected')->sole();
+        $this->assertTrue(SupplierExchangeRate::equals('18000', $audit->old_values['exchange_rate_idr'] ?? null));
+        $this->assertSame('0.692308', $audit->new_values['exchange_rate_idr'] ?? null);
+        $this->assertSame('suppliers:rate-audit', $audit->new_values['command'] ?? null);
+
+        $policy = SupplierPricePolicy::query()->where('product_id', $product->id)->sole();
+        $unheldSku = clone $sku->fresh();
+        $unheldSku->reserved_quantity = 0;
+        $unheldSupplier = clone $supplier->fresh();
+        $unheldSupplier->reserved_balance_micros = 0;
+        $capacityAtCommittedRate = app(SupplierPricing::class)
+            ->capacity($product->fresh(), $unheldSupplier, $unheldSku, $policy);
+        $this->assertSame(2, $capacityAtCommittedRate);
+        $this->assertSame($capacityAtCommittedRate - $reserved, (int) $product->fresh()->supplier_available_stock);
+        $this->assertSame($capacityAtCommittedRate > $reserved, (bool) ($product->fresh()->supplier_available_until?->isFuture()));
     }
 
     #[Group('postgres-release')]

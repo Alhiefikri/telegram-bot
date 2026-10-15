@@ -77,6 +77,7 @@
                         <article class="workspace-source">
                             <div class="workspace-panel-heading"><div><h4 x-text="source.supplier.name"></h4><p x-text="source.catalog.name"></p><p class="workspace-muted workspace-wrap" x-text="'SKU ' + source.catalog.external_id"></p></div><span class="workspace-status" x-bind:class="source.is_active ? 'workspace-success' : 'workspace-warning'" x-text="!source.is_active ? 'Nonaktif' : 'Urutan ' + (index + 1)"></span></div>
                             <dl class="workspace-source-cost"><div><dt>Harga beli / unit</dt><dd x-text="money(source.cost?.idr)"></dd></div><div><dt>Kapasitas katalog eksternal</dt><dd x-text="source.catalog.stock ?? 'Belum tersedia'"></dd></div></dl>
+                            <p class="workspace-warning" x-show="source.cost?.implausible" x-cloak>Kurs koneksi supplier ini di luar rentang wajar, jadi angka harga beli di atas tidak dapat dipakai. Perbaiki kurs di dashboard Supplier Reseller, lalu sinkronkan.</p>
                             <p class="workspace-warning" x-show="source.supplier.is_fresh === false">Data supplier kedaluwarsa. Kapasitas dan basis harga otomatis tidak memakai observasi lama; sinkronkan supplier.</p>
                             <p class="workspace-warning" x-show="!source.supplier.is_active">Koneksi supplier nonaktif. Mapping ini tidak dipakai untuk pembelian otomatis.</p>
                             <p class="workspace-warning" x-show="source.catalog.requires_input || !source.catalog.orderable">Sumber belum mendukung pembelian tanpa input tambahan. Tidak dapat diaktifkan untuk pengiriman otomatis.</p>
@@ -119,6 +120,7 @@
                             </dl>
                             <p class="workspace-muted">Keuntungan = harga jual − harga beli, belum memperhitungkan biaya aktual lain atau diskon jumlah.</p>
                             <p x-show="preview && preview.retail_idr === null">Belum dapat dihitung. Perbarui katalog supplier lalu coba lagi.</p>
+                            <p class="workspace-warning" x-show="workspace.sources.some((source) => source.cost && source.cost.implausible)" x-cloak>Ada koneksi supplier dengan kurs di luar rentang wajar. Simulasi ini memakai kurs tersimpan yang salah, jadi jangan pakai angkanya sebelum kurs diperbaiki di dashboard Supplier Reseller.</p>
                         </div>
                         <p class="workspace-field-error" x-text="feedback.preview" role="alert"></p>
                     </div>

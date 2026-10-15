@@ -21,6 +21,7 @@ use App\Services\Admin\AdminDashboardProductsData;
 use App\Services\ProductWaitlistNotificationService;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
+use App\Services\Suppliers\SupplierMoney;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramCatalogProjectionCache;
 use App\Services\Telegram\TelegramProductNotificationService;
@@ -599,6 +600,63 @@ final class SupplierAvailabilityTest extends TestCase
         $this->artisan('suppliers:sync', ['--limit' => 1])->assertSuccessful();
         $this->assertSame(10000000, $healthy->fresh()->balance_micros);
         $this->assertNotNull($failed->fresh()->sync_attempted_at);
+    }
+
+    public function test_an_implausible_vnd_rate_zeroes_capacity_without_inflating_retail_and_explains_why(): void
+    {
+        [$product, $supplier, $item] = $this->mapped(stock: 20);
+        $this->vnd($supplier, $item, '18000');
+        $product->forceFill(['price_amount' => 60000])->save();
+        SupplierPricePolicy::query()->where('product_id', $product->id)->update(['mode' => 'percent', 'markup_basis_points' => 1000, 'minimum_profit_idr' => 0]);
+
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+
+        $fresh = $product->fresh();
+        $this->assertSame(0, $fresh->supplier_available_stock);
+        $this->assertNull($fresh->supplier_available_until);
+        $this->assertSame(60000, $fresh->price_amount, 'A rupiah-per-USDT rate must never reprice the product.');
+        $reasons = app(SupplierAvailability::class)->explainZeroCapacity($fresh);
+        $this->assertNotEmpty(
+            array_filter($reasons, fn (string $reason): bool => str_contains($reason, 'VND') && str_contains($reason, 'USDT')),
+            json_encode($reasons),
+        );
+    }
+
+    public function test_a_plausible_vnd_rate_projects_capacity_from_wallet_sku_stock_and_profit_guard(): void
+    {
+        [$product, $supplier, $item] = $this->mapped();
+        $this->vnd($supplier, $item, '0.692308');
+        $product->forceFill(['price_amount' => 60000])->save();
+
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+
+        $fresh = $product->fresh();
+        // 300.000 VND wallet / 69.000 VND per unit = four units; per-USDT arithmetic would have shown none.
+        $this->assertSame(4, $fresh->supplier_available_stock);
+        $this->assertSame(4, $fresh->availableStock());
+        $this->assertNotNull($fresh->supplier_available_until);
+        $this->assertSame(47770, SupplierMoney::costIdr((int) $item->fresh()->unit_price_micros, (string) $supplier->fresh()->exchange_rate_idr));
+
+        // Wallet movements keep flowing into the projection: a purchase lowers it, a top-up raises it.
+        $supplier->forceFill(['balance_micros' => 138_000_000_000])->save();
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->assertSame(2, $product->fresh()->supplier_available_stock);
+        $supplier->forceFill(['balance_micros' => 621_000_000_000])->save();
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $this->assertSame(9, $product->fresh()->supplier_available_stock);
+    }
+
+    private function vnd(Supplier $supplier, SupplierCatalogItem $item, string $rate): void
+    {
+        $supplier->forceFill([
+            'provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => $rate,
+            'balance_micros' => 300_000_000_000, 'reserved_balance_micros' => 0,
+            'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5),
+        ])->save();
+        $item->forceFill([
+            'currency' => 'VND', 'unit_price_micros' => 69_000_000_000,
+            'stock' => 20, 'reserved_quantity' => 0, 'synced_at' => now(),
+        ])->save();
     }
 
     private function freshFallback(Product $product, int $balanceMicros, int $freshMinutes): void

@@ -4,6 +4,7 @@ namespace App\Services\Admin;
 
 use App\Models\Product;
 use App\Models\Supplier;
+use App\Models\SupplierCatalogItem;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierMoney;
 
@@ -12,11 +13,21 @@ final class AdminSupplierDashboardData
     public function forTab(array $filters = []): array
     {
         $connections = Supplier::query()->orderBy('id')->paginate(15, ['*'], 'suppliers_page');
-        $connections->setCollection($connections->getCollection()->map(function (Supplier $supplier): array {
+        // One aggregate row per connection so the connection form can show a real
+        // derived SKU cost instead of an illustrative number.
+        $sampleUnits = SupplierCatalogItem::query()
+            ->whereIn('supplier_id', $connections->getCollection()->pluck('id'))
+            ->whereNotNull('unit_price_micros')
+            ->groupBy('supplier_id')
+            ->selectRaw('supplier_id, MAX(unit_price_micros) AS unit_price_micros')
+            ->pluck('unit_price_micros', 'supplier_id');
+        $connections->setCollection($connections->getCollection()->map(function (Supplier $supplier) use ($sampleUnits): array {
             $available = $supplier->balance_micros === null ? null : max(0, (int) $supplier->balance_micros - (int) $supplier->reserved_balance_micros);
+            $sampleUnit = $sampleUnits->get($supplier->id);
 
             return [
                 ...$supplier->only(['id', 'name', 'provider', 'currency', 'currency_confirmed', 'exchange_rate_idr', 'is_active', 'version', 'low_balance_threshold_micros']),
+                'sample_unit' => $sampleUnit === null ? null : rtrim(rtrim(SupplierMoney::decimal((int) $sampleUnit), '0'), '.'),
                 'balance' => $supplier->balance_micros === null ? 'Belum diketahui' : SupplierMoney::balanceDecimal((int) $supplier->balance_micros),
                 'held_balance' => SupplierMoney::decimal((int) $supplier->reserved_balance_micros),
                 'available_balance' => $available === null ? 'Belum diketahui' : SupplierMoney::decimal($available),
