@@ -228,6 +228,13 @@ final class AdminSupplierController extends Controller
     {
         $url = $product === null ? route('admin.dashboard', ['tab' => 'suppliers']) : route('admin.products.workspace', ['product' => $product, 'section' => $section]);
         if (request()->expectsJson()) {
+            // The dashboard supplier form follows redirect_url with a full navigation, so the
+            // confirmation survives only as a session flash. Workspace mutations render the
+            // JSON message inline and must not leave a flash behind for the next page load.
+            if ($product === null) {
+                request()->session()->flash('status', $message);
+            }
+
             return response()->json(['message' => $message, 'redirect_url' => $url] + ($product === null ? [] : ['workspace' => app(AdminProductWorkspaceData::class)->for($product)]))->header('Cache-Control', 'no-store, private');
         }
 
