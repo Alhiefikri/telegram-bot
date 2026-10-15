@@ -38,6 +38,16 @@ purchase-snapshot rates to exact six-place decimals. Final IDR cost rounds up;
 existing integer-rate snapshots retain their economic value. Rollback refuses
 VND connections or fractional history rather than truncating financial evidence.
 
+When funding in USDT, calculate `IDR per VND = actual IDR per USDT / VND credited
+per USDT`, including funding fees in the actual cost. At an illustrative
+Rp18,000/USDT and 24,000 VND/USDT, enter `0.75`, not `18000`; a 69,000 VND
+SKU then costs Rp51,750 (2.875 USDT), rounded up only at the final IDR amount.
+The supplier's estimated USDT quote is not a live FX feed or an exact SKU price.
+New connections no longer prefill a dollar rate. Changing the currency clears
+the rate and requires re-entry; opening an existing connection preserves its
+saved rate. Existing incorrect rates must be corrected explicitly through Admin;
+the fix does not rewrite supplier configuration or historical Purchase snapshots.
+
 The [Partner API contract](https://nastele.online/api/partner/docs) uses a fixed
 HTTPS origin and `X-API-Key` header. Sync reads `GET /balance` and
 `GET /products` only, at most 500 products, without per-product detail reads.

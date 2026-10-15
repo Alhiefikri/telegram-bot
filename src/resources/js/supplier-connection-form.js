@@ -12,6 +12,25 @@ export default function supplierConnectionForm(
     confirmationPassword: "",
     confirmationError: "",
 
+    init() {
+      this.$watch("provider", (next, previous) => {
+        if (next === previous) return;
+        if (next === "buymail") {
+          this.$refs.exchangeRate.value = "1";
+        } else if (
+          this.providers[next].currency !== this.providers[previous].currency ||
+          this.providers[next].confirm ||
+          this.providers[previous].confirm
+        ) {
+          this.clearExchangeRate();
+        }
+      });
+    },
+
+    clearExchangeRate() {
+      this.$refs.exchangeRate.value = "";
+    },
+
     async save() {
       const form = this.$refs.connectionForm;
       if (this.saving || this.confirming || !form.reportValidity()) return;
